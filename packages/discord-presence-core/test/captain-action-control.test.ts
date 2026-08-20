@@ -1,11 +1,30 @@
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { tryHandleCaptainDiscordActionRequest } from "../src/captain-action-control.ts";
+import {
+  planNonWatchCaptainDiscordAction,
+  tryHandleCaptainDiscordActionRequest,
+} from "../src/captain-action-control.ts";
 
 const servers: ReturnType<typeof createServer>[] = [];
 afterEach(() => servers.splice(0).forEach((server) => server.close()));
 
 describe("captain Discord action control", () => {
+  it("shares non-watch mapping and leaves watch destinations to each body", () => {
+    const context = {
+      callId: "call-1",
+      actorId: "user-1",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      messageId: "message-1",
+    };
+    expect(planNonWatchCaptainDiscordAction({ ...context, action: "react", emoji: "👍" })).toMatchObject({
+      action: "discord.presence.react",
+      payload: { kind: "react", emoji: "👍" },
+      successMessage: "I reacted.",
+    });
+    expect(planNonWatchCaptainDiscordAction({ ...context, action: "watch_start" })).toBeUndefined();
+  });
+
   it("validates host-stamped context before execution", async () => {
     const calls: unknown[] = [];
     const server = createServer((request, response) => {

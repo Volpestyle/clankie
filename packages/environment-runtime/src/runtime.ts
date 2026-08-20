@@ -3,13 +3,13 @@ import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/pro
 import { join, resolve } from "node:path";
 import {
   EnvironmentSemanticEventSchema,
-  EnvironmentStartActionCommandSchema,
   EnvironmentTelemetryReferenceSchema,
+  GbaEmulatorStartActionCommandSchema,
   normalizeEnvironmentLease,
   normalizeEnvironmentSessionSpec,
   type EnvironmentActionResult,
-  type EnvironmentCommand,
   type EnvironmentEvent,
+  type GbaEmulatorStartActionCommand,
   type EnvironmentLeaseV2,
   type EnvironmentSemanticEventType,
   type EnvironmentSessionPhase,
@@ -20,7 +20,7 @@ import {
 
 export const MAX_ENVIRONMENT_LEASE_MS = 5 * 60_000;
 const EMERGENCY_ADAPTER_TIMEOUT_MS = 1_000;
-export type EnvironmentStartActionCommand = Extract<EnvironmentCommand, { type: "start_action" }>;
+export type EnvironmentStartActionCommand = GbaEmulatorStartActionCommand;
 
 export interface EnvironmentAdapterActionCompletion {
   status: "completed";
@@ -323,7 +323,7 @@ export class EnvironmentRuntime {
   }
 
   public startAction(token: string, raw: EnvironmentStartActionCommand): Promise<EnvironmentActionResult> {
-    const parsedCommand = EnvironmentStartActionCommandSchema.parse(raw);
+    const parsedCommand = GbaEmulatorStartActionCommandSchema.parse(raw);
     return this.enqueue(async () => {
       const record = await this.authorize(token, parsedCommand.sessionId);
       const command = parsedCommand;
@@ -490,31 +490,6 @@ export class EnvironmentRuntime {
           });
         }),
     );
-  }
-
-  public finishAction(
-    token: string,
-    sessionId: string,
-    actionId: string,
-    outcome: Record<string, unknown>,
-  ): Promise<EnvironmentActionResult> {
-    return this.enqueue(async () => {
-      const record = await this.authorize(token, sessionId);
-      const action = mustAction(record, actionId);
-      if (terminal(action.result)) return structuredClone(action.result);
-      action.result = {
-        schemaVersion: 1,
-        actionId,
-        sessionId,
-        status: "completed",
-        acceptedGoalVersion: record.spec.initialGoalVersion,
-        outcome: sanitize(outcome, this.secretSet(sessionId)) as Record<string, unknown>,
-        updatedAt: this.clock().toISOString(),
-      };
-      await this.persist(record);
-      await this.emit("environment.action.completed", record, record.correlationId, { actionId });
-      return structuredClone(action.result);
-    });
   }
 
   public actionStatus(token: string, sessionId: string, actionId: string): Promise<EnvironmentActionResult> {

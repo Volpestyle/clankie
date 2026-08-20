@@ -3,6 +3,14 @@
 Date: 2026-08-01
 Status: accepted (owner decision)
 
+## Current status (2026-08-19)
+
+Rewind remains Clankie's own local-play choice. A GBA MCP caller may save or
+load only checkpoints belonging to its private core and configured
+`GBA_MCP_CHECKPOINT_DIR`; it cannot reach Clankie's runtime. Possession and body
+lock consequences below are superseded by
+[ADR 0129](0129-each-player-owns-a-body.md).
+
 ## Context
 
 Free play includes restarting from the beginning or loading any verified

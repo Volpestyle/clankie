@@ -1,4 +1,4 @@
-import { listModels, type Catalog } from "@clankie/model-registry";
+import type { Catalog } from "@clankie/model-registry";
 import { clampThinkingLevel, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRuntime, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
@@ -62,7 +62,7 @@ export function registerConfiguredPiProviders(
     const models: ProviderConfig["models"] =
       declared.models === undefined
         ? undefined
-        : listModels(merged, providerId).map((model) => ({
+        : Object.values(merged[providerId]?.models ?? {}).map((model) => ({
             id: model.id,
             name: model.name || model.id,
             reasoning: model.reasoning,

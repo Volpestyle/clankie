@@ -2,28 +2,24 @@ import { readFileSync, readdirSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  EmbodimentAssignment,
-  EmbodimentClaim,
-  EmbodimentLifecycleReport,
-  EmbodimentSession,
-} from "@clankie/protocol";
+import type { EmbodimentSession } from "@clankie/protocol";
 import {
-  createPossessorVoiceClient,
-  createPossessorVoiceListener,
-  type PossessorVoiceClient,
-  type PossessorVoiceListenerEvidence,
-} from "@clankie/possessor-voice";
+  createPlayVoiceClient,
+  createPlayVoiceListener,
+  type PlayVoiceClient,
+  type PlayVoiceListenerEvidence,
+} from "@clankie/play-voice";
+import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { parseFreePlayJournal } from "@clankie/gba-emulator";
 import { describe, expect, it, vi } from "vitest";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
-import { PlayHost } from "../src/play-host.ts";
+import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
 
 /**
  * Asked play reports events and hears the room (ADR 0067 as amended by
  * [ADR 0074](../../../docs/adr/0074-the-room-hears-one-voice.md)).
  *
- * The seam itself is proven in `@clankie/possessor-voice`; what is under test
+ * The seam itself is proven in `@clankie/play-voice`; what is under test
  * here is the wiring, and the wiring is exactly what ADR 0074 changed. These
  * assertions were inverted rather than relaxed: this file used to require that
  * his authored asides cross the seam, which is the defect that made a six-word
@@ -41,7 +37,7 @@ function fakeVoice(
   const reportOptions: { readonly deliveryId?: string; readonly respond?: boolean }[] = [];
   const listeners = new Set<(utterance: string) => void>();
   let closed = false;
-  const client: PossessorVoiceClient = {
+  const client: PlayVoiceClient = {
     narrate(text, narrationOptions) {
       if (options.failNarrate === true) {
         return Promise.reject(new Error("clankie_speech_unavailable: the Discord bridge is not reachable"));
@@ -77,18 +73,31 @@ function fakeVoice(
   };
 }
 
+function fakeActivitySink(close: () => void): ActivityFrameSink {
+  return {
+    publishFrame: () => undefined,
+    publishAudio: () => undefined,
+    publishOverlay: () => undefined,
+    publishStatus: () => undefined,
+    droppedFrameCount: 0,
+    droppedAudioPacketCount: 0,
+    connected: false,
+    close,
+  };
+}
+
 function fakeClient(
   assignment: EmbodimentAssignment,
-  onReport?: (report: EmbodimentLifecycleReport) => void | Promise<void>,
+  onReport?: (report: EmbodimentLifecycleUpdate) => void | Promise<void>,
 ) {
   const assignments = [assignment];
-  const reports: EmbodimentLifecycleReport[] = [];
+  const reports: EmbodimentLifecycleUpdate[] = [];
   return {
     reports,
-    claimEmbodiment(_claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
+    claimEmbodiment(): Promise<EmbodimentAssignment | undefined> {
       return Promise.resolve(assignments.shift());
     },
-    async reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
+    async reportEmbodiment(report: EmbodimentLifecycleUpdate): Promise<unknown> {
       reports.push(report);
       await onReport?.(report);
       return {};
@@ -111,14 +120,13 @@ function session(maxTurns: number): EmbodimentSession {
     budget: { maxTurns, maxDurationMs: 60_000 },
     requestedAt: "2026-07-26T12:00:00.000Z",
     updatedAt: "2026-07-26T12:00:01.000Z",
-    runnerId: "runner-local",
   };
 }
 
 async function playEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-play-voice-"));
   return {
-    CLANKIE_GBA_BODY_ROOT: join(root, "body"),
+    XDG_STATE_HOME: join(root, "state"),
     CLANKIE_GBA_CHECKPOINT_DIR: join(root, "checkpoints"),
     // Without this override the execution journals into the operator's real
     // ~/.local/state/clankie/gba-play (ADR 0068) — test runs must not.
@@ -151,17 +159,16 @@ function talkingMind(speak: string | null) {
 }
 
 async function play(options: {
-  voice?: PossessorVoiceClient;
+  voice?: PlayVoiceClient;
   mind: () => Promise<{ decide: (view: { interjection: string | null }) => Promise<unknown> }>;
   voiceAgent?: () => Promise<{ decide: () => Promise<unknown> } | undefined>;
   turns?: number;
-  onReport?: (report: EmbodimentLifecycleReport) => void | Promise<void>;
+  onReport?: (report: EmbodimentLifecycleUpdate) => void | Promise<void>;
 }) {
   const client = fakeClient({ kind: "start", session: session(options.turns ?? 2) }, options.onReport);
   const env = await playEnv();
   const host = new PlayHost({
     client,
-    runnerId: "runner-local",
     environmentIds: ["pokemon-firered"],
     execute: createGbaPlayExecution({
       logger: silentLogger,
@@ -243,10 +250,10 @@ describe("asked play voice", () => {
   });
 
   it("consumes a post-start room transcript on the next turn through the production loopback seam", async () => {
-    const evidence: PossessorVoiceListenerEvidence[] = [];
+    const evidence: PlayVoiceListenerEvidence[] = [];
     const narrated: string[] = [];
-    const listener = createPossessorVoiceListener({
-      token: "clankie_possessor_voice_loopback_test",
+    const listener = createPlayVoiceListener({
+      token: "clankie_play_voice_loopback_test",
       narrate: (event) => {
         narrated.push(event);
         return Promise.resolve();
@@ -257,9 +264,9 @@ describe("asked play voice", () => {
       },
     });
     const port = await listener.listen(0);
-    const voice = createPossessorVoiceClient({
-      url: `ws://127.0.0.1:${String(port)}/possessor`,
-      token: "clankie_possessor_voice_loopback_test",
+    const voice = createPlayVoiceClient({
+      url: `ws://127.0.0.1:${String(port)}/play`,
+      token: "clankie_play_voice_loopback_test",
       reconnectDelayMs: 10,
     });
     try {
@@ -294,11 +301,11 @@ describe("asked play voice", () => {
       expect(evidence).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            type: "possessor_transcript_delivery",
+            type: "play_transcript_delivery",
             attachedCount: 1,
             deliveredCount: 1,
           }),
-          expect.objectContaining({ type: "possessor_narration_submission", attachedCount: 1 }),
+          expect.objectContaining({ type: "play_narration_submission", attachedCount: 1 }),
         ]),
       );
       expect(JSON.stringify(evidence)).not.toContain("check the path");
@@ -367,6 +374,31 @@ describe("asked play voice", () => {
 
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
     expect(client.reports[1]?.receipt).toMatchObject({ turnsTaken: 2 });
+  });
+
+  it("closes the activity sink and emulator session when voice client creation throws", async () => {
+    const client = fakeClient({ kind: "start", session: session(1) });
+    const env = await playEnv();
+    const closeSink = vi.fn();
+    const host = new PlayHost({
+      client,
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env,
+        createMind: talkingMind(null).create,
+        createActivitySink: () => Promise.resolve(fakeActivitySink(closeSink)),
+        createVoice: () => Promise.reject(new Error("play voice broker failed")),
+      }),
+      logger: silentLogger,
+    });
+
+    await host.poll();
+    await host.settled();
+
+    expect(client.reports).toEqual([expect.objectContaining({ state: "failed" })]);
+    expect(closeSink).toHaveBeenCalledOnce();
+    expect(readdirSync(join(env.XDG_STATE_HOME as string, "clankie", "gba-runtime"))).toEqual([]);
   });
 
   it("lets go of the room when the playthrough ends", async () => {

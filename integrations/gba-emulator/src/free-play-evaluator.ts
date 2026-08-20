@@ -239,10 +239,10 @@ function narrationVerdict(
   }
   const matching = receipts.filter((receipt) => receiptData(receipt)["deliveryId"] === deliveryId);
   if (matching.some((receipt) => receipt["type"] === "discord.voice.response")) return "played";
-  if (matching.some((receipt) => receipt["type"] === "discord.voice.possessor_narration_suppressed")) {
+  if (matching.some((receipt) => isPlayReceipt(receipt, "narration_suppressed"))) {
     return "suppressed";
   }
-  if (matching.some((receipt) => receipt["type"] === "discord.voice.possessor_refusal")) return "refused";
+  if (matching.some((receipt) => isPlayReceipt(receipt, "refusal"))) return "refused";
   // A narration the gate let through still has a terminal model_response even
   // when nothing was ever audible. Reading it separates "he was asked and
   // answered with nothing" from a genuinely missing trail.
@@ -257,6 +257,17 @@ function narrationVerdict(
     return receiptData(terminal)["phase"] === "failed" ? "failed" : "unspoken";
   }
   return "attempted_no_receipt";
+}
+
+function isPlayReceipt(
+  receipt: Record<string, unknown>,
+  suffix: "narration_suppressed" | "refusal",
+): boolean {
+  return (
+    receipt["type"] === `discord.voice.play_${suffix}` ||
+    // Historical receipt logs remain evaluable; current runtime writes only play_*.
+    receipt["type"] === `discord.voice.possessor_${suffix}`
+  );
 }
 
 function matchingReceiptTypes(deliveryId: string, receipts: readonly Record<string, unknown>[]): string[] {

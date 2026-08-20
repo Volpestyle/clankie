@@ -116,19 +116,17 @@ describe("InteractiveTextPrompt", () => {
 
 describe("InteractiveSelectPrompt single select", () => {
   it("filters options, derives a title, and submits the highlighted value", () => {
-    let singleSelected: readonly string[] | undefined;
+    let singleSelected: string | undefined;
     const singlePrompt = new InteractiveSelectPrompt({
-      kind: "single",
       message: "Choose provider.",
       onCancel: () => {
         singleSelected = undefined;
       },
       onRender: () => undefined,
-      onSubmit: (values) => {
-        singleSelected = values;
+      onSubmit: (value) => {
+        singleSelected = value;
       },
       options: selectOptions,
-      required: true,
       theme,
     });
     singlePrompt.focused = true;
@@ -143,13 +141,12 @@ describe("InteractiveSelectPrompt single select", () => {
     expect(filteredSingleRows.some((line) => line.includes(CURSOR_MARKER))).toBe(true);
     expect(filteredSingleRows.some((line) => line.includes("Anthropic subscription"))).toBe(true);
     singlePrompt.handleInput("\r");
-    expect(singleSelected?.[0]).toBe("claude");
+    expect(singleSelected).toBe("claude");
     expectFits(singlePrompt.render(50), 50);
   });
 
   it("does not repeat the title line in the message body", () => {
     const duplicateTitlePrompt = new InteractiveSelectPrompt({
-      kind: "single",
       message: "What exactly do you want?\n\n- select request call_123\n  What exactly do you want?",
       onCancel: () => undefined,
       onRender: () => undefined,
@@ -162,21 +159,20 @@ describe("InteractiveSelectPrompt single select", () => {
   });
 
   it("chooses the highlighted option with the right arrow", () => {
-    let rightSelected: readonly string[] | undefined;
+    let rightSelected: string | undefined;
     const rightPrompt = new InteractiveSelectPrompt({
-      kind: "single",
       message: "Choose provider.",
       onCancel: () => undefined,
       onRender: () => undefined,
-      onSubmit: (values) => {
-        rightSelected = values;
+      onSubmit: (value) => {
+        rightSelected = value;
       },
       options: selectOptions,
       theme,
     });
     rightPrompt.handleInput("\x1b[B");
     rightPrompt.handleInput("\x1b[C");
-    expect(rightSelected?.[0]).toBe("claude");
+    expect(rightSelected).toBe("claude");
     expect(rightPrompt.render(60).some((line) => stripAnsi(line).includes("Enter/→ chooses"))).toBe(true);
   });
 
@@ -184,7 +180,6 @@ describe("InteractiveSelectPrompt single select", () => {
     const currentPrompt = new InteractiveSelectPrompt({
       currentValue: "local",
       initialValue: "local",
-      kind: "single",
       message: "Place the chat input.",
       onCancel: () => undefined,
       onRender: () => undefined,
@@ -200,7 +195,6 @@ describe("InteractiveSelectPrompt single select", () => {
   it("renders status actions tightly under the status summary, outside the option list", () => {
     const labeledActionPrompt = new InteractiveSelectPrompt({
       initialValue: "details",
-      kind: "single",
       message: "Current status\n\nChoose a setting.",
       onCancel: () => undefined,
       onRender: () => undefined,
@@ -242,7 +236,6 @@ describe("InteractiveSelectPrompt single select", () => {
     let backSubmitted = false;
     const backPrompt = new InteractiveSelectPrompt({
       allowBack: true,
-      kind: "single",
       message: "Choose provider.",
       onCancel: () => {
         backCancelled = true;
@@ -262,7 +255,6 @@ describe("InteractiveSelectPrompt single select", () => {
 
     let noBackCancelled = false;
     const noBackPrompt = new InteractiveSelectPrompt({
-      kind: "single",
       message: "Choose provider.",
       onCancel: () => {
         noBackCancelled = true;
@@ -283,7 +275,6 @@ describe("InteractiveSelectPrompt single select", () => {
   it("closes the highlighted option with x when the selector provides that action", () => {
     let closed: string | undefined;
     const prompt = new InteractiveSelectPrompt({
-      kind: "single",
       message: "Conversations",
       onCancel: () => undefined,
       onClose: (value) => {

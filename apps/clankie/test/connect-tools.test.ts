@@ -19,7 +19,7 @@ function deps(overrides: { email?: Partial<EmailPort> }): CaptainDeps {
     },
     browser: { catalog: unused, call: unused },
     media: { generateImage: unused, generateVideo: unused, finishedRenders: unused },
-    embodiment: { submitIntent: unused, getSession: unused, getLiveSession: unused, getPossession: unused },
+    embodiment: { submitIntent: unused, getSession: unused, getLiveSession: unused },
     activity: { current: unused },
     streamWatch: { current: unused },
     presence: { listSessions: unused, listVoiceHistory: unused, listRecentVoiceSpeech: unused },

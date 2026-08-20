@@ -105,7 +105,7 @@ export async function readVoiceSpeechSnapshot(
       spoken += 1;
       inputTokens += event.inputTokens ?? 0;
       outputTokens += event.outputTokens ?? 0;
-    } else if (event.type === "discord.voice.possessor_narration_suppressed") {
+    } else if (isPlayNarrationSuppression(event.type)) {
       suppressed += 1;
     }
   }
@@ -147,7 +147,7 @@ function parseVoiceReceiptLine(line: string): ParsedVoiceReceipt | undefined {
     type !== "discord.voice.joined" &&
     type !== "discord.voice.left" &&
     type !== "discord.voice.response" &&
-    type !== "discord.voice.possessor_narration_suppressed"
+    !isPlayNarrationSuppression(type)
   ) {
     return undefined;
   }
@@ -167,7 +167,7 @@ function parseVoiceReceiptLine(line: string): ParsedVoiceReceipt | undefined {
   const toFirstAudioMs = asCount(data.toFirstAudioMs);
   const reason = asString(data.reason);
   const speech =
-    type === "discord.voice.response" || type === "discord.voice.possessor_narration_suppressed"
+    type === "discord.voice.response" || isPlayNarrationSuppression(type)
       ? {
           occurredAt,
           kind: type === "discord.voice.response" ? ("spoken" as const) : ("suppressed" as const),
@@ -191,6 +191,14 @@ function parseVoiceReceiptLine(line: string): ParsedVoiceReceipt | undefined {
     ...(outputTokens === undefined ? {} : { outputTokens }),
     ...(speech === undefined ? {} : { speech }),
   };
+}
+
+function isPlayNarrationSuppression(type: string): boolean {
+  return (
+    type === "discord.voice.play_narration_suppressed" ||
+    // Historical JSONL remains readable; current runtime evidence never emits this name.
+    type === "discord.voice.possessor_narration_suppressed"
+  );
 }
 
 function sameRoom(event: ParsedVoiceReceipt, room: VoiceRoomFilter): boolean {

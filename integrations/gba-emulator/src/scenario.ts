@@ -1,4 +1,5 @@
 import {
+  GBA_EMULATOR_LOCAL_CAPABILITIES,
   GbaEmulatorSessionSpecSchema,
   type EnvironmentEvent,
   type GbaEmulatorAction,
@@ -16,15 +17,8 @@ import {
   type GbaScenarioReport,
 } from "./contracts.ts";
 import { GbaEmulatorAdapter } from "./adapter.ts";
-import { canonicalJson, sha256 } from "./core-double.ts";
+import { sha256 } from "./core-double.ts";
 import { driveGbaScenario, type GbaDriverIo } from "./driver.ts";
-
-const ALL_EMULATOR_CAPABILITIES = [
-  "emulator.gba.observe",
-  "emulator.gba.input",
-  "emulator.gba.frame_advance",
-  "emulator.gba.wait",
-] as const;
 
 const ACTION_LIMITS = { maxInputs: 8, maxFrames: 600, timeoutMs: 5_000 } as const;
 
@@ -74,7 +68,7 @@ export async function runFrozenGbaScenario(
       maxInputsPerAction: ACTION_LIMITS.maxInputs,
       maxFramesPerAction: ACTION_LIMITS.maxFrames,
       maxActionDurationMs: ACTION_LIMITS.timeoutMs,
-      capabilities: ALL_EMULATOR_CAPABILITIES,
+      capabilities: GBA_EMULATOR_LOCAL_CAPABILITIES,
     },
   });
   const adapter = new GbaEmulatorAdapter(scenario, input.fixtureSha256);
@@ -246,5 +240,4 @@ function validateFrozenIdentity(
   ) {
     throw new Error("Frozen GBA scenario identity does not match its binding");
   }
-  if (sha256(canonicalJson(scenario)).length !== 64) throw new Error("Scenario canonical hash failed");
 }

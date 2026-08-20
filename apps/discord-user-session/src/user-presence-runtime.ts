@@ -1,4 +1,4 @@
-import { encodeReactionEmoji } from "@clankie/discord-presence-core";
+import { planDiscordRestAction, resolveDiscordRestActionResult } from "@clankie/discord-presence-core";
 import {
   isDiscordPresenceActionAvailable,
   type DiscordPresenceSessionRecord,
@@ -57,15 +57,13 @@ export class DiscordUserPresenceRuntime {
     }
 
     const payload = write.payload;
+    const restPlan = planDiscordRestAction(payload);
+    if (restPlan !== undefined) {
+      const response = await this.request(restPlan.method.toUpperCase(), restPlan.path, restPlan.body);
+      const ids = resolveDiscordRestActionResult(restPlan, response);
+      return this.result(write, ids.channelId, ids.messageId);
+    }
     switch (payload.kind) {
-      case "reply": {
-        const message = await this.post(`/channels/${payload.channelId}/messages`, {
-          content: payload.content,
-          message_reference: { message_id: payload.messageId },
-          allowed_mentions: { parse: [] },
-        });
-        return this.result(write, payload.channelId, messageId(message));
-      }
       /** His reply carrying a picture he made this turn (ADR 0085). */
       case "reply_with_media": {
         if (this.resolveAttachment === undefined) {
@@ -88,60 +86,6 @@ export class DiscordUserPresenceRuntime {
         form.append("files[0]", blob, payload.filename);
         const message = await this.multipart(`/channels/${payload.channelId}/messages`, form);
         return this.result(write, payload.channelId, messageId(message));
-      }
-      case "send_message": {
-        const message = await this.post(`/channels/${payload.channelId}/messages`, {
-          content: payload.content,
-          ...(payload.replyToMessageId === undefined
-            ? {}
-            : { message_reference: { message_id: payload.replyToMessageId } }),
-          allowed_mentions: { parse: [] },
-        });
-        return this.result(write, payload.channelId, messageId(message));
-      }
-      case "react": {
-        await this.request(
-          "PUT",
-          `/channels/${payload.channelId}/messages/${payload.messageId}/reactions/${encodeReactionEmoji(payload.emoji)}/@me`,
-        );
-        return this.result(write, payload.channelId, payload.messageId);
-      }
-      case "unreact": {
-        await this.request(
-          "DELETE",
-          `/channels/${payload.channelId}/messages/${payload.messageId}/reactions/${encodeReactionEmoji(payload.emoji)}/@me`,
-        );
-        return this.result(write, payload.channelId, payload.messageId);
-      }
-      case "edit_own_message": {
-        await this.request("PATCH", `/channels/${payload.channelId}/messages/${payload.messageId}`, {
-          content: payload.content,
-        });
-        return this.result(write, payload.channelId, payload.messageId);
-      }
-      case "delete_own_message": {
-        await this.request("DELETE", `/channels/${payload.channelId}/messages/${payload.messageId}`);
-        return this.result(write, payload.channelId, payload.messageId);
-      }
-      case "typing_start": {
-        await this.request("POST", `/channels/${payload.channelId}/typing`);
-        return this.result(write, payload.channelId);
-      }
-      case "create_thread": {
-        const path =
-          payload.messageId === undefined
-            ? `/channels/${payload.channelId}/threads`
-            : `/channels/${payload.channelId}/messages/${payload.messageId}/threads`;
-        const thread = await this.post(path, {
-          name: payload.name,
-          auto_archive_duration: 1_440,
-          ...(payload.messageId === undefined ? { type: 11 } : {}),
-        });
-        return this.result(write, messageId(thread) ?? payload.channelId);
-      }
-      case "join_thread": {
-        await this.request("PUT", `/channels/${payload.channelId}/thread-members/@me`);
-        return this.result(write, payload.channelId);
       }
       case "send_attachment": {
         if (this.resolveAttachment === undefined) {
@@ -189,8 +133,7 @@ export class DiscordUserPresenceRuntime {
         // Embedded applications belong to the bot application (ADR 0047).
         throw new Error("discord_presence_activity_requires_bot");
       default: {
-        const _exhaustive: never = payload;
-        throw new Error(`discord_presence_unknown_payload:${JSON.stringify(_exhaustive)}`);
+        throw new Error(`discord_presence_unknown_payload:${JSON.stringify(payload)}`);
       }
     }
   }
@@ -281,5 +224,3 @@ async function postUserSessionControl(
     throw new Error("discord_presence_go_live_media_unavailable");
   }
 }
-
-export { encodeReactionEmoji } from "@clankie/discord-presence-core";

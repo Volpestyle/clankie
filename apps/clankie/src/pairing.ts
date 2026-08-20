@@ -111,10 +111,6 @@ export class PairingOfferStore {
     this.graceMs = options.consumedGraceMs ?? DEFAULT_CONSUMED_GRACE_MS;
   }
 
-  public get size(): number {
-    return this.offers.size;
-  }
-
   public add(offer: StoredPairingOffer): void {
     this.offers.set(offer.offerId, offer);
     this.bySecretHash.set(hashSecret(offer.offerSecret), offer.offerId);

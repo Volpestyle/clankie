@@ -157,34 +157,29 @@ async function fetchDiscordBytes<T extends string>(
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  try {
-    const response = await fetchImpl(url, { redirect: "error", signal: controller.signal });
-    if (!response.ok) throw new Error("discord_attachment_fetch_failed");
+  const response = await fetchImpl(url, {
+    redirect: "error",
+    signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error("discord_attachment_fetch_failed");
 
-    // The declared type is re-checked against the same allowlist ingress used:
-    // what the CDN actually serves is the thing being handed to the model, and
-    // it does not have to match what the gateway payload claimed.
-    const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-    if (mediaType === undefined || !supportsMediaType(mediaType)) {
-      throw new Error("discord_attachment_media_type_unsupported");
-    }
-    const declaredLength = Number(response.headers.get("content-length") ?? Number.NaN);
-    if (Number.isFinite(declaredLength) && declaredLength > DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX) {
-      throw new Error("discord_attachment_too_large");
-    }
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.byteLength === 0) throw new Error("discord_attachment_empty");
-    if (bytes.byteLength > DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX) {
-      throw new Error("discord_attachment_too_large");
-    }
-    return { bytes, mediaType };
-  } finally {
-    clearTimeout(timer);
+  // The declared type is re-checked against the same allowlist ingress used:
+  // what the CDN actually serves is the thing being handed to the model, and
+  // it does not have to match what the gateway payload claimed.
+  const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  if (mediaType === undefined || !supportsMediaType(mediaType)) {
+    throw new Error("discord_attachment_media_type_unsupported");
   }
+  const declaredLength = Number(response.headers.get("content-length") ?? Number.NaN);
+  if (Number.isFinite(declaredLength) && declaredLength > DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX) {
+    throw new Error("discord_attachment_too_large");
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.byteLength === 0) throw new Error("discord_attachment_empty");
+  if (bytes.byteLength > DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX) {
+    throw new Error("discord_attachment_too_large");
+  }
+  return { bytes, mediaType };
 }
 
 export async function extractMotionFrames(bytes: Buffer, count: number): Promise<readonly Buffer[]> {

@@ -1,54 +1,64 @@
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
+
+const currentReceiptTypes = [
+  "discord.bridge.ready",
+  "discord.bridge.stopped",
+  "discord.user_session.ready",
+  "discord.user_session.stopped",
+  "discord.user_session.refused",
+  "discord.stream.watch_connected",
+  "discord.stream.frame",
+  "discord.stream.publish_started",
+  "discord.stream.publish_stopped",
+  "discord.text.ingress",
+  "discord.text.reply",
+  "discord.person-memory.proposed",
+  "discord.person-memory.recalled",
+  "discord.voice.joined",
+  "discord.voice.consent",
+  "discord.voice.utterance",
+  "discord.voice.transcription",
+  "discord.voice.text_input",
+  "discord.voice.floor_decision",
+  "discord.voice.floor",
+  "discord.voice.model_response",
+  "discord.voice.realtime_tool",
+  "discord.voice.music",
+  "discord.voice.response",
+  "discord.voice.volition",
+  "discord.voice.overlap",
+  "discord.voice.interrupted",
+  "discord.voice.failed",
+  "discord.voice.left",
+  "discord.voice.play_connection",
+  "discord.voice.play_room",
+  "discord.voice.play_transcript_delivery",
+  "discord.voice.play_narration_submission",
+  "discord.voice.play_narration_suppressed",
+  "discord.voice.play_refusal",
+] as const;
+
+// Read-only compatibility for receipts already persisted before the play seam rename.
+const legacyPossessorReceiptTypes = [
+  "discord.voice.possessor_connection",
+  "discord.voice.possessor_room",
+  "discord.voice.possessor_transcript_delivery",
+  "discord.voice.possessor_narration_submission",
+  "discord.voice.possessor_narration_suppressed",
+  "discord.voice.possessor_refusal",
+] as const;
+
+const DiscordBridgeCurrentReceiptTypeSchema = z.enum(currentReceiptTypes);
 
 export const DiscordBridgeReceiptSchema = z
   .object({
     schemaVersion: z.literal(1),
     id: z.string().min(1).max(256),
     occurredAt: z.string().datetime(),
-    type: z.enum([
-      "discord.bridge.ready",
-      "discord.bridge.stopped",
-      // User-session plane (ADR 0048). Kept in the same receipt vocabulary so
-      // one evidence stream describes both bodies rather than two half-views.
-      "discord.user_session.ready",
-      "discord.user_session.stopped",
-      "discord.user_session.refused",
-      "discord.stream.watch_connected",
-      "discord.stream.frame",
-      "discord.stream.publish_started",
-      "discord.stream.publish_stopped",
-      "discord.text.ingress",
-      "discord.text.reply",
-      "discord.person-memory.proposed",
-      "discord.person-memory.recalled",
-      "discord.voice.joined",
-      "discord.voice.consent",
-      "discord.voice.utterance",
-      "discord.voice.transcription",
-      "discord.voice.text_input",
-      "discord.voice.floor_decision",
-      // ADR 0057: the floor machine and the volition gate are receipt-visible
-      // so wake/release and offered/taken/suppressed are numbers, not vibes.
-      "discord.voice.floor",
-      "discord.voice.model_response",
-      "discord.voice.realtime_tool",
-      "discord.voice.music",
-      "discord.voice.response",
-      "discord.voice.volition",
-      "discord.voice.overlap",
-      "discord.voice.interrupted",
-      "discord.voice.failed",
-      "discord.voice.left",
-      "discord.voice.possessor_connection",
-      "discord.voice.possessor_room",
-      "discord.voice.possessor_transcript_delivery",
-      "discord.voice.possessor_narration_submission",
-      "discord.voice.possessor_narration_suppressed",
-      "discord.voice.possessor_refusal",
-    ]),
+    type: z.enum([...currentReceiptTypes, ...legacyPossessorReceiptTypes]),
     data: z
       .record(z.string().min(1).max(64), z.string().max(512).or(z.boolean()).or(z.number().finite()))
       .superRefine((data, context) => {
@@ -101,6 +111,7 @@ export const DiscordBridgeReceiptSchema = z
   });
 
 export type DiscordBridgeReceipt = z.infer<typeof DiscordBridgeReceiptSchema>;
+export type DiscordBridgeReceiptType = z.infer<typeof DiscordBridgeCurrentReceiptTypeSchema>;
 
 export interface DiscordBridgeReceiptStoreOptions {
   readonly path: string;
@@ -122,9 +133,10 @@ export class DiscordBridgeReceiptStore {
   }
 
   public append(
-    type: DiscordBridgeReceipt["type"],
+    type: DiscordBridgeReceiptType,
     data: DiscordBridgeReceipt["data"],
   ): Promise<DiscordBridgeReceipt> {
+    DiscordBridgeCurrentReceiptTypeSchema.parse(type);
     const receipt = DiscordBridgeReceiptSchema.parse({
       schemaVersion: 1,
       id: this.idFactory(),
@@ -173,4 +185,36 @@ export class DiscordBridgeReceiptStore {
 
 export function parseDiscordBridgeReceipt(value: unknown): DiscordBridgeReceipt {
   return DiscordBridgeReceiptSchema.parse(value);
+}
+
+/** Read bounded JSONL evidence, tolerating only a final unterminated write. */
+export async function readDiscordBridgeReceipts(
+  path: string,
+  maximumBytes = 10 * 1024 * 1024,
+): Promise<DiscordBridgeReceipt[]> {
+  let target;
+  try {
+    target = await lstat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  if (!target.isFile() || target.isSymbolicLink()) {
+    throw new Error(`Discord receipt path must be a regular file, not a symlink: ${path}`);
+  }
+  if (target.size > maximumBytes) {
+    throw new Error(`Discord receipt file exceeds the ${maximumBytes.toString()} byte proof limit`);
+  }
+  const raw = await readFile(path, "utf8");
+  const lines = raw.split(/\r?\n/u);
+  const receipts: DiscordBridgeReceipt[] = [];
+  for (const [index, line] of lines.entries()) {
+    if (line.length === 0) continue;
+    try {
+      receipts.push(parseDiscordBridgeReceipt(JSON.parse(line)));
+    } catch (error) {
+      if (index !== lines.length - 1 || raw.endsWith("\n")) throw error;
+    }
+  }
+  return receipts;
 }

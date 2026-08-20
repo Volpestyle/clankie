@@ -1,25 +1,14 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  AudioPlayerStatus,
-  createAudioResource,
-  entersState,
-  StreamType,
-  type AudioPlayer,
-  type AudioResource,
-} from "@discordjs/voice";
+import { VoxClientError, type VoxClient, type VoxControlEvent } from "@clankie/vox-client";
 
 /**
  * Shared DJ queue for the active Discord mouth.
  *
  * The model (captain text tools or the voice realtime tools) searches and
  * picks. This module is the sink and the structured control surface — it
- * never parses chat. Audio-in-voice is the common sink (official bot, or
- * lab body without ClankVox). The lab user body may also attach a video
- * sink — Go Live the same URL — so a YouTube request can be a stream, not
- * only a song. The queue never starts both sinks for one track: that would
- * double the audio.
+ * never parses chat. Vox is the sole media sink for both Discord bodies.
  */
 
 export type VoiceMusicCommandKind = "play" | "queue" | "skip" | "pause" | "resume" | "stop" | "now";
@@ -93,6 +82,9 @@ export interface VoiceMusicSink {
   pause(): void;
   resume(): void;
   stop(): void;
+  duck?(): void;
+  unduck?(): void;
+  dispose?(): void;
 }
 
 interface TrackedVoiceMusicTrack {
@@ -104,7 +96,9 @@ const MAX_QUEUE = 32;
 const MAX_SEARCH_RESULTS = 5;
 const PENDING_PICK_TTL_MS = 120_000;
 const SEARCH_TIMEOUT_MS = 15_000;
-const PLAYER_HANDOFF_TIMEOUT_MS = 120_000;
+function musicFailureCode(error: unknown): string {
+  return error instanceof VoxClientError ? error.code : "music_sink_rejected";
+}
 
 export interface YouTubeSearchHit {
   readonly videoId: string;
@@ -278,16 +272,33 @@ export class VoiceMusicQueue {
       this.emit("skip", "queue", "empty", trace);
       return "Nothing is playing.";
     }
-    this.sink.stop();
     const next = this.queued.shift();
+    this.current = undefined;
+    this.paused = false;
+    this.starting = false;
+    let stopCode: string | undefined;
+    try {
+      this.sink.stop();
+    } catch (error) {
+      stopCode = musicFailureCode(error);
+    }
     if (next === undefined) {
-      this.current = undefined;
-      this.paused = false;
-      this.starting = false;
-      this.emit("skip", "queue", "skipped", trace);
+      this.emit(
+        "skip",
+        "queue",
+        stopCode === undefined ? "skipped" : "failed",
+        trace,
+        stopCode === undefined ? {} : { code: stopCode },
+      );
       return "Skipped. Queue is empty.";
     }
-    this.emit("skip", "queue", "skipped", trace);
+    this.emit(
+      "skip",
+      "queue",
+      stopCode === undefined ? "skipped" : "failed",
+      trace,
+      stopCode === undefined ? {} : { code: stopCode },
+    );
     return this.start(trace === undefined ? next : { track: next.track, trace }, "skip");
   }
 
@@ -300,7 +311,12 @@ export class VoiceMusicQueue {
       this.emit("pause", "queue", "paused", trace);
       return "Already paused.";
     }
-    this.sink.pause();
+    try {
+      this.sink.pause();
+    } catch (error) {
+      this.emit("pause", "queue", "failed", trace, { code: musicFailureCode(error) });
+      return "I couldn't pause that just now.";
+    }
     this.paused = true;
     this.emit("pause", "queue", "paused", trace);
     return "Paused.";
@@ -315,37 +331,75 @@ export class VoiceMusicQueue {
       this.emit("resume", "queue", "resumed", trace);
       return "Already playing.";
     }
-    this.sink.resume();
+    try {
+      this.sink.resume();
+    } catch (error) {
+      this.emit("resume", "queue", "failed", trace, { code: musicFailureCode(error) });
+      return "I couldn't resume that just now.";
+    }
     this.paused = false;
     this.emit("resume", "queue", "resumed", trace);
     return "Resumed.";
   }
 
   public stop(trace?: VoiceMusicTraceContext): string {
+    this.pendingPicks.clear();
     if (this.current === undefined && this.queued.length === 0) {
       this.emit("stop", "queue", "empty", trace);
       return "Nothing is playing.";
     }
-    this.sink.stop();
     this.current = undefined;
     this.queued.length = 0;
     this.paused = false;
     this.starting = false;
-    this.emit("stop", "queue", "stopped", trace);
+    let stopCode: string | undefined;
+    try {
+      this.sink.stop();
+    } catch (error) {
+      stopCode = musicFailureCode(error);
+    }
+    this.emit(
+      "stop",
+      "queue",
+      stopCode === undefined ? "stopped" : "failed",
+      trace,
+      stopCode === undefined ? {} : { code: stopCode },
+    );
     return "Stopped.";
   }
 
   /** Speech is about to use the voice player. Video sink pauses the share. */
   public duck(): void {
     if (this.current === undefined || this.paused) return;
-    this.sink.pause();
+    try {
+      if (this.sink.duck === undefined) this.sink.pause();
+      else this.sink.duck();
+    } catch (error) {
+      this.emit("duck", "queue", "failed", this.current.trace, { code: musicFailureCode(error) });
+      return;
+    }
     this.emit("duck", "queue", "ducked", this.current.trace);
   }
 
   public unduck(): void {
     if (this.current === undefined || this.paused) return;
-    this.sink.resume();
+    try {
+      if (this.sink.unduck === undefined) this.sink.resume();
+      else this.sink.unduck();
+    } catch (error) {
+      this.emit("unduck", "queue", "failed", this.current.trace, { code: musicFailureCode(error) });
+      return;
+    }
     this.emit("unduck", "queue", "unducked", this.current.trace);
+  }
+
+  public dispose(): void {
+    this.stop();
+    try {
+      this.sink.dispose?.();
+    } catch {
+      // Queue state is already empty; disposal is terminal and best effort.
+    }
   }
 
   public async ended(): Promise<void> {
@@ -355,8 +409,19 @@ export class VoiceMusicQueue {
       const trace = this.current?.trace;
       this.current = undefined;
       this.starting = false;
-      this.sink.stop();
-      this.emit("ended", "queue", "ended", trace);
+      let stopCode: string | undefined;
+      try {
+        this.sink.stop();
+      } catch (error) {
+        stopCode = musicFailureCode(error);
+      }
+      this.emit(
+        "ended",
+        "queue",
+        stopCode === undefined ? "ended" : "failed",
+        trace,
+        stopCode === undefined ? {} : { code: stopCode },
+      );
       return;
     }
     this.emit("ended", "queue", "ended", this.current?.trace);
@@ -372,13 +437,18 @@ export class VoiceMusicQueue {
     this.starting = true;
     try {
       await this.sink.play(track.track.url, track.trace);
-    } catch {
-      this.current = undefined;
-      this.emit(operation, "queue", "failed", track.trace, { code: "music_sink_rejected" });
+    } catch (error) {
+      if (this.current === track) {
+        this.starting = false;
+        this.current = undefined;
+        this.queued.length = 0;
+        this.paused = false;
+      }
+      this.emit(operation, "queue", "failed", track.trace, { code: musicFailureCode(error) });
       return "I couldn't start that track.";
-    } finally {
-      this.starting = false;
     }
+    if (this.current !== track) return "I couldn't start that track.";
+    this.starting = false;
     this.emit(operation, "queue", "started", track.trace);
     return this.sinkKind === "video" ? `Streaming ${track.track.url}` : `Playing ${track.track.url}`;
   }
@@ -619,291 +689,139 @@ export function parseYtDlpSearchJson(raw: string): YouTubeSearchHit[] {
   }
 }
 
-/**
- * YouTube → PCM → a dedicated music AudioPlayer.
- *
- * Speech uses a different player and steals the connection subscription.
- * Pause and duck leave yt-dlp/ffmpeg running; resume is `unpause`.
- */
-export function createYoutubeAudioSink(options: {
-  readonly player: AudioPlayer;
-  readonly spawnImpl?: typeof spawn;
+/** Native Vox music sink. Playback starts and ends only on matching native ids. */
+export function createVoxMusicSink(options: {
+  readonly vox: VoxClient;
   readonly onEnded?: () => void;
   readonly trace?: VoiceMusicTrace;
 }): VoiceMusicSink {
-  const spawnImpl = options.spawnImpl ?? spawn;
-  let children: ChildProcess[] = [];
-  let removePlayerListener: (() => void) | undefined;
-  let currentUrl: string | undefined;
-  let currentTrace: VoiceMusicTraceContext | undefined;
-  let startedAt = 0;
-  let seekSeconds = 0;
-  let pipelineGeneration = 0;
-  let resource: AudioResource | undefined;
-  let pendingStart: { readonly generation: number; readonly reject: (error: Error) => void } | undefined;
-
-  const ownsPlayer = (): boolean =>
-    resource !== undefined &&
-    options.player.state.status !== AudioPlayerStatus.Idle &&
-    options.player.state.resource === resource;
+  let current:
+    | {
+        readonly musicId: string;
+        readonly trace?: VoiceMusicTraceContext;
+        resolve: (() => void) | undefined;
+        reject: ((error: Error) => void) | undefined;
+      }
+    | undefined;
 
   const emit = (
     operation: VoiceMusicTraceEvent["operation"],
-    component: VoiceMusicTraceEvent["component"],
     outcome: VoiceMusicTraceEvent["outcome"],
-    trace: VoiceMusicTraceContext | undefined,
-    extra: Pick<VoiceMusicTraceEvent, "exitCode" | "code"> = {},
+    trace?: VoiceMusicTraceContext,
+    code?: string,
   ): void => {
     if (trace === undefined) return;
-    options.trace?.({ ...trace, operation, component, outcome, ...extra });
-  };
-
-  const stopChildren = (): void => {
-    pendingStart?.reject(new Error("music pipeline stopped"));
-    pendingStart = undefined;
-    pipelineGeneration += 1;
-    removePlayerListener?.();
-    removePlayerListener = undefined;
-    for (const child of children) child.kill("SIGKILL");
-    children = [];
-  };
-
-  const observeProcess = (
-    child: ChildProcess,
-    component: "yt_dlp" | "ffmpeg",
-    operation: "play" | "resume",
-    trace: VoiceMusicTraceContext | undefined,
-    attemptCode: string,
-    failureCode?: () => string | undefined,
-  ): void => {
-    child.once("spawn", () => emit(operation, component, "spawned", trace, { code: attemptCode }));
-    child.once("error", () => emit(operation, component, "failed", trace, { code: "spawn_failed" }));
-    child.once("close", (code, signal) => {
-      emit(operation, component, "exited", trace, {
-        ...(typeof code === "number" && code >= 0 ? { exitCode: code } : {}),
-        ...(typeof code === "number" && code !== 0
-          ? { code: failureCode?.() ?? "nonzero_exit" }
-          : signal === null
-            ? { code: attemptCode }
-            : { code: signal.toLowerCase() }),
-      });
+    options.trace?.({
+      ...trace,
+      operation,
+      component: "player",
+      outcome,
+      ...(code === undefined ? {} : { code }),
     });
   };
-
-  const startAttempt = (
-    url: string,
-    seek: number,
-    trace: VoiceMusicTraceContext | undefined,
-    operation: "play" | "resume",
-    generation: number,
-    attemptCode: string,
-    selector: string,
-    playerClient?: string,
-  ): Promise<void> =>
-    new Promise((resolve, reject) => {
-      let settled = false;
-      let receivedAudio = false;
-      const fail = (error: Error): void => {
-        if (settled || generation !== pipelineGeneration) return;
-        settled = true;
-        if (pendingStart?.generation === generation) pendingStart = undefined;
-        reject(error);
-      };
-      pendingStart = { generation, reject: fail };
-      const ffmpegSeek = seek > 0 ? ["-ss", seek.toFixed(1)] : [];
-      const downloader = spawnImpl(
-        "yt-dlp",
-        [
-          ...(playerClient === undefined
-            ? []
-            : ["--extractor-args", `youtube:player_client=${playerClient}`]),
-          "-f",
-          selector,
-          "-o",
-          "-",
-          "--no-playlist",
-          "--no-warnings",
-          "--no-progress",
-          url,
-        ],
-        { stdio: ["ignore", "pipe", "pipe"] },
-      );
-      const transcoder = spawnImpl(
-        "ffmpeg",
-        [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          ...ffmpegSeek,
-          "-i",
-          "pipe:0",
-          "-f",
-          "s16le",
-          "-ar",
-          "48000",
-          "-ac",
-          "2",
-          "pipe:1",
-        ],
-        { stdio: ["pipe", "pipe", "ignore"] },
-      );
-      children = [downloader, transcoder];
-      let downloaderStderr = "";
-      downloader.stderr?.setEncoding("utf8");
-      downloader.stderr?.on("data", (chunk: string) => {
-        downloaderStderr = `${downloaderStderr}${chunk}`.slice(-8_192);
-      });
-      observeProcess(downloader, "yt_dlp", operation, trace, attemptCode, () => {
-        if (/HTTP Error 403/iu.test(downloaderStderr)) return "http_403";
-        if (/Requested format is not available/iu.test(downloaderStderr)) {
-          return "format_unavailable";
-        }
-        return undefined;
-      });
-      observeProcess(transcoder, "ffmpeg", operation, trace, attemptCode);
-      const downloadOutput = downloader.stdout;
-      const transcodeInput = transcoder.stdin;
-      const output = transcoder.stdout;
-      if (downloadOutput === null || transcodeInput === null || output === null) {
-        fail(new Error("music pipeline stdio unavailable"));
-        return;
-      }
-      downloadOutput.pipe(transcodeInput);
-      transcodeInput.on("error", () => undefined);
-      const failBeforeAudio = (): void => {
-        if (!receivedAudio) fail(new Error("music pipeline ended before audio"));
-      };
-      downloader.once("error", failBeforeAudio);
-      transcoder.once("error", failBeforeAudio);
-      downloader.once("close", (code, signal) => {
-        if (code !== 0 || signal !== null) failBeforeAudio();
-      });
-      transcoder.once("close", (code, signal) => {
-        if (code !== 0 || signal !== null) failBeforeAudio();
-      });
-      output.once("data", () => {
-        if (generation !== pipelineGeneration) return;
-        receivedAudio = true;
-        settled = true;
-        if (pendingStart?.generation === generation) pendingStart = undefined;
-        emit(operation, "pipeline", "first_audio", trace, { code: attemptCode });
-        resolve();
-      });
-      const onPlayerState = (_previous: { status: string }, next: { status: string }): void => {
-        if (next.status === AudioPlayerStatus.Playing) emit(operation, "player", "playing", trace);
-        if (next.status === AudioPlayerStatus.Idle) emit(operation, "player", "idle", trace);
-      };
-      options.player.on("stateChange", onPlayerState);
-      removePlayerListener = () => options.player.off("stateChange", onPlayerState);
-      resource = createAudioResource(output, { inputType: StreamType.Raw });
-      options.player.play(resource);
-      emit(operation, "player", "submitted", trace, { code: attemptCode });
-      output.once("end", () => {
-        if (!receivedAudio) {
-          failBeforeAudio();
-          return;
-        }
-        if (generation !== pipelineGeneration || currentUrl !== url) return;
-        options.onEnded?.();
-      });
-    });
-
-  const startAt = async (
-    url: string,
-    seek: number,
-    trace: VoiceMusicTraceContext | undefined,
-    operation: "play" | "resume",
-  ): Promise<void> => {
-    stopChildren();
-    currentUrl = url;
-    currentTrace = trace;
-    seekSeconds = seek;
-    if (ownsPlayer()) options.player.stop(true);
-    resource = undefined;
-    const handoffGeneration = pipelineGeneration;
+  const fail = (musicId: string, code: string): void => {
+    const active = current;
+    if (active === undefined || active.musicId !== musicId) return;
+    current = undefined;
+    active.reject?.(new Error(`Vox music failed: ${code}`));
+    emit("play", "failed", active.trace, code);
+    if (active.resolve === undefined) notifyEnded();
+  };
+  const failCommand = (musicId: string, error: unknown): void => {
+    const active = current;
+    if (active === undefined || active.musicId !== musicId) return;
+    const code = musicFailureCode(error);
+    current = undefined;
+    active.reject?.(error instanceof Error ? error : new Error(`Vox music failed: ${code}`));
+    emit("play", "failed", active.trace, code);
+    if (active.resolve === undefined) notifyEnded();
+  };
+  const notifyEnded = (): void => {
     try {
-      await entersState(options.player, AudioPlayerStatus.Idle, PLAYER_HANDOFF_TIMEOUT_MS);
-    } catch (error) {
-      emit(operation, "player", "failed", trace, { code: "handoff_timeout" });
-      currentUrl = undefined;
-      currentTrace = undefined;
-      seekSeconds = 0;
-      stopChildren();
-      throw error;
-    }
-    if (handoffGeneration !== pipelineGeneration || currentUrl !== url) {
-      throw new Error("music pipeline stopped");
-    }
-    startedAt = Date.now();
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const generation = pipelineGeneration;
-      const attemptCode = attempt === 0 ? "attempt_1_direct" : "attempt_2_hls";
-      try {
-        await startAttempt(
-          url,
-          seek,
-          trace,
-          operation,
-          generation,
-          attemptCode,
-          attempt === 0
-            ? "ba/bestaudio"
-            : "worst[protocol^=m3u8][height>=360][acodec!=none]/worst[protocol^=m3u8][acodec!=none]",
-          attempt === 0 ? "web_embedded" : undefined,
-        );
-        return;
-      } catch (error) {
-        if (generation !== pipelineGeneration || currentUrl !== url) throw error;
-        if (attempt === 0) {
-          emit(operation, "pipeline", "failed", trace, { code: "pre_audio_retry" });
-          stopChildren();
-          continue;
-        }
-        emit(operation, "pipeline", "failed", trace, { code: "pre_audio_failed" });
-        currentUrl = undefined;
-        currentTrace = undefined;
-        seekSeconds = 0;
-        stopChildren();
-        if (operation === "resume") options.onEnded?.();
-        throw error;
-      }
+      options.onEnded?.();
+    } catch {
+      // Queue cleanup must not escape a Vox status callback.
     }
   };
+  const onEvent = (event: VoxControlEvent): void => {
+    const active = current;
+    if (active === undefined) return;
+    if (event.type === "player_state" && event.musicId === active.musicId && event.status === "playing") {
+      active.resolve?.();
+      active.resolve = undefined;
+      active.reject = undefined;
+      emit("play", "playing", active.trace);
+      return;
+    }
+    if (event.type === "music_idle" && event.musicId === active.musicId) {
+      current = undefined;
+      if (active.resolve !== undefined) active.reject?.(new Error("Vox music ended before playback started"));
+      else notifyEnded();
+      return;
+    }
+    if (event.type === "music_error") fail(event.musicId, event.code);
+  };
+  const offEvent = options.vox.onEvent(onEvent);
+  const offStatus = options.vox.onStatus((status) => {
+    const active = current;
+    if (active !== undefined && (status === "error" || status === "closed" || status === "missing")) {
+      fail(active.musicId, `vox_${status}`);
+    }
+  });
 
   return {
     play(url, trace) {
-      return startAt(url, 0, trace, "play");
+      const previous = current;
+      if (previous !== undefined) {
+        current = undefined;
+        previous.reject?.(new Error("Vox music replaced"));
+        try {
+          options.vox.musicStop(previous.musicId);
+        } catch {
+          // The replacement still gets its own independent command.
+        }
+      }
+      const musicId = randomUUID();
+      return new Promise<void>((resolve, reject) => {
+        current = { musicId, ...(trace === undefined ? {} : { trace }), resolve, reject };
+        try {
+          options.vox.musicPlay({ musicId, url });
+          emit("play", "submitted", trace);
+        } catch (error) {
+          failCommand(musicId, error);
+        }
+      });
     },
     pause() {
-      if (currentUrl === undefined) return;
-      if (startedAt > 0) {
-        seekSeconds += Math.max(0, (Date.now() - startedAt) / 1_000);
-        startedAt = 0;
-      }
-      if (ownsPlayer()) options.player.pause(true);
-      emit("pause", "player", "paused", currentTrace);
+      if (current !== undefined) options.vox.musicPause(current.musicId);
     },
     resume() {
-      if (currentUrl === undefined) return;
-      if (children.length > 0) {
-        startedAt = Date.now();
-        if (ownsPlayer() || options.player.state.status === AudioPlayerStatus.Paused) {
-          options.player.unpause();
-        }
-        emit("resume", "player", "playing", currentTrace);
-        return;
-      }
-      void startAt(currentUrl, seekSeconds, currentTrace, "resume").catch(() => undefined);
+      if (current !== undefined) options.vox.musicResume(current.musicId);
     },
     stop() {
-      const trace = currentTrace;
-      currentUrl = undefined;
-      currentTrace = undefined;
-      seekSeconds = 0;
-      stopChildren();
-      if (ownsPlayer()) options.player.stop(true);
-      resource = undefined;
-      emit("stop", "player", "stopped", trace);
+      const active = current;
+      current = undefined;
+      active?.reject?.(new Error("Vox music stopped"));
+      if (active !== undefined) options.vox.musicStop(active.musicId);
+    },
+    duck() {
+      if (current !== undefined) options.vox.musicSetGain(current.musicId, 0.2, 150);
+    },
+    unduck() {
+      if (current !== undefined) options.vox.musicSetGain(current.musicId, 1, 150);
+    },
+    dispose() {
+      const active = current;
+      current = undefined;
+      active?.reject?.(new Error("Vox music disposed"));
+      try {
+        if (active !== undefined) options.vox.musicStop(active.musicId);
+      } catch {
+        // Local sink state is already empty.
+      } finally {
+        offEvent();
+        offStatus();
+      }
     },
   };
 }

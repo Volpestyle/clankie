@@ -9,6 +9,13 @@ deferred is decoded, the grid is rendered into the player's own view, and a
 `walk_to` aimed at a decoded warp on blocking collision walks beside it and
 presses in — routing _through_ warps mid-route stays refused.
 
+## Current status (2026-08-19)
+
+The live collision decoder and composite `walk_to` action remain current. The
+external-harness shared-body measurement below is historical under
+[ADR 0129](0129-each-player-owns-a-body.md); Clankie's runtime and each private
+GBA MCP runtime use the same contracts on independent bodies.
+
 ## Context
 
 An external harness played FireRed through the MCP surface

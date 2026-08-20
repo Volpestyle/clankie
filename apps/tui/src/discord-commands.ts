@@ -299,7 +299,6 @@ export async function runDiscordWizard(
     for (;;) {
       const settings = (await services.settings.load()).discord;
       const action = await flow.readSelect({
-        kind: "single",
         message: "Discord configuration",
         options: [
           {
@@ -362,9 +361,8 @@ export async function runDiscordWizard(
           { value: "status", label: "Show status" },
           { value: "done", label: "Done" },
         ],
-        required: true,
       });
-      const choice = action?.[0];
+      const choice = action;
       if (choice === undefined || choice === "done") break;
       if (choice === "status") {
         await showDiscordStatus(shell, services);
@@ -410,7 +408,6 @@ async function editCredentials(shell: ClankieFaceShell, services: DiscordCommand
   const flow = shell.setupFlow;
   const stored = await services.listCredentials();
   const picked = await flow.readSelect({
-    kind: "single",
     message: "Which token?",
     options: DISCORD_CREDENTIALS.map((credential) => ({
       value: credential.id,
@@ -418,10 +415,9 @@ async function editCredentials(shell: ClankieFaceShell, services: DiscordCommand
       hint: credential.id in stored ? "configured" : credential.hint,
       description: credential.description,
     })),
-    required: true,
     allowBack: true,
   });
-  const providerId = picked?.[0];
+  const providerId = picked;
   if (providerId === undefined) return;
 
   // Show what is already there before offering to overwrite it. Re-prompting
@@ -430,17 +426,15 @@ async function editCredentials(shell: ClankieFaceShell, services: DiscordCommand
   const existing = stored[providerId];
   if (existing !== undefined) {
     const decision = await flow.readSelect({
-      kind: "single",
       message: `${providerId} is already stored — ${describeRedactedCredential(existing)}`,
       options: [
         { value: "keep", label: "Keep it", hint: "no change" },
         { value: "replace", label: "Replace it", hint: "enter a new token" },
         { value: "remove", label: "Remove it", hint: "delete from the broker" },
       ],
-      required: true,
       allowBack: true,
     });
-    const choice = decision?.[0];
+    const choice = decision;
     if (choice === undefined || choice === "keep") return;
     if (choice === "remove") {
       await services.removeCredential(providerId);
@@ -547,15 +541,13 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
   const current = (await services.settings.load()).discord;
 
   const enabled = await flow.readSelect({
-    kind: "single",
     message: "Text ingress (requires Message Content Intent in the Discord portal)",
     options: [
       { value: "true", label: "Enabled", hint: "Clankie reads allowlisted channels" },
       { value: "false", label: "Disabled" },
     ],
-    required: true,
   });
-  const enabledChoice = enabled?.[0];
+  const enabledChoice = enabled;
   if (enabledChoice === undefined) return;
 
   const guilds = await flow.readText({
@@ -573,16 +565,14 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
   if (channels === undefined) return;
 
   const dmPolicy = await flow.readSelect({
-    kind: "single",
     message: "Direct messages",
     options: [
       { value: "deny", label: "Deny all DMs" },
       { value: "owner_only", label: "Owner only", hint: "needs your user id" },
       { value: "allowlist", label: "Explicit allowlist" },
     ],
-    required: true,
   });
-  const policy = dmPolicy?.[0];
+  const policy = dmPolicy;
   if (policy === undefined) return;
 
   let ownerUserId = current.ownerUserId;
@@ -629,15 +619,13 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   const current = (await services.settings.load()).discord;
 
   const enabled = await flow.readSelect({
-    kind: "single",
     message: "Group voice",
     options: [
       { value: "true", label: "Enabled" },
       { value: "false", label: "Disabled" },
     ],
-    required: true,
   });
-  const enabledChoice = enabled?.[0];
+  const enabledChoice = enabled;
   if (enabledChoice === undefined) return;
 
   const guilds = await flow.readText({
@@ -657,7 +645,6 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   // Joining a call and steering him elsewhere have very different blast radii,
   // so they get separate bindings rather than one shared allowlist.
   const joinPolicy = await flow.readSelect({
-    kind: "single",
     message: "Who may summon Clankie into a call?",
     options: [
       {
@@ -674,13 +661,11 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
           "Any member may start or end a call. Ambient commands and person memory stay on the ambient tier.",
       },
     ],
-    required: true,
   });
-  const joinPolicyChoice = joinPolicy?.[0];
+  const joinPolicyChoice = joinPolicy;
   if (joinPolicyChoice === undefined) return;
 
   const consentPolicy = await flow.readSelect({
-    kind: "single",
     message: "Who may Clankie hear in a call?",
     options: [
       {
@@ -697,13 +682,11 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
           "Being in his active voice channel is consent. Opt-out still binds for that call. Best for a private server.",
       },
     ],
-    required: true,
   });
-  const consentPolicyChoice = consentPolicy?.[0];
+  const consentPolicyChoice = consentPolicy;
   if (consentPolicyChoice === undefined) return;
 
   const transcriptLogging = await flow.readSelect({
-    kind: "single",
     message: "Keep full voice transcripts for development?",
     options: [
       {
@@ -719,9 +702,8 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
         description: "Retain exact consented speech with speaker attribution for debugging.",
       },
     ],
-    required: true,
   });
-  const transcriptLoggingChoice = transcriptLogging?.[0];
+  const transcriptLoggingChoice = transcriptLogging;
   if (transcriptLoggingChoice === undefined) return;
 
   const guildIds = resolveGuildList(guilds, current.voiceGuildIds, current.guildId);
@@ -767,7 +749,6 @@ async function editActiveBody(shell: ClankieFaceShell, services: DiscordCommandS
   const current = (await services.settings.load()).discord;
   const credentials = await services.listCredentials();
   const picked = await flow.readSelect({
-    kind: "single",
     message: "Which Discord body is the mouth? Only one process is live.",
     options: [
       {
@@ -783,9 +764,8 @@ async function editActiveBody(shell: ClankieFaceShell, services: DiscordCommandS
         description: "Talk, watch shares, Go Live. No slash commands. Requires the lab body setup.",
       },
     ],
-    required: true,
   });
-  const choice = picked?.[0];
+  const choice = picked;
   if (choice !== "bot" && choice !== "user_session") return;
 
   if (choice === "user_session") {
@@ -813,7 +793,6 @@ async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServ
   const current = (await services.settings.load()).discord;
 
   const enabled = await flow.readSelect({
-    kind: "single",
     message:
       "Lab user body — a normal Discord account. Make it the Active body to talk; the official bot stays down while it is.",
     options: [
@@ -825,9 +804,8 @@ async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServ
       },
       { value: "false", label: "Disabled", hint: "bot only" },
     ],
-    required: true,
   });
-  const enabledChoice = enabled?.[0];
+  const enabledChoice = enabled;
   if (enabledChoice === undefined) return;
 
   const guilds = await flow.readText({
@@ -899,15 +877,13 @@ async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServ
   }
 
   const accept = await flow.readSelect({
-    kind: "single",
     message: LAB_ACKNOWLEDGEMENT,
     options: [
       { value: "accept", label: "I accept", hint: "records a durable opt-in" },
       { value: "skip", label: "Skip for now" },
     ],
-    required: true,
   });
-  if (accept?.[0] !== "accept") {
+  if (accept !== "accept") {
     flow.renderLine("Saved. The lab body will not connect until you record the opt-in.", "warning");
     return;
   }

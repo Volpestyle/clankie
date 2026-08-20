@@ -1,11 +1,16 @@
 # ADR 0063: A play request starts embodiment; the play host owns it
 
-Status: accepted (2026-07-26). The original embodiment-manager and separate
-play-host topology was later folded into the single Clankie service described by
-the [current architecture](../architecture.md). The enduring decision is that
-the captain requests play while the component holding the body lock validates
-and executes it. Doctrine profiles, approval ceremonies, and mission machinery
-mentioned in the historical rationale are no longer current systems.
+Status: accepted (2026-07-26).
+
+## Current status (2026-08-19)
+
+The original embodiment-manager and separate play-host topology was folded into
+the single Clankie service in the [current architecture](../architecture.md).
+The captain still requests play and the service-owned play host validates and
+executes it. [ADR 0129](0129-each-player-owns-a-body.md) supersedes the shared
+body-lock/possession mechanism: Clankie's local runtime is process-owned, and a
+hosted run uses his separately credentialed player seat. Doctrine profiles,
+approval ceremonies, and mission machinery below are also historical.
 
 ## Context
 
@@ -73,5 +78,7 @@ body ownership, or stop controls.
   the shared execution boundary.
 - Presence, activity rendering, narration, and play lifecycle remain separate
   capabilities that compose around the body.
-- Current commands, tool semantics, possession, and checkpoints belong in the
-  [GBA MCP operating guide](../../apps/gba-mcp/README.md).
+- Current Clankie play and checkpoint behavior belongs in the
+  [emulator guide](../../integrations/gba-emulator/README.md); the independent
+  harness tool surface belongs in the
+  [GBA MCP guide](../../apps/gba-mcp/README.md).

@@ -9,18 +9,8 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import { REST, Routes } from "discord.js";
-import { opus } from "prism-media";
 import {
   ASK_CLANKIE_TOOL_NAME,
-  openRealtimeConversationSession,
-  openRealtimeTranscriptionSession,
-  openXaiStreamingTranscriptionSession,
-  XAI_REALTIME_BASE_URL,
-  type RealtimeSocketFactory,
-  type RealtimeTimers,
-} from "@clankie/discord-presence-core";
-import { asRecord, discordId, discordIdSet, type DiscordReadinessCheck } from "./readiness.ts";
-import {
   DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
   DEFAULT_VOICE_REALTIME_MODEL,
   DEFAULT_VOICE_REALTIME_PROVIDER,
@@ -30,11 +20,19 @@ import {
   DEFAULT_VOICE_TTS_PROVIDER,
   DEFAULT_XAI_VOICE_REALTIME_MODEL,
   DEFAULT_XAI_VOICE_REALTIME_VOICE,
+  openRealtimeConversationSession,
+  openRealtimeTranscriptionSession,
+  openXaiStreamingTranscriptionSession,
   parseVoiceRealtimeEnv,
+  XAI_REALTIME_BASE_URL,
+  type RealtimeSocketFactory,
+  type RealtimeTimers,
   type VoiceRealtimeEnvConfig,
   type VoiceRealtimeProvider,
   type VoiceTtsProvider,
-} from "./voice-composition.ts";
+} from "@clankie/discord-presence-core";
+import { asRecord, discordId, discordIdSet, type DiscordReadinessCheck } from "./readiness.ts";
+import { probeVoxProcess, type VoxProcessProbeResult } from "./vox-process.ts";
 
 /** Content-free realtime configuration echo: provider, models, and truncation scalars only. */
 export interface VoiceRealtimeReadiness {
@@ -94,7 +92,7 @@ export interface InspectDiscordVoiceReadinessOptions {
   readonly store: CredentialStore;
   readonly api: DiscordVoiceControlPlanePort;
   readonly rest?: DiscordRestReadPort;
-  readonly opusAvailable?: () => boolean;
+  readonly voxProbe?: () => Promise<VoxProcessProbeResult>;
   readonly clock?: () => Date;
   /**
    * The dormant→engaged live probe. When omitted it is built from the
@@ -252,23 +250,29 @@ export async function inspectDiscordVoiceReadiness(
     );
   }
 
-  let opusReady = false;
+  let voxProbe: VoxProcessProbeResult;
   try {
-    opusReady =
-      options.opusAvailable?.() ??
-      (() => {
-        const decoder = new opus.Decoder({ rate: 48_000, channels: 2, frameSize: 960 });
-        decoder.destroy();
-        return opus.Decoder.type === "@discordjs/opus";
-      })();
-  } catch {
-    opusReady = false;
+    voxProbe = await (options.voxProbe ?? (() => probeVoxProcess({ env: options.env })))();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Vox process smoke failed";
+    voxProbe = {
+      binaryResolved: false,
+      binaryDetail: detail,
+      processReady: false,
+      processDetail: detail,
+    };
   }
   add(
-    "native Opus",
-    opusReady,
-    opusReady ? "@discordjs/opus encoder/decoder is loadable" : "native Opus codec is unavailable",
-    "Run pnpm install with the repository-approved @discordjs/opus build enabled.",
+    "Vox binary",
+    voxProbe.binaryResolved,
+    voxProbe.binaryDetail,
+    "Run pnpm --filter @clankie/vox build or set CLANKIE_VOX_BIN to the owned Vox executable.",
+  );
+  add(
+    "Vox process",
+    voxProbe.processReady,
+    voxProbe.processDetail,
+    "Run the Vox binary directly and resolve any startup error before joining Discord voice.",
   );
 
   try {

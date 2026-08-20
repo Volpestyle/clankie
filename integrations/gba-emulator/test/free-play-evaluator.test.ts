@@ -171,6 +171,17 @@ function turn(index: number, outcome: "accepted" | "rejected_by_adapter", delive
 }
 
 describe("free-play evaluator", () => {
+  it("keeps historical possessor receipt logs readable", () => {
+    const report = evaluateFreePlayJournal({
+      journal: journal(turn(0, "accepted", "legacy-delivery")),
+      voiceReceipts: JSON.stringify({
+        type: "discord.voice.possessor_narration_suppressed",
+        data: { deliveryId: "legacy-delivery", reason: "rate_limited" },
+      }),
+    });
+    expect(report.turns[0]?.verdicts.narration).toBe("suppressed");
+  });
+
   it("joins exact voice receipts and terminal lifecycle without inventing a summary", () => {
     const journal = [
       {
@@ -196,7 +207,7 @@ describe("free-play evaluator", () => {
       }),
       voiceReceipts: [
         {
-          type: "discord.voice.possessor_narration_suppressed",
+          type: "discord.voice.play_narration_suppressed",
           occurredAt: at,
           data: { deliveryId: "delivery-suppressed", reason: "rate_limited" },
         },
@@ -355,7 +366,7 @@ describe("free-play evaluator", () => {
     await write(
       receiptsPath,
       JSON.stringify({
-        type: "discord.voice.possessor_narration_suppressed",
+        type: "discord.voice.play_narration_suppressed",
         data: { deliveryId: "delivery-played" },
       }),
     );

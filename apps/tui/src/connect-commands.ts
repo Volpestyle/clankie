@@ -81,7 +81,7 @@ export function buildConnectCommands(services: ConnectCommandServices): FaceShel
           return;
         }
         if (selector === "discord") {
-          await services.runDiscordWizard(shell, discordServices(services));
+          await services.runDiscordWizard(shell, services);
           return;
         }
         await runConnectWizard(shell, services);
@@ -167,15 +167,6 @@ async function withFlow(shell: ClankieFaceShell, title: string, run: () => Promi
   }
 }
 
-function discordServices(services: ConnectCommandServices) {
-  return {
-    settings: services.settings,
-    listCredentials: services.listCredentials,
-    setCredential: services.setCredential,
-    removeCredential: services.removeCredential,
-  };
-}
-
 async function showConnectStatus(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
   const stored = await services.settings.load();
   const credentials = await services.listCredentials();
@@ -199,7 +190,6 @@ async function runConnectWizard(shell: ClankieFaceShell, services: ConnectComman
     for (;;) {
       const credentials = await services.listCredentials();
       const action = await flow.readSelect({
-        kind: "single",
         message: "Give Clankie access to your services",
         options: [
           {
@@ -226,9 +216,8 @@ async function runConnectWizard(shell: ClankieFaceShell, services: ConnectComman
           { value: "status", label: "Show status" },
           { value: "done", label: "Done" },
         ],
-        required: true,
       });
-      const choice = action?.[0];
+      const choice = action;
       if (choice === undefined || choice === "done") break;
       if (choice === "status") {
         await showConnectStatus(shell, services);
@@ -236,17 +225,15 @@ async function runConnectWizard(shell: ClankieFaceShell, services: ConnectComman
       }
       if (choice === "discord") {
         const next = await flow.readSelect({
-          kind: "single",
           message: "Discord",
           options: [
             { value: "configure", label: "Configure", hint: "token, servers, allowlists" },
             { value: "invite", label: "Invite link", hint: "needs an application id" },
           ],
-          required: true,
           allowBack: true,
         });
-        if (next?.[0] === "configure") await services.runDiscordWizard(shell, discordServices(services));
-        else if (next?.[0] === "invite") await services.showDiscordInvite(shell, discordServices(services));
+        if (next === "configure") await services.runDiscordWizard(shell, services);
+        else if (next === "invite") await services.showDiscordInvite(shell, services);
         continue;
       }
       if (choice === "linear") await runLinearWizard(shell, services);
@@ -263,7 +250,6 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
   const existing = listed[LINEAR_PROVIDER_ID];
   if (existing !== undefined) {
     const decision = await flow.readSelect({
-      kind: "single",
       message: `Linear is already stored — ${describeRedactedCredential(existing)}`,
       options: [
         { value: "keep", label: "Keep it" },
@@ -271,10 +257,9 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
         { value: "key", label: "Replace with an API key" },
         { value: "remove", label: "Disconnect Linear" },
       ],
-      required: true,
       allowBack: true,
     });
-    const choice = decision?.[0];
+    const choice = decision;
     if (choice === undefined || choice === "keep") return;
     if (choice === "remove") {
       await services.removeCredential(LINEAR_PROVIDER_ID);
@@ -292,7 +277,6 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
   }
 
   const method = await flow.readSelect({
-    kind: "single",
     message: "Connect Linear",
     options: [
       {
@@ -308,11 +292,10 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
         description: `Personal key from ${LINEAR_KEY_URL}.`,
       },
     ],
-    required: true,
     allowBack: true,
   });
-  if (method?.[0] === "oauth") await connectLinearOauth(shell, services);
-  else if (method?.[0] === "key") await connectLinearApiKey(shell, services);
+  if (method === "oauth") await connectLinearOauth(shell, services);
+  else if (method === "key") await connectLinearApiKey(shell, services);
 }
 
 async function connectLinearOauth(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
@@ -391,17 +374,15 @@ async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandS
   const existing = listed[EMAIL_PROVIDER_ID];
   if (existing !== undefined) {
     const decision = await flow.readSelect({
-      kind: "single",
       message: `Email is already stored — ${describeRedactedCredential(existing)}`,
       options: [
         { value: "keep", label: "Keep it" },
         { value: "replace", label: "Replace mailbox settings" },
         { value: "remove", label: "Disconnect email" },
       ],
-      required: true,
       allowBack: true,
     });
-    const choice = decision?.[0];
+    const choice = decision;
     if (choice === undefined || choice === "keep") return;
     if (choice === "remove") {
       await services.removeCredential(EMAIL_PROVIDER_ID);
@@ -415,7 +396,6 @@ async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandS
   }
 
   const preset = await flow.readSelect({
-    kind: "single",
     message: "Mailbox provider",
     options: [
       { value: "gmail", label: "Gmail", hint: "needs an app password" },
@@ -424,10 +404,9 @@ async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandS
       { value: "outlook", label: "Outlook / Microsoft 365" },
       { value: "custom", label: "Custom IMAP/SMTP" },
     ],
-    required: true,
     allowBack: true,
   });
-  const presetId = preset?.[0] as EmailPresetId | undefined;
+  const presetId = preset as EmailPresetId | undefined;
   if (presetId === undefined) return;
 
   if (presetId === "gmail") {

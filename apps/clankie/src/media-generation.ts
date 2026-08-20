@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { CredentialStore } from "@clankie/credential-broker";
 import {
   GoogleImageAdapter,
@@ -177,7 +178,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
     this.options = options;
     this.videoWaitMs = options.videoWaitMs ?? DEFAULT_VIDEO_WAIT_MS;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-    this.sleep = options.sleep ?? ((ms) => new Promise((done) => setTimeout(done, ms)));
+    this.sleep = options.sleep ?? ((ms) => delay(ms));
     this.now = options.now ?? (() => Date.now());
     this.backgroundRenderMs = options.backgroundRenderMs ?? DEFAULT_BACKGROUND_RENDER_MS;
     this.renderRetentionMs = options.renderRetentionMs ?? DEFAULT_RENDER_RETENTION_MS;

@@ -1397,7 +1397,7 @@ describe("rejection visibility", () => {
   });
 
   it("keeps the coaching out of the line an audience is handed", async () => {
-    // The possessor seam reports `effect` to a voice room, where a persona
+    // The play voice seam reports `effect` to a voice room, where a persona
     // composes the words. While the advice rode along inside it, the room was
     // handed the harness's coaching and he relayed it — sounding like he was
     // directing the people watching through a game none of them was playing.

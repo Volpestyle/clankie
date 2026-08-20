@@ -1,6 +1,6 @@
 /**
  * Composition root for the merged Clankie service: the surviving control-plane
- * surface plus the runner's in-process capabilities (play host, browser,
+ * surface plus its in-process capabilities (play host, browser,
  * activity observation), one process, one port (4310).
  */
 import { readFileSync } from "node:fs";
@@ -13,7 +13,6 @@ import {
   createVoiceRealtimePorts,
   parseVoiceRealtimeEnv,
 } from "@clankie/discord-presence-core";
-import { defaultGbaBodyRootDir, observeBodyHolder } from "@clankie/body-lock";
 import { defaultGbaPlayJournalDir } from "@clankie/gba-emulator";
 import {
   createDefaultCredentialStore,
@@ -22,7 +21,6 @@ import {
   ensureDiscordUserVoiceBridgeCredential,
   ensureDiscordVoiceBridgeCredential,
   ensureOperatorCredential,
-  ensureRunnerCredential,
 } from "@clankie/credential-broker";
 import { createLogger } from "@clankie/observability";
 import {
@@ -83,7 +81,8 @@ const settingsFilledNames = [
 ];
 
 const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
-const runnerStateRoot = process.env.CLANKIE_RUNNER_STATE ?? join(stateRoot, "runner");
+// Keep the existing on-disk directory so browser profiles survive the process merge.
+const capabilityStateRoot = join(stateRoot, "runner");
 const eventLogPath = process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "events.jsonl");
 
 const operatorCredentialStore = createDefaultCredentialStore();
@@ -103,9 +102,6 @@ const localVoiceRealtime =
         config: localVoiceConfig,
       })
     : undefined;
-const runnerToken =
-  process.env.CLANKIE_RUNNER_TOKEN ??
-  (await ensureRunnerCredential({ env: process.env, store: operatorCredentialStore }));
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,
   store: operatorCredentialStore,
@@ -183,7 +179,7 @@ let browserHost: BrowserHost | undefined;
 if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
   try {
     browserHost = await createBrowserHost({
-      runnerStateRoot,
+      stateRoot: capabilityStateRoot,
       attachmentRoot,
       logger,
       environment: process.env,
@@ -202,7 +198,12 @@ if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
 // he says out loud; nothing here reaches the app until he draws something.
 let tldrawHost: TldrawHost | undefined;
 if (tldrawEnabled(process.env.CLANKIE_TLDRAW_ENABLED)) {
-  tldrawHost = await createTldrawHost({ runnerStateRoot, attachmentRoot, logger, environment: process.env });
+  tldrawHost = await createTldrawHost({
+    stateRoot: capabilityStateRoot,
+    attachmentRoot,
+    logger,
+    environment: process.env,
+  });
   logger.info({ event: "tldraw.capability.enabled" }, "diagram host ready");
 }
 
@@ -275,14 +276,6 @@ const captain = createCaptain(
       submitIntent: (intent) => boundApp().embodiment.submit(intent),
       getSession: (sessionId) => Promise.resolve(boundApp().embodiment.getSession(sessionId)),
       getLiveSession: () => Promise.resolve(boundApp().embodiment.liveSession()),
-      getPossession: () => {
-        const holder = observeBodyHolder(defaultGbaBodyRootDir(process.env));
-        return Promise.resolve(
-          holder === null
-            ? undefined
-            : { schemaVersion: 1 as const, holderId: holder.holderId, acquiredAt: holder.acquiredAt },
-        );
-      },
     },
     activity: {
       current: async () => {
@@ -364,17 +357,7 @@ const clankie = await createClankieApp({
     current: (_signal) => Promise.resolve(activityObservations.current()),
   },
   playSight,
-  // Read-only view of the shared body lock (VUH-938); observation only.
-  bodyPossession: () => {
-    const holder = observeBodyHolder(defaultGbaBodyRootDir(process.env));
-    return holder === null
-      ? null
-      : { schemaVersion: 1 as const, holderId: holder.holderId, acquiredAt: holder.acquiredAt };
-  },
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
-  ...(runnerToken
-    ? { authenticateRunner: createBearerAuthenticator(runnerToken, { runnerId: "local" }) }
-    : {}),
   authenticateCaptain: async (request) =>
     (await authenticateDiscordBridge(request)) ??
     (await authenticateDiscordVoiceBridge(request)) ??
@@ -396,9 +379,9 @@ clankieRef = clankie;
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.
 const embodimentClient: EmbodimentClientPort = {
-  claimEmbodiment: (claim) => clankie.embodiment.claim(claim),
-  reportEmbodiment: async (report) => {
-    const result = await clankie.embodiment.report(report);
+  claimEmbodiment: (environmentIds) => clankie.embodiment.claim(environmentIds),
+  reportEmbodiment: async (update) => {
+    const result = await clankie.embodiment.report(update);
     if (result.outcome === "rejected") throw new Error(`embodiment_${result.error}`);
     return result;
   },
@@ -406,7 +389,6 @@ const embodimentClient: EmbodimentClientPort = {
 };
 const playHost = new PlayHost({
   client: embodimentClient,
-  runnerId: "local",
   environmentIds: ["pokemon-firered", "pokemon-emerald"],
   execute: createConfiguredPlayExecution(),
   logger,

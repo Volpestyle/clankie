@@ -20,9 +20,10 @@ Its live lower third keeps Clankie's self-authored objective, intent, and
 monologue separate from the observed effect; spoken output stays on the
 voice surface rather than being duplicated here.
 
-![Discord Activity rendered-frame architecture](../../docs/diagrams/discord-activity-architecture.jpg)
-
-[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
+The older
+[rendered-frame architecture JPG](../../docs/diagrams/discord-activity-architecture.jpg)
+is a historical snapshot. Current game-body ownership is diagrammed in
+[ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md).
 
 ## Running it
 
@@ -137,15 +138,13 @@ server. A producer path mounted on the tunnelled server would be reachable by
 anyone who can reach the activity, so frame injection is kept off the public
 surface entirely; the bearer token is the second lock rather than the only one.
 
-**Only the process holding the GBA body may open a producer connection.** The
-slot goes to the newest connection and closes the previous one, and every sink
-reconnects two seconds after being closed — so two connected producers do not
-share the surface, they livelock, each taking the slot back from the other. An
-idle `gba-mcp` server that opened its sink at startup did exactly this: measured
-on 2026-08-15 against a live playthrough, a viewer received 47 of 139 published
-frames in 20 seconds, in bursts separated by the 2s reconnect delay. The body
-lock is what makes "one producer" true, so the sink is opened and closed with
-possession rather than with the process.
+**Only Clankie's active play path opens the producer connection.** The slot goes
+to the newest connection and closes the previous one, and every sink reconnects
+two seconds after being closed, so two connected producers would livelock. The
+service therefore opens the sink only for its own active local or hosted play
+session. GBA MCP has no producer dependency and returns frames only to its stdio
+caller. Process ownership, rather than a shared body lock, keeps private harness
+cores off this surface.
 
 The activity server owns the listener, so it owns the first-run mint. The
 clankie service only ever resolves, which avoids two processes minting
@@ -166,8 +165,8 @@ port for an internet-facing surface to connect into.
 - The resident play host publishes at hardware rate (~60fps), deduplicates
   unchanged PNGs, and idles the core between turns, so the surface remains live
   rather than becoming a stale still.
-- GBA MCP publishes directly while it holds the body lock. It does not share the
-  resident host's byte-deduplication step.
+- GBA MCP never publishes here. Its private core's optional PNG is returned only
+  in the MCP observation result.
 - A viewer whose socket backlog exceeds `maxBufferedBytes` has frames dropped
   rather than queued, and the drops are counted on `droppedFrameCount`. The
   standalone entrypoint reports that counter to stdout whenever it changes, so a
@@ -189,8 +188,9 @@ port for an internet-facing surface to connect into.
   thinking/acting at the real free-play boundary, the hub replays the latest
   state to late joiners, and an older producer falls back to `Live session`.
   Text carries the meaning; the three-dot motion honors reduced-motion.
-- Producer messages are validated before they reach a viewer: frame and PCM
-  sizes must agree with their payloads before they are forwarded.
+- Producer messages are validated once at producer ingress before they reach
+  the private hub or a viewer: frame and PCM sizes must agree with their
+  payloads before they are forwarded.
 - Lifecycle messages (`stopped`) are never dropped.
 - Producer disconnect invalidates the latest frame, overlay, and work status,
   so an ended or crashed session cannot remain labelled live for late viewers.

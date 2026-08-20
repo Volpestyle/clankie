@@ -9,105 +9,21 @@
  */
 
 import { Buffer } from "node:buffer";
-import type { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DiscordVoiceEvidenceSchema, type DiscordVoiceEvidence } from "@clankie/protocol";
 import { ClankieApiClient } from "@clankie/api-client";
-
-interface MockConnection extends EventEmitter {
-  state: { status: string };
-  receiver: { speaking: EventEmitter; subscribe: (userId: string, options: unknown) => PassThrough };
-  captures: { userId: string; stream: PassThrough }[];
-}
-
-interface VoiceMockState {
-  readonly connections: MockConnection[];
-}
-
-vi.mock("@discordjs/voice", async () => {
-  const { EventEmitter: Emitter } = await import("node:events");
-  const { PassThrough: Stream } = await import("node:stream");
-
-  class FakeAudioPlayer extends Emitter {
-    public state: { status: string } = { status: "idle" };
-    public play(_resource: unknown): void {
-      this.state = { status: "playing" };
-    }
-    public stop(_force?: boolean): boolean {
-      this.state = { status: "idle" };
-      return true;
-    }
-  }
-
-  class FakeVoiceConnection extends Emitter {
-    public state = {
-      status: "ready",
-      networking: { state: { code: "ready", dave: { protocolVersion: 1 } } },
-    };
-    public captures: { userId: string; stream: InstanceType<typeof Stream> }[] = [];
-    public receiver = {
-      speaking: new Emitter(),
-      subscribe: (userId: string, _options: unknown): InstanceType<typeof Stream> => {
-        const stream = new Stream();
-        this.captures.push({ userId, stream });
-        return stream;
-      },
-    };
-    public subscribe(_player: unknown): void {
-      // The session wires the player to the connection; nothing to fake.
-    }
-    public destroy(): void {
-      this.state = { ...this.state, status: "destroyed" };
-    }
-  }
-
-  const connections: FakeVoiceConnection[] = [];
-  return {
-    AudioPlayerStatus: { Idle: "idle", Playing: "playing" },
-    EndBehaviorType: { AfterSilence: "afterSilence" },
-    NetworkingStatusCode: { Ready: "ready" },
-    NoSubscriberBehavior: { Pause: "pause" },
-    StreamType: { Raw: "raw" },
-    VoiceConnectionStatus: { Ready: "ready", Destroyed: "destroyed" },
-    createAudioPlayer: (): FakeAudioPlayer => new FakeAudioPlayer(),
-    createAudioResource: (stream: unknown): { stream: unknown } => ({ stream }),
-    entersState: (target: { state: { status: string } }): Promise<unknown> => Promise.resolve(target),
-    joinVoiceChannel: (_options: unknown): FakeVoiceConnection => {
-      const connection = new FakeVoiceConnection();
-      connections.push(connection);
-      return connection;
-    },
-    __voiceMock: { connections },
-  };
-});
-
-vi.mock("prism-media", async () => {
-  const { PassThrough: Stream } = await import("node:stream");
-  class Decoder extends Stream {
-    public constructor(_options?: unknown) {
-      super();
-    }
-  }
-  return { opus: { Decoder } };
-});
-
-import * as discordVoiceModule from "@discordjs/voice";
 import {
   ADDRESSED_OFFER_TURN_ITEM,
+  createVoiceBriefingProvider,
+  createVoiceRealtimePorts,
   DiscordVoiceIngress,
   DiscordVoiceSession,
+  parseVoiceRealtimeEnv,
   type RealtimeSocket,
   type RealtimeSocketFactory,
   type RealtimeTimers,
 } from "@clankie/discord-presence-core";
-import {
-  createVoiceBriefingProvider,
-  createVoiceRealtimePorts,
-  parseVoiceRealtimeEnv,
-} from "../src/voice-composition.ts";
-
-const voiceMock = (discordVoiceModule as unknown as { __voiceMock: VoiceMockState }).__voiceMock;
+import { FakeVox } from "./fake-vox.ts";
 
 class FakeRealtimeSocket implements RealtimeSocket {
   public readonly sent: string[] = [];
@@ -211,7 +127,10 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     });
     const evidence: DiscordVoiceEvidence[] = [];
     const clock = { now: 0 };
+    const vox = new FakeVox();
+    vox.autoDaveReady = false;
     const session = new DiscordVoiceSession({
+      vox,
       ingress: new DiscordVoiceIngress(voiceApi, {
         characterId: "clankie",
         credentialRef: "discord_bot",
@@ -230,12 +149,21 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       timers,
     });
 
-    await session.join({
+    let joined = false;
+    const joining = session.join({
       guildId: GUILD,
       channelId: CHANNEL,
       invokingUserId: OWNER,
-      adapterCreator: (() => ({ sendPayload: () => true, destroy: () => undefined })) as never,
     });
+    void joining.then(() => {
+      joined = true;
+    });
+    await flush();
+    expect(joined).toBe(false);
+    const connectionId = vox.joins.at(-1)?.connectionId;
+    if (connectionId === undefined) throw new Error("Vox did not receive the voice join");
+    vox.emit({ type: "dave_state", role: "voice", connectionId, status: "ready", protocolVersion: 2 });
+    await joining;
 
     // Join probes the transcription boundary over the brokered key. Actual
     // listeners are then opened per authenticated Discord speaker.
@@ -253,14 +181,14 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
 
     // One consented utterance: capture opens (gateway attribution span), PCM
     // streams into the listener, then the final transcript addresses him.
-    const connection = voiceMock.connections[voiceMock.connections.length - 1] as MockConnection;
-    connection.receiver.speaking.emit("start", OWNER);
+    vox.emit({ type: "speaking_start", userId: OWNER });
     await flush();
     const listener = sockets[1] as FakeRealtimeSocket;
-    const capture = connection.captures[connection.captures.length - 1];
-    capture?.stream.write(Buffer.alloc(3_840, 1));
+    const captureId = vox.subscriptions.at(-1)?.captureId;
+    if (captureId === undefined) throw new Error("Vox did not open the speaker capture");
+    vox.emitAudio(OWNER, Buffer.alloc(3_840, 1));
     await flush();
-    capture?.stream.end();
+    vox.emit({ type: "user_audio_end", userId: OWNER, captureId });
     await flush();
     expect(listener.frames().some((frame) => frame.type === "input_audio_buffer.append")).toBe(true);
     listener.serverEvent({
@@ -370,7 +298,9 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     });
     const evidence: DiscordVoiceEvidence[] = [];
     const clock = { now: 0 };
+    const vox = new FakeVox();
     const session = new DiscordVoiceSession({
+      vox,
       ingress: new DiscordVoiceIngress(voiceApi, {
         characterId: "clankie",
         credentialRef: "discord_bot",
@@ -399,12 +329,10 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       guildId: GUILD,
       channelId: CHANNEL,
       invokingUserId: OWNER,
-      adapterCreator: (() => ({ sendPayload: () => true, destroy: () => undefined })) as never,
     });
 
     // Wake him with an addressed transcript.
-    const connection = voiceMock.connections[voiceMock.connections.length - 1] as MockConnection;
-    connection.receiver.speaking.emit("start", OWNER);
+    vox.emit({ type: "speaking_start", userId: OWNER });
     await flush();
     const listener = sockets[1] as FakeRealtimeSocket;
     listener.serverEvent({

@@ -13,12 +13,12 @@ import { z } from "zod";
  */
 
 export const XAI_PROVIDER_ID = "xai";
-export const XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
-export const XAI_TOKEN_URL = "https://auth.x.ai/oauth2/token";
-export const XAI_DEVICE_AUTHORIZATION_URL = "https://auth.x.ai/oauth2/device/code";
-export const XAI_DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
-export const XAI_OAUTH_SCOPES = "openid profile email offline_access grok-cli:access api:access";
-export const XAI_OAUTH_REFERRER = "opencode";
+const XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
+const XAI_TOKEN_URL = "https://auth.x.ai/oauth2/token";
+const XAI_DEVICE_AUTHORIZATION_URL = "https://auth.x.ai/oauth2/device/code";
+const XAI_DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
+const XAI_OAUTH_SCOPES = "openid profile email offline_access grok-cli:access api:access";
+const XAI_OAUTH_REFERRER = "opencode";
 
 const DEVICE_CODE_DEFAULT_INTERVAL_MS = 5_000;
 const DEVICE_CODE_MIN_INTERVAL_MS = 1_000;
@@ -48,7 +48,7 @@ const DeviceAuthorizationSchema = z.object({
 
 type OauthCredential = Extract<ProviderCredential, { type: "oauth" }>;
 
-export interface XaiDeviceAuthorization {
+interface XaiDeviceAuthorization {
   readonly deviceCode: string;
   readonly userCode: string;
   readonly verificationUri: string;
@@ -60,12 +60,12 @@ export interface XaiDeviceAuthorization {
 /** Transport used by login, refresh, and the request adapter. Accepts `fetch` or media's narrower `MediaFetch`. */
 export type XaiTransport = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
-export interface RequestXaiDeviceCodeOptions {
+interface RequestXaiDeviceCodeOptions {
   readonly fetchImpl?: XaiTransport;
 }
 
 /** Requests an RFC 8628 device code from auth.x.ai. */
-export async function requestXaiDeviceCode(
+async function requestXaiDeviceCode(
   options: RequestXaiDeviceCodeOptions = {},
 ): Promise<XaiDeviceAuthorization> {
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -156,19 +156,6 @@ export async function runXaiDeviceLogin(options: XaiDeviceLoginOptions): Promise
   }
 }
 
-/** Refreshes a SuperGrok credential without mutating a store. */
-export async function refreshXaiToken(
-  credential: ProviderCredential,
-  fetchImpl: XaiTransport = fetch,
-): Promise<ProviderCredential> {
-  if (credential.type !== "oauth") {
-    throw new Error(
-      `Cannot refresh a "${credential.type}" credential; ${XAI_PROVIDER_ID} subscription auth uses oauth credentials`,
-    );
-  }
-  return refreshOauthCredential(credential, fetchImpl);
-}
-
 export interface XaiFetchOptions {
   readonly store: CredentialStore;
   readonly fetchImpl?: XaiTransport;
@@ -217,7 +204,7 @@ export function createXaiFetch(options: XaiFetchOptions): typeof fetch {
  * Unsigned JWT `exp` check used to refresh a little before expiry. Opaque
  * tokens return false so the stored `expires` field stays authoritative.
  */
-export function xaiAccessTokenIsExpiring(
+function xaiAccessTokenIsExpiring(
   token: string | undefined,
   skewMs: number = ACCESS_TOKEN_REFRESH_SKEW_MS,
 ): boolean {

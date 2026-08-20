@@ -1,13 +1,15 @@
-import type { ChildProcess } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
-import { PassThrough } from "node:stream";
-import { AudioPlayerStatus, type AudioPlayer, type AudioResource } from "@discordjs/voice";
+import {
+  VoxClientError,
+  type VoxClient,
+  type VoxControlEvent,
+  type VoxProcessStatus,
+} from "@clankie/vox-client";
 import { describe, expect, it, vi } from "vitest";
 import {
   VoiceMusicQueue,
   applyMusicControl,
-  createYoutubeAudioSink,
+  createVoxMusicSink,
   isAllowedMusicUrl,
   parseMusicControlPath,
   parseYtDlpSearchJson,
@@ -15,6 +17,61 @@ import {
   type VoiceMusicSink,
   type VoiceMusicTraceEvent,
 } from "../src/voice-music.ts";
+
+function fakeVox() {
+  const listeners = new Set<(event: VoxControlEvent) => void>();
+  const statusListeners = new Set<(status: VoxProcessStatus, detail: string) => void>();
+  const errors: Partial<Record<"play" | "stop" | "pause" | "resume" | "gain", Error>> = {};
+  const musicPlay = vi.fn((_input: { musicId: string; url: string }) => {
+    if (errors.play !== undefined) throw errors.play;
+  });
+  const musicStop = vi.fn((_musicId: string) => {
+    if (errors.stop !== undefined) throw errors.stop;
+  });
+  const musicPause = vi.fn((_musicId: string) => {
+    if (errors.pause !== undefined) throw errors.pause;
+  });
+  const musicResume = vi.fn((_musicId: string) => {
+    if (errors.resume !== undefined) throw errors.resume;
+  });
+  const musicSetGain = vi.fn((_musicId: string, _target: number, _fadeMs?: number) => {
+    if (errors.gain !== undefined) throw errors.gain;
+  });
+  const vox = {
+    available: true,
+    status: "ready" as VoxProcessStatus,
+    detail: "fake Vox",
+    musicPlay,
+    musicStop,
+    musicPause,
+    musicResume,
+    musicSetGain,
+    onEvent(listener: (event: VoxControlEvent) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    onStatus(listener: (status: VoxProcessStatus, detail: string) => void) {
+      statusListeners.add(listener);
+      listener("ready", "fake Vox");
+      return () => statusListeners.delete(listener);
+    },
+  } as unknown as VoxClient;
+  return {
+    vox,
+    musicPlay,
+    musicStop,
+    musicPause,
+    musicResume,
+    musicSetGain,
+    errors,
+    emit: (event: VoxControlEvent): void => {
+      for (const listener of listeners) listener(event);
+    },
+    setStatus: (status: VoxProcessStatus): void => {
+      for (const listener of statusListeners) listener(status, "fake Vox");
+    },
+  };
+}
 
 function recordingSink(): VoiceMusicSink & { calls: string[] } {
   const calls: string[] = [];
@@ -33,36 +90,6 @@ function recordingSink(): VoiceMusicSink & { calls: string[] } {
       calls.push("stop");
     },
   };
-}
-
-function audioPlayer(initialState: AudioPlayer["state"] = { status: AudioPlayerStatus.Idle }) {
-  const emitter = new EventEmitter();
-  let state = initialState;
-  const setState = (next: AudioPlayer["state"]): void => {
-    const previous = state;
-    state = next;
-    emitter.emit("stateChange", previous, next);
-    emitter.emit(next.status, previous, next);
-  };
-  const play = vi.fn((resource: AudioResource) => {
-    setState({ status: AudioPlayerStatus.Playing, resource } as AudioPlayer["state"]);
-  });
-  const pause = vi.fn(() => true);
-  const unpause = vi.fn(() => true);
-  const stop = vi.fn(() => {
-    setState({ status: AudioPlayerStatus.Idle });
-    return true;
-  });
-  const player = Object.assign(emitter, {
-    get state() {
-      return state;
-    },
-    play,
-    pause,
-    unpause,
-    stop,
-  }) as unknown as AudioPlayer;
-  return { player, play, pause, unpause, stop, setState };
 }
 
 const hits = [
@@ -110,6 +137,19 @@ describe("music control (model tools)", () => {
     const queued = await applyMusicControl(queue, "queue", { index: 1, authorId: "u1" });
     expect(queued.message).toContain("Queued");
     expect(queue.snapshot().queued).toHaveLength(1);
+  });
+
+  it("clears pending search picks when music is stopped", async () => {
+    const queue = new VoiceMusicQueue({
+      sink: recordingSink(),
+      sinkKind: "audio",
+      search: async () => [...hits],
+    });
+    await queue.searchAndOffer("u1", "migos", "play");
+    queue.stop();
+    await expect(queue.pick("u1", 1)).resolves.toBe(
+      "I don't have a search waiting. Ask me to play something first.",
+    );
   });
 
   it("plays a url and refuses a missing pick", async () => {
@@ -218,158 +258,53 @@ describe("music control (model tools)", () => {
 });
 
 describe("voice music queue", () => {
-  it("retries embedded direct audio with strict HLS and records both attempts", async () => {
+  it("starts only on matching Vox playback, advances on matching idle, and ducks with gain", async () => {
     const events: VoiceMusicTraceEvent[] = [];
-    const children: ChildProcess[] = [];
-    const downloaderArgs: string[][] = [];
-    const kill = vi.fn(() => true);
-    let attempt = 0;
-    let downloadAttempt = 0;
-    const spawnImpl = ((command: string, args: string[]) => {
-      const stdout = new PassThrough();
-      const stderr = new PassThrough();
-      const child = Object.assign(new EventEmitter(), {
-        stdin: command === "ffmpeg" ? new PassThrough() : null,
-        stdout,
-        stderr,
-        kill,
-      }) as unknown as ChildProcess;
-      children.push(child);
-      if (command === "yt-dlp") {
-        downloaderArgs.push(args);
-        const currentDownload = ++downloadAttempt;
-        if (currentDownload === 1) {
-          queueMicrotask(() => {
-            stderr.write("ERROR: Requested format is not available");
-            child.emit("close", 1, null);
-          });
-        }
-      }
-      if (command === "ffmpeg") {
-        const currentAttempt = ++attempt;
-        queueMicrotask(() => {
-          if (currentAttempt === 1) stdout.end();
-          else stdout.write(Buffer.alloc(4));
-        });
-      }
-      return child;
-    }) as typeof import("node:child_process").spawn;
-    const { player } = audioPlayer();
-    const queue = new VoiceMusicQueue({
-      sink: createYoutubeAudioSink({ player, spawnImpl, trace: (event) => events.push(event) }),
+    const fake = fakeVox();
+    let queue: VoiceMusicQueue;
+    const sink = createVoxMusicSink({
+      vox: fake.vox,
+      trace: (event) => events.push(event),
+      onEnded: () => {
+        void queue.ended();
+      },
+    });
+    queue = new VoiceMusicQueue({
+      sink,
       sinkKind: "audio",
       trace: (event) => events.push(event),
     });
 
-    await expect(
-      queue.play("https://youtu.be/one", "u1", { source: "control", callId: "call-1" }),
-    ).resolves.toContain("Playing");
-    expect(children).toHaveLength(4);
-    expect(kill).toHaveBeenCalled();
-    expect(downloaderArgs[0]).toContain("ba/bestaudio");
-    expect(downloaderArgs[0]).toEqual(
-      expect.arrayContaining(["--extractor-args", "youtube:player_client=web_embedded"]),
-    );
-    expect(downloaderArgs[1]).toContain(
-      "worst[protocol^=m3u8][height>=360][acodec!=none]/worst[protocol^=m3u8][acodec!=none]",
-    );
-    expect(downloaderArgs[1]?.join(" ")).not.toContain("ba/bestaudio");
-    expect(downloaderArgs[1]?.join(" ")).not.toContain("player_client");
-    expect(events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          component: "pipeline",
-          outcome: "failed",
-          code: "pre_audio_retry",
-        }),
-        expect.objectContaining({
-          component: "yt_dlp",
-          outcome: "exited",
-          code: "format_unavailable",
-        }),
-        expect.objectContaining({
-          component: "player",
-          outcome: "submitted",
-          code: "attempt_2_hls",
-        }),
-        expect.objectContaining({
-          component: "pipeline",
-          outcome: "first_audio",
-          code: "attempt_2_hls",
-        }),
-        expect.objectContaining({ component: "queue", outcome: "started", current: true }),
-      ]),
-    );
-    queue.stop();
-  });
-
-  it("waits for speech and never pauses or stops a foreign player resource", async () => {
-    const speech = {} as AudioResource;
-    const nextSpeech = {} as AudioResource;
-    const fake = audioPlayer({ status: AudioPlayerStatus.Playing, resource: speech } as AudioPlayer["state"]);
-    const spawnImpl = ((command: string) => {
-      const stdout = new PassThrough();
-      const child = Object.assign(new EventEmitter(), {
-        stdin: command === "ffmpeg" ? new PassThrough() : null,
-        stdout,
-        stderr: new PassThrough(),
-        kill: vi.fn(() => true),
-      }) as unknown as ChildProcess;
-      if (command === "ffmpeg") queueMicrotask(() => stdout.write(Buffer.alloc(4)));
-      return child;
-    }) as typeof import("node:child_process").spawn;
-    const sink = createYoutubeAudioSink({ player: fake.player, spawnImpl });
-
-    const started = Promise.resolve(sink.play("https://youtu.be/one"));
-    expect(fake.play).not.toHaveBeenCalled();
-    fake.setState({ status: AudioPlayerStatus.Idle });
-    await started;
-    expect(fake.play).toHaveBeenCalledOnce();
-
-    fake.pause.mockClear();
-    fake.stop.mockClear();
-    fake.setState({ status: AudioPlayerStatus.Playing, resource: nextSpeech } as AudioPlayer["state"]);
-    sink.pause();
-    sink.stop();
-    expect(fake.pause).not.toHaveBeenCalled();
-    expect(fake.stop).not.toHaveBeenCalled();
-  });
-
-  it("ducks and unducks without killing yt-dlp or ffmpeg", async () => {
-    const events: VoiceMusicTraceEvent[] = [];
-    const kill = vi.fn(() => true);
-    const spawnImpl = ((command: string) => {
-      const stdout = new PassThrough();
-      const child = Object.assign(new EventEmitter(), {
-        stdin: command === "ffmpeg" ? new PassThrough() : null,
-        stdout,
-        stderr: new PassThrough(),
-        kill,
-      }) as unknown as ChildProcess;
-      if (command === "ffmpeg") queueMicrotask(() => stdout.write(Buffer.alloc(4)));
-      return child;
-    }) as typeof import("node:child_process").spawn;
-    const fake = audioPlayer();
-    const queue = new VoiceMusicQueue({
-      sink: createYoutubeAudioSink({ player: fake.player, spawnImpl, trace: (event) => events.push(event) }),
-      sinkKind: "audio",
-      trace: (event) => events.push(event),
+    let settled = false;
+    const first = queue.play("https://youtu.be/one", "u1", { source: "control", callId: "call-1" });
+    void first.then(() => {
+      settled = true;
     });
-    await queue.play("https://youtu.be/one", "u1", { source: "control", callId: "call-1" });
-    const killsAfterStart = kill.mock.calls.length;
+    const firstId = fake.musicPlay.mock.calls[0]?.[0].musicId as string;
+    expect(queue.snapshot().starting).toBe(true);
+    fake.emit({ type: "player_state", status: "playing", musicId: "some-other-track" });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(queue.snapshot().starting).toBe(true);
+    fake.emit({ type: "player_state", status: "playing", musicId: firstId });
+    await expect(first).resolves.toContain("Playing");
+    expect(queue.snapshot().starting).toBe(false);
+    await queue.enqueue("https://youtu.be/two", "u2");
     queue.duck();
     queue.unduck();
-    expect(kill.mock.calls.length).toBe(killsAfterStart);
-    expect(events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ operation: "duck", outcome: "ducked" }),
-        expect.objectContaining({ operation: "unduck", outcome: "unducked" }),
-      ]),
-    );
-    expect(events.some((event) => event.code === "sigkill")).toBe(false);
-    expect(
-      events.filter((event) => event.operation === "resume" && event.component === "yt_dlp"),
-    ).toHaveLength(0);
+    expect(fake.musicSetGain).toHaveBeenNthCalledWith(1, firstId, 0.2, 150);
+    expect(fake.musicSetGain).toHaveBeenNthCalledWith(2, firstId, 1, 150);
+
+    fake.emit({ type: "music_idle", musicId: "some-other-track" });
+    expect(fake.musicPlay).toHaveBeenCalledTimes(1);
+    fake.emit({ type: "music_idle", musicId: firstId });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(fake.musicPlay).toHaveBeenCalledTimes(2);
+    const secondId = fake.musicPlay.mock.calls[1]?.[0].musicId as string;
+    fake.emit({ type: "player_state", status: "playing", musicId: secondId });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(queue.snapshot().current?.url).toBe("https://youtu.be/two");
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ outcome: "playing" })]));
     queue.stop();
   });
 
@@ -379,6 +314,181 @@ describe("voice music queue", () => {
       sinkKind: "audio",
     });
     await expect(queue.play("https://youtu.be/one")).resolves.toBe("I couldn't start that track.");
+    expect(queue.snapshot().current).toBeUndefined();
+  });
+
+  it("rejects only the matching native Vox music error", async () => {
+    const fake = fakeVox();
+    const events: VoiceMusicTraceEvent[] = [];
+    const queue = new VoiceMusicQueue({
+      sink: createVoxMusicSink({ vox: fake.vox, trace: (event) => events.push(event) }),
+      sinkKind: "audio",
+      trace: (event) => events.push(event),
+    });
+    const playing = queue.play("https://youtu.be/one", undefined, {
+      source: "control",
+      callId: "music-error",
+    });
+    const musicId = fake.musicPlay.mock.calls[0]?.[0].musicId as string;
+    fake.emit({
+      type: "music_error",
+      musicId: "stale-track",
+      code: "pipeline_failed",
+      message: "ignore me",
+    });
+    fake.emit({
+      type: "music_error",
+      musicId,
+      code: "format_unavailable",
+      message: "private native detail",
+    });
+    await expect(playing).resolves.toBe("I couldn't start that track.");
+    expect(queue.snapshot().current).toBeUndefined();
+    expect(events).toContainEqual(expect.objectContaining({ outcome: "failed", code: "format_unavailable" }));
+    expect(JSON.stringify(events)).not.toContain("private native detail");
+  });
+
+  it("does not let an older rejected play clear or stop a newer concurrent track", async () => {
+    const fake = fakeVox();
+    const queue = new VoiceMusicQueue({
+      sink: createVoxMusicSink({ vox: fake.vox }),
+      sinkKind: "audio",
+    });
+    const first = queue.play("https://youtu.be/one");
+    const firstId = fake.musicPlay.mock.calls[0]?.[0].musicId as string;
+    const second = queue.play("https://youtu.be/two");
+    const secondId = fake.musicPlay.mock.calls[1]?.[0].musicId as string;
+    expect(secondId).not.toBe(firstId);
+    await expect(first).resolves.toBe("I couldn't start that track.");
+    fake.emit({ type: "music_idle", musicId: firstId });
+    fake.emit({
+      type: "music_error",
+      musicId: firstId,
+      code: "pipeline_failed",
+      message: "stale failure",
+    });
+    expect(queue.snapshot().current?.url).toBe("https://youtu.be/two");
+
+    fake.emit({ type: "player_state", status: "playing", musicId: secondId });
+    await expect(second).resolves.toContain("Playing");
+    expect(queue.snapshot().current?.url).toBe("https://youtu.be/two");
+    expect(fake.musicStop).toHaveBeenCalledWith(firstId);
+    expect(fake.musicStop).not.toHaveBeenCalledWith(secondId);
+  });
+
+  it("classifies a synchronous Vox play rejection without retaining the failed track", async () => {
+    const fake = fakeVox();
+    const events: VoiceMusicTraceEvent[] = [];
+    fake.errors.play = new VoxClientError("stdin_queue_overflow", "Vox command queue is full");
+    const queue = new VoiceMusicQueue({
+      sink: createVoxMusicSink({ vox: fake.vox, trace: (event) => events.push(event) }),
+      sinkKind: "audio",
+      trace: (event) => events.push(event),
+    });
+
+    const rejected = queue.play("https://youtu.be/one", undefined, {
+      source: "control",
+      callId: "play-rejected",
+    });
+    await queue.enqueue("https://youtu.be/queued");
+    await expect(rejected).resolves.toBe("I couldn't start that track.");
+    expect(queue.snapshot()).toMatchObject({ current: undefined, queued: [] });
+    expect(events).toEqual(
+      expect.arrayContaining([expect.objectContaining({ outcome: "failed", code: "stdin_queue_overflow" })]),
+    );
+  });
+
+  it("contains terminal Vox control throws while preserving queue identity", async () => {
+    const fake = fakeVox();
+    const events: VoiceMusicTraceEvent[] = [];
+    const trace = { source: "control", callId: "terminal-controls" } as const;
+    const queue = new VoiceMusicQueue({
+      sink: createVoxMusicSink({ vox: fake.vox }),
+      sinkKind: "audio",
+      trace: (event) => events.push(event),
+    });
+    const playing = queue.play("https://youtu.be/one", "u1", trace);
+    const firstId = fake.musicPlay.mock.calls[0]?.[0].musicId as string;
+    fake.emit({ type: "player_state", status: "playing", musicId: firstId });
+    await playing;
+    await queue.enqueue("https://youtu.be/two", "u2");
+
+    fake.errors.pause = new VoxClientError("not_ready", "Vox unavailable");
+    expect(queue.pause(trace)).toBe("I couldn't pause that just now.");
+    expect(queue.snapshot()).toMatchObject({ current: { url: "https://youtu.be/one" }, paused: false });
+    delete fake.errors.pause;
+    expect(queue.pause(trace)).toBe("Paused.");
+
+    fake.errors.resume = new VoxClientError("closed", "Vox closed");
+    expect(queue.resume(trace)).toBe("I couldn't resume that just now.");
+    expect(queue.snapshot().paused).toBe(true);
+    delete fake.errors.resume;
+    expect(queue.resume(trace)).toBe("Resumed.");
+
+    fake.errors.gain = new VoxClientError("not_ready", "Vox unavailable");
+    expect(() => queue.duck()).not.toThrow();
+    expect(() => queue.unduck()).not.toThrow();
+    expect(queue.snapshot().current?.url).toBe("https://youtu.be/one");
+    delete fake.errors.gain;
+
+    fake.errors.stop = new VoxClientError("stdin_write_failed", "Vox stdin closed");
+    expect(queue.stop(trace)).toBe("Stopped.");
+    expect(queue.snapshot()).toEqual({
+      current: undefined,
+      queued: [],
+      paused: false,
+      starting: false,
+      sink: "audio",
+    });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ operation: "pause", outcome: "failed", code: "not_ready" }),
+        expect.objectContaining({ operation: "resume", outcome: "failed", code: "closed" }),
+        expect.objectContaining({ operation: "stop", outcome: "failed", code: "stdin_write_failed" }),
+      ]),
+    );
+    expect(() => queue.dispose()).not.toThrow();
+  });
+
+  it("advances to the queued identity even when terminal Vox stop throws during skip", async () => {
+    const fake = fakeVox();
+    const queue = new VoiceMusicQueue({
+      sink: createVoxMusicSink({ vox: fake.vox }),
+      sinkKind: "audio",
+    });
+    const first = queue.play("https://youtu.be/one");
+    fake.emit({
+      type: "player_state",
+      status: "playing",
+      musicId: fake.musicPlay.mock.calls[0]?.[0].musicId as string,
+    });
+    await first;
+    await queue.enqueue("https://youtu.be/two");
+    fake.errors.stop = new VoxClientError("closed", "Vox closed during stop");
+    const skipping = queue.skip();
+    delete fake.errors.stop;
+    const secondId = fake.musicPlay.mock.calls[1]?.[0].musicId as string;
+    fake.emit({ type: "player_state", status: "playing", musicId: secondId });
+    await expect(skipping).resolves.toContain("Playing");
+    expect(queue.snapshot()).toMatchObject({ current: { url: "https://youtu.be/two" }, queued: [] });
+  });
+
+  it("contains terminal status cleanup after native music has started", async () => {
+    const fake = fakeVox();
+    const queue = new VoiceMusicQueue({
+      sink: createVoxMusicSink({ vox: fake.vox, onEnded: () => void queue.ended() }),
+      sinkKind: "audio",
+    });
+    const playing = queue.play("https://youtu.be/one");
+    fake.emit({
+      type: "player_state",
+      status: "playing",
+      musicId: fake.musicPlay.mock.calls[0]?.[0].musicId as string,
+    });
+    await playing;
+    fake.errors.stop = new VoxClientError("closed", "Vox is closed");
+    expect(() => fake.setStatus("error")).not.toThrow();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(queue.snapshot().current).toBeUndefined();
   });
 

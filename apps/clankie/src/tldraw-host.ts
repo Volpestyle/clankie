@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { discordAttachmentRoot } from "@clankie/settings";
 import {
   DrawDiagramResultSchema,
@@ -68,7 +69,7 @@ export interface TldrawHostLogger {
 }
 
 export interface TldrawHostOptions {
-  readonly runnerStateRoot: string;
+  readonly stateRoot: string;
   /** Where a diagram is written so the Discord bridge can serve it back; supplied by the composition root. */
   readonly attachmentRoot?: string;
   readonly logger: TldrawHostLogger;
@@ -117,7 +118,7 @@ export async function createTldrawHost(options: TldrawHostOptions): Promise<Tldr
   const artifactRoot = options.attachmentRoot ?? discordAttachmentRoot(environment);
   await mkdir(join(artifactRoot, ARTIFACT_SUBDIRECTORY), { recursive: true, mode: 0o700 });
 
-  const documentDirectory = join(options.runnerStateRoot, "tldraw");
+  const documentDirectory = join(options.stateRoot, "tldraw");
   await mkdir(documentDirectory, { recursive: true, mode: 0o700 });
 
   /** The board he is drawing on this run, and whether its script is in place. */
@@ -265,7 +266,7 @@ export async function createTldrawHost(options: TldrawHostOptions): Promise<Tldr
         break;
       }
       if (Date.now() > deadline) throw new CanvasRefusal("canvas_failed", "the canvas script never applied");
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await delay(250);
     }
 
     // `applied` only means the watcher wrote the files through. A module that

@@ -12,14 +12,14 @@ import { z } from "zod";
  */
 
 export const ANTHROPIC_PROVIDER_ID = "anthropic";
-export const ANTHROPIC_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-export const ANTHROPIC_AUTHORIZE_ENDPOINT = "https://claude.ai/oauth/authorize";
-export const ANTHROPIC_TOKEN_ENDPOINT = "https://console.anthropic.com/v1/oauth/token";
-export const ANTHROPIC_REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback";
-export const ANTHROPIC_OAUTH_SCOPES = "org:create_api_key user:profile user:inference";
+const ANTHROPIC_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const ANTHROPIC_AUTHORIZE_ENDPOINT = "https://claude.ai/oauth/authorize";
+const ANTHROPIC_TOKEN_ENDPOINT = "https://console.anthropic.com/v1/oauth/token";
+const ANTHROPIC_REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback";
+const ANTHROPIC_OAUTH_SCOPES = "org:create_api_key user:profile user:inference";
 
 /** Required feature flags for Claude subscription requests. */
-export const ANTHROPIC_OAUTH_BETA_FEATURES = [
+const ANTHROPIC_OAUTH_BETA_FEATURES = [
   "oauth-2025-04-20",
   "claude-code-20250219",
   "interleaved-thinking-2025-05-14",
@@ -45,7 +45,7 @@ export interface AnthropicAuthorization {
 }
 
 /** Generates an RFC 7636 S256 verifier/challenge pair. */
-export function generateAnthropicPkce(): { verifier: string; challenge: string } {
+function generateAnthropicPkce(): { verifier: string; challenge: string } {
   const verifier = Array.from(randomBytes(PKCE_VERIFIER_LENGTH), (byte) =>
     PKCE_VERIFIER_CHARSET.charAt(byte % PKCE_VERIFIER_CHARSET.length),
   ).join("");
@@ -56,7 +56,7 @@ export function generateAnthropicPkce(): { verifier: string; challenge: string }
 }
 
 /** Builds the Claude Pro/Max authorization URL used by the manual-code flow. */
-export function buildAnthropicAuthorizeUrl(input: { challenge: string; state: string }): string {
+function buildAnthropicAuthorizeUrl(input: { challenge: string; state: string }): string {
   const params = new URLSearchParams({
     code: "true",
     client_id: ANTHROPIC_OAUTH_CLIENT_ID,
@@ -71,7 +71,7 @@ export function buildAnthropicAuthorizeUrl(input: { challenge: string; state: st
 }
 
 /** Creates the authorization URL plus the in-memory values needed for exchange. */
-export function createAnthropicAuthorization(): AnthropicAuthorization {
+function createAnthropicAuthorization(): AnthropicAuthorization {
   const pkce = generateAnthropicPkce();
   const state = randomBytes(32).toString("base64url");
   return {
@@ -81,7 +81,7 @@ export function createAnthropicAuthorization(): AnthropicAuthorization {
   };
 }
 
-export interface ExchangeAnthropicCodeOptions {
+interface ExchangeAnthropicCodeOptions {
   /** The console's pasted value, formatted as `authorization-code#state`. */
   readonly code: string;
   readonly verifier: string;
@@ -91,9 +91,7 @@ export interface ExchangeAnthropicCodeOptions {
 }
 
 /** Exchanges the pasted console code for a credential after validating OAuth state. */
-export async function exchangeAnthropicCode(
-  options: ExchangeAnthropicCodeOptions,
-): Promise<ProviderCredential> {
+async function exchangeAnthropicCode(options: ExchangeAnthropicCodeOptions): Promise<ProviderCredential> {
   const { authorizationCode, returnedState } = parsePastedCode(options.code);
   if (returnedState !== options.state) {
     throw new Error("Invalid state - potential CSRF attack");
@@ -137,19 +135,6 @@ export async function runAnthropicBrowserLogin(options: AnthropicBrowserLoginOpt
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
   await options.store.set(ANTHROPIC_PROVIDER_ID, credential);
-}
-
-/** Refreshes an Anthropic subscription credential without mutating a store. */
-export async function refreshAnthropicToken(
-  credential: ProviderCredential,
-  fetchImpl: typeof fetch = fetch,
-): Promise<ProviderCredential> {
-  if (credential.type !== "oauth") {
-    throw new Error(
-      `Cannot refresh a "${credential.type}" credential; ${ANTHROPIC_PROVIDER_ID} subscription auth uses oauth credentials`,
-    );
-  }
-  return refreshOauthCredential(credential, fetchImpl);
 }
 
 export interface AnthropicFetchOptions {

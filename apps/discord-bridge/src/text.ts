@@ -7,7 +7,7 @@ export function sanitizeDiscordText(value: string): string {
     .slice(0, 500);
 }
 
-export function stripControlBytes(value: string): string {
+function stripControlBytes(value: string): string {
   return [...value]
     .filter((character) => {
       const codePoint = character.codePointAt(0) as number;

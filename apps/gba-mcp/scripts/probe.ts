@@ -1,100 +1,60 @@
-/**
- * Drive the server the way a coding harness does: over stdio, through the real
- * MCP client. A unit test proves the schema; only this proves the tools are
- * usable by something that was not written alongside them.
- *
- * `pnpm --filter @clankie/gba-mcp probe`
- */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { GBA_MCP_TOOL_NAMES } from "../src/server.ts";
 
+const env = getDefaultEnvironment();
+for (const name of [
+  "GBA_MCP_ROM_PATH",
+  "GBA_MCP_SAVESTATE_PATH",
+  "GBA_MCP_SCENARIO_PATH",
+  "GBA_MCP_CHECKPOINT_DIR",
+  "GBA_MCP_HARNESS_ID",
+]) {
+  const value = process.env[name];
+  if (value !== undefined) env[name] = value;
+}
 const transport = new StdioClientTransport({
-  command: "pnpm",
-  args: ["--filter", "@clankie/gba-mcp", "start"],
-  env: { ...process.env } as Record<string, string>,
+  command: process.execPath,
+  args: ["--import", "tsx", "src/index.ts"],
+  env,
   stderr: "ignore",
 });
-const client = new Client({ name: "clankie-gba-probe", version: "0.1.0" });
+const client = new Client({ name: "gba-emulator-harness-probe", version: "0.1.0" });
 await client.connect(transport);
 
-const tools = await client.listTools();
-console.log(`tools: ${tools.tools.map((tool) => tool.name).join(", ")}`);
+const tools = (await client.listTools()).tools;
+const names = tools.map((tool) => tool.name);
+if (JSON.stringify(names) !== JSON.stringify(GBA_MCP_TOOL_NAMES)) {
+  throw new Error(`unexpected tool catalog: ${names.join(", ")}`);
+}
+console.log(`tools: ${names.join(", ")}`);
 
 const look = await client.callTool({ name: "gba_emulator_observe", arguments: {} });
-const content = look.content as { type: string; text?: string }[];
-console.log(`observe returned: ${content.map((part) => part.type).join(" + ")}`);
-const state = content.find((part) => part.type === "text")?.text ?? "";
-console.log(`state: ${state.replace(/\s+/gu, " ").slice(0, 140)}`);
+const lookContent = look.content as { type: string }[];
+console.log(`observe returned: ${lookContent.map((part) => part.type).join(" + ")}`);
 
 const step = await client.callTool({
   name: "gba_emulator_start_action",
-  arguments: { actionKind: "button_press", button: "left", holdFrames: 16 },
+  arguments: { action: { kind: "button_press", button: "left", holdFrames: 16 } },
 });
-console.log(`act: ${step.isError === true ? `ERROR ${describe(step)}` : "accepted"}`);
+console.log(
+  `act: ${String((step.structuredContent as Record<string, unknown> | undefined)?.["status"] ?? "missing result")}`,
+);
 
-// A recorded refusal matters as much as a success: fail-closed is the part most
-// likely to be quietly broken.
 const refused = await client.callTool({
   name: "gba_emulator_start_action",
-  arguments: { actionKind: "button_press", button: "turbo", holdFrames: 16 },
+  arguments: { action: { kind: "button_press", button: "turbo", holdFrames: 16 } },
 });
-console.log(
-  `refusal: ${refused.isError === true ? describe(refused).slice(0, 90) : "NOT REFUSED — fail-closed is broken"}`,
-);
+console.log(`schema refusal: ${refused.isError === true ? "refused" : "NOT REFUSED"}`);
 
-// A second refusal, past protocol validation: `frames` has no bound in the tool
-// schema but the emulator catalogue caps it, so this exercises the adapter's
-// fail-closed path rather than the SDK's argument check.
-const refusedByEmulator = await client.callTool({
+const bounded = await client.callTool({
   name: "gba_emulator_start_action",
-  arguments: { actionKind: "frame_advance", frames: 999_999 },
+  arguments: { action: { kind: "frame_advance", frames: 2_000 } },
 });
 console.log(
-  `emulator refusal: ${
-    refusedByEmulator.isError === true
-      ? describe(refusedByEmulator).slice(0, 90)
-      : "NOT REFUSED — the catalogue bound is not enforced"
-  }`,
+  `runtime refusal: ${String(
+    (bounded.structuredContent as Record<string, unknown> | undefined)?.["status"] ?? "missing result",
+  )}`,
 );
-
-// Possession flow: acting is refused without the lease, works with it, and the
-// body is handed back on release.
-const holder = process.env["CLANKIE_GBA_PROBE_HOLDER"];
-if (holder !== undefined) {
-  const taken = await client.callTool({
-    name: "gba_emulator_possess",
-    arguments: { holderId: holder },
-  });
-  const token = /token to act: (\S+)/u.exec(describe(taken))?.[1];
-  console.log(`possess: ${taken.isError === true ? describe(taken) : `granted (${String(token)})`}`);
-
-  const possessed = await client.callTool({
-    name: "gba_emulator_start_action",
-    arguments: { actionKind: "button_press", button: "up", holdFrames: 16, possessionToken: token },
-  });
-  console.log(`act while possessing: ${possessed.isError === true ? describe(possessed) : "accepted"}`);
-
-  const stranger = await client.callTool({
-    name: "gba_emulator_possess",
-    arguments: { holderId: "not-configured-agent" },
-  });
-  console.log(
-    `unnamed holder: ${stranger.isError === true ? describe(stranger) : "ALLOWED — deny-by-default broken"}`,
-  );
-
-  await client.callTool({ name: "gba_emulator_release", arguments: { token } });
-  const afterRelease = await client.callTool({
-    name: "gba_emulator_start_action",
-    arguments: { actionKind: "button_press", button: "up", holdFrames: 16 },
-  });
-  console.log(
-    `act after release: ${afterRelease.isError === true ? describe(afterRelease) : "STILL ALLOWED — lease not enforced"}`,
-  );
-}
 
 await client.close();
-
-function describe(result: unknown): string {
-  const parts = (result as { content?: { type: string; text?: string }[] }).content ?? [];
-  return parts.find((part) => part.type === "text")?.text ?? "";
-}

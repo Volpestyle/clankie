@@ -19,13 +19,13 @@ what lets both bodies be one character
 | `realtime-session`           | Injectable OpenAI/xAI realtime boundaries: transcription, conversation, and `ask_clankie` round trips |
 | `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                 |
 | `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)   |
-| `voice-session`              | Media owner: attributed speech/text input, shared group floor, deliberate barge-in and playback       |
+| `voice-session`              | Vox-backed attributed speech/text input, shared group floor, deliberate barge-in and playback         |
 | `voice-composition`          | Shared voice dependency assembly for bot and user-session bodies                                      |
 | `voice-control`              | Local join/leave control request handling                                                             |
 | `voice-music`                | Shared bounded queue and transport controls                                                           |
 | `voice-ingress`              | Routes one `ask_clankie` handoff to the continuing `discord_voice` captain lane                       |
 | `voice-consent`              | Ephemeral consent under explicit or owner-selected presence policy; opt-out always wins               |
-| `voice-audio`                | Memory-only PCM conversion between Discord 48 kHz stereo and realtime 24 kHz mono                     |
+| `voice-audio`                | Shared provider/local-voice PCM helpers and content-free RMS measurement                              |
 | `receipt-store`              | Append-only, content-free receipts for both planes                                                    |
 
 Voice receipts use the `discord.voice.*` vocabulary — `joined`, `consent`,
@@ -65,10 +65,17 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
   session closes after two minutes and reopens on demand. At 25 retained
   listeners, the least recently active idle listener is evicted before another
   opens; active captures and pending transcript correlation are never evicted.
-- **Music behavior is body-dependent.** The official bot provides audible
-  YouTube playback through `@discordjs/voice`; the lab body currently sends
-  video-only Go Live through Vox. The cross-surface contract lives in the
-  [Discord media guide](../../docs/discord-media.md).
+- **Vox is the sole voice media owner.** Both media-enabled Discord bodies use
+  native Vox capture, TTS playback, DAVE readiness, and audible music; a
+  text-only bot does not spawn it. This package owns policy and correlation
+  only; ordinary leave clears Vox's primary role without closing the process or
+  touching its stream-watch/publish roles. TTS is audible only after Vox reports
+  `started`; `buffered` means queued and does not occupy the floor, while
+  `drained` means finished PCM and trailing frames crossed the sender. Fresh
+  app-level readiness evidence records `mediaOwner: vox`; the joined receipt
+  separately proves positive role-scoped DAVE. A leave qualifies only after the
+  account gateway confirms detachment. See
+  [ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md).
 
 ## Consumers
 

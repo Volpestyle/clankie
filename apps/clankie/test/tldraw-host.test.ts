@@ -127,7 +127,7 @@ describe("tldraw host", () => {
   it("mints an attachable artifact from a drawn diagram", async () => {
     const canvas = fakeCanvas(scriptDir);
     const host = await createTldrawHost({
-      runnerStateRoot: root,
+      stateRoot: root,
       logger,
       environment: environment(),
       fetchImpl: canvas.fetchImpl,
@@ -158,7 +158,7 @@ describe("tldraw host", () => {
   it("sends diagram content as parsed data, never as code", async () => {
     const canvas = fakeCanvas(scriptDir);
     const host = await createTldrawHost({
-      runnerStateRoot: root,
+      stateRoot: root,
       logger,
       environment: environment(),
       fetchImpl: canvas.fetchImpl,
@@ -196,7 +196,7 @@ describe("tldraw host", () => {
   it("lets the operator choose the design system without touching the skill", async () => {
     const canvas = fakeCanvas(scriptDir);
     const host = await createTldrawHost({
-      runnerStateRoot: root,
+      stateRoot: root,
       logger,
       environment: environment({ CLANKIE_TLDRAW_DESIGN_SYSTEM: "notebook" }),
       fetchImpl: canvas.fetchImpl,
@@ -221,7 +221,7 @@ describe("tldraw host", () => {
     const canvas = fakeCanvas(scriptDir);
     await rm(join(serverHome, "Library", "Application Support", "tldraw", "server.json"));
     const host = await createTldrawHost({
-      runnerStateRoot: root,
+      stateRoot: root,
       logger,
       environment: environment(),
       fetchImpl: canvas.fetchImpl,
@@ -239,7 +239,7 @@ describe("tldraw host", () => {
   it("refuses when the design system is not installed", async () => {
     const canvas = fakeCanvas(scriptDir);
     const host = await createTldrawHost({
-      runnerStateRoot: root,
+      stateRoot: root,
       logger,
       environment: environment({ CLANKIE_TLDRAW_DESIGN_SYSTEM_DIR: join(root, "nowhere") }),
       fetchImpl: canvas.fetchImpl,
@@ -269,7 +269,7 @@ describe("tldraw host", () => {
       };
     };
     const host = await createTldrawHost({
-      runnerStateRoot: root,
+      stateRoot: root,
       logger,
       environment: environment(),
       fetchImpl: canvas.fetchImpl,

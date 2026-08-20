@@ -11,23 +11,19 @@
     "person-memory-live-proof": "tsx src/live-proof-cli.ts person-memory",
     "voice-readiness": "tsx src/voice-readiness-cli.ts",
     "voice-live-proof": "tsx src/live-proof-cli.ts voice",
-    "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "clean": "rm -rf dist coverage"
+    "test": "vitest run"
   },
   "dependencies": {
     "@clankie/api-client": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/discord-presence-core": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
-    "@clankie/possessor-voice": "workspace:*",
+    "@clankie/play-voice": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/settings": "workspace:*",
-    "@discordjs/opus": "0.10.0",
-    "@discordjs/voice": "0.19.2",
-    "discord.js": "14.26.4",
-    "prism-media": "1.3.5"
+    "@clankie/vox-client": "workspace:*",
+    "discord.js": "14.26.4"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

@@ -70,6 +70,8 @@ export type GbaEvidencePolicy = "frozen" | "rolling";
 
 export interface GbaEmulatorAdapterOptions {
   evidencePolicy?: GbaEvidencePolicy;
+  /** Runtime identity override; scenario bytes and determinism anchors remain unchanged. */
+  characterId?: string;
 }
 
 export class GbaEmulatorAdapter implements EnvironmentAdapter {
@@ -77,6 +79,7 @@ export class GbaEmulatorAdapter implements EnvironmentAdapter {
   private readonly fixtureSha256: string;
   private readonly coreFactory: GbaCoreFactory;
   private readonly evidencePolicy: GbaEvidencePolicy;
+  private readonly characterId: string;
   private readonly sessions = new Map<string, GbaEmulatorSession>();
 
   public constructor(
@@ -106,6 +109,7 @@ export class GbaEmulatorAdapter implements EnvironmentAdapter {
     this.coreFactory =
       coreFactory ?? ((scenario) => new DeterministicGbaCoreDouble(scenario as FrozenGbaScenario));
     this.evidencePolicy = options?.evidencePolicy ?? "frozen";
+    this.characterId = options?.characterId ?? scenarioInput.player.characterId;
   }
 
   public start(
@@ -116,7 +120,7 @@ export class GbaEmulatorAdapter implements EnvironmentAdapter {
       throw new Error("The emulator adapter accepts no credentials or connection material");
     }
     const spec = GbaEmulatorSessionSpecSchema.parse(specInput);
-    validateScenarioBinding(spec, this.scenario);
+    validateScenarioBinding(spec, this.scenario, this.characterId);
     const adapterSessionId = `gba-emulator:${spec.sessionId}`;
     const session = new GbaEmulatorSession(
       adapterSessionId,
@@ -154,7 +158,6 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
   private readonly fixtureSha256: string;
   private readonly core: GbaCoreSeam;
   private readonly completed = new Map<string, EnvironmentAdapterActionCompletion>();
-  private readonly pendingWaits = new Set<string>();
   private readonly evidence: GbaEmulatorEvidenceEvent[] = [];
   private readonly evidencePolicy: GbaEvidencePolicy;
   /**
@@ -220,28 +223,13 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     if (command.sessionId !== this.sessionId) return Promise.reject(closed("session_mismatch"));
     const prior = this.completed.get(command.actionId);
     if (prior) return Promise.resolve(structuredClone(prior));
-    if (this.pendingWaits.has(command.actionId)) return Promise.resolve();
     if (this.stopped) return Promise.reject(closed("session_stopped"));
     if (this.paused) return Promise.reject(closed("session_paused"));
     if (!this.certain) return Promise.reject(closed("uncertain_state"));
-    if (this.pendingWaits.size > 0) return Promise.reject(closed("action_already_pending"));
 
     try {
       enforceLimits(command.action.limits, this.spec.resourceBounds);
       enforceCapability(command.action.action, this.spec.resourceBounds);
-      if (command.action.action.kind === "wait") {
-        if (this.evidence.length > this.scenario.maxEvidenceEvents - 2 && !this.rollEvidenceWindow()) {
-          this.markStateUncertain("Bounded evidence capacity cannot cover a cancellable wait");
-          throw closed("evidence_bound_exceeded");
-        }
-        this.record(
-          command.actionId,
-          "wait",
-          `Started bounded wait for ${String(command.action.action.durationMs)}ms`,
-        );
-        this.pendingWaits.add(command.actionId);
-        return Promise.resolve();
-      }
       const outcome = await this.apply(command.actionId, command.action.action, command.action.limits);
       const completion: EnvironmentAdapterActionCompletion = { status: "completed", outcome };
       this.completed.set(command.actionId, completion);
@@ -261,18 +249,11 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     }
   }
 
-  public cancelAction(actionId: string, reason: string): Promise<void> {
-    if (this.pendingWaits.delete(actionId)) {
-      this.record(actionId, "cancel_action", boundedSummary(`Wait cancelled: ${reason}`));
-    }
+  public cancelAction(_actionId: string, _reason: string): Promise<void> {
     return Promise.resolve();
   }
 
-  public stop(reason: string): Promise<void> {
-    for (const actionId of this.pendingWaits) {
-      this.record(actionId, "cancel_action", boundedSummary(`Session stopped: ${reason}`));
-    }
-    this.pendingWaits.clear();
+  public stop(_reason: string): Promise<void> {
     this.stopped = true;
     this.paused = false;
     return Promise.resolve();
@@ -478,15 +459,14 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         case "action": {
           if (!actionId) throw closed("action_id_required");
           const completed = this.completed.has(actionId);
-          const pending = this.pendingWaits.has(actionId);
-          if (!completed && !pending) throw closed("unknown_action");
+          if (!completed) throw closed("unknown_action");
           return {
             ...base,
             kind,
             data: {
               actionId,
-              status: completed ? ("completed" as const) : ("running" as const),
-              summary: completed ? "Emulator action completed" : "Emulator wait is pending",
+              status: "completed" as const,
+              summary: "Emulator action completed",
             },
           };
         }
@@ -519,6 +499,11 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       stateCertain: this.certain,
       ramStateSha256: this.core.ramStateSha256(),
     };
+  }
+
+  /** Forget route facts inferred from the timeline replaced by a savestate load. */
+  public resetAfterStateLoad(): void {
+    this.blockedTiles.clear();
   }
 
   public trace(): GbaEmulatorTrace {
@@ -567,7 +552,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
 
   private async apply(
     actionId: string,
-    action: Exclude<GbaEmulatorAction, { kind: "wait" }>,
+    action: GbaEmulatorAction,
     limits: GbaEmulatorActionLimits,
   ): Promise<Record<string, unknown>> {
     if (this.evidence.length >= this.scenario.maxEvidenceEvents && !this.rollEvidenceWindow()) {
@@ -1303,9 +1288,13 @@ export function validateGbaEmulatorTrace(input: unknown): GbaEmulatorTrace {
   return trace;
 }
 
-function validateScenarioBinding(spec: GbaEmulatorSessionSpec, scenario: GbaAdapterScenario): void {
+function validateScenarioBinding(
+  spec: GbaEmulatorSessionSpec,
+  scenario: GbaAdapterScenario,
+  characterId: string,
+): void {
   if (spec.worldId !== scenario.worldId) throw new Error("Emulator world does not match the frozen scenario");
-  if (spec.characterId !== scenario.player.characterId) {
+  if (spec.characterId !== characterId) {
     throw new Error("Emulator character does not match the frozen scenario");
   }
   const bounds = spec.resourceBounds;
@@ -1343,7 +1332,6 @@ function enforceCapability(action: GbaEmulatorAction, bounds: GbaEmulatorResourc
       // A menu choice is cursor presses and an A, by the same reasoning.
       select_menu_entry: "emulator.gba.input",
       frame_advance: "emulator.gba.frame_advance",
-      wait: "emulator.gba.wait",
     } as const
   )[action.kind];
   if (!bounds.capabilities.includes(capability)) throw closed("capability_not_granted");
@@ -1451,6 +1439,53 @@ const NAMING_CLOSE_WAIT_FRAMES = 120;
 /** Ceiling on tiles explored while planning, so a large map cannot stall a turn. */
 const MAX_WALK_SEARCH_TILES = 4_096;
 
+interface GridPoint {
+  x: number;
+  y: number;
+}
+
+/** Shared bounded BFS; callers own direction priority and every traversable edge rule. */
+export function boundedShortestPath<Step extends { dx: number; dy: number }>(
+  from: GridPoint,
+  to: GridPoint,
+  directions: readonly Step[],
+  mayTraverse: (from: GridPoint, to: GridPoint, step: Step) => boolean,
+): { step: Step; x: number; y: number }[] | null {
+  if (from.x === to.x && from.y === to.y) return [];
+  const key = ({ x, y }: GridPoint): string => `${String(x)},${String(y)}`;
+  const start = key(from);
+  const queue: GridPoint[] = [from];
+  const seen = new Set<string>([start]);
+  const cameFrom = new Map<string, { previous: string; step: Step; point: GridPoint }>();
+  let cursor = 0;
+  let explored = 0;
+
+  while (cursor < queue.length) {
+    const current = queue[cursor++]!;
+    for (const step of directions) {
+      const next = { x: current.x + step.dx, y: current.y + step.dy };
+      const id = key(next);
+      if (seen.has(id) || !mayTraverse(current, next, step)) continue;
+      seen.add(id);
+      cameFrom.set(id, { previous: key(current), step, point: next });
+      if (next.x === to.x && next.y === to.y) {
+        const path: { step: Step; x: number; y: number }[] = [];
+        for (let at = id; at !== start;) {
+          const entry = cameFrom.get(at);
+          if (entry === undefined) return null;
+          path.push({ step: entry.step, ...entry.point });
+          at = entry.previous;
+        }
+        return path.reverse();
+      }
+      explored += 1;
+      if (explored > MAX_WALK_SEARCH_TILES) return null;
+      queue.push(next);
+    }
+  }
+  return null;
+}
+
 /**
  * How many obstructions one map remembers. Roughly the number of NPCs a
  * FireRed town holds, so a route can learn a whole street without the list
@@ -1506,42 +1541,14 @@ export function planWalk(
   const inside = (x: number, y: number): boolean =>
     x >= grid.minX && y >= grid.minY && x < grid.maxX && y < grid.maxY;
   if (!inside(to.x, to.y) || !grid.isPassable(to.x, to.y)) return null;
-  if (from.x === to.x && from.y === to.y) return [];
-
-  const key = (x: number, y: number): string => `${String(x)},${String(y)}`;
-  const cameFrom = new Map<string, { prev: string; step: PlannedWalkStep }>();
-  const seen = new Set<string>([key(from.x, from.y)]);
-  let frontier = [{ x: from.x, y: from.y }];
-  let explored = 0;
-
-  while (frontier.length > 0) {
-    const next: { x: number; y: number }[] = [];
-    for (const tile of frontier) {
-      for (const step of WALK_STEPS) {
-        const x = tile.x + step.dx;
-        const y = tile.y + step.dy;
-        const id = key(x, y);
-        if (seen.has(id) || !inside(x, y) || !grid.isPassable(x, y)) continue;
-        seen.add(id);
-        cameFrom.set(id, { prev: key(tile.x, tile.y), step: { button: step.button, x, y } });
-        if (x === to.x && y === to.y) {
-          const path: PlannedWalkStep[] = [];
-          for (let at = id; at !== key(from.x, from.y);) {
-            const entry = cameFrom.get(at);
-            if (entry === undefined) return null;
-            path.push(entry.step);
-            at = entry.prev;
-          }
-          return path.reverse();
-        }
-        next.push({ x, y });
-        explored += 1;
-        if (explored > MAX_WALK_SEARCH_TILES) return null;
-      }
-    }
-    frontier = next;
-  }
-  return null;
+  return (
+    boundedShortestPath(
+      from,
+      to,
+      WALK_STEPS,
+      (_current, next) => inside(next.x, next.y) && grid.isPassable(next.x, next.y),
+    )?.map(({ step, x, y }) => ({ button: step.button, x, y })) ?? null
+  );
 }
 
 /**

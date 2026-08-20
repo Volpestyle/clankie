@@ -28,10 +28,10 @@ The broker is canonical, but provider consumers retain a compatibility fallback:
 when no broker entry exists they may read the provider's declared API-key
 environment variable. The clankie service also fills absent keys from the
 gitignored root `.env.local`; an existing shell value wins. Discord account
-tokens, bridge identities, the activity producer, and possessor voice do not use
+tokens, bridge identities, the activity producer, and play voice do not use
 that fallback and reject their forbidden environment names.
-`CLANKIE_OPERATOR_TOKEN`, `CLANKIE_CAPTAIN_TOKEN`, and `CLANKIE_RUNNER_TOKEN`
-remain explicit test/CI overrides.
+`CLANKIE_OPERATOR_TOKEN` and `CLANKIE_CAPTAIN_TOKEN` remain explicit test/CI
+overrides.
 
 ## Local operator credential
 
@@ -101,6 +101,18 @@ derives `transportKind` from which bearer authenticated, so a request body
 cannot claim a transport it does not hold. All four bearer patterns are mutually
 exclusive: `clankie_discord_` prefixes every one of them, and an unanchored
 match would let a user-plane bearer authenticate as the bot bridge.
+
+## Play voice bearer
+
+`clankie_play_voice` authenticates only Clankie's local or hosted play loop to
+the active Discord body's loopback `@clankie/play-voice` listener. The Discord
+body owns first-run minting; play resolves the stored value. The bearer has no
+environment fallback, and `CLANKIE_PLAY_VOICE_TOKEN` is a hard error.
+
+GBA MCP and external harnesses neither receive nor depend on this credential.
+The retired `clankie_possessor_voice` id is not accepted as the current bearer;
+there is no path from owning an emulator process to hearing or speaking in
+Clankie's room ([ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md)).
 
 ## Capability boundary
 

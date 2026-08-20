@@ -73,9 +73,9 @@ export const ClankieConfigSchema = z
   .looseObject({
     /** Primary model as a "providerId/modelId" ref. */
     model: z.string().optional(),
-    /** Cheap/fast model for auxiliary tasks, as a "providerId/modelId" ref. */
+    /** Compatibility-only owner config; accepted and preserved but not used by a runtime. */
     small_model: z.string().optional(),
-    /** Voice pipeline model, as a "providerId/modelId" ref. */
+    /** Compatibility-only owner config; active voice settings live under `/voice`. */
     voice_model: z.string().optional(),
     /** Loopback-only local model used for settled terminal-tail classification. */
     settle_classifier_model: z.string().optional(),

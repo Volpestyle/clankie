@@ -20,7 +20,7 @@ const SESSION_ID = "session-clankie";
 const PLAYER_ID = "player-clankie";
 const WORLD_ID = "pallet";
 const NOW = "2026-08-16T00:00:00.000Z";
-const CAPABILITIES = ["world.observe", "world.act", "world.frames", "world.presence"];
+const CAPABILITIES = ["world.observe", "world.act", "world.frames"];
 
 interface WireRequest {
   readonly operation: string;
@@ -133,10 +133,6 @@ describe("hosted world body", () => {
         }
         case "play.frame":
           return frame({ frame: current.frame, data: "after-action" });
-        case "world.session":
-          return sessionStatus(current.frame);
-        case "world.who":
-          return whoResult();
         case "world.leave":
           return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
         default:
@@ -194,8 +190,6 @@ describe("hosted world body", () => {
     });
     expect(body.io.observe("overworld")).toMatchObject({ frame: 20, data: { position: { x: 14, y: 13 } } });
     expect(body.io.observe("action")).toMatchObject({ data: { status: "failed" } });
-    await expect(body.session()).resolves.toMatchObject({ sessionId: SESSION_ID, state: "playing" });
-    await expect(body.who()).resolves.toMatchObject({ worldId: WORLD_ID, players: [] });
     await body.close();
     await body.close();
 
@@ -1054,25 +1048,6 @@ function frame(options: { frame: number; data: string; bodyGeneration?: number }
     data: Buffer.from(options.data).toString("base64"),
     capturedAt: NOW,
   };
-}
-
-function sessionStatus(frameNumber: number) {
-  return {
-    ok: true,
-    worldId: WORLD_ID,
-    playerId: PLAYER_ID,
-    sessionId: SESSION_ID,
-    gameId: "firered",
-    displayName: "Clankie",
-    state: "playing",
-    bodyGeneration: 1,
-    frame: frameNumber,
-    startedAt: NOW,
-  };
-}
-
-function whoResult() {
-  return { ok: true, worldId: WORLD_ID, players: [] };
 }
 
 /** A world that answers every poll with one fixed observation. */

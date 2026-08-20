@@ -1,21 +1,12 @@
 import type { DiscordBridgeReceipt } from "@clankie/discord-presence-core";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   evaluateDiscordLiveProof,
   evaluateDiscordPersonMemoryLiveProof,
   evaluateDiscordVoiceLiveProof,
-  readDiscordLiveReceipts,
 } from "../src/live-proof.ts";
 
 describe("Discord text live proof", () => {
-  it("treats an absent receipt file as incomplete evidence", async () => {
-    await expect(
-      readDiscordLiveReceipts(join(tmpdir(), `missing-discord-receipts-${process.pid}.jsonl`)),
-    ).resolves.toEqual([]);
-  });
-
   it("requires a real settled reply", () => {
     const receipts = [
       receipt("discord.bridge.ready", {}),
@@ -102,13 +93,14 @@ describe("Discord person-memory live proof", () => {
 describe("Discord group voice live proof", () => {
   it("requires DAVE plus three consented, attributed, answered speakers and a clean leave", () => {
     const receipts: DiscordBridgeReceipt[] = [
+      voxReadyReceipt(),
       receipt("discord.voice.joined", {
         guildId: "guild-1",
         channelId: "voice-1",
         daveProtocolVersion: 1,
       }),
     ];
-    receipts.push(...possessorSeamReceipts());
+    receipts.push(...playSeamReceipts());
     for (const [index, userId] of ["user-1", "user-2", "user-3"].entries()) {
       receipts.push(
         receipt("discord.voice.consent", {
@@ -148,14 +140,14 @@ describe("Discord group voice live proof", () => {
         phase: "playing",
       }),
     );
-    receipts.push(receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }));
+    receipts.push(...cleanLeaveReceipts());
     receipts.push(
       receipt("discord.voice.joined", {
         guildId: "guild-1",
         channelId: "voice-1",
         daveProtocolVersion: 1,
       }),
-      receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+      ...cleanLeaveReceipts(),
     );
 
     expect(evaluateDiscordVoiceLiveProof(receipts)).toMatchObject({ passed: true });
@@ -163,6 +155,7 @@ describe("Discord group voice live proof", () => {
 
   it("evaluates the latest complete qualifying session in a cumulative receipt log", () => {
     const receipts: DiscordBridgeReceipt[] = [
+      voxReadyReceipt(),
       receipt("discord.voice.joined", {
         guildId: "guild-1",
         channelId: "voice-1",
@@ -181,7 +174,7 @@ describe("Discord group voice live proof", () => {
         stage: "playback",
         code: "voice_playback_timeout",
       }),
-      receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+      ...cleanLeaveReceipts(),
       // This abandoned join used to poison proof selection because the first
       // historical join was treated as the active session. It is replaced by
       // the following coherent session rather than borrowing its leave.
@@ -195,7 +188,7 @@ describe("Discord group voice live proof", () => {
         channelId: "voice-1",
         daveProtocolVersion: 1,
       }),
-      ...possessorSeamReceipts(),
+      ...playSeamReceipts(),
     ];
     for (const [index, userId] of ["user-1", "user-2", "user-3"].entries()) {
       receipts.push(
@@ -235,7 +228,7 @@ describe("Discord group voice live proof", () => {
         userId: "user-3",
         phase: "playing",
       }),
-      receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+      ...cleanLeaveReceipts(),
       // Reconnect proof: complete, but no participant activity, so it must not
       // be selected as the main proof session.
       receipt("discord.voice.joined", {
@@ -243,7 +236,7 @@ describe("Discord group voice live proof", () => {
         channelId: "voice-1",
         daveProtocolVersion: 1,
       }),
-      receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+      ...cleanLeaveReceipts(),
     );
 
     const report = evaluateDiscordVoiceLiveProof(receipts);
@@ -255,6 +248,7 @@ describe("Discord group voice live proof", () => {
 
   it("rejects a synthetic single-speaker or failed media path", () => {
     const report = evaluateDiscordVoiceLiveProof([
+      voxReadyReceipt(),
       receipt("discord.voice.joined", {
         guildId: "guild-1",
         channelId: "voice-1",
@@ -281,8 +275,8 @@ describe("Discord group voice live proof", () => {
       "speech round trips",
       "overlap and barge-in",
       "clean leave",
-      "possessor room state",
-      "possessor two-way delivery",
+      "play room state",
+      "play two-way delivery",
       "DAVE reconnect",
     ]);
   });
@@ -314,11 +308,9 @@ describe("Discord group voice live proof", () => {
     );
   });
 
-  it("does not count a refused possessor narration as two-way delivery", () => {
+  it("does not count a refused play narration as two-way delivery", () => {
     const receipts = passingVoiceCeremony();
-    const submission = receipts.find(
-      (entry) => entry.type === "discord.voice.possessor_narration_submission",
-    );
+    const submission = receipts.find((entry) => entry.type === "discord.voice.play_narration_submission");
     expect(submission).toBeDefined();
     const deliveryId = submission?.data.deliveryId;
     if (typeof deliveryId !== "string") throw new Error("passing fixture has no narration delivery id");
@@ -326,7 +318,7 @@ describe("Discord group voice live proof", () => {
     receipts.splice(
       mainLeaveIndex,
       0,
-      receipt("discord.voice.possessor_refusal", {
+      receipt("discord.voice.play_refusal", {
         deliveryId,
         attachedCount: 1,
         reason: "voice_narration_not_in_channel",
@@ -335,20 +327,41 @@ describe("Discord group voice live proof", () => {
 
     const report = evaluateDiscordVoiceLiveProof(receipts);
     expect(report.passed).toBe(false);
-    expect(report.checks.find((check) => check.name === "possessor two-way delivery")?.detail).toContain(
+    expect(report.checks.find((check) => check.name === "play two-way delivery")?.detail).toContain(
       "1 refusal",
     );
+  });
+
+  it("rejects a ceremony whose bridge receipt does not prove Vox owns media", () => {
+    const receipts = passingVoiceCeremony().filter((entry) => entry.type !== "discord.bridge.ready");
+    const report = evaluateDiscordVoiceLiveProof(receipts);
+    expect(report.passed).toBe(false);
+    expect(report.checks.find((check) => check.name === "Vox media owner")?.ok).toBe(false);
+  });
+
+  it("does not accept the session's early internal left receipt as clean leave proof", () => {
+    const receipts = passingVoiceCeremony().filter(
+      (entry) => entry.type !== "discord.voice.left" || entry.data.gatewayConfirmed !== true,
+    );
+    const report = evaluateDiscordVoiceLiveProof(receipts);
+
+    expect(report.passed).toBe(false);
+    expect(report.checks.find((check) => check.name === "clean leave")).toMatchObject({
+      ok: false,
+      detail: "no matching gateway-confirmed Vox-owned leave receipt",
+    });
   });
 });
 
 function passingVoiceCeremony(): DiscordBridgeReceipt[] {
   const receipts: DiscordBridgeReceipt[] = [
+    voxReadyReceipt(),
     receipt("discord.voice.joined", {
       guildId: "guild-1",
       channelId: "voice-1",
       daveProtocolVersion: 1,
     }),
-    ...possessorSeamReceipts(),
+    ...playSeamReceipts(),
   ];
   for (const [index, userId] of ["user-1", "user-2", "user-3"].entries()) {
     receipts.push(
@@ -388,28 +401,44 @@ function passingVoiceCeremony(): DiscordBridgeReceipt[] {
       userId: "user-3",
       phase: "playing",
     }),
-    receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+    ...cleanLeaveReceipts(),
     receipt("discord.voice.joined", {
       guildId: "guild-1",
       channelId: "voice-1",
       daveProtocolVersion: 1,
     }),
-    receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+    ...cleanLeaveReceipts(),
   );
   return receipts;
 }
 
-function possessorSeamReceipts(): DiscordBridgeReceipt[] {
+function voxReadyReceipt(): DiscordBridgeReceipt {
+  return receipt("discord.bridge.ready", { mediaOwner: "vox", voxProcessReady: true });
+}
+
+function cleanLeaveReceipts(): DiscordBridgeReceipt[] {
   return [
-    receipt("discord.voice.possessor_connection", { phase: "attached", attachedCount: 1 }),
-    receipt("discord.voice.possessor_room", { listening: true, attachedCount: 1, deliveredCount: 1 }),
-    receipt("discord.voice.possessor_transcript_delivery", {
-      deliveryId: "possessor-heard-1",
+    receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+    receipt("discord.voice.left", {
+      guildId: "guild-1",
+      channelId: "voice-1",
+      gatewayConfirmed: true,
+      mediaOwner: "vox",
+    }),
+  ];
+}
+
+function playSeamReceipts(): DiscordBridgeReceipt[] {
+  return [
+    receipt("discord.voice.play_connection", { phase: "attached", attachedCount: 1 }),
+    receipt("discord.voice.play_room", { listening: true, attachedCount: 1, deliveredCount: 1 }),
+    receipt("discord.voice.play_transcript_delivery", {
+      deliveryId: "play-heard-1",
       attachedCount: 1,
       deliveredCount: 1,
     }),
-    receipt("discord.voice.possessor_narration_submission", {
-      deliveryId: "possessor-narration-1",
+    receipt("discord.voice.play_narration_submission", {
+      deliveryId: "play-narration-1",
       attachedCount: 1,
     }),
   ];

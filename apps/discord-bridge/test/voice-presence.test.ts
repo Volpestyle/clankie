@@ -1,15 +1,9 @@
-import type { JoinDiscordVoiceInput } from "@clankie/discord-presence-core";
 import { describe, expect, it } from "vitest";
 import {
   executeVoicePresenceIntent,
   type VoicePresenceExecutionConfig,
   type VoicePresenceSessionPort,
 } from "../src/voice-presence.ts";
-
-const ADAPTER = (() => ({
-  sendPayload: () => true,
-  destroy: () => undefined,
-})) as unknown as JoinDiscordVoiceInput["adapterCreator"];
 
 class FakeVoiceSession implements VoicePresenceSessionPort {
   public readonly joins: { guildId: string; channelId: string }[] = [];
@@ -55,7 +49,6 @@ function input(intent: "join" | "leave", roleIds: readonly string[] = ["voice-ro
     guildId: "guild-1",
     principal: { userId: "user-1", roleIds: new Set(roleIds) },
     memberVoiceChannelId: "voice-1",
-    adapterCreator: ADAPTER,
   };
 }
 

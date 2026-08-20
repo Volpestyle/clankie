@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
-import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
-import { PassThrough } from "node:stream";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,79 +8,21 @@ import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/brow
 
 const logger = { info: () => undefined, warn: () => undefined };
 
-/**
- * A fake `agent-browser mcp` speaking newline-delimited JSON-RPC on stdio, so
- * the suite exercises the real framing without launching a browser.
- */
-function fakeServer(options: {
+interface FakeServerOptions {
   tools?: { name: string; description?: string; inputSchema?: unknown }[];
   toolPages?: { name: string; description?: string; inputSchema?: unknown }[][];
-  onCall?: (
-    name: string,
-    args: unknown,
-  ) =>
-    | {
-        content: { type: string; text?: string; data?: string; mimeType?: string }[];
-        isError?: boolean;
-      }
-    | Promise<{
-        content: { type: string; text?: string; data?: string; mimeType?: string }[];
-        isError?: boolean;
-      }>;
-}) {
-  const stdin = new PassThrough();
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  const child = new EventEmitter() as EventEmitter & {
-    stdin: PassThrough;
-    stdout: PassThrough;
-    stderr: PassThrough;
-    kill(): void;
+  callResult?: {
+    content: { type: string; text?: string; data?: string; mimeType?: string }[];
+    isError?: boolean;
   };
-  child.stdin = stdin;
-  child.stdout = stdout;
-  child.stderr = stderr;
-  child.kill = () => undefined;
-
-  let buffer = "";
-  stdin.on("data", (chunk: Buffer) => {
-    buffer += chunk.toString("utf8");
-    let newline = buffer.indexOf("\n");
-    while (newline >= 0) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      newline = buffer.indexOf("\n");
-      if (!line) continue;
-      const message = JSON.parse(line) as {
-        id?: number;
-        method: string;
-        params?: { name?: string; arguments?: unknown; cursor?: string };
-      };
-      if (message.id === undefined) continue;
-      const reply = (result: unknown) =>
-        stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n`);
-      if (message.method === "initialize") reply({ protocolVersion: "2025-11-25", capabilities: {} });
-      else if (message.method === "tools/list") {
-        const page = Number(message.params?.cursor ?? "0");
-        const pages = options.toolPages ?? [options.tools ?? []];
-        reply({
-          tools: pages[page] ?? [],
-          ...(page + 1 < pages.length ? { nextCursor: String(page + 1) } : {}),
-        });
-      } else if (message.method === "tools/call") {
-        void Promise.resolve(
-          options.onCall?.(message.params?.name ?? "", message.params?.arguments) ?? {
-            content: [{ type: "text", text: "ok" }],
-          },
-        ).then(reply);
-      }
-    }
-  });
-  return child;
+  callDelayMs?: number;
+  statsPath?: string;
 }
 
+const fakeServerPath = join(import.meta.dirname, "fixtures", "browser-mcp-server.mjs");
+
 describe("browserEnabled", () => {
-  it("defaults on so an unconfigured runner still has a browser", () => {
+  it("defaults on so an unconfigured service still has a browser", () => {
     expect(browserEnabled(undefined)).toBe(true);
     expect(browserEnabled("")).toBe(true);
     expect(browserEnabled("   ")).toBe(true);
@@ -113,15 +53,16 @@ describe("browser host", () => {
   });
 
   async function build(
-    server: ReturnType<typeof fakeServer>,
+    server: FakeServerOptions,
     blockedTools: readonly string[] = [],
   ): Promise<BrowserHost> {
     host = await createBrowserHost({
-      runnerStateRoot: stateRoot,
+      stateRoot,
       attachmentRoot: stateRoot,
       logger,
       environment: {},
-      spawnImpl: (() => server) as never,
+      command: process.execPath,
+      args: [fakeServerPath, JSON.stringify(server)],
       blockedTools,
     });
     return host;
@@ -129,13 +70,13 @@ describe("browser host", () => {
 
   it("projects the full server catalog minus the blocklist", async () => {
     const created = await build(
-      fakeServer({
+      {
         tools: [
           { name: "navigate", description: "Go to a URL", inputSchema: { type: "object" } },
           { name: "eval", description: "Run JavaScript", inputSchema: { type: "object" } },
           { name: "new_superpower", description: "shipped last week", inputSchema: { type: "object" } },
         ],
-      }),
+      },
       ["eval"],
     );
     const catalog = await created.catalog();
@@ -149,25 +90,21 @@ describe("browser host", () => {
   });
 
   it("loads every paginated catalog page", async () => {
-    const created = await build(
-      fakeServer({
-        toolPages: [
-          [{ name: "first", inputSchema: { type: "object" } }],
-          [{ name: "second", inputSchema: { type: "object" } }],
-        ],
-      }),
-    );
+    const created = await build({
+      toolPages: [
+        [{ name: "first", inputSchema: { type: "object" } }],
+        [{ name: "second", inputSchema: { type: "object" } }],
+      ],
+    });
 
     expect((await created.catalog()).tools.map((tool) => tool.name)).toEqual(["first", "second"]);
   });
 
   it("calls a granted tool and returns its bounded text", async () => {
-    const created = await build(
-      fakeServer({
-        tools: [{ name: "navigate", inputSchema: { type: "object" } }],
-        onCall: (name) => ({ content: [{ type: "text", text: `visited via ${name}` }] }),
-      }),
-    );
+    const created = await build({
+      tools: [{ name: "navigate", inputSchema: { type: "object" } }],
+      callResult: { content: [{ type: "text", text: "visited via navigate" }] },
+    });
     const result = await created.call({
       schemaVersion: 1,
       tool: "navigate",
@@ -178,17 +115,15 @@ describe("browser host", () => {
 
   it("parks an image block as a hash-bound artifact instead of dropping it", async () => {
     const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
-    const created = await build(
-      fakeServer({
-        tools: [{ name: "navigate", inputSchema: { type: "object" } }],
-        onCall: () => ({
-          content: [
-            { type: "text", text: "/tmp/shot.png" },
-            { type: "image", data: png.toString("base64"), mimeType: "image/png" },
-          ],
-        }),
-      }),
-    );
+    const created = await build({
+      tools: [{ name: "navigate", inputSchema: { type: "object" } }],
+      callResult: {
+        content: [
+          { type: "text", text: "/tmp/shot.png" },
+          { type: "image", data: png.toString("base64"), mimeType: "image/png" },
+        ],
+      },
+    });
     const result = await created.call({ schemaVersion: 1, tool: "navigate", arguments: {} });
     expect(result.outcome).toBe("ok");
     if (result.outcome !== "ok") return;
@@ -206,35 +141,50 @@ describe("browser host", () => {
   });
 
   it("refuses a blocklisted tool instead of forwarding it", async () => {
-    const created = await build(
-      fakeServer({ tools: [{ name: "navigate", inputSchema: { type: "object" } }] }),
-      ["eval"],
-    );
+    const created = await build({ tools: [{ name: "navigate", inputSchema: { type: "object" } }] }, ["eval"]);
     const result = await created.call({ schemaVersion: 1, tool: "eval", arguments: {} });
     expect(result).toMatchObject({ outcome: "refused", reason: "unknown_tool" });
   });
 
+  it("degrades a startup failure instead of failing service boot", async () => {
+    host = await createBrowserHost({
+      stateRoot,
+      attachmentRoot: stateRoot,
+      logger,
+      environment: {},
+      command: join(stateRoot, "missing-agent-browser"),
+      args: [],
+    });
+    await expect(host.catalog()).resolves.toMatchObject({ available: false, tools: [] });
+    await expect(host.call({ schemaVersion: 1, tool: "navigate", arguments: {} })).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "browser_unavailable",
+    });
+  });
+
+  it("shuts down the SDK transport and refuses later calls", async () => {
+    const created = await build({ tools: [{ name: "navigate", inputSchema: { type: "object" } }] });
+    await created.close();
+    await expect(created.call({ schemaVersion: 1, tool: "navigate", arguments: {} })).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "browser_unavailable",
+      detail: "browser_host_closed",
+    });
+  });
+
   it("serializes calls across sessions and rejects raw CLI arguments", async () => {
-    let active = 0;
-    let maxActive = 0;
-    const created = await build(
-      fakeServer({
-        tools: [{ name: "navigate", inputSchema: { type: "object" } }],
-        async onCall() {
-          active += 1;
-          maxActive = Math.max(maxActive, active);
-          await new Promise((resolve) => setTimeout(resolve, 5));
-          active -= 1;
-          return { content: [{ type: "text", text: "ok" }] };
-        },
-      }),
-    );
+    const statsPath = join(stateRoot, "call-stats.json");
+    const created = await build({
+      tools: [{ name: "navigate", inputSchema: { type: "object" } }],
+      callDelayMs: 5,
+      statsPath,
+    });
 
     await Promise.all([
       created.call({ schemaVersion: 1, tool: "navigate", arguments: {} }),
       created.call({ schemaVersion: 1, tool: "navigate", arguments: {} }),
     ]);
-    expect(maxActive).toBe(1);
+    expect(JSON.parse(readFileSync(statsPath, "utf8"))).toEqual({ maxActiveCalls: 1 });
     await expect(
       created.call({ schemaVersion: 1, tool: "navigate", arguments: { extraArgs: ["--profile", "/tmp/x"] } }),
     ).resolves.toMatchObject({ outcome: "refused" });

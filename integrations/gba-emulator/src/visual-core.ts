@@ -3,7 +3,12 @@ import { z } from "zod";
 import { Sha256Schema } from "./contracts.ts";
 import { sha256 } from "./core-double.ts";
 import type { GbaCoreSeam } from "./core-seam.ts";
-import { MgbaLibretroCore, mgbaCoreWasmSha256, type MgbaFramebuffer } from "./mgba-core.ts";
+import {
+  MgbaLibretroCore,
+  mgbaCoreWasmSha256,
+  type MgbaCoreIdentity,
+  type MgbaFramebuffer,
+} from "./mgba-core.ts";
 
 export const VisualGbaScenarioSchema = z
   .object({
@@ -25,23 +30,8 @@ export const VisualGbaScenarioSchema = z
   .strict();
 export type VisualGbaScenario = z.infer<typeof VisualGbaScenarioSchema>;
 
-export interface MgbaVisualCoreIdentity {
-  romSha256: string;
-  savestateSha256: string;
-  coreWasmSha256: string;
-}
-
 const POST_INPUT_SETTLE_FRAMES = 32;
 const WARMUP_FRAMES_AFTER_RESTORE = 2;
-/** One frame per observation is hardware rate — see the FireRed core's note. */
-const OBSERVE_CHUNK_FRAMES = 1;
-const FRAME_INTERVAL_MS = 1_000 / 59.7275;
-
-/** Wait without blocking the thread — see the FireRed core's note. */
-function delay(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((done) => setTimeout(done, ms));
-}
 
 /**
  * A real mGBA body for cartridges without a verified RAM decoder.
@@ -53,19 +43,17 @@ function delay(ms: number): Promise<void> {
 export class MgbaVisualCore implements GbaCoreSeam {
   public readonly coreId: string;
   private readonly core: MgbaLibretroCore;
-  private readonly verifiedIdentity: MgbaVisualCoreIdentity;
+  private readonly verifiedIdentity: MgbaCoreIdentity;
   private readonly configuredBootSavestate: Uint8Array;
   private frame = 0;
   private inputCount = 0;
   private frameObserver: (() => void) | null = null;
   private paceToWallClock = false;
-  /** True while an action owns the core, so idle ticks stand off. */
-  private running = false;
 
   private constructor(
     coreId: string,
     core: MgbaLibretroCore,
-    verifiedIdentity: MgbaVisualCoreIdentity,
+    verifiedIdentity: MgbaCoreIdentity,
     configuredBootSavestate: Uint8Array,
   ) {
     this.coreId = coreId;
@@ -107,7 +95,7 @@ export class MgbaVisualCore implements GbaCoreSeam {
     );
   }
 
-  public identity(): MgbaVisualCoreIdentity {
+  public identity(): MgbaCoreIdentity {
     return { ...this.verifiedIdentity };
   }
 
@@ -132,37 +120,14 @@ export class MgbaVisualCore implements GbaCoreSeam {
 
   /** Console-clock frames between actions. See `GbaCoreSeam.idleFrames`. */
   public idleFrames(frames: number): void {
-    if (this.running || frames <= 0) return;
-    this.core.setHeldButtons([]);
-    this.core.runFrames(frames);
-    this.frame += frames;
-    this.frameObserver?.();
+    if (this.core.idleFrames(frames, this.frameObserver)) this.frame += frames;
   }
 
   /** Deadline-paced and non-blocking — see the FireRed core's note. */
   private async runFramesObserved(frames: number): Promise<void> {
-    if (this.frameObserver === null && !this.paceToWallClock) {
-      this.core.runFrames(frames);
-      return;
-    }
-    // Held across the awaits: an idle tick that fired between two paced frames
-    // would clear the buttons this action is still holding.
-    this.running = true;
-    try {
-      const startedAt = performance.now();
-      let done = 0;
-      while (done < frames) {
-        const chunk = Math.min(OBSERVE_CHUNK_FRAMES, frames - done);
-        this.core.runFrames(chunk);
-        done += chunk;
-        this.frameObserver?.();
-        if (this.paceToWallClock) {
-          await delay(startedAt + done * FRAME_INTERVAL_MS - performance.now());
-        }
-      }
-    } finally {
-      this.running = false;
-    }
+    const observer =
+      this.frameObserver === null && !this.paceToWallClock ? null : () => this.frameObserver?.();
+    await this.core.runFramesObserved(frames, observer, () => this.paceToWallClock);
   }
 
   public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {

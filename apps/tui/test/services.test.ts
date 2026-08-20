@@ -74,7 +74,6 @@ function stubService(options: StubOptions = {}): ManagedService {
   return {
     id: options.id ?? "clankie",
     label: "Stub service",
-    dependsOn: [],
     spawnArgs: ["--filter", "@clankie/stub", "start"],
     commandMatches: options.commandMatches ?? ((command) => command.includes("@clankie/stub")),
     probe: async () => ({
@@ -94,10 +93,7 @@ function processList(...commands: readonly string[]): () => readonly (readonly [
 const noProcesses = processList();
 
 async function writeRecord(env: NodeJS.ProcessEnv, id: ServiceId, pid: number): Promise<void> {
-  await writeFile(
-    serviceStatePath(id, env),
-    `${JSON.stringify({ version: 1, id, pid, startedAt: new Date().toISOString() })}\n`,
-  );
+  await writeFile(serviceStatePath(id, env), `${JSON.stringify({ version: 1, id, pid })}\n`);
 }
 
 describe("service supervisor", () => {
@@ -464,6 +460,134 @@ describe("service targets", () => {
     ).toBe(true);
   });
 
+  it.each([
+    {
+      label: "user-session to bot with voice enabled",
+      target: "discord-user-session" as const,
+      env: { DISCORD_ACTIVE_BODY: "bot", DISCORD_VOICE_ENABLED: "true" },
+      started: "@clankie/discord-bridge",
+      outcome: "discord-bridge",
+    },
+    {
+      label: "user-session to bot with voice disabled",
+      target: "discord-user-session" as const,
+      env: { DISCORD_ACTIVE_BODY: "bot", DISCORD_VOICE_ENABLED: "false" },
+      started: "@clankie/discord-bridge",
+      outcome: "discord-bridge",
+    },
+    {
+      label: "bot to user-session with voice enabled",
+      target: "discord-bridge" as const,
+      env: {
+        DISCORD_ACTIVE_BODY: "user_session",
+        DISCORD_USER_SESSION_ENABLED: "true",
+        DISCORD_USER_SESSION_VOICE_ENABLED: "true",
+      },
+      started: "@clankie/discord-user-session",
+      outcome: "discord-user-session",
+    },
+    {
+      label: "bot to user-session with voice disabled",
+      target: "discord-bridge" as const,
+      env: {
+        DISCORD_ACTIVE_BODY: "user_session",
+        DISCORD_USER_SESSION_ENABLED: "true",
+        DISCORD_USER_SESSION_VOICE_ENABLED: "false",
+      },
+      started: "@clankie/discord-user-session",
+      outcome: "discord-user-session",
+    },
+  ])("stops both Discord bodies before starting only the selected body: $label", async (candidate) => {
+    const env = { ...(await stateEnv()), ...candidate.env };
+    await writeRecord(env, "discord-bridge", 9_501);
+    await writeRecord(env, "discord-user-session", 9_502);
+    const alive = new Set([9_501, 9_502]);
+    const order: string[] = [];
+    let nextPid = 9_503;
+
+    const outcomes = await restartTarget(candidate.target, {
+      repoRoot: "/repo",
+      env,
+      processIsAliveImpl: (pid) => alive.has(pid),
+      readProcessCommandImpl: (pid) =>
+        pid === 9_501
+          ? "pnpm --filter @clankie/discord-bridge start"
+          : "pnpm --filter @clankie/discord-user-session start",
+      killImpl: (pid) => {
+        order.push(pid === 9_501 ? "stop:bot" : "stop:user-session");
+        alive.delete(pid);
+      },
+      listProcessCommandsImpl: noProcesses,
+      fetchImpl: (async () =>
+        alive.has(9_503)
+          ? Response.json({ ok: true })
+          : Promise.reject(new Error("connection refused"))) as typeof fetch,
+      spawnImpl: ((_command: string, args: string[]) => {
+        const pkg = args[1] ?? "unknown";
+        order.push(`start:${pkg}`);
+        const pid = nextPid++;
+        alive.add(pid);
+        return runningChild(pid);
+      }) as unknown as typeof spawn,
+    });
+
+    expect(order).toEqual(["stop:user-session", "stop:bot", `start:${candidate.started}`]);
+    expect(outcomes).toEqual([expect.objectContaining({ id: candidate.outcome, ok: true })]);
+  });
+
+  it("leaves both Discord bodies stopped and reports a selected-body EADDRINUSE failure", async () => {
+    const env = {
+      ...(await stateEnv()),
+      DISCORD_ACTIVE_BODY: "user_session",
+      DISCORD_USER_SESSION_ENABLED: "true",
+      DISCORD_USER_SESSION_VOICE_ENABLED: "true",
+    };
+    await writeRecord(env, "discord-bridge", 9_601);
+    await writeRecord(env, "discord-user-session", 9_602);
+    const alive = new Set([9_601, 9_602]);
+    const order: string[] = [];
+
+    const outcomes = await restartTarget("discord-bridge", {
+      repoRoot: "/repo",
+      env,
+      processIsAliveImpl: (pid) => alive.has(pid),
+      readProcessCommandImpl: (pid) =>
+        pid === 9_601
+          ? "pnpm --filter @clankie/discord-bridge start"
+          : "pnpm --filter @clankie/discord-user-session start",
+      killImpl: (pid) => {
+        order.push(pid === 9_601 ? "stop:bot" : "stop:user-session");
+        alive.delete(pid);
+      },
+      listProcessCommandsImpl: noProcesses,
+      fetchImpl: (async () => {
+        throw new Error("connection refused");
+      }) as typeof fetch,
+      spawnImpl: ((_command: string, args: string[]) => {
+        order.push(`start:${args[1] ?? "unknown"}`);
+        const error = new Error("listen EADDRINUSE: address already in use 127.0.0.1:4323");
+        Object.assign(error, { code: "EADDRINUSE" });
+        throw error;
+      }) as unknown as typeof spawn,
+    });
+
+    expect(order).toEqual(["stop:user-session", "stop:bot", "start:@clankie/discord-user-session"]);
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        id: "discord-user-session",
+        ok: false,
+        error: expect.stringContaining("EADDRINUSE"),
+      }),
+    ]);
+    expect(alive.size).toBe(0);
+    await expect(readFile(serviceStatePath("discord-bridge", env), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(serviceStatePath("discord-user-session", env), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("recognizes the service's own spawn, not every mention of its package", () => {
     const matches = managedService("clankie").commandMatches;
     expect(matches("node /path/pnpm.mjs --filter @clankie/clankie start")).toBe(true);
@@ -753,7 +877,12 @@ describe("restart carries dependents", () => {
   });
 
   it("leaves a leaf service on its own", () => {
-    expect(resolveRestartTargets("discord-bridge")).toEqual(["discord-bridge"]);
+    expect(resolveRestartTargets("activity")).toEqual(["activity"]);
+  });
+
+  it("treats both Discord processes as one mutually-exclusive restart slot", () => {
+    expect(resolveRestartTargets("discord-bridge")).toEqual(["discord-bridge", "discord-user-session"]);
+    expect(resolveRestartTargets("discord-user-session")).toEqual(["discord-bridge", "discord-user-session"]);
   });
 
   it("keeps the full order for an explicit all", () => {

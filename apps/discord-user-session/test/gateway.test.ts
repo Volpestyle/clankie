@@ -153,24 +153,6 @@ describe("DiscordUserGateway", () => {
     gateway.close();
   });
 
-  it("sends voice state updates as op 4", () => {
-    const socket = new FakeSocket();
-    const gateway = new DiscordUserGateway({ token: "user-token", connect: () => socket.asWebSocket() });
-    gateway.open();
-    socket.readyState = 1;
-    gateway.sendVoiceStateUpdate({
-      guildId: "guild-1",
-      channelId: "voice-1",
-      selfMute: false,
-      selfDeaf: false,
-    });
-    expect(socket.sent.at(-1)).toEqual({
-      op: 4,
-      d: { guild_id: "guild-1", channel_id: "voice-1", self_mute: false, self_deaf: false },
-    });
-    gateway.close();
-  });
-
   it("tracks current member voice channels from gateway state", () => {
     const socket = new FakeSocket();
     const gateway = new DiscordUserGateway({ token: "user-token", connect: () => socket.asWebSocket() });

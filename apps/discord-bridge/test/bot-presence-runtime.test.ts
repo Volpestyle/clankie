@@ -7,7 +7,7 @@ import {
 import type { DiscordPresenceWrite } from "@clankie/protocol";
 import { ChannelType } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
-import { DiscordBotPresenceRuntime, encodeReactionEmoji } from "../src/bot-presence-runtime.ts";
+import { DiscordBotPresenceRuntime } from "../src/bot-presence-runtime.ts";
 
 describe("Discord presence gateway session on bot transport", () => {
   it("removes act capability and emits degraded when the gateway disconnects mid-action", async () => {
@@ -314,20 +314,6 @@ describe("DiscordBotPresenceRuntime", () => {
     expect(() => new DiscordBotPresenceRuntime({ botToken: "  " })).toThrow(
       /discord_presence_bot_token_required/,
     );
-  });
-});
-
-describe("encodeReactionEmoji", () => {
-  it("encodes unicode, custom name:id, and angle-bracket mentions", () => {
-    expect(encodeReactionEmoji("👍")).toBe(encodeURIComponent("👍"));
-    expect(encodeReactionEmoji("clankie:123456789012345678")).toBe("clankie:123456789012345678");
-    expect(encodeReactionEmoji("<:clankie:123456789012345678>")).toBe("clankie:123456789012345678");
-    expect(encodeReactionEmoji("<a:wave:99>")).toBe("wave:99");
-  });
-
-  it("rejects malformed colon-bearing strings", () => {
-    expect(() => encodeReactionEmoji("<:bad>")).toThrow(/discord_presence_invalid_emoji/);
-    expect(() => encodeReactionEmoji("not:a:valid:emoji")).toThrow(/discord_presence_invalid_emoji/);
   });
 });
 

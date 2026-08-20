@@ -1,7 +1,17 @@
 # ADR 0098: The lab user body watches Discord shares through ClankVox
 
 Status: accepted (2026-08-15). The native package placement is owned by
-[ADR 0100](0100-vox-is-an-owned-native-media-package.md).
+[ADR 0100](0100-vox-is-an-owned-native-media-package.md). Current-status
+addendum (2026-08-19): [ADR 0128](0128-vox-is-the-sole-discord-media-owner.md)
+supersedes the user-body-only media-owner and video-routed music assumptions.
+The user body now shares one Vox child across audible primary voice/music,
+`stream_watch`, and `stream_publish`; watch/publish remain separate role proofs.
+Their operational commands are
+`pnpm --filter @clankie/discord-user-session watch-live-proof` and
+`pnpm --filter @clankie/discord-user-session publish-live-proof`, both against
+the user-session receipt log and both optionally accepting `-- --wait=120`.
+The body gating, account-risk, stream admission, and sampled-still decisions
+remain in force. The rollout details below are historical where they conflict.
 
 ## Context
 

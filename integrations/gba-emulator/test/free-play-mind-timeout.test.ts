@@ -39,8 +39,8 @@ describe("model free-play request deadline", () => {
     // The 2026-08-02 wedge in miniature: the SDK routed a prompt rejection into
     // the stream and closed it, so the drain finished normally and `object`
     // never settled either way. Without a deadline of its own the mind awaited
-    // that promise forever, and the play loop held the body lock for three
-    // hours without ever failing the turn.
+    // that promise forever, and the play loop hung for three hours without ever
+    // failing the turn.
     streamObject.mockImplementation(() => ({
       object: new Promise<never>(() => {
         // never settles, exactly as the closed-on-error stream left it

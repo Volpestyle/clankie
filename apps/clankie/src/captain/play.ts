@@ -1,10 +1,10 @@
 /**
  * Asked play (ADR 0063), captain side: submit the intent, wait bounded for the
- * runner's answer, and return the typed note his reply renders. The captain
+ * local play host's answer, and return the typed note his reply renders. The captain
  * holds nothing but the ask — no emulator import, no process, no credential.
  *
  * The bounded wait is what keeps the reply honest: "started" is only said
- * after the runner reports running, and past the bound the note is `pending`,
+ * after the play host reaches running, and past the bound the note is `pending`,
  * which he must voice as "starting it up", never "I'm playing".
  */
 import { randomUUID } from "node:crypto";
@@ -55,7 +55,21 @@ export function defaultPlayBudget(env: NodeJS.ProcessEnv = process.env): Embodim
 }
 
 export async function startPlay(ports: PlayPorts, input: StartPlayInput): Promise<EmbodimentPlayNote> {
-  const intentId = `play-${randomUUID()}`;
+  return submitStart(ports, input);
+}
+
+/** Ask to join a hosted world; the venue selects the body behind the same lifecycle. */
+export function joinWorld(ports: PlayPorts, input: StartPlayInput): Promise<EmbodimentPlayNote> {
+  return submitStart(ports, input, "world");
+}
+
+async function submitStart(
+  ports: PlayPorts,
+  input: StartPlayInput,
+  venue?: "world",
+): Promise<EmbodimentPlayNote> {
+  const joining = venue === "world";
+  const intentId = `${joining ? "world" : "play"}-${randomUUID()}`;
   const submitted = await ports.submitEmbodimentIntent({
     kind: "start",
     schemaVersion: 1,
@@ -65,9 +79,14 @@ export async function startPlay(ports: PlayPorts, input: StartPlayInput): Promis
     requestedAt: new Date().toISOString(),
     environmentId: input.environmentId,
     budget: input.budget ?? defaultPlayBudget(),
+    ...(venue === undefined ? {} : { venue }),
   });
   if (submitted.outcome === "refused") {
-    return { action: "start_refused", environmentId: input.environmentId, reason: submitted.reason };
+    return {
+      action: joining ? "join_refused" : "start_refused",
+      environmentId: input.environmentId,
+      reason: submitted.reason,
+    };
   }
   if (submitted.outcome !== "accepted") {
     // A start never answers "stop_requested"; treat a confused wire as pending.
@@ -76,85 +95,29 @@ export async function startPlay(ports: PlayPorts, input: StartPlayInput): Promis
   const sessionId = submitted.session.sessionId;
   const outcome = await waitForSession(ports, sessionId, input.waitMs, input.pollMs, (session) => {
     if (session.state === "running") {
-      return {
-        action: "started" as const,
-        sessionId,
-        environmentId: session.environmentId,
-        ...(session.resumedFromCheckpointId === undefined
-          ? {}
-          : { resumedFromCheckpointId: session.resumedFromCheckpointId }),
-      };
+      return joining
+        ? { action: "joined" as const, sessionId, environmentId: session.environmentId }
+        : {
+            action: "started" as const,
+            sessionId,
+            environmentId: session.environmentId,
+            ...(session.resumedFromCheckpointId === undefined
+              ? {}
+              : { resumedFromCheckpointId: session.resumedFromCheckpointId }),
+          };
     }
     if (session.state === "refused") {
       return {
-        action: "start_refused" as const,
+        action: joining ? ("join_refused" as const) : ("start_refused" as const),
         environmentId: session.environmentId,
-        reason: session.refusalReason ?? "environment_unavailable",
+        reason: session.refusalReason ?? (joining ? "world_unreachable" : "environment_unavailable"),
       };
     }
     if (session.state === "failed") {
       return {
-        action: "start_refused" as const,
+        action: joining ? ("join_refused" as const) : ("start_refused" as const),
         environmentId: session.environmentId,
-        reason: "environment_unavailable" as const,
-      };
-    }
-    return undefined;
-  });
-  return outcome ?? { action: "pending", intentId: submitted.session.intentId };
-}
-
-export interface JoinWorldInput extends PlayAskContext {
-  environmentId: EmbodimentEnvironmentId;
-  budget?: EmbodimentBudget;
-  waitMs?: number;
-  pollMs?: number;
-}
-
-/**
- * Ask to join a hosted world. Same asked-play seam as `startPlay`; the
- * venue on the intent is how the runner picks a different body.
- */
-export async function joinWorld(ports: PlayPorts, input: JoinWorldInput): Promise<EmbodimentPlayNote> {
-  const intentId = `world-${randomUUID()}`;
-  const submitted = await ports.submitEmbodimentIntent({
-    kind: "start",
-    schemaVersion: 1,
-    intentId,
-    originLane: input.originLane,
-    requestedBy: input.requestedBy,
-    requestedAt: new Date().toISOString(),
-    environmentId: input.environmentId,
-    budget: input.budget ?? defaultPlayBudget(),
-    venue: "world",
-  });
-  if (submitted.outcome === "refused") {
-    return {
-      action: "join_refused",
-      environmentId: input.environmentId,
-      reason: submitted.reason,
-    };
-  }
-  if (submitted.outcome !== "accepted") {
-    return { action: "pending", intentId };
-  }
-  const sessionId = submitted.session.sessionId;
-  const outcome = await waitForSession(ports, sessionId, input.waitMs, input.pollMs, (session) => {
-    if (session.state === "running") {
-      return { action: "joined" as const, sessionId, environmentId: session.environmentId };
-    }
-    if (session.state === "refused") {
-      return {
-        action: "join_refused" as const,
-        environmentId: session.environmentId,
-        reason: session.refusalReason ?? "world_unreachable",
-      };
-    }
-    if (session.state === "failed") {
-      return {
-        action: "join_refused" as const,
-        environmentId: session.environmentId,
-        reason: "world_unreachable" as const,
+        reason: joining ? ("world_unreachable" as const) : ("environment_unavailable" as const),
       };
     }
     return undefined;

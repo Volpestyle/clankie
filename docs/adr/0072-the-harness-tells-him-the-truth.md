@@ -7,6 +7,13 @@ agency), [ADR 0058](0058-read-collision-from-the-live-map-buffer.md) and
 composite actions), inside the authority bounds
 [ADR 0053](0053-mcp-possession-of-clankies-body.md) sets.
 
+## Current status (2026-08-19)
+
+Truthful effects, observations, bounds, and composite actions remain shared
+contracts. [ADR 0129](0129-each-player-owns-a-body.md) changes ownership only:
+Clankie's runtime and every private GBA MCP runtime enforce those contracts on
+independent bodies.
+
 ## Context
 
 The harness must expose what it knows and avoid inventing effects when a decoder

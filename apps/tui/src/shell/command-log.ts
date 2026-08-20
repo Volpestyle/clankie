@@ -37,37 +37,6 @@ function styleCommandResultLine(line: string, ansi: ClankieFaceAnsiTheme): strin
   return line;
 }
 
-/** Command result whose body is another component (e.g. a dashboard view). */
-export class ClankieCommandResultComponent implements Component {
-  private readonly prompt: string;
-  private readonly tone: CommandLogTone;
-  private readonly body: Component;
-  private readonly ansi: ClankieFaceAnsiTheme;
-  private readonly cache = new ClankieRenderCache();
-
-  constructor(prompt: string, tone: CommandLogTone, body: Component, ansi: ClankieFaceAnsiTheme) {
-    this.prompt = prompt;
-    this.tone = tone;
-    this.body = body;
-    this.ansi = ansi;
-  }
-
-  invalidate(): void {
-    this.cache.clear();
-    this.body.invalidate();
-  }
-
-  render(width: number): string[] {
-    return this.cache.get(width, () => {
-      const bodyWidth = Math.max(1, width - 2);
-      return [
-        formatCommandLogHeader(this.prompt, this.tone, this.ansi),
-        ...this.body.render(bodyWidth).map((line) => `  ${truncateToWidth(line, bodyWidth, "", true)}`),
-      ];
-    });
-  }
-}
-
 /** Command result with a plain multi-line text body. */
 export class ClankieCommandTextResultComponent implements Component {
   private readonly prompt: string;

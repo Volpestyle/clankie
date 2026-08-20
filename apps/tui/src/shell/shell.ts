@@ -72,11 +72,7 @@ import {
 import { shouldRouteClankieTranscriptGlobalInput } from "../face/clankie-transcript-key-routing.ts";
 import { ClankieTranscriptMarkdownBlock } from "../face/clankie-transcript-block.ts";
 import { ClankieBashResultComponent, runFaceBashCommand } from "../face/clankie-face-bash.ts";
-import {
-  ClankieCommandResultComponent,
-  ClankieCommandTextResultComponent,
-  type CommandLogTone,
-} from "./command-log.ts";
+import { ClankieCommandTextResultComponent, type CommandLogTone } from "./command-log.ts";
 import {
   layoutSettingsFromEnv,
   type InputPlacement,
@@ -101,7 +97,6 @@ const UNICODE_AGENT_SPINNER = {
 const ASCII_AGENT_SPINNER = { frames: ["/", "-", "\\", "|"], intervalMs: 80 } as const;
 
 export type FaceBlockHandle = {
-  remove(): void;
   setMarkdown(markdown: string): void;
 };
 
@@ -129,18 +124,12 @@ export interface FaceShellOptions {
   readonly statusExtras?: () => readonly string[];
   /** Handles a plain prompt (not a slash command, not `!`). */
   readonly onPrompt?: (prompt: string, shell: ClankieFaceShell, signal: AbortSignal) => Promise<void>;
-  /** Live durable turns detach on Escape because aborting observation does not cancel server work. */
-  readonly interruptMode?: "cancel" | "detach";
   readonly onExit?: () => Promise<void> | void;
 }
 
 type ActivePromptTurn = {
   readonly controller: AbortController;
-  readonly prompt: string;
   loader?: Loader | undefined;
-  loaderBlock?: ClankieTranscriptBlockHandle | undefined;
-  promptRestoreEligible: boolean;
-  userBlock?: FaceBlockHandle | undefined;
 };
 
 type SelectableOverlayEntry = {
@@ -357,13 +346,9 @@ export class ClankieFaceShell {
       red: ansi.red,
       yellow: ansi.yellow,
     });
-    const block = this.insertTranscript(component, options);
+    this.insertTranscript(component, options);
     this.tui.requestRender();
     return {
-      remove: (): void => {
-        block.remove();
-        this.tui.requestRender();
-      },
       setMarkdown: (markdown: string): void => {
         component.setMarkdown(markdown);
         this.tui.requestRender();
@@ -373,11 +358,6 @@ export class ClankieFaceShell {
 
   insertCommandResult(prompt: string, message: string, tone: CommandLogTone): void {
     this.insertTranscript(new ClankieCommandTextResultComponent(prompt, message, tone, this.theme.ansi));
-    this.tui.requestRender();
-  }
-
-  insertCommandComponent(prompt: string, component: Component, tone: CommandLogTone): void {
-    this.insertTranscript(new ClankieCommandResultComponent(prompt, tone, component, this.theme.ansi));
     this.tui.requestRender();
   }
 
@@ -550,10 +530,6 @@ export class ClankieFaceShell {
 
   // --- turn loader ---
 
-  get isResponding(): boolean {
-    return this.respondingState;
-  }
-
   startTurnLoader(message = "Waiting for response..."): void {
     this.respondingState = true;
     const loader = new Loader(
@@ -568,7 +544,6 @@ export class ClankieFaceShell {
     this.activeLoaderBlock = loaderBlock;
     if (this.activeTurn !== undefined) {
       this.activeTurn.loader = loader;
-      this.activeTurn.loaderBlock = loaderBlock;
     }
     loader.start();
     this.refreshStatus("streaming");
@@ -586,7 +561,6 @@ export class ClankieFaceShell {
     loader?.stop();
     if (this.activeTurn !== undefined) {
       this.activeTurn.loader = undefined;
-      this.activeTurn.loaderBlock = undefined;
     }
     block?.remove();
     this.respondingState = false;
@@ -1043,7 +1017,7 @@ export class ClankieFaceShell {
       return;
     }
     // Slash commands stay usable while a turn streams, so they are never gated on
-    // isResponding. A second plain prompt would collide with the active turn, so
+    // respondingState. A second plain prompt would collide with the active turn, so
     // restore the text rather than dropping what the user typed.
     if (prompt.startsWith("/")) {
       this.rememberPrompt(prompt);
@@ -1095,8 +1069,8 @@ export class ClankieFaceShell {
       return;
     }
     const controller = new AbortController();
-    const userBlock = this.insertMarkdown(`**You**\n\n${prompt}`);
-    const turn: ActivePromptTurn = { controller, prompt, promptRestoreEligible: true, userBlock };
+    this.insertMarkdown(`**You**\n\n${prompt}`);
+    const turn: ActivePromptTurn = { controller };
     this.activeTurn = turn;
     this.startTurnLoader();
     try {
@@ -1114,30 +1088,8 @@ export class ClankieFaceShell {
     const turn = this.activeTurn;
     if (turn === undefined || turn.controller.signal.aborted) return false;
 
-    if (this.options.interruptMode === "detach") {
-      turn.promptRestoreEligible = false;
-      turn.loader?.setMessage("Detaching — Clankie continues...");
-      this.refreshStatus("detaching — Clankie continues");
-      turn.controller.abort();
-      this.tui.requestRender();
-      return true;
-    }
-
-    const canRestorePrompt = turn.promptRestoreEligible && this.editor.getText().trim().length === 0;
-    if (canRestorePrompt) {
-      turn.userBlock?.remove();
-      turn.loader?.stop();
-      turn.loaderBlock?.remove();
-      if (this.activeLoader === turn.loader) this.activeLoader = undefined;
-      if (this.activeLoaderBlock === turn.loaderBlock) this.activeLoaderBlock = undefined;
-      this.editor.setText(turn.prompt);
-      this.tui.setFocus(this.editor);
-      this.refreshCommandSurface(turn.prompt);
-      this.refreshStatus("interrupted - edit prompt");
-    } else {
-      turn.loader?.setMessage("Interrupting...");
-      this.refreshStatus("interrupting");
-    }
+    turn.loader?.setMessage("Detaching — Clankie continues...");
+    this.refreshStatus("detaching — Clankie continues");
     turn.controller.abort();
     this.tui.requestRender();
     return true;

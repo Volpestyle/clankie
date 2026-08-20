@@ -10,21 +10,29 @@ is append-only JSONL or plain files now), never write to it.
 
 ## The trail map
 
-| What you want                            | Where it lives                                                                                       | Shape                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Operator console chat (the TUI dialogue) | `~/.clankie/captain/conversations/<conversationId>/`                                                 | `meta.json` (title, revision, session state) + append-only `events.jsonl` (`message` role/text, `reasoning`, `tool`, `turn` phases). Cursors are zero-padded line counts.                                                                                                                                                                                                                 |
-| The pi session behind a conversation     | `~/.clankie/captain/conversations/<conversationId>/pi/`                                              | pi JSONL session trees; durable room sessions live the same way — voice under `~/.clankie/captain/voice/<sessionKey>/`, Discord text under `~/.clankie/captain/rooms/<sessionKey>/` (ADR 0118).                                                                                                                                                                                           |
-| What he heard/said per room              | `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`                                             | One JSONL file per lane+target; `observe_room` and the TUI lanes view read the same files.                                                                                                                                                                                                                                                                                                |
-| Tool calls he made in a room             | `~/.clankie/captain/rooms/<sessionKey>/`, `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl` | Ordinary Discord text runs in the room's durable tree under `rooms/` (ADR 0118). `turns/` holds one pi tree per _one-shot_ — every privileged turn, and text turns from before 2026-08-18 — with full `toolCall`/`toolResult` args and results, under the same directory name as the lane log file. ADR 0107.                                                                             |
-| Presence + system events                 | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                                            | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence.                                                                                                                                                                                                                                                            |
-| Durable memory                           | `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`                                | Approved person facts grouped by guild/user plus one global bounded episode ring stored across source-lane files. `/memory status` reads the same store through the operator-only API.                                                                                                                                                                                                    |
-| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`, `.screenshots/<journal-stem>/*.png`                       | V1/V2/V3 header / V1/V2 per-turn. V3 headers add the stable `journeyId`, environment, and venue used to join sittings; V2 turns bind semantic decision, immediate pre-action, result, post-action, and progress evidence / optional summary. Selected turns and the summary may reference bounded screenshot artifacts by relative path, dimensions, byte size, hash, and capture reason. |
-| Who held the GBA body                    | `~/.local/state/clankie/gba-body/possession-events.jsonl` (beside `body.lock`)                       | Lease transitions: acquired, released, expired, stolen, refused.                                                                                                                                                                                                                                                                                                                          |
-| Discord semantic actions                 | `~/.local/state/clankie/discord-live-receipts.jsonl` (override: `DISCORD_BRIDGE_RECEIPT_PATH`)       | What the bridge actually did — content-free receipts, never message bodies.                                                                                                                                                                                                                                                                                                               |
-| Opt-in development voice transcript      | `~/.local/state/clankie/discord-voice-transcripts.jsonl`                                             | Exists only when `discord.voiceTranscriptLoggingEnabled` is on. Exact consented final speech with body, guild/channel, stay/delivery ids, speaker id/display name, and timestamp. Mode 0600; receipts remain content-free.                                                                                                                                                                |
-| Service stdout + lifecycle               | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                                               | Service ids: `clankie`, `discord-bridge`, `discord-user-session`, `activity`, `tunnel`.                                                                                                                                                                                                                                                                                                   |
-| Live status                              | `clankie status` / `/trace` in the face                                                              | `/trace` lists rooms and tails their bounded `heard`/`said` lane logs through the service.                                                                                                                                                                                                                                                                                                |
-| What's on the TUI screen right now       | `herdr pane read <pane> --source recent`                                                             | Viewport only — see caveat below.                                                                                                                                                                                                                                                                                                                                                         |
+| What you want                            | Where it lives                                                                                               | Shape                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operator console chat (the TUI dialogue) | `~/.clankie/captain/conversations/<conversationId>/`                                                         | `meta.json` (title, revision, session state) + append-only `events.jsonl` (`message` role/text, `reasoning`, `tool`, `turn` phases). Cursors are zero-padded line counts.                                                                                                                                     |
+| The pi session behind a conversation     | `~/.clankie/captain/conversations/<conversationId>/pi/`                                                      | pi JSONL session trees; durable room sessions live the same way — voice under `~/.clankie/captain/voice/<sessionKey>/`, Discord text under `~/.clankie/captain/rooms/<sessionKey>/` (ADR 0118).                                                                                                               |
+| What he heard/said per room              | `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`                                                     | One JSONL file per lane+target; `observe_room` and the TUI lanes view read the same files.                                                                                                                                                                                                                    |
+| Tool calls he made in a room             | `~/.clankie/captain/rooms/<sessionKey>/`, `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl`         | Ordinary Discord text runs in the room's durable tree under `rooms/` (ADR 0118). `turns/` holds one pi tree per _one-shot_ — every privileged turn, and text turns from before 2026-08-18 — with full `toolCall`/`toolResult` args and results, under the same directory name as the lane log file. ADR 0107. |
+| Presence + system events                 | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                                                    | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence.                                                                                                                                                                                |
+| Durable memory                           | `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`                                        | Approved person facts grouped by guild/user plus one global bounded episode ring stored across source-lane files. `/memory status` reads the same store through the operator-only API.                                                                                                                        |
+| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`, `.screenshots/<journal-stem>/*.png`                               | V1/V2/V3 headers and V1/V2 turn lines. V3 adds the stable journey, environment, and venue that join sittings; V2 binds causal evidence. Selected turns and summaries may reference bounded PNGs by relative path, dimensions, byte size, hash, and capture reason.                                            |
+| Historical shared-body artifacts         | `~/.local/state/clankie/gba-body/possession-events.jsonl` and `body.lock`, when left by an older build       | Inert historical files only. Current play and GBA MCP neither read nor write them; do not infer current ownership from them.                                                                                                                                                                                  |
+| Official-bot Discord actions             | `~/.local/state/clankie/discord-live-receipts.jsonl` (override: `DISCORD_BRIDGE_RECEIPT_PATH`)               | What the bot bridge actually did, including text and bot voice — content-free receipts, never message bodies.                                                                                                                                                                                                 |
+| User-session Discord actions             | `~/.local/state/clankie/discord-user-session-receipts.jsonl` (override: `DISCORD_USER_SESSION_RECEIPT_PATH`) | What the personal-lab body actually did, including voice, screen watch, and Go Live publish — content-free receipts, never message bodies or media.                                                                                                                                                           |
+| Opt-in development voice transcript      | `~/.local/state/clankie/discord-voice-transcripts.jsonl`                                                     | Exists only when `discord.voiceTranscriptLoggingEnabled` is on. Exact consented final speech with body, guild/channel, stay/delivery ids, speaker id/display name, and timestamp. Mode 0600; receipts remain content-free.                                                                                    |
+| Service stdout + lifecycle               | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                                                       | Service ids: `clankie`, `discord-bridge`, `discord-user-session`, `activity`, `tunnel`.                                                                                                                                                                                                                       |
+| Live status                              | `clankie status` / `/trace` in the face                                                                      | `/trace` lists rooms and tails their bounded `heard`/`said` lane logs through the service.                                                                                                                                                                                                                    |
+| What's on the TUI screen right now       | `herdr pane read <pane> --source recent`                                                                     | Viewport only — see caveat below.                                                                                                                                                                                                                                                                             |
+
+Discord media proof uses the log owned by the active body. Bot voice evidence is
+in `discord-live-receipts.jsonl`; user-session voice, watch, and publish evidence
+is in `discord-user-session-receipts.jsonl`. Fresh media-enabled readiness names
+`mediaOwner: vox`; a text-only bot names `mediaOwner: none` and does not spawn
+Vox. Role-scoped voice, DAVE, watch, publish, and leave receipts prove behavior
+without storing message bodies or media.
 
 ## Gotchas that cost real time
 
@@ -139,6 +147,38 @@ is append-only JSONL or plain files now), never write to it.
   model text. A `READY` report can therefore coexist with a broken ElevenLabs
   context lifecycle. Probe the TTS boundary directly when receipts show the
   mute-mouth signature.
+- **Vox process readiness is not Discord media readiness.** `process_ready`
+  must carry the exact `VOX_IPC_PROTOCOL_VERSION` before the client accepts any
+  command, but it still proves only that the one child accepts IPC. Primary
+  `ready`, `connection_state`, `transport_state`, `dave_state`, and transport
+  error events must carry the caller's current `connectionId`. For voice,
+  require `transport_state=ready` for role `voice`, positive role-scoped
+  `dave_state=ready`, then a `discord.voice.joined` receipt with
+  `daveProtocolVersion > 0`. Fresh app readiness must also set `mediaOwner` to
+  `vox`; otherwise the evidence may predate the sole-owner migration.
+- **Buffered TTS is not audible TTS.** `tts_playback_state=buffered` only means
+  PCM entered Vox's queue. `started` is the first audible TTS-containing RTP
+  frame successfully transmitted and starts floor occupancy. `drained` follows
+  `finish_tts_playback` only after PCM, a held partial tail, and trailing output
+  frames cross the sender. Join all three by `playbackId`.
+- **Watch and publish are separate proofs.** A decoded watch still proves
+  `stream_watch`, not `stream_publish`. A qualifying
+  `discord.stream.publish_started` proves Discord accepted OP18 and OP22, the
+  `stream_publish` transport and positive DAVE were ready, and Vox emitted the
+  first `stream_publish_media_started` H264 event for the current
+  connection/source generations. Never accept a generic ready line.
+- **A local leave event is not a completed leave.** Qualifying
+  `discord.voice.left` evidence records `gatewayConfirmed: true` and
+  `mediaOwner: vox` only after the account gateway confirms that the body is
+  detached from voice. A local session close without those fields is not the
+  clean-leave proof.
+- **A clean voice leave must not kill another role.** In the user body, primary
+  voice, screen watch, and publish share one child but have separate leases. A
+  valid leave closes `voice` while active watch/publish evidence continues;
+  only body shutdown closes all roles and the child. If process inspection
+  finds two Vox children or a Node voice media owner, the sole-owner proof
+  fails. A text-only official-bot process is the intentional exception: it
+  records `mediaOwner: none` and spawns no Vox child.
 - **A missing play summary is not automatically an incomplete mystery.** Join
   the journal header `runId` to `embodiment.session.stopped` or
   `embodiment.session.failed` in `~/.clankie/events.jsonl`. A matching terminal
@@ -154,6 +194,12 @@ is append-only JSONL or plain files now), never write to it.
   `environmentSessionId`, hosted `ses_...`, and checkpoint ids still name one
   execution or saved state. V1/V2 journals predate this join and must not be
   assigned a journey from timing alone.
+- **There is no current GBA possession trail.** Clankie's play host and every
+  GBA MCP process own separate emulator/runtime instances. Trace Clankie's play
+  through `gba-play/*.jsonl` plus embodiment lifecycle events; trace an MCP
+  harness through its own stdio results and configured checkpoint directory.
+  Old `body.lock` and `possession-events.jsonl` files are inert and intentionally
+  neither migrated nor deleted.
 - **`world_unreachable` is usually a missing process, not a crash.** The hosted
   world is a separate `pokeagents` server reached over a unix socket, so a
   refusal milliseconds after `embodiment.session.claimed` means nothing was
@@ -204,7 +250,7 @@ grep '<session-id-prefix>' ~/.clankie/events.jsonl | tail -n 5 | jq -c '{occurre
 Did he speak this stay, and are play reports dropped:
 
 ```bash
-jq -c 'select(.type == "discord.voice.response" or .type == "discord.voice.possessor_narration_suppressed" or .type == "discord.voice.left") | {type, at: .occurredAt, stayId: .data.stayId, deliveryId: .data.deliveryId, trigger: .data.trigger, reason: .data.reason, spoken: .data.spokenCount, suppressed: .data.narrationSuppressed, tokens: {in: .data.inputTokens, out: .data.outputTokens}}' ~/.local/state/clankie/discord-live-receipts.jsonl | tail -n 40
+jq -c 'select(.type == "discord.voice.response" or .type == "discord.voice.play_narration_suppressed" or .type == "discord.voice.left") | {type, at: .occurredAt, stayId: .data.stayId, deliveryId: .data.deliveryId, trigger: .data.trigger, reason: .data.reason, spoken: .data.spokenCount, suppressed: .data.narrationSuppressed, tokens: {in: .data.inputTokens, out: .data.outputTokens}}' ~/.local/state/clankie/discord-live-receipts.jsonl | tail -n 40
 ```
 
 What exact consented speech did Discord transcribe in development:
@@ -218,6 +264,21 @@ Where did one voice/music turn stop:
 ```bash
 jq -c --arg id '<delivery-or-call-id>' 'select(.data.deliveryId == $id or .data.callId == $id) | {type, at: .occurredAt, data: .data}' ~/.local/state/clankie/discord-live-receipts.jsonl
 ```
+
+Prove a personal-lab screen watch or Go Live publish from its own receipt log:
+
+```bash
+pnpm --filter @clankie/discord-user-session watch-live-proof
+pnpm --filter @clankie/discord-user-session watch-live-proof -- --wait=120
+pnpm --filter @clankie/discord-user-session publish-live-proof
+pnpm --filter @clankie/discord-user-session publish-live-proof -- --wait=120
+```
+
+Both commands read
+`$XDG_STATE_HOME/clankie/discord-user-session-receipts.jsonl`, defaulting to
+`~/.local/state/clankie/discord-user-session-receipts.jsonl`. Add `--json` after
+`--` for machine-readable output. Never point these proofs at the bot's
+`discord-live-receipts.jsonl`.
 
 Evaluate one production play journal with lifecycle and receipt joins:
 

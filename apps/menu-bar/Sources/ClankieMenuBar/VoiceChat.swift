@@ -43,7 +43,6 @@ struct LocalVoiceLine: Identifiable, Sendable {
   let id = UUID()
   let speaker: String
   let text: String
-  let occurredAt: String
 }
 
 private struct VoiceServerEvent: Decodable {
@@ -52,7 +51,6 @@ private struct VoiceServerEvent: Decodable {
   let speaker: String?
   let text: String?
   let final: Bool?
-  let occurredAt: String?
   let message: String?
 }
 
@@ -338,8 +336,7 @@ final class VoiceChatController {
       transcript.append(
         .init(
           speaker: isOperator ? "You" : "Clankie",
-          text: text,
-          occurredAt: event.occurredAt ?? ""
+          text: text
         ))
       if transcript.count > 40 { transcript.removeFirst(transcript.count - 40) }
       if isOperator { partialOperator = "" } else { partialClankie = "" }

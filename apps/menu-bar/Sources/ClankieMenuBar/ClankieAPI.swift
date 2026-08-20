@@ -14,7 +14,6 @@ struct ContextUsage: Decodable, Sendable {
 struct OperatorConversation: Decodable, Identifiable, Sendable {
   let conversationId: String
   let title: String
-  let updatedAt: String
   let sessionState: String
   let isDefault: Bool
   let contextUsage: ContextUsage?
@@ -24,7 +23,6 @@ struct OperatorConversation: Decodable, Identifiable, Sendable {
 
 struct ConversationEvent: Decodable, Identifiable, Sendable {
   let cursor: String
-  let occurredAt: String
   let type: String
   let role: String?
   let text: String?
@@ -67,7 +65,6 @@ struct VoiceTranscriptPage: Decodable, Sendable {
   let enabled: Bool
   let entries: [VoiceTranscriptEntry]
   let nextCursor: String
-  let hasMore: Bool
 }
 
 private struct ConversationListResponse: Decodable { let conversations: [OperatorConversation] }

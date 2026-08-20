@@ -1,35 +1,12 @@
 import {
-  BrowserToolCatalogSchema,
-  CallBrowserToolResultSchema,
-  GenerateImageResultSchema,
-  GenerateVideoResultSchema,
-  MEDIA_IMAGE_GENERATION_PATH,
-  MEDIA_VIDEO_GENERATION_PATH,
-  type GenerateImageRequest,
-  type GenerateImageResult,
-  type GenerateVideoRequest,
-  type GenerateVideoResult,
-  type BrowserToolCatalog,
-  type CallBrowserToolRequest,
-  type CallBrowserToolResult,
-  BodyPossessionReadSchema,
   CaptainChannelTurnResultSchema,
-  CaptainPresenceReportSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteResultSchema,
   DiscordPresenceWriteSchema,
-  DiscordStreamWatchObservationSchema,
   DiscordStreamWatchReportSchema,
   DiscordUserSessionOptInRequestSchema,
   DiscordUserSessionOptInSchema,
-  DISCORD_VOICE_TRANSCRIPTS_PATH,
-  DiscordVoiceTranscriptPageSchema,
   DISCORD_STREAM_WATCH_PATH,
-  EmbodimentAssignmentSchema,
-  EmbodimentSessionSchema,
-  EmbodimentSubmitResultSchema,
-  type BodyPossession,
-  type CaptainPresenceReport,
   type CaptainChannelTurnResult,
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
@@ -39,22 +16,13 @@ import {
   type CaptainSessionLaneV2,
   type DiscordPersonIdentity,
   type DiscordPersonMemoryEdit,
-  type DiscordPersonMemoryDeleteResult,
   type DiscordPersonMemoryExport,
   type DiscordPersonMemoryProjection,
   type DiscordPersonMemoryProposal,
   type OperatorMemoryCatalog,
-  type DiscordStreamWatchObservation,
   type DiscordStreamWatchReport,
   type DiscordUserSessionOptIn,
   type DiscordUserSessionOptInRequest,
-  type DiscordVoiceTranscriptPage,
-  type EmbodimentAssignment,
-  type EmbodimentClaim,
-  type EmbodimentIntent,
-  type EmbodimentLifecycleReport,
-  type EmbodimentSession,
-  type EmbodimentSubmitResult,
 } from "@clankie/protocol";
 import {
   DISCORD_PRESENCE_LIVE_PHASE_HEADER,
@@ -63,19 +31,14 @@ import {
   DiscordPresenceLiveClaimSchema,
   ActivityObservationReadSchema,
   PLAY_STILL_PATH,
-  PLAY_STORY_PATH,
   PlayStillReadSchema,
-  PlayStoryReadSchema,
   DiscordPresencePhaseEventSchema,
   DiscordPresenceSessionRecordSchema,
   type DiscordPresenceLiveClaim,
   type DiscordPresencePhaseEvent,
   type DiscordPresenceSessionRecord,
-  DiscordVoiceHistorySchema,
-  type DiscordVoiceStay,
   type ActivityObservationRead,
   type PlayStillRead,
-  type PlayStoryRead,
 } from "@clankie/interactive-environment";
 
 export type {
@@ -87,8 +50,6 @@ export type {
 export interface ClankieApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
-  runnerToken?: string;
-  runnerId?: string;
   captainToken?: string;
   operatorToken?: string;
 }
@@ -137,16 +98,12 @@ export interface DiscordVoiceBriefing {
 export class ClankieApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
-  private readonly runnerToken: string | undefined;
-  private readonly runnerId: string;
   private readonly captainToken: string | undefined;
   private readonly operatorToken: string | undefined;
 
   public constructor(options: string | ClankieApiClientOptions) {
     this.baseUrl = typeof options === "string" ? options : options.baseUrl;
     this.fetchImpl = typeof options === "string" ? fetch : (options.fetchImpl ?? fetch);
-    this.runnerToken = typeof options === "string" ? undefined : options.runnerToken;
-    this.runnerId = typeof options === "string" ? "local" : (options.runnerId ?? "local");
     this.captainToken = typeof options === "string" ? undefined : options.captainToken;
     this.operatorToken = typeof options === "string" ? undefined : options.operatorToken;
   }
@@ -171,15 +128,6 @@ export class ClankieApiClient {
     // The service runs a single unversioned doctrine profile; older callers
     // still stamp this constant into presence writes.
     return { ...body, profileHash: body.profileHash ?? "unversioned" };
-  }
-
-  public async recordCaptainPresence(input: CaptainPresenceReport): Promise<Record<string, unknown>> {
-    const report = CaptainPresenceReportSchema.parse(input);
-    return this.request("/v1/captain/presence", {
-      method: "POST",
-      headers: this.captainHeaders(),
-      body: JSON.stringify(report),
-    });
   }
 
   /** Submits a bounded, ambient Discord text turn through the authenticated captain lane. */
@@ -289,50 +237,6 @@ export class ClankieApiClient {
     });
   }
 
-  public async inspectDiscordStreamWatch(): Promise<DiscordStreamWatchObservation> {
-    const result = await this.request<unknown>(DISCORD_STREAM_WATCH_PATH, {
-      headers: this.activityReadHeaders(),
-    });
-    return DiscordStreamWatchObservationSchema.parse(result);
-  }
-
-  public async listDiscordPresenceSessions(): Promise<DiscordPresenceSessionRecord[]> {
-    const result = await this.request<unknown>("/v1/discord/presence-sessions", {
-      headers: this.captainHeaders(),
-    });
-    return DiscordPresenceSessionRecordSchema.array().parse(result);
-  }
-
-  /**
-   * Completed voice stays with join-time room context (VUH-940) — where
-   * Clankie's body was, when, and who shared the channel. A read-side
-   * projection over the durable phase stream; nothing is written.
-   */
-  public async listDiscordVoiceHistory(limit?: number): Promise<DiscordVoiceStay[]> {
-    const query = limit === undefined ? "" : `?limit=${String(limit)}`;
-    const result = await this.request<unknown>(`/v1/discord/voice-history${query}`, {
-      headers: this.captainHeaders(),
-    });
-    return DiscordVoiceHistorySchema.parse(result).stays;
-  }
-
-  /** Reads the private exact transcript log only while the owner retention setting is enabled. */
-  public async readDiscordVoiceTranscripts(
-    input: {
-      readonly cursor?: string;
-      readonly limit?: number;
-    } = {},
-  ): Promise<DiscordVoiceTranscriptPage> {
-    const query = new URLSearchParams();
-    if (input.cursor !== undefined) query.set("cursor", input.cursor);
-    if (input.limit !== undefined) query.set("limit", String(input.limit));
-    const suffix = query.size === 0 ? "" : `?${query.toString()}`;
-    const result = await this.request<unknown>(`${DISCORD_VOICE_TRANSCRIPTS_PATH}${suffix}`, {
-      headers: this.captainHeaders(),
-    });
-    return DiscordVoiceTranscriptPageSchema.parse(result);
-  }
-
   public inspectDiscordReadiness(): Promise<DiscordControlPlaneReadiness> {
     return this.request("/v1/discord/readiness", {
       headers: this.captainHeaders(),
@@ -368,12 +272,6 @@ export class ClankieApiClient {
     );
   }
 
-  public fetchPlayStory(): Promise<PlayStoryRead> {
-    return this.request(PLAY_STORY_PATH, { headers: this.activityReadHeaders() }).then((body) =>
-      PlayStoryReadSchema.parse(body),
-    );
-  }
-
   public proposeDiscordPersonMemory(input: DiscordPersonMemoryProposal): Promise<Record<string, unknown>> {
     return this.request("/v1/memory/discord-people/proposals", {
       method: "POST",
@@ -393,41 +291,6 @@ export class ClankieApiClient {
     return this.request(
       `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}${suffix}`,
       { headers: this.captainHeaders() },
-    );
-  }
-
-  public recordCaptainEpisode(episode: CaptainEpisode): Promise<{ episodeId: string }> {
-    return this.request("/v1/memory/captain-episodes", {
-      method: "POST",
-      headers: this.captainHeaders(),
-      body: JSON.stringify(episode),
-    });
-  }
-
-  /**
-   * The lane is the recall scope, so it must come from the channel the
-   * service stamped — never from anything the model chose. There is
-   * deliberately no tool wrapping this call.
-   */
-  public recallCaptainEpisodes(lane: CaptainSessionLaneV2): Promise<{ recallCard: string }> {
-    return this.request(`/v1/memory/captain-episodes?lane=${encodeURIComponent(lane)}`, {
-      headers: this.captainHeaders(),
-    });
-  }
-
-  public exportDiscordPersonMemory(identity: DiscordPersonIdentity): Promise<DiscordPersonMemoryExport> {
-    return this.request(
-      `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}/export`,
-      { headers: this.operatorHeaders() },
-    );
-  }
-
-  public deleteDiscordPersonMemory(
-    identity: DiscordPersonIdentity,
-  ): Promise<DiscordPersonMemoryDeleteResult> {
-    return this.request(
-      `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}`,
-      { method: "DELETE", headers: this.operatorHeaders() },
     );
   }
 
@@ -471,142 +334,12 @@ export class ClankieApiClient {
     );
   }
 
-  /** Submit an asked-play intent (ADR 0063); the service answers with the typed outcome. */
-  public async submitEmbodimentIntent(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult> {
-    const result = await this.request<unknown>("/v1/embodiment/intents", {
-      method: "POST",
-      headers: this.captainHeaders(),
-      body: JSON.stringify(intent),
-    });
-    return EmbodimentSubmitResultSchema.parse(result);
-  }
-
-  public async getEmbodimentSession(sessionId: string): Promise<EmbodimentSession | undefined> {
-    const response = await this.fetchImpl(
-      new URL(`/v1/embodiment/sessions/${encodeURIComponent(sessionId)}`, this.baseUrl),
-      { headers: { "content-type": "application/json", ...this.captainHeaders() } },
-    );
-    if (response.status === 404) return undefined;
-    if (!response.ok) throw new Error(`Clankie API ${response.status}: ${await response.text()}`);
-    const body = (await response.json()) as { session: unknown };
-    return EmbodimentSessionSchema.parse(body.session);
-  }
-
-  /** The single non-terminal asked session, if one exists: one body, one driver. */
-  public async getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined> {
-    const headers = this.captainToken !== undefined ? this.captainHeaders() : this.runnerHeaders();
-    const body = await this.request<{ session: unknown }>("/v1/embodiment/sessions/live", { headers });
-    if (body.session === null || body.session === undefined) return undefined;
-    return EmbodimentSessionSchema.parse(body.session);
-  }
-
   /** Latest settled state of Clankie's own active activity, without another lane's transcript. */
   public async getCurrentActivityObservation(): Promise<ActivityObservationRead> {
     const body = await this.request<unknown>("/v1/embodiment/sessions/live/activity", {
       headers: this.activityReadHeaders(),
     });
     return ActivityObservationReadSchema.parse(body);
-  }
-
-  /**
-   * The catalog of Clankie's own browser (ADR 0082). `available: false` means
-   * the host could not be reached — never that he has no browser.
-   */
-  public async listBrowserTools(): Promise<BrowserToolCatalog> {
-    const body = await this.request<{ catalog: unknown }>("/v1/browser/tools", {
-      headers: this.activityReadHeaders(),
-    });
-    return BrowserToolCatalogSchema.parse(body.catalog);
-  }
-
-  /**
-   * Drive one browser tool. A risk-classed tool called with only a captain
-   * token comes back `refused` with a reason, which he relays rather than
-   * treats as a failure.
-   */
-  public async callBrowserTool(request: CallBrowserToolRequest): Promise<CallBrowserToolResult> {
-    const body = await this.request<{ result: unknown }>("/v1/browser/call", {
-      method: "POST",
-      headers: this.activityReadHeaders(),
-      body: JSON.stringify(request),
-    });
-    return CallBrowserToolResultSchema.parse(body.result);
-  }
-
-  /**
-   * Draw something, or edit something he already drew (ADR 0085). The provider
-   * and model are operator config, so the request only says what to make.
-   */
-  public async generateImage(request: GenerateImageRequest): Promise<GenerateImageResult> {
-    const body = await this.request<{ result: unknown }>(MEDIA_IMAGE_GENERATION_PATH, {
-      method: "POST",
-      headers: this.activityReadHeaders(),
-      body: JSON.stringify(request),
-    });
-    return GenerateImageResultSchema.parse(body.result);
-  }
-
-  /**
-   * Render a clip, or pick up one already rendering. A `pending` result is the
-   * normal shape for a render that outlasts the call's patience: the same
-   * method with its `requestId` resumes rather than paying to render twice.
-   */
-  public async generateVideo(request: GenerateVideoRequest): Promise<GenerateVideoResult> {
-    const body = await this.request<{ result: unknown }>(MEDIA_VIDEO_GENERATION_PATH, {
-      method: "POST",
-      headers: this.activityReadHeaders(),
-      body: JSON.stringify(request),
-    });
-    return GenerateVideoResultSchema.parse(body.result);
-  }
-
-  /**
-   * Who holds Clankie's body right now (VUH-938): a liveness-checked view of
-   * the cross-process body lock, which sees every suitor — including an MCP
-   * possessor no embodiment session ever recorded. `undefined` means nobody.
-   */
-  public async getBodyPossession(): Promise<BodyPossession | undefined> {
-    const body = await this.request<unknown>("/v1/embodiment/possession", {
-      headers: this.captainHeaders(),
-    });
-    return BodyPossessionReadSchema.parse(body).possession ?? undefined;
-  }
-
-  public async claimEmbodiment(claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
-    const response = await this.request<{ assignment: unknown } | undefined>("/v1/embodiment/claims", {
-      method: "POST",
-      headers: this.runnerHeaders(),
-      body: JSON.stringify(claim),
-      // A claim is one cheap poll on a 1s cadence. Without a bound, one
-      // request hung across a service restart wedges the entire claim
-      // loop silently — the host looks alive and claims nothing forever.
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (response === undefined) return undefined;
-    return EmbodimentAssignmentSchema.parse(response.assignment);
-  }
-
-  public async reportEmbodiment(report: EmbodimentLifecycleReport): Promise<EmbodimentSession> {
-    const result = await this.request<{ accepted: boolean; session: unknown }>(
-      `/v1/embodiment/sessions/${encodeURIComponent(report.sessionId)}/report`,
-      {
-        method: "POST",
-        headers: this.runnerHeaders(),
-        body: JSON.stringify(report),
-        // Lifecycle reporting is safety-critical, but it cannot wedge the
-        // host forever when the service disappears mid-shutdown.
-        signal: AbortSignal.timeout(10_000),
-      },
-    );
-    return EmbodimentSessionSchema.parse(result.session);
-  }
-
-  private runnerHeaders(): Record<string, string> {
-    if (!this.runnerToken) throw new Error("CLANKIE_RUNNER_TOKEN is required for runner execution");
-    return {
-      authorization: `Bearer ${this.runnerToken}`,
-      "x-clankie-runner-id": this.runnerId,
-    };
   }
 
   private captainHeaders(): Record<string, string> {

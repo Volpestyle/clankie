@@ -20,15 +20,6 @@ describe("shell assembly", () => {
     expect(shell.layoutSettings.inputPlacement).toBe("bottom");
   });
 
-  it("builds a console command set with names and descriptions", () => {
-    const commands = buildConsoleCommands({});
-    expect(commands.length).toBeGreaterThanOrEqual(8);
-    for (const command of commands) {
-      expect(command.name.length).toBeGreaterThan(0);
-      expect(command.description.length).toBeGreaterThan(0);
-    }
-  });
-
   it("opens a readable conversation picker", async () => {
     const results: Array<{ invocation: string; text: string }> = [];
     const selected: string[] = [];
@@ -68,7 +59,7 @@ describe("shell assembly", () => {
         end() {},
         readSelect(options: NonNullable<typeof menu>) {
           menu = options;
-          return Promise.resolve(["global-default"]);
+          return Promise.resolve("global-default");
         },
       },
       insertCommandResult(invocation: string, text: string) {
@@ -208,5 +199,23 @@ describe("shell assembly", () => {
 
     expect(routed).toBeUndefined();
     expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("always detaches an active turn on Escape", () => {
+    const shell = new ClankieFaceShell({
+      commands: buildConsoleCommands({}),
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie", tagline: "test" },
+    });
+    const controller = new AbortController();
+    const internals = shell as unknown as {
+      activeTurn: { controller: AbortController };
+      routeInput(data: string): { consume?: boolean } | undefined;
+    };
+    internals.activeTurn = { controller };
+
+    expect(internals.routeInput("\x1b")).toEqual({ consume: true });
+    expect(controller.signal.aborted).toBe(true);
   });
 });

@@ -53,7 +53,7 @@ const catalog: OperatorMemoryCatalog = {
   ],
 };
 
-function shellFixture(selections: string[][], texts: string[] = []) {
+function shellFixture(selections: string[], texts: string[] = []) {
   const lines: string[] = [];
   const results: string[] = [];
   const flow: SetupFlow = {
@@ -99,10 +99,7 @@ describe("/memory", () => {
   it("edits an episode and confirms before forgetting a person fact", async () => {
     const api = client();
     const command = buildMemoryCommands({ client: api })[0]!;
-    const episode = shellFixture(
-      [["episodes"], ["0"], ["edit"], ["shareable"]],
-      ["Remember the corrected thing"],
-    );
+    const episode = shellFixture(["episodes", "0", "edit", "shareable"], ["Remember the corrected thing"]);
     await command.run("", episode.shell);
     expect(api.updateCaptainEpisode).toHaveBeenCalledWith("operator", "episode-1", {
       summary: "Remember the corrected thing",
@@ -110,7 +107,7 @@ describe("/memory", () => {
     });
     expect(episode.lines).toContain("Saved episode.");
 
-    const fact = shellFixture([["people"], ["0"], ["forget"], ["forget"]]);
+    const fact = shellFixture(["people", "0", "forget", "forget"]);
     await command.run("", fact.shell);
     expect(api.deleteDiscordPersonMemoryFact).toHaveBeenCalledWith(
       { guildId: "guild-1", userId: "user-1" },

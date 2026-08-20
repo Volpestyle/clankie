@@ -28,9 +28,29 @@ Only this body can watch another person's share or publish Go Live.
 Both account tokens may remain stored, but the launcher starts exactly one
 Discord body. The processes do not share credentials or gateways.
 
-![Credential routing by active Discord body](diagrams/credential-routing.jpg)
+The active account token remains inside its TypeScript body and authenticates
+that body's gateway/REST connection. It is never sent to `@clankie/vox-client`
+or `clankvox`. After Discord accepts a voice or stream join, only the
+short-lived voice/stream endpoint, session, token, user, channel, and server
+credentials required by that role cross the bounded IPC process boundary. They
+are held for the role lifetime and are not broker entries or receipt fields
+([ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md)).
 
-[Editable Turbopuffer tldraw source](diagrams/clankie-docs-diagrams-2.tldraw)
+The older [credential-routing JPG](diagrams/credential-routing.jpg) is a
+historical snapshot. Current credential ownership is:
+
+```mermaid
+flowchart LR
+  Broker[credential broker]
+  Broker --> Bot[official bot account]
+  Broker --> User[lab user account]
+  Broker --> PlayVoice[clankie_play_voice]
+  Broker --> Seat[pokeagent_mmo_world]
+  PlayVoice --> Active[active Discord body]
+  PlayVoice --> ClankiePlay[Clankie's local or hosted play]
+  Seat --> ClankieSeat[Clankie's hosted player identity]
+  Harness[external harness] --> Private[its private emulator/runtime]
+```
 
 ## Configure Discord
 
@@ -76,21 +96,25 @@ Discord account tokens and must never be pasted into the Discord portal.
 | ----------------------------------- | ------------------------------------------------- |
 | `clankie_operator`                  | Trusted local operator APIs                       |
 | `clankie_captain`                   | Captain dispatch and lane APIs                    |
-| `clankie_runner`                    | Embodiment/runner APIs                            |
 | `clankie_discord_bridge`            | Official-bot text lane                            |
 | `clankie_discord_voice_bridge`      | Official-bot voice lane                           |
 | `clankie_discord_user_bridge`       | User-body text lane                               |
 | `clankie_discord_user_voice_bridge` | User-body voice lane                              |
 | `clankie_activity_producer`         | Private Activity frame producer/snapshot listener |
-| `clankie_possessor_voice`           | Local gameplay commentary/hearing seam            |
+| `clankie_play_voice`                | Clankie's gameplay commentary/hearing seam        |
 
 The owning service mints these values. Models never receive them. The four
 Discord lane bearers are intentionally distinct, so a body or text lane cannot
 claim another transport by changing a request field.
 
+`clankie_play_voice` is shared only by Clankie's play loop and the active
+Discord body. It is not issued to GBA MCP or any external harness. The old
+`clankie_possessor_voice` provider id is not a current principal.
+
 Discord also issues short-lived voice and stream-server credentials after a
-gateway session is established. Those runtime values go directly to the media
-owner and are neither operator configuration nor broker entries.
+gateway session is established. Those runtime values go through the Apache
+`@clankie/vox-client` boundary to the active body's one AGPL `clankvox` child.
+They are neither operator configuration nor broker entries.
 
 ## World seat
 
@@ -107,6 +131,10 @@ when the broker also holds an entry, so an ambient environment value can never
 beat the broker ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). This
 is the one credential with no environment fallback of any kind.
 
+Each player or harness receives a different world credential and therefore a
+different player identity/session. Possessing another local process or sharing
+Clankie's seat is not part of the contract.
+
 No `/auth` or `/connect` flow writes this slot yet; the operator stores it in
 the broker directly. Without an entry, `pokeagent_join_mmo` refuses with
 `no_credential`, which Clankie says out loud rather than retrying. The minting
@@ -120,7 +148,7 @@ and holder-file side lives in the world's own
 credentials such as Linear and email. Provider consumers may use their declared
 environment fallback when no broker entry exists; Discord account and internal
 body credentials remain broker-only. The only internal bearer environment
-exceptions are the documented operator/captain/runner test and CI overrides.
+exceptions are the documented operator and captain test/CI overrides.
 
 Storage implementation and grant validation details live in
 [`@clankie/credential-broker`](../packages/credential-broker/README.md).

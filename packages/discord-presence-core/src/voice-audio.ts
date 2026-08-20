@@ -22,33 +22,6 @@ export function discordPcmToSpeechPcm(input: Uint8Array): Buffer {
   return output;
 }
 
-/**
- * Converts interleaved 48 kHz stereo s16le into the 24 kHz mono s16le the
- * realtime input buffer expects (ADR 0057). Channels are averaged into mono,
- * then adjacent frame pairs are averaged down to 24 kHz — a cheap low-pass
- * that keeps the whole path in memory, like the converters around it.
- */
-export function discordPcmToRealtimePcm(input: Uint8Array): Buffer {
-  const source = Buffer.from(input);
-  const frameBytes = PCM_SAMPLE_BYTES * DISCORD_VOICE_CHANNELS;
-  const sourceFrames = Math.floor(source.byteLength / frameBytes);
-  const outputFrames = Math.floor(sourceFrames / 2);
-  const output = Buffer.allocUnsafe(outputFrames * PCM_SAMPLE_BYTES);
-  for (let outputFrame = 0; outputFrame < outputFrames; outputFrame += 1) {
-    const sourceOffset = outputFrame * 2 * frameBytes;
-    const first = monoSample(source, sourceOffset);
-    const second = monoSample(source, sourceOffset + frameBytes);
-    output.writeInt16LE(Math.trunc((first + second) / 2), outputFrame * PCM_SAMPLE_BYTES);
-  }
-  return output;
-}
-
-function monoSample(source: Buffer, offset: number): number {
-  const left = source.readInt16LE(offset);
-  const right = source.readInt16LE(offset + PCM_SAMPLE_BYTES);
-  return Math.trunc((left + right) / 2);
-}
-
 /** Wraps mono s16le samples in the canonical PCM WAV container accepted by whisper.cpp. */
 export function encodeMonoPcmWav(pcmInput: Uint8Array, sampleRate = SPEECH_SAMPLE_RATE): Buffer {
   const pcm = Buffer.from(pcmInput);
@@ -74,35 +47,6 @@ export function encodeMonoPcmWav(pcmInput: Uint8Array, sampleRate = SPEECH_SAMPL
   wav.writeUInt32LE(pcm.byteLength, 40);
   pcm.copy(wav, 44);
   return wav;
-}
-
-/**
- * Converts OpenAI's 24 kHz mono s16le PCM into the 48 kHz stereo raw PCM
- * expected by @discordjs/voice. Linear interpolation avoids a subprocess and
- * keeps synthesized speech entirely in memory.
- */
-export function openAiPcmToDiscordPcm(input: Uint8Array): Buffer {
-  const source = Buffer.from(input);
-  if (source.byteLength % PCM_SAMPLE_BYTES !== 0) {
-    throw new Error("OpenAI voice PCM must contain whole s16le samples");
-  }
-  const samples = source.byteLength / PCM_SAMPLE_BYTES;
-  if (samples === 0) return Buffer.alloc(0);
-  const output = Buffer.allocUnsafe(samples * 2 * DISCORD_VOICE_CHANNELS * PCM_SAMPLE_BYTES);
-  for (let index = 0; index < samples; index += 1) {
-    const current = source.readInt16LE(index * PCM_SAMPLE_BYTES);
-    const next = index + 1 < samples ? source.readInt16LE((index + 1) * PCM_SAMPLE_BYTES) : current;
-    const midpoint = Math.trunc((current + next) / 2);
-    writeStereoFrame(output, index * 2, current);
-    writeStereoFrame(output, index * 2 + 1, midpoint);
-  }
-  return output;
-}
-
-function writeStereoFrame(output: Buffer, frame: number, sample: number): void {
-  const offset = frame * DISCORD_VOICE_CHANNELS * PCM_SAMPLE_BYTES;
-  output.writeInt16LE(sample, offset);
-  output.writeInt16LE(sample, offset + PCM_SAMPLE_BYTES);
 }
 
 /**

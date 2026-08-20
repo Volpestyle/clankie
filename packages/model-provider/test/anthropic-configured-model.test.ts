@@ -5,7 +5,7 @@ import type { CredentialStore, ProviderCredential, RedactedCredential } from "@c
 import { CatalogSchema } from "@clankie/model-registry";
 import { generateText } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { ANTHROPIC_OAUTH_BETA_FEATURES, resolveConfiguredLanguageModel } from "../src/index.ts";
+import { resolveConfiguredLanguageModel } from "../src/index.ts";
 
 const tempDirs: string[] = [];
 
@@ -136,7 +136,9 @@ describe("configured Anthropic captain models", () => {
     expect(capturedHeaders.get("authorization")).toBe("Bearer subscription-access");
     expect(capturedHeaders.get("x-api-key")).toBeNull();
     const features = capturedHeaders.get("anthropic-beta")?.split(",") ?? [];
-    for (const feature of ANTHROPIC_OAUTH_BETA_FEATURES) expect(features).toContain(feature);
+    for (const feature of ["oauth-2025-04-20", "claude-code-20250219"]) {
+      expect(features).toContain(feature);
+    }
     expect(capturedBody).not.toContain("subscription-access");
     expect(capturedBody).not.toContain("subscription-refresh");
   });

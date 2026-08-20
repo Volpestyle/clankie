@@ -82,7 +82,10 @@ settles.
 
 Guild/channel settings come from `~/.config/clankie/settings.json`. The launcher
 injects repository paths and local service credentials where required, while
-Discord body identities resolve directly from the credential broker.
+Discord body identities resolve directly from the credential broker. The
+launcher starts only the selected Discord body; that body owns one `clankvox`
+child through `@clankie/vox-client`, so Vox is not a separately supervised
+credential holder.
 
 ## Operator behavior
 
@@ -119,12 +122,12 @@ on|off` remain available for direct use. Restart Clankie to apply a change.
 - `/auth` writes provider keys and OAuth credentials to the credential broker.
   `/auth status` may also report compatibility provider environment fallbacks;
   Discord and body credentials remain broker-only except documented
-  operator/captain/runner test overrides.
+  operator/captain test overrides.
 - `/voice` selects OpenAI Realtime, Grok Voice, or OpenAI plus ElevenLabs and
   configures the active model, voice, xAI reasoning effort, and brokered API
   keys. `/voice status` shows the effective settings and environment overrides.
 - YouTube music is an ordinary prompt, not a slash command. Audible playback is
-  on the official-bot voice path; see the
+  on the active Discord body's Vox primary-voice role; see the
   [Discord media guide](../../docs/discord-media.md).
 - `/provider`, `/model`, and `/effort` select the captain. The header carries
   the effective Pi model and effort after subscription routing, effective-ref

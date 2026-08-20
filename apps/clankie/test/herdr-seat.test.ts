@@ -1,6 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   formatHerdrSessionCensus,
@@ -8,7 +5,6 @@ import {
   readHerdrSessionCensus,
 } from "../src/captain/herdr-census.ts";
 import { operatorPromptWithHerdrSeat } from "../src/captain/herdr-seat.ts";
-import { readHerdrSummariesFile, upsertHerdrSummaries } from "../src/captain/herdr-summaries.ts";
 
 const list = {
   result: {
@@ -91,21 +87,5 @@ describe("operatorPromptWithHerdrSeat", () => {
     expect(prompt).toContain("<herdr_session>");
     expect(prompt).toContain("w15:pQ  claude  done");
     expect(prompt.endsWith("harvest the done panes")).toBe(true);
-  });
-});
-
-describe("upsertHerdrSummaries", () => {
-  it("merges by pane and does not drop siblings", () => {
-    const dir = mkdtempSync(join(tmpdir(), "herdr-summaries-"));
-    const path = join(dir, "summaries.json");
-    try {
-      upsertHerdrSummaries({ "w1:p1": { summary: "first" } }, path);
-      upsertHerdrSummaries({ "w1:p2": { summary: "second", next: "harvest" } }, path);
-      const file = readHerdrSummariesFile(path);
-      expect(file.agents["w1:p1"]?.summary).toBe("first");
-      expect(file.agents["w1:p2"]).toMatchObject({ summary: "second", next: "harvest" });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });

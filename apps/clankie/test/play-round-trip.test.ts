@@ -1,10 +1,9 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-  acquireBodyLock,
   DeterministicGbaCoreDouble,
   FrozenGbaScenarioSchema,
   listGbaCheckpoints,
@@ -16,15 +15,10 @@ import {
   type GbaAdapterScenario,
 } from "@clankie/gba-emulator";
 import type { FreePlayMind, GbaCoreSeam } from "@clankie/gba-emulator";
-import type {
-  EmbodimentAssignment,
-  EmbodimentClaim,
-  EmbodimentLifecycleReport,
-  EmbodimentSession,
-} from "@clankie/protocol";
+import type { EmbodimentSession } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
-import { PlayHost } from "../src/play-host.ts";
+import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
 import type { ActivityObservationSnapshot } from "@clankie/interactive-environment";
 
 const silentLogger = {
@@ -46,13 +40,13 @@ const buttonMasher = () =>
 
 function fakeClient(assignment: EmbodimentAssignment) {
   const assignments = [assignment];
-  const reports: EmbodimentLifecycleReport[] = [];
+  const reports: EmbodimentLifecycleUpdate[] = [];
   return {
     reports,
-    claimEmbodiment(_claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
+    claimEmbodiment(): Promise<EmbodimentAssignment | undefined> {
       return Promise.resolve(assignments.shift());
     },
-    reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
+    reportEmbodiment(report: EmbodimentLifecycleUpdate): Promise<unknown> {
       reports.push(report);
       return Promise.resolve({});
     },
@@ -74,14 +68,13 @@ function session(maxTurns = 2): EmbodimentSession {
     budget: { maxTurns, maxDurationMs: 60_000 },
     requestedAt: "2026-07-26T12:00:00.000Z",
     updatedAt: "2026-07-26T12:00:01.000Z",
-    runnerId: "runner-local",
   };
 }
 
 async function playEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-play-round-trip-"));
   return {
-    CLANKIE_GBA_BODY_ROOT: join(root, "body"),
+    XDG_STATE_HOME: join(root, "state"),
     CLANKIE_GBA_CHECKPOINT_DIR: join(root, "checkpoints"),
     CLANKIE_GBA_PLAY_JOURNAL_DIR: join(root, "gba-play"),
     CLANKIE_ACTIVITY_PRODUCER_URL: "ws://127.0.0.1:1/producer",
@@ -96,7 +89,6 @@ describe("asked play round trip on the deterministic double", () => {
     const clearedSessions: string[] = [];
     const host = new PlayHost({
       client,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -212,7 +204,6 @@ describe("asked play round trip on the deterministic double", () => {
     const first = fakeClient({ kind: "start", session: session() });
     const firstHost = new PlayHost({
       client: first,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -248,7 +239,6 @@ describe("asked play round trip on the deterministic double", () => {
     const second = fakeClient({ kind: "start", session: session() });
     const secondHost = new PlayHost({
       client: second,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -319,7 +309,6 @@ describe("asked play round trip on the deterministic double", () => {
     const first = fakeClient({ kind: "start", session: session(1) });
     const firstHost = new PlayHost({
       client: first,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -383,7 +372,6 @@ describe("asked play round trip on the deterministic double", () => {
     const second = fakeClient({ kind: "start", session: session(2) });
     const secondHost = new PlayHost({
       client: second,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: warningLogger,
@@ -459,7 +447,6 @@ describe("asked play round trip on the deterministic double", () => {
     const client = fakeClient({ kind: "start", session: session(5) });
     const host = new PlayHost({
       client,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -545,7 +532,6 @@ describe("asked play round trip on the deterministic double", () => {
     const client = fakeClient({ kind: "start", session: session(2) });
     const host = new PlayHost({
       client,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -569,32 +555,6 @@ describe("asked play round trip on the deterministic double", () => {
     expect(banked?.continuity).toEqual({ notes: "about to start over", objective: null });
   });
 
-  it("refuses body_held when another process holds the body lock", async () => {
-    const env = await playEnv();
-    await mkdir(env["CLANKIE_GBA_BODY_ROOT"] as string, { recursive: true });
-    const lock = acquireBodyLock({
-      rootDir: env["CLANKIE_GBA_BODY_ROOT"] as string,
-      holderId: "claude-code-possession",
-    });
-    try {
-      const client = fakeClient({ kind: "start", session: session() });
-      const host = new PlayHost({
-        client,
-        runnerId: "runner-local",
-        environmentIds: ["pokemon-firered"],
-        execute: createGbaPlayExecution({ logger: silentLogger, env, createMind: buttonMasher }),
-        logger: silentLogger,
-      });
-      await host.poll();
-      await host.settled();
-      expect(client.reports).toEqual([
-        expect.objectContaining({ state: "refused", refusalReason: "body_held" }),
-      ]);
-    } finally {
-      lock.release();
-    }
-  });
-
   it("keeps the game running while he thinks, so the watched screen never freezes", async () => {
     // The core advances only when dispatch drives it, which left the activity
     // surface a still image for the whole thinking gap — two thirds of the wall
@@ -611,7 +571,7 @@ describe("asked play round trip on the deterministic double", () => {
     );
     const doubleScenario = FrozenGbaScenarioSchema.parse(JSON.parse(doubleBytes.toString("utf8")));
 
-    // Only the wiring is under test here: that the runner installs a console
+    // Only the wiring is under test here: that the local host installs a console
     // clock and ticks it while he thinks. Standing off during an action is the
     // core's own guard, covered against a real core in the emulator package.
     let idled = 0;
@@ -645,7 +605,6 @@ describe("asked play round trip on the deterministic double", () => {
     const client = fakeClient({ kind: "start", session: session() });
     const host = new PlayHost({
       client,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,

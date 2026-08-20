@@ -1,4 +1,4 @@
-import { encodeReactionEmoji } from "@clankie/discord-presence-core";
+import { planDiscordRestAction, resolveDiscordRestActionResult } from "@clankie/discord-presence-core";
 import {
   isDiscordPresenceActionAvailable,
   type DiscordPresenceSessionRecord,
@@ -9,7 +9,7 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
 } from "@clankie/protocol";
-import { ChannelType, REST, Routes } from "discord.js";
+import { REST, Routes } from "discord.js";
 
 /** Discord invite target type for launching an embedded application (activity). */
 const INVITE_TARGET_TYPE_EMBEDDED_APPLICATION = 2;
@@ -73,17 +73,16 @@ export class DiscordBotPresenceRuntime {
     }
 
     const payload = write.payload;
+    const restPlan = planDiscordRestAction(payload);
+    if (restPlan !== undefined) {
+      const response = await this.rest[restPlan.method](
+        restPlan.path as `/${string}`,
+        restPlan.body === undefined ? undefined : { body: restPlan.body },
+      );
+      const ids = resolveDiscordRestActionResult(restPlan, response);
+      return result(write, ids.channelId, ids.messageId);
+    }
     switch (payload.kind) {
-      case "reply": {
-        const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
-          body: {
-            content: payload.content,
-            message_reference: { message_id: payload.messageId },
-            allowed_mentions: { parse: [] },
-          },
-        })) as { id?: string };
-        return result(write, payload.channelId, message.id);
-      }
       /**
        * His reply with a picture he made on the same turn (ADR 0085). One
        * message, not a reply followed by an attachment: two posts would read as
@@ -121,73 +120,6 @@ export class DiscordBotPresenceRuntime {
               }),
         })) as { id?: string };
         return result(write, payload.channelId, message.id);
-      }
-      case "send_message": {
-        const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
-          body: {
-            content: payload.content,
-            ...(payload.replyToMessageId === undefined
-              ? {}
-              : { message_reference: { message_id: payload.replyToMessageId } }),
-            allowed_mentions: { parse: [] },
-          },
-        })) as { id?: string };
-        return result(write, payload.channelId, message.id);
-      }
-      case "react": {
-        await this.rest.put(
-          Routes.channelMessageOwnReaction(
-            payload.channelId,
-            payload.messageId,
-            encodeReactionEmoji(payload.emoji),
-          ),
-        );
-        return result(write, payload.channelId, payload.messageId);
-      }
-      case "unreact": {
-        await this.rest.delete(
-          Routes.channelMessageOwnReaction(
-            payload.channelId,
-            payload.messageId,
-            encodeReactionEmoji(payload.emoji),
-          ),
-        );
-        return result(write, payload.channelId, payload.messageId);
-      }
-      case "edit_own_message": {
-        await this.rest.patch(Routes.channelMessage(payload.channelId, payload.messageId), {
-          body: { content: payload.content },
-        });
-        return result(write, payload.channelId, payload.messageId);
-      }
-      case "delete_own_message": {
-        await this.rest.delete(Routes.channelMessage(payload.channelId, payload.messageId));
-        return result(write, payload.channelId, payload.messageId);
-      }
-      case "typing_start": {
-        await this.rest.post(Routes.channelTyping(payload.channelId));
-        return result(write, payload.channelId);
-      }
-      case "create_thread": {
-        if (payload.messageId === undefined) {
-          // API v10 start-thread-without-message requires an explicit channel type.
-          const thread = (await this.rest.post(Routes.threads(payload.channelId), {
-            body: {
-              name: payload.name,
-              auto_archive_duration: 1_440,
-              type: ChannelType.PublicThread,
-            },
-          })) as { id?: string };
-          return result(write, thread.id ?? payload.channelId);
-        }
-        const thread = (await this.rest.post(Routes.threads(payload.channelId, payload.messageId), {
-          body: { name: payload.name, auto_archive_duration: 1_440 },
-        })) as { id?: string };
-        return result(write, thread.id ?? payload.channelId);
-      }
-      case "join_thread": {
-        await this.rest.put(Routes.threadMembers(payload.channelId, "@me"));
-        return result(write, payload.channelId);
       }
       case "send_attachment": {
         if (this.resolveAttachment === undefined) {
@@ -248,8 +180,7 @@ export class DiscordBotPresenceRuntime {
         return result(write, payload.channelId);
       }
       default: {
-        const _exhaustive: never = payload;
-        throw new Error(`discord_presence_unknown_payload:${JSON.stringify(_exhaustive)}`);
+        throw new Error(`discord_presence_unknown_payload:${JSON.stringify(payload)}`);
       }
     }
   }
@@ -324,15 +255,4 @@ function result(
     ...(channelId === undefined ? {} : { channelId }),
     ...(messageId === undefined ? {} : { messageId }),
   });
-}
-
-export { encodeReactionEmoji } from "@clankie/discord-presence-core";
-
-export function createDiscordBotPresenceRuntime(options: DiscordBotPresenceRuntimeOptions): {
-  execute: DiscordBotPresenceRuntime["execute"];
-} {
-  const runtime = new DiscordBotPresenceRuntime(options);
-  return {
-    execute: (write, session) => runtime.execute(write, session),
-  };
 }

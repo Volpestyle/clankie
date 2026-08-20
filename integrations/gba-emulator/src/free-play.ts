@@ -32,6 +32,7 @@ export * from "./free-play-bounds.ts";
 import { canonicalJson, sha256 } from "./core-double.ts";
 import { GbaCheckpointLabelSchema } from "./checkpoint.ts";
 import type { GbaDriverIo } from "./driver.ts";
+import type { GbaCheckpointSummary } from "./checkpoint.ts";
 import {
   described,
   FreePlayProgressTracker,
@@ -50,7 +51,7 @@ import {
  * emulator catalog ([ADR 0075](../../../docs/adr/0075-rewinding-is-a-play-choice.md)).
  *
  * State loads have always lived outside the adapter — ADR 0060 shipped save
- * and load as possession hooks beside the action surface, not inside it — and
+ * and load as checkpoint hooks beside the action surface, not inside it — and
  * these follow that shape: the loop consults a checkpoint port the composer
  * injects, and the governed emulator catalog does not change. What changes is
  * *who may want one*: the owner ruled that restarting or loading a save is a
@@ -374,7 +375,7 @@ export const FreePlayTurnSchema = z
      * His volition fired this turn — he judged the moment worth a word —
      * regardless of who ended up authoring it or whether the gate let it out.
      * True on room-authored turns where `speak` is deliberately null, which is
-     * what the possessor seam reports on.
+     * what the play voice seam reports on.
      */
     speakWanted: z.boolean().default(false),
     action: FreePlayActionSchema.nullable(),
@@ -386,7 +387,7 @@ export const FreePlayTurnSchema = z
      * this says whether he moved, was blocked, or changed nothing.
      *
      * Observation only. Everything that reads this field is an audience — the
-     * activity overlay, the story card, and the possessor seam that hands a
+     * activity overlay, the story card, and the play voice seam that hands a
      * voice room what just happened — so the coaching half lives next door.
      */
     effect: z.string().max(200).nullable(),
@@ -503,14 +504,6 @@ export class InterjectionQueue {
   }
 }
 
-/** One checkpoint, as the listing and the load report it to the player. */
-export interface FreePlayCheckpointSummary {
-  checkpointId: string;
-  label: string | null;
-  capturedAt: string;
-  position: { mapId: string; x: number; y: number } | null;
-}
-
 /**
  * The body's saved time, as the loop may touch it (ADR 0075).
  *
@@ -522,15 +515,15 @@ export interface FreePlayCheckpointSummary {
  */
 export interface FreePlayCheckpointPort {
   /** Every loadable checkpoint, newest first. */
-  list(): FreePlayCheckpointSummary[];
+  list(): GbaCheckpointSummary[];
   /** Mint the current body and mind as a new immutable checkpoint. */
   save(input: {
     label?: string | undefined;
     position: GbaPosition | null;
     continuity: { notes: string | null; objective: string | null };
-  }): FreePlayCheckpointSummary;
+  }): GbaCheckpointSummary;
   /** Restore one by id. Throws with a self-describing reason on refusal. */
-  load(checkpointId: string): FreePlayCheckpointSummary;
+  load(checkpointId: string): GbaCheckpointSummary;
   /** Reboot to the configured starting savestate. */
   restart(): void;
 }
@@ -1047,7 +1040,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     }
     // Only the observation is stored. `effect.advice` is the harness coaching
     // his next press, and everything downstream of this record is an audience:
-    // the overlay, the story card, and the possessor seam that hands a voice
+    // the overlay, the story card, and the play voice seam that hands a voice
     // room what just happened. A room told "hold the direction longer to move"
     // hears him directing *them*, which is how he ended up sounding like the
     // spectators were the ones playing. The advice goes to the mind alone.
@@ -1112,7 +1105,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     // His own volition, read before anyone decides who authors the words.
     // ADR 0074 moves *authorship* to the room; it does not move the judgement
     // of whether this moment was worth remarking on at all. Keeping that
-    // judgement is what lets the possessor seam report the turns he thought
+    // judgement is what lets the play voice seam report the turns he thought
     // were worth a word, instead of narrating every turn's diagnostics.
     const ownWish = parsed.data.speak ?? null;
     let wants = roomAuthors ? null : ownWish;

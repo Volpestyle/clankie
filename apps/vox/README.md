@@ -2,14 +2,16 @@
 
 Vox is Clankie's native Discord media implementation: realtime sockets, codecs,
 packet timing, encryption, capture, playback, screen watch, and Go Live. The
-current product rollout uses Vox for the active lab user body's screen-watch and
-Go Live paths. Ordinary bot and user-session voice and audible music still use
-`@discordjs/voice`; Vox's voice/audio contract is implemented for a separately
-evidenced migration ([ADR 0100](../../docs/adr/0100-vox-is-an-owned-native-media-package.md)).
+media-enabled active bot or user-session body owns one Vox child; a text-only
+official-bot process does not spawn Vox. Vox is the sole media owner for primary
+voice, capture, TTS, and audible music in both media-enabled bodies, plus
+concurrent screen-watch and Go Live roles in the user body
+([ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md)).
 
-![Vox native media architecture](../../docs/diagrams/vox-architecture.jpg)
-
-[Editable Turbopuffer tldraw source](../../docs/diagrams/vox-architecture.tldraw)
+The canonical current diagram is in
+[ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md). The old
+JPG/tldraw export under `docs/diagrams/` is a historical screen-watch rollout
+snapshot.
 
 Discord is the only platform ClankVox targets today, and this package
 documents that Discord transport. Another platform's media transport would live
@@ -41,7 +43,7 @@ ClankVox reports transport truth and leaves the product decisions to Clankie.
 ## 2. Mental Model
 
 The cross-package/process map is the diagram above. The
-[internal transport map](./docs/diagram.md) details Vox modules and roles.
+[architecture guide](./docs/architecture.md) details Vox modules and roles.
 
 Clankie owns product policy and ClankVox owns deterministic media mechanics; they
 meet at the stdin/stdout IPC boundary. The Discord transport exposes three roles
@@ -78,14 +80,14 @@ Most behavior is split across supervisor-style modules:
 
 - [Architecture](./docs/architecture.md): process model, ownership boundaries,
   transport roles, IPC, and module map.
-- [Diagram](./docs/diagram.md): docs-UI-friendly media-plane map.
 - [Audio Pipeline](./docs/audio-pipeline.md): capture, TTS, music, playback
   pacing, and telemetry.
 - [Go Live](./docs/go-live.md): native screen watch, native self publish,
   stream discovery, sender/receiver flows.
 
-The product integration lives in
-[`apps/discord-user-session`](../discord-user-session/README.md), which imports the
+The product integrations live in
+[`apps/discord-bridge`](../discord-bridge/README.md) and
+[`apps/discord-user-session`](../discord-user-session/README.md). Both import the
 separately Apache-licensed process client from `@clankie/vox-client`. The
 [Discord media guide](../../docs/discord-media.md) describes the user-visible
 Activity, Go Live, share-watch, and music differences.
@@ -113,8 +115,8 @@ through cmake, and cmake >= 4 refuses its vendored `cmake_minimum_required`
 without that floor).
 
 The client resolves `target/release/clankvox`, then
-`target/debug/clankvox`, then the compatibility installation at
-`~/.clankie/bin/clankvox`. `CLANKIE_VOX_BIN` explicitly selects another build.
+`target/debug/clankvox`. `CLANKIE_VOX_BIN` explicitly selects another build,
+which must pass the same mandatory IPC protocol handshake.
 
 ## License boundary
 
@@ -126,12 +128,32 @@ media implementation explicit rather than silently relicensing it.
 ## Discord Boundaries
 
 - ClankVox implements Discord voice and Go Live transport; Discord is the only
-  platform it targets today. Current product integration consumes the two Go
-  Live roles, not native ordinary voice/music.
+  platform it targets today. Both media-enabled bodies consume native ordinary
+  voice/music; the user body additionally consumes the two Go Live roles.
 - Inbound native screen watch is integrated end to end through `stream_watch`.
-- Outbound publish exists and is intentionally narrow: YouTube-backed
-  music/video URLs plus browser-session PNG frames, H264 sender transport, and
+- Outbound publish exists and is intentionally narrow: YouTube-backed video
+  URLs plus browser-session PNG frames, H264 sender transport, and
   Clankie-owned source orchestration.
 - Native Go Live behavior depends on Discord user-token/selfbot flows.
 - Go Live DAVE video decrypt and raw UDP keyframe feedback remain the important
   transport constraints; see [Go Live](./docs/go-live.md) for detail.
+
+## Readiness
+
+`process_ready` includes the mandatory IPC protocol version; the client accepts
+no commands until it exactly matches `VOX_IPC_PROTOCOL_VERSION`.
+`process_ready`, role-scoped `transport_state=ready`, and role-scoped positive
+`dave_state=ready` are three different facts. Voice does not emit `joined`
+until its transport is ready and DAVE reports a protocol version greater than
+zero. Screen watch and publish retain separate transports, DAVE managers, and
+live proofs. A primary voice leave clears only that role; the child and any
+active stream roles survive until their owning body shuts them down. Primary
+`ready`, `connection_state`, `transport_state`, `dave_state`, and transport
+error events carry the caller's `connectionId`; internal transport generations
+discard delayed events from replaced sockets. DAVE state is monotonic within a
+generation, including when `DaveReady` arrives before `Ready`.
+
+TTS playback is correlated by `playbackId`. `buffered` means PCM was accepted
+into the queue, `started` means an audible TTS-containing RTP frame was
+successfully transmitted, and `drained` follows `finish_tts_playback` only after
+PCM, the held partial tail, and trailing output frames have crossed the sender.

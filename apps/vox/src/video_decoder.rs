@@ -17,34 +17,7 @@ use tracing::{info, warn};
 pub(crate) struct DecodedFrame {
     pub(crate) width: u32,
     pub(crate) height: u32,
-    /// Instantaneous normalized luma diff (0.0–1.0) between this frame and the
-    /// previous one, computed on a coarse 64×36 grid.  0.0 = identical,
-    /// 1.0 = every sampled pixel changed by maximum amount.
-    pub(crate) change_score: f32,
-    /// EMA-smoothed change score.  Rises when sustained visual change occurs
-    /// across multiple consecutive frames; filters out single-frame noise
-    /// (compression shimmer, cursor blink, HUD animation).
-    pub(crate) ema_change_score: f32,
-    /// True when the instantaneous change score is high enough to indicate a
-    /// hard cut (scene change, app switch, new page load, etc.).
-    pub(crate) is_scene_cut: bool,
 }
-
-// ── Frame-diff constants ────────────────────────────────────────────────
-
-/// Coarse-grid dimensions used for luma diff sampling.
-/// 64×36 = 2 304 samples — cheap enough to run every frame while capturing
-/// meaningful spatial structure.
-const DIFF_GRID_W: usize = 64;
-const DIFF_GRID_H: usize = 36;
-const DIFF_GRID_SIZE: usize = DIFF_GRID_W * DIFF_GRID_H;
-
-/// EMA decay factor.  0.35 means each new frame contributes 35 % and history
-/// contributes 65 %.  At 2 fps this gives a ~1.5 s smoothing window.
-const EMA_ALPHA: f32 = 0.35;
-
-/// Instantaneous diff above this is classified as a scene cut.
-const SCENE_CUT_THRESHOLD: f32 = 0.40;
 
 /// DECODING_STATE bitmask for states where the decoder may have produced a
 /// usable frame (even if concealed or with lost references).  We accept
@@ -77,12 +50,6 @@ pub(crate) struct PersistentVideoDecoder {
     reset_pending_pli: bool,
     /// Reusable RGB buffer to avoid per-frame allocation.
     rgb_buf: Vec<u8>,
-
-    // ── Frame-diff state ────────────────────────────────────────────
-    /// Coarse luma grid from the previously decoded frame.
-    prev_luma_grid: Vec<u8>,
-    /// EMA-smoothed change score, persists across frames.
-    ema_change: f32,
 }
 
 /// Configure error concealment on an OpenH264 decoder.
@@ -117,8 +84,6 @@ impl PersistentVideoDecoder {
             frames_decoded_since_reset: 0,
             reset_pending_pli: false,
             rgb_buf: Vec::new(),
-            prev_luma_grid: Vec::new(),
-            ema_change: 0.0,
         })
     }
 
@@ -239,66 +204,10 @@ impl PersistentVideoDecoder {
             );
         }
 
-        // ── Coarse luma diff ─────────────────────────────────────
-        let (change_score, ema_change_score, is_scene_cut) = self.compute_change(width, height);
-
         Some(DecodedFrame {
             width: width as u32,
             height: height as u32,
-            change_score,
-            ema_change_score,
-            is_scene_cut,
         })
-    }
-
-    /// Compute a coarse luma diff between the current `rgb_buf` and the
-    /// previous frame's luma grid.  Updates internal EMA and prev grid.
-    ///
-    /// Returns `(instantaneous_score, ema_score, is_scene_cut)`.
-    /// First frame always returns (0.0, 0.0, false) because there is no
-    /// previous frame to compare against.
-    fn compute_change(&mut self, width: usize, height: usize) -> (f32, f32, bool) {
-        // Build a coarse luma grid by sampling the RGB buffer at evenly
-        // spaced grid points.  Luma ≈ 0.299 R + 0.587 G + 0.114 B, but
-        // integer approximation (77 R + 150 G + 29 B) >> 8 is plenty.
-        let mut grid = vec![0u8; DIFF_GRID_SIZE];
-        for gy in 0..DIFF_GRID_H {
-            let src_y = (gy * height) / DIFF_GRID_H;
-            for gx in 0..DIFF_GRID_W {
-                let src_x = (gx * width) / DIFF_GRID_W;
-                let idx = (src_y * width + src_x) * 3;
-                if idx + 2 < self.rgb_buf.len() {
-                    let r = self.rgb_buf[idx] as u32;
-                    let g = self.rgb_buf[idx + 1] as u32;
-                    let b = self.rgb_buf[idx + 2] as u32;
-                    grid[gy * DIFF_GRID_W + gx] = ((77 * r + 150 * g + 29 * b) >> 8) as u8;
-                }
-            }
-        }
-
-        // Compare against previous grid.
-        let change_score = if self.prev_luma_grid.len() == DIFF_GRID_SIZE {
-            let mut total_diff: u64 = 0;
-            for i in 0..DIFF_GRID_SIZE {
-                let diff = (grid[i] as i16 - self.prev_luma_grid[i] as i16).unsigned_abs() as u64;
-                total_diff += diff;
-            }
-            // Normalize: max possible diff per sample is 255.
-            (total_diff as f64 / (DIFF_GRID_SIZE as f64 * 255.0)) as f32
-        } else {
-            // First frame — no previous data to compare.
-            0.0
-        };
-
-        // Update EMA.
-        self.ema_change = EMA_ALPHA * change_score + (1.0 - EMA_ALPHA) * self.ema_change;
-
-        let is_scene_cut = change_score >= SCENE_CUT_THRESHOLD;
-
-        // Store current grid as previous for next frame.
-        self.prev_luma_grid = grid;
-
-        (change_score, self.ema_change, is_scene_cut)
     }
 
     /// Encode the most recently decoded frame (held in the internal RGB
@@ -342,8 +251,6 @@ impl PersistentVideoDecoder {
                 self.consecutive_errors = 0;
                 self.frames_decoded_since_reset = 0;
                 self.reset_pending_pli = true;
-                self.prev_luma_grid.clear();
-                self.ema_change = 0.0;
                 self.last_reset_at = Some(now);
             }
             Err(e) => warn!("clankvox_openh264_decoder_reset_failed: {e}"),

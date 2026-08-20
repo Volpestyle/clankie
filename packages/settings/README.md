@@ -10,7 +10,7 @@ Operator-facing **non-secret** configuration, stored at
 validates typed token patterns. The broker is canonical; some model/media
 providers retain compatibility API-key environment fallbacks, while Discord
 account tokens and broker-only body bearers reject environment copies.
-Operator, captain, and runner bearers retain explicit test/CI overrides.
+Operator and captain bearers retain explicit test/CI overrides.
 The [credential guide](../../docs/credentials.md) lists the concrete account and
 local bearer identities.
 

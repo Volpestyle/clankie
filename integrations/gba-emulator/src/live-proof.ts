@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import type { MgbaCoreIdentity } from "./mgba-core.ts";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const IdentitySchema = z
@@ -75,12 +76,9 @@ export interface FireRedLiveProofReport {
   readonly schemaVersion: 1;
   readonly passed: boolean;
   readonly checks: readonly { readonly name: string; readonly ok: boolean }[];
-  readonly identity: {
+  readonly identity: MgbaCoreIdentity & {
     readonly scenarioId: "firered-oaks-lab-rival";
     readonly fixtureSha256: string;
-    readonly romSha256: string;
-    readonly savestateSha256: string;
-    readonly coreWasmSha256: string;
   };
 }
 

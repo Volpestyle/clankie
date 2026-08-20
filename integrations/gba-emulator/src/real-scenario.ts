@@ -1,5 +1,6 @@
 import {
   EnvironmentSemanticEventSchema,
+  GBA_EMULATOR_LOCAL_CAPABILITIES,
   GbaEmulatorSessionSpecSchema,
   GbaMapPositionSchema,
   type EnvironmentEvent,
@@ -11,10 +12,11 @@ import {
 } from "@clankie/interactive-environment";
 import { EnvironmentAdapterActionError, EnvironmentRuntime } from "@clankie/environment-runtime";
 import { z } from "zod";
-import { GbaEmulatorAdapter } from "./adapter.ts";
+import { GbaEmulatorAdapter, boundedShortestPath } from "./adapter.ts";
 import { Sha256Schema, type GbaEmulatorTrace } from "./contracts.ts";
-import { canonicalJson, sha256 } from "./core-double.ts";
+import { sha256 } from "./core-double.ts";
 import type { GbaCoreSeam } from "./core-seam.ts";
+import type { MgbaCoreIdentity } from "./mgba-core.ts";
 
 /**
  * Real-core route scenario (VUH-913, ADR 0040): Clankie boots the real
@@ -294,12 +296,6 @@ export const RealGbaScenarioReportSchema = z
   });
 export type RealGbaScenarioReport = z.infer<typeof RealGbaScenarioReportSchema>;
 
-const ALL_EMULATOR_CAPABILITIES = [
-  "emulator.gba.observe",
-  "emulator.gba.input",
-  "emulator.gba.frame_advance",
-  "emulator.gba.wait",
-] as const;
 const ACTION_LIMITS = { maxInputs: 8, maxFrames: 600, timeoutMs: 5_000 } as const;
 const RUN_CLOCK = "2026-07-19T00:00:00.000Z";
 
@@ -326,34 +322,18 @@ export function nextRealRouteStep(
     { button: "left", dx: -1, dy: 0 },
     { button: "up", dx: 0, dy: -1 },
   ];
-  const queue: { x: number; y: number; first: Direction | null }[] = [
-    { x: position.x, y: position.y, first: null },
-  ];
-  const seen = new Set([`${String(position.x)},${String(position.y)}`]);
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current) break;
-    if (current.x === target.x && current.y === target.y && current.first) return current.first;
-    for (const direction of directions) {
-      const next = { x: current.x + direction.dx, y: current.y + direction.dy };
-      const key = `${String(next.x)},${String(next.y)}`;
-      const edge = `${String(current.x)},${String(current.y)}>${key}`;
-      if (
-        next.x < bounds.minX ||
-        next.x > bounds.maxX ||
-        next.y < bounds.minY ||
-        next.y > bounds.maxY ||
-        blocked.has(key) ||
-        blockedEdges.has(edge) ||
-        seen.has(key)
-      ) {
-        continue;
-      }
-      seen.add(key);
-      queue.push({ ...next, first: current.first ?? direction.button });
-    }
-  }
-  return null;
+  const path = boundedShortestPath(position, target, directions, (current, next) => {
+    const key = `${String(next.x)},${String(next.y)}`;
+    return (
+      next.x >= bounds.minX &&
+      next.x <= bounds.maxX &&
+      next.y >= bounds.minY &&
+      next.y <= bounds.maxY &&
+      !blocked.has(key) &&
+      !blockedEdges.has(`${String(current.x)},${String(current.y)}>${key}`)
+    );
+  });
+  return path?.[0]?.step.button ?? null;
 }
 
 export interface RunRealGbaScenarioInput {
@@ -363,7 +343,7 @@ export interface RunRealGbaScenarioInput {
   /** Pre-initialized core behind the adapter seam (real mGBA, or a CI stub). */
   core: GbaCoreSeam;
   /** Digests the core actually verified at creation; checked against pins. */
-  coreIdentity?: { romSha256: string; savestateSha256: string; coreWasmSha256: string };
+  coreIdentity?: MgbaCoreIdentity;
 }
 
 export interface RunRealGbaScenarioResult {
@@ -399,7 +379,7 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
       maxInputsPerAction: ACTION_LIMITS.maxInputs,
       maxFramesPerAction: ACTION_LIMITS.maxFrames,
       maxActionDurationMs: ACTION_LIMITS.timeoutMs,
-      capabilities: ALL_EMULATOR_CAPABILITIES,
+      capabilities: GBA_EMULATOR_LOCAL_CAPABILITIES,
     },
   });
   const adapter = new GbaEmulatorAdapter(scenario, input.fixtureSha256, () => input.core);
@@ -520,7 +500,7 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
     }
 
     let reasonCode: RealGbaReasonCode;
-    let action: Exclude<GbaEmulatorAction, { kind: "wait" }>;
+    let action: GbaEmulatorAction;
     if (battle?.kind === "battle") {
       if (battle.data.phase === "won") {
         decisions.push({ ...observed, reasonCode: "halt_battle_won" });
@@ -803,6 +783,5 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
   ) {
     throw new Error("Runner-private grant escaped into scenario evidence");
   }
-  if (sha256(canonicalJson(scenario)).length !== 64) throw new Error("Scenario canonical hash failed");
   return { report, trace, decisionTrace, semanticEvents, goalEvent };
 }

@@ -40,11 +40,9 @@ export type ClankieCommandSearchItem = {
   readonly category: string;
   readonly invocation: string;
   readonly aliasesText: string;
-  readonly description: string;
 };
 
 export type ClankieCommandDetail = {
-  readonly command: ClankieAutocompleteCommand;
   readonly invocation: string;
   readonly category: string;
   readonly aliases: readonly string[];
@@ -86,7 +84,6 @@ export function describeClankieCommand(
   const context = argumentContext(argumentText);
   const staticSpec = staticArgumentSpec(command.name, context);
   return {
-    command,
     invocation: commandInvocation(command),
     category: commandCategory(command.name),
     aliases: command.aliases,
@@ -265,7 +262,6 @@ function commandSearchItem(command: ClankieAutocompleteCommand): ClankieCommandS
     category: commandCategory(command.name),
     invocation: commandInvocation(command),
     aliasesText: command.aliases.map((alias) => `/${alias}`).join(", "),
-    description: command.description,
   };
 }
 
@@ -299,9 +295,9 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
     case "discord":
       return values(["status", "invite"], ["/discord status", "/discord invite"]);
     case "model":
-      return modelRoleArguments("model");
+      return modelArguments("model");
     case "provider":
-      return modelRoleArguments("provider");
+      return modelArguments("provider");
     case "auth":
       return authArguments(context);
     case "trace":
@@ -324,67 +320,33 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
   }
 }
 
-function modelRoleArguments(command: "model" | "provider"): StaticArgumentSpec {
-  return values(
-    ["status", "small", "voice"],
-    [`/${command}`, `/${command} small`, `/${command} voice`, `/${command} status`],
-  );
+function modelArguments(command: "model" | "provider"): StaticArgumentSpec {
+  return values(["status"], [`/${command}`, `/${command} status`]);
 }
 
 function authArguments(context: ArgumentContext): StaticArgumentSpec {
   const action = context.args[0]?.toLowerCase();
   if (action === "status") return { values: [], examples: ["/auth status"] };
-  if (action === "login")
-    return values(["codex", "claude", "status"], ["/auth login codex", "/auth login claude"]);
-  if (action === "codex" || action === "claude") return values(["status"], [`/auth ${action}`]);
-  if (
-    action === "xai" ||
-    action === "gemini" ||
-    action === "openai" ||
-    action === "elevenlabs" ||
-    action === "relay" ||
-    action === "local-voice"
-  ) {
-    return values(["status"], [`/auth ${action}`]);
-  }
-  if (action === "discord")
-    return values(["status", "--user-token", "--voice"], ["/auth discord status", "/auth discord --voice"]);
   if (action === "mcp") return { values: [], examples: ["/auth mcp linear", "/auth mcp figma"] };
-  return values(
-    [
-      "status",
-      "codex",
-      "claude",
-      "xai",
-      "gemini",
-      "openai",
-      "discord",
-      "mcp",
-      "elevenlabs",
-      "relay",
-      "local-voice",
-      "login",
-    ],
-    ["/auth status", "/auth codex", "/auth xai", "/auth mcp linear"],
-  );
+  return values(["status", "mcp"], ["/auth status", "/auth mcp linear"]);
 }
 
 function layoutArguments(context: ArgumentContext): StaticArgumentSpec {
   const setting = context.args[0]?.toLowerCase();
-  if (setting === "input" || setting === "chat" || setting === "prompt") {
+  if (setting === "input") {
     return values(["top", "bottom"], ["/layout input top", "/layout input bottom"]);
   }
-  if (setting === "status" || setting === "footer" || setting === "bar") {
+  if (setting === "status") {
     return values(
       ["above", "below", "above-input", "below-input"],
       ["/layout status above", "/layout status below"],
     );
   }
-  if (setting === "header" || setting === "banner") {
+  if (setting === "header") {
     return values(["on", "off", "toggle", "status"], ["/layout header off", "/layout header on"]);
   }
   return values(
-    ["status", "input", "top", "bottom", "footer", "header"],
+    ["status", "input", "header"],
     ["/layout input top", "/layout status below", "/layout header off"],
   );
 }

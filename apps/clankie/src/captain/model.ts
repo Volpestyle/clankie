@@ -104,12 +104,10 @@ function fromPiCredential(
   };
 }
 
-export type CaptainModelSelection = PiModelSelection;
-
 export interface CaptainModelRuntime {
   readonly runtime: ModelRuntime;
   /** Resolves Clankie's configured policy through Pi's model catalog. */
-  resolveSelection(): Promise<CaptainModelSelection>;
+  resolveSelection(): Promise<PiModelSelection>;
 }
 
 export async function createCaptainModelRuntime(repoRoot: string): Promise<CaptainModelRuntime> {

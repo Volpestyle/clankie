@@ -1,6 +1,12 @@
 # ADR 0100: Vox is an owned native media package
 
-Status: accepted (2026-08-15).
+Status: accepted (2026-08-15). Current-status addendum (2026-08-19):
+[ADR 0128](0128-vox-is-the-sole-discord-media-owner.md) supersedes the staged
+rollout and user-body-only child ownership below. Both active body choices now
+use one Vox child as their sole media owner when media is enabled; text-only
+official-bot mode spawns none. This ADR's owned source, provenance, AGPL package
+license, Apache client, and process-boundary decisions remain in force; the
+first-rollout text and diagram are historical.
 
 ## Context
 

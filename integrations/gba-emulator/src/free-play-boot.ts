@@ -10,7 +10,7 @@ import type { FrameGridAnchor } from "./frame-grid.ts";
 import { encodeFramebufferPng } from "./framebuffer-png.ts";
 import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
 import { MgbaVisualCore, VisualGbaScenarioSchema } from "./visual-core.ts";
-import type { GbaCheckpointCapability } from "./checkpoint.ts";
+import type { MgbaCoreIdentity } from "./mgba-core.ts";
 
 /**
  * Resolve which game Clankie is looking at.
@@ -30,6 +30,26 @@ import type { GbaCheckpointCapability } from "./checkpoint.ts";
  * The deterministic double has no serializable state — its determinism *is*
  * its identity — so on the double the capability is absent rather than stubbed.
  */
+export interface GbaCheckpointCapability {
+  saveState: () => Uint8Array;
+  loadState: (bytes: Uint8Array) => void;
+  /**
+   * The savestate the core booted from — the configured beginning. Held so a
+   * restart (ADR 0075) reboots to it without re-reading the operator's file;
+   * the bytes were digest-verified at core creation.
+   */
+  bootSavestate: () => Uint8Array;
+  /** Digests verified at core creation; a checkpoint must match them to load. */
+  identity: MgbaCoreIdentity;
+  /** The booted scenario — the template a checkpoint's companion scenario is minted from. */
+  scenario: GbaCheckpointScenario;
+}
+
+export type GbaCheckpointScenario = GbaAdapterScenario & {
+  readonly romSha256: string;
+  readonly coreWasmSha256: string;
+};
+
 export interface BootedGbaGame {
   scenario: GbaAdapterScenario;
   fixtureSha256: string;
@@ -59,16 +79,21 @@ export interface BootedGbaGame {
 export interface BootGbaGameOptions {
   env?: NodeJS.ProcessEnv;
   environmentId?: EmbodimentEnvironmentId;
+  romPath?: string;
+  savestatePath?: string;
+  scenarioPath?: string;
   /** Directory holding the ROM-gated fixtures, i.e. the package's own. */
   fixturesDir: string;
   /** Fallback frozen double scenario when no ROM is configured. */
   doubleScenarioPath: string;
+  /** Disable operator-local ROM discovery for isolated harnesses. */
+  discoverDefaultPaths?: boolean;
 }
 
 /**
  * Where the operator's ROM and savestate live when no env names them —
  * `~/.local/share/clankie/gba/`, the same well-known operator-local home the
- * checkpoint and body-lock directories use. Existence-gated: a machine without
+ * checkpoint and runtime directories use. Existence-gated: a machine without
  * the files keeps today's deterministic-double behavior, so a supervised
  * runner starts with no env prefix at all on a machine that has them.
  */
@@ -80,22 +105,41 @@ export function defaultGbaGameDir(env: NodeJS.ProcessEnv = process.env): string 
   return path.join(dataHome, "clankie", "gba");
 }
 
-function defaultedGamePath(configured: string | undefined, fallback: string): string | undefined {
+/** Parent for invocation-local emulator runtime records. */
+export function defaultGbaRuntimeRootDir(env: NodeJS.ProcessEnv = process.env): string {
+  const stateHome =
+    env["XDG_STATE_HOME"] !== undefined && env["XDG_STATE_HOME"].length > 0
+      ? env["XDG_STATE_HOME"]
+      : path.join(homedir(), ".local", "state");
+  return path.join(stateHome, "clankie", "gba-runtime");
+}
+
+function defaultedGamePath(
+  configured: string | undefined,
+  fallback: string,
+  discoverDefaultPaths: boolean,
+): string | undefined {
   if (configured !== undefined) return configured;
-  return existsSync(fallback) ? fallback : undefined;
+  return discoverDefaultPaths && existsSync(fallback) ? fallback : undefined;
 }
 
 export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGbaGame> {
   const env = options.env ?? process.env;
+  const discoverDefaultPaths = options.discoverDefaultPaths ?? true;
   const gameDir = defaultGbaGameDir(env);
   if ((options.environmentId ?? "pokemon-firered") === "pokemon-emerald") {
-    const romPath = defaultedGamePath(env["CLANKIE_GBA_ROM_PATH"], path.join(gameDir, "emerald.gba"));
+    const romPath = defaultedGamePath(
+      options.romPath ?? env["CLANKIE_GBA_ROM_PATH"],
+      path.join(gameDir, "emerald.gba"),
+      discoverDefaultPaths,
+    );
     if (romPath === undefined) {
       throw new Error(`Pokemon Emerald ROM is not installed at ${path.join(gameDir, "emerald.gba")}`);
     }
     const savestatePath = defaultedGamePath(
-      env["CLANKIE_GBA_SAVESTATE_PATH"],
+      options.savestatePath ?? env["CLANKIE_GBA_SAVESTATE_PATH"],
       path.join(gameDir, "emerald-title.state"),
+      discoverDefaultPaths,
     );
     if (savestatePath === undefined) {
       throw new Error(
@@ -103,7 +147,9 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
       );
     }
     const scenarioPath =
-      env["CLANKIE_GBA_SCENARIO_PATH"] ?? path.join(options.fixturesDir, "emerald-title/v1/scenario.json");
+      options.scenarioPath ??
+      env["CLANKIE_GBA_SCENARIO_PATH"] ??
+      path.join(options.fixturesDir, "emerald-title/v1/scenario.json");
     const fixtureBytes = readFileSync(scenarioPath);
     const scenario = VisualGbaScenarioSchema.parse(JSON.parse(fixtureBytes.toString("utf8")));
     const core = await MgbaVisualCore.create({
@@ -133,14 +179,20 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
       real: true,
     };
   }
-  const romPath = defaultedGamePath(env["CLANKIE_GBA_ROM_PATH"], path.join(gameDir, "firered.gba"));
+  const romPath = defaultedGamePath(
+    options.romPath ?? env["CLANKIE_GBA_ROM_PATH"],
+    path.join(gameDir, "firered.gba"),
+    discoverDefaultPaths,
+  );
   const savestatePath = defaultedGamePath(
-    env["CLANKIE_GBA_SAVESTATE_PATH"],
+    options.savestatePath ?? env["CLANKIE_GBA_SAVESTATE_PATH"],
     path.join(gameDir, "firered-bedroom.state"),
+    discoverDefaultPaths,
   );
   const real = romPath !== undefined && savestatePath !== undefined;
 
   const scenarioPath =
+    options.scenarioPath ??
     env["CLANKIE_GBA_SCENARIO_PATH"] ??
     (real
       ? path.join(options.fixturesDir, "firered-bedroom-route/v1/scenario.json")
@@ -207,7 +259,3 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
     real: true,
   };
 }
-
-// The body root resolver moved to `@clankie/body-lock` with the mutex it
-// scopes (VUH-938); re-exported so existing imports keep working.
-export { defaultGbaBodyRootDir } from "@clankie/body-lock";

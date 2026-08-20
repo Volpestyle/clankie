@@ -1,7 +1,7 @@
 /**
  * Asked play in a hosted world. Same composition as local play above the
  * body: mind, voice, journal, activity frames. What drops out is
- * `bootGbaGame` and `acquireBodyLock`; what drops in is `joinWorld`.
+ * `bootGbaGame`; what drops in is `joinWorld`.
  *
  * The world owns the body and its own single-holder rule. A missing
  * activity producer, voice seam, or journal degrades exactly as local
@@ -30,8 +30,8 @@ import {
   RenderedSurfaceOverlaySchema,
 } from "@clankie/interactive-environment";
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
-import { createBrokeredPossessorVoiceClient, type PossessorVoiceClient } from "@clankie/possessor-voice";
-import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
+import { createBrokeredPlayVoiceClient, type PlayVoiceClient } from "@clankie/play-voice";
+import { createBrokeredActivityFrameSink, type ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { personaInstructions, SettingsStore } from "@clankie/settings";
 import type { ActivityObservationWritePort } from "./activity-observation.ts";
 import type { PlayExecution } from "./play-host.ts";
@@ -59,7 +59,8 @@ export interface WorldPlayExecutionOptions {
   playSight?: PlaySightProjection;
   createMind?: () => Promise<FreePlayMind>;
   createVoiceAgent?: () => Promise<ClankieVoice | undefined>;
-  createVoice?: () => Promise<PossessorVoiceClient | undefined>;
+  createVoice?: () => Promise<PlayVoiceClient | undefined>;
+  createActivitySink?: () => Promise<ActivityFrameSink | undefined>;
   joinWorld?: (options: WorldJoinOptions) => Promise<WorldJoinResult>;
 }
 
@@ -139,9 +140,12 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       return { kind: "refused", reason: "environment_unavailable" };
     }
 
-    const sink = await createBrokeredActivityFrameSink({
-      url: env["CLANKIE_ACTIVITY_PRODUCER_URL"] ?? "ws://127.0.0.1:4322/producer",
-    });
+    const sink =
+      options.createActivitySink === undefined
+        ? await createBrokeredActivityFrameSink({
+            url: env["CLANKIE_ACTIVITY_PRODUCER_URL"] ?? "ws://127.0.0.1:4322/producer",
+          })
+        : await options.createActivitySink();
     let framesPublished = 0;
     let framesDroppedWithoutSink = 0;
     let sequence = 0;
@@ -202,18 +206,31 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       }
     };
 
-    const voice =
-      options.createVoice === undefined
-        ? await createBrokeredPossessorVoiceClient()
-        : await options.createVoice();
-    if (voice === undefined) {
-      options.logger.info(
-        { sessionId: session.sessionId },
-        "no possessor voice seam; this playthrough has no spoken narration",
-      );
-    }
+    // The joined seat and activity sink already exist here. Keep their cleanup
+    // in scope before broker/client creation can fail.
+    let voice: PlayVoiceClient | undefined;
     const interjections = options.interjections ?? new InterjectionQueue();
-    const unsubscribe = voice?.subscribe((utterance) => interjections.offer(utterance));
+    let unsubscribe: (() => void) | undefined;
+    try {
+      voice =
+        options.createVoice === undefined
+          ? await createBrokeredPlayVoiceClient()
+          : await options.createVoice();
+      if (voice === undefined) {
+        options.logger.info(
+          { sessionId: session.sessionId },
+          "no play voice seam; this playthrough has no spoken narration",
+        );
+      }
+      unsubscribe = voice?.subscribe((utterance) => interjections.offer(utterance));
+    } catch (error) {
+      unsubscribe?.();
+      voice?.close();
+      body.observeFrames(null);
+      sink?.close();
+      await body.close().catch(() => undefined);
+      throw error;
+    }
 
     let speechFailureLogged = false;
     const reportToRoom = (

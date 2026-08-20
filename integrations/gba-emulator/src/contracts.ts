@@ -144,8 +144,6 @@ export const GbaEmulatorEvidenceEventSchema = z
       "enter_text",
       "select_menu_entry",
       "frame_advance",
-      "wait",
-      "cancel_action",
     ]),
     summary: z.string().min(1).max(512),
     frame: z.number().int().nonnegative().max(100_000_000),

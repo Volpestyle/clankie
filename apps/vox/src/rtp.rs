@@ -234,8 +234,10 @@ mod tests {
         let mut packet = [0u8; RTP_HEADER_LEN];
         packet[0] = 0x80; // V=2, P=0
         let decrypted = vec![0xDE, 0xAD, 0x00, 0x03];
-        let result = strip_rtp_padding(&packet, decrypted.clone());
-        assert_eq!(result, decrypted);
+        assert_eq!(
+            strip_rtp_padding(&packet, decrypted),
+            vec![0xDE, 0xAD, 0x00, 0x03]
+        );
     }
 
     #[test]

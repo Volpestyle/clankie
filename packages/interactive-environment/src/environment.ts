@@ -3,7 +3,6 @@ import {
   CharacterIdSchema,
   CommandAuthoritySchema,
   EnvironmentSessionIdSchema,
-  IntentContextSchema,
   MissionIdSchema,
   TaskIdSchema,
   WorldIdSchema,
@@ -48,7 +47,6 @@ export const GbaEmulatorCapabilitySchema = z.enum([
   "emulator.gba.observe",
   "emulator.gba.input",
   "emulator.gba.frame_advance",
-  "emulator.gba.wait",
 ]);
 export type GbaEmulatorCapability = z.infer<typeof GbaEmulatorCapabilitySchema>;
 
@@ -65,7 +63,7 @@ export const GbaEmulatorResourceBoundsSchema = z
     maxInputsPerAction: z.number().int().positive().max(64),
     maxFramesPerAction: z.number().int().positive().max(3_600),
     maxActionDurationMs: z.number().int().positive(),
-    capabilities: z.array(GbaEmulatorCapabilitySchema).min(1).max(4),
+    capabilities: z.array(GbaEmulatorCapabilitySchema).min(1).max(3),
   })
   .strict();
 export type GbaEmulatorResourceBounds = z.infer<typeof GbaEmulatorResourceBoundsSchema>;
@@ -302,103 +300,6 @@ export const EnvironmentActionResultSchema = z.discriminatedUnion("status", [
   }),
 ]);
 export type EnvironmentActionResult = z.infer<typeof EnvironmentActionResultSchema>;
-
-const EnvironmentCommandBaseSchema = z.object({
-  schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
-  commandId: z.string().min(1),
-  context: IntentContextSchema,
-  requestedAt: z.string().datetime(),
-});
-
-export const EnvironmentJoinCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("join"),
-  session: EnvironmentSessionSpecSchema,
-}).superRefine((command, context) => {
-  const commandAuthority = command.context.authority;
-  const sessionAuthority = command.session.requestedBy;
-  if (
-    commandAuthority.tier !== sessionAuthority.tier ||
-    commandAuthority.principal.kind !== sessionAuthority.principal.kind ||
-    commandAuthority.principal.id !== sessionAuthority.principal.id
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["session", "requestedBy"],
-      message: "join authority mismatch",
-    });
-  }
-});
-export const EnvironmentStatusCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("status"),
-  sessionId: EnvironmentSessionIdSchema.optional(),
-});
-export const EnvironmentCancelJoinCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("cancel_join"),
-  sessionId: EnvironmentSessionIdSchema,
-});
-export const EnvironmentStartActionCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("start_action"),
-  sessionId: EnvironmentSessionIdSchema,
-  actionId: ActionIdSchema,
-  action: z.object({ kind: z.string().min(1) }).passthrough(),
-});
-export const EnvironmentActionStatusCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("action_status"),
-  sessionId: EnvironmentSessionIdSchema,
-  actionId: ActionIdSchema,
-});
-export const EnvironmentCancelActionCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("cancel_action"),
-  sessionId: EnvironmentSessionIdSchema,
-  actionId: ActionIdSchema,
-  reason: z.string().min(1),
-});
-export const EnvironmentSteerCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("steer"),
-  sessionId: EnvironmentSessionIdSchema,
-  intent: z.string().min(1),
-});
-export const EnvironmentPauseCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("pause"),
-  sessionId: EnvironmentSessionIdSchema,
-  reason: z.string().min(1),
-});
-export const EnvironmentResumeCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("resume"),
-  sessionId: EnvironmentSessionIdSchema,
-});
-export const EnvironmentDisconnectCommandSchema = EnvironmentCommandBaseSchema.extend({
-  type: z.literal("disconnect"),
-  sessionId: EnvironmentSessionIdSchema,
-  reason: z.string().min(1),
-});
-
-export const EnvironmentCommandSchema = z.discriminatedUnion("type", [
-  EnvironmentJoinCommandSchema,
-  EnvironmentStatusCommandSchema,
-  EnvironmentCancelJoinCommandSchema,
-  EnvironmentStartActionCommandSchema,
-  EnvironmentActionStatusCommandSchema,
-  EnvironmentCancelActionCommandSchema,
-  EnvironmentSteerCommandSchema,
-  EnvironmentPauseCommandSchema,
-  EnvironmentResumeCommandSchema,
-  EnvironmentDisconnectCommandSchema,
-]);
-export type EnvironmentCommand = z.infer<typeof EnvironmentCommandSchema>;
-
-export const EnvironmentObservationSchema = z.object({
-  schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
-  observationId: z.string().min(1),
-  sessionId: EnvironmentSessionIdSchema,
-  characterId: CharacterIdSchema,
-  worldId: WorldIdSchema,
-  goalVersion: z.number().int().nonnegative(),
-  capturedAt: z.string().datetime(),
-  kind: z.string().min(1),
-  data: z.record(z.string(), z.unknown()),
-});
-export type EnvironmentObservation = z.infer<typeof EnvironmentObservationSchema>;
 
 export const EnvironmentSemanticEventTypeSchema = z.enum([
   "environment.session.started",

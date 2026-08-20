@@ -1,4 +1,5 @@
 import type { DiscordRawAttachment, DiscordRawEmbed } from "@clankie/discord-presence-core";
+import { EventEmitter } from "node:events";
 import { WebSocket, type RawData } from "ws";
 
 /**
@@ -20,7 +21,6 @@ const OP = {
   dispatch: 0,
   heartbeat: 1,
   identify: 2,
-  voiceStateUpdate: 4,
   resume: 6,
   reconnect: 7,
   invalidSession: 9,
@@ -68,21 +68,19 @@ export interface DiscordGatewayVoiceServer {
   readonly endpoint: string | null;
 }
 
-export interface DiscordGatewayEvents {
-  ready: (identity: { readonly userId: string; readonly username: string }) => void;
-  resumed: () => void;
-  reconnecting: () => void;
-  disconnected: () => void;
+type DiscordGatewayEvents = {
+  ready: [identity: { readonly userId: string; readonly username: string }];
+  resumed: [];
+  reconnecting: [];
+  disconnected: [];
   /** Terminal: the credential was rejected or the reconnect budget is spent. */
-  failed: (reason: string) => void;
-  messageCreate: (message: DiscordGatewayMessage) => void;
-  voiceStateUpdate: (state: DiscordGatewayVoiceState) => void;
-  voiceServerUpdate: (server: DiscordGatewayVoiceServer) => void;
+  failed: [reason: string];
+  messageCreate: [message: DiscordGatewayMessage];
+  voiceStateUpdate: [state: DiscordGatewayVoiceState];
+  voiceServerUpdate: [server: DiscordGatewayVoiceServer];
   /** Every dispatch, for stream discovery (STREAM_CREATE / STREAM_WATCH path). */
-  raw: (packet: { readonly t: string; readonly d: Record<string, unknown> }) => void;
-}
-
-type Listener<E extends keyof DiscordGatewayEvents> = DiscordGatewayEvents[E];
+  raw: [packet: { readonly t: string; readonly d: Record<string, unknown> }];
+};
 
 export interface DiscordUserGatewayOptions {
   /** Normal-user credential. Sent bare — a user token carries no `Bot ` prefix. */
@@ -96,7 +94,7 @@ export class DiscordUserGateway {
   private readonly token: string;
   private readonly connect: (url: string) => WebSocket;
   private readonly url: string;
-  private readonly listeners = new Map<keyof DiscordGatewayEvents, Set<(...args: never[]) => void>>();
+  private readonly events = new EventEmitter();
   private socket: WebSocket | undefined;
   private heartbeatTimer: NodeJS.Timeout | undefined;
   private reconnectTimer: NodeJS.Timeout | undefined;
@@ -142,10 +140,12 @@ export class DiscordUserGateway {
     return found;
   }
 
-  public on<E extends keyof DiscordGatewayEvents>(event: E, listener: Listener<E>): void {
-    const existing = this.listeners.get(event) ?? new Set();
-    existing.add(listener as (...args: never[]) => void);
-    this.listeners.set(event, existing);
+  public on<E extends keyof DiscordGatewayEvents>(
+    event: E,
+    listener: (...args: DiscordGatewayEvents[E]) => void,
+  ): () => void {
+    this.events.on(event, listener);
+    return () => this.events.off(event, listener);
   }
 
   public open(): void {
@@ -153,25 +153,7 @@ export class DiscordUserGateway {
     this.openSocket(this.url);
   }
 
-  /** Op 4. Also the join/leave primitive the voice adapter drives. */
-  public sendVoiceStateUpdate(payload: {
-    readonly guildId: string;
-    readonly channelId: string | null;
-    readonly selfMute: boolean;
-    readonly selfDeaf: boolean;
-  }): boolean {
-    return this.send({
-      op: OP.voiceStateUpdate,
-      d: {
-        guild_id: payload.guildId,
-        channel_id: payload.channelId,
-        self_mute: payload.selfMute,
-        self_deaf: payload.selfDeaf,
-      },
-    });
-  }
-
-  /** Raw passthrough used by the voice adapter, which builds its own op 4 frames. */
+  /** Raw passthrough for validated Vox membership and Discord stream opcodes. */
   public sendPayload(payload: unknown): boolean {
     return this.send(payload);
   }
@@ -268,6 +250,16 @@ export class DiscordUserGateway {
           const state = record(value);
           if (typeof state?.user_id !== "string" || typeof state.channel_id !== "string") continue;
           this.voiceChannels.set(`${payload.id}:${state.user_id}`, state.channel_id);
+          if (state.user_id === this.selfUserId) {
+            this.selfVoiceSessionId = typeof state.session_id === "string" ? state.session_id : undefined;
+            this.emit("voiceStateUpdate", {
+              guildId: payload.id,
+              channelId: state.channel_id,
+              userId: state.user_id,
+              ...(typeof state.session_id === "string" ? { sessionId: state.session_id } : {}),
+              raw: state,
+            });
+          }
         }
         return;
       }
@@ -310,8 +302,11 @@ export class DiscordUserGateway {
           if (typeof payload.channel_id === "string") this.voiceChannels.set(key, payload.channel_id);
           else this.voiceChannels.delete(key);
         }
-        if (payload.user_id === this.selfUserId && typeof payload.session_id === "string") {
-          this.selfVoiceSessionId = payload.session_id;
+        if (payload.user_id === this.selfUserId) {
+          this.selfVoiceSessionId =
+            typeof payload.channel_id === "string" && typeof payload.session_id === "string"
+              ? payload.session_id
+              : undefined;
         }
         this.emit("voiceStateUpdate", {
           ...(typeof payload.guild_id === "string" ? { guildId: payload.guild_id } : {}),
@@ -432,13 +427,8 @@ export class DiscordUserGateway {
     this.reconnectTimer = undefined;
   }
 
-  private emit<E extends keyof DiscordGatewayEvents>(
-    event: E,
-    ...args: Parameters<DiscordGatewayEvents[E]>
-  ): void {
-    for (const listener of this.listeners.get(event) ?? []) {
-      (listener as (...values: Parameters<DiscordGatewayEvents[E]>) => void)(...args);
-    }
+  private emit<E extends keyof DiscordGatewayEvents>(event: E, ...args: DiscordGatewayEvents[E]): void {
+    this.events.emit(event, ...args);
   }
 }
 

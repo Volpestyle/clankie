@@ -117,7 +117,6 @@ async function runVoiceWizard(shell: ClankieFaceShell, services: VoiceCommandSer
   try {
     for (;;) {
       const action = await flow.readSelect({
-        kind: "single",
         message: "Voice",
         options: [
           {
@@ -141,9 +140,8 @@ async function runVoiceWizard(shell: ClankieFaceShell, services: VoiceCommandSer
           { value: "status", label: "Show status" },
           { value: "done", label: "Done" },
         ],
-        required: true,
       });
-      const choice = action?.[0];
+      const choice = action;
       if (choice === undefined || choice === "done") break;
       if (choice === "status") {
         await showVoiceStatus(shell, services);
@@ -189,7 +187,6 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
   const current = (await services.settings.load()).voice;
 
   const provider = await flow.readSelect({
-    kind: "single",
     message: "Which voice stack should Clankie use?",
     options: [
       {
@@ -212,9 +209,8 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
           "OpenAI realtime writes text and ElevenLabs speaks it; room audio never reaches ElevenLabs.",
       },
     ],
-    required: true,
   });
-  const providerChoice = provider?.[0];
+  const providerChoice = provider;
   if (providerChoice === undefined) return;
 
   if (providerChoice === "openai") {
@@ -263,15 +259,13 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
     });
     if (voice === undefined) return;
     const reasoning = await flow.readSelect({
-      kind: "single",
       message: "Grok Voice reasoning",
       options: [
         { value: "high", label: "High", hint: "default" },
         { value: "none", label: "None", hint: "lowest latency" },
       ],
-      required: true,
     });
-    const reasoningChoice = reasoning?.[0];
+    const reasoningChoice = reasoning;
     if (reasoningChoice !== "high" && reasoningChoice !== "none") return;
     await apply(services, (settings) => ({
       ...settings,
@@ -371,17 +365,15 @@ async function editApiCredential(
   const existing = stored[providerId];
   if (existing !== undefined) {
     const decision = await flow.readSelect({
-      kind: "single",
       message: `${providerId} is already stored — ${existing.type} credential (redacted)`,
       options: [
         { value: "keep", label: "Keep it", hint: "no change" },
         { value: "replace", label: "Replace it", hint: "enter a new key" },
         { value: "remove", label: "Remove it", hint: "delete from the broker" },
       ],
-      required: true,
       allowBack: true,
     });
-    const choice = decision?.[0];
+    const choice = decision;
     if (choice === undefined || choice === "keep") return;
     if (choice === "remove") {
       await services.removeCredential(providerId);

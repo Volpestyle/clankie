@@ -15,8 +15,7 @@ import {
 } from "./service-supervisor.ts";
 
 /**
- * The long-lived processes that make Clankie present, and the order they
- * depend on each other in:
+ * The long-lived processes that make Clankie present:
  *
  *   clankie  ->  discord-bridge          (active body = bot)
  *            ->  discord-user-session    (active body = user_session)
@@ -96,13 +95,16 @@ export function resolveTargets(target: ServiceTarget): readonly ServiceId[] {
  * posts comes back `discord_presence_live_claim_stale`; it stays healthy and
  * Clankie simply goes quiet, which is exactly how this was found.
  *
- * Driven by `restartsWith` rather than `dependsOn`, because the two are not the
- * same relationship. Stopping is deliberately untouched: naming one service to
- * stop is an instruction to stop that service.
+ * Stopping is deliberately untouched: naming one service to stop is an
+ * instruction to stop that service.
  */
 export function resolveRestartTargets(target: ServiceTarget): readonly ServiceId[] {
   if (target === "all") return SERVICE_ORDER;
   const affected = new Set<ServiceId>([target]);
+  if (target === "discord-bridge" || target === "discord-user-session") {
+    affected.add("discord-bridge");
+    affected.add("discord-user-session");
+  }
   // SERVICE_ORDER is dependency-ordered, so one forward pass also closes over a
   // service invalidated by something itself invalidated earlier in the chain.
   for (const id of SERVICE_ORDER) {
@@ -181,7 +183,6 @@ async function readPresenceDetail(input: {
 const CLANKIE: ManagedService = {
   id: "clankie",
   label: "Clankie",
-  dependsOn: [],
   ...pnpmStart("@clankie/clankie"),
   stopGraceMs: clankieStopGraceMs,
   /**
@@ -219,7 +220,6 @@ const CLANKIE: ManagedService = {
 const DISCORD_BRIDGE: ManagedService = {
   id: "discord-bridge",
   label: "Discord bridge",
-  dependsOn: ["clankie"],
   ...pnpmStart("@clankie/discord-bridge"),
   enabled: (env) => resolveDiscordActiveBody(env) === "bot",
   // Its live presence claim is only valid against the service instance that
@@ -271,7 +271,6 @@ const DISCORD_BRIDGE: ManagedService = {
 const DISCORD_USER_SESSION: ManagedService = {
   id: "discord-user-session",
   label: "Discord lab body",
-  dependsOn: ["clankie"],
   ...pnpmStart("@clankie/discord-user-session"),
   restartsWith: ["clankie"],
   enabled: (env) =>
@@ -323,7 +322,6 @@ const DISCORD_USER_SESSION: ManagedService = {
 const ACTIVITY: ManagedService = {
   id: "activity",
   label: "Activity surface",
-  dependsOn: [],
   ...pnpmStart("@clankie/discord-activity"),
   probe: async ({ env, fetchImpl }) => {
     const port = env["CLANKIE_ACTIVITY_PORT"] ?? "4320";
@@ -370,7 +368,6 @@ export function activityTunnelUrl(env: NodeJS.ProcessEnv): string | undefined {
 const TUNNEL: ManagedService = {
   id: "tunnel",
   label: "Activity tunnel",
-  dependsOn: ["activity"],
   command: "cloudflared",
   spawnArgs: (env) => ["tunnel", "run", tunnelName(env)],
   enabled: (env) => tunnelName(env).length > 0,
@@ -454,18 +451,32 @@ function failureFrom(id: ServiceId, error: unknown): ServiceOutcome {
 }
 
 /**
- * Restarts in dependency order and stops at the first failure. Continuing past
- * a dead clankie service would only produce a bridge that cannot route a turn,
- * and a wall of downstream errors that hide the one that mattered.
+ * Stops the whole restart set in reverse order before starting it forwards.
+ * The two Discord bodies are one mutually-exclusive slot: both are stopped,
+ * then only the body selected by the current environment is started.
  */
 export async function restartTarget(
   target: ServiceTarget,
   options: ServiceRegistryOptions,
 ): Promise<readonly ServiceOutcome[]> {
-  const outcomes: ServiceOutcome[] = [];
-  for (const id of resolveRestartTargets(target)) {
+  const ids = resolveRestartTargets(target);
+  const stopFailures: ServiceOutcome[] = [];
+  for (const id of [...ids].reverse()) {
     try {
-      outcomes.push(outcomeFrom(await restartOne(id, options)));
+      await stopService(managedService(id), options);
+    } catch (error) {
+      stopFailures.push(failureFrom(id, error));
+    }
+  }
+  if (stopFailures.length > 0) return stopFailures;
+
+  const outcomes: ServiceOutcome[] = [];
+  const env = options.env ?? process.env;
+  for (const id of ids) {
+    const service = managedService(id);
+    if (service.enabled?.(env) === false) continue;
+    try {
+      outcomes.push(outcomeFrom(await startService(service, options)));
     } catch (error) {
       outcomes.push(failureFrom(id, error));
       break;
@@ -497,11 +508,4 @@ export async function inspectServices(
   options: ServiceRegistryOptions,
 ): Promise<readonly ServiceStatus[]> {
   return await Promise.all(ids.map((id) => inspectService(managedService(id), options)));
-}
-
-export async function inspectTarget(
-  target: ServiceTarget,
-  options: ServiceRegistryOptions,
-): Promise<readonly ServiceStatus[]> {
-  return await inspectServices(resolveTargets(target), options);
 }

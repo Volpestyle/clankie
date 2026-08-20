@@ -1,6 +1,8 @@
 import type { CredentialStore } from "@clankie/credential-broker";
 import { DISCORD_USER_SESSION_PROVIDER_ID } from "@clankie/credential-broker";
+import { parseDiscordIdSet } from "@clankie/discord-presence-core";
 import type { DiscordUserSessionOptIn } from "@clankie/protocol";
+import { isDiscordBodyActive } from "@clankie/settings";
 
 /**
  * Every precondition for wearing the user-session body, in one place (ADR 0048).
@@ -23,6 +25,7 @@ export interface UserSessionAdmission {
 
 export type UserSessionRefusalCode =
   | "discord_user_session_disabled"
+  | "discord_user_session_inactive_body"
   | "discord_user_session_allowlist_required"
   | "discord_user_session_opt_in_required"
   | "discord_user_session_opt_in_revoked"
@@ -53,9 +56,15 @@ export async function assertUserSessionAdmissible(input: {
       "Set DISCORD_USER_SESSION_ENABLED=true to run the personal-lab user-session plane",
     );
   }
+  if (!isDiscordBodyActive("user_session", input.env)) {
+    throw new DiscordUserSessionRefused(
+      "discord_user_session_inactive_body",
+      "Set DISCORD_ACTIVE_BODY=user_session before starting this body directly",
+    );
+  }
 
-  const guildIds = idSet(input.env.DISCORD_USER_SESSION_GUILD_IDS);
-  const channelIds = idSet(input.env.DISCORD_USER_SESSION_CHANNEL_IDS);
+  const guildIds = parseDiscordIdSet(input.env.DISCORD_USER_SESSION_GUILD_IDS);
+  const channelIds = parseDiscordIdSet(input.env.DISCORD_USER_SESSION_CHANNEL_IDS);
   if (guildIds.size === 0 || channelIds.size === 0) {
     throw new DiscordUserSessionRefused(
       "discord_user_session_allowlist_required",
@@ -96,7 +105,7 @@ export async function assertUserSessionAdmissible(input: {
   // it. Otherwise editing an env var would silently extend a recorded consent.
   const optInGuilds = new Set(optIn.guildIds);
   const optInChannels = new Set(optIn.channelIds);
-  const voiceIds = idSet(input.env.DISCORD_USER_SESSION_VOICE_CHANNEL_IDS);
+  const voiceIds = parseDiscordIdSet(input.env.DISCORD_USER_SESSION_VOICE_CHANNEL_IDS);
   const widened = [
     ...[...guildIds].filter((id) => !optInGuilds.has(id)).map((id) => `guild:${id}`),
     ...[...channelIds].filter((id) => !optInChannels.has(id)).map((id) => `channel:${id}`),
@@ -118,13 +127,4 @@ export async function assertUserSessionAdmissible(input: {
   }
 
   return { optIn, profileHash, userToken: credential.key };
-}
-
-function idSet(value: string | undefined): ReadonlySet<string> {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-  );
 }

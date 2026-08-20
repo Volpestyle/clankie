@@ -47,7 +47,7 @@ use protocol::{
 };
 use udp_rx::udp_recv_loop;
 pub(crate) use video_frames::VideoFrameCandidate;
-use ws_ops::{handle_binary_opcode, handle_text_opcode, ws_read_loop, ws_write_loop};
+use ws_ops::{ws_read_loop, ws_write_loop};
 
 type WsStream = tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -68,15 +68,19 @@ pub(crate) fn parse_user_id(user_id: &str, context: &str) -> Option<u64> {
 pub enum VoiceEvent {
     Ready {
         role: TransportRole,
+        generation: u64,
         ssrc: u32,
+        dave_protocol_version: u16,
     },
     SsrcUpdate {
         role: TransportRole,
+        generation: u64,
         ssrc: u32,
         user_id: u64,
     },
     VideoStateUpdate {
         role: TransportRole,
+        generation: u64,
         user_id: u64,
         audio_ssrc: Option<u32>,
         video_ssrc: Option<u32>,
@@ -85,16 +89,19 @@ pub enum VoiceEvent {
     },
     ClientDisconnect {
         role: TransportRole,
+        generation: u64,
         user_id: u64,
     },
     OpusReceived {
         role: TransportRole,
+        generation: u64,
         ssrc: u32,
         opus_frame: Vec<u8>,
         rtp_sequence: u16,
     },
     VideoFrameReceived {
         role: TransportRole,
+        generation: u64,
         user_id: u64,
         ssrc: u32,
         codec: String,
@@ -107,11 +114,42 @@ pub enum VoiceEvent {
     },
     DaveReady {
         role: TransportRole,
+        generation: u64,
+        protocol_version: u16,
     },
     Disconnected {
         role: TransportRole,
+        generation: u64,
         reason: String,
     },
+}
+
+impl VoiceEvent {
+    pub(crate) fn role(&self) -> TransportRole {
+        match *self {
+            Self::Ready { role, .. }
+            | Self::SsrcUpdate { role, .. }
+            | Self::VideoStateUpdate { role, .. }
+            | Self::ClientDisconnect { role, .. }
+            | Self::OpusReceived { role, .. }
+            | Self::VideoFrameReceived { role, .. }
+            | Self::DaveReady { role, .. }
+            | Self::Disconnected { role, .. } => role,
+        }
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        match *self {
+            Self::Ready { generation, .. }
+            | Self::SsrcUpdate { generation, .. }
+            | Self::VideoStateUpdate { generation, .. }
+            | Self::ClientDisconnect { generation, .. }
+            | Self::OpusReceived { generation, .. }
+            | Self::VideoFrameReceived { generation, .. }
+            | Self::DaveReady { generation, .. }
+            | Self::Disconnected { generation, .. } => generation,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +163,7 @@ enum WsCommand {
     Close,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportRole {
     Voice,
@@ -151,6 +189,7 @@ pub struct VoiceConnectionParams<'a> {
     pub token: &'a str,
     pub dave_channel_id: u64,
     pub role: TransportRole,
+    pub generation: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +218,6 @@ pub struct VoiceConnection {
 
 impl VoiceConnection {
     /// Perform the full voice WS + UDP handshake, then spawn background tasks.
-    #[allow(clippy::too_many_lines)]
     pub async fn connect(
         params: VoiceConnectionParams<'_>,
         event_tx: mpsc::Sender<VoiceEvent>,
@@ -193,6 +231,7 @@ impl VoiceConnection {
             token,
             dave_channel_id,
             role,
+            generation,
         } = params;
 
         let ep = endpoint.trim_start_matches("wss://").trim_end_matches('/');
@@ -378,62 +417,9 @@ impl VoiceConnection {
                 );
             }
             tokio::spawn(async move {
-                for (i, msg) in handshake_overflow.into_iter().enumerate() {
-                    match msg {
-                        Message::Text(ref text) => {
-                            if let Ok(v) = serde_json::from_str::<Value>(text) {
-                                let op = v["op"].as_u64().unwrap_or(u64::MAX);
-                                info!("Replay [{i}]: Text OP={op}");
-                                let d = &v["d"];
-                                handle_text_opcode(
-                                    op,
-                                    d,
-                                    &event_tx,
-                                    &ws_cmd_tx,
-                                    &dave,
-                                    &ssrc_map,
-                                    &video_ssrc_map,
-                                    &current_video_codec,
-                                    user_id,
-                                    dave_channel_id,
-                                    role,
-                                    &ws_sequence,
-                                )
-                                .await;
-                            } else {
-                                info!("Replay [{i}]: Invalid Text");
-                            }
-                        }
-                        Message::Binary(ref data) if data.len() >= 3 => {
-                            let seq = u16::from_be_bytes([data[0], data[1]]);
-                            let op = data[2];
-                            info!(
-                                "Replay [{}]: Binary OP={} seq={} len={}",
-                                i,
-                                op,
-                                seq,
-                                data.len()
-                            );
-                            handle_binary_opcode(
-                                data,
-                                &event_tx,
-                                &ws_cmd_tx,
-                                &dave,
-                                role,
-                                &ws_sequence,
-                            )
-                            .await;
-                        }
-                        Message::Binary(_) => {
-                            info!("Replay [{i}]: Empty Binary");
-                        }
-                        _ => {
-                            info!("Replay [{i}]: Other message type");
-                        }
-                    }
-                }
                 ws_read_loop(
                     ws_read,
+                    handshake_overflow,
                     event_tx,
                     ws_cmd_tx,
                     dave,
@@ -444,6 +430,7 @@ impl VoiceConnection {
                     user_id,
                     dave_channel_id,
                     role,
+                    generation,
                     ws_sequence,
                     disconnect_sent,
                 )
@@ -464,6 +451,7 @@ impl VoiceConnection {
                     shutdown,
                     heartbeat_interval,
                     role,
+                    generation,
                     ws_sequence,
                     event_tx,
                     disconnect_sent,
@@ -492,6 +480,7 @@ impl VoiceConnection {
                     event_tx,
                     shutdown,
                     role,
+                    generation,
                     disconnect_sent,
                 )
                 .await;
@@ -537,7 +526,9 @@ impl VoiceConnection {
         let _ = event_tx
             .send(VoiceEvent::Ready {
                 role,
+                generation,
                 ssrc: ready.ssrc,
+                dave_protocol_version: session_description.dave_protocol_version,
             })
             .await;
 
@@ -606,6 +597,7 @@ async fn send_disconnect_once(
     event_tx: &mpsc::Sender<VoiceEvent>,
     disconnect_sent: &Arc<AtomicBool>,
     role: TransportRole,
+    generation: u64,
     reason: impl Into<String>,
 ) {
     if disconnect_sent
@@ -615,6 +607,7 @@ async fn send_disconnect_once(
         let _ = event_tx
             .send(VoiceEvent::Disconnected {
                 role,
+                generation,
                 reason: reason.into(),
             })
             .await;

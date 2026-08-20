@@ -2,7 +2,10 @@
 
 Status: accepted (2026-08-16). Extends
 [ADR 0057](0057-realtime-voice-with-captain-handoff.md); the group-room floor,
-captain handoff, consent, and Discord media owner stay unchanged.
+captain handoff, and consent stay unchanged. Current-status addendum
+(2026-08-19): [ADR 0128](0128-vox-is-the-sole-discord-media-owner.md) now owns
+the Discord media boundary; provider selection remains TypeScript policy above
+Vox.
 
 ## Context
 

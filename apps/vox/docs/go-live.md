@@ -74,12 +74,14 @@ Inbound native watch works like this:
 4. Clankie calls `stream_watch_connect`
 5. `clankvox` opens the stream-server transport
 6. Discord sends video state and media
-7. `clankvox` decrypts/depacketizes frames and emits:
-   - `user_video_state`
-   - `user_video_frame`
-   - `user_video_end`
+7. `clankvox` decrypts/depacketizes frames and emits raw VP8 as `user_video_frame`
 8. clankvox decodes H264 access units to JPEG in-process
    (`decoded_video_frame`) for the higher-level screen-watch pipeline
+
+Remote bindings are keyed by transport role plus user and stream. Concurrent
+primary webcam and stream-watch state cannot erase each other, and decoder-reset
+or DAVE-ready PLI/FIR feedback always returns through the role that produced the
+frame.
 
 The transport can emit raw VP8 frames, but the current TypeScript product does
 not decode or promote them. End-to-end screen observation therefore requires
@@ -104,6 +106,12 @@ Outbound self publish works like this:
    - browser-session publish feeds PNG frames into ffmpeg over stdin
 9. each access unit is DAVE-encrypted, RTP-packetized, and sent over UDP
 
+The product does not treat the control request as live-media proof.
+`discord.stream.publish_started` is recorded only after Discord accepts OP18 and
+OP22, the `stream_publish` transport is ready, that role has positive DAVE, and
+Vox emits `stream_publish_media_started` for the first accepted H264 access unit
+from the current connection/source generations.
+
 Pause/resume/stop are split cleanly:
 
 - pause: Clankie sends OP22 paused true and `stream_publish_pause`
@@ -119,7 +127,7 @@ Rollout:
 
 - publish lifecycle is tied to Clankie-owned source orchestration
 - source support is intentionally narrow and centered on:
-  - YouTube-backed music/video URLs
+  - YouTube-backed video URLs
   - browser-session PNG frames captured on the Clankie side
     (the active Clankie user-session body supplies these snapshots)
 - sender codec is H264

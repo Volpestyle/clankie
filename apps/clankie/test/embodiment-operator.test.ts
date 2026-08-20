@@ -10,6 +10,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 
 const OPERATOR = { authorization: "Bearer operator-secret" };
 const CAPTAIN = { authorization: "Bearer captain-secret" };
+const DISCORD_VOICE = { authorization: "Bearer discord-voice-secret" };
 
 async function makeApp(
   activity?: () => ActivityObservationSnapshot | undefined,
@@ -93,6 +94,22 @@ describe("operator play controls", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { session: { environmentId: string } | null };
     expect(body.session?.environmentId).toBe("pokemon-firered");
+  });
+
+  it("does not expose external claim, lifecycle-report, or possession routes", async () => {
+    const app = await makeApp();
+    expect((await app.request("/v1/embodiment/claims", { method: "POST", headers: CAPTAIN })).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await app.request("/v1/embodiment/sessions/session-1/report", {
+          method: "POST",
+          headers: CAPTAIN,
+        })
+      ).status,
+    ).toBe(404);
+    expect((await app.request("/v1/embodiment/possession", { headers: CAPTAIN })).status).toBe(404);
   });
 
   it("projects the runner's matching latest activity to captain and operator without persistence", async () => {
@@ -207,6 +224,9 @@ describe("operator play controls", () => {
     sessionId = ((await started.json()) as { session: { sessionId: string } }).session.sessionId;
 
     expect((await app.request("/v1/embodiment/sessions/live/still")).status).toBe(401);
+    expect((await app.request("/v1/embodiment/sessions/live/still", { headers: DISCORD_VOICE })).status).toBe(
+      401,
+    );
     const still = await app.request("/v1/embodiment/sessions/live/still", { headers: OPERATOR });
     expect(still.status).toBe(200);
     expect(await still.json()).toMatchObject({ outcome: "still", sessionId, pngBase64: "aa==" });
@@ -216,5 +236,8 @@ describe("operator play controls", () => {
       outcome: "card",
       card: { sessionId, objective: "leave the lab", moments: [{ effect: "bumped Oak" }] },
     });
+    expect((await app.request("/v1/embodiment/sessions/live/story", { headers: DISCORD_VOICE })).status).toBe(
+      401,
+    );
   });
 });

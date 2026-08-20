@@ -4,13 +4,31 @@ Clankie is one service plus the surfaces that reach it. The service owns the
 captain (a [pi](https://pi.dev)-based agent with durable sessions), his tools,
 his game bodies, and the HTTP API every surface speaks.
 
-![Current system overview](diagrams/clankie-current-architecture.jpg)
+```mermaid
+flowchart LR
+  TUI["TUI / menu bar / relay"] --> Service["apps/clankie<br/>captain, tools, HTTP authority"]
+  Body["one active Discord body<br/>official bot or lab user"] --> Service
+  Body --> Client["@clankie/vox-client<br/>Apache-2.0 IPC boundary"]
+  Client --> Vox["one clankvox child<br/>AGPL-3.0-or-later"]
+  Vox --> Media["Discord media<br/>voice + user-body stream roles"]
+  Service --> Local["Clankie's local emulator<br/>process-owned runtime"]
+  Service --> Contract["pinned @pokeagents/world-protocol"] --> Seat["Clankie's hosted seat<br/>separate player identity"]
+  Local --> Activity["Discord Activity<br/>rendered game media"]
+  Seat --> Activity
+  Harness["external harness"] --> GbaMcp["GBA MCP<br/>private emulator + runtime"]
+  Service --> State["Keychain + bounded local state"]
+  Service --> External["models, browser, Linear, email, Herdr"]
+```
 
-[Editable Turbopuffer tldraw source](diagrams/clankie-current-architecture.tldraw)
+This Mermaid diagram, [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md),
+and [ADR 0129](adr/0129-each-player-owns-a-body.md) are the canonical current
+architecture diagrams. The JPG/tldraw exports under `docs/diagrams/` are
+historical snapshots.
 
 ## How a message becomes a turn
 
-![Message to captain turn sequence](diagrams/clankie-message-turn-sequence.jpg)
+The older [message-to-captain JPG](diagrams/clankie-message-turn-sequence.jpg)
+is a historical snapshot; the present flow is described below.
 
 A Discord message reaches the active bridge. A text-only message in the live
 voice channel's attached chat enters that room's existing `VoiceFloor`; the
@@ -50,7 +68,8 @@ recovery ([ADR 0111](adr/0111-a-console-process-starts-one-conversation.md)).
 Conversations are files under `~/.clankie/captain/`. The full HTTP
 surface is listed in [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml);
 [`apps/clankie/scripts/setup-yaak.py`](../apps/clankie/scripts/setup-yaak.py)
-builds a local Yaak workspace against it.
+imports that canonical catalog into Yaak and adds a Keychain-backed `Local`
+environment for authenticated requests.
 
 The native macOS menu-bar app uses that same contract to list continuing Pi
 sessions and tail expanded transcripts. Its microphone opens a private local
@@ -126,23 +145,36 @@ the full picture — what each store holds, who may read it, and what bounds it.
   or hosted sitting receives the last self-authored notes and objective while
   exact world state remains owned by the checkpoint or hosted cartridge save
   ([ADR 0126](adr/0126-game-state-history-and-memory-have-separate-owners.md)).
-  Two bodies implement that seam. The local one is
+  Two Clankie-owned bodies implement that seam. The local one is
   [`integrations/gba-emulator`](../integrations/gba-emulator/README.md), booted
-  and leased by the local play host; `body-lock` keeps one writer on it across
-  the free-play CLI, GBA MCP, and live session. The hosted one is a seat in a
-  PokeAgent MMO world, reached through the published
+  by the local play host in the service process. The hosted one is Clankie's
+  separately credentialed seat in a PokeAgents world, reached through the published
   `@pokeagents/world-protocol` contract and entered with the `pokeagent_join_mmo`
   tool ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). A hosted world
   cannot be paused, changes without him acting, and can replace his body under
   him. Owner settings independently enable the local emulator and hosted MMO;
   both may be available while the shared play host allows one live session
   across them. Frames from either flow to the Discord activity surface.
+  [`apps/gba-mcp`](../apps/gba-mcp/README.md) is outside this path: each MCP
+  process owns a private emulator/runtime and grants its caller no control over
+  Clankie, Activity publication, play voice, or room input.
+  `EnvironmentRuntime` leases remain internal action/session fences within the
+  owning runtime; they are not cross-process possession.
+- **PokeAgents boundary.** The sibling PokeAgents repository owns the
+  `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and
+  the MCP projection derived from that catalog. MCP carries calls; the world
+  contract and host enforce player identity, authority, and gameplay semantics.
+  Clankie currently imports only the pinned published `@pokeagents/world-protocol`
+  package (including `/ipc`) and keeps host, emulator, persistence, and
+  world-MCP packages out of product source. A stronger session-bound typed
+  client or catalog-only dispatch is PokeAgents-owned follow-up, not a shipped
+  Clankie claim.
 - **Auth.** Provider keys and OAuth tokens live in the credential broker
   (Keychain), written by the TUI `/auth` flow and read by pi through a
   credential-store bridge. Compatibility model/media provider keys may fall
   back to existing shell values or the gitignored root `.env.local` when the
   broker has no entry; Discord account and body credentials remain broker-only
-  except documented operator/captain/runner test overrides. Persona is owner-authored in
+  except documented operator/captain test overrides. Persona is owner-authored in
   `~/.config/clankie/settings.json` and can never be set by a caller.
   `/connect` stores Linear and mailbox credentials the same way; Discord
   remains a body configured by `/discord` ([credential guide](credentials.md),
@@ -152,10 +184,13 @@ the full picture — what each store holds, who may read it, and what bounds it.
   from settings, and mail stays console-only because sign-in codes arrive there
   ([ADR 0127](adr/0127-his-accounts-are-his.md)). A seat in a
   hosted world is a broker credential too — `pokeagent_mmo_world`, with the
-  environment variant refused outright. An optional lab
-  user-session body watches Discord screen shares and publishes Go Live through
-  the owned `@clankie/vox` native media package ([Discord media guide](discord-media.md),
-  [ADR 0100](adr/0100-vox-is-an-owned-native-media-package.md)).
+  environment variant refused outright. Each media-enabled active Discord body
+  owns one `clankvox` child through the Apache `@clankie/vox-client` boundary.
+  A text-only official-bot process does not spawn Vox. Both media-enabled bodies
+  use its primary role for voice, TTS, and music; the lab user body can
+  concurrently watch screen shares and publish Go Live through separate roles
+  ([Discord media guide](discord-media.md),
+  [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md)).
   `/discord` Active body picks which process is the mouth; the launcher
   starts only that one ([ADR 0048](adr/0048-discord-user-session-transport.md)).
   Who may ask him to drive this machine from Discord is
@@ -163,15 +198,20 @@ the full picture — what each store holds, who may read it, and what bounds it.
 
 ## Native media plane
 
-![Vox native media architecture](diagrams/vox-architecture.jpg)
+Each media-enabled active bot or user-session body owns exactly one `clankvox`
+child. A text-only official-bot process owns none. Apache product code speaks
+through `@clankie/vox-client`; the AGPL executable owns DAVE, RTP/RTCP, codecs,
+capture, TTS/music pacing, screen-watch, and Go Live publishing. The TypeScript
+`DiscordVoiceSession` retains consent, attribution, floor, realtime-provider,
+and captain-handoff policy.
 
-[Editable Turbopuffer tldraw source](diagrams/vox-architecture.tldraw)
-
-The active user-session body owns one `clankvox` child. Apache product code
-speaks through `@clankie/vox-client`; the AGPL executable owns DAVE, RTP/RTCP,
-codecs, capture, screen-watch, and Go Live publishing. Product receipts wait
-for native `transport_state=ready` instead of treating process spawn as media
-readiness.
+Readiness is role-specific: versioned `process_ready` must exactly match the
+client IPC protocol and proves only that the child can serve IPC;
+`transport_state=ready` proves a role's Discord media transport; and positive
+`dave_state=ready` proves that role's negotiated DAVE session. Primary voice
+ready, connection, transport, DAVE, and error events are correlated by the
+caller's `connectionId`. The detailed current diagram and evidence rules live in
+[ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md).
 
 ## Current architecture constraints
 
@@ -188,18 +228,19 @@ media, browsing, and operator control.
 
 ## Canonical Homes
 
-| Concern                        | Canonical reference                                                                       |
-| ------------------------------ | ----------------------------------------------------------------------------------------- |
-| HTTP API                       | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                               |
-| Operator console and launcher  | [`apps/tui/README.md`](../apps/tui/README.md)                                             |
-| macOS menu-bar app             | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                   |
-| Official Discord bot operation | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                       |
-| Shared Discord behavior        | [`packages/discord-presence-core/README.md`](../packages/discord-presence-core/README.md) |
-| Personal-lab Discord body      | [`apps/discord-user-session/README.md`](../apps/discord-user-session/README.md)           |
-| Possessor commentary/hearing   | [`packages/possessor-voice/README.md`](../packages/possessor-voice/README.md)             |
-| Native media                   | [`apps/vox/README.md`](../apps/vox/README.md)                                             |
-| Discord media surfaces         | [`docs/discord-media.md`](discord-media.md)                                               |
-| Durable memory                 | [`docs/memory.md`](memory.md)                                                             |
-| Credential identities/setup    | [`docs/credentials.md`](credentials.md)                                                   |
-| Credential implementation      | [`packages/credential-broker/README.md`](../packages/credential-broker/README.md)         |
-| Models                         | [`packages/model-provider/README.md`](../packages/model-provider/README.md)               |
+| Concern                           | Canonical reference                                                                       |
+| --------------------------------- | ----------------------------------------------------------------------------------------- |
+| HTTP API                          | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                               |
+| Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                             |
+| macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                   |
+| Official Discord bot operation    | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                       |
+| Shared Discord behavior           | [`packages/discord-presence-core/README.md`](../packages/discord-presence-core/README.md) |
+| Personal-lab Discord body         | [`apps/discord-user-session/README.md`](../apps/discord-user-session/README.md)           |
+| Clankie's play commentary/hearing | [`packages/play-voice/README.md`](../packages/play-voice/README.md)                       |
+| Game-body ownership               | [ADR 0129](adr/0129-each-player-owns-a-body.md)                                           |
+| Native media                      | [`apps/vox/README.md`](../apps/vox/README.md)                                             |
+| Discord media surfaces            | [`docs/discord-media.md`](discord-media.md)                                               |
+| Durable memory                    | [`docs/memory.md`](memory.md)                                                             |
+| Credential identities/setup       | [`docs/credentials.md`](credentials.md)                                                   |
+| Credential implementation         | [`packages/credential-broker/README.md`](../packages/credential-broker/README.md)         |
+| Models                            | [`packages/model-provider/README.md`](../packages/model-provider/README.md)               |

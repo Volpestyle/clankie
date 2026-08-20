@@ -9,7 +9,6 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "fixture:check": "tsx scripts/check-fixture.ts",
@@ -20,11 +19,9 @@
     "gameplay:competence": "tsx scripts/run-free-play-competence.ts",
     "gameplay:evaluate-competence-receipt": "tsx scripts/evaluate-free-play-competence-receipt.ts",
     "gameplay:evaluate-journal": "tsx scripts/evaluate-free-play-journal.ts",
-    "clean": "rm -rf dist coverage",
     "free-play": "tsx scripts/free-play-cli.ts"
   },
   "dependencies": {
-    "@clankie/body-lock": "workspace:*",
     "@clankie/environment-runtime": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/model-provider": "workspace:*",

@@ -9,6 +9,14 @@ Consent ([ADR 0071](0071-presence-as-consent-voice-policy.md)) and authorship
 text also reaches an active realtime room under
 [ADR 0124](0124-one-self-has-many-local-threads.md).
 
+## Current status (2026-08-19)
+
+Admitted room text still reaches Clankie's active play as an interjection through
+`@clankie/play-voice`. [ADR 0129](0129-each-player-owns-a-body.md) supersedes
+the possessor scope: external harnesses and GBA MCP receive no room input. The
+transport/retention rationale below remains the historical basis for Clankie's
+own seam.
+
 ## Context
 
 ADR 0064 gives a possessor one way to hear the room: the bridge pushes each

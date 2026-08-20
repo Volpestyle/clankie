@@ -16,6 +16,7 @@ import {
 import { createFreePlaySession } from "./free-play-session.ts";
 import { positionOf, type FreePlayProgress, type GbaPosition } from "./free-play-progress.ts";
 import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
+import type { MgbaCoreIdentity } from "./mgba-core.ts";
 
 const PositionSchema = z
   .object({
@@ -283,7 +284,7 @@ export interface LoadedFreePlayCompetenceBenchmark {
 }
 
 export function loadFreePlayCompetenceBenchmark(path: string): LoadedFreePlayCompetenceBenchmark {
-  const bytes = readFileSyncCompat(path);
+  const bytes = readFileSync(path);
   return {
     path,
     fixtureSha256: sha256(bytes),
@@ -293,7 +294,7 @@ export function loadFreePlayCompetenceBenchmark(path: string): LoadedFreePlayCom
 
 export interface FreePlayCompetenceCoreHandle {
   coreFactory: GbaCoreFactory;
-  identity?: { romSha256: string; savestateSha256: string; coreWasmSha256: string };
+  identity?: MgbaCoreIdentity;
 }
 
 export interface RunFreePlayCompetenceBenchmarkInput {
@@ -587,7 +588,6 @@ async function runState(
     scenario: loaded.scenario,
     fixtureSha256: loaded.stateFixtureSha256,
     ...(core?.coreFactory === undefined ? {} : { coreFactory: core.coreFactory }),
-    acquireBody: false,
     runId: `competence-${state.stateId}`,
     ...(input.clock === undefined ? {} : { clock: input.clock }),
   });
@@ -628,7 +628,7 @@ async function runState(
       checks,
     });
   } finally {
-    session.close();
+    await session.close();
   }
 }
 
@@ -651,7 +651,7 @@ function loadScenarioForState(
   };
 } {
   const scenarioPath = resolve(dirname(benchmark.path), state.scenarioPath);
-  const bytes = readFileSyncCompat(scenarioPath);
+  const bytes = readFileSync(scenarioPath);
   const parsed: unknown = JSON.parse(bytes.toString("utf8"));
   const sourceFixtureSha256 = sha256(bytes);
   if (state.kind === "deterministic_double") {
@@ -716,7 +716,7 @@ function assertPins(
 function assertCoreIdentity(
   state: FreePlayCompetenceState,
   expected: { romSha256?: string; savestateSha256: string; coreWasmSha256?: string },
-  actual: { romSha256: string; savestateSha256: string; coreWasmSha256: string },
+  actual: MgbaCoreIdentity,
 ): void {
   if (
     actual.romSha256 !== expected.romSha256 ||
@@ -921,10 +921,6 @@ async function readRegularFile(path: string, maximumBytes: number): Promise<Buff
     throw new Error(`Free-play competence evidence has an invalid size: ${path}`);
   }
   return readFile(path);
-}
-
-function readFileSyncCompat(path: string): Buffer {
-  return readFileSync(path);
 }
 
 function requiredCheckpointHash(

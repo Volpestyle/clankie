@@ -1,4 +1,4 @@
-import { resolveDiscordActiveBody } from "@clankie/settings";
+import { postToDiscordActiveBody } from "./discord-active-body.ts";
 
 /**
  * Captain client for the active Discord body's DJ desk.
@@ -45,17 +45,8 @@ async function postMusic(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
 ): Promise<DiscordMusicCallResult> {
-  const port =
-    resolveDiscordActiveBody(env) === "user_session"
-      ? env.CLANKIE_USER_SESSION_CONTROL_PORT?.trim() || "4312"
-      : env.CLANKIE_DISCORD_BRIDGE_CONTROL_PORT?.trim() || "4313";
   try {
-    const response = await fetchImpl(`http://127.0.0.1:${port}/music/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20_000),
-    });
+    const response = await postToDiscordActiveBody(`/music/${action}`, body, env, fetchImpl);
     const parsed = (await response.json()) as { ok?: boolean; message?: string };
     if (typeof parsed.message === "string") {
       return { ok: parsed.ok === true, message: parsed.message };

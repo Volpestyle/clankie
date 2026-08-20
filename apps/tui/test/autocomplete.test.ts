@@ -82,14 +82,14 @@ const commands: ClankieAutocompleteCommand[] = [
     name: "provider",
     aliases: [],
     description: "Choose which provider the model picker browses",
-    argumentHint: "[small|voice|status]",
+    argumentHint: "[status]",
     takesArgument: true,
   },
   {
     name: "model",
     aliases: [],
     description: "Choose a model from the selected provider",
-    argumentHint: "[small|voice|status]",
+    argumentHint: "[status]",
     takesArgument: true,
   },
   {
@@ -316,11 +316,11 @@ describe("argument suggestions", () => {
   }
 
   it("completes model and auth arguments", async () => {
-    expect((await items("/provider sm", 12)).some((item) => item.value === "small")).toBe(true);
-    expect((await items("/model sm", 9)).some((item) => item.value === "small")).toBe(true);
+    expect((await items("/provider ", 10)).map((item) => item.value)).toEqual(["status"]);
+    expect((await items("/model ", 7)).map((item) => item.value)).toEqual(["status"]);
     expect((await items("/model st", 9)).some((item) => item.value === "status")).toBe(true);
     expect((await items("/auth st", 8)).some((item) => item.value === "status")).toBe(true);
-    expect((await items("/auth xa", 8)).some((item) => item.value === "xai")).toBe(true);
+    expect((await items("/auth mc", 8)).some((item) => item.value === "mcp")).toBe(true);
   });
 
   it("completes image-model, voice, and Discord arguments", async () => {
@@ -333,6 +333,7 @@ describe("argument suggestions", () => {
     expect((await items("/layout in", 10)).some((item) => item.value === "input")).toBe(true);
     expect((await items("/layout input t", 15)).some((item) => item.value === "top")).toBe(true);
     expect((await items("/layout status b", 16)).some((item) => item.value === "below")).toBe(true);
+    expect((await items("/layout ", 8)).some((item) => item.value === "footer")).toBe(false);
   });
 
   it("completes /connect catalog arguments", async () => {

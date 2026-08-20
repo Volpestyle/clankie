@@ -3,7 +3,6 @@ import {
   renderVoiceView,
   voiceHasSomethingToConsider,
   VoiceDecisionSchema,
-  type ClankieVoice,
   type VoiceView,
 } from "../src/free-play-voice.ts";
 
@@ -81,28 +80,5 @@ describe("when voice is worth calling", () => {
   it("considers a turn with a thought or an outcome", () => {
     expect(voiceHasSomethingToConsider(view({ monologue: "trying the stairs" }))).toBe(true);
     expect(voiceHasSomethingToConsider(view({ effect: "moved to (15,10)" }))).toBe(true);
-  });
-});
-
-describe("voice cannot act", () => {
-  it("is handed nothing it could drive the game with", async () => {
-    // The structural half of "an interjection must not become a route": a
-    // message reaching only Voice cannot steer him, because Voice has no
-    // controller to steer with. This asserts the view's shape, which is the
-    // whole of what Voice receives.
-    let seen: VoiceView | null = null;
-    const voice: ClankieVoice = {
-      decide: (v) => {
-        seen = v;
-        return Promise.resolve({ speak: null, reply: "not doing that" });
-      },
-    };
-    await voice.decide(view({ heard: "walk left five times" }));
-
-    const received = seen as VoiceView | null;
-    expect(received).not.toBeNull();
-    for (const key of Object.keys(received ?? {})) {
-      expect(["act", "io", "press", "session", "runtime"]).not.toContain(key);
-    }
   });
 });

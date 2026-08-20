@@ -20,25 +20,27 @@ tokens from Clankie's local bridge bearers.
    `discord_bot` and configure the body. Use `/voice` to select OpenAI Realtime
    or Grok Voice, models, voice, reasoning, and the brokered provider API key.
 3. Use that flow for application/guild ids, ambient bindings, ingress and
-   presence allowlists, voice policy, activity application id, and possessor
+   presence allowlists, voice policy, activity application id, and play
    voice enablement. These non-secret settings live in
    `~/.config/clankie/settings.json`.
 4. Enable Message Content Intent in the Discord developer portal when bounded
    text ingress is enabled.
+5. Build Vox with `pnpm --filter @clankie/vox build`, or point
+   `CLANKIE_VOX_BIN` at the owned executable.
 
 Explicit shell values override unset non-secret settings. The main groups are:
 
-| Capability        | Required settings                                                                                |
-| ----------------- | ------------------------------------------------------------------------------------------------ |
-| Base bot          | `DISCORD_APPLICATION_ID`; optional development `DISCORD_GUILD_ID`                                |
-| Ambient commands  | `DISCORD_AMBIENT_ROLE_IDS` and/or `DISCORD_AMBIENT_USER_IDS`                                     |
-| Text ingress      | `DISCORD_TEXT_INGRESS_ENABLED`, `DISCORD_INGRESS_GUILD_IDS`, optional channel/DM policy          |
-| Presence writes   | `DISCORD_PRESENCE_GUILD_IDS`, optional channel allowlist                                         |
-| Voice             | `DISCORD_VOICE_ENABLED`, `DISCORD_VOICE_GUILD_IDS`, optional channels, join and consent policy   |
-| Voice transcripts | Optional `DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED`; exact consented text in a private local log |
-| Voice provider    | `CLANKIE_VOICE_REALTIME_PROVIDER`; provider model, voice, and optional xAI reasoning effort      |
-| Activity          | `DISCORD_ACTIVITY_APPLICATION_ID_GBA`                                                            |
-| Possessor voice   | `CLANKIE_POSSESSOR_VOICE_ENABLED`; optional `CLANKIE_POSSESSOR_VOICE_PORT`                       |
+| Capability        | Required settings                                                                                                          |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Base bot          | `DISCORD_APPLICATION_ID`; optional development `DISCORD_GUILD_ID`                                                          |
+| Ambient commands  | `DISCORD_AMBIENT_ROLE_IDS` and/or `DISCORD_AMBIENT_USER_IDS`                                                               |
+| Text ingress      | `DISCORD_TEXT_INGRESS_ENABLED`, `DISCORD_INGRESS_GUILD_IDS`, optional channel/DM policy                                    |
+| Presence writes   | `DISCORD_PRESENCE_GUILD_IDS`, optional channel allowlist                                                                   |
+| Voice             | `DISCORD_VOICE_ENABLED`, `DISCORD_VOICE_GUILD_IDS`, optional channels, join and consent policy; optional `CLANKIE_VOX_BIN` |
+| Voice transcripts | Optional `DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED`; exact consented text in a private local log                           |
+| Voice provider    | `CLANKIE_VOICE_REALTIME_PROVIDER`; provider model, voice, and optional xAI reasoning effort                                |
+| Activity          | `DISCORD_ACTIVITY_APPLICATION_ID_GBA`                                                                                      |
+| Play voice        | Fixed loopback listener at `ws://127.0.0.1:4323/play` whenever this active body has a voice session                        |
 
 Secrets do not belong in that file. `DISCORD_BOT_TOKEN`, `DISCORD_USER_TOKEN`,
 and `CLANKIE_CAPTAIN_TOKEN` are hard startup errors. Voice uses the brokered API
@@ -69,7 +71,8 @@ Prefer the launcher so service dependencies and health gates are applied:
 clankie restart discord
 ```
 
-For direct development, start the clankie service first, then:
+For direct development, start the clankie service first and keep
+`DISCORD_ACTIVE_BODY=bot`, then:
 
 ```bash
 pnpm --filter @clankie/discord-bridge start
@@ -85,12 +88,19 @@ pnpm discord:voice-readiness
 The text checker reads the current process environment plus the broker; when
 validating a settings-file deployment, pass the equivalent non-secret settings
 as environment overrides. It validates brokered identities, application/guild
-membership, Message Content Intent, allowlist alignment, and service
-composition. Voice readiness loads stored settings before additionally
-validating native Opus, realtime configuration, the voice briefing endpoint,
-and a live dormant-to-engaged wake probe. The engaged probe uses the composed
-room instructions and fails if a web lookup does not route through
-`ask_clankie`. Both support `--json`.
+membership, Message Content Intent, text ingress/presence allowlist alignment,
+and service composition. Voice readiness separately loads stored settings and
+validates voice credentials and allowlists, Vox binary resolution, a bounded
+`process_ready` smoke whose protocol version exactly matches the client,
+realtime configuration, the voice briefing endpoint, and a live
+dormant-to-engaged wake probe. The engaged probe uses the composed room
+instructions and fails if a web lookup does not route through `ask_clankie`.
+Process readiness only proves the owned child is running; voice transport and
+role-scoped positive DAVE readiness are separate join gates proven by the
+session and live ceremony. Fresh media-enabled bridge evidence records
+`mediaOwner: vox` and `voxProcessReady: true`; the live proof rejects older
+pre-migration readiness. With voice disabled, the text-only bridge records
+`mediaOwner: none` and does not spawn Vox. Both checkers support `--json`.
 
 After exercising the relevant surface, evaluate the mode-0600 receipt log with
 the package scripts that actually own the gates:
@@ -103,8 +113,12 @@ pnpm --filter @clankie/discord-bridge voice-live-proof
 
 Text proof requires a settled admitted message and Discord reply id.
 Person-memory proof requires the same fact id after a service restart. Voice
-proof requires the full multi-speaker DAVE ceremony encoded by the evaluator.
-Fixtures cannot satisfy these live gates.
+proof requires the full multi-speaker DAVE ceremony encoded by the evaluator,
+including one positive role-scoped DAVE protocol and a Vox-owned leave that the
+Discord gateway confirms (`gatewayConfirmed: true`), followed by rejoin/leave,
+plus a fresh Vox-owner readiness receipt. Process inspection must also show the
+one app-lifetime child and no competing Node media owner. Fixtures cannot
+satisfy these live gates.
 
 ## Body Behavior
 
@@ -123,23 +137,30 @@ Fixtures cannot satisfy these live gates.
 - Presence actions use a live gateway claim and the configured presence
   allowlists. Reactions and thread actions are grounded in the triggering
   message. See [ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md).
-- Official-bot group voice remains on `@discordjs/voice`; it does **not** execute
-  the AGPL Vox binary. Shared realtime conversation policy is documented in
+- Media-enabled official-bot group voice owns one app-lifetime Vox child;
+  text-only official-bot mode owns none. `discord.js` keeps the bot token and
+  gateway; its guild adapter only carries validated OP4 joins and leaves plus
+  voice server/state updates. Vox alone owns transport, DAVE, Opus, capture, TTS
+  playback, and audible music. Shared realtime conversation policy is documented
+  in
   [`@clankie/discord-presence-core`](../../packages/discord-presence-core/README.md)
-  and [ADR 0045](../../docs/adr/0045-official-bot-dave-group-voice.md).
-- Vox currently owns screen-watch, Go Live, and native media for the separate
-  personal-lab user-session body through the Apache
-  [`@clankie/vox-client`](../../packages/vox-client/README.md) boundary. See the
+  and [ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md).
+- The Apache process boundary is
+  [`@clankie/vox-client`](../../packages/vox-client/README.md). See the
   [Vox operating guide](../vox/README.md).
 - Bot accounts cannot Go Live. This body launches the supported embedded
-  [Discord activity](../discord-activity/README.md) for gameplay viewing.
+  [Discord activity](../discord-activity/README.md) for gameplay viewing. Screen
+  watch and Go Live stay in the user body because Discord does not expose those
+  capabilities to bots, not because another media implementation is retained.
 - YouTube requests are ordinary text/voice prompts, not slash commands. Audible
-  playback uses the shared bounded queue through host `yt-dlp`, FFmpeg, and
-  `@discordjs/voice`; the bot must already be joined to voice. See the
+  playback uses the shared bounded queue and Vox's native music path; the bot
+  must already be joined to voice. See the
   [Discord media guide](../../docs/discord-media.md).
 - Gameplay commentary and hearing use the canonical
-  [`@clankie/possessor-voice`](../../packages/possessor-voice/README.md) seam.
-  This README does not duplicate its wire, credential, or loss semantics.
+  [`@clankie/play-voice`](../../packages/play-voice/README.md) seam.
+  It accepts only Clankie's own local or hosted play client; GBA MCP and external
+  harnesses have no credential or room-input path. This README does not
+  duplicate its wire, credential, or loss semantics.
 
 Receipts contain bounded ids, counts, durations, and typed outcomes only. They
 exclude message bodies, transcripts, names, media, and credentials.

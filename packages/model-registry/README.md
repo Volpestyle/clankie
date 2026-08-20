@@ -1,6 +1,6 @@
 # @clankie/model-registry
 
-Model catalog service backed by [models.dev](https://models.dev). It ships a vendored snapshot of the models.dev catalog, keeps an optional on-disk cache fresh, and exposes pure query helpers plus a merge hook for user-configured custom providers (e.g. a local Ollama endpoint models.dev knows nothing about).
+Model catalog service backed by [models.dev](https://models.dev). It ships a vendored snapshot of the models.dev catalog, keeps an optional on-disk cache fresh, and merges user-configured custom providers (e.g. a local Ollama endpoint models.dev knows nothing about).
 
 Schemas are lenient by design: unknown keys pass through and malformed or missing fields fall back to safe defaults, so a models.dev format change never breaks catalog loading.
 

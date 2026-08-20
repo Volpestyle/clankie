@@ -31,9 +31,9 @@ use super::{TransportRole, VoiceEvent, WsCommand, WsStream, parse_user_id, send_
 // Background tasks
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn ws_read_loop(
-    mut ws_read: futures_util::stream::SplitStream<WsStream>,
+    ws_read: futures_util::stream::SplitStream<WsStream>,
+    handshake_overflow: Vec<Message>,
     event_tx: mpsc::Sender<VoiceEvent>,
     ws_cmd_tx: mpsc::Sender<WsCommand>,
     dave: Arc<Mutex<Option<DaveManager>>>,
@@ -44,9 +44,16 @@ pub(super) async fn ws_read_loop(
     bot_user_id: u64,
     channel_id: u64,
     role: TransportRole,
+    generation: u64,
     ws_sequence: Arc<AtomicI32>,
     disconnect_sent: Arc<AtomicBool>,
 ) {
+    let mut ws_read = futures_util::stream::iter(
+        handshake_overflow
+            .into_iter()
+            .map(Ok::<_, tokio_tungstenite::tungstenite::Error>),
+    )
+    .chain(ws_read);
     while let Some(msg) = ws_read.next().await {
         if shutdown.load(Ordering::Relaxed) {
             break;
@@ -77,6 +84,7 @@ pub(super) async fn ws_read_loop(
                     bot_user_id,
                     channel_id,
                     role,
+                    generation,
                     &ws_sequence,
                 )
                 .await;
@@ -85,7 +93,16 @@ pub(super) async fn ws_read_loop(
                 if data.is_empty() {
                     continue;
                 }
-                handle_binary_opcode(&data, &event_tx, &ws_cmd_tx, &dave, role, &ws_sequence).await;
+                handle_binary_opcode(
+                    &data,
+                    &event_tx,
+                    &ws_cmd_tx,
+                    &dave,
+                    role,
+                    generation,
+                    &ws_sequence,
+                )
+                .await;
             }
             Ok(Message::Close(frame)) => {
                 let reason = match frame {
@@ -96,7 +113,7 @@ pub(super) async fn ws_read_loop(
                     None => "WebSocket closed by server (no close frame)".into(),
                 };
                 warn!("{reason}");
-                send_disconnect_once(&event_tx, &disconnect_sent, role, reason).await;
+                send_disconnect_once(&event_tx, &disconnect_sent, role, generation, reason).await;
                 break;
             }
             Err(e) => {
@@ -104,6 +121,7 @@ pub(super) async fn ws_read_loop(
                     &event_tx,
                     &disconnect_sent,
                     role,
+                    generation,
                     format!("WS read error: {e}"),
                 )
                 .await;
@@ -115,7 +133,6 @@ pub(super) async fn ws_read_loop(
     info!("Voice WS read loop exited");
 }
 
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(super) async fn handle_text_opcode(
     op: u64,
     d: &Value,
@@ -128,6 +145,7 @@ pub(super) async fn handle_text_opcode(
     bot_user_id: u64,
     channel_id: u64,
     role: TransportRole,
+    generation: u64,
     _ws_sequence: &Arc<AtomicI32>,
 ) {
     match op {
@@ -153,6 +171,7 @@ pub(super) async fn handle_text_opcode(
             let _ = event_tx
                 .send(VoiceEvent::SsrcUpdate {
                     role,
+                    generation,
                     ssrc: payload.ssrc,
                     user_id: uid,
                 })
@@ -189,6 +208,7 @@ pub(super) async fn handle_text_opcode(
                     video_ssrc_map,
                     current_video_codec,
                     role,
+                    generation,
                 )
                 .await;
                 return;
@@ -231,7 +251,11 @@ pub(super) async fn handle_text_opcode(
                 .lock()
                 .retain(|_, binding| binding.user_id != uid);
             let _ = event_tx
-                .send(VoiceEvent::ClientDisconnect { role, user_id: uid })
+                .send(VoiceEvent::ClientDisconnect {
+                    role,
+                    generation,
+                    user_id: uid,
+                })
                 .await;
         }
         13 => {
@@ -250,7 +274,11 @@ pub(super) async fn handle_text_opcode(
                 .lock()
                 .retain(|_, binding| binding.user_id != uid);
             let _ = event_tx
-                .send(VoiceEvent::ClientDisconnect { role, user_id: uid })
+                .send(VoiceEvent::ClientDisconnect {
+                    role,
+                    generation,
+                    user_id: uid,
+                })
                 .await;
         }
         // Session update / codec update
@@ -320,12 +348,23 @@ pub(super) async fn handle_text_opcode(
                 }
             };
             if transitioned {
-                let ready = {
+                let ready_protocol_version = {
                     let guard = dave.lock();
-                    guard.as_ref().is_some_and(DaveManager::is_ready)
+                    guard
+                        .as_ref()
+                        .filter(|manager| manager.is_ready())
+                        .map(DaveManager::protocol_version)
                 };
-                if ready {
-                    let _ = event_tx.send(VoiceEvent::DaveReady { role }).await;
+                if let Some(protocol_version) =
+                    ready_protocol_version.filter(|version| *version > 0)
+                {
+                    let _ = event_tx
+                        .send(VoiceEvent::DaveReady {
+                            role,
+                            generation,
+                            protocol_version,
+                        })
+                        .await;
                 }
             }
         }
@@ -389,13 +428,13 @@ pub(super) async fn handle_text_opcode(
     }
 }
 
-#[allow(clippy::too_many_lines)]
 pub(super) async fn handle_binary_opcode(
     data: &[u8],
     event_tx: &mpsc::Sender<VoiceEvent>,
     ws_cmd_tx: &mpsc::Sender<WsCommand>,
     dave: &Arc<Mutex<Option<DaveManager>>>,
     role: TransportRole,
+    generation: u64,
     ws_sequence: &Arc<AtomicI32>,
 ) {
     // Incoming binary frames from Discord Voice WebSocket have the format:
@@ -501,7 +540,7 @@ pub(super) async fn handle_binary_opcode(
             );
 
             // Process commit under lock, collect any recovery action, then drop lock
-            let (ready, success, recovery_action) =
+            let (ready_protocol_version, success, recovery_action) =
                 {
                     let mut guard = dave.lock();
                     if let Some(ref mut dm) = *guard {
@@ -516,7 +555,7 @@ pub(super) async fn handle_binary_opcode(
                                     ready = dm.is_ready(),
                                     "DAVE: commit processed, MLS group members"
                                 );
-                                (dm.is_ready(), true, None)
+                                (dm.is_ready().then(|| dm.protocol_version()), true, None)
                             }
                             Err(e) => {
                                 error!("DAVE process_commit: {e}");
@@ -524,11 +563,11 @@ pub(super) async fn handle_binary_opcode(
                                 error!(error = %error, "DAVE reinit failed after commit error");
                                 error
                             }).ok();
-                                (false, false, recovery)
+                                (None, false, recovery)
                             }
                         }
                     } else {
-                        (false, false, None)
+                        (None, false, None)
                     }
                 };
             // Lock is dropped — safe to await
@@ -542,8 +581,14 @@ pub(super) async fn handle_binary_opcode(
                 send_transition_ready(ws_cmd_tx, transition_id, "commit").await;
             }
 
-            if ready {
-                let _ = event_tx.send(VoiceEvent::DaveReady { role }).await;
+            if let Some(protocol_version) = ready_protocol_version.filter(|version| *version > 0) {
+                let _ = event_tx
+                    .send(VoiceEvent::DaveReady {
+                        role,
+                        generation,
+                        protocol_version,
+                    })
+                    .await;
             }
         }
         // OP30: MLS Welcome (server → client)
@@ -562,7 +607,7 @@ pub(super) async fn handle_binary_opcode(
             );
 
             // Process welcome under lock, collect any recovery action, then drop lock
-            let (ready, success, recovery_action) = {
+            let (ready_protocol_version, success, recovery_action) = {
                 let mut guard = dave.lock();
                 if let Some(ref mut dm) = *guard {
                     match dm.process_welcome(welcome_payload) {
@@ -576,7 +621,7 @@ pub(super) async fn handle_binary_opcode(
                                 ready = dm.is_ready(),
                                 "DAVE: welcome processed, MLS group members"
                             );
-                            (dm.is_ready(), true, None)
+                            (dm.is_ready().then(|| dm.protocol_version()), true, None)
                         }
                         Err(e) => {
                             if is_already_in_group_error(&e) {
@@ -588,13 +633,13 @@ pub(super) async fn handle_binary_opcode(
                                         transition_id
                                     );
                                     dm.store_pending_transition(transition_id);
-                                    (dm.is_ready(), true, None)
+                                    (dm.is_ready().then(|| dm.protocol_version()), true, None)
                                 } else {
                                     warn!(
                                         "DAVE process_welcome: AlreadyInGroup for non-pending transition {}; ignoring stale welcome",
                                         transition_id
                                     );
-                                    (dm.is_ready(), false, None)
+                                    (dm.is_ready().then(|| dm.protocol_version()), false, None)
                                 }
                             } else {
                                 error!("DAVE process_welcome failed: {e}");
@@ -602,12 +647,12 @@ pub(super) async fn handle_binary_opcode(
                                     error!(error = %error, "DAVE reinit failed after welcome error");
                                     error
                                 }).ok();
-                                (false, false, recovery)
+                                (None, false, recovery)
                             }
                         }
                     }
                 } else {
-                    (false, false, None)
+                    (None, false, None)
                 }
             };
             // Lock is dropped — safe to await
@@ -621,8 +666,14 @@ pub(super) async fn handle_binary_opcode(
                 send_transition_ready(ws_cmd_tx, transition_id, "welcome").await;
             }
 
-            if ready {
-                let _ = event_tx.send(VoiceEvent::DaveReady { role }).await;
+            if let Some(protocol_version) = ready_protocol_version.filter(|version| *version > 0) {
+                let _ = event_tx
+                    .send(VoiceEvent::DaveReady {
+                        role,
+                        generation,
+                        protocol_version,
+                    })
+                    .await;
             }
         }
         // OP31: MLS Invalid Commit Welcome
@@ -696,6 +747,7 @@ pub(super) async fn ws_write_loop(
     shutdown: Arc<AtomicBool>,
     heartbeat_interval_ms: f64,
     role: TransportRole,
+    generation: u64,
     ws_sequence: Arc<AtomicI32>,
     event_tx: mpsc::Sender<VoiceEvent>,
     disconnect_sent: Arc<AtomicBool>,
@@ -739,6 +791,7 @@ pub(super) async fn ws_write_loop(
                         &event_tx,
                         &disconnect_sent,
                         role,
+                        generation,
                         format!("WS heartbeat send failed: {error}"),
                     )
                     .await;
@@ -753,6 +806,7 @@ pub(super) async fn ws_write_loop(
                                 &event_tx,
                                 &disconnect_sent,
                                 role,
+                                generation,
                                 format!("WS command send failed: {error}"),
                             )
                             .await;
@@ -765,6 +819,7 @@ pub(super) async fn ws_write_loop(
                                 &event_tx,
                                 &disconnect_sent,
                                 role,
+                                generation,
                                 format!("WS binary send failed: {error}"),
                             )
                             .await;

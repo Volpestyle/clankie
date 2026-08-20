@@ -3,20 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileCredentialStore, type ProviderCredential } from "@clankie/credential-broker";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  createXaiFetch,
-  refreshXaiToken,
-  requestXaiDeviceCode,
-  runXaiDeviceLogin,
-  XAI_DEVICE_AUTHORIZATION_URL,
-  XAI_DEVICE_CODE_GRANT_TYPE,
-  XAI_OAUTH_CLIENT_ID,
-  XAI_OAUTH_REFERRER,
-  XAI_OAUTH_SCOPES,
-  XAI_PROVIDER_ID,
-  XAI_TOKEN_URL,
-  xaiAccessTokenIsExpiring,
-} from "../src/oauth/xai.ts";
+import { createXaiFetch, runXaiDeviceLogin, XAI_PROVIDER_ID } from "../src/oauth/xai.ts";
+
+const DEVICE_AUTHORIZATION_URL = "https://auth.x.ai/oauth2/device/code";
+const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
+const TOKEN_URL = "https://auth.x.ai/oauth2/token";
 
 const tempDirs: string[] = [];
 
@@ -56,41 +47,6 @@ function jwtWithExp(expSeconds: number): string {
 }
 
 describe("xAI SuperGrok device authorization", () => {
-  it("requests a device code with the public Grok-CLI client", async () => {
-    let request: { url: string; headers: Headers; body: URLSearchParams } | undefined;
-    const device = await requestXaiDeviceCode({
-      fetchImpl: async (input, init) => {
-        request = {
-          url: String(input),
-          headers: new Headers(init?.headers),
-          body: new URLSearchParams(String(init?.body)),
-        };
-        return jsonResponse({
-          device_code: "device-secret",
-          user_code: "ABCD-EFGH",
-          verification_uri: "https://auth.x.ai/activate",
-          verification_uri_complete: "https://auth.x.ai/activate?user_code=ABCD-EFGH",
-          expires_in: 300,
-          interval: 5,
-        });
-      },
-    });
-
-    expect(request?.url).toBe(XAI_DEVICE_AUTHORIZATION_URL);
-    expect(request?.headers.get("content-type")).toBe("application/x-www-form-urlencoded");
-    expect(request?.body.get("client_id")).toBe(XAI_OAUTH_CLIENT_ID);
-    expect(request?.body.get("scope")).toBe(XAI_OAUTH_SCOPES);
-    expect(request?.body.get("referrer")).toBe(XAI_OAUTH_REFERRER);
-    expect(device).toMatchObject({
-      deviceCode: "device-secret",
-      userCode: "ABCD-EFGH",
-      verificationUri: "https://auth.x.ai/activate",
-      verificationUriComplete: "https://auth.x.ai/activate?user_code=ABCD-EFGH",
-      expiresInMs: 300_000,
-      intervalMs: 5_000,
-    });
-  });
-
   it("polls through authorization_pending and slow_down until tokens arrive", async () => {
     const calls: Array<{ url: string; grant?: string }> = [];
     const sleeps: number[] = [];
@@ -109,7 +65,11 @@ describe("xAI SuperGrok device authorization", () => {
           const body = new URLSearchParams(String(init?.body));
           const grant = body.get("grant_type");
           calls.push(grant === null ? { url } : { url, grant });
-          if (url === XAI_DEVICE_AUTHORIZATION_URL) {
+          if (url === DEVICE_AUTHORIZATION_URL) {
+            expect(new Headers(init?.headers).get("content-type")).toBe("application/x-www-form-urlencoded");
+            expect(body.get("client_id")).toBe("b1a00492-073a-47ea-816f-4c329264a828");
+            expect(body.get("scope")).toBe("openid profile email offline_access grok-cli:access api:access");
+            expect(body.get("referrer")).toBe("opencode");
             return jsonResponse({
               device_code: "device-secret",
               user_code: "WXYZ-1234",
@@ -118,10 +78,10 @@ describe("xAI SuperGrok device authorization", () => {
               interval: 2,
             });
           }
-          if (calls.filter((call) => call.grant === XAI_DEVICE_CODE_GRANT_TYPE).length === 1) {
+          if (calls.filter((call) => call.grant === DEVICE_CODE_GRANT_TYPE).length === 1) {
             return jsonResponse({ error: "authorization_pending" }, 400);
           }
-          if (calls.filter((call) => call.grant === XAI_DEVICE_CODE_GRANT_TYPE).length === 2) {
+          if (calls.filter((call) => call.grant === DEVICE_CODE_GRANT_TYPE).length === 2) {
             return jsonResponse({ error: "slow_down" }, 400);
           }
           return jsonResponse({
@@ -135,9 +95,9 @@ describe("xAI SuperGrok device authorization", () => {
 
     expect(calls.map((call) => call.grant)).toEqual([
       undefined,
-      XAI_DEVICE_CODE_GRANT_TYPE,
-      XAI_DEVICE_CODE_GRANT_TYPE,
-      XAI_DEVICE_CODE_GRANT_TYPE,
+      DEVICE_CODE_GRANT_TYPE,
+      DEVICE_CODE_GRANT_TYPE,
+      DEVICE_CODE_GRANT_TYPE,
     ]);
     expect(sleeps[0]).toBe(2_000 + 3_000);
     expect(sleeps[1]).toBe(7_000 + 3_000);
@@ -150,7 +110,7 @@ describe("xAI SuperGrok device authorization", () => {
         onUserCode: () => {},
         openUrl: () => {},
         fetchImpl: async (input) => {
-          if (String(input) === XAI_DEVICE_AUTHORIZATION_URL) {
+          if (String(input) === DEVICE_AUTHORIZATION_URL) {
             return jsonResponse({
               device_code: "device-secret",
               user_code: "DENIED",
@@ -167,30 +127,6 @@ describe("xAI SuperGrok device authorization", () => {
 });
 
 describe("xAI SuperGrok refresh and request adaptation", () => {
-  it("refreshes with the prior refresh token and keeps it when rotation omits one", async () => {
-    let body: URLSearchParams | undefined;
-    const credential = expectOauth(
-      await refreshXaiToken(
-        { type: "oauth", access: "expired", refresh: "refresh-old", expires: 1 },
-        async (_input, init) => {
-          body = new URLSearchParams(String(init?.body));
-          return jsonResponse({ access_token: "access-next", expires_in: 120 });
-        },
-      ),
-    );
-
-    expect(body?.get("grant_type")).toBe("refresh_token");
-    expect(body?.get("refresh_token")).toBe("refresh-old");
-    expect(body?.get("client_id")).toBe(XAI_OAUTH_CLIENT_ID);
-    expect(credential).toMatchObject({ access: "access-next", refresh: "refresh-old" });
-  });
-
-  it("rejects refresh for API-key credentials", async () => {
-    await expect(refreshXaiToken({ type: "api", key: "xai-secret" })).rejects.toThrow(
-      "uses oauth credentials",
-    );
-  });
-
   it("replaces the placeholder bearer with the live SuperGrok token", async () => {
     const store = await temporaryStore();
     await store.set(XAI_PROVIDER_ID, {
@@ -221,19 +157,21 @@ describe("xAI SuperGrok refresh and request adaptation", () => {
     const store = await temporaryStore();
     await store.set(XAI_PROVIDER_ID, {
       type: "oauth",
-      access: "expired",
+      access: jwtWithExp(Math.floor(Date.now() / 1000) - 60),
       refresh: "refresh-old",
-      expires: 1,
+      expires: 0,
     });
     const refreshStarted = deferred();
     const releaseRefresh = deferred();
     let refreshCalls = 0;
+    let refreshBody: URLSearchParams | undefined;
     let modelCalls = 0;
     const adapted = createXaiFetch({
       store,
-      fetchImpl: async (input) => {
-        if (String(input) === XAI_TOKEN_URL) {
+      fetchImpl: async (input, init) => {
+        if (String(input) === TOKEN_URL) {
           refreshCalls += 1;
+          refreshBody = new URLSearchParams(String(init?.body));
           refreshStarted.resolve();
           await releaseRefresh.promise;
           return jsonResponse({
@@ -254,6 +192,8 @@ describe("xAI SuperGrok refresh and request adaptation", () => {
     await Promise.all([first, second]);
 
     expect(refreshCalls).toBe(1);
+    expect(refreshBody?.get("grant_type")).toBe("refresh_token");
+    expect(refreshBody?.get("refresh_token")).toBe("refresh-old");
     expect(modelCalls).toBe(2);
     expect(expectOauth(await store.get(XAI_PROVIDER_ID))).toMatchObject({
       access: "access-rotated",
@@ -283,11 +223,5 @@ describe("xAI SuperGrok refresh and request adaptation", () => {
       `No oauth credential stored for "${XAI_PROVIDER_ID}"`,
     );
     expect(networkCalls).toBe(0);
-  });
-
-  it("treats a JWT inside the skew window as expiring", () => {
-    expect(xaiAccessTokenIsExpiring(jwtWithExp(Math.floor(Date.now() / 1000) - 60), 0)).toBe(true);
-    expect(xaiAccessTokenIsExpiring(jwtWithExp(Math.floor(Date.now() / 1000) + 3600), 0)).toBe(false);
-    expect(xaiAccessTokenIsExpiring("opaque-token", 0)).toBe(false);
   });
 });

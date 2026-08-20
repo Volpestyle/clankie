@@ -628,7 +628,7 @@ function describeAction(action: FreePlayView["history"][number]["action"]): stri
       : `loaded checkpoint ${action.checkpointId}`;
   }
   if (action.kind === "restart_game") return "restarted the game";
-  return `waited ${String(action.durationMs)}ms`;
+  throw new Error(`Unknown free-play action: ${JSON.stringify(action)}`);
 }
 
 export interface ModelVoiceOptions extends ModelFreePlayMindOptions {
@@ -704,8 +704,7 @@ function modelRequestAbortSignal(timeoutMs: number | undefined): AbortSignal {
  * an error part and the stream was closed — the drain below finished normally
  * and `stream.object` never settled at all, so there was nothing for the abort
  * to interrupt. `decide` never returned, the turn never failed, and an
- * asked-play session hung for three hours holding the body lock while Clankie
- * sat silent in voice.
+ * asked-play session hung for three hours while Clankie sat silent in voice.
  *
  * So the deadline is enforced here as well as there. Whatever the provider
  * layer does or fails to do, the turn ends and the loop records it.

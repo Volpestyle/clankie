@@ -1,11 +1,11 @@
-import type {
-  EmbodimentAssignment,
-  EmbodimentClaim,
-  EmbodimentLifecycleReport,
-  EmbodimentSession,
-} from "@clankie/protocol";
+import type { EmbodimentSession } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
-import { PlayHost, type PlayExecution } from "../src/play-host.ts";
+import {
+  PlayHost,
+  type EmbodimentAssignment,
+  type EmbodimentLifecycleUpdate,
+  type PlayExecution,
+} from "../src/play-host.ts";
 
 const silentLogger = {
   info: () => undefined,
@@ -25,7 +25,6 @@ function session(partial: Partial<EmbodimentSession> = {}): EmbodimentSession {
     budget: { maxTurns: 5, maxDurationMs: 60_000 },
     requestedAt: "2026-07-26T12:00:00.000Z",
     updatedAt: "2026-07-26T12:00:01.000Z",
-    runnerId: "runner-local",
     ...partial,
   };
 }
@@ -37,16 +36,16 @@ interface FakeClientOptions {
 
 function fakeClient(options: FakeClientOptions = {}) {
   const assignments = [...(options.assignments ?? [])];
-  const reports: EmbodimentLifecycleReport[] = [];
-  const claims: EmbodimentClaim[] = [];
+  const reports: EmbodimentLifecycleUpdate[] = [];
+  const claims: (readonly string[])[] = [];
   return {
     reports,
     claims,
-    claimEmbodiment(claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
-      claims.push(claim);
+    claimEmbodiment(environmentIds: readonly string[]): Promise<EmbodimentAssignment | undefined> {
+      claims.push(environmentIds);
       return Promise.resolve(assignments.shift());
     },
-    reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
+    reportEmbodiment(report: EmbodimentLifecycleUpdate): Promise<unknown> {
       reports.push(report);
       return Promise.resolve({});
     },
@@ -59,7 +58,6 @@ function fakeClient(options: FakeClientOptions = {}) {
 function host(client: ReturnType<typeof fakeClient>, execute: PlayExecution) {
   return new PlayHost({
     client,
-    runnerId: "runner-local",
     environmentIds: ["pokemon-firered"],
     execute,
     logger: silentLogger,
@@ -95,9 +93,9 @@ describe("PlayHost", () => {
     });
   });
 
-  it("narrates claim, running, and settled into the runner log", async () => {
+  it("narrates claim, running, and settled into the service log", async () => {
     // The successful path used to be the invisible one: a clean claim-run-stop
-    // left the runner's own log with nothing to say a playthrough happened.
+    // left the service log with nothing to say a playthrough happened.
     const lines: string[] = [];
     const logger = {
       info: (_context: Record<string, unknown>, message: string) => {
@@ -109,7 +107,6 @@ describe("PlayHost", () => {
     const client = fakeClient({ assignments: [{ kind: "start", session: session() }] });
     const subject = new PlayHost({
       client,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: async (_session, _control, onRunning) => {
         await onRunning("checkpoint-8");
@@ -152,8 +149,7 @@ describe("PlayHost", () => {
     };
     let failing = true;
     const client = {
-      claims: [] as EmbodimentClaim[],
-      reports: [] as EmbodimentLifecycleReport[],
+      reports: [] as EmbodimentLifecycleUpdate[],
       claimEmbodiment(): Promise<EmbodimentAssignment | undefined> {
         if (failing) return Promise.reject(new Error("Clankie API 401: unauthorized"));
         return Promise.resolve(undefined);
@@ -167,9 +163,8 @@ describe("PlayHost", () => {
     };
     const subject = new PlayHost({
       client,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
-      execute: async () => ({ kind: "refused", reason: "body_held" }),
+      execute: async () => ({ kind: "refused", reason: "play_session_active" }),
       logger,
     });
 
@@ -186,11 +181,14 @@ describe("PlayHost", () => {
 
   it("reports a refusal without ever reporting running", async () => {
     const client = fakeClient({ assignments: [{ kind: "start", session: session() }] });
-    const subject = host(client, () => Promise.resolve({ kind: "refused", reason: "body_held" }));
+    const subject = host(client, () => Promise.resolve({ kind: "refused", reason: "play_session_active" }));
     await subject.poll();
     await subject.settled();
     expect(client.reports).toHaveLength(1);
-    expect(client.reports[0]).toMatchObject({ state: "refused", refusalReason: "body_held" });
+    expect(client.reports[0]).toMatchObject({
+      state: "refused",
+      refusalReason: "play_session_active",
+    });
   });
 
   it("delivers a stop to the in-flight session at the next turn boundary", async () => {
@@ -254,7 +252,7 @@ describe("PlayHost", () => {
   });
 
   it("bounds shutdown when the control plane hangs on the forced failure report", async () => {
-    const reports: EmbodimentLifecycleReport[] = [];
+    const reports: EmbodimentLifecycleUpdate[] = [];
     let claimed = false;
     const client = {
       claimEmbodiment(): Promise<EmbodimentAssignment | undefined> {
@@ -262,7 +260,7 @@ describe("PlayHost", () => {
         claimed = true;
         return Promise.resolve({ kind: "start", session: session() });
       },
-      reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
+      reportEmbodiment(report: EmbodimentLifecycleUpdate): Promise<unknown> {
         reports.push(report);
         if (report.state === "failed") return new Promise(() => undefined);
         return Promise.resolve({});
@@ -271,7 +269,6 @@ describe("PlayHost", () => {
     };
     const subject = new PlayHost({
       client,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: async (_session, _control, onRunning) => {
         await onRunning();
@@ -318,13 +315,6 @@ describe("PlayHost", () => {
       state: "refused",
       refusalReason: "environment_unavailable",
     });
-  });
-
-  it("leaves another runner's live session alone", async () => {
-    const client = fakeClient({ live: session({ state: "running", runnerId: "runner-other" }) });
-    const subject = host(client, () => Promise.reject(new Error("never called")));
-    await subject.reconcile();
-    expect(client.reports).toHaveLength(0);
   });
 
   it("refuses a double-assigned start instead of running two sessions", async () => {

@@ -3,9 +3,13 @@
 Status: accepted (James, 2026-07-25). Screen-share watch and Go Live publish,
 originally deferred here, shipped through
 [ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)
-and [ADR 0100](0100-vox-is-an-owned-native-media-package.md). References to
-doctrine and deployment profiles describe the retired implementation at
-ratification.
+and [ADR 0100](0100-vox-is-an-owned-native-media-package.md). Current-status
+addendum (2026-08-19): [ADR 0128](0128-vox-is-the-sole-discord-media-owner.md)
+governs the one child and role-specific media lifecycle for either
+media-enabled active body; text-only official-bot mode spawns no child. This
+ADR's one-active-body, credential isolation, opt-in, and allowlist decisions
+remain in force. References to doctrine and deployment profiles describe the
+retired implementation at ratification.
 
 ## Context
 

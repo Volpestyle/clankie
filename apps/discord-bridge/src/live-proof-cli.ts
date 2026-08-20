@@ -1,17 +1,17 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { readDiscordBridgeReceipts } from "@clankie/discord-presence-core";
 import {
   evaluateDiscordLiveProof,
   evaluateDiscordPersonMemoryLiveProof,
   evaluateDiscordVoiceLiveProof,
-  readDiscordLiveReceipts,
 } from "./live-proof.ts";
 
 const stateHome = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
 if (!isAbsolute(stateHome)) throw new Error("XDG_STATE_HOME must be absolute");
 const path =
   process.env.DISCORD_BRIDGE_RECEIPT_PATH ?? join(stateHome, "clankie", "discord-live-receipts.jsonl");
-const receipts = await readDiscordLiveReceipts(path);
+const receipts = await readDiscordBridgeReceipts(path);
 const mode = process.argv[2];
 const report =
   mode === "person-memory"

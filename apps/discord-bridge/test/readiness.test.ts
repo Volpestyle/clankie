@@ -2,9 +2,7 @@ import type { DiscordControlPlaneReadiness } from "@clankie/api-client";
 import {
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID,
-  DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID,
   mintDiscordBridgeToken,
-  mintDiscordVoiceBridgeToken,
   type CredentialStore,
   type ProviderCredential,
 } from "@clankie/credential-broker";
@@ -52,10 +50,6 @@ describe("Discord text readiness", () => {
     store.credentials.set(DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID, {
       type: "api",
       key: mintDiscordBridgeToken(() => Buffer.alloc(32, 4)),
-    });
-    store.credentials.set(DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID, {
-      type: "api",
-      key: mintDiscordVoiceBridgeToken(() => Buffer.alloc(32, 5)),
     });
     const env = {
       DISCORD_APPLICATION_ID: "111111111111111111",

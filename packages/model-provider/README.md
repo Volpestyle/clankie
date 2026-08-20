@@ -13,25 +13,27 @@ non-captain AI SDK path has four pure layers:
 The captain takes a separate final branch: `registerConfiguredPiProviders`
 projects custom Clankie provider declarations into Pi, while Pi's `ModelRuntime`
 owns its catalog, auth, implementation, and thinking levels
-([ADR 0101](../../docs/adr/0101-pi-owns-the-captain-model-runtime.md)). Gameplay,
-voice, image, and video keep the AI SDK path above.
+([ADR 0101](../../docs/adr/0101-pi-owns-the-captain-model-runtime.md)). Gameplay
+and image/video generation keep the AI SDK path above.
 
 ## config.ts — layered configuration
 
 `loadConfig()` reads the global file (`${XDG_CONFIG_HOME ?? ~/.config}/clankie/clankie.json`, via `globalConfigPath`) then the nearest repo `.clankie.json` walking up from `cwd` (`findRepoConfigPath`), and deep-merges repo over global: objects merge per key, arrays and scalars replace. It never throws — a file with invalid JSON or a failing schema becomes an entry in `issues` and is skipped.
 
 `ClankieConfigSchema` is a loose zod schema (unknown keys pass through for
-forward compatibility) covering language/media role refs, per-ref variants,
-provider allow/deny lists, and custom provider declarations. **Secrets never
-live in config**: the full tree rejects authorization/API-key headers and
-token- or secret-shaped fields. Rejections point at `/auth` and the credential
-broker.
+forward compatibility) covering the primary language ref, media refs, per-ref
+variants, provider allow/deny lists, and custom provider declarations. Legacy
+`small_model` and `voice_model` fields remain readable and preserved for owner
+config compatibility, but no picker or runtime writes or consumes them.
+**Secrets never live in config**: the full tree rejects authorization/API-key
+headers and token- or secret-shaped fields. Rejections point at `/auth` and the
+credential broker.
 
 `updateGlobalConfig(mutate)` loads the global file only, applies the mutator (in-place edits or a returned replacement both work), validates, and writes atomically (temp file + rename, pretty JSON). Concurrent in-process updates are serialized through a promise queue. A corrupt global file is a hard error, never silently overwritten.
 
 Model refs are `"providerId/modelId"` strings; `parseModelRef` splits on the **first** slash because model ids may contain slashes (fireworks `accounts/x/models/y`), and `formatModelRef` is its inverse.
 
-## resolve.ts — providers and roles
+## resolve.ts — catalog and roles
 
 `mergedCatalog(config, catalog)` overlays config-declared providers/models onto the registry catalog via `applyCustomProviders`. Only catalog-shaped data crosses over (name/env/npm/models); `options` such as `baseURL` are connection config and stay config-side.
 
@@ -42,8 +44,6 @@ aliases, and backend limits live in
 Codex client visibility alone is not evidence that Clankie's third-party
 `originator` may call a model
 ([ADR 0052](../../docs/adr/0052-subscription-precedence-over-metered-api-key.md)).
-
-`resolveProviders({config, catalog, credentialIds, env})` returns each provider with its connection state — `"credential"` (broker holds one), `"env"` (a declared env var is set), or `"none"` — after dropping `disabled_providers` and applying a non-empty `enabled_providers` allowlist. Connected providers sort first, then by name.
 
 `resolveRole(role, {config, catalog})` resolves a configured role ref into `{providerId, modelId, model, variantId}`, where `model` is the merged-catalog entry (undefined for unknown models) and `variantId` comes from `config.variant[ref]`.
 

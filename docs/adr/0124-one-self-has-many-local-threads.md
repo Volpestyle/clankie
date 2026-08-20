@@ -8,6 +8,13 @@ are continuing threads), and
 [ADR 0098](0098-the-room-can-type-to-a-playthrough.md) (typed room input is an
 experience available to another body).
 
+## Current status (2026-08-19)
+
+The shared-self/local-thread model remains. The game thread is Clankie's own
+local runtime or hosted player seat. [ADR 0129](0129-each-player-owns-a-body.md)
+supersedes the external-possessor implication: GBA MCP and other harnesses are
+not Clankie threads and receive no room input.
+
 ## Context
 
 Clankie is present in several places at once: Discord text rooms, a voice room,

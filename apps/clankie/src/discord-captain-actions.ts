@@ -4,7 +4,7 @@ import {
   type DiscordCaptainActionInput,
   type DiscordCaptainActionResult,
 } from "@clankie/protocol";
-import { resolveDiscordActiveBody } from "@clankie/settings";
+import { postToDiscordActiveBody } from "./discord-active-body.ts";
 
 export function createDiscordCaptainActionClient(
   env: NodeJS.ProcessEnv = process.env,
@@ -15,16 +15,12 @@ export function createDiscordCaptainActionClient(
   return {
     execute: async (input) => {
       try {
-        const port =
-          resolveDiscordActiveBody(env) === "user_session"
-            ? env.CLANKIE_USER_SESSION_CONTROL_PORT?.trim() || "4312"
-            : env.CLANKIE_DISCORD_BRIDGE_CONTROL_PORT?.trim() || "4313";
-        const response = await fetchImpl(`http://127.0.0.1:${port}/captain-action`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(DiscordCaptainActionInputSchema.parse(input)),
-          signal: AbortSignal.timeout(20_000),
-        });
+        const response = await postToDiscordActiveBody(
+          "/captain-action",
+          DiscordCaptainActionInputSchema.parse(input),
+          env,
+          fetchImpl,
+        );
         if (!response.ok) return unavailable();
         const parsed = DiscordCaptainActionResultSchema.safeParse(await response.json());
         return parsed.success ? parsed.data : unavailable();

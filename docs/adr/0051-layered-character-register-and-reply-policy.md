@@ -1,9 +1,14 @@
 # ADR 0051: Character, operating contract, and register are separate layers
 
-Status: accepted (2026-07-25). The possession section is amended by
-[ADR 0064](0064-possessor-voice-seam.md) and
-[ADR 0074](0074-the-room-hears-one-voice.md): the possessor remains a distinct
-inbound principal, but it no longer authors outbound room speech verbatim.
+Status: accepted (2026-07-25).
+
+## Current status (2026-08-19)
+
+The character/contract/register decision remains. The possession section is
+historical and superseded by [ADR 0129](0129-each-player-owns-a-body.md): an
+external harness owns a private body and receives neither Clankie's persona nor
+room input. `@clankie/play-voice` connects only Clankie's own local or hosted
+play to his active Discord body.
 
 ## Context
 

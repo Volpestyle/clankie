@@ -1,25 +1,4 @@
-import type { EnvironmentActionResult, EnvironmentCommand, EnvironmentLease } from "../src/index.ts";
-
-export const baseContext = {
-  sourceLane: "gameplay" as const,
-  authority: {
-    principal: { kind: "captain" as const, id: "clankie" },
-    tier: "autonomous" as const,
-  },
-  correlationId: "corr-environment-1",
-  expectedGoalVersion: 42,
-};
-
-export const validStartActionCommand: EnvironmentCommand = {
-  schemaVersion: 1,
-  commandId: "command-1",
-  type: "start_action",
-  context: baseContext,
-  requestedAt: "2026-07-11T12:00:00.000Z",
-  sessionId: "environment-session-1",
-  actionId: "environment-action-1",
-  action: { kind: "test_action" },
-};
+import type { EnvironmentActionResult, EnvironmentLease } from "../src/index.ts";
 
 const resultBase = {
   schemaVersion: 1 as const,

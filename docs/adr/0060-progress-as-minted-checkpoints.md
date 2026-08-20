@@ -4,6 +4,13 @@ Status: accepted (James, 2026-07-25). Implemented in the GBA emulator
 integration and the GBA MCP server, with the fail-closed paths covered by
 tests.
 
+## Current status (2026-08-19)
+
+Checkpoint identity and verification remain unchanged. Under
+[ADR 0129](0129-each-player-owns-a-body.md), Clankie's play and each GBA MCP
+process operate separate cores and checkpoint scopes; save/load authority comes
+from the owning runtime, not possession of a shared body.
+
 ## Context
 
 Every boot of the real core loads a pinned savestate and verifies it against the

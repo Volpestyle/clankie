@@ -8,21 +8,20 @@
     "start": "tsx src/index.ts",
     "readiness": "tsx src/readiness-cli.ts",
     "live-proof": "tsx src/live-proof-cli.ts",
-    "build": "tsc --noEmit -p tsconfig.json",
+    "watch-live-proof": "tsx src/live-proof-cli.ts watch",
+    "publish-live-proof": "tsx src/live-proof-cli.ts publish",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "clean": "rm -rf dist coverage"
+    "test": "vitest run"
   },
   "dependencies": {
     "@clankie/api-client": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/discord-presence-core": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
+    "@clankie/play-voice": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/settings": "workspace:*",
     "@clankie/vox-client": "workspace:*",
-    "@discordjs/voice": "0.19.2",
-    "discord-api-types": "0.38.49",
     "ws": "8.21.0"
   },
   "devDependencies": {

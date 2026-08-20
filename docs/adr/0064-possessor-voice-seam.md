@@ -1,13 +1,15 @@
 # ADR 0064: The possessor voice seam
 
-Status: accepted (2026-07-26). Builds on
-[ADR 0047](0047-discord-activity-presence-plane.md) (possession changes who
-decides, never who is present), [ADR 0053](0053-mcp-possession-of-clankies-body.md)
-(possession over MCP), and [ADR 0057](0057-realtime-voice-with-captain-handoff.md)
-(the realtime voice architecture, its floor, and its consent disclosures). None
-of them changes here. Amended by
-[ADR 0098 (room text)](0098-the-room-can-type-to-a-playthrough.md), which widens the hearing
-half from voice transcripts to any text the ingress allowlist already admits.
+Status: superseded in scope (2026-08-19) by
+[ADR 0129](0129-each-player-owns-a-body.md).
+
+## Current status (2026-08-19)
+
+The no-script, push-only, loopback design survives as neutral
+`@clankie/play-voice`, but only for Clankie's own local or hosted play. External
+harnesses receive no bearer, narration path, room state, or room input. The
+possessor terminology, `clankie_possessor_voice` credential, and diagram below
+describe the retired architecture.
 
 ## Context
 

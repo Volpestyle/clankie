@@ -3,21 +3,14 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GbaDriverIo } from "@clankie/gba-emulator";
-import type {
-  EmbodimentAssignment,
-  EmbodimentClaim,
-  EmbodimentLifecycleReport,
-  EmbodimentPlayNote,
-  EmbodimentSession,
-  WorldJoinRefusalReason,
-} from "@clankie/protocol";
+import type { EmbodimentPlayNote, EmbodimentSession, WorldJoinRefusalReason } from "@clankie/protocol";
 import { embodimentVenue } from "@clankie/protocol";
+import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { describe, expect, it } from "vitest";
 import { joinWorld as askJoinWorld, startPlay } from "../src/captain/play.ts";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
-import { PlayHost } from "../src/play-host.ts";
+import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
 import { parseFreePlayJournal } from "@clankie/gba-emulator";
-import { SessionStatusSchema, WhoResultSchema } from "@pokeagents/world-protocol";
 import type { WorldBody } from "../src/world/body.ts";
 
 const silentLogger = {
@@ -71,24 +64,21 @@ function fakeWorldBody(overrides: Partial<WorldBody> = {}): WorldBody {
       bodyGeneration: 1,
       adapterVersion: 2,
     }),
-    session: () =>
-      Promise.resolve(
-        SessionStatusSchema.parse({
-          ok: true,
-          worldId: "kanto",
-          playerId: "player-1",
-          sessionId: "world-session-1",
-          gameId: "firered",
-          displayName: "clankie",
-          state: "playing",
-          bodyGeneration: 1,
-          frame: 1,
-          startedAt: "2026-07-26T12:00:00.000Z",
-        }),
-      ),
-    who: () => Promise.resolve(WhoResultSchema.parse({ ok: true, worldId: "kanto", players: [] })),
     close: () => Promise.resolve(),
     ...overrides,
+  };
+}
+
+function fakeActivitySink(close: () => void): ActivityFrameSink {
+  return {
+    publishFrame: () => undefined,
+    publishAudio: () => undefined,
+    publishOverlay: () => undefined,
+    publishStatus: () => undefined,
+    droppedFrameCount: 0,
+    droppedAudioPacketCount: 0,
+    connected: false,
+    close,
   };
 }
 
@@ -105,19 +95,18 @@ function session(venue?: "local" | "world"): EmbodimentSession {
     budget: { maxTurns: 2, maxDurationMs: 60_000 },
     requestedAt: "2026-07-26T12:00:00.000Z",
     updatedAt: "2026-07-26T12:00:01.000Z",
-    runnerId: "runner-local",
   };
 }
 
 function fakeClient(assignment: EmbodimentAssignment) {
   const assignments = [assignment];
-  const reports: EmbodimentLifecycleReport[] = [];
+  const reports: EmbodimentLifecycleUpdate[] = [];
   return {
     reports,
-    claimEmbodiment(_claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
+    claimEmbodiment(): Promise<EmbodimentAssignment | undefined> {
       return Promise.resolve(assignments.shift());
     },
-    reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
+    reportEmbodiment(report: EmbodimentLifecycleUpdate): Promise<unknown> {
       reports.push(report);
       return Promise.resolve({});
     },
@@ -130,7 +119,7 @@ function fakeClient(assignment: EmbodimentAssignment) {
 async function playEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-play-world-"));
   return {
-    CLANKIE_GBA_BODY_ROOT: join(root, "body"),
+    XDG_STATE_HOME: join(root, "state"),
     CLANKIE_GBA_CHECKPOINT_DIR: join(root, "checkpoints"),
     CLANKIE_GBA_PLAY_JOURNAL_DIR: join(root, "gba-play"),
     CLANKIE_ACTIVITY_PRODUCER_URL: "ws://127.0.0.1:1/producer",
@@ -143,7 +132,6 @@ describe("world play execution", () => {
       const client = fakeClient({ kind: "start", session: session(venue) });
       const host = new PlayHost({
         client,
-        runnerId: "runner-local",
         environmentIds: ["pokemon-firered"],
         execute: createGbaPlayExecution({
           logger: silentLogger,
@@ -175,7 +163,6 @@ describe("world play execution", () => {
     const env = await playEnv();
     const host = new PlayHost({
       client,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -216,10 +203,12 @@ describe("world play execution", () => {
 
   it("restores the game mind from the previous hosted-world sitting", async () => {
     const env = await playEnv();
-    const first = fakeClient({ kind: "start", session: { ...session("world"), budget: { maxTurns: 1 } } });
+    const first = fakeClient({
+      kind: "start",
+      session: { ...session("world"), budget: { maxTurns: 1 } },
+    });
     const firstHost = new PlayHost({
       client: first,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -252,7 +241,6 @@ describe("world play execution", () => {
     const second = fakeClient({ kind: "start", session: secondSession });
     const secondHost = new PlayHost({
       client: second,
-      runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
@@ -281,8 +269,44 @@ describe("world play execution", () => {
     });
   });
 
+  it("releases the hosted seat, listeners, and activity sink when voice client creation throws", async () => {
+    let bodyClosed = 0;
+    let sinkClosed = 0;
+    const observers: Array<(() => void) | null> = [];
+    const body = fakeWorldBody({
+      observeFrames: (observer) => observers.push(observer),
+      close: () => {
+        bodyClosed += 1;
+        return Promise.resolve();
+      },
+    });
+    const client = fakeClient({ kind: "start", session: session("world") });
+    const host = new PlayHost({
+      client,
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env: await playEnv(),
+        createMind: buttonMasher,
+        joinWorld: () => Promise.resolve({ outcome: "joined", body }),
+        createActivitySink: () => Promise.resolve(fakeActivitySink(() => (sinkClosed += 1))),
+        createVoice: () => Promise.reject(new Error("play voice client failed")),
+      }),
+      logger: silentLogger,
+    });
+
+    await host.poll();
+    await host.settled();
+
+    expect(client.reports).toEqual([expect.objectContaining({ state: "failed" })]);
+    expect(observers).toEqual([null]);
+    expect(sinkClosed).toBe(1);
+    expect(bodyClosed).toBe(1);
+  });
+
   it("refuses each world-join reason without starting a local body", async () => {
     const reasons: WorldJoinRefusalReason[] = [
+      "play_session_active",
       "no_credential",
       "world_unreachable",
       "world_refused",
@@ -293,7 +317,6 @@ describe("world play execution", () => {
       const client = fakeClient({ kind: "start", session: session("world") });
       const host = new PlayHost({
         client,
-        runnerId: "runner-local",
         environmentIds: ["pokemon-firered"],
         execute: createGbaPlayExecution({
           logger: silentLogger,
@@ -318,6 +341,7 @@ describe("world play execution", () => {
 describe("joinWorld captain ask", () => {
   it("submits a world venue and maps each join refusal onto join_refused", async () => {
     const reasons: WorldJoinRefusalReason[] = [
+      "play_session_active",
       "no_credential",
       "world_unreachable",
       "world_refused",
@@ -341,13 +365,51 @@ describe("joinWorld captain ask", () => {
     }
   });
 
-  it("leaves pokeagent_start_solo's intent local and its refusal vocabulary intact", async () => {
+  it("polls accepted local and world starts through the same lifecycle without changing their notes", async () => {
+    for (const candidate of [
+      { ask: startPlay, venue: undefined, action: "started" },
+      { ask: askJoinWorld, venue: "world", action: "joined" },
+    ] as const) {
+      const intents: unknown[] = [];
+      const accepted = session(candidate.venue);
+      const running: EmbodimentSession = {
+        ...accepted,
+        state: "running",
+        resumedFromCheckpointId: "checkpoint-8",
+      };
+      const note = await candidate.ask(
+        {
+          submitEmbodimentIntent: (intent) => {
+            intents.push(intent);
+            return Promise.resolve({ outcome: "accepted", session: accepted });
+          },
+          getEmbodimentSession: () => Promise.resolve(running),
+          getLiveEmbodimentSession: () => Promise.resolve(running),
+        },
+        { environmentId: "pokemon-firered", originLane: "discord_presence", requestedBy: "user-1" },
+      );
+      if (candidate.venue === undefined) expect(intents[0]).not.toHaveProperty("venue");
+      else expect(intents[0]).toMatchObject({ venue: candidate.venue });
+      expect(note).toEqual(
+        candidate.action === "joined"
+          ? { action: "joined", sessionId: running.sessionId, environmentId: running.environmentId }
+          : {
+              action: "started",
+              sessionId: running.sessionId,
+              environmentId: running.environmentId,
+              resumedFromCheckpointId: "checkpoint-8",
+            },
+      );
+    }
+  });
+
+  it("leaves pokeagent_start_solo's intent local and reports an active local session", async () => {
     const intents: unknown[] = [];
     const note = await startPlay(
       {
         submitEmbodimentIntent: (intent) => {
           intents.push(intent);
-          return Promise.resolve({ outcome: "refused", reason: "body_held" });
+          return Promise.resolve({ outcome: "refused", reason: "play_session_active" });
         },
         getEmbodimentSession: () => Promise.resolve(undefined),
         getLiveEmbodimentSession: () => Promise.resolve(undefined),
@@ -359,7 +421,7 @@ describe("joinWorld captain ask", () => {
     expect(note).toEqual({
       action: "start_refused",
       environmentId: "pokemon-firered",
-      reason: "body_held",
+      reason: "play_session_active",
     });
   });
 });

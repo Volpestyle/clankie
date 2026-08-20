@@ -7,11 +7,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "codex-probe": "tsx src/codex-model-probe-cli.ts",
-    "clean": "rm -rf dist coverage"
+    "codex-probe": "tsx src/codex-model-probe-cli.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.11",

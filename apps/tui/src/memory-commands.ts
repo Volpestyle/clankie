@@ -87,7 +87,6 @@ async function runMemoryBrowser(
   flow.begin("memory");
   try {
     const selected = await flow.readSelect({
-      kind: "single",
       message: "Clankie's memory",
       options: [
         {
@@ -104,10 +103,9 @@ async function runMemoryBrowser(
         },
         { value: "done", label: "Done" },
       ],
-      required: true,
     });
-    if (selected?.[0] === "episodes") await browseEpisodes(shell, client, catalog.captainEpisodes);
-    else if (selected?.[0] === "people") await browsePeople(shell, client, catalog);
+    if (selected === "episodes") await browseEpisodes(shell, client, catalog.captainEpisodes);
+    else if (selected === "people") await browsePeople(shell, client, catalog);
   } finally {
     flow.end();
   }
@@ -124,7 +122,6 @@ async function browseEpisodes(
     return;
   }
   const picked = await shell.setupFlow.readSelect({
-    kind: "single",
     message: "Episode",
     options: ordered.map((episode, index) => ({
       value: String(index),
@@ -132,22 +129,19 @@ async function browseEpisodes(
       hint: `${episode.lane} · ${episode.occurredAt.slice(0, 10)}`,
       description: `${episode.targetId} · ${episode.visibility} · ${episode.episodeId}`,
     })),
-    required: true,
   });
-  const episode = picked === undefined ? undefined : ordered[Number(picked[0])];
+  const episode = picked === undefined ? undefined : ordered[Number(picked)];
   if (episode === undefined) return;
   const action = await shell.setupFlow.readSelect({
-    kind: "single",
     message: truncate(episode.summary, 96),
     options: [
       { value: "edit", label: "Edit", hint: "note and visibility" },
       { value: "forget", label: "Forget", hint: "delete this episode" },
       { value: "back", label: "Back" },
     ],
-    required: true,
   });
-  if (action?.[0] === "edit") await editEpisode(shell, client, episode);
-  else if (action?.[0] === "forget" && (await confirmForget(shell, "episode"))) {
+  if (action === "edit") await editEpisode(shell, client, episode);
+  else if (action === "forget" && (await confirmForget(shell, "episode"))) {
     await client.deleteCaptainEpisode(episode.lane, episode.episodeId);
     shell.setupFlow.renderLine("Forgot episode.", "success");
   }
@@ -166,19 +160,17 @@ async function editEpisode(
   });
   if (summary === undefined) return;
   const visibility = await shell.setupFlow.readSelect({
-    kind: "single",
     message: "Where may this resurface?",
     options: [
       { value: "shareable", label: "Shareable", hint: "any relevant room" },
       { value: "operator_private", label: "Operator only", hint: "private console" },
     ],
     initialValue: episode.visibility,
-    required: true,
   });
-  if (visibility?.[0] === undefined) return;
+  if (visibility === undefined) return;
   await client.updateCaptainEpisode(episode.lane, episode.episodeId, {
     summary: summary.trim(),
-    visibility: visibility[0] as CaptainEpisode["visibility"],
+    visibility: visibility as CaptainEpisode["visibility"],
   });
   shell.setupFlow.renderLine("Saved episode.", "success");
 }
@@ -198,7 +190,6 @@ async function browsePeople(
     return;
   }
   const picked = await shell.setupFlow.readSelect({
-    kind: "single",
     message: "Person memory",
     options: facts.map(({ subject, fact }, index) => ({
       value: String(index),
@@ -206,22 +197,19 @@ async function browsePeople(
       hint: `${subject.guildId}/${subject.userId} · ${fact.kind}`,
       description: `${visibilityLabel(fact.visibility)} · confidence ${fact.confidence.toFixed(2)} · ${fact.factId}`,
     })),
-    required: true,
   });
-  const selected = picked === undefined ? undefined : facts[Number(picked[0])];
+  const selected = picked === undefined ? undefined : facts[Number(picked)];
   if (selected === undefined) return;
   const action = await shell.setupFlow.readSelect({
-    kind: "single",
     message: truncate(selected.fact.body, 96),
     options: [
       { value: "edit", label: "Edit", hint: "fact, kind, visibility, confidence" },
       { value: "forget", label: "Forget", hint: "delete this fact" },
       { value: "back", label: "Back" },
     ],
-    required: true,
   });
-  if (action?.[0] === "edit") await editPersonFact(shell, client, selected);
-  else if (action?.[0] === "forget" && (await confirmForget(shell, "fact"))) {
+  if (action === "edit") await editPersonFact(shell, client, selected);
+  else if (action === "forget" && (await confirmForget(shell, "fact"))) {
     await client.deleteDiscordPersonMemoryFact(selected.subject, selected.fact.factId);
     shell.setupFlow.renderLine("Forgot person fact.", "success");
   }
@@ -241,7 +229,6 @@ async function editPersonFact(
   });
   if (body === undefined) return;
   const kind = await shell.setupFlow.readSelect({
-    kind: "single",
     message: "Kind",
     options: [
       { value: "person-fact", label: "Person fact" },
@@ -249,11 +236,9 @@ async function editPersonFact(
       { value: "relationship-note", label: "Relationship note" },
     ],
     initialValue: fact.kind,
-    required: true,
   });
-  if (kind?.[0] === undefined) return;
+  if (kind === undefined) return;
   const scope = await shell.setupFlow.readSelect({
-    kind: "single",
     message: "Visibility",
     options: [
       { value: "guild", label: "Server", hint: "all admitted channels in this server" },
@@ -261,11 +246,10 @@ async function editPersonFact(
       { value: "operator_private", label: "Operator only" },
     ],
     initialValue: fact.visibility.scope,
-    required: true,
   });
-  if (scope?.[0] === undefined) return;
+  if (scope === undefined) return;
   let visibility: DiscordPersonMemoryVisibility;
-  if (scope[0] === "channel") {
+  if (scope === "channel") {
     const channelId = await shell.setupFlow.readText({
       message: "Discord channel ID",
       ...(fact.visibility.scope === "channel" ? { defaultValue: fact.visibility.channelId } : {}),
@@ -274,7 +258,7 @@ async function editPersonFact(
     if (channelId === undefined) return;
     visibility = { scope: "channel", channelId: channelId.trim() };
   } else {
-    visibility = { scope: scope[0] as "guild" | "operator_private" };
+    visibility = { scope: scope as "guild" | "operator_private" };
   }
   const confidence = await shell.setupFlow.readText({
     message: "Confidence (0–1)",
@@ -287,7 +271,7 @@ async function editPersonFact(
   if (confidence === undefined) return;
   await client.updateDiscordPersonMemoryFact(subject, fact.factId, {
     body: body.trim(),
-    kind: kind[0] as DiscordPersonMemoryFact["kind"],
+    kind: kind as DiscordPersonMemoryFact["kind"],
     visibility,
     confidence: Number(confidence),
   });
@@ -296,16 +280,14 @@ async function editPersonFact(
 
 async function confirmForget(shell: ClankieFaceShell, noun: string): Promise<boolean> {
   const confirmation = await shell.setupFlow.readSelect({
-    kind: "single",
     message: `Forget this ${noun}?`,
     options: [
       { value: "cancel", label: "Keep it" },
       { value: "forget", label: "Forget", hint: "cannot be undone" },
     ],
     initialValue: "cancel",
-    required: true,
   });
-  return confirmation?.[0] === "forget";
+  return confirmation === "forget";
 }
 
 function newestEpisodes(episodes: readonly CaptainEpisode[]): CaptainEpisode[] {

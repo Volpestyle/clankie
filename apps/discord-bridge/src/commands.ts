@@ -26,8 +26,6 @@ export const DISCORD_SUBCOMMANDS = [
   "voice-status",
   "watch",
 ] as const;
-export type DiscordSubcommand = (typeof DISCORD_SUBCOMMANDS)[number];
-
 export const commands = [
   new SlashCommandBuilder()
     .setName(DISCORD_COMMAND_NAME)

@@ -20,7 +20,6 @@ import {
   createOperatorConversationServiceClient,
   OPERATOR_CONVERSATION_REF_MAX,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
-  OperatorConversationAttachmentSchema,
   OperatorConversationRecoverySchema,
   OperatorConversationRevisionConflictSchema,
   OperatorConversationSchema,
@@ -53,14 +52,6 @@ describe("protocol", () => {
       revision: 7,
       contextUsage: { tokens: 72_400, contextWindow: 200_000 },
     });
-    expect(
-      OperatorConversationAttachmentSchema.parse({
-        schemaVersion: 1,
-        conversationId: conversation.conversationId,
-        surfaceClientId: "mac-window-1",
-        cursor: "event:12",
-      }),
-    ).toMatchObject({ surfaceClientId: "mac-window-1", cursor: "event:12" });
     expect(
       SubmitOperatorConversationTurnSchema.parse({
         schemaVersion: 1,

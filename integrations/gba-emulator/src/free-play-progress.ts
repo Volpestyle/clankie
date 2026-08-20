@@ -83,11 +83,6 @@ export function attemptedDirection(action: GbaEmulatorAction): string | null {
   return DIRECTIONS.has(action.button) ? action.button : null;
 }
 
-/** Stable key for "this move, from this tile" — the unit of refusal memory. */
-export function transitionKey(position: GbaPosition, direction: string): string {
-  return `${position.mapId}:${String(position.x)},${String(position.y)}:${direction}`;
-}
-
 /** How much read-back text a single turn's effect line may carry. */
 const DIALOG_TRANSCRIPT_LIMIT = 600;
 
@@ -96,7 +91,7 @@ const DIALOG_TRANSCRIPT_LIMIT = 600;
  *
  * `summary` is what happened. `advice` is the harness coaching his next
  * decision — second person, imperative, written for the player and nobody
- * else. Both reach the mind; only `summary` crosses the possessor seam to a
+ * else. Both reach the mind; only `summary` crosses the play voice seam to a
  * voice room, because a persona handed "hold the direction longer" relays it
  * at the people watching and ends up directing a game none of them is
  * playing. ADR 0074's seam carries the moment, not the tutor.

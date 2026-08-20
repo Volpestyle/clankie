@@ -12,6 +12,7 @@ import {
   type GbaDriverDecision,
   type GbaDriverReasonCode,
 } from "./contracts.ts";
+import { boundedShortestPath } from "./adapter.ts";
 
 /**
  * State-derived scenario driver. Every decision below is a pure function of
@@ -230,29 +231,17 @@ function nextRouteStep(
     { button: "left" as const, dx: -1, dy: 0 },
     { button: "up" as const, dx: 0, dy: -1 },
   ];
-  const queue: { x: number; y: number; first: "up" | "down" | "left" | "right" | null }[] = [
-    { x: position.x, y: position.y, first: null },
-  ];
-  const seen = new Set([`${String(position.x)},${String(position.y)}`]);
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (current.x === target.x && current.y === target.y && current.first) return current.first;
-    for (const direction of directions) {
-      const next = { x: current.x + direction.dx, y: current.y + direction.dy };
-      const key = `${String(next.x)},${String(next.y)}`;
-      if (
-        next.x < 0 ||
-        next.y < 0 ||
-        next.x >= scenario.map.width ||
-        next.y >= scenario.map.height ||
-        blocked.has(key) ||
-        seen.has(key)
-      ) {
-        continue;
-      }
-      seen.add(key);
-      queue.push({ ...next, first: current.first ?? direction.button });
-    }
-  }
+  const path = boundedShortestPath(
+    position,
+    target,
+    directions,
+    (_current, next) =>
+      next.x >= 0 &&
+      next.y >= 0 &&
+      next.x < scenario.map.width &&
+      next.y < scenario.map.height &&
+      !blocked.has(`${String(next.x)},${String(next.y)}`),
+  );
+  if (path?.[0] !== undefined) return path[0].step.button;
   throw new Error("No route to the frozen scenario target exists from the observed position");
 }

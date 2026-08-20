@@ -2,8 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { redactCredential, type CredentialStore, type ProviderCredential } from "@clankie/credential-broker";
-import { CatalogSchema, type Catalog, type ModelRegistry, type RefreshResult } from "@clankie/model-registry";
-import { loadConfig, updateGlobalConfig } from "@clankie/model-provider";
+import { CatalogSchema, type Catalog, type ModelRegistry } from "@clankie/model-registry";
+import { loadConfig, mergedCatalog, updateGlobalConfig } from "@clankie/model-provider";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildProviderCommands,
@@ -121,7 +121,7 @@ interface SecretRequest {
 }
 
 function testShell(
-  selections: Array<string[] | undefined>,
+  selections: Array<string | undefined>,
   secrets: Array<string | undefined> = [],
   texts: Array<string | undefined> = [],
 ): {
@@ -173,7 +173,6 @@ function testShell(
 
 async function testServices(
   options: {
-    readonly refreshResult?: RefreshResult;
     readonly captainModels?: ProviderServices["captainModels"];
     readonly fetchImpl?: typeof fetch;
   } = {},
@@ -197,9 +196,30 @@ async function testServices(
       return catalog();
     },
     async refresh() {
-      refreshes.count += 1;
-      return options.refreshResult ?? { source: "network", updated: true };
+      return { source: "network", updated: true };
     },
+  };
+  const currentCatalog = async () => mergedCatalog((await loadConfig({ env, cwd: root })).config, catalog());
+  const captainModels: ProviderServices["captainModels"] = {
+    async providers() {
+      return Object.values(await currentCatalog()).map(({ id, name }) => ({ id, name }));
+    },
+    async models(providerId) {
+      return Object.values((await currentCatalog())[providerId]?.models ?? {});
+    },
+    async thinkingLevels(providerId, modelId) {
+      return (await currentCatalog())[providerId]?.models[modelId]?.reasoning
+        ? ["off", "low", "medium", "high"]
+        : ["off"];
+    },
+    async resolveSelection(config) {
+      if (config.model === undefined) throw new Error("No captain model configured");
+      return { model: {} as never, ref: config.model, thinkingLevel: "medium" };
+    },
+    async refresh() {
+      refreshes.count += 1;
+    },
+    async register() {},
   };
   return {
     changed,
@@ -209,7 +229,7 @@ async function testServices(
     services: {
       cwd: root,
       env,
-      ...(options.captainModels === undefined ? {} : { captainModels: options.captainModels }),
+      captainModels: options.captainModels ?? captainModels,
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
       onConfigChanged(config) {
         notifications.count += 1;
@@ -287,8 +307,7 @@ describe("auth command", () => {
         clankie_discord_user_voice_bridge: { type: "api", key: "clan…" },
         clankie_discord_voice_bridge: { type: "api", key: "clan…" },
         clankie_operator: { type: "api", key: "clan…" },
-        clankie_possessor_voice: { type: "api", key: "clan…" },
-        clankie_runner: { type: "api", key: "clan…" },
+        clankie_play_voice: { type: "api", key: "clan…" },
         discord_bot: { type: "api", key: "MTUz…" },
         elevenlabs: { type: "api", key: "sk_0…" },
         openai: { type: "api", key: "sk-p…" },
@@ -352,7 +371,7 @@ describe("auth command", () => {
     const fixture = await testServices();
     fixture.credentials.set("openai", { type: "api", key: "sk-live-secret-value" });
     fixture.credentials.set("clankie_operator", { type: "api", key: "clankie_op_local-only" });
-    const view = testShell([["remove"], undefined]);
+    const view = testShell(["remove", undefined]);
 
     await command(buildProviderCommands(fixture.services), "auth").run("", view.shell);
 
@@ -363,7 +382,7 @@ describe("auth command", () => {
   it("validates API keys through masked input and stores only through the broker", async () => {
     const { credentials, services } = await testServices();
     const secret = "sk-valid-api-key";
-    const view = testShell([["api"], ["openai"], ["done"]], ["short", secret]);
+    const view = testShell(["api", "openai", "done"], ["short", secret]);
 
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
@@ -379,7 +398,7 @@ describe("auth command", () => {
   it("features ElevenLabs in the API-key picker despite its absence from the catalog", async () => {
     const { credentials, services } = await testServices();
     const secret = "elevenlabs-live-key";
-    const view = testShell([["api"], ["elevenlabs"], ["done"]], [secret]);
+    const view = testShell(["api", "elevenlabs", "done"], [secret]);
 
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
@@ -389,7 +408,7 @@ describe("auth command", () => {
     expect(rendered(view)).toContain("Pick the ElevenLabs voice and model with /voice.");
     expect(rendered(view)).not.toContain(secret);
 
-    const rerun = testShell([["api"], undefined]);
+    const rerun = testShell(["api", undefined]);
     await command(buildProviderCommands(services), "auth").run("", rerun.shell);
     expect(rerun.selects[1]?.options.find((option) => option.value === "elevenlabs")?.hint).toBe(
       "configured",
@@ -402,7 +421,7 @@ describe("auth command", () => {
       ...fixture.services,
       oauth: { ...fixture.services.oauth, codexBrowser: async () => oauthCredential },
     };
-    const view = testShell([["codex"], ["browser"], ["done"]]);
+    const view = testShell(["codex", "browser", "done"]);
 
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
@@ -425,7 +444,7 @@ describe("auth command", () => {
         },
       },
     };
-    const view = testShell([["codex"], ["device"], ["done"]]);
+    const view = testShell(["codex", "device", "done"]);
 
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
@@ -455,7 +474,7 @@ describe("auth command", () => {
         },
       },
     };
-    const view = testShell([["anthropic-oauth"], ["browser"], ["done"]], [pastedCode]);
+    const view = testShell(["anthropic-oauth", "browser", "done"], [pastedCode]);
 
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
@@ -479,7 +498,7 @@ describe("auth command", () => {
         },
       },
     };
-    const view = testShell([["anthropic-oauth"], ["manual"], ["done"]], ["authorization-code#state"]);
+    const view = testShell(["anthropic-oauth", "manual", "done"], ["authorization-code#state"]);
 
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
@@ -499,7 +518,7 @@ describe("auth command", () => {
         },
       },
     };
-    const view = testShell([["codex"], ["browser"], ["done"]]);
+    const view = testShell(["codex", "browser", "done"]);
 
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
@@ -520,7 +539,7 @@ describe("auth command", () => {
         },
       },
     };
-    const view = testShell([["xai-oauth"], ["done"]]);
+    const view = testShell(["xai-oauth", "done"]);
 
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
@@ -536,7 +555,7 @@ describe("auth command", () => {
   it("removes only the local broker credential and explains remote revocation", async () => {
     const fixture = await testServices();
     fixture.credentials.set("openai-codex", oauthCredential);
-    const view = testShell([["remove"], ["openai-codex"], ["yes"], ["done"]]);
+    const view = testShell(["remove", "openai-codex", "yes", "done"]);
 
     await command(buildProviderCommands(fixture.services), "auth").run("", view.shell);
 
@@ -571,14 +590,14 @@ describe("provider and model commands", () => {
       },
     });
     const commands = buildProviderCommands(fixture.services);
-    const modelView = testShell([["pi-provider"], ["pi-model"]]);
+    const modelView = testShell(["pi-provider", "pi-model"]);
 
     await command(commands, "provider").run("", modelView.shell);
     await command(commands, "model").run("", modelView.shell);
 
     expect(modelView.selects[0]?.options.map((option) => option.value)).toEqual(["pi-provider"]);
     expect(modelView.selects[1]?.options.map((option) => option.value)).toEqual(["pi-model"]);
-    const effortView = testShell([["high"]]);
+    const effortView = testShell(["high"]);
     await command(commands, "effort").run("", effortView.shell);
     expect(effortView.selects[0]?.options.map((option) => option.value)).toEqual([
       "off",
@@ -589,6 +608,18 @@ describe("provider and model commands", () => {
     expect((await loadConfig({ cwd: fixture.services.cwd, env: fixture.env })).config.variant).toEqual({
       "pi-provider/pi-model": "high",
     });
+  });
+
+  it("applies provider allowlists to Pi's catalog", async () => {
+    const fixture = await testServices();
+    await updateGlobalConfig((config) => void (config.enabled_providers = ["beta"]), {
+      env: fixture.env,
+    });
+    const view = testShell(["beta"]);
+
+    await command(buildProviderCommands(fixture.services), "provider").run("", view.shell);
+
+    expect(view.selects[0]?.options.map((option) => option.value)).toEqual(["beta"]);
   });
 
   it("adds a local endpoint from the provider modal and keeps per-model context", async () => {
@@ -603,7 +634,7 @@ describe("provider and model commands", () => {
           ),
         ),
     });
-    const view = testShell([["__local__"], ["ollama"]], [], ["ollama", "http://localhost:11434/v1", "32768"]);
+    const view = testShell(["__local__", "ollama"], [], ["ollama", "http://localhost:11434/v1", "32768"]);
 
     await command(buildProviderCommands(fixture.services), "provider").run("", view.shell);
 
@@ -623,7 +654,7 @@ describe("provider and model commands", () => {
   it("falls back to typed model ids when the local endpoint is unreachable", async () => {
     const fixture = await testServices({ fetchImpl: () => Promise.reject(new Error("ECONNREFUSED")) });
     const view = testShell(
-      [["__local__"], ["lmstudio-local"]],
+      ["__local__", "lmstudio-local"],
       [],
       ["lmstudio-local", "http://127.0.0.1:1234/v1", "qwen3:8b, , mistral", "8192"],
     );
@@ -641,7 +672,7 @@ describe("provider and model commands", () => {
   it("separates provider intent from the authoritative model write", async () => {
     const { changed, env, services } = await testServices();
     const commands = buildProviderCommands(services);
-    const view = testShell([["beta"], ["beta-two"]]);
+    const view = testShell(["beta", "beta-two"]);
 
     await command(commands, "provider").run("", view.shell);
 
@@ -665,7 +696,7 @@ describe("provider and model commands", () => {
     const fixture = await testServices();
     fixture.credentials.set("xai", oauthCredential);
     const commands = buildProviderCommands(fixture.services);
-    const view = testShell([["xai"]]);
+    const view = testShell(["xai"]);
 
     await command(commands, "provider").run("", view.shell);
 
@@ -685,7 +716,7 @@ describe("provider and model commands", () => {
       { env },
     );
     const commands = buildProviderCommands(services);
-    const view = testShell([["alpha-one"]]);
+    const view = testShell(["alpha-one"]);
 
     await command(commands, "model").run("", view.shell);
 
@@ -702,7 +733,7 @@ describe("provider and model commands", () => {
       },
       { env },
     );
-    const view = testShell([["gpt-5.5"]]);
+    const view = testShell(["gpt-5.5"]);
 
     await command(buildProviderCommands(services), "model").run("", view.shell);
 
@@ -723,7 +754,7 @@ describe("provider and model commands", () => {
     expect(view.results.at(-1)?.text).toContain("run /provider first");
   });
 
-  it("refreshes the registry from the model picker without reopening provider selection", async () => {
+  it("refreshes Pi's catalog from the model picker without reopening provider selection", async () => {
     const { env, refreshes, services } = await testServices();
     await updateGlobalConfig(
       (config) => {
@@ -731,7 +762,7 @@ describe("provider and model commands", () => {
       },
       { env },
     );
-    const view = testShell([["__refresh__"], ["alpha-one"]]);
+    const view = testShell(["__refresh__", "alpha-one"]);
 
     await command(buildProviderCommands(services), "model").run("", view.shell);
 
@@ -744,7 +775,7 @@ describe("provider and model commands", () => {
   it("releases committed provider intent so another face's later config becomes authoritative", async () => {
     const { env, services } = await testServices();
     const commands = buildProviderCommands(services);
-    const first = testShell([["beta"], ["beta-one"]]);
+    const first = testShell(["beta", "beta-one"]);
     await command(commands, "provider").run("", first.shell);
     await command(commands, "model").run("", first.shell);
 
@@ -754,7 +785,7 @@ describe("provider and model commands", () => {
       },
       { env },
     );
-    const afterExternalChange = testShell([["alpha-one"]]);
+    const afterExternalChange = testShell(["alpha-one"]);
 
     await command(commands, "model").run("", afterExternalChange.shell);
 

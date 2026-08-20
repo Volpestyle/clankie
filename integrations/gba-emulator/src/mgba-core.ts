@@ -18,6 +18,10 @@ import { sha256 } from "./core-double.ts";
  */
 
 const RETRO_DEVICE_JOYPAD = 1;
+/** One frame per observation is hardware rate. */
+const OBSERVE_CHUNK_FRAMES = 1;
+/** Wall-clock milliseconds one emulated frame represents. */
+const FRAME_INTERVAL_MS = 1_000 / 59.7275;
 /** RETRO_MEMORY_SYSTEM_RAM: the GBA's 256 KB EWRAM (bus address 0x02000000). */
 const RETRO_MEMORY_SYSTEM_RAM = 2;
 export const GBA_EWRAM_BUS_ADDRESS = 0x02000000;
@@ -136,6 +140,17 @@ export interface MgbaFramebuffer {
   bytes: Uint8Array;
 }
 
+export interface MgbaCoreIdentity {
+  readonly romSha256: string;
+  readonly savestateSha256: string;
+  readonly coreWasmSha256: string;
+}
+
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((done) => setTimeout(done, ms));
+}
+
 interface EmscriptenModule {
   HEAPU8: Uint8Array;
   _malloc(size: number): number;
@@ -158,6 +173,7 @@ export class MgbaLibretroCore {
   private frame: MgbaFramebuffer | null = null;
   private memoryDescriptors: LibretroMemoryDescriptor[] = [];
   private keymask = 0;
+  private observedRunInProgress = false;
   private retroRun: () => number = () => 0;
   private retroLoadGame: (infoPtr: number) => number = () => 0;
   private retroGetMemoryData: (id: number) => number = () => 0;
@@ -298,6 +314,47 @@ export class MgbaLibretroCore {
   /** Step exactly `frames` frames at the current held-button state. */
   public runFrames(frames: number): void {
     for (let i = 0; i < frames; i += 1) this.retroRun();
+  }
+
+  /** Run console-clock frames between actions without interrupting a held input. */
+  public idleFrames(frames: number, observer: (() => void) | null): boolean {
+    if (this.observedRunInProgress || frames <= 0) return false;
+    this.setHeldButtons([]);
+    this.runFrames(frames);
+    observer?.();
+    return true;
+  }
+
+  /**
+   * Run frames with optional hardware-speed pacing and per-frame observation.
+   * The deadline stays anchored to the start so timer rounding does not make a
+   * long action drift slower than the console.
+   */
+  public async runFramesObserved(
+    frames: number,
+    observer: (() => void) | null,
+    paceToWallClock: () => boolean,
+  ): Promise<void> {
+    if (observer === null && !paceToWallClock()) {
+      this.runFrames(frames);
+      return;
+    }
+    this.observedRunInProgress = true;
+    try {
+      const startedAt = performance.now();
+      let done = 0;
+      while (done < frames) {
+        const chunk = Math.min(OBSERVE_CHUNK_FRAMES, frames - done);
+        this.runFrames(chunk);
+        done += chunk;
+        observer?.();
+        if (paceToWallClock()) {
+          await delay(startedAt + done * FRAME_INTERVAL_MS - performance.now());
+        }
+      }
+    } finally {
+      this.observedRunInProgress = false;
+    }
   }
 
   private readMappedMemory(busAddress: number, byteLength: number, label: string): Uint8Array {

@@ -2,6 +2,7 @@ use serde::Serialize;
 use tokio::time;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct VideoResolution {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) width: Option<u32>,
@@ -12,23 +13,24 @@ pub(crate) struct VideoResolution {
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct VideoStreamDescriptor {
     pub(crate) ssrc: u32,
-    #[serde(rename = "rtxSsrc", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) rtx_ssrc: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) rid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) quality: Option<u32>,
-    #[serde(rename = "streamType", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) stream_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) active: Option<bool>,
-    #[serde(rename = "maxBitrate", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) max_bitrate: Option<u32>,
-    #[serde(rename = "maxFramerate", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) max_framerate: Option<u32>,
-    #[serde(rename = "maxResolution", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) max_resolution: Option<VideoResolution>,
 }
 
@@ -82,6 +84,13 @@ impl UserVideoSubscription {
             last_keyframe_forwarded_at: None,
             last_sink_wants_reasserted_at: None,
         }
+    }
+
+    pub(crate) fn reset_runtime(&mut self) {
+        self.last_frame_sent_at = None;
+        self.forwarded_frame_count = 0;
+        self.last_keyframe_forwarded_at = None;
+        self.last_sink_wants_reasserted_at = None;
     }
 }
 
@@ -143,4 +152,43 @@ pub(crate) fn normalize_video_pixel_count(pixel_count: u32) -> Option<u32> {
         return None;
     }
     Some(pixel_count.clamp(64 * 64, 3840 * 2160))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{VideoResolution, VideoStreamDescriptor};
+
+    #[test]
+    fn stream_descriptor_serializes_camel_case_contract_fields() {
+        let descriptor = VideoStreamDescriptor {
+            ssrc: 4_001,
+            rtx_ssrc: Some(5_001),
+            rid: Some("f".into()),
+            quality: Some(100),
+            stream_type: Some("screen".into()),
+            active: Some(true),
+            max_bitrate: Some(4_000_000),
+            max_framerate: Some(30),
+            max_resolution: Some(VideoResolution {
+                width: Some(1280),
+                height: Some(720),
+                resolution_type: Some("fixed".into()),
+            }),
+        };
+
+        assert_eq!(
+            serde_json::to_value(descriptor).expect("stream descriptor"),
+            serde_json::json!({
+                "ssrc": 4001,
+                "rtxSsrc": 5001,
+                "rid": "f",
+                "quality": 100,
+                "streamType": "screen",
+                "active": true,
+                "maxBitrate": 4000000,
+                "maxFramerate": 30,
+                "maxResolution": { "width": 1280, "height": 720, "type": "fixed" }
+            })
+        );
+    }
 }

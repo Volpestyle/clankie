@@ -14,6 +14,12 @@ strict emulator contract from `@clankie/interactive-environment`, enforces
 per-lease input/frame bounds and capabilities, drives the pinned core, and
 records a bounded hash-chained evidence trace.
 
+This package implements a body; it is not a shared body service. Clankie's play
+host and each GBA MCP process instantiate independent cores, runtimes, sessions,
+and checkpoint scopes. The runtime's internal session/capability lease fences
+its owner's actions and recovery; it does not let one process possess another
+([ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md)).
+
 ## The core seam
 
 Three interchangeable cores implement the adapter-facing `GbaCoreSeam` (button
@@ -40,6 +46,10 @@ input consuming frames + typed RAM-derived state + framebuffer/RAM digests):
   exposes the real framebuffer, raw buttons, RAM digest, and checkpoints. Until
   Emerald has its own verified RAM profile, decoded observations and composite
   actions fail closed; the free-play mind plays from the screen with raw input.
+
+Both real-core facades use `MgbaLibretroCore`'s single frame pump: one observed
+frame per emulated frame, deadline-paced at the calibrated 59.7275 Hz without
+blocking the event loop. Idle ticks stand off while that pump owns an action.
 
 ## Collision
 
@@ -139,7 +149,7 @@ operator-local directory with a digest receipt and a companion scenario that
 boots through this same fail-closed loader. The pinned fixtures stay frozen — a
 checkpoint is always a sibling identity, never an overwrite — and loading
 verifies the id, receipt, ROM, core build, and savestate digest before touching
-the core. The GBA MCP server publishes this as lease-gated
+the core. The GBA MCP server publishes this behind its private runtime lease as
 `gba_emulator_save_state` / `gba_emulator_load_state` tools.
 Asked play exposes the same store as Clankie's `save_checkpoint` and
 `load_checkpoint` choices, carrying his current notes and objective into every
@@ -176,8 +186,9 @@ semantic-event, and screenshot hashes before accepting existing evidence.
 defines free-play agency.
 
 `pnpm gba:free-play` runs a **model**, not an algorithm. The scenario drivers
-above compute every action — `nextRealRouteStep` is BFS, move selection is an
-`argmax` — and stay deterministic. Free play hands the decision to Clankie.
+above compute every action — route callers provide their own direction order
+and edge rules to one bounded BFS, while move selection is an `argmax` — and
+stay deterministic. Free play hands the decision to Clankie.
 
 ```bash
 CLANKIE_FREE_PLAY_TURNS=20 pnpm gba:free-play
@@ -222,7 +233,7 @@ as a stuck overworld.
 
 An effect is two fields, because it has two readers (ADR 0108). `effect` is the
 observation — what changed — and it is the half every audience gets: the
-activity overlay, the story card, and the possessor seam that hands a voice
+activity overlay, the story card, and the play voice seam that hands a voice
 room what just happened. `effectAdvice` is the harness coaching his next press
 ("hold the direction longer to move", "steer this menu with single presses"),
 written to him in the imperative and joined onto the effect only in the history
@@ -283,8 +294,8 @@ product entry into play.
 
 The product entrance to free play is an ask: a captain turn submits an
 embodiment intent, the service's play host claims it, and this package's
-composition — body lock, `createFreePlaySession`, `runFreePlay`, checkpoints —
-runs under the host instead of a hand-launched terminal. `RunFreePlayInput`
+composition — `createFreePlaySession`, `runFreePlay`, and checkpoints — runs
+inside Clankie's service instead of a hand-launched terminal. `RunFreePlayInput`
 takes a `shouldStop` hook so an asked stop or an exhausted duration budget ends
 the playthrough at a turn boundary, and an asked session resumes from the
 newest compatible checkpoint and mints one on the way out (ADR 0060).

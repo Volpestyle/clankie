@@ -23,9 +23,17 @@ pub(crate) fn shell_quote(s: &str) -> String {
 /// Build a shell fragment that resolves a YouTube/extractor URL to a direct
 /// media URL through `yt-dlp --print urls`.
 pub(crate) fn ytdlp_resolved_input(url: &str, format_selector: &str) -> String {
+    ytdlp_resolved_input_with_client(url, format_selector, "android")
+}
+
+pub(crate) fn ytdlp_resolved_input_with_client(
+    url: &str,
+    format_selector: &str,
+    player_client: &str,
+) -> String {
     let quoted_url = shell_quote(url);
     let quoted_format = shell_quote(format_selector);
-    let yt_arg = shell_quote("youtube:player_client=android");
+    let yt_arg = shell_quote(&format!("youtube:player_client={player_client}"));
     format!(
         "\"$(yt-dlp --no-warnings --quiet --no-playlist --no-live-from-start --extractor-args {yt_arg} -f {quoted_format} --print urls {quoted_url} | sed -n '1p')\""
     )
@@ -93,7 +101,7 @@ pub(crate) fn signal_process_group(pid: u32, signal: ProcessSignal) -> io::Resul
     };
     // SAFETY: pid originates from Child::id(), the child was spawned with
     // process_group(0), and we guard against pid==0 above.
-    #[allow(unsafe_code, clippy::cast_possible_wrap)]
+    #[allow(unsafe_code)]
     let rc = unsafe { libc::killpg(pid as libc::pid_t, sig) };
     if rc == 0 {
         Ok(())

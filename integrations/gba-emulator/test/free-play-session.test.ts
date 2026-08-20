@@ -1,11 +1,11 @@
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { FrozenGbaScenarioSchema } from "../src/contracts.ts";
 import { sha256 } from "../src/core-double.ts";
-import { defaultGbaBodyRootDir } from "../src/free-play-boot.ts";
+import { defaultGbaRuntimeRootDir } from "../src/free-play-boot.ts";
 import { createFreePlaySession } from "../src/free-play-session.ts";
 
 const require = createRequire(import.meta.url);
@@ -19,25 +19,84 @@ const scenarioBytes = readFileSync(scenarioPath);
 const scenario = FrozenGbaScenarioSchema.parse(JSON.parse(scenarioBytes.toString("utf8")));
 const fixtureSha256 = sha256(scenarioBytes);
 
-describe("shared body root", () => {
-  it("refuses a second writer on the same body", async () => {
-    // The whole point of a stable root: the MCP server and the free-play CLI
-    // are separate processes, so the only thing that can stop them driving the
-    // same game at once is a lease they can both see. Two temp dirs meant two
-    // invisible bodies — the ADR 0053 footgun.
-    const rootDir = mkdtempSync(path.join(tmpdir(), "shared-body-"));
-    const first = await createFreePlaySession({ rootDir, scenario, fixtureSha256 });
-    await expect(createFreePlaySession({ rootDir, scenario, fixtureSha256 })).rejects.toThrow(
-      /body is already held/i,
-    );
-    first.close();
+describe("invocation-local runtimes", () => {
+  it("can use a harness identity without mutating the digest-validated scenario", async () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), "gba-harness-identity-"));
+    const session = await createFreePlaySession({
+      rootDir,
+      scenario,
+      fixtureSha256,
+      characterId: "gba-mcp-harness",
+      holderId: "gba-mcp-harness",
+    });
+    expect(session.io.observe("overworld").characterId).toBe("gba-mcp-harness");
+    expect(await session.io.act({ kind: "button_press", button: "a", holdFrames: 4 })).toMatchObject({
+      status: "completed",
+    });
+    await session.close();
   });
 
-  it("resolves the same root for every entrypoint", () => {
-    const env = { XDG_STATE_HOME: mkdtempSync(path.join(tmpdir(), "state-")) } as NodeJS.ProcessEnv;
-    expect(defaultGbaBodyRootDir(env)).toBe(defaultGbaBodyRootDir(env));
-    const override = mkdtempSync(path.join(tmpdir(), "override-"));
-    expect(defaultGbaBodyRootDir({ CLANKIE_GBA_BODY_ROOT: override } as NodeJS.ProcessEnv)).toBe(override);
+  it("starts and acts independently under one state parent without loading sibling records", async () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), "gba-runtimes-"));
+    const input = { rootDir, scenario, fixtureSha256, runId: "same-session-id" };
+    const first = await createFreePlaySession(input);
+    const second = await createFreePlaySession(input);
+
+    // Matching session and action ids would collide immediately if either
+    // runtime loaded records from the other's child directory.
+    expect(second.sessionId).toBe(first.sessionId);
+    const [firstResult, secondResult] = await Promise.all([
+      first.io.act({ kind: "button_press", button: "a", holdFrames: 4 }),
+      second.io.act({ kind: "button_press", button: "b", holdFrames: 4 }),
+    ]);
+    expect(firstResult.status).toBe("completed");
+    expect(secondResult.status).toBe("completed");
+
+    const runtimeDirs = readdirSync(rootDir, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+    expect(runtimeDirs).toHaveLength(2);
+    for (const runtimeDir of runtimeDirs) {
+      expect(
+        readdirSync(path.join(rootDir, runtimeDir.name, "environment-sessions")).filter((name) =>
+          name.endsWith(".json"),
+        ),
+      ).toHaveLength(1);
+    }
+
+    await first.close();
+    await first.close();
+    expect(
+      first.events.filter((event) => "type" in event && event.type === "environment.session.stopped"),
+    ).toHaveLength(1);
+    await expect(first.io.act({ kind: "button_press", button: "a", holdFrames: 4 })).rejects.toThrow(
+      /revoked/,
+    );
+    await second.close();
+    expect(readdirSync(rootDir)).toEqual([]);
+  });
+
+  it("removes runtime state and preserves a persistence error from close", async () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), "gba-close-failure-"));
+    const session = await createFreePlaySession({ rootDir, scenario, fixtureSha256 });
+    const runtimeRoot = path.join(rootDir, readdirSync(rootDir)[0]!);
+    const recordsDir = path.join(runtimeRoot, "environment-sessions");
+    rmSync(recordsDir, { recursive: true });
+    writeFileSync(recordsDir, "blocks persistence");
+
+    let closeError: unknown;
+    try {
+      await session.close();
+    } catch (error) {
+      closeError = error;
+    }
+    expect(closeError).toMatchObject({ code: "EEXIST" });
+    expect(readdirSync(rootDir)).toEqual([]);
+    await expect(session.close()).rejects.toBe(closeError);
+  });
+
+  it("resolves a neutral XDG state parent", () => {
+    const stateRoot = mkdtempSync(path.join(tmpdir(), "state-"));
+    const env = { XDG_STATE_HOME: stateRoot } as NodeJS.ProcessEnv;
+    expect(defaultGbaRuntimeRootDir(env)).toBe(path.join(stateRoot, "clankie", "gba-runtime"));
   });
 });
 
@@ -62,7 +121,7 @@ describe("lease lapse recovery", () => {
     const types = session.events.map((event) => ("type" in event ? event.type : ""));
     expect(types).toContain("environment.session.lease_expired");
     expect(types).toContain("environment.session.lease_renewed");
-    session.close();
+    await session.close();
   });
 
   it("recovers pause and resume across a lapse without undoing a deliberate pause", async () => {
@@ -84,79 +143,20 @@ describe("lease lapse recovery", () => {
     await session.io.resume();
     const result = await session.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
     expect(result.status).toBe("completed");
-    session.close();
-  });
-});
-
-describe("observe-only sessions", () => {
-  it("lets several coexist on one body", async () => {
-    // An MCP client starts stdio servers freely — `claude mcp list`, every
-    // session, every retry. Locking at construction made the first server win
-    // and every later one fail to connect at all, which is contention over
-    // existing rather than over the body. Observation is not driving.
-    const rootDir = mkdtempSync(path.join(tmpdir(), "observe-only-"));
-    const first = await createFreePlaySession({ rootDir, scenario, fixtureSha256, acquireBody: false });
-    const second = await createFreePlaySession({ rootDir, scenario, fixtureSha256, acquireBody: false });
-    // Each server is its own run: distinct identities, coexisting freely.
-    expect(second.sessionId).not.toBe(first.sessionId);
-    first.close();
-    second.close();
-  });
-
-  it("still refuses a driver while an observer is up", async () => {
-    const rootDir = mkdtempSync(path.join(tmpdir(), "observe-then-drive-"));
-    const observer = await createFreePlaySession({ rootDir, scenario, fixtureSha256, acquireBody: false });
-    const driver = await createFreePlaySession({ rootDir, scenario, fixtureSha256 });
-    // The observer took nothing, so the driver gets the body; a second driver
-    // does not.
-    await expect(createFreePlaySession({ rootDir, scenario, fixtureSha256 })).rejects.toThrow(
-      /body is already held/i,
-    );
-    driver.close();
-    observer.close();
+    await session.close();
   });
 });
 
 describe("per-run session identity", () => {
-  it("keeps each run's record instead of overwriting the last one", async () => {
-    // With one stable id, the second playthrough reused the first one's record
-    // file and destroyed its action history the moment it started. A run is a
-    // run: two playthroughs, two identities, two records on disk.
+  it("gives successive playthroughs distinct identities", async () => {
     const rootDir = mkdtempSync(path.join(tmpdir(), "per-run-"));
     const first = await createFreePlaySession({ rootDir, scenario, fixtureSha256 });
     await first.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
-    first.close();
+    await first.close();
     const second = await createFreePlaySession({ rootDir, scenario, fixtureSha256 });
     await second.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
-    second.close();
+    await second.close();
     expect(second.sessionId).not.toBe(first.sessionId);
     expect(first.sessionId).toMatch(/^gba-free-play:.+:v\d+:/u);
-    const records = readdirSync(path.join(rootDir, "environment-sessions")).filter((name) =>
-      name.endsWith(".json"),
-    );
-    expect(records).toHaveLength(2);
-  });
-});
-
-describe("stalled wait recovery", () => {
-  it("cancels a timed-out wait at the next act instead of wedging the playthrough", async () => {
-    // The 2026-07-26 marathon softlock: he chose a wait, nothing in free play
-    // ever completes one, and the adapter refused every following action with
-    // action_already_pending until the process died. Mid-run deadline
-    // enforcement turns that into a bounded pause.
-    const rootDir = mkdtempSync(path.join(tmpdir(), "wait-wedge-"));
-    const now = { value: new Date("2026-07-19T00:00:00.000Z") };
-    const session = await createFreePlaySession({
-      rootDir,
-      scenario,
-      fixtureSha256,
-      clock: () => now.value,
-    });
-    const wait = await session.io.act({ kind: "wait", durationMs: 1_000 });
-    expect(wait.status).toBe("running");
-    now.value = new Date("2026-07-19T00:00:06.000Z"); // past the 5s action deadline
-    const next = await session.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
-    expect(next.status).toBe("completed");
-    session.close();
   });
 });

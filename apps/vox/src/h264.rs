@@ -125,8 +125,9 @@ impl H264Depacketizer {
     /// If the assembled frame is a keyframe but doesn't contain SPS/PPS inline,
     /// prepend the cached parameter sets so ffmpeg can decode it standalone.
     pub(crate) fn prepend_cached_parameter_sets(&self, frame: Vec<u8>) -> Vec<u8> {
-        let has_sps = Self::annexb_contains_nal_type(&frame, 7);
-        let has_pps = Self::annexb_contains_nal_type(&frame, 8);
+        let nal_types = collect_annexb_nal_types(&frame);
+        let has_sps = nal_types.contains(&7);
+        let has_pps = nal_types.contains(&8);
         if has_sps && has_pps {
             return frame;
         }
@@ -158,30 +159,6 @@ impl H264Depacketizer {
         }
         out.extend_from_slice(&frame);
         out
-    }
-
-    /// Scan an Annex-B bitstream for the presence of a specific NAL type.
-    pub(crate) fn annexb_contains_nal_type(buf: &[u8], target: u8) -> bool {
-        let mut i = 0;
-        while i < buf.len().saturating_sub(3) {
-            if buf[i] == 0 && buf[i + 1] == 0 {
-                let nal_start = if buf[i + 2] == 1 {
-                    i + 3
-                } else if buf[i + 2] == 0 && i + 3 < buf.len() && buf[i + 3] == 1 {
-                    i + 4
-                } else {
-                    i += 1;
-                    continue;
-                };
-                if nal_start < buf.len() && (buf[nal_start] & 0x1F) == target {
-                    return true;
-                }
-                i = nal_start;
-            } else {
-                i += 1;
-            }
-        }
-        false
     }
 
     pub(crate) fn prepare_timestamp(&mut self, timestamp: u32) {
@@ -229,52 +206,16 @@ pub(crate) fn find_next_start_code(data: &[u8], from: usize) -> Option<(usize, u
 }
 
 pub(crate) fn h264_annexb_has_idr_slice(frame: &[u8]) -> bool {
-    let mut index = 0usize;
-    while index + 4 <= frame.len() {
-        if frame[index..].starts_with(&[0, 0, 0, 1]) {
-            let nal_start = index + 4;
-            if let Some(byte) = frame.get(nal_start) {
-                let nal_type = byte & 0x1F;
-                if nal_type == 5 {
-                    return true;
-                }
-            }
-            index = nal_start;
-        } else if frame[index..].starts_with(&[0, 0, 1]) {
-            let nal_start = index + 3;
-            if let Some(byte) = frame.get(nal_start) {
-                let nal_type = byte & 0x1F;
-                if nal_type == 5 {
-                    return true;
-                }
-            }
-            index = nal_start;
-        } else {
-            index += 1;
-        }
-    }
-    false
+    split_h264_annexb_nalus(frame)
+        .into_iter()
+        .any(|nalu| nalu.first().is_some_and(|byte| byte & 0x1f == 5))
 }
 
 pub(crate) fn collect_annexb_nal_types(frame: &[u8]) -> Vec<u8> {
-    let mut types = Vec::new();
-    let mut index = 0usize;
-    while index + 4 <= frame.len() {
-        if frame[index..].starts_with(&[0, 0, 0, 1]) {
-            if let Some(byte) = frame.get(index + 4) {
-                types.push(byte & 0x1F);
-            }
-            index += 4;
-        } else if frame[index..].starts_with(&[0, 0, 1]) {
-            if let Some(byte) = frame.get(index + 3) {
-                types.push(byte & 0x1F);
-            }
-            index += 3;
-        } else {
-            index += 1;
-        }
-    }
-    types
+    split_h264_annexb_nalus(frame)
+        .into_iter()
+        .filter_map(|nalu| nalu.first().map(|byte| byte & 0x1f))
+        .collect()
 }
 
 pub(crate) fn split_h264_annexb_nalus(frame: &[u8]) -> Vec<&[u8]> {
