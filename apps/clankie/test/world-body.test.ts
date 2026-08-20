@@ -94,6 +94,31 @@ describe("hosted world body", () => {
     });
   });
 
+  it("carries map size and edge connections", async () => {
+    const world = await staticWorld(
+      observation({
+        frame: 10,
+        mapSize: { width: 24, height: 20 },
+        connections: [{ direction: "north", destination: "route-1" }],
+      }),
+    );
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(result.body.io.observe("overworld")).toMatchObject({
+      data: {
+        mapSize: { width: 24, height: 20 },
+        exits: {
+          connections: [{ direction: "north", destination: "route-1" }],
+        },
+      },
+    });
+    await result.body.close();
+  });
+
   it("reports nothing rather than emptiness when the world publishes neither", async () => {
     // A world too old to publish either field. Silence is the honest answer:
     // an empty `lines` reads as "he read it and it said nothing", and an empty
@@ -110,8 +135,12 @@ describe("hosted world body", () => {
     expect(result.outcome).toBe("joined");
     if (result.outcome !== "joined") return;
     expectAdapterError(() => result.body.io.observe("dialog"), "semantic_state_unavailable");
-    const overworld = result.body.io.observe("overworld") as { data: Record<string, unknown> };
+    const overworld = result.body.io.observe("overworld") as {
+      data: { mapSize: unknown; exits: { connections: unknown }; occupants?: unknown };
+    };
     expect("occupants" in overworld.data).toBe(false);
+    expect(overworld.data.mapSize).toBeNull();
+    expect(overworld.data.exits.connections).toEqual([]);
   });
 
   it("joins by credential, maps every available view, drives actions, and leaves once", async () => {
@@ -958,6 +987,8 @@ function observation(options: {
     to: string;
     walkTo: "supported" | "unsupported";
   }>;
+  mapSize?: { width: number; height: number } | null;
+  connections?: { direction: "north" | "south" | "west" | "east"; destination: string }[] | null;
 }) {
   const decoded = options.decoded ?? true;
   const mode = options.mode ?? "overworld";
@@ -1002,6 +1033,8 @@ function observation(options: {
           npcs: options.npcs ?? [],
           dialogLines: options.dialogLines ?? [],
           menu: options.menu ?? null,
+          ...(options.mapSize === undefined ? {} : { mapSize: options.mapSize }),
+          ...(options.connections === undefined ? {} : { connections: options.connections }),
         }
       : null,
   };

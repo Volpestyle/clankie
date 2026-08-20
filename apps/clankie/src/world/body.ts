@@ -290,6 +290,33 @@ const FireRedStateSchema = z
       })
       .strict()
       .nullable(),
+    /**
+     * Absent on a world older than this field; null when no map is loaded.
+     * Interior tile count, border excluded — the same number the local body
+     * publishes. Player coordinates still include the 7-tile border.
+     */
+    mapSize: z
+      .object({
+        width: z.number().int().positive().max(1_024),
+        height: z.number().int().positive().max(1_024),
+      })
+      .strict()
+      .nullish(),
+    /**
+     * Absent on a world older than this field; null when that world did not
+     * read the map header. Empty is a decoded indoor map with no edges.
+     */
+    connections: z
+      .array(
+        z
+          .object({
+            direction: z.enum(["north", "south", "west", "east"]),
+            destination: z.string().min(1).max(128),
+          })
+          .strict(),
+      )
+      .max(8)
+      .nullish(),
   })
   .strict();
 type FireRedState = z.infer<typeof FireRedStateSchema>;
@@ -544,12 +571,13 @@ class HostedWorldBody implements WorldBody {
           };
         }
         case "overworld": {
-          const overworld = requireSemanticState(state).overworld;
+          const decoded = requireSemanticState(state);
+          const overworld = decoded.overworld;
           if (overworld === null) {
             throw adapterError("semantic_state_unavailable", "The world has no decoded overworld position");
           }
-          const view = mapOverworld(observation?.minimap ?? null, overworld);
-          const npcs = requireSemanticState(state).npcs;
+          const view = mapOverworld(observation?.minimap ?? null, overworld, decoded.connections);
+          const npcs = decoded.npcs;
           return {
             ...base,
             kind,
@@ -557,7 +585,7 @@ class HostedWorldBody implements WorldBody {
               position: { mapId: overworld.mapId, x: overworld.x, y: overworld.y },
               facing: overworld.facing,
               surroundings: view.surroundings,
-              mapSize: null,
+              mapSize: decoded.mapSize ?? null,
               minimap: view.minimap,
               // A world that does not publish them leaves this absent rather
               // than empty: "not read" and "nobody here" are different facts.
@@ -1079,7 +1107,11 @@ function localSceneMode(mode: Observation["scene"]["mode"] | undefined) {
   }
 }
 
-function mapOverworld(minimap: Observation["minimap"], position: NonNullable<FireRedState["overworld"]>) {
+function mapOverworld(
+  minimap: Observation["minimap"],
+  position: NonNullable<FireRedState["overworld"]>,
+  connections: FireRedState["connections"],
+) {
   if (minimap === null || minimap.topLeft.mapId !== position.mapId) {
     return { minimap: null, surroundings: null, exits: null };
   }
@@ -1119,7 +1151,7 @@ function mapOverworld(minimap: Observation["minimap"], position: NonNullable<Fir
         destination: exit.to,
         walkTo: exit.walkTo,
       })),
-      connections: [],
+      connections: connections ?? [],
     },
   };
 }
