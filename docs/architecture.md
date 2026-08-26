@@ -192,10 +192,11 @@ the full picture — what each store holds, who may read it, and what bounds it.
   Clankie currently imports only the pinned `@pokeagents/world-protocol`
   package (including `/ipc`) and keeps host, emulator, persistence, and
   world-MCP packages out of product source. Hosted play composes
-  `WorldPlayerClient`. The play loop owns the BODY operations (`world.join`,
-  `world.leave`, `play.observe`, `play.act`, `play.frame`, `play.watch`);
-  `pokeagent_world` owns the rest of `WORLD_OPERATIONS` (session, who, regions,
-  travel, challenges).
+  `WorldPlayerClient`. Every catalog operation is classified body or mind;
+  unclassified names stay off `pokeagent_world` until classified. The play loop
+  owns BODY (`world.join`, `world.leave`, `play.observe`, `play.act`,
+  `play.frame`, `play.watch`); the mind owns session, who, regions, travel, and
+  challenges.
 - **Auth.** Provider keys and OAuth tokens live in the credential broker
   (Keychain), written by the TUI `/auth` flow and read by pi through a
   credential-store bridge. Compatibility model/media provider keys may fall

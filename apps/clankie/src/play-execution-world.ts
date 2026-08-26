@@ -345,6 +345,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
         interjections,
         shouldStop: () =>
           control.stopRequested() ||
+          body.ended() ||
           (session.budget.maxDurationMs !== undefined &&
             clock().getTime() - startedAt >= session.budget.maxDurationMs),
         onTurn: (turn, evidence) => {
@@ -420,7 +421,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       });
 
       body.observeFrames(null);
-      const outcome = control.stopRequested() ? "stopped" : "budget_exhausted";
+      const outcome = control.stopRequested() || body.ended() ? "stopped" : "budget_exhausted";
       const durationMs = clock().getTime() - startedAt;
       const framesDropped =
         (sink?.droppedFrameCount ?? 0) + framesDroppedWithoutSink + body.droppedFrameCount();
@@ -470,7 +471,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       sink?.close();
       unsubscribe?.();
       voice?.close();
-      await body.close();
+      await body.close().catch(() => undefined);
     }
   };
 }

@@ -96,6 +96,8 @@ export interface WorldBody {
   readonly grantedOperationNames: () => readonly string[];
   /** Invoke a granted world operation. The client retains the bearer. */
   readonly callWorld: (name: string, input: Record<string, unknown>) => Promise<unknown>;
+  /** True after the world ended the session or this body closed. */
+  readonly ended: () => boolean;
   /** Leaves the world and releases the body. Always call it. */
   readonly close: () => Promise<void>;
 }
@@ -232,13 +234,24 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
     };
   }
 
-  const watchAudio = await openWatchAudio(client, options.fetchImpl ?? fetch, options.onAudioUnavailable);
-  return { outcome: "joined", body: new HostedWorldBody(client, observation, watchAudio) };
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const watchAudio = await openWatchAudio(client, fetchImpl, options.onAudioUnavailable);
+  return {
+    outcome: "joined",
+    body: new HostedWorldBody(client, observation, {
+      ...(watchAudio === undefined ? {} : { watchAudio }),
+      fetchImpl,
+      ...(options.onAudioUnavailable === undefined ? {} : { onAudioUnavailable: options.onAudioUnavailable }),
+    }),
+  };
 }
 
 const REQUIRED_CAPABILITIES = ["world.observe", "world.act", "world.frames"] as const;
 const AUDIO_POLL_MS = 80;
 const AUDIO_QUEUE_MAX = 64;
+const FRAME_CONSUME_RETRIES = 8;
+const FRAME_CONSUME_BACKOFF_MS = 50;
+const ALREADY_LEFT = new Set(["session_ended", "not_your_session", "unauthenticated"]);
 const GOAL_VERSION = 1;
 const CHARACTER_ID = "clankie";
 
@@ -384,7 +397,10 @@ class HostedWorldBody implements WorldBody {
   private frame: Frame | undefined;
   private png: Uint8Array | null = null;
   private droppedFrames = 0;
-  private readonly watchAudio: WatchAudioSource | undefined;
+  private watchAudio: WatchAudioSource | undefined;
+  private readonly fetchImpl: typeof fetch;
+  private readonly onAudioUnavailable: ((reason: string) => void) | undefined;
+  private watchRemintInFlight = false;
   private readonly audioPackets: WorldAudioPacket[] = [];
   private audioGeneration = 0;
   private audioCursor = 0;
@@ -396,18 +412,29 @@ class HostedWorldBody implements WorldBody {
   private observationPollInFlight = false;
   private paused = false;
   private closed = false;
+  private sessionEnded = false;
   private closePromise: Promise<void> | undefined;
   private lastAction: EnvironmentActionResult | undefined;
   private readonly stableActionFailures = new Map<string, { errorCode: string; message: string }>();
 
-  public constructor(client: WorldPlayerClient, observation: Observation, watchAudio?: WatchAudioSource) {
+  public constructor(
+    client: WorldPlayerClient,
+    observation: Observation,
+    options: {
+      readonly watchAudio?: WatchAudioSource;
+      readonly fetchImpl: typeof fetch;
+      readonly onAudioUnavailable?: (reason: string) => void;
+    },
+  ) {
     this.client = client;
     const session = client.session;
     if (session === undefined) throw new Error("Hosted world body requires a joined session");
     this.journeyId = worldPlayJourneyId({ worldId: session.worldId, playerId: session.playerId });
     this.observation = observation;
     this.bodyGeneration = observation.bodyGeneration;
-    this.watchAudio = watchAudio;
+    this.watchAudio = options.watchAudio;
+    this.fetchImpl = options.fetchImpl;
+    this.onAudioUnavailable = options.onAudioUnavailable;
     this.io = {
       observe: (kind) => this.observe(kind),
       act: (action) => this.act(action),
@@ -416,7 +443,7 @@ class HostedWorldBody implements WorldBody {
         return Promise.resolve();
       },
       resume: () => {
-        if (this.closed) throw new Error("World body is closed");
+        if (this.closed || this.sessionEnded) throw new Error("World body is closed");
         this.paused = false;
         return Promise.resolve();
       },
@@ -427,16 +454,19 @@ class HostedWorldBody implements WorldBody {
 
   public readonly observeFrames = (observer: (() => void) | null): void => {
     this.frameObserver = observer;
-    if (observer === null || this.closed) {
+    if (observer === null || this.closed || this.sessionEnded) {
       this.watching = false;
       this.stopAudioPolling();
       return;
     }
-    if (this.watching) return;
-    this.watching = true;
-    void this.consumeFrames();
+    if (!this.watching) {
+      this.watching = true;
+      void this.consumeFrames();
+    }
     this.startAudioPolling();
   };
+
+  public readonly ended = (): boolean => this.closed || this.sessionEnded;
 
   public readonly droppedFrameCount = (): number => this.droppedFrames;
 
@@ -463,6 +493,7 @@ class HostedWorldBody implements WorldBody {
     }
     try {
       const result = await this.client.call(name as WorldOperationName, input as never);
+      if (isRefusal(result)) this.stopIfEnded(result);
       if (
         name === "world.travel" &&
         !isRefusal(result) &&
@@ -488,12 +519,14 @@ class HostedWorldBody implements WorldBody {
   public readonly close = (): Promise<void> => {
     if (this.closePromise !== undefined) return this.closePromise;
     this.closed = true;
+    this.sessionEnded = true;
     this.watching = false;
     this.frameObserver = null;
     this.stopAudioPolling();
     this.closePromise = (async () => {
+      if (!this.client.joined) return;
       const outcome = await this.client.call("world.leave", {});
-      if (isRefusal(outcome) && outcome.code === "session_ended") return;
+      if (isRefusal(outcome) && ALREADY_LEFT.has(outcome.code)) return;
       if (isRefusal(outcome)) {
         throw new Error(`${outcome.code}: ${outcome.message}`);
       }
@@ -502,7 +535,9 @@ class HostedWorldBody implements WorldBody {
   };
 
   private observe(kind: GbaEmulatorObservationKind): GbaEmulatorObservation {
-    if (this.closed) throw adapterError("session_ended", "The hosted world body is closed");
+    if (this.closed || this.sessionEnded) {
+      throw adapterError("session_ended", "The hosted world session has ended");
+    }
     const observation = this.observation;
     const base = this.observationBase();
     const state =
@@ -704,7 +739,9 @@ class HostedWorldBody implements WorldBody {
   private async act(action: GbaEmulatorAction): Promise<EnvironmentActionResult> {
     this.actionSequence += 1;
     const actionId = `world-action-${String(this.actionSequence)}`;
-    if (this.closed) return this.failedAction(actionId, "session_ended", "The hosted world body is closed");
+    if (this.closed || this.sessionEnded) {
+      return this.failedAction(actionId, "session_ended", "The hosted world session has ended");
+    }
     if (this.paused) return this.failedAction(actionId, "session_paused", "Clankie paused his world actions");
     const stableFailureKey = unsupportedWalkKey(this.observation, action);
     const remembered =
@@ -728,6 +765,7 @@ class HostedWorldBody implements WorldBody {
     }
 
     if (isRefusal(result)) {
+      this.stopIfEnded(result);
       return this.failedAction(actionId, result.code, result.message, result.retryAfterMs !== undefined);
     }
     const sameRequestGeneration = result.bodyGeneration === requestGeneration;
@@ -828,22 +866,35 @@ class HostedWorldBody implements WorldBody {
   }
 
   private async consumeFrames(): Promise<void> {
+    let attempt = 0;
     try {
-      for await (const incoming of this.client.frames()) {
-        if (this.closed || !this.watching || this.frameObserver === null) break;
-        if (!this.acceptFrame(incoming)) continue;
-        void this.pollObservation();
-        this.frameObserver?.();
+      while (!this.closed && !this.sessionEnded && this.frameObserver !== null) {
+        try {
+          for await (const incoming of this.client.frames()) {
+            if (this.closed || this.sessionEnded || !this.watching || this.frameObserver === null) return;
+            if (!this.acceptFrame(incoming)) continue;
+            void this.pollObservation();
+            this.frameObserver?.();
+          }
+          if (!this.client.joined) this.markEnded();
+          return;
+        } catch {
+          if (this.closed || this.sessionEnded || !this.client.joined || this.frameObserver === null) {
+            if (!this.client.joined) this.markEnded();
+            return;
+          }
+          attempt += 1;
+          if (attempt > FRAME_CONSUME_RETRIES) return;
+          await delay(Math.min(1_000, FRAME_CONSUME_BACKOFF_MS * 2 ** (attempt - 1)));
+        }
       }
-    } catch {
-      // A transient failed poll leaves the last good frame visible; a later watch retries.
     } finally {
       this.watching = false;
     }
   }
 
   private async pollObservation(): Promise<void> {
-    if (this.closed || this.observationPollInFlight) return;
+    if (this.closed || this.sessionEnded || this.observationPollInFlight) return;
     this.observationPollInFlight = true;
     try {
       const outcome = await this.client.call("play.observe", {});
@@ -859,16 +910,10 @@ class HostedWorldBody implements WorldBody {
     }
   }
 
-  private startAudioPolling(): void {
-    if (this.watchAudio === undefined || this.audioTimer !== undefined) return;
-    void this.pollAudio();
-    this.audioTimer = setInterval(() => void this.pollAudio(), AUDIO_POLL_MS);
-    this.audioTimer.unref();
-  }
-
   private async pollAudio(): Promise<void> {
     if (
       this.closed ||
+      this.sessionEnded ||
       this.frameObserver === null ||
       this.audioPollInFlight ||
       this.watchAudio === undefined
@@ -886,7 +931,10 @@ class HostedWorldBody implements WorldBody {
         headers: { Authorization: `Watch ${this.watchAudio.token}` },
         cache: "no-store",
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        this.revokeWatchAudio(`watch_http_${String(response.status)}`);
+        return;
+      }
       const parsed = WatchAudioBatchSchema.safeParse(await response.json());
       if (!parsed.success) return;
       const batch = parsed.data;
@@ -936,7 +984,13 @@ class HostedWorldBody implements WorldBody {
     ) {
       return false;
     }
-    this.droppedFrames += incoming.dropped;
+    const impliedDrop =
+      this.frame !== undefined &&
+      incoming.bodyGeneration === this.frame.bodyGeneration &&
+      incoming.frame > this.frame.frame
+        ? Math.max(0, incoming.frame - this.frame.frame - 1)
+        : 0;
+    this.droppedFrames += Math.max(incoming.dropped, impliedDrop);
     this.frame = incoming;
     this.png = Uint8Array.from(Buffer.from(incoming.data, "base64"));
     return true;
@@ -967,9 +1021,52 @@ class HostedWorldBody implements WorldBody {
   }
 
   private stopIfEnded(outcome: Refusal): void {
-    if (outcome.code !== "session_ended" && outcome.code !== "not_your_session") return;
+    if (!ALREADY_LEFT.has(outcome.code)) return;
+    this.markEnded();
+  }
+
+  private markEnded(): void {
+    if (this.sessionEnded) return;
+    this.sessionEnded = true;
     this.watching = false;
     this.stopAudioPolling();
+  }
+
+  private startAudioPolling(): void {
+    if (this.closed || this.sessionEnded || this.frameObserver === null) return;
+    if (this.watchAudio === undefined) {
+      void this.remintWatchAudio();
+      return;
+    }
+    if (this.audioTimer !== undefined) return;
+    void this.pollAudio();
+    this.audioTimer = setInterval(() => void this.pollAudio(), AUDIO_POLL_MS);
+    this.audioTimer.unref();
+  }
+
+  private async remintWatchAudio(): Promise<void> {
+    if (
+      this.watchRemintInFlight ||
+      this.closed ||
+      this.sessionEnded ||
+      this.frameObserver === null ||
+      this.watchAudio !== undefined
+    ) {
+      return;
+    }
+    this.watchRemintInFlight = true;
+    try {
+      this.watchAudio = await openWatchAudio(this.client, this.fetchImpl, this.onAudioUnavailable);
+      if (this.watchAudio !== undefined) this.startAudioPolling();
+    } finally {
+      this.watchRemintInFlight = false;
+    }
+  }
+
+  private revokeWatchAudio(reason: string): void {
+    this.stopAudioPolling();
+    this.watchAudio = undefined;
+    this.onAudioUnavailable?.(reason);
   }
 
   private stopAudioPolling(): void {
@@ -1213,4 +1310,11 @@ async function bestEffortLeave(client: WorldPlayerClient): Promise<void> {
 function boundedError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.slice(0, 300) || "Hosted world request failed";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 }

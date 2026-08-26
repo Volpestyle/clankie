@@ -38,7 +38,7 @@ export class HostedWorldSession {
         readonly grantedOperations: readonly string[];
         readonly session: ReturnType<WorldBody["sessionSnapshot"]>;
       } {
-    if (this.body === undefined) return { outcome: "not_playing" };
+    if (this.body === undefined || this.body.ended()) return { outcome: "not_playing" };
     return {
       outcome: "playing",
       grantedOperations: this.body.grantedOperationNames().filter((name) => MIND_OPERATIONS.has(name)),
@@ -47,7 +47,7 @@ export class HostedWorldSession {
   }
 
   public async invoke(name: string, input: Record<string, unknown> = {}): Promise<HostedWorldInvokeResult> {
-    if (this.body === undefined) return { outcome: "refused", reason: "not_playing" };
+    if (this.body === undefined || this.body.ended()) return { outcome: "refused", reason: "not_playing" };
     if (!MIND_OPERATIONS.has(name) || findOperation(name) === undefined) {
       return { outcome: "refused", reason: "unknown_operation", detail: name };
     }

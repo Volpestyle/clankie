@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { WORLD_OPERATIONS } from "@pokeagents/world-protocol";
 import { describe, expect, it } from "vitest";
-import { HOSTED_WORLD_BODY_OPERATIONS, HOSTED_WORLD_MIND_OPERATIONS } from "../src/world/operations.ts";
+import {
+  HOSTED_WORLD_BODY_OPERATIONS,
+  HOSTED_WORLD_MIND_OPERATIONS,
+  HOSTED_WORLD_OPERATION_CLASS,
+} from "../src/world/operations.ts";
 
 const src = (...parts: string[]) => join(import.meta.dirname, "../src", ...parts);
 
@@ -29,6 +33,17 @@ describe("hosted world BODY/MIND partition", () => {
       }
       expect(source).toContain(`client.call("${name}"`);
     }
+  });
+
+  it("keeps unclassified catalog names off the mind enum", () => {
+    expect(HOSTED_WORLD_MIND_OPERATIONS).not.toContain("play.watch_audio");
+    for (const name of HOSTED_WORLD_MIND_OPERATIONS) {
+      expect(HOSTED_WORLD_OPERATION_CLASS[name]).toBe("mind");
+    }
+    const classified = new Set(Object.keys(HOSTED_WORLD_OPERATION_CLASS));
+    expect(
+      WORLD_OPERATIONS.map((operation) => operation.name).filter((name) => !classified.has(name)),
+    ).toEqual([]);
   });
 
   it("feeds pokeagent_world from the derived mind list", () => {

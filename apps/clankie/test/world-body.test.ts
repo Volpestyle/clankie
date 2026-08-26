@@ -1098,6 +1098,166 @@ describe("a decoded screen with no semantic state", () => {
     expect(danger.data.severity).toBe("low");
     await result.body.close();
   });
+
+  it("ends the body on session_ended and treats close as already-left", async () => {
+    let observes = 0;
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          observes += 1;
+          if (observes >= 2) return { ok: false, code: "session_ended", message: "host restarted" };
+          return observation({ frame: 10 });
+        case "play.act":
+          return { ok: false, code: "session_ended", message: "host restarted" };
+        case "play.frame":
+          return frame({ frame: 10, data: "still" });
+        case "world.leave":
+          if (request.token === undefined) {
+            return { ok: false, code: "unauthenticated", message: "no session token" };
+          }
+          return { ok: false, code: "session_ended", message: "session has ended" };
+        default:
+          return { ok: false, code: "not_supported", message: request.operation };
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    const body = result.body;
+    const gate = new HostedWorldSession();
+    gate.attach(body);
+    body.observeFrames(() => undefined);
+    await waitUntil(() => body.ended(), 1_000);
+    expectAdapterError(() => body.io.observe("scene"), "session_ended");
+    await expect(body.io.act({ kind: "button_press", button: "a", holdFrames: 4 })).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "session_ended",
+    });
+    expect(gate.inspect()).toEqual({ outcome: "not_playing" });
+    await expect(body.close()).resolves.toBeUndefined();
+    expect(world.requests.filter((request) => request.operation === "world.join")).toHaveLength(1);
+    body.observeFrames(null);
+  });
+
+  it("counts the frame gap when act jumps the latest screen", async () => {
+    let currentFrame = 1;
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return observation({ frame: currentFrame });
+        case "play.act":
+          currentFrame = 50;
+          return actRan(observation({ frame: 50, x: 13, y: 13 }));
+        case "play.frame":
+          return frame({ frame: currentFrame, data: `frame-${String(currentFrame)}` });
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    const seen: string[] = [];
+    result.body.observeFrames(() => {
+      const png = result.body.framePng();
+      if (png !== null) seen.push(Buffer.from(png).toString());
+    });
+    await waitUntil(() => seen.includes("frame-1"), 1_000);
+    expect(result.body.droppedFrameCount()).toBe(0);
+    await result.body.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+    expect(Buffer.from(result.body.framePng() ?? []).toString()).toBe("frame-50");
+    expect(result.body.droppedFrameCount()).toBe(48);
+    result.body.observeFrames(null);
+    await result.body.close();
+  });
+
+  it("keeps publishing frames after a transient play.frame failure", async () => {
+    let frames = 0;
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return observation({ frame: Math.max(1, frames) });
+        case "play.frame":
+          frames += 1;
+          if (frames === 3) return { not: "a frame" };
+          return frame({ frame: frames, data: `frame-${String(frames)}` });
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    let callbacks = 0;
+    result.body.observeFrames(() => {
+      callbacks += 1;
+    });
+    await waitUntil(() => callbacks >= 2, 1_000);
+    await waitUntil(() => callbacks >= 4, 2_000);
+    result.body.observeFrames(null);
+    await result.body.close();
+  });
+
+  it("stops the watch audio poller on 401 and signals unavailable", async () => {
+    const fetches: number[] = [];
+    const unavailable: string[] = [];
+    const world = await fakeWorld(
+      (request) => {
+        switch (request.operation) {
+          case "world.join":
+            return joinResult();
+          case "play.observe":
+            return observation({ frame: 1 });
+          case "play.frame":
+            return frame({ frame: 1, data: "frame-1" });
+          case "world.leave":
+            return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+          default:
+            throw new Error(`unexpected ${request.operation}`);
+        }
+      },
+      () => ({ ok: true, visibility: "unlisted", url: `https://watch.example/watch#wtk.${"A".repeat(43)}` }),
+    );
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+      fetchImpl: (async () => {
+        fetches.push(Date.now());
+        return new Response("revoked", { status: 401 });
+      }) as typeof fetch,
+      onAudioUnavailable: (reason) => unavailable.push(reason),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    result.body.observeFrames(() => undefined);
+    await waitUntil(() => unavailable.length > 0, 1_000);
+    const atUnavailable = fetches.length;
+    await delay(250);
+    expect(fetches.length).toBe(atUnavailable);
+    expect(unavailable).toEqual(["watch_http_401"]);
+    expect(atUnavailable).toBeLessThan(3);
+    result.body.observeFrames(null);
+    await result.body.close();
+  });
 });
 
 function observation(options: {
@@ -1259,4 +1419,13 @@ function closeServer(server: Server): Promise<void> {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntil(predicate: () => boolean, ms: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (predicate()) return;
+    await delay(10);
+  }
+  throw new Error("timed out waiting");
 }

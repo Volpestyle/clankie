@@ -73,6 +73,7 @@ function fakeWorldBody(overrides: Partial<WorldBody> = {}): WorldBody {
     }),
     grantedOperationNames: () => ["play.observe", "play.act", "play.frame"],
     callWorld: () => Promise.resolve({ ok: false, code: "not_supported", message: "fake" }),
+    ended: () => false,
     ...overrides,
   };
 }
@@ -216,6 +217,51 @@ describe("world play execution", () => {
     expect(sequences.frames).toEqual([1, 2]);
     expect(sequences.overlays).toEqual([1, 2]);
     expect(closed).toBe(1);
+  });
+
+  it("records turns when the hosted world session ends instead of wiping the receipt", async () => {
+    let sessionEnded = false;
+    const body = fakeWorldBody({
+      ended: () => sessionEnded,
+      io: {
+        ...fakeIo,
+        act: () => {
+          sessionEnded = true;
+          return Promise.resolve({
+            schemaVersion: 1,
+            actionId: "act-end",
+            sessionId: "env-1",
+            updatedAt: "2026-07-26T12:00:00.000Z",
+            status: "failed",
+            acceptedGoalVersion: 1,
+            errorCode: "session_ended",
+            message: "host restarted",
+            retryable: false,
+          });
+        },
+      },
+    });
+    const client = fakeClient({
+      kind: "start",
+      session: { ...session("world"), budget: { maxTurns: 2, maxDurationMs: 60_000 } },
+    });
+    const env = await playEnv();
+    const host = new PlayHost({
+      client,
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env,
+        createMind: buttonMasher,
+        joinWorld: () => Promise.resolve({ outcome: "joined", body }),
+        createActivitySink: () => Promise.resolve(fakeActivitySink(() => undefined)),
+      }),
+      logger: silentLogger,
+    });
+    expect(await host.poll()).toBe(true);
+    await host.settled();
+    expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
+    expect(client.reports[1]?.receipt?.turnsTaken).toBeGreaterThan(0);
   });
 
   it("restores the game mind from the previous hosted-world sitting", async () => {
