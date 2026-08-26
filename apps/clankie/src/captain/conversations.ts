@@ -63,6 +63,9 @@ export interface ConversationTurnContext {
   readonly workspace?: string;
   readonly seat?: ConversationTurnSeat;
   readonly internal?: true;
+  /** Conversation-store run id; one metrics line uses this, including absorbed steers. */
+  readonly runId: string;
+  readonly acceptedAt: string;
 }
 
 /** Runs one accepted operator turn against the captain's model session. */
@@ -387,6 +390,8 @@ export class ConversationStore {
           this.append(meta, event);
         },
         {
+          runId,
+          acceptedAt: meta.updatedAt,
           ...(publishOperatorMessage ? {} : { internal: true as const }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),

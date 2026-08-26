@@ -43,6 +43,15 @@ import type { CaptainPort } from "./port.ts";
 import { connectionTools } from "./connect-tools.ts";
 import { discordTurnHasSystemTools, discordTurnUsesDurableSession } from "./system-authority.ts";
 import { browserExtension, captainTools, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
+import {
+  contextTokenCount,
+  recordPiToolStart,
+  tryAppendTurnSettled,
+  TurnMetrics,
+  TurnSettledLog,
+  turnSettledLogPath,
+  type TurnSettledOutcome,
+} from "./turn-metrics.ts";
 
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
   operator: "operator",
@@ -332,6 +341,7 @@ export async function runOneShotDiscordTurn(
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
   const autonomy = new AutonomyStore(join(options.stateDir, "autonomy.json"));
+  const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
   const settingsStore = options.settings ?? new SettingsStore();
   let modelRuntime: Promise<CaptainModelRuntime> | undefined;
@@ -502,6 +512,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
 
       const live = lane.running !== undefined || lane.session.isStreaming;
+      const operatorTokensStart = contextTokenCount(lane.session.getContextUsage());
+      const metrics = live
+        ? undefined
+        : new TurnMetrics({
+            conversationId,
+            lane: "operator",
+            runId: context.runId,
+            acceptedAt: context.acceptedAt,
+            ...(operatorTokensStart === undefined ? {} : { contextTokensStart: operatorTokensStart }),
+          });
       const skillCalls = new Map<string, string>();
       const goalWasActive = autonomy.getGoal(conversationId)?.status === "active";
       let runTokens = 0;
@@ -533,6 +553,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               }
             } else if (event.type === "tool_execution_start") {
               activity = undefined;
+              if (metrics !== undefined) recordPiToolStart(metrics, event);
               const skillName = operatorSkillName(event.toolName, event.args);
               if (skillName !== undefined) skillCalls.set(event.toolCallId, skillName);
               publish({
@@ -580,6 +601,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               }
             }
           });
+      let settled: TurnSettledOutcome | undefined;
       try {
         if (!live) await syncModel(lane);
         await laneLog.append("operator", conversationId, {
@@ -625,7 +647,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (goalWasActive || autonomy.getGoal(conversationId)?.status === "active") {
           autonomy.finishTurn(conversationId, runTokens);
         }
+        settled = "completed";
+      } catch (error) {
+        if (metrics !== undefined) settled = "failed";
+        throw error;
       } finally {
+        if (settled !== undefined) {
+          tryAppendTurnSettled(
+            turnSettled,
+            metrics,
+            settled,
+            new Date(),
+            contextTokenCount(lane.session.getContextUsage()),
+          );
+        }
         if (releaseStarting !== undefined) {
           releaseStarting();
           lane.starting = undefined;
@@ -672,7 +707,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       kind: "heard",
       text: normalized.heard,
     });
+    const live = lane.running !== undefined || lane.session.isStreaming;
+    const discordTokensStart = contextTokenCount(lane.session.getContextUsage());
+    const metrics = live
+      ? undefined
+      : new TurnMetrics({
+          conversationId: normalized.sessionKey,
+          lane: normalized.lane,
+          runId: turnId,
+          acceptedAt: new Date().toISOString(),
+          ...(discordTokensStart === undefined ? {} : { contextTokensStart: discordTokensStart }),
+        });
+    const unsubscribeMetrics =
+      metrics === undefined
+        ? () => undefined
+        : lane.session.subscribe((event) => {
+            recordPiToolStart(metrics, event);
+          });
     let role: "ran" | "absorbed" = "ran";
+    let early: CaptainChannelTurnResult | undefined;
+    let settled: TurnSettledOutcome | undefined;
+    let tokensEnd: number | undefined;
     try {
       if (normalized.durable) {
         if (lane.running === undefined && !lane.session.isStreaming) await syncModel(lane);
@@ -680,14 +735,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent)),
         );
         if (!outcome.completed) {
-          return {
+          settled = "interrupted";
+          early = {
             state: "failed",
             captainSessionId: normalized.sessionKey,
             turnId,
             code: "captain_turn_stalled",
           };
+        } else {
+          role = outcome.value;
         }
-        role = outcome.value;
       } else {
         const completed = await runOneShotDiscordTurn(
           lane.session,
@@ -695,7 +752,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           normalized.images.map(toImageContent),
         );
         if (!completed) {
-          return {
+          settled = "interrupted";
+          early = {
             state: "failed",
             captainSessionId: normalized.sessionKey,
             turnId,
@@ -704,9 +762,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
       }
     } catch {
-      return { state: "failed", turnId, code: "captain_session_failed" };
+      settled = "failed";
+      early = { state: "failed", turnId, code: "captain_session_failed" };
     } finally {
+      tokensEnd = contextTokenCount(lane.session.getContextUsage());
+      unsubscribeMetrics();
       if (!normalized.durable) lane.session.dispose();
+    }
+    if (early !== undefined) {
+      tryAppendTurnSettled(turnSettled, metrics, settled ?? "failed", new Date(), tokensEnd);
+      return early;
     }
     if (role === "absorbed") {
       // Heard inside another turn's live run: that run's reply answers this
@@ -716,6 +781,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     const message = lane.lastAssistantText.trim();
     if (message.length === 0) {
+      tryAppendTurnSettled(turnSettled, metrics, "failed", new Date(), tokensEnd);
       return {
         state: "failed",
         captainSessionId: normalized.sessionKey,
@@ -727,6 +793,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // merely quotes the sentinel is still a reply, and silencing it would let
     // anyone who says the token in a channel mute him.
     if (message === CAPTAIN_SILENT_REPLY_SENTINEL) {
+      tryAppendTurnSettled(turnSettled, metrics, "completed", new Date(), tokensEnd);
       return { state: "silent", captainSessionId: normalized.sessionKey, turnId };
     }
     await laneLog.append(normalized.lane, normalized.targetId, {
@@ -734,6 +801,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       kind: "said",
       text: message,
     });
+    tryAppendTurnSettled(turnSettled, metrics, "completed", new Date(), tokensEnd);
     return {
       state: "settled",
       captainSessionId: normalized.sessionKey,

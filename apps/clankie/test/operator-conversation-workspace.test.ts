@@ -50,11 +50,21 @@ describe("workspace-scoped operator conversations", () => {
       await store.awaitRun(sent.result.runId);
     }
 
-    expect(contexts).toEqual([
-      { workspace, seat: { herdrPaneId: "pane-3" } },
-      // A global conversation names no workspace; the captain stays in his repo.
-      { seat: { herdrPaneId: "pane-3" } },
-    ]);
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0]).toEqual(
+      expect.objectContaining({
+        workspace,
+        seat: { herdrPaneId: "pane-3" },
+        runId: expect.stringMatching(/^run-/u),
+      }),
+    );
+    // A global conversation names no workspace; the captain stays in his repo.
+    expect(contexts[1]).toEqual(
+      expect.objectContaining({ seat: { herdrPaneId: "pane-3" }, runId: expect.stringMatching(/^run-/u) }),
+    );
+    expect(contexts[1]?.workspace).toBeUndefined();
+    expect(contexts[0]?.acceptedAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u));
+    expect(contexts[1]?.acceptedAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u));
     await store.close();
   });
 

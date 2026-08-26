@@ -65,7 +65,15 @@ tails. A TUI process creates a fresh conversation unless `--chat` explicitly
 resumes one. Conversation and Pi session are one lifetime: bounded retention
 removes their shared directory, while public event logs rotate with typed cursor
 recovery ([ADR 0111](adr/0111-a-console-process-starts-one-conversation.md)).
-Conversations are files under `~/.clankie/captain/`. The full HTTP
+Conversations are files under `~/.clankie/captain/`. Each settled operator or
+Discord captain turn also appends one metrics line to
+`~/.clankie/captain/turn-settled.jsonl`: tool-name counts, first mutating tool,
+and context-token occupancy. The file sits beside `autonomy.json`, outside the
+conversation directory the retention pass deletes. It is not `~/.clankie/events.jsonl` —
+that log already uses `captain.turn.settled` for presence idle/waiting_user, and
+the captain does not write domain events. An absorbed steer
+([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)) shares the owning
+run's line. The full HTTP
 surface is listed in [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml);
 [`apps/clankie/scripts/setup-yaak.py`](../apps/clankie/scripts/setup-yaak.py)
 imports that canonical catalog into Yaak and adds a Keychain-backed `Local`

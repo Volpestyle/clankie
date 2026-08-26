@@ -4,6 +4,14 @@ Status: accepted (James, 2026-08-16). Refines the operator lifecycle from
 [ADR 0032](0032-conversation-scoped-operator-lanes.md) without adding another
 session identity.
 
+## Current status (2026-08-26)
+
+Per-turn tool-shape counters live in `~/.clankie/captain/turn-settled.jsonl`,
+outside the conversation directory the retention pass deletes. Presence already
+uses `captain.turn.settled` in `~/.clankie/events.jsonl` for idle/waiting_user,
+so the metrics line is a sibling captain file rather than a second payload
+under the same domain-event type.
+
 ## Context
 
 Persisting a console's last selected conversation and silently reopening it on
