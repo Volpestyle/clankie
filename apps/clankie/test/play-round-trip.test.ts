@@ -16,6 +16,7 @@ import {
 } from "@clankie/gba-emulator";
 import type { FreePlayMind, GbaCoreSeam } from "@clankie/gba-emulator";
 import type { EmbodimentSession } from "@clankie/protocol";
+import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { describe, expect, it } from "vitest";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
 import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
@@ -87,6 +88,8 @@ describe("asked play round trip on the deterministic double", () => {
     const client = fakeClient({ kind: "start", session: session() });
     const activitySnapshots: ActivityObservationSnapshot[] = [];
     const clearedSessions: string[] = [];
+    const frameSequences: number[] = [];
+    const overlaySequences: number[] = [];
     const host = new PlayHost({
       client,
       environmentIds: ["pokemon-firered"],
@@ -94,6 +97,17 @@ describe("asked play round trip on the deterministic double", () => {
         logger: silentLogger,
         env,
         createMind: buttonMasher,
+        createActivitySink: () =>
+          Promise.resolve({
+            publishFrame: (frame) => frameSequences.push(frame.sequence),
+            publishAudio: () => undefined,
+            publishOverlay: (overlay) => overlaySequences.push(overlay.sequence),
+            publishStatus: () => undefined,
+            droppedFrameCount: 0,
+            droppedAudioPacketCount: 0,
+            connected: true,
+            close: () => undefined,
+          } satisfies ActivityFrameSink),
         activityObservations: {
           publish(snapshot) {
             activitySnapshots.push(snapshot);
@@ -141,6 +155,9 @@ describe("asked play round trip on the deterministic double", () => {
       runnerObserved: { outcome: "accepted" },
     });
     expect(clearedSessions).toEqual(["round-trip-1"]);
+    expect(frameSequences.length).toBeGreaterThan(1);
+    expect(frameSequences).toEqual(frameSequences.map((_, index) => index + 1));
+    expect(overlaySequences).toEqual([1, 2]);
   });
 
   it("mints a checkpoint on stop and resumes from it on the next ask", async () => {

@@ -69,11 +69,14 @@ function fakeWorldBody(overrides: Partial<WorldBody> = {}): WorldBody {
   };
 }
 
-function fakeActivitySink(close: () => void): ActivityFrameSink {
+function fakeActivitySink(
+  close: () => void,
+  sequences?: { frames: number[]; overlays: number[] },
+): ActivityFrameSink {
   return {
-    publishFrame: () => undefined,
+    publishFrame: (frame) => sequences?.frames.push(frame.sequence),
     publishAudio: () => undefined,
-    publishOverlay: () => undefined,
+    publishOverlay: (overlay) => sequences?.overlays.push(overlay.sequence),
     publishStatus: () => undefined,
     droppedFrameCount: 0,
     droppedAudioPacketCount: 0,
@@ -153,7 +156,9 @@ describe("world play execution", () => {
 
   it("runs a world session against a fake body and never takes the local lock", async () => {
     let closed = 0;
+    let frame = 0;
     const body = fakeWorldBody({
+      framePng: () => new Uint8Array([137, 80, 78, 71, (frame += 1)]),
       close: () => {
         closed += 1;
         return Promise.resolve();
@@ -161,6 +166,7 @@ describe("world play execution", () => {
     });
     const client = fakeClient({ kind: "start", session: session("world") });
     const env = await playEnv();
+    const sequences = { frames: [] as number[], overlays: [] as number[] };
     const host = new PlayHost({
       client,
       environmentIds: ["pokemon-firered"],
@@ -169,6 +175,7 @@ describe("world play execution", () => {
         env,
         createMind: buttonMasher,
         joinWorld: () => Promise.resolve({ outcome: "joined", body }),
+        createActivitySink: () => Promise.resolve(fakeActivitySink(() => undefined, sequences)),
       }),
       logger: silentLogger,
     });
@@ -198,6 +205,8 @@ describe("world play execution", () => {
         actionResult: { source: "environment", result: { status: "completed" } },
       },
     });
+    expect(sequences.frames).toEqual([1, 2]);
+    expect(sequences.overlays).toEqual([1, 2]);
     expect(closed).toBe(1);
   });
 

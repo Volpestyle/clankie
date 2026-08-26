@@ -148,7 +148,8 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
         : await options.createActivitySink();
     let framesPublished = 0;
     let framesDroppedWithoutSink = 0;
-    let sequence = 0;
+    let frameSequence = 0;
+    let overlaySequence = 0;
     let audioSequence = 0;
     let audioPacketsPublished = 0;
     let audioPacketsDroppedWithoutSink = 0;
@@ -164,12 +165,12 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       const digest = createHash("sha256").update(bytes).digest("hex");
       if (digest === lastFrameDigest) return;
       lastFrameDigest = digest;
-      sequence += 1;
+      frameSequence += 1;
       framesPublished += 1;
       sink.publishFrame({
         schemaVersion: 1,
         surface: "gba_emulator",
-        sequence,
+        sequence: frameSequence,
         frame,
         width: FRAME_WIDTH,
         height: FRAME_HEIGHT,
@@ -302,7 +303,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       });
       const observer = (): void => {
         publishAudio();
-        publishFrame(sequence);
+        publishFrame(frameSequence);
       };
       body.observeFrames(observer);
 
@@ -343,13 +344,13 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           (session.budget.maxDurationMs !== undefined &&
             clock().getTime() - startedAt >= session.budget.maxDurationMs),
         onTurn: (turn, evidence) => {
-          sequence += 1;
+          overlaySequence += 1;
           if (sink !== undefined) {
             sink.publishOverlay(
               RenderedSurfaceOverlaySchema.parse({
                 schemaVersion: 1,
                 surface: "gba_emulator",
-                sequence,
+                sequence: overlaySequence,
                 objective: overlayText(turn.objective),
                 intent: overlayText(turn.intent),
                 monologue: overlayText(turn.monologue),

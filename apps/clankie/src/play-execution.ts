@@ -294,7 +294,8 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         : await options.createActivitySink();
     let framesPublished = 0;
     let framesDroppedWithoutSink = 0;
-    let sequence = 0;
+    let frameSequence = 0;
+    let overlaySequence = 0;
     let lastFrameDigest: string | null = null;
     const publishFrame = (frame: number): void => {
       const png = game.framePng(STREAM_SCALE);
@@ -311,12 +312,12 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       // replays its latest frame to every joiner, so nothing goes blank.
       if (digest === lastFrameDigest) return;
       lastFrameDigest = digest;
-      sequence += 1;
+      frameSequence += 1;
       framesPublished += 1;
       sink.publishFrame({
         schemaVersion: 1,
         surface: "gba_emulator",
-        sequence,
+        sequence: frameSequence,
         frame,
         width: FRAME_WIDTH,
         height: FRAME_HEIGHT,
@@ -555,7 +556,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       });
       // One publish per action shows a teleport, not a step; paced so the
       // motion reads as gameplay (same rule as the MCP and live paths).
-      const observer = (): void => publishFrame(sequence);
+      const observer = (): void => publishFrame(frameSequence);
       game.observeFrames(observer, { pace: true });
 
       // Dispatch drives the core, so between turns the game is stopped, not
@@ -620,13 +621,13 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             clock().getTime() - startedAt >= session.budget.maxDurationMs),
         onTurn: (turn, evidence) => {
           latestTurn = turn;
-          sequence += 1;
+          overlaySequence += 1;
           if (sink !== undefined) {
             sink.publishOverlay(
               RenderedSurfaceOverlaySchema.parse({
                 schemaVersion: 1,
                 surface: "gba_emulator",
-                sequence,
+                sequence: overlaySequence,
                 objective: overlayText(turn.objective),
                 intent: overlayText(turn.intent),
                 monologue: overlayText(turn.monologue),
