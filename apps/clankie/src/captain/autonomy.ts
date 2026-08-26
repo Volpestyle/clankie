@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   OperatorGoalSchema,
   OperatorWakeSchema,
@@ -26,6 +26,18 @@ const PersistedAutonomySchema = z
 
 type PersistedAutonomy = z.infer<typeof PersistedAutonomySchema>;
 type InternalRun = (conversationId: string, prompt: string) => Promise<void>;
+
+const GoalDecisionSchema = z
+  .object({
+    at: z.string(),
+    goalCreatedAt: z.string(),
+    decision: z.string().min(1).max(512),
+    why: z.string().min(1).max(512),
+    evidence: z.string().min(1).max(512).optional(),
+    autonomous: z.boolean().optional(),
+  })
+  .strict();
+export type GoalDecision = z.infer<typeof GoalDecisionSchema>;
 
 /** Durable owner-approved goals plus one replaceable self-wake per operator conversation. */
 export class AutonomyStore {
@@ -132,6 +144,50 @@ export class AutonomyStore {
     }
     this.save();
     if (this.state.enabled && goal.status === "active") this.queueGoal(conversationId, goal);
+  }
+
+  /** Append one model-authored decision to the conversation's goal journal (ADR 0132). */
+  public noteDecision(
+    conversationId: string,
+    note: { decision: string; why: string; evidence?: string; autonomous?: boolean },
+  ): GoalDecision {
+    const goal = this.requireGoal(conversationId);
+    const entry: GoalDecision = {
+      at: new Date().toISOString(),
+      goalCreatedAt: goal.createdAt,
+      decision: note.decision.trim(),
+      why: note.why.trim(),
+      ...(note.evidence === undefined ? {} : { evidence: note.evidence.trim() }),
+      ...(note.autonomous === true ? { autonomous: true } : {}),
+    };
+    GoalDecisionSchema.parse(entry);
+    mkdirSync(this.journalDir(), { recursive: true });
+    appendFileSync(this.journalPath(conversationId), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+    return entry;
+  }
+
+  /** The current goal's journal tail; entries from earlier goals are filtered out. */
+  public recentDecisions(conversationId: string, limit = 20): GoalDecision[] {
+    const goal = this.state.conversations[conversationId]?.goal;
+    if (goal === undefined) return [];
+    let raw: string;
+    try {
+      raw = readFileSync(this.journalPath(conversationId), "utf8");
+    } catch {
+      return [];
+    }
+    return raw
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .flatMap((line) => {
+        try {
+          const parsed = GoalDecisionSchema.safeParse(JSON.parse(line));
+          return parsed.success && parsed.data.goalCreatedAt === goal.createdAt ? [parsed.data] : [];
+        } catch {
+          return [];
+        }
+      })
+      .slice(-limit);
   }
 
   public scheduleWake(conversationId: string, at: string, reason: string): OperatorWake {
@@ -274,6 +330,14 @@ export class AutonomyStore {
       return;
     }
     this.arm();
+  }
+
+  private journalDir(): string {
+    return join(dirname(this.path), "goal-journal");
+  }
+
+  private journalPath(conversationId: string): string {
+    return join(this.journalDir(), `${encodeURIComponent(conversationId)}.jsonl`);
   }
 
   private requireGoal(conversationId: string): OperatorGoal {

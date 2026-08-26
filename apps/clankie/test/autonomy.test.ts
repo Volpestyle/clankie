@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("captain autonomy", () => {
-  it("exposes goal and wake controls only in the operator lane", async () => {
+  it("exposes continuity controls only in the operator lane", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-autonomy-tools-"));
     roots.push(root);
     const autonomy = new AutonomyStore(join(root, "autonomy.json"));
@@ -26,6 +26,19 @@ describe("captain autonomy", () => {
         getLiveSession: () => Promise.resolve(undefined),
       },
     } as unknown as CaptainDeps;
+    const herdrWatches = {
+      watch: vi.fn((_conversationId: string, target: string, _reason: string) =>
+        Promise.resolve({
+          outcome: "watching" as const,
+          watchId: "watch-1",
+          target,
+          paneId: target,
+          terminalId: "term-1",
+          alreadyWatching: false,
+          createdAt: "2026-08-26T19:00:00.000Z",
+        }),
+      ),
+    };
     const operator = captainTools(
       deps,
       { targetId: "global-default" },
@@ -33,13 +46,29 @@ describe("captain autonomy", () => {
       "operator",
       undefined,
       autonomy,
+      herdrWatches,
     );
     const names = operator.map((tool) => tool.name);
     expect(names).toEqual(
-      expect.arrayContaining(["create_goal", "get_goal", "update_goal", "schedule_wake"]),
+      expect.arrayContaining(["create_goal", "get_goal", "update_goal", "schedule_wake", "herdr_watch"]),
     );
     expect(captainTools(deps, {}, {} as LaneLog, "discord_presence", undefined, autonomy)).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "create_goal" })]),
+    );
+
+    const watch = operator.find((tool) => tool.name === "herdr_watch");
+    if (watch === undefined) throw new Error("herdr_watch is missing");
+    await watch.execute(
+      "call-watch",
+      { agent: "w18:p1", reason: "Harvest the finished analysis" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(herdrWatches.watch).toHaveBeenCalledWith(
+      "global-default",
+      "w18:p1",
+      "Harvest the finished analysis",
     );
 
     const create = operator.find((tool) => tool.name === "create_goal");
@@ -121,6 +150,40 @@ describe("captain autonomy", () => {
       error: "state_unreadable",
     });
     failClosed.close();
+  });
+
+  it("keeps a per-goal decision journal that survives restarts", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T12:00:00.000Z"));
+    const root = await mkdtemp(join(tmpdir(), "clankie-goal-journal-"));
+    roots.push(root);
+    const path = join(root, "autonomy.json");
+    const store = new AutonomyStore(path);
+    expect(() => store.noteDecision("global-default", { decision: "pick A", why: "because" })).toThrow(
+      /no goal/u,
+    );
+
+    store.createGoal("global-default", "Verify the release");
+    store.noteDecision("global-default", {
+      decision: "Verify via the public socket path",
+      why: "An in-process call proves the wrong boundary",
+      evidence: "verify-clankie proof ladder rung 3",
+      autonomous: true,
+    });
+    store.noteDecision("global-default", { decision: "Skip the flaky mirror", why: "It 404s" });
+    expect(store.recentDecisions("global-default")).toMatchObject([
+      { decision: "Verify via the public socket path", autonomous: true },
+      { decision: "Skip the flaky mirror" },
+    ]);
+    store.close();
+
+    const restarted = new AutonomyStore(path);
+    expect(restarted.recentDecisions("global-default")).toHaveLength(2);
+    restarted.updateGoal("global-default", "complete");
+    vi.setSystemTime(new Date("2026-08-26T12:01:00.000Z"));
+    restarted.createGoal("global-default", "Next goal");
+    expect(restarted.recentDecisions("global-default")).toEqual([]);
+    restarted.close();
   });
 
   it("does not admit a replacement wake while the current wake is still running", async () => {

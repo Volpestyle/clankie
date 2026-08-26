@@ -26,6 +26,13 @@ Report advertised capabilities as `live`, `refused`, or `absent`. A receipt
 that fails because a promised capability is absent is useful evidence; do not
 weaken the expectation to make the instrument green.
 
+Name the rung the evidence actually reached. A claim backed by anything short
+of the real dependency through the public path is unproven — report it as
+unproven rather than writing it up as settled. For a safety claim ("this
+change cannot break X"), find the one fact it is safe because of and prove
+that fact by running code; one proven fact kills the scary cases at once,
+where a list of asserted maybes proves nothing.
+
 ## Game-body boundary
 
 - A GBA MCP probe proves only the private core/runtime created by that stdio

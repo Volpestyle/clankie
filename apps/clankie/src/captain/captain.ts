@@ -34,6 +34,7 @@ import {
 import { ConversationStore } from "./conversations.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.ts";
+import { HerdrWatchStore } from "./herdr-watch.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import { discordTurnSessionKey, normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
@@ -341,6 +342,7 @@ export async function runOneShotDiscordTurn(
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
   const autonomy = new AutonomyStore(join(options.stateDir, "autonomy.json"));
+  const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"));
   const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
   const settingsStore = options.settings ?? new SettingsStore();
@@ -424,7 +426,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       thinkingLevel: selection.thinkingLevel,
       modelRuntime: models,
       customTools: [
-        ...captainTools(deps, capture, laneLog, lane, currentSettings.gameplay, autonomy),
+        ...captainTools(deps, capture, laneLog, lane, currentSettings.gameplay, autonomy, herdrWatches),
         ...connectionTools(deps, lane),
       ],
       resourceLoader: loader,
@@ -670,6 +672,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     (conversationId) => {
       autonomy.clearConversation(conversationId);
+      herdrWatches.cancelConversation(conversationId);
       const key = `operator:${conversationId}`;
       const pending = sessions.get(key);
       sessions.delete(key);
@@ -687,6 +690,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (!(await conversations.awaitRunResult(result.runId))) {
       throw new Error("Internal autonomy turn failed");
     }
+  });
+
+  herdrWatches.start((conversationId, prompt) => {
+    if (!conversations.has(conversationId)) {
+      herdrWatches.cancelConversation(conversationId);
+      return Promise.resolve();
+    }
+    const result = conversations.submitInternal(conversationId, prompt);
+    if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
+    return Promise.resolve();
   });
 
   async function runDiscordTurn(
@@ -899,6 +912,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async close(): Promise<void> {
+      herdrWatches.close();
       autonomy.close();
       await conversations.close();
       for (const pending of sessions.values()) {

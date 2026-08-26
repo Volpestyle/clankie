@@ -94,6 +94,11 @@ pause/resume, and clearing, while `/autonomy off` stops new continuations and
 wakes. A due wake queues one turn with Clankie's recorded reason and may be
 replaced by another. Neither path changes the conversation's tool set or
 authority ([ADR 0130](adr/0130-goals-and-self-wakes-share-the-operator-thread.md)).
+Each conversation also keeps an append-only goal decision journal under
+`~/.clankie/captain/goal-journal/` — one line per real choice made while
+working a goal, written through `note_goal_decision` and returned by
+`get_goal` so a continuation resumes from what was already decided
+([ADR 0132](adr/0132-a-goal-keeps-a-decision-journal.md)).
 
 The native macOS menu-bar app uses that same contract to list continuing Pi
 sessions and tail expanded transcripts. Its microphone opens a private local

@@ -6,7 +6,9 @@ extends the herdr-as-fleet decision in the pi rewrite
 [ADR 0095](0095-discord-system-actors.md). The second decision below — the
 console opening the board beside itself — is amended by
 [ADR 0106](0106-the-board-opens-when-asked.md): the board now opens only on
-`/board`. The rest of this record stands.
+`/board`. [ADR 0131](0131-herdr-completion-watches-wake-the-operator-thread.md)
+adds one narrow lifecycle tool that turns Herdr's native completion event into
+an operator-thread wake. The rest of this record stands.
 
 ## Context
 
@@ -23,8 +25,8 @@ this process) — his shell still runs in the service. And the console could
 see sibling agents (`HerdrRoster`) but has no persistent picture of the
 fleet sitting next to the conversation.
 
-Bespoke herdr tools stay rejected (ADR 0095). The missing piece is a
-relationship, not a protocol.
+Bespoke Herdr leadership tools stay rejected (ADR 0095). The completion-watch
+bridge in ADR 0131 is lifecycle plumbing, not a second leadership protocol.
 
 ## Decision
 

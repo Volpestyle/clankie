@@ -20,6 +20,7 @@ import type { GameplaySettings } from "@clankie/settings";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
+import type { HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
 import { joinWorld, startPlay, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
@@ -73,7 +74,9 @@ const json = toolJson;
  * The captain's authored tool bank. Coding tools (read/bash/edit/write) are
  * pi built-ins and are not defined here. They attach to the operator console
  * and to Discord text turns whose actor is on `systemActorUserIds`. Herdr
- * leadership goes through bash + the herdr skill, not bespoke tools.
+ * leadership goes through bash + the herdr skill; only the asynchronous
+ * completion wake has a captain tool because a shell wait cannot resume a
+ * finished model turn.
  */
 export function captainTools(
   deps: CaptainDeps,
@@ -82,6 +85,7 @@ export function captainTools(
   lane: CaptainSessionLaneV2,
   gameplay: GameplaySettings = { pokemonEmulatorEnabled: true, pokeagentMmoEnabled: true },
   autonomy?: AutonomyStore,
+  herdrWatches?: HerdrWatchPort,
 ): ToolDefinition[] {
   const playPorts = {
     submitEmbodimentIntent: deps.embodiment.submitIntent,
@@ -97,6 +101,7 @@ export function captainTools(
   ]);
   return [
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
+    ...(lane === "operator" && herdrWatches !== undefined ? herdrWatchTools(herdrWatches, turn) : []),
     defineTool({
       name: "generate_image",
       label: "Draw a picture",
@@ -486,6 +491,39 @@ export function captainTools(
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
 }
 
+function herdrWatchTools(watches: HerdrWatchPort, turn: TurnContext): ToolDefinition[] {
+  const conversationId = (): string => {
+    if (turn.targetId === undefined) throw new Error("Operator conversation attribution is unavailable");
+    return turn.targetId;
+  };
+  return [
+    defineTool({
+      name: "herdr_watch",
+      label: "Watch Herdr agent",
+      description:
+        "Arm a persisted, event-driven one-shot watcher on a working Herdr agent pane. When the agent settles, " +
+        "this same operator conversation wakes so you can inspect and harvest it. Use this after agreeing to " +
+        "harvest or after dispatching work; do not poll with schedule_wake or block the current turn with " +
+        "`herdr agent wait`. A settled status is only a cue to inspect, not proof the work is correct.",
+      parameters: Type.Object({
+        agent: Type.String({
+          minLength: 1,
+          maxLength: 128,
+          description: "Live Herdr agent name or pane id from the current census, such as w18:p1.",
+        }),
+        reason: Type.String({
+          minLength: 1,
+          maxLength: 512,
+          description: "What to inspect or harvest when this pane settles.",
+        }),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, params) =>
+        json(await watches.watch(conversationId(), params.agent, params.reason)),
+    }),
+  ];
+}
+
 function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefinition[] {
   const conversationId = (): string => {
     if (turn.targetId === undefined) throw new Error("Operator conversation attribution is unavailable");
@@ -510,9 +548,35 @@ function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefiniti
     defineTool({
       name: "get_goal",
       label: "Inspect goal",
-      description: "Read this conversation's active goal, usage, autonomy switch, and pending self-wake.",
+      description:
+        "Read this conversation's active goal, usage, autonomy switch, pending self-wake, and the goal's recent decision journal.",
       parameters: Type.Object({}),
-      execute: async () => json(autonomy.status(conversationId())),
+      execute: async () =>
+        json({
+          ...autonomy.status(conversationId()),
+          recentDecisions: autonomy.recentDecisions(conversationId()),
+        }),
+    }),
+    defineTool({
+      name: "note_goal_decision",
+      label: "Note goal decision",
+      description:
+        "Append one line to the current goal's decision journal: what you decided, why, and the evidence behind it. Use when goal work makes a real choice — an approach picked, a hypothesis ruled out, a change discarded — not for routine motion. get_goal returns the recent trail so a later turn resumes from it.",
+      parameters: Type.Object({
+        decision: Type.String({ minLength: 1, maxLength: 512 }),
+        why: Type.String({ minLength: 1, maxLength: 512 }),
+        evidence: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, params) =>
+        json(
+          autonomy.noteDecision(conversationId(), {
+            decision: params.decision,
+            why: params.why,
+            ...(params.evidence === undefined ? {} : { evidence: params.evidence }),
+            ...(turn.autonomous === true ? { autonomous: true } : {}),
+          }),
+        ),
     }),
     defineTool({
       name: "update_goal",
