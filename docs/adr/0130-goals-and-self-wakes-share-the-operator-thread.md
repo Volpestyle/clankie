@@ -51,11 +51,14 @@ cancel the pending wake and can schedule its successor.
 
 All autonomous work uses the existing conversation queue. A human message
 therefore steers the same session and orders ahead of the next continuation
-when it is already queued. Waking grants no new capabilities. Existing tool
-availability, owner confirmation rules for destructive or far-reaching work,
-and external credential boundaries remain the authority model. Turning
-autonomy off prevents new autonomous turns; it does not abort a tool call
-already running.
+when it is already queued. A human message that arrives while the autonomous
+run is still streaming is absorbed into that run
+([ADR 0091](0091-a-mid-turn-message-steers-the-turn.md)) rather than waiting
+for it to settle; an in-flight tool call still finishes. Waking grants no new
+capabilities. Existing tool availability, owner confirmation rules for
+destructive or far-reaching work, and external credential boundaries remain
+the authority model. Turning autonomy off prevents new autonomous turns; it
+does not abort a tool call already running.
 
 ## Alternatives considered
 

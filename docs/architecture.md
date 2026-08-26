@@ -76,8 +76,11 @@ replaceable self-wake per operator conversation, plus a global enable switch.
 An unreadable file fails closed and surfaces `state_unreadable` to operator
 clients instead of silently re-enabling autonomous work.
 An active goal queues host-authored continuation turns through the same
-conversation chain as operator messages, so steering stays ordered and every
-tool call and reply stays in the existing Pi session and public event log. A
+conversation chain as operator messages, so every tool call and reply stays in
+the existing Pi session and public event log. A human message that arrives
+while that run is streaming is steered into it rather than waiting behind the
+whole turn; in-flight tool calls still finish
+([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)). A
 token budget moves a goal to `budget_limited`; `/goal` owns activation,
 pause/resume, and clearing, while `/autonomy off` stops new continuations and
 wakes. A due wake queues one turn with Clankie's recorded reason and may be

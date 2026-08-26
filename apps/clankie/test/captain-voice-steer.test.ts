@@ -119,6 +119,34 @@ describe("runDurableTurn", () => {
     await expect(second).rejects.toThrow("steered into failed");
   });
 
+  it("waits on a preparing lane instead of starting a second prompt", async () => {
+    const session = new StubSession();
+    const lane = makeLane(session);
+    let release!: () => void;
+    lane.starting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const first = runDurableTurn(lane, "first", []);
+    const second = runDurableTurn(lane, "second", []);
+    await drain();
+    expect(session.calls).toHaveLength(0);
+
+    release();
+    lane.starting = undefined;
+    await drain();
+    expect(session.calls).toEqual([{ text: "first", behavior: undefined }]);
+    session.settleRun();
+    await expect(first).resolves.toBe("ran");
+    await drain();
+    expect(session.calls).toEqual([
+      { text: "first", behavior: undefined },
+      { text: "second", behavior: undefined },
+    ]);
+    session.settleRun();
+    await expect(second).resolves.toBe("ran");
+  });
+
   it("resets captured media only when starting a run, never when steering", async () => {
     const session = new StubSession();
     const lane = makeLane(session);

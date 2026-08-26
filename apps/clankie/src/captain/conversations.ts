@@ -98,6 +98,8 @@ export class ConversationStore {
   private readonly metas = new Map<string, ConversationMeta>();
   private readonly chains = new Map<string, Promise<void>>();
   private readonly runs = new Map<string, Promise<boolean>>();
+  private readonly runCounts = new Map<string, number>();
+  private readonly internalRuns = new Map<string, number>();
 
   private readonly root: string;
   private readonly runner: ConversationRunner;
@@ -367,27 +369,37 @@ export class ConversationStore {
     }
     this.append(meta, { type: "turn", runId, phase: "accepted" });
 
-    const previous = this.chains.get(meta.conversationId) ?? Promise.resolve();
-    const run = previous
-      .then(() => {
-        meta.sessionState = "active";
-        this.saveMeta(meta);
-        return this.runner(
-          meta.conversationId,
-          message,
-          (event) => {
-            this.append(meta, event);
-          },
-          {
-            ...(publishOperatorMessage ? {} : { internal: true as const }),
-            ...(workspace === undefined ? {} : { workspace }),
-            ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),
-          },
-        );
-      })
+    const conversationId = meta.conversationId;
+    this.runCounts.set(conversationId, (this.runCounts.get(conversationId) ?? 0) + 1);
+    const joinLiveInternal = publishOperatorMessage && (this.internalRuns.get(conversationId) ?? 0) > 0;
+    if (!publishOperatorMessage) {
+      this.internalRuns.set(conversationId, (this.internalRuns.get(conversationId) ?? 0) + 1);
+    }
+
+    const previous = this.chains.get(conversationId) ?? Promise.resolve();
+    const invoke = (): Promise<void> => {
+      meta.sessionState = "active";
+      this.saveMeta(meta);
+      return this.runner(
+        conversationId,
+        message,
+        (event) => {
+          this.append(meta, event);
+        },
+        {
+          ...(publishOperatorMessage ? {} : { internal: true as const }),
+          ...(workspace === undefined ? {} : { workspace }),
+          ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),
+        },
+      );
+    };
+    // A human send during an in-flight autonomous turn is admitted now so the
+    // captain can steer it into the live pi run (ADR 0091). Other pairs stay FIFO.
+    const work = joinLiveInternal ? invoke() : previous.then(invoke);
+    const run = work
       .then(() => {
         this.append(meta, { type: "turn", runId, phase: "completed" });
-        meta.sessionState = "waiting";
+        if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "waiting";
         return true;
       })
       .catch((error: unknown) => {
@@ -397,7 +409,7 @@ export class ConversationStore {
           phase: "failed",
           reasonCode: error instanceof Error ? error.constructor.name : "run_failed",
         });
-        meta.sessionState = "failed";
+        if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "failed";
         return false;
       })
       .finally(() => {
@@ -405,11 +417,21 @@ export class ConversationStore {
         this.saveMeta(meta);
         this.trimEventLog(meta);
         this.runs.delete(runId);
-        this.prune(meta.conversationId);
+        const remaining = (this.runCounts.get(conversationId) ?? 1) - 1;
+        if (remaining <= 0) this.runCounts.delete(conversationId);
+        else this.runCounts.set(conversationId, remaining);
+        if (!publishOperatorMessage) {
+          const remainingInternal = (this.internalRuns.get(conversationId) ?? 1) - 1;
+          if (remainingInternal <= 0) this.internalRuns.delete(conversationId);
+          else this.internalRuns.set(conversationId, remainingInternal);
+        }
+        this.prune(conversationId);
       });
     this.chains.set(
-      meta.conversationId,
-      run.then(() => undefined),
+      conversationId,
+      joinLiveInternal
+        ? Promise.all([previous, run.then(() => undefined)]).then(() => undefined)
+        : run.then(() => undefined),
     );
     this.runs.set(runId, run);
     return {
@@ -547,6 +569,8 @@ export class ConversationStore {
     rmSync(join(this.root, meta.conversationId), { recursive: true, force: true });
     this.metas.delete(meta.conversationId);
     this.chains.delete(meta.conversationId);
+    this.runCounts.delete(meta.conversationId);
+    this.internalRuns.delete(meta.conversationId);
     this.counts.delete(meta.conversationId);
     this.sequences.delete(meta.conversationId);
     this.onPrune?.(meta.conversationId);

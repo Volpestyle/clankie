@@ -3,6 +3,14 @@
 Status: accepted (2026-08-15). Defines interruption semantics for durable
 Discord lanes.
 
+## Current status (2026-08-26)
+
+Operator conversations reuse this dispatch when a human message arrives while
+an autonomous goal or wake turn is streaming. The conversation store admits
+that send onto the live run instead of waiting behind it; in-flight tool calls
+still finish. FIFO remains for every other pair of operator turns
+([ADR 0130](0130-goals-and-self-wakes-share-the-operator-thread.md)).
+
 ## Context
 
 The durable Discord voice lane is one pi session per channel. A second utterance

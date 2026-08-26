@@ -190,6 +190,12 @@ interface LaneSession {
   turnCounter: number;
   /** Settlement of the in-flight run, while one is active: true if it succeeded. */
   running?: Promise<boolean> | undefined;
+  /**
+   * Operator turns hold this while they prepare (model sync, lane-log, herdr
+   * census) so a concurrent human send waits and then steers instead of starting
+   * a second prompt.
+   */
+  starting?: Promise<void> | undefined;
 }
 
 /**
@@ -205,18 +211,21 @@ export async function runDurableTurn(
     readonly session: Pick<AgentSession, "isStreaming" | "prompt">;
     readonly capture: TurnContext;
     running?: Promise<boolean> | undefined;
+    starting?: Promise<void> | undefined;
   },
   prompt: string,
   images: ImageContent[],
+  options?: { expandPromptTemplates?: boolean },
 ): Promise<"ran" | "absorbed"> {
+  const expandPromptTemplates = options?.expandPromptTemplates ?? false;
   for (;;) {
     const running = lane.running;
-    if (running === undefined) {
+    if (running === undefined && lane.starting === undefined) {
       // The idle check and the prompt() call share one synchronous stretch —
       // with template expansion off pi reaches its own streaming check without
       // awaiting — so the state observed here is the state it acts on.
       lane.capture.media = undefined;
-      const run = lane.session.prompt(prompt, { expandPromptTemplates: false, images });
+      const run = lane.session.prompt(prompt, { expandPromptTemplates, images });
       lane.running = run
         .then(
           () => true,
@@ -230,16 +239,18 @@ export async function runDurableTurn(
     }
     if (lane.session.isStreaming) {
       await lane.session.prompt(prompt, {
-        expandPromptTemplates: false,
+        expandPromptTemplates,
         streamingBehavior: "steer",
         images,
       });
-      if (!(await running)) throw new Error("The run this turn was steered into failed");
+      if (running === undefined || !(await running)) {
+        throw new Error("The run this turn was steered into failed");
+      }
       return "absorbed";
     }
-    // A run is accepted but not streaming yet, or is winding down: wait for it
-    // to settle and decide again.
-    await running;
+    // A run is accepted but not streaming yet, still preparing, or is winding
+    // down: wait it out and re-decide.
+    await (lane.starting ?? running);
   }
 }
 
@@ -478,10 +489,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         true,
         context.workspace ?? options.repoRoot,
       );
-      lane.capture.media = undefined;
+      let releaseStarting: (() => void) | undefined;
+      if (lane.running === undefined && lane.starting === undefined && !lane.session.isStreaming) {
+        lane.starting = new Promise<void>((resolve) => {
+          releaseStarting = resolve;
+        });
+        lane.capture.media = undefined;
+        lane.capture.autonomous = context.internal === true;
+      }
       lane.capture.room = roomKey("operator", conversationId);
       lane.capture.targetId = conversationId;
-      lane.capture.autonomous = context.internal === true;
+      if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
+
+      const live = lane.running !== undefined || lane.session.isStreaming;
       const skillCalls = new Map<string, string>();
       const goalWasActive = autonomy.getGoal(conversationId)?.status === "active";
       let runTokens = 0;
@@ -491,82 +511,84 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         activity = phase;
         publish({ type: "activity", phase });
       };
-      const unsubscribe = lane.session.subscribe((event) => {
-        if (event.type === "message_update") {
-          if (
-            event.assistantMessageEvent.type === "thinking_start" ||
-            event.assistantMessageEvent.type === "thinking_delta"
-          ) {
-            publishActivity("thinking");
-          } else if (
-            event.assistantMessageEvent.type === "text_start" ||
-            event.assistantMessageEvent.type === "text_delta"
-          ) {
-            publishActivity("responding");
-          } else if (
-            event.assistantMessageEvent.type === "toolcall_start" ||
-            event.assistantMessageEvent.type === "toolcall_delta"
-          ) {
-            publishActivity("preparing_tool");
-          }
-        } else if (event.type === "tool_execution_start") {
-          activity = undefined;
-          const skillName = operatorSkillName(event.toolName, event.args);
-          if (skillName !== undefined) skillCalls.set(event.toolCallId, skillName);
-          publish({
-            type: "tool",
-            toolCallId: event.toolCallId,
-            name: event.toolName,
-            phase: "started",
-            detail: formatOperatorToolDetail(event.args),
-            ...(skillName === undefined ? {} : { skillName }),
+      const unsubscribe = live
+        ? () => undefined
+        : lane.session.subscribe((event) => {
+            if (event.type === "message_update") {
+              if (
+                event.assistantMessageEvent.type === "thinking_start" ||
+                event.assistantMessageEvent.type === "thinking_delta"
+              ) {
+                publishActivity("thinking");
+              } else if (
+                event.assistantMessageEvent.type === "text_start" ||
+                event.assistantMessageEvent.type === "text_delta"
+              ) {
+                publishActivity("responding");
+              } else if (
+                event.assistantMessageEvent.type === "toolcall_start" ||
+                event.assistantMessageEvent.type === "toolcall_delta"
+              ) {
+                publishActivity("preparing_tool");
+              }
+            } else if (event.type === "tool_execution_start") {
+              activity = undefined;
+              const skillName = operatorSkillName(event.toolName, event.args);
+              if (skillName !== undefined) skillCalls.set(event.toolCallId, skillName);
+              publish({
+                type: "tool",
+                toolCallId: event.toolCallId,
+                name: event.toolName,
+                phase: "started",
+                detail: formatOperatorToolDetail(event.args),
+                ...(skillName === undefined ? {} : { skillName }),
+              });
+            } else if (event.type === "tool_execution_end") {
+              const skillName = skillCalls.get(event.toolCallId);
+              skillCalls.delete(event.toolCallId);
+              publish({
+                type: "tool",
+                toolCallId: event.toolCallId,
+                name: event.toolName,
+                phase: event.isError ? "failed" : "completed",
+                detail: formatOperatorToolResult(event.result),
+                ...(skillName === undefined ? {} : { skillName }),
+              });
+            } else if (event.type === "compaction_start") {
+              publishActivity("compacting");
+            } else if (event.type === "auto_retry_start") {
+              publishActivity("retrying");
+            } else if (event.type === "auto_retry_end") {
+              publishActivity("waiting");
+            } else if (event.type === "compaction_end") {
+              publishActivity("waiting");
+              const usage = lane.session.getContextUsage();
+              if (usage !== undefined) {
+                publish({
+                  type: "context",
+                  usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
+                });
+              }
+            } else if (event.type === "message_end" && event.message.role === "assistant") {
+              runTokens += event.message.usage.totalTokens;
+              const usage = lane.session.getContextUsage();
+              if (usage !== undefined) {
+                publish({
+                  type: "context",
+                  usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
+                });
+              }
+            }
           });
-        } else if (event.type === "tool_execution_end") {
-          const skillName = skillCalls.get(event.toolCallId);
-          skillCalls.delete(event.toolCallId);
-          publish({
-            type: "tool",
-            toolCallId: event.toolCallId,
-            name: event.toolName,
-            phase: event.isError ? "failed" : "completed",
-            detail: formatOperatorToolResult(event.result),
-            ...(skillName === undefined ? {} : { skillName }),
-          });
-        } else if (event.type === "compaction_start") {
-          publishActivity("compacting");
-        } else if (event.type === "auto_retry_start") {
-          publishActivity("retrying");
-        } else if (event.type === "auto_retry_end") {
-          publishActivity("waiting");
-        } else if (event.type === "compaction_end") {
-          publishActivity("waiting");
-          const usage = lane.session.getContextUsage();
-          if (usage !== undefined) {
-            publish({
-              type: "context",
-              usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
-            });
-          }
-        } else if (event.type === "message_end" && event.message.role === "assistant") {
-          runTokens += event.message.usage.totalTokens;
-          const usage = lane.session.getContextUsage();
-          if (usage !== undefined) {
-            publish({
-              type: "context",
-              usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
-            });
-          }
-        }
-      });
       try {
-        await syncModel(lane);
+        if (!live) await syncModel(lane);
         await laneLog.append("operator", conversationId, {
           at: new Date().toISOString(),
           kind: "heard",
           text: message,
         });
         const paneId = context.seat?.herdrPaneId;
-        const census = paneId === undefined ? undefined : await readHerdrSessionCensus(paneId);
+        const census = live || paneId === undefined ? undefined : await readHerdrSessionCensus(paneId);
         const prompt = resolveOperatorPrompt(
           message,
           lane.session.resourceLoader.getSkills().skills,
@@ -582,11 +604,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             skillName: prompt.skillName,
           });
         }
+        if (releaseStarting !== undefined) {
+          releaseStarting();
+          lane.starting = undefined;
+          releaseStarting = undefined;
+        }
         // The resource loader disables discovered extensions and prompt templates;
         // exact, loaded operator skills are the only input allowed to reach Pi expansion.
-        await lane.session.prompt(prompt.prompt, {
+        const role = await runDurableTurn(lane, prompt.prompt, [], {
           expandPromptTemplates: prompt.skillName !== undefined,
         });
+        if (role === "absorbed") return;
         const text = lane.lastAssistantText.trim();
         publish({ type: "message", role: "captain", text, streaming: false });
         await laneLog.append("operator", conversationId, {
@@ -598,6 +626,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           autonomy.finishTurn(conversationId, runTokens);
         }
       } finally {
+        if (releaseStarting !== undefined) {
+          releaseStarting();
+          lane.starting = undefined;
+        }
         unsubscribe();
       }
     },
