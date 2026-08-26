@@ -149,8 +149,10 @@ const ASK_CLANKIE_TOOL = {
     "Use your captain mind to act or to look something up. This is your own route to Clankie's " +
     "complete tools and memory, not another assistant; capabilities reached through it are your " +
     "capabilities. Use this for anything beyond conversation — web browsing and research, actions, " +
-    "files, the story of this playthrough, facts the briefing does not cover, or something from the " +
+    "files, the shell and the herdr agent fleet on the operator's machine, text channels you cannot see from here, " +
+    "the story of this playthrough, facts the briefing does not cover, or something from the " +
     "conversation you choose to remember as part of your own experience. Do not wait for someone to ask you to remember it. " +
+    "Never say you cannot do or see something without asking through this first — it decides what each speaker may have. " +
     "Do not use it just to look at your screen. " +
     "Do not use it for songs or YouTube — those are youtube_search and music_play.",
   parameters: {
