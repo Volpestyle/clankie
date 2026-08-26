@@ -16,6 +16,8 @@ import {
 } from "./session/lane-observation.ts";
 import type {
   ObservableCaptainLane,
+  OperatorAutonomyCommand,
+  OperatorAutonomyStatus,
   OperatorConversationContextUsage,
   OperatorConversationSessionState,
   OperatorConversationScope,
@@ -72,6 +74,7 @@ export interface ConsoleCommandContext {
     create?(title?: string): Promise<{ readonly conversationId: string; readonly title: string }>;
     /** Opens the conversation rooted at a directory, creating it on first visit. */
     open?(path: string): Promise<{ readonly conversationId: string; readonly title: string }>;
+    autonomy?(command: OperatorAutonomyCommand): Promise<OperatorAutonomyStatus>;
   };
 }
 
@@ -265,6 +268,91 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           `Started ${created.title} with fresh context.`,
           "success",
         );
+      },
+    },
+    {
+      name: "goal",
+      aliases: [],
+      description: "Show, start, pause, resume, or clear this conversation's goal",
+      argumentHint: "[pause|resume|clear|--tokens <n> <objective>|<objective>]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (conversations?.autonomy === undefined) {
+          shell.insertCommandResult("/goal", "Goals are unavailable.", "error");
+          return;
+        }
+        const input = argument.trim();
+        let command: OperatorAutonomyCommand;
+        if (input.length === 0 || input === "status") command = { action: "status" };
+        else if (input === "pause" || input === "resume") {
+          command = { action: "set_goal_status", status: input === "pause" ? "paused" : "active" };
+        } else if (input === "clear") command = { action: "clear_goal" };
+        else {
+          const budget = /^--tokens\s+(\d+)\s+([\s\S]+)$/u.exec(input);
+          if (input.startsWith("--tokens") && budget === null) {
+            shell.insertCommandResult(
+              "/goal",
+              "Usage: /goal [--tokens <positive integer>] <objective>",
+              "error",
+            );
+            return;
+          }
+          command = {
+            action: "set_goal",
+            objective: budget?.[2]?.trim() ?? input,
+            ...(budget === null ? {} : { tokenBudget: Number.parseInt(budget[1]!, 10) }),
+          };
+        }
+        try {
+          const status = await conversations.autonomy(command);
+          shell.insertCommandResult(
+            "/goal",
+            formatAutonomyStatus(status),
+            status.error === undefined ? "success" : "error",
+          );
+        } catch (error) {
+          shell.insertCommandResult("/goal", error instanceof Error ? error.message : String(error), "error");
+        }
+      },
+    },
+    {
+      name: "autonomy",
+      aliases: [],
+      description: "Show or switch Clankie's autonomous goal and wake runner",
+      argumentHint: "[on|off|clear]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (conversations?.autonomy === undefined) {
+          shell.insertCommandResult("/autonomy", "Autonomy controls are unavailable.", "error");
+          return;
+        }
+        const input = argument.trim().toLowerCase();
+        const command: OperatorAutonomyCommand | undefined =
+          input.length === 0 || input === "status"
+            ? { action: "status" }
+            : input === "on" || input === "off"
+              ? { action: "set_enabled", enabled: input === "on" }
+              : input === "clear"
+                ? { action: "clear_wake" }
+                : undefined;
+        if (command === undefined) {
+          shell.insertCommandResult("/autonomy", "Usage: /autonomy [on|off|clear]", "error");
+          return;
+        }
+        try {
+          const status = await conversations.autonomy(command);
+          shell.insertCommandResult(
+            "/autonomy",
+            formatAutonomyStatus(status),
+            status.error === undefined ? "success" : "error",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/autonomy",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
       },
     },
     {
@@ -515,6 +603,20 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   );
 
   return commands;
+}
+
+function formatAutonomyStatus(status: OperatorAutonomyStatus): string {
+  const goal = status.goal;
+  const wake = status.wake;
+  return [
+    `Autonomy: ${status.enabled ? "on" : "off"}`,
+    ...(status.error === undefined ? [] : ["State: unreadable · autonomy is fail-closed"]),
+    goal === undefined ? "Goal: none" : `Goal: ${goal.status} · ${goal.objective}`,
+    ...(goal?.tokenBudget === undefined
+      ? []
+      : [`Budget: ${String(goal.tokensUsed)} / ${String(goal.tokenBudget)} tokens`]),
+    wake === undefined ? "Wake: none" : `Wake: ${wake.at} · ${wake.reason}`,
+  ].join("\n");
 }
 
 function formatGameplaySettings(settings: GameplaySettings): string {

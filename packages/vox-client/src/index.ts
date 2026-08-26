@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX_FRAME_BYTES = 32 * 1024 * 1024;
@@ -273,9 +273,67 @@ export function resolveVoxBin(
   return candidates.find((candidate) => existsSync(candidate));
 }
 
-export function defaultVoxBinCandidates(): readonly string[] {
-  const voxRoot = fileURLToPath(new URL("../../../apps/vox", import.meta.url));
+export function defaultVoxRoot(): string {
+  return fileURLToPath(new URL("../../../apps/vox", import.meta.url));
+}
+
+export function defaultVoxBinCandidates(voxRoot: string = defaultVoxRoot()): readonly string[] {
   return [join(voxRoot, "target", "release", "clankvox"), join(voxRoot, "target", "debug", "clankvox")];
+}
+
+/** Build inputs whose mtime should never exceed the binary's. */
+const VOX_BUILD_INPUTS = ["src", "Cargo.toml", "Cargo.lock"] as const;
+
+/** Newest mtime at `path`, walking into it when it is a directory. */
+function newestMtimeMs(path: string): number | undefined {
+  let root;
+  try {
+    root = statSync(path);
+  } catch {
+    return undefined;
+  }
+  if (!root.isDirectory()) return root.mtimeMs;
+  let newest = root.mtimeMs;
+  for (const entry of readdirSync(path, { recursive: true, encoding: "utf8" })) {
+    try {
+      const at = statSync(join(path, entry)).mtimeMs;
+      if (at > newest) newest = at;
+    } catch {
+      // A file that vanished mid-walk cannot be newer than a build that already exists.
+    }
+  }
+  return newest;
+}
+
+/**
+ * Explain a Vox binary that predates its own source, when it does.
+ *
+ * Nothing rebuilds this binary automatically, so editing `apps/vox` and
+ * restarting a body silently runs the previous build against the current
+ * client. Version drift then surfaces at the one place the two halves agree on
+ * a contract — the IPC handshake — and reads as a protocol bug. On 2026-08-21 a
+ * binary six days older than the commit that dropped Vox's stdout log layer
+ * failed with "Vox emitted log before the protocol handshake", which sent the
+ * search into the frame decoder rather than into `cargo build`.
+ *
+ * Judges only this repo's own build output. A `CLANKIE_VOX_BIN` pointing
+ * anywhere else is the operator's own build, and `apps/vox` says nothing about
+ * how current it is. Returns undefined for such a binary, for one already at
+ * least as new as every input, and when the source tree is absent — a packaged
+ * install ships the binary with nothing to compare against.
+ */
+export function voxBuildStaleHint(bin: string, voxRoot: string = defaultVoxRoot()): string | undefined {
+  const owned = defaultVoxBinCandidates(voxRoot).some((candidate) => resolve(candidate) === resolve(bin));
+  if (!owned) return undefined;
+  const built = newestMtimeMs(bin);
+  if (built === undefined) return undefined;
+  let newestInput: number | undefined;
+  for (const input of VOX_BUILD_INPUTS) {
+    const at = newestMtimeMs(join(voxRoot, input));
+    if (at !== undefined && (newestInput === undefined || at > newestInput)) newestInput = at;
+  }
+  if (newestInput === undefined || built >= newestInput) return undefined;
+  return "the Vox binary predates apps/vox — run `pnpm --filter @clankie/vox build`";
 }
 
 export function createVoxClient(
@@ -329,13 +387,17 @@ export function createVoxClient(
     correlationId?: string,
     terminate = true,
   ): VoxClientError => {
-    const error = new VoxClientError(code, message, correlationId);
+    // Every pre-handshake failure has the same cheap first suspect, so name it
+    // here rather than at each fault site.
+    const stale = handshakeComplete ? undefined : voxBuildStaleHint(bin);
+    const reported = stale === undefined ? message : `${message} — ${stale}`;
+    const error = new VoxClientError(code, reported, correlationId);
     if (!terminalError) {
       terminalError = true;
       if (handshakeTimer !== undefined) clearTimeout(handshakeTimer);
       queuedControlCommands.length = 0;
-      setStatus("error", message);
-      options.onError?.(message);
+      setStatus("error", reported);
+      options.onError?.(reported);
       if (terminate && child.exitCode === null && !child.killed) child.kill("SIGTERM");
     }
     return error;

@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import {
   decodeVoxVideoFrame,
   resolveVoxBin,
   sanitizeVoxLog,
+  voxBuildStaleHint,
 } from "../src/index.ts";
 
 function framed(format: number, payload: Uint8Array): Buffer {
@@ -449,6 +450,44 @@ describe("Vox client framing", () => {
 
   it("resolves an owned candidate without requiring environment configuration", () => {
     expect(resolveVoxBin({}, [process.execPath])).toBe(process.execPath);
+  });
+
+  it("reports a Vox binary older than its source, including sources in a subdirectory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vox-stale-"));
+    try {
+      // `apps/vox/src` nests `voice_conn`, so a walk that does not recurse
+      // would call a six-day-old binary current.
+      await mkdir(join(root, "src", "voice_conn"), { recursive: true });
+      await mkdir(join(root, "target", "release"), { recursive: true });
+      await writeFile(join(root, "Cargo.toml"), "");
+      await writeFile(join(root, "src", "main.rs"), "");
+      await writeFile(join(root, "src", "voice_conn", "mod.rs"), "");
+      const bin = join(root, "target", "release", "clankvox");
+      await writeFile(bin, "");
+
+      const old = new Date(1_000_000);
+      const recent = new Date(2_000_000);
+      for (const path of [root, join(root, "Cargo.toml"), join(root, "src"), join(root, "src", "main.rs")]) {
+        await utimes(path, old, old);
+      }
+      await utimes(bin, old, old);
+      await utimes(join(root, "src", "voice_conn"), old, old);
+      await utimes(join(root, "src", "voice_conn", "mod.rs"), recent, recent);
+
+      expect(voxBuildStaleHint(bin, root)).toContain("pnpm --filter @clankie/vox build");
+
+      await utimes(bin, new Date(3_000_000), new Date(3_000_000));
+      expect(voxBuildStaleHint(bin, root)).toBeUndefined();
+
+      // A packaged install ships the binary with no source to compare against.
+      await utimes(bin, old, old);
+      expect(voxBuildStaleHint(bin, join(root, "absent"))).toBeUndefined();
+
+      // A binary the operator points at is their own build, not ours to judge.
+      expect(voxBuildStaleHint(join(root, "elsewhere", "clankvox"), root)).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("returns an unavailable missing client for a missing binary", () => {

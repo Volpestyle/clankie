@@ -24,6 +24,9 @@ import type {
   SubmitOperatorConversationTurnResult,
 } from "@clankie/protocol";
 
+type ConversationServiceRequest = Exclude<OperatorConversationServiceRequest, { op: "autonomy" }>;
+type ConversationServiceResult = Exclude<OperatorConversationServiceResult, { op: "autonomy" }>;
+
 const CURSOR_WIDTH = 12;
 const ZERO_CURSOR = "0".repeat(CURSOR_WIDTH);
 export const OPERATOR_CONVERSATION_RETAINED_MAX = 64;
@@ -59,6 +62,7 @@ export interface ConversationTurnContext {
    */
   readonly workspace?: string;
   readonly seat?: ConversationTurnSeat;
+  readonly internal?: true;
 }
 
 /** Runs one accepted operator turn against the captain's model session. */
@@ -93,7 +97,7 @@ function workspaceOf(scope: OperatorConversationScope): string | undefined {
 export class ConversationStore {
   private readonly metas = new Map<string, ConversationMeta>();
   private readonly chains = new Map<string, Promise<void>>();
-  private readonly runs = new Map<string, Promise<void>>();
+  private readonly runs = new Map<string, Promise<boolean>>();
 
   private readonly root: string;
   private readonly runner: ConversationRunner;
@@ -171,9 +175,7 @@ export class ConversationStore {
     }
   }
 
-  public async serve(
-    request: OperatorConversationServiceRequest,
-  ): Promise<OperatorConversationServiceResult> {
+  public async serve(request: ConversationServiceRequest): Promise<ConversationServiceResult> {
     switch (request.op) {
       case "list": {
         const conversations = [...this.metas.values()]
@@ -214,7 +216,22 @@ export class ConversationStore {
 
   /** Keeps an accepted detached run alive for the transport's waitUntil. */
   public awaitRun(runId: string): Promise<void> {
-    return this.runs.get(runId) ?? Promise.resolve();
+    return this.runs.get(runId)?.then(() => undefined) ?? Promise.resolve();
+  }
+
+  public awaitRunResult(runId: string): Promise<boolean> {
+    return this.runs.get(runId) ?? Promise.resolve(false);
+  }
+
+  public has(conversationId: string): boolean {
+    return this.metas.has(conversationId);
+  }
+
+  /** Queue a host-authored continuation without forging an operator message. */
+  public submitInternal(conversationId: string, message: string): SubmitOperatorConversationTurnResult {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined) throw new Error(`Unknown conversation ${conversationId}`);
+    return this.enqueue(meta, message, undefined, false);
   }
 
   public async close(): Promise<void> {
@@ -318,7 +335,6 @@ export class ConversationStore {
     if (meta === undefined) {
       throw new Error(`Unknown conversation ${turn.conversationId}`);
     }
-    const workspace = workspaceOf(meta.scope);
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
       return {
@@ -330,32 +346,49 @@ export class ConversationStore {
         safeCursor,
       };
     }
+    return this.enqueue(meta, turn.message, turn.herdrPaneId, true);
+  }
+
+  private enqueue(
+    meta: ConversationMeta,
+    message: string,
+    herdrPaneId: string | undefined,
+    publishOperatorMessage: boolean,
+  ): SubmitOperatorConversationTurnResult {
+    const workspace = workspaceOf(meta.scope);
+    const safeCursor = this.lastCursor(meta);
     meta.revision += 1;
     meta.sessionState = "active";
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
     const runId = `run-${randomUUID()}`;
-    this.append(meta, { type: "message", role: "operator", text: turn.message, streaming: false });
+    if (publishOperatorMessage) {
+      this.append(meta, { type: "message", role: "operator", text: message, streaming: false });
+    }
     this.append(meta, { type: "turn", runId, phase: "accepted" });
 
     const previous = this.chains.get(meta.conversationId) ?? Promise.resolve();
     const run = previous
-      .then(() =>
-        this.runner(
+      .then(() => {
+        meta.sessionState = "active";
+        this.saveMeta(meta);
+        return this.runner(
           meta.conversationId,
-          turn.message,
+          message,
           (event) => {
             this.append(meta, event);
           },
           {
+            ...(publishOperatorMessage ? {} : { internal: true as const }),
             ...(workspace === undefined ? {} : { workspace }),
-            ...(turn.herdrPaneId === undefined ? {} : { seat: { herdrPaneId: turn.herdrPaneId } }),
+            ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),
           },
-        ),
-      )
+        );
+      })
       .then(() => {
         this.append(meta, { type: "turn", runId, phase: "completed" });
         meta.sessionState = "waiting";
+        return true;
       })
       .catch((error: unknown) => {
         this.append(meta, {
@@ -365,6 +398,7 @@ export class ConversationStore {
           reasonCode: error instanceof Error ? error.constructor.name : "run_failed",
         });
         meta.sessionState = "failed";
+        return false;
       })
       .finally(() => {
         meta.updatedAt = new Date().toISOString();
@@ -373,7 +407,10 @@ export class ConversationStore {
         this.runs.delete(runId);
         this.prune(meta.conversationId);
       });
-    this.chains.set(meta.conversationId, run);
+    this.chains.set(
+      meta.conversationId,
+      run.then(() => undefined),
+    );
     this.runs.set(runId, run);
     return {
       schemaVersion: 1,

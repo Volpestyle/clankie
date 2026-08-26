@@ -11,6 +11,34 @@ afterEach(async () => {
 });
 
 describe("operator conversation context", () => {
+  it("queues internal turns without forging an operator message", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-conversation-internal-"));
+    roots.push(root);
+    const store = new ConversationStore(root, async (_conversationId, message, publish) => {
+      publish({ type: "message", role: "captain", text: `ran: ${message}`, streaming: false });
+    });
+
+    const accepted = store.submitInternal("global-default", "scheduled wake");
+    if (accepted.status !== "accepted") throw new Error("internal turn was not accepted");
+    await store.awaitRun(accepted.runId);
+    const replay = await store.serve({
+      op: "replay",
+      schemaVersion: 1,
+      replay: {
+        schemaVersion: 1,
+        conversationId: "global-default",
+        surfaceClientId: "test",
+        limit: 20,
+      },
+    });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("replay failed");
+    expect(replay.result.events).toContainEqual(
+      expect.objectContaining({ type: "message", role: "captain", text: "ran: scheduled wake" }),
+    );
+    expect(replay.result.events).not.toContainEqual(expect.objectContaining({ role: "operator" }));
+    await store.close();
+  });
+
   it("streams context, persists it, and fences stale revisions", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-conversation-context-"));
     roots.push(root);

@@ -166,6 +166,56 @@ export const OperatorConversationSchema = z
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
 
+export const OperatorGoalStatusSchema = z.enum(["active", "paused", "blocked", "budget_limited", "complete"]);
+export type OperatorGoalStatus = z.infer<typeof OperatorGoalStatusSchema>;
+
+export const OperatorGoalSchema = z
+  .object({
+    objective: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
+    status: OperatorGoalStatusSchema,
+    tokenBudget: z.number().int().positive().optional(),
+    tokensUsed: z.number().int().nonnegative(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorGoal = z.infer<typeof OperatorGoalSchema>;
+
+export const OperatorWakeSchema = z
+  .object({
+    at: z.string().datetime(),
+    reason: z.string().trim().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
+    createdAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorWake = z.infer<typeof OperatorWakeSchema>;
+
+export const OperatorAutonomyStatusSchema = z
+  .object({
+    enabled: z.boolean(),
+    error: z.literal("state_unreadable").optional(),
+    goal: OperatorGoalSchema.optional(),
+    wake: OperatorWakeSchema.optional(),
+  })
+  .strict();
+export type OperatorAutonomyStatus = z.infer<typeof OperatorAutonomyStatusSchema>;
+
+export const OperatorAutonomyCommandSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("status") }).strict(),
+  z.object({ action: z.literal("set_enabled"), enabled: z.boolean() }).strict(),
+  z
+    .object({
+      action: z.literal("set_goal"),
+      objective: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
+      tokenBudget: z.number().int().positive().optional(),
+    })
+    .strict(),
+  z.object({ action: z.literal("set_goal_status"), status: z.enum(["active", "paused"]) }).strict(),
+  z.object({ action: z.literal("clear_goal") }).strict(),
+  z.object({ action: z.literal("clear_wake") }).strict(),
+]);
+export type OperatorAutonomyCommand = z.infer<typeof OperatorAutonomyCommandSchema>;
+
 /**
  * Strict discriminated public event union. Every app-renderable VUH-745 session
  * event (activity, message, reasoning, context occupancy, tool, typed input,
@@ -503,6 +553,14 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       turn: SubmitOperatorConversationTurnSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("autonomy"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      command: OperatorAutonomyCommandSchema,
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
 
@@ -557,6 +615,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       result: SubmitOperatorConversationTurnResultSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("autonomy"),
+      schemaVersion: z.literal(1),
+      status: OperatorAutonomyStatusSchema,
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceResult = z.infer<typeof OperatorConversationServiceResultSchema>;
 
@@ -605,6 +670,7 @@ export interface OperatorConversationServiceClient {
     signal?: AbortSignal,
   ): AsyncIterable<OperatorConversationTailItem>;
   send(turn: SubmitOperatorConversationTurn): Promise<SubmitOperatorConversationTurnResult>;
+  autonomy(conversationId: string, command: OperatorAutonomyCommand): Promise<OperatorAutonomyStatus>;
 }
 
 export function createOperatorConversationServiceClient(
@@ -673,6 +739,11 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "send", schemaVersion: 1, turn });
       if (result.op !== "send") throw new Error(`Unexpected ${result.op} result for send`);
       return result.result;
+    },
+    async autonomy(conversationId, command) {
+      const result = await dispatch({ op: "autonomy", schemaVersion: 1, conversationId, command });
+      if (result.op !== "autonomy") throw new Error(`Unexpected ${result.op} result for autonomy`);
+      return result.status;
     },
   };
 }

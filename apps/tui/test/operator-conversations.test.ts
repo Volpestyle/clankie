@@ -78,6 +78,7 @@ function client(extra: OperatorConversation[] = []): OperatorConversationClient 
       revision: input.expectedRevision + 1,
       safeCursor: "event:1",
     }),
+    autonomy: async () => ({ enabled: true }),
   };
 }
 

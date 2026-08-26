@@ -315,7 +315,23 @@ describe("protocol", () => {
         conversationId: "conversation-global-default",
       }),
     ).toMatchObject({ op: "close" });
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(7);
+    expect(
+      OperatorConversationServiceRequestSchema.parse({
+        op: "autonomy",
+        schemaVersion: 1,
+        conversationId: "conversation-global-default",
+        command: { action: "set_goal", objective: "Ship it", tokenBudget: 10_000 },
+      }),
+    ).toMatchObject({ op: "autonomy", command: { action: "set_goal" } });
+    expect(() =>
+      OperatorConversationServiceRequestSchema.parse({
+        op: "autonomy",
+        schemaVersion: 1,
+        conversationId: "conversation-global-default",
+        command: { action: "set_goal", objective: "Ship it", tokenBudget: 0 },
+      }),
+    ).toThrow();
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(8);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 

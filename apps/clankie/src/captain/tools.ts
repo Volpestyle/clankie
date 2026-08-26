@@ -19,6 +19,7 @@ import {
 import type { GameplaySettings } from "@clankie/settings";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
+import type { AutonomyStore } from "./autonomy.ts";
 import type { LaneLog } from "./lane-log.ts";
 import { joinWorld, startPlay, stopPlay } from "./play.ts";
 
@@ -44,6 +45,8 @@ export interface TurnContext {
   /** Discord channel and trigger message for grounded social actions. */
   channelId?: string | undefined;
   messageId?: string | undefined;
+  /** True for a host-authored goal continuation or scheduled wake. */
+  autonomous?: boolean | undefined;
 }
 
 /** Room key, stable across a room's turns and distinct across rooms. */
@@ -77,6 +80,7 @@ export function captainTools(
   laneLog: LaneLog,
   lane: CaptainSessionLaneV2,
   gameplay: GameplaySettings = { pokemonEmulatorEnabled: true, pokeagentMmoEnabled: true },
+  autonomy?: AutonomyStore,
 ): ToolDefinition[] {
   const playPorts = {
     submitEmbodimentIntent: deps.embodiment.submitIntent,
@@ -91,6 +95,7 @@ export function captainTools(
       : []),
   ]);
   return [
+    ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     defineTool({
       name: "generate_image",
       label: "Draw a picture",
@@ -416,6 +421,70 @@ export function captainTools(
       },
     }),
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
+}
+
+function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefinition[] {
+  const conversationId = (): string => {
+    if (turn.targetId === undefined) throw new Error("Operator conversation attribution is unavailable");
+    return turn.targetId;
+  };
+  return [
+    defineTool({
+      name: "create_goal",
+      label: "Create goal",
+      description:
+        "Create an active durable goal for this conversation. Use only when the owner or system explicitly asks for a goal; never infer a goal from an ordinary task or from your own idea. Propose self-authored goals conversationally instead.",
+      parameters: Type.Object({
+        objective: Type.String({ minLength: 1, maxLength: 16_384 }),
+        token_budget: Type.Optional(Type.Number({ minimum: 1 })),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, params) => {
+        if (turn.autonomous === true) throw new Error("Autonomous turns may propose goals, not create them");
+        return json(autonomy.createGoal(conversationId(), params.objective, params.token_budget));
+      },
+    }),
+    defineTool({
+      name: "get_goal",
+      label: "Inspect goal",
+      description: "Read this conversation's active goal, usage, autonomy switch, and pending self-wake.",
+      parameters: Type.Object({}),
+      execute: async () => json(autonomy.status(conversationId())),
+    }),
+    defineTool({
+      name: "update_goal",
+      label: "Update goal",
+      description:
+        "Mark the current goal complete only after verifying the full objective, or blocked when no meaningful progress is possible without owner input or an external change. You cannot rewrite, pause, or resume the objective.",
+      parameters: Type.Object({ status: StringEnum(["complete", "blocked"]) }),
+      executionMode: "sequential",
+      execute: async (_id, params) =>
+        json(autonomy.updateGoal(conversationId(), params.status as "complete" | "blocked")),
+    }),
+    defineTool({
+      name: "schedule_wake",
+      label: "Schedule self-wake",
+      description:
+        "Choose a future time to wake this operator conversation for a concrete reason. This replaces any pending wake in this conversation and grants no additional authority.",
+      parameters: Type.Object({
+        at: Type.String({ description: "Future ISO-8601 timestamp with timezone." }),
+        reason: Type.String({ minLength: 1, maxLength: 512 }),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, params) => json(autonomy.scheduleWake(conversationId(), params.at, params.reason)),
+    }),
+    defineTool({
+      name: "cancel_wake",
+      label: "Cancel self-wake",
+      description: "Cancel this conversation's pending self-wake.",
+      parameters: Type.Object({}),
+      executionMode: "sequential",
+      execute: async () => {
+        autonomy.cancelWake(conversationId());
+        return json({ cancelled: true });
+      },
+    }),
+  ];
 }
 
 function turnActor(turn: TurnContext, lane: CaptainSessionLaneV2): string {

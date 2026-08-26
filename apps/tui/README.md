@@ -97,6 +97,13 @@ credential holder.
 - `/new [title]` starts and selects a conversation with fresh model context in
   the current workspace. The previous conversation remains available through
   `/conversation`.
+- `/goal` shows the selected conversation's durable goal. `/goal <objective>`
+  starts one; `--tokens <n>` gives it a hard model-token budget, and
+  `pause|resume|clear` remain owner controls. Clankie proposes goals in chat;
+  proposals do not activate themselves.
+- `/autonomy on|off` controls autonomous goal continuations and scheduled
+  self-wakes globally. `/autonomy clear` removes the selected conversation's
+  pending wake without changing its goal.
 - `/cd` opens the conversation for another directory and moves the console's
   shell escape and completion with it.
 - Type `/skill-name` for direct skill invocation or `$` at a token boundary for

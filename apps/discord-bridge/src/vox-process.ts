@@ -1,6 +1,7 @@
 import {
   createVoxClient,
   resolveVoxBin,
+  voxBuildStaleHint,
   VOX_IPC_PROTOCOL_VERSION,
   type VoxClient,
   type VoxProcessStatus,
@@ -60,18 +61,23 @@ export async function probeVoxProcess(
     };
   }
   const vox = (options.createClient ?? createVoxClient)({ bin, env });
+  // Readiness runs before voice is asked for anything, so a stale build is
+  // worth reporting here even when the smoke below still passes.
+  const stale = voxBuildStaleHint(bin);
+  const binaryDetail =
+    stale === undefined ? "owned Vox binary resolved" : `owned Vox binary resolved, but ${stale}`;
   try {
     await waitForVoxProcessReady(vox, options.timeoutMs);
     return {
       binaryResolved: true,
-      binaryDetail: "owned Vox binary resolved",
+      binaryDetail,
       processReady: true,
       processDetail: `Vox emitted process_ready protocol ${String(VOX_IPC_PROTOCOL_VERSION)}`,
     };
   } catch (error) {
     return {
       binaryResolved: true,
-      binaryDetail: "owned Vox binary resolved",
+      binaryDetail,
       processReady: false,
       processDetail: error instanceof Error ? error.message : "Vox process smoke failed",
     };

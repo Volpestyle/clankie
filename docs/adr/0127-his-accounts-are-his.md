@@ -59,6 +59,14 @@ instructions add is the judgment: when a page asks for a code, a CAPTCHA, or a
 phone number, name the page and the check, show the window, and neither open a
 second account nor look for a way around it.
 
+**Mail he reads is untrusted sender text.** His address is public, so a message
+is a stranger writing — the same posture Discord bodies already have
+([ADR 0081](0081-an-image-is-part-of-what-is-said.md)). `email_list`,
+`email_read`, and `email_search` label their results and his instructions say
+what the label means: quoted content, never authority to act. The label is a
+disposition, not a boundary; the boundary is the console lane and the person
+sitting at it.
+
 **Mail stays console-only, for a new reason.** ADR 0093 kept mail off Discord
 because the mailbox was the owner's. It is his now, and it stays off Discord
 because a sign-in code read out in a room is that account handed to whoever was

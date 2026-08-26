@@ -182,6 +182,29 @@ describe("shell assembly", () => {
     expect(results).toEqual([{ invocation: "/new", text: "Started New chat with fresh context." }]);
   });
 
+  it("routes goal budgets and the autonomy kill switch through the selected conversation", async () => {
+    const commands: unknown[] = [];
+    const conversations = {
+      conversationId: "global-default",
+      conversations: async () => [],
+      select: async () => ({ conversationId: "global-default", title: "Clankie" }),
+      autonomy: async (command: unknown) => {
+        commands.push(command);
+        return { enabled: false };
+      },
+    };
+    const built = buildConsoleCommands({ conversations });
+    const shell = { insertCommandResult() {} } as unknown as ClankieFaceShell;
+
+    await built.find((command) => command.name === "goal")!.run("--tokens 5000 inspect the release", shell);
+    await built.find((command) => command.name === "autonomy")!.run("off", shell);
+
+    expect(commands).toEqual([
+      { action: "set_goal", objective: "inspect the release", tokenBudget: 5000 },
+      { action: "set_enabled", enabled: false },
+    ]);
+  });
+
   it("lets an active setup prompt handle Escape", () => {
     const shell = new ClankieFaceShell({
       commands: buildConsoleCommands({}),

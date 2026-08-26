@@ -118,6 +118,14 @@ The client resolves `target/release/clankvox`, then
 `target/debug/clankvox`. `CLANKIE_VOX_BIN` explicitly selects another build,
 which must pass the same mandatory IPC protocol handshake.
 
+Nothing rebuilds the binary on a body's behalf, so editing this package and
+restarting a Discord body runs the previous build against the current client —
+drift that surfaces as a handshake fault rather than as a build problem. When
+the resolved binary is one of the two paths above and older than `src`,
+`Cargo.toml`, or `Cargo.lock`, the client says so in that fault and
+`clankie restart discord` readiness reports it up front. A `CLANKIE_VOX_BIN`
+pointing outside this package is the operator's own build and is left unjudged.
+
 ## License boundary
 
 This package is `AGPL-3.0-or-later`; see [LICENSE](LICENSE) and

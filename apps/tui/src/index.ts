@@ -131,6 +131,11 @@ const conversationsContext = {
   },
   conversations: () => conversationSelection.conversations(),
   close: (conversationId: string) => conversationClient.close(conversationId),
+  autonomy: async (command: Parameters<typeof conversationClient.autonomy>[1]) => {
+    const conversationId = conversationSelection.conversationId;
+    if (conversationId === undefined) throw new Error("No conversation is selected");
+    return await conversationClient.autonomy(conversationId, command);
+  },
   select: async (conversationId: string) => {
     const conversation = await conversationSelection.select(conversationId);
     currentConversationTitle = conversation.title;

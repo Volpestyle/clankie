@@ -61,9 +61,11 @@ describe("clankie app smoke", () => {
           Promise.resolve(
             request.op === "list"
               ? { op: "list", schemaVersion: 1, conversations: [] }
-              : (() => {
-                  throw new Error(`smoke stub only lists (got ${request.op})`);
-                })(),
+              : request.op === "autonomy"
+                ? { op: "autonomy", schemaVersion: 1, status: { enabled: true } }
+                : (() => {
+                    throw new Error(`smoke stub does not handle ${request.op}`);
+                  })(),
           ),
       }),
       memory: createFileMemory({ dataDir: join(root, "memory") }),
@@ -150,6 +152,23 @@ describe("clankie app smoke", () => {
     });
     expect(dispatch.status).toBe(200);
     await expect(dispatch.json()).resolves.toMatchObject({ op: "list" });
+
+    const autonomy = await app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+      method: "POST",
+      headers: captain,
+      body: JSON.stringify({
+        op: "autonomy",
+        schemaVersion: 1,
+        conversationId: "global-default",
+        command: { action: "status" },
+      }),
+    });
+    expect(autonomy.status).toBe(200);
+    await expect(autonomy.json()).resolves.toEqual({
+      op: "autonomy",
+      schemaVersion: 1,
+      status: { enabled: true },
+    });
 
     const unauthenticated = await app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
       method: "POST",

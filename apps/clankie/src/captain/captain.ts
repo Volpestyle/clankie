@@ -32,6 +32,7 @@ import {
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import { ConversationStore } from "./conversations.ts";
+import { AutonomyStore } from "./autonomy.ts";
 import { readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
@@ -319,6 +320,7 @@ export async function runOneShotDiscordTurn(
  */
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
+  const autonomy = new AutonomyStore(join(options.stateDir, "autonomy.json"));
   const sessions = new Map<string, Promise<LaneSession>>();
   const settingsStore = options.settings ?? new SettingsStore();
   let modelRuntime: Promise<CaptainModelRuntime> | undefined;
@@ -401,7 +403,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       thinkingLevel: selection.thinkingLevel,
       modelRuntime: models,
       customTools: [
-        ...captainTools(deps, capture, laneLog, lane, currentSettings.gameplay),
+        ...captainTools(deps, capture, laneLog, lane, currentSettings.gameplay, autonomy),
         ...connectionTools(deps, lane),
       ],
       resourceLoader: loader,
@@ -479,7 +481,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       lane.capture.media = undefined;
       lane.capture.room = roomKey("operator", conversationId);
       lane.capture.targetId = conversationId;
+      lane.capture.autonomous = context.internal === true;
       const skillCalls = new Map<string, string>();
+      const goalWasActive = autonomy.getGoal(conversationId)?.status === "active";
+      let runTokens = 0;
       let activity: OperatorConversationActivityPhase | undefined;
       const publishActivity = (phase: OperatorConversationActivityPhase): void => {
         if (activity === phase) return;
@@ -543,6 +548,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             });
           }
         } else if (event.type === "message_end" && event.message.role === "assistant") {
+          runTokens += event.message.usage.totalTokens;
           const usage = lane.session.getContextUsage();
           if (usage !== undefined) {
             publish({
@@ -588,17 +594,33 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           kind: "said",
           text,
         });
+        if (goalWasActive || autonomy.getGoal(conversationId)?.status === "active") {
+          autonomy.finishTurn(conversationId, runTokens);
+        }
       } finally {
         unsubscribe();
       }
     },
     (conversationId) => {
+      autonomy.clearConversation(conversationId);
       const key = `operator:${conversationId}`;
       const pending = sessions.get(key);
       sessions.delete(key);
       void pending?.then((lane) => lane.session.dispose()).catch(() => undefined);
     },
   );
+
+  autonomy.start(async (conversationId, prompt) => {
+    if (!conversations.has(conversationId)) {
+      autonomy.clearConversation(conversationId);
+      return;
+    }
+    const result = conversations.submitInternal(conversationId, prompt);
+    if (result.status !== "accepted") throw new Error("Internal autonomy turn was not accepted");
+    if (!(await conversations.awaitRunResult(result.runId))) {
+      throw new Error("Internal autonomy turn failed");
+    }
+  });
 
   async function runDiscordTurn(
     lane: LaneSession,
@@ -751,6 +773,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     serveOperatorConversation(
       request: OperatorConversationServiceRequest,
     ): Promise<OperatorConversationServiceResult> {
+      if (request.op === "autonomy") {
+        if (!conversations.has(request.conversationId)) {
+          throw new Error(`Unknown conversation ${request.conversationId}`);
+        }
+        return Promise.resolve({
+          op: "autonomy",
+          schemaVersion: 1,
+          status: autonomy.command(request.conversationId, request.command),
+        });
+      }
       return conversations.serve(request);
     },
 
@@ -767,6 +799,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async close(): Promise<void> {
+      autonomy.close();
       await conversations.close();
       for (const pending of sessions.values()) {
         try {

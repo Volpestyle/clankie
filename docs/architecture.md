@@ -71,6 +71,19 @@ surface is listed in [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)
 imports that canonical catalog into Yaak and adds a Keychain-backed `Local`
 environment for authenticated requests.
 
+The service also keeps `autonomy.json`: one owner-approved goal and one
+replaceable self-wake per operator conversation, plus a global enable switch.
+An unreadable file fails closed and surfaces `state_unreadable` to operator
+clients instead of silently re-enabling autonomous work.
+An active goal queues host-authored continuation turns through the same
+conversation chain as operator messages, so steering stays ordered and every
+tool call and reply stays in the existing Pi session and public event log. A
+token budget moves a goal to `budget_limited`; `/goal` owns activation,
+pause/resume, and clearing, while `/autonomy off` stops new continuations and
+wakes. A due wake queues one turn with Clankie's recorded reason and may be
+replaced by another. Neither path changes the conversation's tool set or
+authority ([ADR 0130](adr/0130-goals-and-self-wakes-share-the-operator-thread.md)).
+
 The native macOS menu-bar app uses that same contract to list continuing Pi
 sessions and tail expanded transcripts. Its microphone opens a private local
 realtime room over an authenticated loopback WebSocket; social speech stays in
@@ -182,7 +195,9 @@ the full picture — what each store holds, who may read it, and what bounds it.
   his own address, not the owner's inbox: `email.fromAddress` carries the
   identity when the provider login differs, the captain states that address
   from settings, and mail stays console-only because sign-in codes arrive there
-  ([ADR 0127](adr/0127-his-accounts-are-his.md)). A seat in a
+  ([ADR 0127](adr/0127-his-accounts-are-his.md)). That address is public, so every
+  message the mail tools return is labelled untrusted sender text the way a
+  Discord body is ([ADR 0081](adr/0081-an-image-is-part-of-what-is-said.md)). A seat in a
   hosted world is a broker credential too — `pokeagent_mmo_world`, with the
   environment variant refused outright. Each media-enabled active Discord body
   owns one `clankvox` child through the Apache `@clankie/vox-client` boundary.
