@@ -20,6 +20,7 @@ describe("captain voice presence tools", () => {
     expect(names()).toEqual([
       "pokeagent_start_solo",
       "pokeagent_join_mmo",
+      "pokeagent_world",
       "pokeagent_stop",
       "pokeagent_observe",
       "pokeagent_recall",
@@ -32,6 +33,7 @@ describe("captain voice presence tools", () => {
     ]);
     expect(names({ pokemonEmulatorEnabled: false, pokeagentMmoEnabled: true })).toEqual([
       "pokeagent_join_mmo",
+      "pokeagent_world",
       "pokeagent_stop",
       "pokeagent_observe",
       "pokeagent_recall",
@@ -149,6 +151,62 @@ describe("captain voice presence tools", () => {
         venue: "world",
       }),
     );
+  });
+
+  it("lists granted world operations and refuses travel when ungranted", async () => {
+    const hostedWorld = {
+      inspect: () => ({
+        outcome: "playing" as const,
+        grantedOperations: ["world.session", "world.who"],
+        session: {
+          worldId: "pallet",
+          playerId: "player-clankie",
+          sessionId: "session-clankie",
+          gameId: "firered",
+        },
+      }),
+      invoke: async (name: string) =>
+        name === "world.who"
+          ? { outcome: "ok", result: { ok: true, worldId: "pallet", players: [] } }
+          : {
+              outcome: "refused",
+              reason: "capability_unavailable",
+              detail: `The world did not grant ${name}`,
+            },
+    };
+    const deps = {
+      embodiment: {
+        submitIntent: () => Promise.reject(new Error("unused")),
+        getSession: () => Promise.resolve(undefined),
+        getLiveSession: () => Promise.resolve(undefined),
+      },
+      hostedWorld,
+    } as unknown as CaptainDeps;
+    const world = captainTools(deps, {}, {} as LaneLog, "operator").find(
+      (tool) => tool.name === "pokeagent_world",
+    );
+    if (world === undefined) throw new Error("pokeagent_world is missing");
+    const listed = await world.execute("call-1", {}, undefined, undefined, {} as never);
+    expect(JSON.parse((listed.content[0] as { text: string }).text)).toMatchObject({
+      outcome: "playing",
+      grantedOperations: ["world.session", "world.who"],
+    });
+    const who = await world.execute("call-2", { operation: "world.who" }, undefined, undefined, {} as never);
+    expect(JSON.parse((who.content[0] as { text: string }).text)).toMatchObject({
+      outcome: "ok",
+      result: { ok: true, players: [] },
+    });
+    const travel = await world.execute(
+      "call-3",
+      { operation: "world.travel", destination: "emerald" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(JSON.parse((travel.content[0] as { text: string }).text)).toMatchObject({
+      outcome: "refused",
+      reason: "capability_unavailable",
+    });
   });
 
   it("reserves text updates for people waiting on slow work", () => {

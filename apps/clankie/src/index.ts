@@ -34,6 +34,7 @@ import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
+import { HostedWorldSession } from "./world/session.ts";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
@@ -220,6 +221,7 @@ const discordUserPresenceRuntime = await loadDiscordPresenceRuntime(
 
 const activityObservations = new ActivityObservationProjection();
 const playSight = new PlaySightProjection({ journalRootDir: defaultGbaPlayJournalDir(process.env) });
+const hostedWorld = new HostedWorldSession();
 
 // The captain's tools reach the same in-process authorities the routes use.
 // The app needs the captain and the captain's deps need the app, so the app
@@ -297,6 +299,10 @@ const captain = createCaptain(
     playSight: {
       still: () => Promise.resolve(playSight.still()),
       story: () => Promise.resolve(playSight.story()),
+    },
+    hostedWorld: {
+      inspect: () => hostedWorld.inspect(),
+      invoke: (name, input) => hostedWorld.invoke(name, input),
     },
     streamWatch: {
       current: () => Promise.resolve(boundApp().streamWatch()),
@@ -462,6 +468,7 @@ function createConfiguredPlayExecution(): PlayExecution {
     logger,
     activityObservations,
     playSight,
+    hostedWorld,
     gameplay: startupSettings.gameplay,
   });
 }

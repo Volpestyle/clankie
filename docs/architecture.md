@@ -164,9 +164,10 @@ the full picture — what each store holds, who may read it, and what bounds it.
   Two Clankie-owned bodies implement that seam. The local one is
   [`integrations/gba-emulator`](../integrations/gba-emulator/README.md), booted
   by the local play host in the service process. The hosted one is Clankie's
-  separately credentialed seat in a PokeAgents world, reached through the published
-  `@pokeagents/world-protocol` contract and entered with the `pokeagent_join_mmo`
-  tool ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). A hosted world
+  separately credentialed seat in a PokeAgents world, reached through
+  `WorldPlayerClient` on `@pokeagents/world-protocol/ipc` (`WORLD_ADDRESS` unix,
+  tcp, or tls) and entered with the `pokeagent_join_mmo` tool
+  ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). A hosted world
   cannot be paused, changes without him acting, and can replace his body under
   him. Owner settings independently enable the local emulator and hosted MMO;
   both may be available while the shared play host allows one live session
@@ -180,11 +181,11 @@ the full picture — what each store holds, who may read it, and what bounds it.
   `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and
   the MCP projection derived from that catalog. MCP carries calls; the world
   contract and host enforce player identity, authority, and gameplay semantics.
-  Clankie currently imports only the pinned published `@pokeagents/world-protocol`
+  Clankie currently imports only the pinned `@pokeagents/world-protocol`
   package (including `/ipc`) and keeps host, emulator, persistence, and
-  world-MCP packages out of product source. A stronger session-bound typed
-  client or catalog-only dispatch is PokeAgents-owned follow-up, not a shipped
-  Clankie claim.
+  world-MCP packages out of product source. Hosted play composes
+  `WorldPlayerClient`; granted session, presence, travel, and challenge
+  operations are available to the gameplay mind as `pokeagent_world`.
 - **Auth.** Provider keys and OAuth tokens live in the credential broker
   (Keychain), written by the TUI `/auth` flow and read by pi through a
   credential-store bridge. Compatibility model/media provider keys may fall

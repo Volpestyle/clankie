@@ -15,16 +15,17 @@ packages keep `@pokeagent-mmo`, so the scope now marks the boundary this record
 is about. Everything below about what may be imported still holds, and the
 `pinned` in the title now means a pinned version.
 
-## Current status (2026-08-19)
+## Current status (2026-08-26)
 
 The code described here is shipped. [ADR 0129](0129-each-player-owns-a-body.md)
 clarifies that hosted co-play uses separately credentialed player seats and that
 MCP is only a transport projection for other harnesses. The sibling PokeAgents
 repository ships the operation catalog and derives its MCP tools from it.
-Clankie's current boundary imports only published `@pokeagents/world-protocol`
-and `/ipc`; host packages remain forbidden. A stronger session-bound typed
-client or catalog-only dispatch remains PokeAgents-owned follow-up, not a claim
-about this implementation.
+Clankie's current boundary imports only `@pokeagents/world-protocol` and `/ipc`;
+host packages remain forbidden. Hosted play composes `WorldPlayerClient` for
+transport, session, retry, and frame order; the adapter maps observations into
+the GBA driver and publishes Activity media. Granted session, presence, travel,
+and challenge operations are available through `pokeagent_world`.
 
 ## Context
 

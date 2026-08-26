@@ -63,6 +63,24 @@ export interface CaptainDeps {
     still(): Promise<PlayStillRead>;
     story(): Promise<PlayStoryRead>;
   };
+  /** Granted hosted-world operations while a PokeAgents body is live. */
+  readonly hostedWorld?: {
+    inspect():
+      | { readonly outcome: "not_playing" }
+      | {
+          readonly outcome: "playing";
+          readonly grantedOperations: readonly string[];
+          readonly session:
+            | {
+                readonly worldId: string;
+                readonly playerId: string;
+                readonly sessionId: string;
+                readonly gameId: string;
+              }
+            | undefined;
+        };
+    invoke(name: string, input?: Record<string, unknown>): Promise<unknown>;
+  };
   readonly streamWatch: {
     current(): Promise<DiscordStreamWatchObservation>;
   };

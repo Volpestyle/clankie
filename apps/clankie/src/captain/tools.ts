@@ -89,7 +89,7 @@ export function captainTools(
   };
   const enabled = new Set([
     ...(gameplay.pokemonEmulatorEnabled ? ["pokeagent_start_solo"] : []),
-    ...(gameplay.pokeagentMmoEnabled ? ["pokeagent_join_mmo"] : []),
+    ...(gameplay.pokeagentMmoEnabled ? ["pokeagent_join_mmo", "pokeagent_world"] : []),
     ...(gameplay.pokemonEmulatorEnabled || gameplay.pokeagentMmoEnabled
       ? ["pokeagent_stop", "pokeagent_observe", "pokeagent_recall"]
       : []),
@@ -199,6 +199,78 @@ export function captainTools(
     ...discordVoicePresenceTools(deps, turn, lane),
     ...discordActionTools(deps, turn, lane),
     ...discordMusicTools(deps, turn, lane),
+    defineTool({
+      name: "pokeagent_world",
+      label: "PokeAgent: world",
+      description:
+        "Use a granted hosted-world operation while you are in the PokeAgent MMO: session status, who else is here, " +
+        "regions you can sail to, travel, or challenges. Omit operation to see what this session currently grants. " +
+        "Availability follows the world's grants — a missing capability is a refusal, not a prompt to retry. " +
+        "Not for walking or reading the screen; those stay on the play body.",
+      parameters: Type.Object({
+        operation: Type.Optional(
+          StringEnum([
+            "world.session",
+            "world.who",
+            "world.regions",
+            "world.travel",
+            "world.challenge",
+            "world.challenges",
+            "world.answer_challenge",
+          ]),
+        ),
+        destination: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+        acknowledgeOneWay: Type.Optional(Type.Boolean()),
+        kind: Type.Optional(StringEnum(["battle", "trade"])),
+        opponent: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+        message: Type.Optional(Type.String({ maxLength: 256 })),
+        challengeId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+        answer: Type.Optional(StringEnum(["accept", "decline"])),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, params) => {
+        const hosted = deps.hostedWorld;
+        if (hosted === undefined) {
+          return json({
+            outcome: "refused",
+            reason: "not_playing",
+            detail: "hosted world operations are unavailable",
+          });
+        }
+        const operation = params.operation;
+        if (operation === undefined) return json(hosted.inspect());
+        const input: Record<string, unknown> = {};
+        if (operation === "world.travel") {
+          if (typeof params.destination !== "string") {
+            return json({ outcome: "refused", reason: "invalid_input", detail: "travel needs destination" });
+          }
+          input.destination = params.destination;
+          if (params.acknowledgeOneWay === true) input.acknowledgeOneWay = true;
+        } else if (operation === "world.challenge") {
+          if (params.kind === undefined || typeof params.opponent !== "string") {
+            return json({
+              outcome: "refused",
+              reason: "invalid_input",
+              detail: "challenge needs kind and opponent",
+            });
+          }
+          input.kind = params.kind;
+          input.opponent = params.opponent;
+          if (typeof params.message === "string") input.message = params.message;
+        } else if (operation === "world.answer_challenge") {
+          if (typeof params.challengeId !== "string" || params.answer === undefined) {
+            return json({
+              outcome: "refused",
+              reason: "invalid_input",
+              detail: "answer_challenge needs challengeId and answer",
+            });
+          }
+          input.challengeId = params.challengeId;
+          input.answer = params.answer;
+        }
+        return json(await hosted.invoke(operation, input));
+      },
+    }),
     defineTool({
       name: "pokeagent_stop",
       label: "PokeAgent: stop",
@@ -433,7 +505,7 @@ function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefiniti
       name: "create_goal",
       label: "Create goal",
       description:
-        "Create an active durable goal for this conversation. Use only when the owner or system explicitly asks for a goal; never infer a goal from an ordinary task or from your own idea. Propose self-authored goals conversationally instead.",
+        "Create an active durable goal for this conversation. Use only when the owner or system explicitly asks for a goal; never infer a goal from an ordinary task or from your own idea. Propose self-authored goals conversationally instead. State the objective as a checkable result, not a duration of effort.",
       parameters: Type.Object({
         objective: Type.String({ minLength: 1, maxLength: 16_384 }),
         token_budget: Type.Optional(Type.Number({ minimum: 1 })),

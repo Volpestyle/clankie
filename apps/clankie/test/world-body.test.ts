@@ -13,6 +13,7 @@ import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
 import { WORLD_PROTOCOL_VERSION } from "@pokeagents/world-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { joinWorld } from "../src/world/body.ts";
+import { HostedWorldSession } from "../src/world/session.ts";
 
 const CREDENTIAL = "clankie-world-test-credential-0000000000000001";
 const TOKEN = "session-token-0000000000000000000000000001";
@@ -770,6 +771,110 @@ describe("hosted world body", () => {
     // region parameter at all — regions are reached afterwards through
     // `world.travel`, gated on badges.
     expect(world.requests[0]?.input).toMatchObject({ gameId: "firered" });
+  });
+
+  it("dials unix, tcp, and tls addresses through WorldPlayerClient", async () => {
+    const targets: string[] = [];
+    const transport = async (address: { kind: string }, request: { operation: string }) => {
+      targets.push(`${address.kind}:${request.operation}`);
+      if (request.operation === "world.join") return joinResult();
+      if (request.operation === "play.observe") return observation({ frame: 1 });
+      if (request.operation === "play.watch") {
+        return { ok: false, code: "not_supported", message: "watching is disabled" };
+      }
+      if (request.operation === "world.leave") return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+      throw new Error(`unexpected ${request.operation}`);
+    };
+    const env = await provisionedEnv(await mkdtemp(join(tmpdir(), "clankie-world-address-")));
+    for (const [WORLD_ADDRESS, kind] of [
+      [undefined, "unix"],
+      ["tcp://100.64.0.1:7777", "tcp"],
+      ["tls://world.example:443", "tls"],
+    ] as const) {
+      targets.length = 0;
+      const result = await joinWorld({
+        environmentId: "pokemon-firered",
+        env: WORLD_ADDRESS === undefined ? env : { ...env, WORLD_ADDRESS },
+        transport,
+      });
+      expect(result.outcome).toBe("joined");
+      if (result.outcome !== "joined") return;
+      expect(targets[0]).toBe(`${kind}:world.join`);
+      await result.body.close();
+    }
+  });
+
+  it("exposes granted session and presence operations and preserves a world refusal", async () => {
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return { ...joinResult(), capabilities: [...CAPABILITIES, "world.presence"] };
+        case "play.observe":
+          return observation({ frame: 10 });
+        case "world.session":
+          return {
+            ok: true,
+            worldId: WORLD_ID,
+            playerId: PLAYER_ID,
+            sessionId: SESSION_ID,
+            gameId: "firered",
+            displayName: "Clankie",
+            state: "playing",
+            bodyGeneration: 1,
+            frame: 10,
+            startedAt: NOW,
+          };
+        case "world.who":
+          return { ok: false, code: "budget_exhausted", message: "who is rate limited" };
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(result.body.grantedOperationNames()).toEqual(
+      expect.arrayContaining(["play.observe", "play.act", "play.frame", "world.who", "world.session"]),
+    );
+    expect(result.body.sessionSnapshot()).toMatchObject({
+      worldId: WORLD_ID,
+      playerId: PLAYER_ID,
+      sessionId: SESSION_ID,
+      gameId: "firered",
+    });
+    await expect(result.body.callWorld("world.session", {})).resolves.toMatchObject({
+      ok: true,
+      playerId: PLAYER_ID,
+      state: "playing",
+    });
+    await expect(result.body.callWorld("world.who", {})).resolves.toMatchObject({
+      ok: false,
+      code: "budget_exhausted",
+      message: "who is rate limited",
+    });
+    const gate = new HostedWorldSession();
+    expect(gate.inspect()).toEqual({ outcome: "not_playing" });
+    gate.attach(result.body);
+    expect(gate.inspect()).toMatchObject({
+      outcome: "playing",
+      grantedOperations: expect.arrayContaining(["world.who", "world.session"]),
+    });
+    await expect(gate.invoke("world.who", {})).resolves.toMatchObject({
+      outcome: "ok",
+      result: { ok: false, code: "budget_exhausted" },
+    });
+    await expect(gate.invoke("world.travel", { destination: "emerald" })).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "capability_unavailable",
+    });
+    gate.detach(result.body);
+    expect(gate.inspect()).toEqual({ outcome: "not_playing" });
+    await result.body.close();
   });
 });
 

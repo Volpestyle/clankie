@@ -37,6 +37,7 @@ import type { ActivityObservationWritePort } from "./activity-observation.ts";
 import type { PlayExecution } from "./play-host.ts";
 import type { PlaySightProjection } from "./play-sight.ts";
 import { joinWorld, type WorldJoinOptions, type WorldJoinResult } from "./world/body.ts";
+import type { HostedWorldSession } from "./world/session.ts";
 
 /** Native screen. Same constant, same reason, as local play-execution. */
 const STREAM_SCALE = 1;
@@ -57,6 +58,8 @@ export interface WorldPlayExecutionOptions {
   onTurn?: (turn: FreePlayTurn) => void;
   activityObservations?: ActivityObservationWritePort;
   playSight?: PlaySightProjection;
+  /** Live hosted-world operations for the captain while this body is playing. */
+  hostedWorld?: HostedWorldSession;
   createMind?: () => Promise<FreePlayMind>;
   createVoiceAgent?: () => Promise<ClankieVoice | undefined>;
   createVoice?: () => Promise<PlayVoiceClient | undefined>;
@@ -288,6 +291,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
     const startedAt = clock().getTime();
     try {
       await onRunning();
+      options.hostedWorld?.attach(body);
       options.playSight?.attach({
         sessionId: session.sessionId,
         journeyId: body.journeyId,
@@ -461,6 +465,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       };
     } finally {
       options.activityObservations?.clear(session.sessionId);
+      options.hostedWorld?.detach(body);
       options.playSight?.detach(session.sessionId);
       sink?.close();
       unsubscribe?.();

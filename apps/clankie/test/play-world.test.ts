@@ -65,6 +65,14 @@ function fakeWorldBody(overrides: Partial<WorldBody> = {}): WorldBody {
       adapterVersion: 2,
     }),
     close: () => Promise.resolve(),
+    sessionSnapshot: () => ({
+      worldId: "kanto",
+      playerId: "player-1",
+      sessionId: "world-session-1",
+      gameId: "firered",
+    }),
+    grantedOperationNames: () => ["play.observe", "play.act", "play.frame"],
+    callWorld: () => Promise.resolve({ ok: false, code: "not_supported", message: "fake" }),
     ...overrides,
   };
 }

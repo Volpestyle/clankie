@@ -54,6 +54,7 @@ import type { PlayExecution } from "./play-host.ts";
 import type { PlaySightProjection } from "./play-sight.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
 import type { WorldJoinOptions, WorldJoinResult } from "./world/body.ts";
+import type { HostedWorldSession } from "./world/session.ts";
 
 /**
  * The stream carries the native screen; the model's own view stays upscaled.
@@ -144,6 +145,8 @@ export interface GbaPlayExecutionOptions {
    * Lane A fills the real body; tests supply a fake.
    */
   joinWorld?: (options: WorldJoinOptions) => Promise<WorldJoinResult>;
+  /** Live hosted-world operations for the captain while a world body is playing. */
+  hostedWorld?: HostedWorldSession;
 }
 
 export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayExecution {

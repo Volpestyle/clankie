@@ -1,5 +1,5 @@
 /**
- * The world as a body (VUH-970).
+ * The world as a body (VUH-970 / VUH-1012).
  *
  * `runFreePlay` drives exactly one seam — `GbaDriverIo` — and everything above
  * it (the model mind, the voice, interjections, the journal, progress) never
@@ -7,11 +7,10 @@
  * second play loop: it is a second implementation of that seam, plus a frame
  * source, composed by the same execution the local body already uses.
  *
- * The shape here deliberately mirrors `BootedGbaGame` — `framePng()` plus
- * `observeFrames(observer)` — because the activity publish path in
- * `play-execution.ts` is proven (digest dedupe so an idle screen costs no
- * bandwidth, dropped frames counted rather than swallowed) and porting it
- * verbatim is worth more than a tidier signature.
+ * Transport, session, retry, and frame-order accounting live in
+ * `WorldPlayerClient`. This adapter maps world observations into the GBA
+ * driver, publishes Activity media, and exposes granted multiplayer operations
+ * to the gameplay mind.
  *
  * What is genuinely different, and must not be papered over:
  *
@@ -44,21 +43,23 @@ import {
 import type { EmbodimentEnvironmentId, WorldJoinRefusalReason } from "@clankie/protocol";
 import {
   ActionSchema,
-  ActResultSchema,
-  FrameSchema,
-  JoinResultSchema,
-  LeaveResultSchema,
-  ObservationSchema,
-  RefusalSchema,
-  WatchResultSchema,
+  findOperation,
+  isRefusal,
   WORLD_PROTOCOL_VERSION,
   type Action,
   type ActionRefusal,
   type Frame,
-  type JoinResult,
   type Observation,
+  type Refusal,
+  type WorldOperationName,
 } from "@pokeagents/world-protocol";
-import { callHost, defaultWorldStateDir, worldSocketPath } from "@pokeagents/world-protocol/ipc";
+import {
+  defaultWorldStateDir,
+  parseWorldAddress,
+  WorldPlayerClient,
+  worldSocketPath,
+  type WorldPlayerTransport,
+} from "@pokeagents/world-protocol/ipc";
 import { z } from "zod";
 
 export interface WorldBody {
@@ -88,8 +89,21 @@ export interface WorldBody {
   readonly droppedAudioPacketCount: () => number;
   /** Causal identity sampled beside decision/pre-action/post-action state. */
   readonly traceProvenance: () => FreePlayProvenance;
+  /** Safe join metadata; never includes the session bearer. */
+  readonly sessionSnapshot: () => WorldSessionSnapshot | undefined;
+  /** Operations the live session currently holds. */
+  readonly grantedOperationNames: () => readonly string[];
+  /** Invoke a granted world operation. The client retains the bearer. */
+  readonly callWorld: (name: string, input: Record<string, unknown>) => Promise<unknown>;
   /** Leaves the world and releases the body. Always call it. */
   readonly close: () => Promise<void>;
+}
+
+export interface WorldSessionSnapshot {
+  readonly worldId: string;
+  readonly playerId: string;
+  readonly sessionId: string;
+  readonly gameId: string;
 }
 
 /**
@@ -106,6 +120,8 @@ export interface WorldJoinOptions {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   onAudioUnavailable?: (reason: string) => void;
+  /** Test injection; production uses the package transport. */
+  transport?: WorldPlayerTransport;
 }
 
 export interface WorldAudioPacket {
@@ -117,6 +133,18 @@ export interface WorldAudioPacket {
   readonly frames: number;
   readonly data: Uint8Array;
   readonly capturedAt: string;
+}
+
+/**
+ * Dial target for the hosted world.
+ *
+ * `WORLD_ADDRESS` is unix path, `tcp://host:port`, or `tls://host:port`. Absent,
+ * the default is the world's unix socket under `WORLD_STATE_DIR`.
+ */
+export function resolveWorldTarget(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env["WORLD_ADDRESS"]?.trim();
+  if (configured !== undefined && configured.length > 0) return configured;
+  return worldSocketPath(defaultWorldStateDir(env));
 }
 
 /**
@@ -147,37 +175,37 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
   }
   if (credential === undefined) return { outcome: "refused", reason: "no_credential" };
 
-  const socketPath = worldSocketPath(defaultWorldStateDir(env));
+  let target: string;
+  try {
+    target = resolveWorldTarget(env);
+    parseWorldAddress(target);
+  } catch (error) {
+    return { outcome: "refused", reason: "world_unreachable", detail: boundedError(error) };
+  }
+
+  const client = new WorldPlayerClient({
+    target,
+    credential,
+    ...(options.transport === undefined ? {} : { transport: options.transport }),
+  });
   // `world.join` takes a game, not a region. Regions are reached afterwards
   // through `world.travel`, gated on badges — so there is nothing to choose here.
   const gameId = gameIdFor(options.environmentId);
-  let rawJoin: Awaited<ReturnType<typeof callHost>>;
+  let joined;
   try {
-    rawJoin = await callHost(socketPath, {
-      operation: "world.join",
-      credential,
-      input: {
-        protocolVersion: WORLD_PROTOCOL_VERSION,
-        gameId,
-        displayName: "Clankie",
-        harness: "clankie",
-      },
+    joined = await client.call("world.join", {
+      protocolVersion: WORLD_PROTOCOL_VERSION,
+      gameId,
+      displayName: "Clankie",
+      harness: "clankie",
     });
   } catch (error) {
-    return {
-      outcome: "refused",
-      reason: "world_unreachable",
-      detail: boundedError(error),
-    };
+    return { outcome: "refused", reason: "world_unreachable", detail: boundedError(error) };
   }
-
-  const joined = JoinResultSchema.safeParse(rawJoin);
-  if (!joined.success) return joinRefusal(rawJoin);
-  const missing = REQUIRED_CAPABILITIES.filter(
-    (capability) => !joined.data.capabilities.includes(capability),
-  );
+  if (isRefusal(joined)) return joinRefusal(joined);
+  const missing = REQUIRED_CAPABILITIES.filter((capability) => !client.capabilities.includes(capability));
   if (missing.length > 0) {
-    await bestEffortLeave(socketPath, joined.data.token);
+    await bestEffortLeave(client);
     return {
       outcome: "refused",
       reason: "world_refused",
@@ -185,48 +213,29 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
     };
   }
 
-  let rawObservation: Awaited<ReturnType<typeof callHost>>;
+  let observation;
   try {
-    rawObservation = await callHost(socketPath, {
-      operation: "play.observe",
-      token: joined.data.token,
-    });
+    observation = await client.call("play.observe", {});
   } catch (error) {
-    await bestEffortLeave(socketPath, joined.data.token);
-    return {
-      outcome: "refused",
-      reason: "world_unreachable",
-      detail: boundedError(error),
-    };
+    await bestEffortLeave(client);
+    return { outcome: "refused", reason: "world_unreachable", detail: boundedError(error) };
   }
-  const observation = ObservationSchema.safeParse(rawObservation);
-  if (
-    !observation.success ||
-    observation.data.sessionId !== joined.data.sessionId ||
-    observation.data.gameId !== joined.data.gameId
-  ) {
-    await bestEffortLeave(socketPath, joined.data.token);
+  if (isRefusal(observation) || observation.gameId !== joined.gameId) {
+    await bestEffortLeave(client);
     return {
       outcome: "refused",
       reason: "world_refused",
-      detail: refusalDetail(rawObservation, "The world returned an invalid initial observation"),
+      detail: isRefusal(observation)
+        ? `${observation.code}: ${observation.message}`
+        : "The world returned an invalid initial observation",
     };
   }
 
-  const watchAudio = await openWatchAudio(
-    socketPath,
-    joined.data.token,
-    options.fetchImpl ?? fetch,
-    options.onAudioUnavailable,
-  );
-  return {
-    outcome: "joined",
-    body: new HostedWorldBody(socketPath, joined.data, observation.data, watchAudio),
-  };
+  const watchAudio = await openWatchAudio(client, options.fetchImpl ?? fetch, options.onAudioUnavailable);
+  return { outcome: "joined", body: new HostedWorldBody(client, observation, watchAudio) };
 }
 
 const REQUIRED_CAPABILITIES = ["world.observe", "world.act", "world.frames"] as const;
-const HARDWARE_TICK_MS = Math.round(1_000 / 59.7275);
 const AUDIO_POLL_MS = 80;
 const AUDIO_QUEUE_MAX = 64;
 const GOAL_VERSION = 1;
@@ -365,8 +374,7 @@ class HostedWorldBody implements WorldBody {
   public readonly journeyId: PlayJourneyId;
   public readonly io: GbaDriverIo;
 
-  private readonly socketPath: string;
-  private readonly joined: JoinResult;
+  private readonly client: WorldPlayerClient;
   private observation: Observation | undefined;
   private observationSequence = 0;
   private actionSequence = 0;
@@ -383,8 +391,7 @@ class HostedWorldBody implements WorldBody {
   private audioTimer: NodeJS.Timeout | undefined;
   private audioPollInFlight = false;
   private frameObserver: (() => void) | null = null;
-  private frameTimer: NodeJS.Timeout | undefined;
-  private framePollInFlight = false;
+  private watching = false;
   private observationPollInFlight = false;
   private paused = false;
   private closed = false;
@@ -392,15 +399,11 @@ class HostedWorldBody implements WorldBody {
   private lastAction: EnvironmentActionResult | undefined;
   private readonly stableActionFailures = new Map<string, { errorCode: string; message: string }>();
 
-  public constructor(
-    socketPath: string,
-    joined: JoinResult,
-    observation: Observation,
-    watchAudio?: WatchAudioSource,
-  ) {
-    this.socketPath = socketPath;
-    this.joined = joined;
-    this.journeyId = worldPlayJourneyId({ worldId: joined.worldId, playerId: joined.playerId });
+  public constructor(client: WorldPlayerClient, observation: Observation, watchAudio?: WatchAudioSource) {
+    this.client = client;
+    const session = client.session;
+    if (session === undefined) throw new Error("Hosted world body requires a joined session");
+    this.journeyId = worldPlayJourneyId({ worldId: session.worldId, playerId: session.playerId });
     this.observation = observation;
     this.bodyGeneration = observation.bodyGeneration;
     this.watchAudio = watchAudio;
@@ -424,15 +427,13 @@ class HostedWorldBody implements WorldBody {
   public readonly observeFrames = (observer: (() => void) | null): void => {
     this.frameObserver = observer;
     if (observer === null || this.closed) {
-      this.stopFramePolling();
+      this.watching = false;
+      this.stopAudioPolling();
       return;
     }
-    if (this.frameTimer !== undefined) return;
-    // ponytail: hardware-tick polling is the transport ceiling; replace it with a streaming
-    // frames operation when the host exposes one.
-    void this.pollFrame();
-    this.frameTimer = setInterval(() => void this.pollFrame(), HARDWARE_TICK_MS);
-    this.frameTimer.unref();
+    if (this.watching) return;
+    this.watching = true;
+    void this.consumeFrames();
     this.startAudioPolling();
   };
 
@@ -442,10 +443,43 @@ class HostedWorldBody implements WorldBody {
 
   public readonly droppedAudioPacketCount = (): number => this.droppedAudioPackets;
 
+  public readonly sessionSnapshot = (): WorldSessionSnapshot | undefined => {
+    const session = this.client.session;
+    if (session === undefined) return undefined;
+    return {
+      worldId: session.worldId,
+      playerId: session.playerId,
+      sessionId: session.sessionId,
+      gameId: session.gameId,
+    };
+  };
+
+  public readonly grantedOperationNames = (): readonly string[] => this.client.grantedOperationNames;
+
+  public readonly callWorld = async (name: string, input: Record<string, unknown>): Promise<unknown> => {
+    if (findOperation(name) === undefined) {
+      return { ok: false, code: "not_supported", message: `unknown operation ${name}` };
+    }
+    try {
+      const result = await this.client.call(name as WorldOperationName, input as never);
+      if (
+        name === "world.travel" &&
+        !isRefusal(result) &&
+        "session" in result &&
+        result.session.bodyGeneration > this.bodyGeneration
+      ) {
+        this.resetGeneration(result.session.bodyGeneration);
+      }
+      return result;
+    } catch (error) {
+      return { ok: false, code: "world_unreachable", message: boundedError(error) };
+    }
+  };
+
   public readonly traceProvenance = (): FreePlayProvenance => ({
     body: "world",
-    sessionId: this.joined.sessionId,
-    worldId: this.joined.worldId,
+    sessionId: this.client.session?.sessionId ?? this.observation?.sessionId ?? "ended",
+    worldId: this.client.session?.worldId ?? "ended",
     bodyGeneration: this.bodyGeneration,
     ...(this.observation === undefined ? {} : { adapterVersion: this.observation.adapterVersion }),
   });
@@ -453,20 +487,14 @@ class HostedWorldBody implements WorldBody {
   public readonly close = (): Promise<void> => {
     if (this.closePromise !== undefined) return this.closePromise;
     this.closed = true;
+    this.watching = false;
     this.frameObserver = null;
-    this.stopFramePolling();
+    this.stopAudioPolling();
     this.closePromise = (async () => {
-      const request = { operation: "world.leave", token: this.joined.token } as const;
-      let outcome;
-      try {
-        outcome = await callHost(this.socketPath, request);
-      } catch {
-        outcome = await callHost(this.socketPath, request);
-      }
-      if (RefusalSchema.safeParse(outcome).data?.code === "session_ended") return;
-      const parsed = LeaveResultSchema.safeParse(outcome);
-      if (!parsed.success || parsed.data.sessionId !== this.joined.sessionId) {
-        throw new Error(refusalDetail(outcome, "The world returned an invalid leave result"));
+      const outcome = await this.client.call("world.leave", {});
+      if (isRefusal(outcome) && outcome.code === "session_ended") return;
+      if (isRefusal(outcome)) {
+        throw new Error(`${outcome.code}: ${outcome.message}`);
       }
     })();
     return this.closePromise;
@@ -540,12 +568,13 @@ class HostedWorldBody implements WorldBody {
           if (this.frame === undefined || this.png === null) {
             throw adapterError("frame_unavailable", "The hosted world has not returned a frame yet");
           }
-          const encodedSession = encodeURIComponent(this.joined.sessionId);
+          const sessionId = this.sessionId();
+          const encodedSession = encodeURIComponent(sessionId);
           return {
             ...base,
             kind,
             data: {
-              artifactId: `world:${this.joined.sessionId}:g${String(this.frame.bodyGeneration)}:${String(this.frame.frame)}`,
+              artifactId: `world:${sessionId}:g${String(this.frame.bodyGeneration)}:${String(this.frame.frame)}`,
               uri: `artifact://pokeagent-mmo/${encodedSession}/generations/${String(this.frame.bodyGeneration)}/frames/${String(this.frame.frame)}`,
               framebufferSha256: sha256(this.png),
               ramStateSha256: stateDigest(observation),
@@ -686,54 +715,38 @@ class HostedWorldBody implements WorldBody {
     }
     const requestGeneration = this.bodyGeneration;
     const worldAction = mapAction(action);
-    const request = {
-      operation: "play.act",
-      token: this.joined.token,
-      input: {
+
+    let result;
+    try {
+      result = await this.client.call("play.act", {
         action: worldAction,
         idempotencyKey: `${this.actionKeyPrefix}-${String(this.actionSequence)}`,
-      },
-    } as const;
-
-    let outcome: Awaited<ReturnType<typeof callHost>>;
-    try {
-      outcome = await callHost(this.socketPath, request);
-    } catch {
-      try {
-        outcome = await callHost(this.socketPath, request);
-      } catch (error) {
-        return this.failedAction(actionId, "world_unreachable", boundedError(error), true);
-      }
+      });
+    } catch (error) {
+      return this.failedAction(actionId, "world_unreachable", boundedError(error), true);
     }
 
-    const result = ActResultSchema.safeParse(outcome);
-    if (!result.success || result.data.sessionId !== this.joined.sessionId) {
-      const refusal = RefusalSchema.safeParse(outcome);
-      return this.failedAction(
-        actionId,
-        refusal.success ? refusal.data.code : "world_protocol_error",
-        refusal.success ? refusal.data.message : "The world returned an invalid action result",
-        refusal.success && refusal.data.retryAfterMs !== undefined,
-      );
+    if (isRefusal(result)) {
+      return this.failedAction(actionId, result.code, result.message, result.retryAfterMs !== undefined);
     }
-    const sameRequestGeneration = result.data.bodyGeneration === requestGeneration;
-    if (result.data.bodyGeneration > this.bodyGeneration) {
-      this.resetGeneration(result.data.bodyGeneration);
+    const sameRequestGeneration = result.bodyGeneration === requestGeneration;
+    if (result.bodyGeneration > this.bodyGeneration) {
+      this.resetGeneration(result.bodyGeneration);
     }
-    if (result.data.outcome.kind === "rejected") {
-      const refusal = result.data.outcome.refusal;
+    if (result.outcome.kind === "rejected") {
+      const refusal = result.outcome.refusal;
       const detail = actionRefusalDetail(refusal);
       const message =
         `The world refused the action: ${JSON.stringify(refusal)}` + (detail === null ? "" : ` — ${detail}`);
-      const failed = this.failedAction(actionId, result.data.outcome.refusal.reason, message);
+      const failed = this.failedAction(actionId, result.outcome.refusal.reason, message);
       if (
-        result.data.outcome.refusal.reason === "walk_exit_unsupported" &&
+        result.outcome.refusal.reason === "walk_exit_unsupported" &&
         stableFailureKey !== null &&
         sameRequestGeneration
       ) {
         this.stableActionFailures.delete(stableFailureKey);
         this.stableActionFailures.set(stableFailureKey, {
-          errorCode: result.data.outcome.refusal.reason,
+          errorCode: result.outcome.refusal.reason,
           message,
         });
         if (this.stableActionFailures.size > FREE_PLAY_HARD_FAILURE_LIMIT) {
@@ -745,32 +758,32 @@ class HostedWorldBody implements WorldBody {
       return failed;
     }
 
-    this.acceptObservation(result.data.outcome.observation);
+    this.acceptObservation(result.outcome.observation);
     try {
-      await this.refreshFrame();
+      this.acceptFrame(await this.client.latestFrame());
     } catch {
       // The action is authoritative even if its follow-up screen poll transiently fails.
     }
     const completed: EnvironmentActionResult = {
       schemaVersion: INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,
       actionId,
-      sessionId: this.joined.sessionId,
-      updatedAt: result.data.outcome.observation.observedAt,
+      sessionId: this.sessionId(),
+      updatedAt: result.outcome.observation.observedAt,
       status: "completed",
       acceptedGoalVersion: GOAL_VERSION,
       outcome: {
-        inputsSpent: result.data.outcome.inputsSpent,
-        framesSpent: result.data.outcome.framesSpent,
-        screenChanged: result.data.outcome.screenChanged,
-        replayed: result.data.replayed,
-        bodyGeneration: result.data.bodyGeneration,
-        frame: result.data.frame,
+        inputsSpent: result.outcome.inputsSpent,
+        framesSpent: result.outcome.framesSpent,
+        screenChanged: result.outcome.screenChanged,
+        replayed: result.replayed,
+        bodyGeneration: result.bodyGeneration,
+        frame: result.frame,
         // A composite action's own account of itself, spread flat because the
         // world names these fields the way the local adapter does — so every
         // effect line `free-play-progress` already writes works here unchanged.
         // Dropping it is what made every `advance_dialog` on a hosted world
         // read as "read no new text — the dialog stopped", however much it read.
-        ...result.data.outcome.detail,
+        ...result.outcome.detail,
       },
     };
     this.lastAction = completed;
@@ -786,7 +799,7 @@ class HostedWorldBody implements WorldBody {
     const failed: EnvironmentActionResult = {
       schemaVersion: INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,
       actionId,
-      sessionId: this.joined.sessionId,
+      sessionId: this.sessionId(),
       updatedAt: new Date().toISOString(),
       status: "failed",
       acceptedGoalVersion: GOAL_VERSION,
@@ -804,40 +817,27 @@ class HostedWorldBody implements WorldBody {
     return {
       schemaVersion: 1,
       observationId: `world-observation-${String(this.observationSequence)}`,
-      sessionId: this.joined.sessionId,
+      sessionId: this.sessionId(),
       characterId: CHARACTER_ID,
-      worldId: this.joined.worldId,
+      worldId: this.client.session?.worldId ?? "ended",
       goalVersion: GOAL_VERSION,
       capturedAt: observation?.observedAt ?? this.frame?.capturedAt ?? new Date().toISOString(),
       frame: observation?.frame ?? this.frame?.frame ?? 0,
     };
   }
 
-  private async pollFrame(): Promise<void> {
-    if (this.closed || this.frameObserver === null || this.framePollInFlight) return;
-    this.framePollInFlight = true;
+  private async consumeFrames(): Promise<void> {
     try {
-      await this.refreshFrame();
+      for await (const incoming of this.client.frames()) {
+        if (this.closed || !this.watching || this.frameObserver === null) break;
+        if (!this.acceptFrame(incoming)) continue;
+        void this.pollObservation();
+        this.frameObserver?.();
+      }
     } catch {
-      // A transient failed poll leaves the last good frame visible; the next hardware tick retries.
+      // A transient failed poll leaves the last good frame visible; a later watch retries.
     } finally {
-      this.framePollInFlight = false;
-    }
-  }
-
-  private async refreshFrame(): Promise<void> {
-    const outcome = await callHost(this.socketPath, {
-      operation: "play.frame",
-      token: this.joined.token,
-    });
-    const frame = FrameSchema.safeParse(outcome);
-    if (!frame.success || frame.data.sessionId !== this.joined.sessionId) {
-      this.stopIfEnded(outcome);
-      return;
-    }
-    if (this.acceptFrame(frame.data)) {
-      void this.pollObservation();
-      this.frameObserver?.();
+      this.watching = false;
     }
   }
 
@@ -845,16 +845,12 @@ class HostedWorldBody implements WorldBody {
     if (this.closed || this.observationPollInFlight) return;
     this.observationPollInFlight = true;
     try {
-      const outcome = await callHost(this.socketPath, {
-        operation: "play.observe",
-        token: this.joined.token,
-      });
-      const observation = ObservationSchema.safeParse(outcome);
-      if (!observation.success || observation.data.sessionId !== this.joined.sessionId) {
+      const outcome = await this.client.call("play.observe", {});
+      if (isRefusal(outcome)) {
         this.stopIfEnded(outcome);
         return;
       }
-      this.acceptObservation(observation.data);
+      this.acceptObservation(outcome);
     } catch {
       // Frame polling remains useful when a semantic refresh transiently fails.
     } finally {
@@ -932,9 +928,12 @@ class HostedWorldBody implements WorldBody {
     ) {
       return false;
     }
-    if (this.frame !== undefined && incoming.frame <= this.frame.frame) return false;
-    if (this.frame !== undefined) {
-      this.droppedFrames += Math.max(0, incoming.frame - this.frame.frame - 1);
+    if (
+      this.frame !== undefined &&
+      incoming.bodyGeneration === this.frame.bodyGeneration &&
+      incoming.frame <= this.frame.frame
+    ) {
+      return false;
     }
     this.droppedFrames += incoming.dropped;
     this.frame = incoming;
@@ -966,25 +965,22 @@ class HostedWorldBody implements WorldBody {
     this.stableActionFailures.clear();
   }
 
-  private stopIfEnded(outcome: unknown): void {
-    const refusal = RefusalSchema.safeParse(outcome);
-    if (
-      !refusal.success ||
-      (refusal.data.code !== "session_ended" && refusal.data.code !== "not_your_session")
-    ) {
-      return;
-    }
-    this.stopFramePolling();
+  private stopIfEnded(outcome: Refusal): void {
+    if (outcome.code !== "session_ended" && outcome.code !== "not_your_session") return;
+    this.watching = false;
+    this.stopAudioPolling();
   }
 
-  private stopFramePolling(): void {
-    if (this.frameTimer !== undefined) clearInterval(this.frameTimer);
-    this.frameTimer = undefined;
+  private stopAudioPolling(): void {
     if (this.audioTimer !== undefined) clearInterval(this.audioTimer);
     this.audioTimer = undefined;
     this.audioGeneration = 0;
     this.audioCursor = 0;
     this.audioPackets.length = 0;
+  }
+
+  private sessionId(): string {
+    return this.client.session?.sessionId ?? this.observation?.sessionId ?? "ended";
   }
 }
 
@@ -1019,28 +1015,21 @@ function actionRefusalDetail(refusal: ActionRefusal): string | null {
 }
 
 async function openWatchAudio(
-  socketPath: string,
-  token: string,
+  client: WorldPlayerClient,
   fetchImpl: typeof fetch,
   onUnavailable?: (reason: string) => void,
 ): Promise<WatchAudioSource | undefined> {
   try {
-    const outcome = await callHost(socketPath, {
-      operation: "play.watch",
-      token,
-      input: { visibility: "unlisted" },
-    });
-    const parsed = WatchResultSchema.safeParse(outcome);
-    if (!parsed.success) {
-      const refusal = RefusalSchema.safeParse(outcome);
-      onUnavailable?.(refusal.success ? refusal.data.code : "invalid_watch_response");
+    const outcome = await client.call("play.watch", { visibility: "unlisted" });
+    if (isRefusal(outcome)) {
+      onUnavailable?.(outcome.code);
       return undefined;
     }
-    if (parsed.data.visibility === "off") {
+    if (outcome.visibility === "off") {
       onUnavailable?.("watch_disabled");
       return undefined;
     }
-    const watch = new URL(parsed.data.url);
+    const watch = new URL(outcome.url);
     const watchToken = decodeURIComponent(watch.hash.slice(1));
     if (watchToken.length === 0) {
       onUnavailable?.("invalid_watch_token");
@@ -1053,7 +1042,7 @@ async function openWatchAudio(
   }
 }
 
-function gameIdFor(environmentId: EmbodimentEnvironmentId): string {
+function gameIdFor(environmentId: EmbodimentEnvironmentId): "firered" | "emerald" {
   switch (environmentId) {
     case "pokemon-firered":
       return "firered";
@@ -1195,32 +1184,19 @@ function adapterError(code: string, message: string): EnvironmentAdapterActionEr
   return new EnvironmentAdapterActionError(code, message, false);
 }
 
-function joinRefusal(outcome: unknown): WorldJoinResult {
-  const refusal = RefusalSchema.safeParse(outcome);
-  if (!refusal.success) {
-    return {
-      outcome: "refused",
-      reason: "world_refused",
-      detail: "The world returned an invalid join result",
-    };
+function joinRefusal(refusal: Refusal): WorldJoinResult {
+  if (refusal.code === "world_full") {
+    return { outcome: "refused", reason: "world_full", detail: refusal.message };
   }
-  if (refusal.data.code === "world_full") {
-    return { outcome: "refused", reason: "world_full", detail: refusal.data.message };
+  if (refusal.code === "game_unavailable") {
+    return { outcome: "refused", reason: "region_not_hosted", detail: refusal.message };
   }
-  if (refusal.data.code === "game_unavailable") {
-    return { outcome: "refused", reason: "region_not_hosted", detail: refusal.data.message };
-  }
-  return { outcome: "refused", reason: "world_refused", detail: refusal.data.message };
+  return { outcome: "refused", reason: "world_refused", detail: refusal.message };
 }
 
-function refusalDetail(outcome: unknown, fallback: string): string {
-  const refusal = RefusalSchema.safeParse(outcome);
-  return refusal.success ? `${refusal.data.code}: ${refusal.data.message}` : fallback;
-}
-
-async function bestEffortLeave(socketPath: string, token: string): Promise<void> {
+async function bestEffortLeave(client: WorldPlayerClient): Promise<void> {
   try {
-    await callHost(socketPath, { operation: "world.leave", token });
+    await client.call("world.leave", {});
   } catch {
     // The join is already being refused; cleanup cannot make that result less true.
   }
