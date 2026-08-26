@@ -134,9 +134,10 @@ is the one credential with no environment fallback of any kind.
 The world itself is dialed through `WORLD_ADDRESS`: a unix socket path,
 `tcp://host:port`, or `tls://host:port`. Unset, Clankie uses the host's unix
 socket under `WORLD_STATE_DIR` (default `~/.pokeagent-mmo/world/host.sock`).
-`@pokeagents/world-protocol` is currently pinned to a git SHA of 0.3.0 so the
-shared `WorldPlayerClient` is available; swap that specifier for the published
-npm 0.3.x once it is on the registry.
+`@pokeagents/world-protocol` is currently pinned to git SHA
+`a61b882b012ba99c8773766a1de65c9a5fe5ddaa` of 0.3.0 so the shared
+`WorldPlayerClient` is available; swap that specifier for the published npm
+0.3.x once it is on the registry.
 
 Each player or harness receives a different world credential and therefore a
 different player identity/session. Possessing another local process or sharing

@@ -28,7 +28,7 @@
     "@earendil-works/pi-coding-agent": "0.84.2",
     "@hono/node-server": "2.0.8",
     "@modelcontextprotocol/sdk": "1.29.0",
-    "@pokeagents/world-protocol": "github:Volpestyle/pokeagents#ecbd0daa15b45f97687ca35cc1eee1e867ad6981&path:/packages/world-protocol",
+    "@pokeagents/world-protocol": "github:Volpestyle/pokeagents#a61b882b012ba99c8773766a1de65c9a5fe5ddaa&path:/packages/world-protocol",
     "hono": "4.12.28",
     "imapflow": "1.6.6",
     "nodemailer": "7.0.11",
