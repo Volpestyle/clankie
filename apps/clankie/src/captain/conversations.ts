@@ -102,6 +102,7 @@ export class ConversationStore {
   private readonly chains = new Map<string, Promise<void>>();
   private readonly runs = new Map<string, Promise<boolean>>();
   private readonly runCounts = new Map<string, number>();
+  /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
   private readonly internalRuns = new Map<string, number>();
 
   private readonly root: string;
@@ -374,13 +375,16 @@ export class ConversationStore {
 
     const conversationId = meta.conversationId;
     this.runCounts.set(conversationId, (this.runCounts.get(conversationId) ?? 0) + 1);
+    // Steer only while an autonomous invoke is in flight. A continuation still
+    // sitting on the FIFO must not open the lane — that let a later human send
+    // jump an in-flight human turn (ADR 0091 / ADR 0130).
     const joinLiveInternal = publishOperatorMessage && (this.internalRuns.get(conversationId) ?? 0) > 0;
-    if (!publishOperatorMessage) {
-      this.internalRuns.set(conversationId, (this.internalRuns.get(conversationId) ?? 0) + 1);
-    }
 
     const previous = this.chains.get(conversationId) ?? Promise.resolve();
     const invoke = (): Promise<void> => {
+      if (!publishOperatorMessage) {
+        this.internalRuns.set(conversationId, (this.internalRuns.get(conversationId) ?? 0) + 1);
+      }
       meta.sessionState = "active";
       this.saveMeta(meta);
       return this.runner(

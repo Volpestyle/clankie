@@ -4,6 +4,13 @@ Status: accepted (James, 2026-08-25). Extends
 [ADR 0111](0111-a-console-process-starts-one-conversation.md) and
 [ADR 0124](0124-one-self-has-many-local-threads.md).
 
+## Current status (2026-08-26)
+
+A human send steers into an autonomous turn only while that turn's `invoke()`
+is in flight. A goal or wake merely queued on the FIFO stays FIFO with every
+other pair, including a later human send
+([ADR 0091](0091-a-mid-turn-message-steers-the-turn.md)).
+
 ## Context
 
 Clankie is always on, but a captain session only thinks when something wakes

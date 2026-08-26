@@ -194,6 +194,74 @@ describe("operator conversation context", () => {
     await store.close();
   });
 
+  it("keeps FIFO when a human send arrives while a continuation is only queued", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-conversation-queued-internal-"));
+    roots.push(root);
+    const started: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const store = new ConversationStore(root, async (_conversationId, message) => {
+      started.push(`start:${message}`);
+      if (message === "first") await firstGate;
+      started.push(`end:${message}`);
+    });
+
+    const first = await store.serve({
+      op: "send",
+      schemaVersion: 1,
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: "global-default",
+        surfaceClientId: "test",
+        expectedRevision: 0,
+        message: "first",
+      },
+    });
+    if (first.op !== "send" || first.result.status !== "accepted")
+      throw new Error("first turn was not accepted");
+    await drain();
+    expect(started).toEqual(["start:first"]);
+
+    const internal = store.submitInternal("global-default", "queued-wake");
+    if (internal.status !== "accepted") throw new Error("internal turn was not accepted");
+    await drain();
+    expect(started).toEqual(["start:first"]);
+
+    const second = await store.serve({
+      op: "send",
+      schemaVersion: 1,
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: "global-default",
+        surfaceClientId: "test",
+        expectedRevision: 2,
+        message: "second",
+      },
+    });
+    if (second.op !== "send" || second.result.status !== "accepted")
+      throw new Error("second turn was not accepted");
+    await drain();
+    expect(started).toEqual(["start:first"]);
+
+    releaseFirst();
+    await store.awaitRun(first.result.runId);
+    await store.awaitRun(internal.runId);
+    await store.awaitRun(second.result.runId);
+    expect(started).toEqual([
+      "start:first",
+      "end:first",
+      "start:queued-wake",
+      "end:queued-wake",
+      "start:second",
+      "end:second",
+    ]);
+    await store.close();
+  });
+
   it("streams context, persists it, and fences stale revisions", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-conversation-context-"));
     roots.push(root);
