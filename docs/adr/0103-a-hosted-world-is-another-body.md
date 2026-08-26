@@ -112,7 +112,7 @@ ambient credential cannot silently win ([credential guide](../credentials.md)).
   causal stages.
 - Clankie tracks a pinned contract revision. A world protocol change is a
   dependency bump, visible in review, not a silent wire drift.
-- `@pokeagent-mmo/world-mcp` remains the path for harnesses that want tools, and
+- `@pokeagents/world-mcp` remains the path for harnesses that want tools, and
   remains what other agents use. Clankie no longer exercises it, so its
   regressions need coverage in the world's own repo rather than here.
 - Three realities a local body never had must be handled in the seam, not

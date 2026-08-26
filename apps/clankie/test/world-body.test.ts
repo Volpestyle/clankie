@@ -773,6 +773,33 @@ describe("hosted world body", () => {
     expect(world.requests[0]?.input).toMatchObject({ gameId: "firered" });
   });
 
+  it("maps WorldPlayerConfigError onto existing join refusals", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "clankie-world-config-"));
+    cleanups.push(() => rm(stateDir, { recursive: true, force: true }));
+    const env = await provisionedEnv(stateDir);
+    await expect(
+      joinWorld({
+        environmentId: "pokemon-firered",
+        env: { ...env, WORLD_ADDRESS: "ws://world.example:443" },
+      }),
+    ).resolves.toEqual({
+      outcome: "refused",
+      reason: "world_unreachable",
+      detail: "WORLD_ADDRESS must use tcp://, tls://, or a Unix socket path.",
+    });
+    await expect(
+      joinWorld({
+        environmentId: "pokemon-firered",
+        env,
+        transport: () => Promise.reject(new Error("ECONNREFUSED")),
+      }),
+    ).resolves.toEqual({
+      outcome: "refused",
+      reason: "world_unreachable",
+      detail: "The configured world is unreachable.",
+    });
+  });
+
   it("dials unix, tcp, and tls addresses through WorldPlayerClient", async () => {
     const targets: string[] = [];
     const transport = async (address: { kind: string }, request: { operation: string }) => {

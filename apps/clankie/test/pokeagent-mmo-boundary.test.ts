@@ -10,11 +10,7 @@ const productRoots = ["apps", "integrations", "packages"] as const;
  * player in that world, not its owner, so the contract and transport-free
  * cartridge knowledge are allowed and the host is not.
  */
-const allowedDependencies = new Set([
-  "@pokeagent-mmo/firered",
-  "@pokeagent-mmo/world-mcp",
-  "@pokeagents/world-protocol",
-]);
+const allowedDependencies = new Set(["@pokeagent-mmo/firered", "@pokeagents/world-protocol"]);
 const allowedSourceImports = new Set(["@pokeagent-mmo/firered", "@pokeagents/world-protocol"]);
 const skippedDirectories = new Set(["coverage", "dist", "node_modules", "test"]);
 
@@ -58,7 +54,7 @@ function importedSpecifiers(source: string): readonly string[] {
 }
 
 describe("PokeAgent MMO stays behind its published player boundary", () => {
-  it("depends only on the packaged MCP server or transport-free FireRed knowledge", () => {
+  it("depends only on the pinned world-protocol package or transport-free FireRed knowledge", () => {
     const violations: string[] = [];
     for (const packageRoot of workspacePackages()) {
       const path = join(packageRoot, "package.json");

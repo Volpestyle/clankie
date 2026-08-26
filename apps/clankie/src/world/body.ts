@@ -57,6 +57,7 @@ import {
   defaultWorldStateDir,
   parseWorldAddress,
   WorldPlayerClient,
+  WorldPlayerConfigError,
   worldSocketPath,
   type WorldPlayerTransport,
 } from "@pokeagents/world-protocol/ipc";
@@ -180,7 +181,7 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
     target = resolveWorldTarget(env);
     parseWorldAddress(target);
   } catch (error) {
-    return { outcome: "refused", reason: "world_unreachable", detail: boundedError(error) };
+    return joinConfigRefusal(error);
   }
 
   const client = new WorldPlayerClient({
@@ -200,7 +201,7 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
       harness: "clankie",
     });
   } catch (error) {
-    return { outcome: "refused", reason: "world_unreachable", detail: boundedError(error) };
+    return joinConfigRefusal(error);
   }
   if (isRefusal(joined)) return joinRefusal(joined);
   const missing = REQUIRED_CAPABILITIES.filter((capability) => !client.capabilities.includes(capability));
@@ -218,7 +219,7 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
     observation = await client.call("play.observe", {});
   } catch (error) {
     await bestEffortLeave(client);
-    return { outcome: "refused", reason: "world_unreachable", detail: boundedError(error) };
+    return joinConfigRefusal(error);
   }
   if (isRefusal(observation) || observation.gameId !== joined.gameId) {
     await bestEffortLeave(client);
@@ -1182,6 +1183,13 @@ function sha256(bytes: Uint8Array): string {
 
 function adapterError(code: string, message: string): EnvironmentAdapterActionError {
   return new EnvironmentAdapterActionError(code, message, false);
+}
+
+function joinConfigRefusal(error: unknown): Extract<WorldJoinResult, { outcome: "refused" }> {
+  if (error instanceof WorldPlayerConfigError && error.kind === "missing_credentials") {
+    return { outcome: "refused", reason: "no_credential" };
+  }
+  return { outcome: "refused", reason: "world_unreachable", detail: boundedError(error) };
 }
 
 function joinRefusal(refusal: Refusal): WorldJoinResult {

@@ -22,6 +22,7 @@ import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
 import type { LaneLog } from "./lane-log.ts";
 import { joinWorld, startPlay, stopPlay } from "./play.ts";
+import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 
 /**
  * What the running turn is, as its tools need to see it: the last attachable
@@ -208,17 +209,7 @@ export function captainTools(
         "Availability follows the world's grants — a missing capability is a refusal, not a prompt to retry. " +
         "Not for walking or reading the screen; those stay on the play body.",
       parameters: Type.Object({
-        operation: Type.Optional(
-          StringEnum([
-            "world.session",
-            "world.who",
-            "world.regions",
-            "world.travel",
-            "world.challenge",
-            "world.challenges",
-            "world.answer_challenge",
-          ]),
-        ),
+        operation: Type.Optional(StringEnum(HOSTED_WORLD_MIND_OPERATIONS as [string, ...string[]])),
         destination: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
         acknowledgeOneWay: Type.Optional(Type.Boolean()),
         kind: Type.Optional(StringEnum(["battle", "trade"])),

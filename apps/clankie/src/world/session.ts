@@ -3,21 +3,11 @@
  * playing. Transport, grants, and the bearer stay inside WorldPlayerClient;
  * this is only the attach point.
  */
-import { findOperation, type WorldOperationName } from "@pokeagents/world-protocol";
+import { findOperation } from "@pokeagents/world-protocol";
 import type { WorldBody } from "./body.ts";
+import { HOSTED_WORLD_MIND_OPERATIONS } from "./operations.ts";
 
-/** Multiplayer operations the gameplay mind may ask for. The play loop still owns act/observe/frame. */
-export const HOSTED_WORLD_MIND_OPERATIONS = [
-  "world.session",
-  "world.who",
-  "world.regions",
-  "world.travel",
-  "world.challenge",
-  "world.challenges",
-  "world.answer_challenge",
-] as const satisfies readonly WorldOperationName[];
-
-export type HostedWorldMindOperation = (typeof HOSTED_WORLD_MIND_OPERATIONS)[number];
+export { HOSTED_WORLD_MIND_OPERATIONS, type HostedWorldMindOperation } from "./operations.ts";
 
 const MIND_OPERATIONS = new Set<string>(HOSTED_WORLD_MIND_OPERATIONS);
 
