@@ -9,7 +9,7 @@ Status: accepted (James, 2026-08-26). Extends
 Goal pursuit runs across many autonomous continuations and self-wakes. The
 conversation's pi trees and lane logs record what Clankie said and did, but
 retention prunes conversation directories, and neither trail records what he
-*decided* and why while working a goal — which approach he picked, what he
+_decided_ and why while working a goal — which approach he picked, what he
 ruled out, what he discarded. A woken turn re-derives choices the last turn
 already made, and the owner auditing a finished goal has only the transcript,
 if it still exists.
