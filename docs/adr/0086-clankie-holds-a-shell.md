@@ -5,7 +5,9 @@ Status: accepted (James, 2026-08-09). Applies with
 boundary, as amended by
 [ADR 0105](0105-voice-is-as-capable-as-the-room-it-is-in.md). The "Discord voice
 never receives system tools" sentence below is historical: the gate is the
-actor, and a granted turn runs one-shot.
+actor, and a granted turn runs one-shot. Further amended by
+[ADR 0133](0133-a-machine-grant-belongs-to-a-discord-lane.md), which lets an
+explicitly trusted private DM or guild room own a durable tool-bearing lane.
 
 ## Context
 

@@ -66,6 +66,8 @@ export function resolveDiscordSettings(
   takeList("approvalRoleIds", "DISCORD_APPROVAL_ROLE_IDS");
   takeString("ownerUserId", "DISCORD_OWNER_USER_ID");
   takeList("systemActorUserIds", "DISCORD_SYSTEM_ACTOR_USER_IDS");
+  takeList("systemActorGuildIds", "DISCORD_SYSTEM_ACTOR_GUILD_IDS");
+  takeList("systemActorChannelIds", "DISCORD_SYSTEM_ACTOR_CHANNEL_IDS");
 
   takeBoolean("textIngressEnabled", "DISCORD_TEXT_INGRESS_ENABLED");
   takeList("ingressGuildIds", "DISCORD_INGRESS_GUILD_IDS");
@@ -163,6 +165,8 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   putList("DISCORD_APPROVAL_ROLE_IDS", settings.approvalRoleIds);
   put("DISCORD_OWNER_USER_ID", settings.ownerUserId);
   putList("DISCORD_SYSTEM_ACTOR_USER_IDS", settings.systemActorUserIds);
+  putList("DISCORD_SYSTEM_ACTOR_GUILD_IDS", settings.systemActorGuildIds);
+  putList("DISCORD_SYSTEM_ACTOR_CHANNEL_IDS", settings.systemActorChannelIds);
 
   if (settings.textIngressEnabled) env["DISCORD_TEXT_INGRESS_ENABLED"] = "true";
   putList("DISCORD_INGRESS_GUILD_IDS", settings.ingressGuildIds);

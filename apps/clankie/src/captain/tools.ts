@@ -73,10 +73,9 @@ const json = toolJson;
 /**
  * The captain's authored tool bank. Coding tools (read/bash/edit/write) are
  * pi built-ins and are not defined here. They attach to the operator console
- * and to Discord text turns whose actor is on `systemActorUserIds`. Herdr
- * leadership goes through bash + the herdr skill; only the asynchronous
- * completion wake has a captain tool because a shell wait cannot resume a
- * finished model turn.
+ * and to Discord turns authorized by the machine-access policy. Herdr leadership
+ * goes through bash + the herdr skill; only the asynchronous completion wake
+ * has a captain tool because a shell wait cannot resume a finished model turn.
  */
 export function captainTools(
   deps: CaptainDeps,

@@ -3,22 +3,27 @@
 // fullscreen face to the one healthy clankie service.
 import { resolve } from "node:path";
 import { ensureCaptainCredential, ensureOperatorCredential } from "@clankie/credential-broker";
-import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
+import { discordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
 import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "./headless-captain.ts";
 import { startOne } from "./services.ts";
 import { parseDirectConversation } from "../src/session/operator-conversations.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 
-// Every spawned service fills its own env from the settings store at startup,
-// which is enough for settings a *child* consumes. The activity tunnel is the
-// exception: the launcher itself decides whether to run it, what to name it,
-// and which hostname to probe, so an unfilled env here means a configured
-// tunnel silently reports "not configured; activity stays local" and no tunnel
-// is ever started. That is exactly what happened on 2026-08-02 — the settings
-// were correct, the README described this path, and the launcher could not see
-// either value. Fill before any service registry read.
-applyDiscordSettingsToEnvironment((await new SettingsStore().load()).discord);
+// Every child fills its own env from settings. The launcher consumes only the
+// active-body switches and activity tunnel, so project just those; copying the
+// whole settings tree into child env would turn stored per-turn authorization
+// into an immutable environment override until restart.
+const launcherDiscordEnvironment = discordSettingsToEnvironment((await new SettingsStore().load()).discord);
+for (const name of [
+  "DISCORD_ACTIVE_BODY",
+  "DISCORD_USER_SESSION_ENABLED",
+  "CLANKIE_ACTIVITY_TUNNEL_NAME",
+  "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME",
+] as const) {
+  const configured = launcherDiscordEnvironment[name];
+  if ((process.env[name]?.length ?? 0) === 0 && configured !== undefined) process.env[name] = configured;
+}
 let direct;
 try {
   direct = parseDirectConversation(process.argv.slice(2));

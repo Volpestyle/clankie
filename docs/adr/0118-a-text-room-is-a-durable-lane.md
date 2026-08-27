@@ -10,7 +10,9 @@ evidence lives) and [ADR 0085](0085-a-picture-he-makes-is-something-he-says.md) 
 message carries the words and the picture). Narrowed by
 [ADR 0124](0124-one-self-has-many-local-threads.md): the active voice room owns
 text-only input from its attached chat, so that delivery does not also start a
-text-lane turn.
+text-lane turn. Amended by
+[ADR 0133](0133-a-machine-grant-belongs-to-a-discord-lane.md): explicitly
+trusted private DMs and guild rooms carry a separate durable system lane.
 
 ## Context
 

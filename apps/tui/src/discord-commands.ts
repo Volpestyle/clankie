@@ -9,7 +9,7 @@ import type { RedactedCredential } from "@clankie/credential-broker";
 import type { DiscordUserSessionOptIn } from "@clankie/protocol";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
-export interface DiscordUserSessionOptInClient {
+interface DiscordUserSessionOptInClient {
   inspectDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined>;
   recordDiscordUserSessionOptIn(request: {
     schemaVersion: 1;
@@ -118,7 +118,7 @@ export function discordBotInviteUrl(applicationId: string): string {
   );
 }
 
-export const DISCORD_BOT_PRIMER = [
+const DISCORD_BOT_PRIMER = [
   "1. Open https://discord.com/developers/applications and click New Application.",
   "2. Bot → Add Bot → Reset Token. Paste that token under Tokens.",
   "3. Privileged Gateway Intents: enable Message Content (required for text).",
@@ -139,6 +139,7 @@ function validateSnowflake(optional: boolean) {
 }
 
 function validateSnowflakeList(value: string): string | undefined {
+  if (value.trim().toLowerCase() === "none") return undefined;
   const items = splitList(value);
   if (items.some((item) => !SNOWFLAKE.test(item))) return "Every entry must be a numeric Discord id.";
   return undefined;
@@ -188,9 +189,11 @@ export function describeRedactedCredential(redacted: RedactedCredential): string
   return "wellknown";
 }
 
-/** Typed input wins; blank keeps what was already configured. */
+/** Typed input wins; blank keeps what was already configured; `none` clears it explicitly. */
 export function resolveIdList(typed: string, existing: readonly string[]): string[] {
-  return typed.trim().length > 0 ? splitList(typed) : [...existing];
+  const value = typed.trim();
+  if (value.toLowerCase() === "none") return [];
+  return value.length > 0 ? splitList(value) : [...existing];
 }
 
 /**
@@ -256,6 +259,8 @@ function describeSettings(settings: DiscordSettings): string[] {
     showList("approval roles", settings.approvalRoleIds),
     show("owner user id", settings.ownerUserId),
     showList("system actors", settings.systemActorUserIds),
+    showList("system guilds", settings.systemActorGuildIds),
+    showList("system channels", settings.systemActorChannelIds),
     "",
     `text ingress: ${settings.textIngressEnabled ? "enabled" : "disabled"}`,
     showList("  ingress guilds", settings.ingressGuildIds),
@@ -327,9 +332,9 @@ export async function runDiscordWizard(
           {
             value: "system",
             label: "Machine control from Discord",
-            hint: "who may ask him to drive herdr / the shell",
+            hint: "trusted DMs, servers, and rooms",
             description:
-              "Discord users whose text turns get bash, files, and herdr. Empty means nobody — Discord stays social. The operator console is always privileged.",
+              "Named users get private operator DMs and one-shot access elsewhere; trusted server rooms share a durable operator lane.",
           },
           {
             value: "ingress",
@@ -520,18 +525,42 @@ async function editSystemActors(shell: ClankieFaceShell, services: DiscordComman
 
   const typed = await flow.readText({
     message:
-      "Discord user ids who may ask him to control this machine (comma separated) — bash, files, herdr. Blank keeps the current list. Empty list means nobody; Discord stays social.",
+      "Discord user ids with machine access (comma separated) — their official-bot DMs are durable; shared-room turns stay one-shot. Blank keeps, `none` clears.",
     placeholder: current.systemActorUserIds.join(",") || current.ownerUserId || "your Discord user id",
     validate: validateSnowflakeList,
   });
   if (typed === undefined) return;
 
   const systemActorUserIds = resolveIdList(typed, current.systemActorUserIds);
-  await apply(services, (discord) => ({ ...discord, systemActorUserIds }));
+  const guilds = await flow.readText({
+    message:
+      "Server ids whose admitted members all get durable machine access (comma separated). Blank keeps, `none` clears.",
+    placeholder: current.systemActorGuildIds.join(",") || "private server id",
+    validate: validateSnowflakeList,
+  });
+  if (guilds === undefined) return;
+
+  const systemActorGuildIds = resolveIdList(guilds, current.systemActorGuildIds);
+  const channels = await flow.readText({
+    message:
+      "Optional channel ids inside those servers — blank keeps the current refinement; `none` trusts every admitted channel.",
+    placeholder: current.systemActorChannelIds.join(",") || "blank = every admitted channel",
+    validate: validateSnowflakeList,
+  });
+  if (channels === undefined) return;
+
+  const systemActorChannelIds =
+    systemActorGuildIds.length === 0 ? [] : resolveIdList(channels, current.systemActorChannelIds);
+  await apply(services, (discord) => ({
+    ...discord,
+    systemActorUserIds,
+    systemActorGuildIds,
+    systemActorChannelIds,
+  }));
   flow.renderLine(
-    systemActorUserIds.length === 0
-      ? "Saved machine-control allowlist (empty — Discord stays social)."
-      : `Saved machine-control allowlist (${String(systemActorUserIds.length)} user${systemActorUserIds.length === 1 ? "" : "s"}).`,
+    systemActorUserIds.length === 0 && systemActorGuildIds.length === 0
+      ? "Saved machine-control grants (empty — Discord stays social)."
+      : `Saved machine-control grants (${String(systemActorUserIds.length)} user${systemActorUserIds.length === 1 ? "" : "s"}, ${String(systemActorGuildIds.length)} server${systemActorGuildIds.length === 1 ? "" : "s"}).`,
     "success",
   );
 }

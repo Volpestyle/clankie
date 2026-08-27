@@ -74,6 +74,10 @@ loadRepoEnvFile();
 
 // Fill the Discord environment from settings.json before anything reads it;
 // existing environment entries win, so a deliberate override still overrides.
+// Keep the pre-projection environment for captain authorization: those grants
+// reload from settings on every turn, and values copied out of the same file at
+// boot are not real environment overrides.
+const captainDiscordEnvironment = { ...process.env };
 const settingsStore = new SettingsStore();
 const startupSettings = await settingsStore.load();
 const settingsFilledNames = [
@@ -347,7 +351,12 @@ const captain = createCaptain(
     },
     resolveDiscordAttachments: createDiscordAttachmentResolver(),
   },
-  { repoRoot, stateDir: join(stateRoot, "captain"), settings: settingsStore },
+  {
+    repoRoot,
+    stateDir: join(stateRoot, "captain"),
+    settings: settingsStore,
+    discordEnvironment: captainDiscordEnvironment,
+  },
 );
 
 const clankie = await createClankieApp({

@@ -33,9 +33,19 @@ export const DiscordSettingsSchema = z
      * Discord stays social. The operator console is always privileged and
      * does not consult this list. Distinct from `ownerUserId` (DM policy)
      * and `ambientUserIds` (slash-command tier) so those policies can move
-     * without handing out a shell.
+     * without handing out a shell. An official-bot DM with one of these users
+     * is a private durable operator lane; their turns in an ordinary shared
+     * room remain one-shot.
      */
     systemActorUserIds: SnowflakeListSchema,
+    /**
+     * Guilds whose admitted members share durable machine access. This is an
+     * explicit remote-shell grant to every human the Discord gateway admits in
+     * the selected rooms; it never inherits from the text/voice ingress lists.
+     */
+    systemActorGuildIds: SnowflakeListSchema,
+    /** Optional room refinement below `systemActorGuildIds`; empty means every admitted room in those guilds. */
+    systemActorChannelIds: SnowflakeListSchema,
 
     textIngressEnabled: z.boolean().default(false),
     ingressGuildIds: SnowflakeListSchema,

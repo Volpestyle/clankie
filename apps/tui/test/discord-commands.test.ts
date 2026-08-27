@@ -51,6 +51,10 @@ describe("empty allowlist guard", () => {
     expect(resolveIdList("", channels)).toEqual(channels);
     expect(resolveIdList("333333333333333333", channels)).toEqual(["333333333333333333"]);
   });
+
+  it("requires an explicit word to clear a security allowlist", () => {
+    expect(resolveIdList("none", channels)).toEqual([]);
+  });
 });
 
 describe("Discord server allowlist resolution", () => {

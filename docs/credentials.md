@@ -58,6 +58,20 @@ Use the TUI's direct `/discord` flow. `/auth` is for model/vendor credentials;
 using its advanced custom-provider entry for Discord reaches the same broker but
 skips the Discord-specific setup and checks.
 
+Machine access is a separate grant from ingress. Under `/discord` → **Machine
+control from Discord**:
+
+- named users get durable machine access in their official-bot DMs and
+  one-shot access in ordinary shared rooms;
+- named servers grant every admitted member a shared durable machine session,
+  optionally refined to named channels; and
+- empty grant lists keep Discord social.
+
+These tools run unsandboxed as the Clankie service user. A server grant is
+appropriate only when every admitted member in its selected rooms may control
+that machine. Removing a grant takes effect for the next message; it does not
+cancel work already running.
+
 ### Official bot
 
 1. Create a Discord application and bot, enable the required intents, and copy

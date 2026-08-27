@@ -42,7 +42,7 @@ import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import type { CaptainPort } from "./port.ts";
 import { connectionTools } from "./connect-tools.ts";
-import { discordTurnHasSystemTools, discordTurnUsesDurableSession } from "./system-authority.ts";
+import { planDiscordTurnSession } from "./system-authority.ts";
 import { browserExtension, captainTools, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
 import {
   contextTokenCount,
@@ -190,6 +190,8 @@ export interface CaptainOptions {
   readonly stateDir: string;
   /** Settings store; defaults to the owner-authored file. Reloaded per turn. */
   readonly settings?: SettingsStore;
+  /** Real process-level overrides captured before stored settings are projected into child env. */
+  readonly discordEnvironment?: NodeJS.ProcessEnv;
 }
 
 interface LaneSession {
@@ -332,12 +334,12 @@ export async function runOneShotDiscordTurn(
 
 /**
  * The captain on pi. Sessions are pi's JSONL trees throughout: continuing ones
- * for operator conversations and voice channels, and a fresh tree per turn for
- * bounded Discord text turns and privileged one-shots. Nothing carries forward
- * out of a one-shot — the channel history arrives with each request — but the
- * tree it wrote stays, because that is the only record of the tools it ran
- * (ADR 0107). The persona still comes from owner-authored settings, never from
- * the caller.
+ * for operator conversations and durable Discord lanes, and a fresh tree for
+ * every actor-level system grant in a shared room. Nothing carries forward out
+ * of a one-shot — the bounded channel history arrives with each request — but
+ * its tree stays because that is the only record of the tools it ran (ADR
+ * 0107). The persona still comes from owner-authored settings, never from the
+ * caller.
  */
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
@@ -362,8 +364,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const reach = systemTools
       ? [
           "",
-          "# This turn",
-          "You have a shell and filesystem tools this turn. `herdr` talks to the local socket from this service. When a turn names your herdr pane, you have joined that session: the agents in `<herdr_session>` are yours to lead, route, and harvest. When it names none, you are on the socket only. Never run bare `herdr-lead` from this shell — that starts a TUI in-process and hangs.",
+          "# Machine access",
+          "You have shell and filesystem tools in this authorized context. `herdr` talks to the local socket from this service. When a turn names your herdr pane, you have joined that session: the agents in `<herdr_session>` are yours to lead, route, and harvest. When it names none, you are on the socket only. Never run bare `herdr-lead` from this shell — that starts a TUI in-process and hangs.",
         ].join("\n")
       : [
           "",
@@ -433,12 +435,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       sessionManager,
       settingsManager: piSettings,
       // Coding tools (read/bash/edit/write) run unsandboxed as the service
-      // user. The operator console always has them. A Discord turn — text or
-      // voice — gets them only when the trigger actor is on
-      // `systemActorUserIds` (ADR 0105), and only on a one-shot session, so a
-      // grant never outlives the speaker who earned it on the shared voice
-      // lane. A tools list is a boundary; the framing around untrusted channel
-      // history is not.
+      // user. The operator console always has them. Discord gets them only from
+      // the authenticated authority plan: per-user grants stay one-shot in
+      // shared rooms, while private owner DMs and explicitly trusted guild
+      // lanes may bind them durably. A tools list is a boundary; prompt framing
+      // around untrusted channel history is not.
       ...(systemTools ? {} : { noTools: "builtin" as const }),
     });
     await session.bindExtensions({ mode: "print" });
@@ -826,26 +827,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   return {
     async submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult> {
-      // Whether the lane is already live decides what he needs to be told, so
-      // it is read before the prompt is built rather than after. A lane resumed
-      // from disk after a restart reads as cold and gets one redundant backlog,
-      // which costs a duplicated paragraph exactly once per channel per boot.
-      const sessionKey = discordTurnSessionKey(request);
-      const heard = await normalizeDiscordTurn(request, deps, {
-        carriesHistory: sessions.has(sessionKey),
-      });
-      const { settings: discord } = resolveDiscordSettings((await settings()).discord);
-      const systemTools = discordTurnHasSystemTools({
-        lane: heard.lane,
+      const { settings: discord } = resolveDiscordSettings(
+        (await settings()).discord,
+        options.discordEnvironment,
+      );
+      const plan = planDiscordTurnSession({
+        baseSessionKey: discordTurnSessionKey(request),
+        durable: true,
         actorId: request.trigger.actorId,
-        systemActorUserIds: discord.systemActorUserIds,
+        ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
+        channelId: request.trigger.channelId,
+        transportKind: request.identity.transportKind,
+        settings: discord,
       });
-      // A privileged turn leaves its shared lane for a one-shot of its own, so
-      // the tools it was granted cannot answer to whoever speaks next. Every
-      // other turn, text or voice, continues the room's durable lane.
+      // Whether this exact authority lane is already live decides what he needs
+      // to be told. A one-shot never owns history, even when the social lane in
+      // the same room is warm. A lane resumed after restart reads as cold and
+      // gets one redundant bounded backlog once per boot.
+      const heard = await normalizeDiscordTurn(request, deps, {
+        carriesHistory: plan.durable && sessions.has(plan.sessionKey),
+      });
       const normalized: NormalizedDiscordTurn = {
         ...heard,
-        durable: discordTurnUsesDurableSession({ durable: heard.durable, systemTools }),
+        sessionKey: plan.sessionKey,
+        durable: plan.durable,
       };
       if (!normalized.durable) {
         // One-shot for context, durable for evidence: a fresh session per turn
@@ -861,7 +866,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             options.repoRoot,
             join(options.stateDir, "turns", laneKey(normalized.lane, normalized.targetId)),
           ),
-          systemTools,
+          plan.systemTools,
           options.repoRoot,
         );
         return runDiscordTurn(lane, normalized, request.deliveryId);
@@ -877,7 +882,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           normalized.lane === "discord_voice" ? "voice" : "rooms",
           encodeURIComponent(normalized.sessionKey),
         ),
-        false,
+        plan.systemTools,
         options.repoRoot,
       );
       return runDiscordTurn(lane, normalized, request.deliveryId);

@@ -127,12 +127,16 @@ the full picture — what each store holds, who may read it, and what bounds it.
 ## Where things run
 
 - **Captain tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
-  attach to the operator console and to Discord turns — text or voice — whose
-  trigger actor is on `discord.systemActorUserIds`
+  attach to the operator console and to Discord turns authorized by the
+  machine-control grants
   ([ADR 0095](adr/0095-discord-system-actors.md),
-  [ADR 0105](adr/0105-voice-is-as-capable-as-the-room-it-is-in.md)). A
-  privileged turn always runs on a one-shot session, so the grant never
-  outlives the actor who earned it on the room's shared lane. They
+  [ADR 0105](adr/0105-voice-is-as-capable-as-the-room-it-is-in.md),
+  [ADR 0133](adr/0133-a-machine-grant-belongs-to-a-discord-lane.md)). An
+  individually granted actor gets a one-shot tool-bearing turn in shared rooms
+  and a durable tool-bearing lane in an official-bot DM. Explicitly trusted
+  guilds, optionally narrowed to channels, give every admitted member the same
+  durable tool-bearing lane. Social and system histories have separate session
+  keys, so revocation routes the next message away from the old tool bank. They
   land in the conversation's workspace — the directory a workspace-scoped
   operator conversation names, this repository for every other lane
   ([ADR 0104](adr/0104-clankie-works-where-you-launched-him.md)). Voice join/leave
@@ -228,8 +232,10 @@ the full picture — what each store holds, who may read it, and what bounds it.
   [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md)).
   `/discord` Active body picks which process is the mouth; the launcher
   starts only that one ([ADR 0048](adr/0048-discord-user-session-transport.md)).
-  Who may ask him to drive this machine from Discord is
-  `discord.systemActorUserIds` ([ADR 0095](adr/0095-discord-system-actors.md)).
+  Who may ask him to drive this machine from Discord is configured under
+  `discord.systemActorUserIds`, `systemActorGuildIds`, and
+  `systemActorChannelIds`
+  ([ADR 0133](adr/0133-a-machine-grant-belongs-to-a-discord-lane.md)).
 
 ## Native media plane
 

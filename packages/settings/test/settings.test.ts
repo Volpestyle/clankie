@@ -160,22 +160,42 @@ describe("discord settings resolution", () => {
     expect(env["DISCORD_VOICE_ENABLED"]).toBeUndefined();
   });
 
-  it("carries the Discord system-actor allowlist and lets the environment override it", () => {
-    expect(DiscordSettingsSchema.parse({}).systemActorUserIds).toEqual([]);
+  it("carries Discord machine grants and lets the environment override them", () => {
+    expect(DiscordSettingsSchema.parse({})).toMatchObject({
+      systemActorUserIds: [],
+      systemActorGuildIds: [],
+      systemActorChannelIds: [],
+    });
     expect(discordSettingsToEnvironment(stored)["DISCORD_SYSTEM_ACTOR_USER_IDS"]).toBeUndefined();
 
     const allowlisted = DiscordSettingsSchema.parse({
       systemActorUserIds: ["555555555555555555"],
+      systemActorGuildIds: ["666666666666666666"],
+      systemActorChannelIds: ["777777777777777777"],
     });
-    expect(discordSettingsToEnvironment(allowlisted)["DISCORD_SYSTEM_ACTOR_USER_IDS"]).toBe(
-      "555555555555555555",
-    );
+    expect(discordSettingsToEnvironment(allowlisted)).toMatchObject({
+      DISCORD_SYSTEM_ACTOR_USER_IDS: "555555555555555555",
+      DISCORD_SYSTEM_ACTOR_GUILD_IDS: "666666666666666666",
+      DISCORD_SYSTEM_ACTOR_CHANNEL_IDS: "777777777777777777",
+    });
 
     const overridden = resolveDiscordSettings(allowlisted, {
       DISCORD_SYSTEM_ACTOR_USER_IDS: "111111111111111111,222222222222222222",
+      DISCORD_SYSTEM_ACTOR_GUILD_IDS: "333333333333333333",
+      DISCORD_SYSTEM_ACTOR_CHANNEL_IDS: "444444444444444444",
     } as NodeJS.ProcessEnv);
-    expect(overridden.settings.systemActorUserIds).toEqual(["111111111111111111", "222222222222222222"]);
-    expect(overridden.overriddenByEnvironment).toContain("DISCORD_SYSTEM_ACTOR_USER_IDS");
+    expect(overridden.settings).toMatchObject({
+      systemActorUserIds: ["111111111111111111", "222222222222222222"],
+      systemActorGuildIds: ["333333333333333333"],
+      systemActorChannelIds: ["444444444444444444"],
+    });
+    expect(overridden.overriddenByEnvironment).toEqual(
+      expect.arrayContaining([
+        "DISCORD_SYSTEM_ACTOR_USER_IDS",
+        "DISCORD_SYSTEM_ACTOR_GUILD_IDS",
+        "DISCORD_SYSTEM_ACTOR_CHANNEL_IDS",
+      ]),
+    );
   });
 
   it("defaults the active body to the official bot and can switch to the lab body", () => {

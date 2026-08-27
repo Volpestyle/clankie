@@ -1,75 +1,115 @@
 import { describe, expect, it } from "vitest";
-import { discordTurnHasSystemTools, discordTurnUsesDurableSession } from "../src/captain/system-authority.ts";
+import { planDiscordTurnSession } from "../src/captain/system-authority.ts";
 
 const ACTOR = "555555555555555555";
+const GUILD = "666666666666666666";
+const CHANNEL = "777777777777777777";
+const BASE = `discord:clankie:discord:${GUILD}:${CHANNEL}`;
 
-describe("discordTurnHasSystemTools", () => {
-  it("grants a Discord text turn only when the trigger actor is allowlisted", () => {
-    expect(
-      discordTurnHasSystemTools({
-        lane: "discord_presence",
-        actorId: ACTOR,
-        systemActorUserIds: [ACTOR],
-      }),
-    ).toBe(true);
-    expect(
-      discordTurnHasSystemTools({
-        lane: "discord_presence",
-        actorId: "111111111111111111",
-        systemActorUserIds: [ACTOR],
-      }),
-    ).toBe(false);
+const settings = (
+  overrides: Partial<{
+    systemActorUserIds: string[];
+    systemActorGuildIds: string[];
+    systemActorChannelIds: string[];
+  }> = {},
+) => ({
+  systemActorUserIds: [],
+  systemActorGuildIds: [],
+  systemActorChannelIds: [],
+  ...overrides,
+});
+
+describe("Discord turn authority", () => {
+  it("keeps an ungranted room on its durable social lane", () => {
+    expect(plan()).toEqual({
+      kind: "social",
+      durable: true,
+      systemTools: false,
+      sessionKey: BASE,
+    });
   });
 
-  it("denies everyone when the allowlist is empty", () => {
-    expect(
-      discordTurnHasSystemTools({
-        lane: "discord_presence",
-        actorId: ACTOR,
-        systemActorUserIds: [],
-      }),
-    ).toBe(false);
+  it("keeps an individually granted actor one-shot inside a shared room", () => {
+    expect(plan({ settings: settings({ systemActorUserIds: [ACTOR] }) })).toEqual({
+      kind: "system_turn",
+      durable: false,
+      systemTools: true,
+      sessionKey: BASE,
+    });
   });
 
-  it("grants voice on the same allowlist, and to nobody else in the call", () => {
-    expect(
-      discordTurnHasSystemTools({
-        lane: "discord_voice",
-        actorId: ACTOR,
-        systemActorUserIds: [ACTOR],
-      }),
-    ).toBe(true);
-    // Another speaker in the same channel earns nothing from the first's grant.
-    expect(
-      discordTurnHasSystemTools({
-        lane: "discord_voice",
-        actorId: "111111111111111111",
-        systemActorUserIds: [ACTOR],
-      }),
-    ).toBe(false);
-    expect(discordTurnHasSystemTools({ lane: "discord_voice", actorId: ACTOR, systemActorUserIds: [] })).toBe(
-      false,
+  it("gives an individually granted actor a separate durable official-bot DM", () => {
+    const input = {
+      baseSessionKey: "discord:clankie:discord:dm:dm-1",
+      actorId: ACTOR,
+      channelId: "dm-1",
+      settings: settings({ systemActorUserIds: [ACTOR] }),
+    };
+    expect(planDiscordTurnSession({ ...input, durable: true, transportKind: "bot" })).toEqual({
+      kind: "system_lane",
+      durable: true,
+      systemTools: true,
+      sessionKey: `${input.baseSessionKey}:authority:system`,
+      grant: "dm_user",
+    });
+    // The lab user body can observe group DMs, so actor identity alone cannot
+    // prove that everyone sharing the lane has the same grant.
+    expect(planDiscordTurnSession({ ...input, durable: true, transportKind: "user_session" }).kind).toBe(
+      "system_turn",
     );
   });
 
-  it("does not treat the operator or gameplay lanes as a Discord grant", () => {
-    // The console is privileged by being the console, not by this list.
-    for (const lane of ["operator", "gameplay"] as const) {
-      expect(discordTurnHasSystemTools({ lane, actorId: ACTOR, systemActorUserIds: [ACTOR] })).toBe(false);
-    }
+  it("grants every actor in a trusted guild room one durable system lane", () => {
+    const trusted = settings({ systemActorGuildIds: [GUILD] });
+    const first = plan({ settings: trusted });
+    const second = plan({ actorId: "111111111111111111", settings: trusted });
+    expect(first).toMatchObject({
+      kind: "system_lane",
+      durable: true,
+      systemTools: true,
+      grant: "guild",
+    });
+    expect(second).toEqual(first);
+    expect(first.sessionKey).toBe(`${BASE}:authority:system`);
+  });
+
+  it("uses the optional channel list as refinement below a trusted guild", () => {
+    const trusted = settings({
+      systemActorGuildIds: [GUILD],
+      systemActorChannelIds: [CHANNEL],
+    });
+    expect(plan({ settings: trusted }).kind).toBe("system_lane");
+    expect(plan({ channelId: "888888888888888888", settings: trusted }).kind).toBe("social");
+    expect(plan({ guildId: "999999999999999999", settings: trusted }).kind).toBe("social");
+  });
+
+  it("never makes a source-declared one-shot durable", () => {
+    expect(plan({ durable: false, settings: settings({ systemActorGuildIds: [GUILD] }) })).toMatchObject({
+      kind: "system_turn",
+      durable: false,
+      systemTools: true,
+    });
+  });
+
+  it("routes the next message away from a revoked tool-bearing lane", () => {
+    const granted = plan({ settings: settings({ systemActorGuildIds: [GUILD] }) });
+    const revoked = plan();
+    expect(granted.sessionKey).not.toBe(revoked.sessionKey);
+    expect(revoked).toMatchObject({ kind: "social", systemTools: false });
   });
 });
 
-describe("discordTurnUsesDurableSession", () => {
-  it("takes a privileged turn off the shared voice session", () => {
-    // The grant must not outlive the speaker who earned it: builtins bound to
-    // the channel's durable session would still be there for whoever talks next.
-    expect(discordTurnUsesDurableSession({ durable: true, systemTools: true })).toBe(false);
-    expect(discordTurnUsesDurableSession({ durable: true, systemTools: false })).toBe(true);
+function plan(
+  overrides: Partial<Parameters<typeof planDiscordTurnSession>[0]> = {},
+): ReturnType<typeof planDiscordTurnSession> {
+  return planDiscordTurnSession({
+    baseSessionKey: BASE,
+    durable: true,
+    actorId: ACTOR,
+    guildId: GUILD,
+    channelId: CHANNEL,
+    transportKind: "bot",
+    settings: settings(),
+    ...overrides,
   });
-
-  it("leaves one-shot text turns one-shot either way", () => {
-    expect(discordTurnUsesDurableSession({ durable: false, systemTools: true })).toBe(false);
-    expect(discordTurnUsesDurableSession({ durable: false, systemTools: false })).toBe(false);
-  });
-});
+}

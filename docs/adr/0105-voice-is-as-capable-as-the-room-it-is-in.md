@@ -2,7 +2,9 @@
 
 Status: accepted (James, 2026-08-16). Amends
 [ADR 0095](0095-discord-system-actors.md), which weighed this exact grant and
-rejected it for a precondition this record supplies.
+rejected it for a precondition this record supplies. Amended by
+[ADR 0133](0133-a-machine-grant-belongs-to-a-discord-lane.md): a whole trusted
+guild room may now own the durable tool-bearing session.
 
 ## Context
 

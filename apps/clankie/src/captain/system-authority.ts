@@ -1,40 +1,85 @@
-import type { CaptainSessionLaneV2 } from "@clankie/protocol";
+import type { DiscordSettings } from "@clankie/settings";
 
 /**
- * Whether this Discord turn may use the operator's machine tools (bash,
- * read, write, edit — and therefore herdr).
- *
- * The operator console never consults this: it is already the privileged
- * seat. Text and voice both key on the trigger actor, which is the whole
- * authority — a tools list is a boundary; the prompt around untrusted channel
- * history is not. Both actor ids are Discord-gateway authenticated: a text
- * turn's from the message author, a voice turn's from the per-user audio
- * stream that produced the transcript, never inferred from the audio itself.
- *
- * Gameplay is not a room anyone talks to him from, so it never grants.
+ * The complete authority/session decision for one authenticated Discord turn.
+ * Literal fields make the unsafe state (durable shared session carrying a
+ * per-user grant) unrepresentable.
  */
-export function discordTurnHasSystemTools(input: {
-  readonly lane: CaptainSessionLaneV2;
-  readonly actorId: string;
-  readonly systemActorUserIds: readonly string[];
-}): boolean {
-  if (input.lane !== "discord_presence" && input.lane !== "discord_voice") return false;
-  return input.systemActorUserIds.includes(input.actorId);
-}
+export type DiscordTurnSessionPlan =
+  | {
+      readonly kind: "social";
+      readonly durable: boolean;
+      readonly systemTools: false;
+      readonly sessionKey: string;
+    }
+  | {
+      readonly kind: "system_turn";
+      readonly durable: false;
+      readonly systemTools: true;
+      readonly sessionKey: string;
+    }
+  | {
+      readonly kind: "system_lane";
+      readonly durable: true;
+      readonly systemTools: true;
+      readonly sessionKey: string;
+      readonly grant: "dm_user" | "guild";
+    };
+
+type DiscordMachineSettings = Pick<
+  DiscordSettings,
+  "systemActorUserIds" | "systemActorGuildIds" | "systemActorChannelIds"
+>;
 
 /**
- * Whether a turn runs on its lane's shared durable session.
+ * Bind machine tools either to one authenticated actor's turn or to a lane
+ * whose entire admitted population has the same grant.
  *
- * Voice keeps one durable session per channel, shared by every speaker in it.
- * Builtins are bound when that session is built, so granting them for an
- * allowlisted speaker would leave them attached to the session for whoever
- * talks next — the grant would outlive the actor who earned it. A privileged
- * turn therefore always runs one-shot, exactly as a privileged text turn
- * already does: the tools last one turn and answer to one authenticated actor.
+ * Official bots cannot participate in group DMs, so an allowlisted user's bot
+ * DM is private enough to own a durable tool bank. The lab user transport can
+ * observe group DMs and therefore stays one-shot. A trusted guild grant is
+ * intentionally broader: every admitted human in its selected channels gets
+ * the tools, so the channel itself may safely own the durable session.
  */
-export function discordTurnUsesDurableSession(input: {
+export function planDiscordTurnSession(input: {
+  readonly baseSessionKey: string;
   readonly durable: boolean;
-  readonly systemTools: boolean;
-}): boolean {
-  return input.durable && !input.systemTools;
+  readonly actorId: string;
+  readonly guildId?: string;
+  readonly channelId: string;
+  readonly transportKind: "bot" | "user_session";
+  readonly settings: DiscordMachineSettings;
+}): DiscordTurnSessionPlan {
+  const userGranted = input.settings.systemActorUserIds.includes(input.actorId);
+  const guildGranted =
+    input.guildId !== undefined &&
+    input.settings.systemActorGuildIds.includes(input.guildId) &&
+    (input.settings.systemActorChannelIds.length === 0 ||
+      input.settings.systemActorChannelIds.includes(input.channelId));
+  const privateDmGranted = input.guildId === undefined && input.transportKind === "bot" && userGranted;
+  const systemTools = userGranted || guildGranted;
+
+  if (!systemTools) {
+    return {
+      kind: "social",
+      durable: input.durable,
+      systemTools: false,
+      sessionKey: input.baseSessionKey,
+    };
+  }
+  if (input.durable && (privateDmGranted || guildGranted)) {
+    return {
+      kind: "system_lane",
+      durable: true,
+      systemTools: true,
+      sessionKey: `${input.baseSessionKey}:authority:system`,
+      grant: privateDmGranted ? "dm_user" : "guild",
+    };
+  }
+  return {
+    kind: "system_turn",
+    durable: false,
+    systemTools: true,
+    sessionKey: input.baseSessionKey,
+  };
 }

@@ -6,6 +6,10 @@ tools in the pi captain. Amended by
 [ADR 0105](0105-voice-is-as-capable-as-the-room-it-is-in.md): the allowlist now
 reaches voice as well, on the one-shot session boundary this record named as the
 missing precondition. The "voice never gets the tools" rule below is historical.
+Further amended by
+[ADR 0133](0133-a-machine-grant-belongs-to-a-discord-lane.md): individual
+grants stay one-shot in shared rooms, while trusted private DMs and guild rooms
+may carry a durable tool bank.
 
 ## Context
 
