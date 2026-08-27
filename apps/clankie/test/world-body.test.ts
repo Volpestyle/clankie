@@ -966,7 +966,7 @@ function memoryStore(): CredentialStore {
   };
 }
 
-function joinResult() {
+function joinResult(gameId: "firered" | "emerald" = "firered") {
   return {
     ok: true,
     // Read from the constant, not a literal: the pinned contract decides what a
@@ -976,7 +976,7 @@ function joinResult() {
     worldId: WORLD_ID,
     playerId: PLAYER_ID,
     sessionId: SESSION_ID,
-    gameId: "firered",
+    gameId,
     token: TOKEN,
     capabilities: CAPABILITIES,
     limits: { maxInputsPerAction: 64, maxFramesPerAction: 1_800, stallTimeoutMs: 5_000 },
@@ -1260,6 +1260,158 @@ describe("a decoded screen with no semantic state", () => {
   });
 });
 
+describe("hosted Emerald adapter-v2 semantic state", () => {
+  it("joins Emerald and maps the verified VUH-987 payload", async () => {
+    const world = await staticWorld(emeraldObservation({ frame: 10 }));
+    const result = await joinWorld({
+      environmentId: "pokemon-emerald",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(world.requests[0]).toMatchObject({
+      operation: "world.join",
+      input: {
+        protocolVersion: WORLD_PROTOCOL_VERSION,
+        gameId: "emerald",
+        displayName: "Clankie",
+        harness: "clankie",
+      },
+    });
+    expect(result.body.io.observe("danger")).toMatchObject({ data: { stateCertain: true } });
+    expect(result.body.io.observe("scene")).toMatchObject({
+      data: { mode: "overworld", inputReady: true },
+    });
+    const overworld = result.body.io.observe("overworld") as {
+      data: {
+        position: unknown;
+        facing: unknown;
+        mapSize: unknown;
+        surroundings: { north: { passable: boolean }; ahead: { passable: boolean } };
+        occupants?: unknown;
+      };
+    };
+    expect(overworld).toMatchObject({
+      data: {
+        position: { mapId: "emerald-map-25-40", x: 9, y: 8 },
+        facing: "north",
+        mapSize: { width: 20, height: 18 },
+        minimap: { topLeft: { x: 8, y: 7 } },
+        surroundings: {
+          north: { passable: false },
+          east: { passable: true },
+          south: { passable: true },
+          west: { passable: true },
+          ahead: { passable: false },
+        },
+      },
+    });
+    expect("occupants" in overworld.data).toBe(false);
+    expect(result.body.io.observe("party")).toMatchObject({
+      data: {
+        activeSlot: 0,
+        members: [
+          { speciesId: "emerald-species-252", level: 5, currentHp: 20, maxHp: 21, status: "healthy" },
+        ],
+      },
+    });
+    expectAdapterError(() => result.body.io.observe("dialog"), "dialog_not_open");
+    expectAdapterError(() => result.body.io.observe("menu"), "menu_not_open");
+    expectAdapterError(() => result.body.io.observe("battle"), "battle_not_active");
+    expectAdapterError(() => result.body.io.observe("inventory"), "semantic_state_unavailable");
+    await result.body.close();
+  });
+
+  it("carries Emerald dialog text with an emerald speaker", async () => {
+    const world = await staticWorld(
+      emeraldObservation({
+        frame: 10,
+        mode: "dialog",
+        dialogLines: ["The HOENN region is waiting."],
+      }),
+    );
+    const result = await joinWorld({
+      environmentId: "pokemon-emerald",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(result.body.io.observe("dialog")).toMatchObject({
+      data: { speaker: "emerald", lines: ["The HOENN region is waiting."], untrusted: true },
+    });
+    await result.body.close();
+  });
+
+  it("fails closed for an unknown Emerald adapter version", async () => {
+    const world = await staticWorld(emeraldObservation({ frame: 10, adapterVersion: 3 }));
+    const result = await joinWorld({
+      environmentId: "pokemon-emerald",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(result.body.io.observe("danger")).toMatchObject({ data: { stateCertain: false } });
+    expect(result.body.io.observe("scene")).toMatchObject({ data: { mode: "overworld" } });
+    expectAdapterError(
+      () => result.body.io.observe("overworld"),
+      "semantic_state_unavailable",
+      /decoded Emerald state/u,
+    );
+    expectAdapterError(
+      () => result.body.io.observe("party"),
+      "semantic_state_unavailable",
+      /decoded Emerald state/u,
+    );
+    await result.body.close();
+  });
+
+  it("fails closed when Emerald semantic state is absent", async () => {
+    const world = await staticWorld(emeraldObservation({ frame: 10, decoded: true, state: null }));
+    const result = await joinWorld({
+      environmentId: "pokemon-emerald",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(result.body.io.observe("danger")).toMatchObject({ data: { stateCertain: false } });
+    expectAdapterError(
+      () => result.body.io.observe("party"),
+      "semantic_state_unavailable",
+      /decoded Emerald state/u,
+    );
+    expectAdapterError(() => result.body.io.observe("overworld"), "semantic_state_unavailable");
+    await result.body.close();
+  });
+
+  it("does not infer FireRed menu, occupants, or species from Emerald extras", async () => {
+    const current = emeraldObservation({ frame: 10, mode: "menu" });
+    (current.state as Record<string, unknown>)["menu"] = {
+      menuId: "start",
+      cursor: 0,
+      entries: [{ id: "POKEMON", label: "POKEMON" }],
+    };
+    (current.state as Record<string, unknown>)["npcs"] = [
+      { localId: 1, graphicsId: 1, x: 9, y: 8, facing: "south" },
+    ];
+    (current.state as Record<string, unknown>)["connections"] = [
+      { direction: "north", destination: "route-103" },
+    ];
+    const world = await staticWorld(current);
+    const result = await joinWorld({
+      environmentId: "pokemon-emerald",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(result.body.io.observe("danger")).toMatchObject({ data: { stateCertain: false } });
+    expectAdapterError(() => result.body.io.observe("overworld"), "semantic_state_unavailable");
+    expectAdapterError(() => result.body.io.observe("party"), "semantic_state_unavailable");
+    expectAdapterError(() => result.body.io.observe("menu"), "semantic_state_unavailable");
+    expectAdapterError(() => result.body.io.observe("battle"), "battle_not_active");
+    await result.body.close();
+  });
+});
+
 function observation(options: {
   frame: number;
   bodyGeneration?: number;
@@ -1332,6 +1484,58 @@ function observation(options: {
   };
 }
 
+function emeraldObservation(options: {
+  frame: number;
+  adapterVersion?: number;
+  decoded?: boolean;
+  mode?: "overworld" | "dialog" | "menu";
+  dialogLines?: string[];
+  mapSize?: { width: number; height: number } | null;
+  state?: Record<string, unknown> | null;
+}) {
+  const decoded = options.decoded ?? true;
+  const mode = options.mode ?? "overworld";
+  const onMap = mode === "overworld" || mode === "dialog" || mode === "menu";
+  const mapId = "emerald-map-25-40";
+  const payload = {
+    overworld: {
+      mapId,
+      mapGroup: 25,
+      mapNum: 40,
+      x: 9,
+      y: 8,
+      facing: "north" as const,
+    },
+    party: [{ slot: 0, speciesId: 252, level: 5, currentHp: 20, maxHp: 21, moveIds: [33] }],
+    fieldInputReady: mode === "overworld",
+    dialogLines: options.dialogLines ?? [],
+    mapSize: options.mapSize === undefined ? { width: 20, height: 18 } : options.mapSize,
+  };
+  return {
+    sessionId: SESSION_ID,
+    bodyGeneration: 1,
+    gameId: "emerald",
+    adapterVersion: options.adapterVersion ?? 2,
+    frame: options.frame,
+    observedAt: NOW,
+    scene: {
+      mode: decoded ? mode : "unknown",
+      inputReady: decoded && mode === "overworld",
+      waitingForAdvance: false,
+      decoded,
+    },
+    minimap:
+      decoded && onMap
+        ? {
+            topLeft: { mapId, x: 8, y: 7 },
+            rows: [".#.", ".@.", "..."],
+            exits: [],
+          }
+        : null,
+    state: options.state === undefined ? (decoded ? payload : null) : options.state,
+  };
+}
+
 function actRan(current: ReturnType<typeof observation>, detail?: Record<string, unknown>) {
   return {
     ok: true,
@@ -1376,11 +1580,13 @@ function frame(options: { frame: number; data: string; bodyGeneration?: number }
 }
 
 /** A world that answers every poll with one fixed observation. */
-async function staticWorld(current: ReturnType<typeof observation>): Promise<FakeWorld> {
+async function staticWorld(
+  current: ReturnType<typeof observation> | ReturnType<typeof emeraldObservation>,
+): Promise<FakeWorld> {
   return fakeWorld((request) => {
     switch (request.operation) {
       case "world.join":
-        return joinResult();
+        return joinResult(current.gameId === "emerald" ? "emerald" : "firered");
       case "play.observe":
         return current;
       case "play.frame":
@@ -1393,12 +1599,15 @@ async function staticWorld(current: ReturnType<typeof observation>): Promise<Fak
   });
 }
 
-function expectAdapterError(run: () => unknown, code: string): void {
+function expectAdapterError(run: () => unknown, code: string, message?: RegExp): void {
   try {
     run();
   } catch (error) {
     expect(error).toBeInstanceOf(EnvironmentAdapterActionError);
     expect((error as EnvironmentAdapterActionError).errorCode).toBe(code);
+    if (message !== undefined) {
+      expect((error as EnvironmentAdapterActionError).message).toMatch(message);
+    }
     return;
   }
   throw new Error(`expected EnvironmentAdapterActionError ${code}`);

@@ -187,11 +187,15 @@ the full picture — what each store holds, who may read it, and what bounds it.
   separately credentialed seat in a PokeAgents world, reached through
   `WorldPlayerClient` on `@pokeagents/world-protocol/ipc` (`WORLD_ADDRESS` unix,
   tcp, or tls) and entered with the `pokeagent_join_mmo` tool
-  ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). A hosted world
-  cannot be paused, changes without him acting, and can replace his body under
-  him. Owner settings independently enable the local emulator and hosted MMO;
-  both may be available while the shared play host allows one live session
-  across them. Frames from either flow to the Discord activity surface.
+  ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). The hosted
+  `GbaDriverIo` seam consumes verified FireRed adapter-v2 and Emerald
+  adapter-v2 payloads, selected by the observation's `(gameId, adapterVersion)`
+  pair; unknown pairs and game-specific extras the selected schema does not
+  verify fail closed. A hosted world cannot be paused, changes without him
+  acting, and can replace his body under him. Owner settings independently
+  enable the local emulator and hosted MMO; both may be available while the
+  shared play host allows one live session across them. Frames from either
+  flow to the Discord activity surface.
   [`apps/gba-mcp`](../apps/gba-mcp/README.md) is outside this path: each MCP
   process owns a private emulator/runtime and grants its caller no control over
   Clankie, Activity publication, play voice, or room input.

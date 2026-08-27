@@ -25,7 +25,10 @@ Clankie's current boundary imports only `@pokeagents/world-protocol` and `/ipc`;
 host packages remain forbidden. Hosted play composes `WorldPlayerClient` for
 transport, session, retry, and frame order; the adapter maps observations into
 the GBA driver and publishes Activity media. Granted session, presence, travel,
-and challenge operations are available through `pokeagent_world`.
+and challenge operations are available through `pokeagent_world`. Emerald
+adapter version 2 is a supported semantic profile at that existing adapter
+boundary: `HostedWorldBody` selects schemas by `(gameId, adapterVersion)`
+rather than assuming FireRed.
 
 ## Context
 
@@ -71,12 +74,17 @@ watch grant, reads live PCM with that read-only capability, and forwards bounded
 packets to the Activity. This keeps spectator media out of the agent protocol
 without creating a second emulator capture.
 
-Adapter-owned state evolves behind that contract. FireRed adapter version 2
-includes the decoded new-game name menus, which the body exposes through the
-same `menu` observation as local play. A successful hosted menu action is
-rendered from that pre-action entry only after the host reports that its live
-cursor reached and confirmed it. An incomplete selection is ran with its press
-count, stopping reason, and fresh observation.
+Adapter-owned state evolves behind that contract. The hosted body selects a
+state schema by the observation's `(gameId, adapterVersion)` pair. FireRed
+adapter version 2 includes the decoded new-game name menus, which the body
+exposes through the same `menu` observation as local play. A successful hosted
+menu action is rendered from that pre-action entry only after the host reports
+that its live cursor reached and confirmed it. An incomplete selection is ran
+with its press count, stopping reason, and fresh observation. Emerald adapter
+version 2 publishes overworld position, party, dialog lines, and map size
+through those same observation kinds; it does not publish FireRed's NPC list,
+connections, or decoded menu entries, and those stay fail-closed rather than
+inferred.
 
 World protocol v3 separates exit topology from `walk_to` support. Unsupported
 exits stay visible, trigger mechanics stay private, and the body returns a

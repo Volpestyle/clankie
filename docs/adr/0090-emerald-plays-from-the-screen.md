@@ -5,6 +5,20 @@ Status: accepted (James, 2026-08-11). Extends
 the FireRed RAM profile in
 [ADR 0043](0043-version-pinned-firered-gameplay-profile.md).
 
+## Current status (2026-08-26)
+
+Local asked-play Emerald still boots through `MgbaVisualCore` and plays from
+the screen: that body has no Emerald RAM profile. Hosted Emerald is a different
+body. PokeAgents VUH-987 publishes Emerald adapter version 2 as a verified
+payload — overworld map, position, and facing; party slots with species, level,
+HP, and moves; field readiness; dialog lines; and nullable map size.
+`HostedWorldBody` selects the state schema by the observation's
+`(gameId, adapterVersion)` pair: `firered@2` and `emerald@2` map into the
+existing `GbaDriverIo` seam; every unknown pair fails closed. FireRed-only
+NPCs, map connections, and decoded menu entries stay optional and are never
+invented for Emerald. Detailed menu, battle, and inventory observations still
+refuse when their verified payload is absent.
+
 ## Context
 
 The asked-play path serves Pokémon FireRed through a pinned mGBA body and a
@@ -26,11 +40,19 @@ savestate from the operator-local GBA directory. ROM and savestate bytes never
 enter the repository. The runner advertises both Pokémon environments and
 passes the selected environment id into the shared GBA boot path.
 
-`MgbaVisualCore` exposes real framebuffer observation, bounded raw buttons,
-frame advance, RAM/framebuffer digests, and checkpoints. It reports scene mode
-`unknown`. The adapter therefore refuses decoded observations and composite
-actions (`walk_to`, dialog, naming, and menu selection) with
-`semantic_state_unavailable`; raw buttons and frame advance remain available.
+The local body, `MgbaVisualCore`, exposes real framebuffer observation, bounded
+raw buttons, frame advance, RAM/framebuffer digests, and checkpoints. It
+reports scene mode `unknown`. That adapter therefore refuses decoded
+observations and composite actions (`walk_to`, dialog, naming, and menu
+selection) with `semantic_state_unavailable`; raw buttons and frame advance
+remain available.
+
+The hosted body does not reuse that visual-only profile. It consumes the
+adapter state the world already verified, selecting `firered@2` or `emerald@2`
+and mapping the shared decoded fields through the same `GbaDriverIo` kinds.
+Party identities carry the real game id (`emerald-species-<id>`), and dialog
+speaker and semantic-refusal text are game-aware. Game-specific extras the
+selected schema does not verify stay fail-closed.
 
 ![ADR 0090: Emerald plays from the screen](../diagrams/0090-emerald-plays-from-the-screen.jpg)
 
@@ -45,10 +67,13 @@ actions (`walk_to`, dialog, naming, and menu selection) with
 
 ## Consequences
 
-- Clankie can start, watch, control, checkpoint, resume, and stop Emerald
-  through the same asked-play lifecycle as FireRed.
-- Emerald play spends more decisions on raw navigation and reads text
-  from the framebuffer. Composite actions become available only as verified
-  Emerald decoders land.
-- CI remains ROM-free. A ROM-gated test boots the operator-local pinned state,
-  verifies the title framebuffer exists, and proves a raw button changes it.
+- Clankie can start, watch, control, checkpoint, resume, and stop local Emerald
+  through the same asked-play lifecycle as FireRed, reading the screen when the
+  local body has no decode.
+- Hosted Emerald play reads verified VUH-987 position, party, dialog, and map
+  size through `GbaDriverIo`. Composite menu, battle, and inventory views stay
+  refused until those payloads exist; FireRed extras are not inferred.
+- CI remains ROM-free. A ROM-gated local test boots the operator-local pinned
+  state, verifies the title framebuffer exists, and proves a raw button
+  changes it. Hosted Emerald semantic mapping is proven against a fake world
+  that speaks the verified adapter-v2 shape.

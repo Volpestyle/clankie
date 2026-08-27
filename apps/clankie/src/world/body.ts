@@ -255,6 +255,14 @@ const ALREADY_LEFT = new Set(["session_ended", "not_your_session", "unauthentica
 const GOAL_VERSION = 1;
 const CHARACTER_ID = "clankie";
 
+const HostedFacingSchema = z.enum(["north", "east", "south", "west"]);
+const HostedMapSizeSchema = z
+  .object({
+    width: z.number().int().positive().max(1_024),
+    height: z.number().int().positive().max(1_024),
+  })
+  .strict();
+
 const FireRedStateSchema = z
   .object({
     overworld: z
@@ -264,7 +272,7 @@ const FireRedStateSchema = z
         mapNum: z.number().int().nonnegative(),
         x: z.number().int().nonnegative(),
         y: z.number().int().nonnegative(),
-        facing: z.enum(["north", "east", "south", "west"]),
+        facing: HostedFacingSchema,
       })
       .strict()
       .nullable(),
@@ -318,13 +326,7 @@ const FireRedStateSchema = z
      * Interior tile count, border excluded — the same number the local body
      * publishes. Player coordinates still include the 7-tile border.
      */
-    mapSize: z
-      .object({
-        width: z.number().int().positive().max(1_024),
-        height: z.number().int().positive().max(1_024),
-      })
-      .strict()
-      .nullish(),
+    mapSize: HostedMapSizeSchema.nullish(),
     /**
      * Absent on a world older than this field; null when that world did not
      * read the map header. Empty is a decoded indoor map with no edges.
@@ -343,6 +345,44 @@ const FireRedStateSchema = z
   })
   .strict();
 type FireRedState = z.infer<typeof FireRedStateSchema>;
+
+/**
+ * Verified Emerald adapter-v2 payload (VUH-987). Overworld, party, dialog, and
+ * map size are real; NPCs, connections, and decoded menu entries are not, and
+ * must not be inferred from FireRed.
+ */
+const EmeraldStateSchema = z
+  .object({
+    overworld: z
+      .object({
+        mapId: z.string().min(1).max(128),
+        mapGroup: z.number().int().min(0).max(255),
+        mapNum: z.number().int().min(0).max(255),
+        x: z.number().int().min(0).max(1_023),
+        y: z.number().int().min(0).max(1_023),
+        facing: HostedFacingSchema,
+      })
+      .strict(),
+    party: z.array(
+      z
+        .object({
+          slot: z.number().int().min(0).max(5),
+          speciesId: z.number().int().min(1).max(439),
+          level: z.number().int().min(1).max(100),
+          currentHp: z.number().int().min(0).max(9_999),
+          maxHp: z.number().int().min(1).max(9_999),
+          moveIds: z.array(z.number().int().min(1).max(354)).min(1).max(4),
+        })
+        .strict(),
+    ),
+    fieldInputReady: z.boolean(),
+    dialogLines: z.array(z.string().max(512)).max(8),
+    mapSize: HostedMapSizeSchema.nullable(),
+  })
+  .strict();
+type EmeraldState = z.infer<typeof EmeraldStateSchema>;
+
+type HostedSemanticState = ({ gameId: "firered" } & FireRedState) | ({ gameId: "emerald" } & EmeraldState);
 
 const WatchAudioPacketSchema = z
   .object({
@@ -540,10 +580,9 @@ class HostedWorldBody implements WorldBody {
     }
     const observation = this.observation;
     const base = this.observationBase();
-    const state =
-      observation?.gameId === "firered" && observation.adapterVersion === 2
-        ? FireRedStateSchema.safeParse(observation.state).data
-        : undefined;
+    // Schema selection is the real (gameId, adapterVersion) pair. Unknown
+    // pairs fail closed; FireRed-only extras are never invented for Emerald.
+    const state = parseHostedSemanticState(observation);
     const certain = observation?.scene.decoded === true && state !== undefined;
 
     const mapped = (() => {
@@ -636,13 +675,17 @@ class HostedWorldBody implements WorldBody {
           };
         }
         case "overworld": {
-          const decoded = requireSemanticState(state);
+          const decoded = requireSemanticState(state, observation?.gameId);
           const overworld = decoded.overworld;
           if (overworld === null) {
             throw adapterError("semantic_state_unavailable", "The world has no decoded overworld position");
           }
-          const view = mapOverworld(observation?.minimap ?? null, overworld, decoded.connections);
-          const npcs = decoded.npcs;
+          const view = mapOverworld(
+            observation?.minimap ?? null,
+            overworld,
+            decoded.gameId === "firered" ? decoded.connections : undefined,
+          );
+          const npcs = decoded.gameId === "firered" ? decoded.npcs : undefined;
           return {
             ...base,
             kind,
@@ -661,7 +704,8 @@ class HostedWorldBody implements WorldBody {
           };
         }
         case "party": {
-          const party = requireSemanticState(state).party;
+          const decoded = requireSemanticState(state, observation?.gameId);
+          const party = decoded.party;
           return {
             ...base,
             kind,
@@ -669,7 +713,7 @@ class HostedWorldBody implements WorldBody {
               activeSlot: party.find((member) => member.currentHp > 0)?.slot ?? party[0]?.slot ?? 0,
               members: party.map((member) => ({
                 slot: member.slot,
-                speciesId: `firered-species-${String(member.speciesId)}`,
+                speciesId: `${decoded.gameId}-species-${String(member.speciesId)}`,
                 level: member.level,
                 currentHp: member.currentHp,
                 maxHp: member.maxHp,
@@ -683,7 +727,8 @@ class HostedWorldBody implements WorldBody {
             throw adapterError("dialog_not_open", "No dialog is open in the hosted world");
           }
           {
-            const lines = requireSemanticState(state).dialogLines ?? [];
+            const decoded = requireSemanticState(state, observation?.gameId);
+            const lines = decoded.dialogLines ?? [];
             if (lines.length === 0) {
               // A world that does not publish the text, or a box that decoded
               // to nothing. Refusing is what keeps `advance_dialog` honest —
@@ -698,7 +743,7 @@ class HostedWorldBody implements WorldBody {
               ...base,
               kind,
               data: {
-                speaker: "firered",
+                speaker: decoded.gameId,
                 lines: [...lines],
                 lineIndex: 0,
                 untrusted: true as const,
@@ -709,14 +754,17 @@ class HostedWorldBody implements WorldBody {
           if (observation?.scene.mode !== "menu" && observation?.scene.mode !== "naming") {
             throw adapterError("menu_not_open", "No menu is open in the hosted world");
           }
-          const menu = requireSemanticState(state).menu;
-          if (menu === null) {
-            throw adapterError(
-              "semantic_state_unavailable",
-              "The hosted world does not expose decoded entries for this menu",
-            );
+          {
+            const decoded = requireSemanticState(state, observation?.gameId);
+            const menu = decoded.gameId === "firered" ? decoded.menu : undefined;
+            if (menu === undefined || menu === null) {
+              throw adapterError(
+                "semantic_state_unavailable",
+                "The hosted world does not expose decoded entries for this menu",
+              );
+            }
+            return { ...base, kind, data: { ...menu, untrusted: true as const } };
           }
-          return { ...base, kind, data: { ...menu, untrusted: true as const } };
         case "battle":
           if (observation?.scene.mode !== "battle") {
             throw adapterError("battle_not_active", "No battle is active in the hosted world");
@@ -726,7 +774,7 @@ class HostedWorldBody implements WorldBody {
             "The hosted world does not expose decoded battle state",
           );
         case "inventory":
-          requireSemanticState(state);
+          requireSemanticState(state, observation?.gameId);
           throw adapterError(
             "semantic_state_unavailable",
             "The hosted world does not expose decoded inventory",
@@ -1164,11 +1212,38 @@ function mapAction(action: GbaEmulatorAction): Action {
   }
 }
 
-function requireSemanticState(state: FireRedState | undefined): FireRedState {
+function parseHostedSemanticState(observation: Observation | undefined): HostedSemanticState | undefined {
+  if (observation === undefined || observation.adapterVersion !== 2) return undefined;
+  if (observation.gameId === "firered") {
+    const parsed = FireRedStateSchema.safeParse(observation.state);
+    return parsed.success ? { gameId: "firered", ...parsed.data } : undefined;
+  }
+  if (observation.gameId === "emerald") {
+    const parsed = EmeraldStateSchema.safeParse(observation.state);
+    return parsed.success ? { gameId: "emerald", ...parsed.data } : undefined;
+  }
+  return undefined;
+}
+
+function semanticGameLabel(gameId: Observation["gameId"] | undefined): string {
+  switch (gameId) {
+    case "emerald":
+      return "Emerald";
+    case "firered":
+      return "FireRed";
+    default:
+      return "game";
+  }
+}
+
+function requireSemanticState(
+  state: HostedSemanticState | undefined,
+  gameId: Observation["gameId"] | undefined,
+): HostedSemanticState {
   if (state === undefined) {
     throw adapterError(
       "semantic_state_unavailable",
-      "The hosted world has no decoded FireRed state for this screen",
+      `The hosted world has no decoded ${semanticGameLabel(gameId)} state for this screen`,
     );
   }
   return state;
@@ -1196,7 +1271,7 @@ function localSceneMode(mode: Observation["scene"]["mode"] | undefined) {
 
 function mapOverworld(
   minimap: Observation["minimap"],
-  position: NonNullable<FireRedState["overworld"]>,
+  position: NonNullable<FireRedState["overworld"]> | EmeraldState["overworld"],
   connections: FireRedState["connections"],
 ) {
   if (minimap === null || minimap.topLeft.mapId !== position.mapId) {
