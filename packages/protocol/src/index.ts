@@ -1235,6 +1235,20 @@ export type CaptainChannelTurnResult = z.infer<typeof CaptainChannelTurnResultSc
 export const DiscordTransportKindSchema = z.enum(["bot", "user_session"]);
 export type DiscordTransportKind = z.infer<typeof DiscordTransportKindSchema>;
 
+/** Public-safe categories for deterministic Discord tool-progress UI. */
+export const DiscordToolProgressCategorySchema = z.enum([
+  "browsing",
+  "creating_media",
+  "working_locally",
+  "using_connected_services",
+  "playing",
+  "using_tools",
+]);
+export type DiscordToolProgressCategory = z.infer<typeof DiscordToolProgressCategorySchema>;
+
+export const DiscordToolProgressPhaseSchema = z.enum(["running", "completed", "failed", "dismissed"]);
+export type DiscordToolProgressPhase = z.infer<typeof DiscordToolProgressPhaseSchema>;
+
 /** Transport-agnostic Discord presence action names (ADR 0024). No bot/user token fields. */
 export const DiscordPresenceActionSchema = z.enum([
   "discord.presence.reply",
@@ -1252,6 +1266,7 @@ export const DiscordPresenceActionSchema = z.enum([
   "discord.presence.react",
   "discord.presence.unreact",
   "discord.presence.send_message",
+  "discord.presence.tool_progress",
   "discord.presence.edit_own_message",
   "discord.presence.delete_own_message",
   "discord.presence.send_attachment",
@@ -1300,6 +1315,16 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
     text: z.string().trim().min(1).max(600),
   }).strict(),
   DiscordCaptainActionContextSchema.extend({
+    action: z.literal("tool_progress"),
+    phase: DiscordToolProgressPhaseSchema,
+    categories: z.array(DiscordToolProgressCategorySchema).min(1).max(6),
+    toolCalls: z.number().int().nonnegative(),
+    activeToolCalls: z.number().int().nonnegative(),
+    failedToolCalls: z.number().int().nonnegative(),
+    elapsedSeconds: z.number().int().nonnegative(),
+    progressMessageId: z.string().min(1).max(128).optional(),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({
     action: z.literal("watch_start"),
     guildId: z.string().min(1).max(128),
   }).strict(),
@@ -1311,7 +1336,11 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
 export type DiscordCaptainActionInput = z.infer<typeof DiscordCaptainActionInputSchema>;
 
 export const DiscordCaptainActionResultSchema = z
-  .object({ ok: z.boolean(), message: z.string().min(1).max(1_000) })
+  .object({
+    ok: z.boolean(),
+    message: z.string().min(1).max(1_000),
+    messageId: z.string().min(1).max(128).optional(),
+  })
   .strict();
 export type DiscordCaptainActionResult = z.infer<typeof DiscordCaptainActionResultSchema>;
 
@@ -1339,6 +1368,7 @@ export const DISCORD_PRESENCE_ACTION_RISK_CLASS: Readonly<
   "discord.presence.react": "narrative-write",
   "discord.presence.unreact": "narrative-write",
   "discord.presence.send_message": "narrative-write",
+  "discord.presence.tool_progress": "narrative-write",
   "discord.presence.edit_own_message": "reversible-write",
   "discord.presence.delete_own_message": "reversible-write",
   "discord.presence.send_attachment": "publish-external",
@@ -1605,6 +1635,43 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("tool_progress"),
+      channelId: z.string().min(1),
+      replyToMessageId: z.string().min(1),
+      messageId: z.string().min(1).optional(),
+      phase: DiscordToolProgressPhaseSchema,
+      categories: z.array(DiscordToolProgressCategorySchema).min(1).max(6),
+      toolCalls: z.number().int().nonnegative(),
+      activeToolCalls: z.number().int().nonnegative(),
+      failedToolCalls: z.number().int().nonnegative(),
+      elapsedSeconds: z.number().int().nonnegative(),
+    })
+    .strict()
+    .superRefine((progress, context) => {
+      if (progress.activeToolCalls > progress.toolCalls || progress.failedToolCalls > progress.toolCalls) {
+        context.addIssue({
+          code: "custom",
+          path: ["toolCalls"],
+          message: "Tool progress counts cannot exceed total tool calls",
+        });
+      }
+      if (progress.phase === "running" && progress.toolCalls === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["toolCalls"],
+          message: "Running tool progress requires at least one tool call",
+        });
+      }
+      if (progress.phase === "dismissed" && progress.messageId === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["messageId"],
+          message: "Dismissed tool progress requires its message id",
+        });
+      }
+    }),
+  z
+    .object({
       kind: z.literal("edit_own_message"),
       channelId: z.string().min(1),
       messageId: z.string().min(1),
@@ -1677,6 +1744,7 @@ export const DISCORD_PRESENCE_ACTION_PAYLOAD_KIND: Readonly<
   "discord.presence.react": "react",
   "discord.presence.unreact": "unreact",
   "discord.presence.send_message": "send_message",
+  "discord.presence.tool_progress": "tool_progress",
   "discord.presence.edit_own_message": "edit_own_message",
   "discord.presence.delete_own_message": "delete_own_message",
   "discord.presence.send_attachment": "send_attachment",
@@ -1763,6 +1831,8 @@ export function resolveDiscordPresenceLedgerContent(
     case "edit_own_message":
     case "reply_with_media":
       return payload.content;
+    case "tool_progress":
+      return `tool_progress:${payload.phase}`;
     case "react":
     case "unreact":
       return payload.emoji;

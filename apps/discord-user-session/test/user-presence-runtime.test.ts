@@ -4,6 +4,33 @@ import { describe, expect, it, vi } from "vitest";
 import { DiscordUserPresenceRuntime } from "../src/user-presence-runtime.ts";
 
 describe("DiscordUserPresenceRuntime", () => {
+  it("renders tool activity as a blockquote fallback", async () => {
+    const fetchImpl = jsonFetch({ id: "tool-card-1" });
+    const result = await runtime(fetchImpl).execute(
+      write({
+        action: "discord.presence.tool_progress",
+        payload: {
+          kind: "tool_progress",
+          channelId: "channel-1",
+          replyToMessageId: "message-1",
+          phase: "running",
+          categories: ["working_locally"],
+          toolCalls: 2,
+          activeToolCalls: 1,
+          failedToolCalls: 0,
+          elapsedSeconds: 3,
+        },
+      }),
+      present,
+    );
+    expect(result.messageId).toBe("tool-card-1");
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      content: expect.stringMatching(/^> 🛠️ \*\*Tool activity\*\*/u),
+      allowed_mentions: { parse: [] },
+    });
+  });
+
   it("sends the user credential bare, without the bot prefix", async () => {
     const fetchImpl = jsonFetch({ id: "message-out-1" });
     const result = await runtime(fetchImpl).execute(

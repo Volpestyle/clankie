@@ -1,4 +1,8 @@
-import { planDiscordRestAction, resolveDiscordRestActionResult } from "@clankie/discord-presence-core";
+import {
+  discordToolProgressComponents,
+  planDiscordRestAction,
+  resolveDiscordRestActionResult,
+} from "@clankie/discord-presence-core";
 import {
   isDiscordPresenceActionAvailable,
   type DiscordPresenceSessionRecord,
@@ -9,7 +13,7 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
 } from "@clankie/protocol";
-import { REST, Routes } from "discord.js";
+import { MessageFlags, REST, Routes } from "discord.js";
 
 /** Discord invite target type for launching an embedded application (activity). */
 const INVITE_TARGET_TYPE_EMBEDDED_APPLICATION = 2;
@@ -73,6 +77,30 @@ export class DiscordBotPresenceRuntime {
     }
 
     const payload = write.payload;
+    if (payload.kind === "tool_progress") {
+      const route =
+        payload.messageId === undefined
+          ? Routes.channelMessages(payload.channelId)
+          : Routes.channelMessage(payload.channelId, payload.messageId);
+      if (payload.phase === "dismissed") {
+        await this.rest.delete(route);
+        return result(write, payload.channelId);
+      }
+      const components = discordToolProgressComponents(payload);
+      if (payload.messageId !== undefined) {
+        await this.rest.patch(route, { body: { components } });
+        return result(write, payload.channelId, payload.messageId);
+      }
+      const message = (await this.rest.post(route, {
+        body: {
+          flags: MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications,
+          components,
+          message_reference: { message_id: payload.replyToMessageId },
+          allowed_mentions: { parse: [] },
+        },
+      })) as { id?: string };
+      return result(write, payload.channelId, message.id);
+    }
     const restPlan = planDiscordRestAction(payload);
     if (restPlan !== undefined) {
       const response = await this.rest[restPlan.method](

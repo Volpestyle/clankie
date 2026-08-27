@@ -53,6 +53,8 @@ export const DiscordSettingsSchema = z
     ingressDmPolicy: z.enum(["deny", "owner_only", "allowlist"]).default("deny"),
     ingressDmUserIds: SnowflakeListSchema,
     ingressContextMessages: z.number().int().min(0).max(50).default(10),
+    /** Guild text channels where the body shows deterministic, content-free tool activity cards. */
+    toolProgressChannelIds: SnowflakeListSchema,
 
     presenceGuildIds: SnowflakeListSchema,
     presenceChannelIds: SnowflakeListSchema,

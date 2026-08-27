@@ -165,6 +165,7 @@ describe("discord settings resolution", () => {
       systemActorUserIds: [],
       systemActorGuildIds: [],
       systemActorChannelIds: [],
+      toolProgressChannelIds: [],
     });
     expect(discordSettingsToEnvironment(stored)["DISCORD_SYSTEM_ACTOR_USER_IDS"]).toBeUndefined();
 

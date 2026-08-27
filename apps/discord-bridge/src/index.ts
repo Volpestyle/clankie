@@ -95,7 +95,8 @@ import { assertOfficialBotBodyActive, discordBridgeHealth } from "./lifecycle.ts
 // the token guards below: settings hold non-secret values only, and running the
 // guards afterwards means a token-shaped value that ever reached the settings
 // schema by mistake would still be caught here rather than used.
-const storedSettings = await new SettingsStore().load();
+const settingsStore = new SettingsStore();
+const storedSettings = await settingsStore.load();
 const settingsFilledNames = [
   ...applyDiscordSettingsToEnvironment(storedSettings.discord),
   ...applyVoiceSettingsToEnvironment(storedSettings.voice),
@@ -194,10 +195,12 @@ const textIngressEnabled = process.env.DISCORD_TEXT_INGRESS_ENABLED === "true";
 const textIngressContextLimit = parseContextMessageLimit(process.env.DISCORD_INGRESS_CONTEXT_MESSAGES);
 const ingressGuildIds = parseDiscordIdSet(process.env.DISCORD_INGRESS_GUILD_IDS);
 const ingressChannelIds = parseDiscordIdSet(process.env.DISCORD_INGRESS_CHANNEL_IDS);
+const ownerUserId = process.env.DISCORD_OWNER_USER_ID?.trim();
 // One advertised port for every bridge-side presence write: text ingress
 // replies and the slash-invoked activity launch go through the same live-claim
 // and tool-exposure guards.
 const presencePort = createAdvertisedDiscordPresencePort(api, presenceSession);
+const toolProgressMessageIds = new Set<string>();
 const textIngress = textIngressEnabled
   ? new DiscordTextIngress(
       presencePort,
@@ -738,6 +741,50 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       });
       return;
     }
+    case "tools": {
+      if (interaction.guildId === null) {
+        await interaction.reply({
+          content: "Tool activity cards are channel-scoped and unavailable in DMs.",
+          ephemeral: true,
+        });
+        return;
+      }
+      if (ownerUserId === undefined || interaction.user.id !== ownerUserId) {
+        await interaction.reply({
+          content: "Only Clankie's owner can change tool activity visibility.",
+          ephemeral: true,
+        });
+        return;
+      }
+      const mode = interaction.options.getString("mode", true);
+      const current = (await settingsStore.load()).discord.toolProgressChannelIds.includes(
+        interaction.channelId,
+      );
+      if (mode === "status") {
+        await interaction.reply({
+          content: `Tool activity cards are ${current ? "on" : "off"} in this channel.`,
+          ephemeral: true,
+        });
+        return;
+      }
+      const enabled = mode === "on";
+      await settingsStore.update((settings) => ({
+        ...settings,
+        discord: {
+          ...settings.discord,
+          toolProgressChannelIds: enabled
+            ? [...new Set([...settings.discord.toolProgressChannelIds, interaction.channelId])]
+            : settings.discord.toolProgressChannelIds.filter(
+                (channelId) => channelId !== interaction.channelId,
+              ),
+        },
+      }));
+      await interaction.reply({
+        content: `Tool activity cards are now ${enabled ? "on" : "off"} in this channel.`,
+        ephemeral: true,
+      });
+      return;
+    }
     case "person-memory": {
       if (!interaction.guildId) {
         await interaction.reply({
@@ -1231,6 +1278,13 @@ async function executeCaptainDiscordAction(
   let plan = planNonWatchCaptainDiscordAction(input);
   if (plan !== undefined) {
     if (
+      input.action === "tool_progress" &&
+      input.progressMessageId !== undefined &&
+      !toolProgressMessageIds.has(input.progressMessageId)
+    ) {
+      return { ok: false, message: "That tool activity card does not belong to this process." };
+    }
+    if (
       !ingressGuildIds.has(input.guildId) ||
       (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
     ) {
@@ -1239,7 +1293,7 @@ async function executeCaptainDiscordAction(
         message:
           input.action === "react" || input.action === "unreact"
             ? "That message is outside my admitted Discord channels."
-            : input.action === "send_text_update"
+            : input.action === "send_text_update" || input.action === "tool_progress"
               ? "That channel is outside my admitted Discord channels."
               : "Threads only work in my admitted server channels.",
       };
@@ -1290,7 +1344,7 @@ async function executeCaptainDiscordAction(
 
   try {
     const health = await presencePort.getHealth();
-    await presencePort.executeDiscordPresenceAction(
+    const action = await presencePort.executeDiscordPresenceAction(
       DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,
         idempotencyKey: `captain:${input.callId}:${input.action}`,
@@ -1306,9 +1360,16 @@ async function executeCaptainDiscordAction(
         payload: plan.payload,
       }),
     );
+    if (input.action === "tool_progress") {
+      if (action.messageId !== undefined) toolProgressMessageIds.add(action.messageId);
+      if (input.phase !== "running" && input.progressMessageId !== undefined) {
+        toolProgressMessageIds.delete(input.progressMessageId);
+      }
+    }
     return {
       ok: true,
       message: plan.successMessage,
+      ...(action.messageId === undefined ? {} : { messageId: action.messageId }),
     };
   } catch (error) {
     return {

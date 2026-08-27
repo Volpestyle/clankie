@@ -122,12 +122,16 @@ satisfy these live gates.
 
 ## Body Behavior
 
-- `/clankie status`, `person-memory`, `join`, `leave`, `voice-consent`,
+- `/clankie status`, `tools`, `person-memory`, `join`, `leave`, `voice-consent`,
   `voice-status`, and `watch` are the registered slash subcommands. Voice
   responses and disclosures are ephemeral. The captain's argument-free
   `voice_join` / `voice_leave` tools also reach this process: a Discord turn
   follows the authenticated speaker, an operator-console turn follows the
   configured owner ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)).
+- `/clankie tools mode:on|off|status` is owner-only and persists one quiet,
+  edited tool-activity card per requested turn in the current guild channel.
+  The card contains public-safe categories and counts, never tool arguments or
+  results ([ADR 0134](../../docs/adr/0134-discord-tool-work-is-a-status-card.md)).
 - Bounded text ingress is deny-by-default by guild/channel/DM policy. Admitted
   Discord content and attachments are labelled untrusted before the captain
   sees them. Text-only input in the active voice channel instead enters that

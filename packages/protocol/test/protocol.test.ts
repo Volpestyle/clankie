@@ -377,6 +377,30 @@ describe("protocol", () => {
     });
     expect(react.content).toBeUndefined();
     expect(resolveDiscordPresenceLedgerContent(react)).toBe("👍");
+    const toolProgress = DiscordPresenceWriteSchema.parse({
+      schemaVersion: 1,
+      idempotencyKey: "k-tool-progress",
+      action: "discord.presence.tool_progress",
+      identity: write.identity,
+      payload: {
+        kind: "tool_progress",
+        channelId: "ch",
+        replyToMessageId: "m1",
+        phase: "running",
+        categories: ["browsing"],
+        toolCalls: 1,
+        activeToolCalls: 1,
+        failedToolCalls: 0,
+        elapsedSeconds: 2,
+      },
+    });
+    expect(resolveDiscordPresenceLedgerContent(toolProgress)).toBe("tool_progress:running");
+    expect(() =>
+      DiscordPresenceWriteSchema.parse({
+        ...toolProgress,
+        payload: { ...toolProgress.payload, activeToolCalls: 2 },
+      }),
+    ).toThrow(/counts cannot exceed/u);
     expect(resolveDiscordPresenceLedgerContent({ payload: { kind: "typing_start", channelId: "c" } })).toBe(
       "typing",
     );

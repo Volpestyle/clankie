@@ -385,6 +385,7 @@ export const DISCORD_PRESENCE_CATALOG: readonly DiscordPresenceCatalogEntry[] = 
   catalogEntry("discord.presence.react", ANY_TRANSPORT, "present"),
   catalogEntry("discord.presence.unreact", ANY_TRANSPORT, "present"),
   catalogEntry("discord.presence.send_message", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.tool_progress", ANY_TRANSPORT, "present"),
   catalogEntry("discord.presence.edit_own_message", ANY_TRANSPORT, "present"),
   catalogEntry("discord.presence.delete_own_message", ANY_TRANSPORT, "present"),
   catalogEntry("discord.presence.send_attachment", ANY_TRANSPORT, "present"),

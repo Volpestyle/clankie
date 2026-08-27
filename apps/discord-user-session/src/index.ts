@@ -182,6 +182,7 @@ const presenceSession = new DiscordPresenceSession({
 });
 
 const presencePort = createAdvertisedDiscordPresencePort(api, presenceSession);
+const toolProgressMessageIds = new Set<string>();
 const textIngress = new DiscordTextIngress(
   presencePort,
   {
@@ -669,13 +670,20 @@ async function executeCaptainDiscordAction(
   let channelId = input.channelId;
   let plan = planNonWatchCaptainDiscordAction(input);
   if (plan !== undefined) {
+    if (
+      input.action === "tool_progress" &&
+      input.progressMessageId !== undefined &&
+      !toolProgressMessageIds.has(input.progressMessageId)
+    ) {
+      return { ok: false, message: "That tool activity card does not belong to this process." };
+    }
     if (!guildIds.has(input.guildId) || (channelIds.size > 0 && !channelIds.has(input.channelId))) {
       return {
         ok: false,
         message:
           input.action === "react" || input.action === "unreact"
             ? "That message is outside my admitted Discord channels."
-            : input.action === "send_text_update"
+            : input.action === "send_text_update" || input.action === "tool_progress"
               ? "That channel is outside my admitted Discord channels."
               : "Threads only work in my admitted server channels.",
       };
@@ -712,7 +720,7 @@ async function executeCaptainDiscordAction(
 
   try {
     const health = await presencePort.getHealth();
-    await presencePort.executeDiscordPresenceAction(
+    const action = await presencePort.executeDiscordPresenceAction(
       DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,
         idempotencyKey: `captain:${input.callId}:${input.action}`,
@@ -728,9 +736,16 @@ async function executeCaptainDiscordAction(
         payload: plan.payload,
       }),
     );
+    if (input.action === "tool_progress") {
+      if (action.messageId !== undefined) toolProgressMessageIds.add(action.messageId);
+      if (input.phase !== "running" && input.progressMessageId !== undefined) {
+        toolProgressMessageIds.delete(input.progressMessageId);
+      }
+    }
     return {
       ok: true,
       message: plan.successMessage,
+      ...(action.messageId === undefined ? {} : { messageId: action.messageId }),
     };
   } catch {
     return { ok: false, message: "My Discord body refused that action." };

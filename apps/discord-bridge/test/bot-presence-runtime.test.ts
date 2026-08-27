@@ -5,7 +5,7 @@ import {
   type DiscordPresencePhaseEvent,
 } from "@clankie/interactive-environment";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
-import { ChannelType } from "discord.js";
+import { ChannelType, MessageFlags } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
 import { DiscordBotPresenceRuntime } from "../src/bot-presence-runtime.ts";
 
@@ -79,6 +79,62 @@ function sessionWrite(suffix: string): DiscordPresenceWrite {
 }
 
 describe("DiscordBotPresenceRuntime", () => {
+  it("renders tool activity as one quiet Components V2 card", async () => {
+    const post = vi.fn(async () => ({ id: "tool-card-1" }));
+    const patch = vi.fn(async () => undefined);
+    const del = vi.fn(async () => undefined);
+    const runtime = new DiscordBotPresenceRuntime({
+      botToken: "bot-token",
+      rest: { post, put: vi.fn(), delete: del, patch } as never,
+    });
+    const progress = {
+      kind: "tool_progress" as const,
+      channelId: "ch-1",
+      replyToMessageId: "msg-1",
+      categories: ["browsing" as const],
+      toolCalls: 1,
+      activeToolCalls: 1,
+      failedToolCalls: 0,
+      elapsedSeconds: 2,
+    };
+
+    const created = await runtime.execute(
+      write({ action: "discord.presence.tool_progress", payload: { ...progress, phase: "running" } }),
+      presentSession,
+    );
+    expect(created.messageId).toBe("tool-card-1");
+    expect(post).toHaveBeenCalledWith(
+      expect.stringContaining("ch-1"),
+      expect.objectContaining({
+        body: expect.objectContaining({
+          flags: MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications,
+          components: [expect.objectContaining({ type: 17 })],
+          allowed_mentions: { parse: [] },
+        }),
+      }),
+    );
+
+    await runtime.execute(
+      write({
+        action: "discord.presence.tool_progress",
+        payload: { ...progress, messageId: "tool-card-1", phase: "completed", activeToolCalls: 0 },
+      }),
+      presentSession,
+    );
+    expect(patch).toHaveBeenCalledWith(expect.stringContaining("tool-card-1"), {
+      body: { components: [expect.objectContaining({ type: 17 })] },
+    });
+
+    await runtime.execute(
+      write({
+        action: "discord.presence.tool_progress",
+        payload: { ...progress, messageId: "tool-card-1", phase: "dismissed", activeToolCalls: 0 },
+      }),
+      presentSession,
+    );
+    expect(del).toHaveBeenCalledWith(expect.stringContaining("tool-card-1"));
+  });
+
   it("posts replies and reactions through the bot REST client", async () => {
     const post = vi.fn(async () => ({ id: "msg-out-1" }));
     const put = vi.fn(async () => undefined);

@@ -22,6 +22,21 @@ describe("captain Discord action control", () => {
       payload: { kind: "react", emoji: "👍" },
       successMessage: "I reacted.",
     });
+    expect(
+      planNonWatchCaptainDiscordAction({
+        ...context,
+        action: "tool_progress",
+        phase: "running",
+        categories: ["browsing"],
+        toolCalls: 1,
+        activeToolCalls: 1,
+        failedToolCalls: 0,
+        elapsedSeconds: 2,
+      }),
+    ).toMatchObject({
+      action: "discord.presence.tool_progress",
+      payload: { kind: "tool_progress", replyToMessageId: "message-1", categories: ["browsing"] },
+    });
     expect(planNonWatchCaptainDiscordAction({ ...context, action: "watch_start" })).toBeUndefined();
   });
 

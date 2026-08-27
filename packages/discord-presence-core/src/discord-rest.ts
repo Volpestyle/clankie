@@ -1,4 +1,63 @@
-import type { DiscordPresenceActionRequest } from "@clankie/protocol";
+import type { DiscordPresenceActionRequest, DiscordToolProgressCategory } from "@clankie/protocol";
+
+type DiscordToolProgressPayload = Extract<DiscordPresenceActionRequest, { readonly kind: "tool_progress" }>;
+
+const TOOL_PROGRESS_LABELS: Readonly<Record<DiscordToolProgressCategory, string>> = {
+  browsing: "Browsing",
+  creating_media: "Creating media",
+  working_locally: "Working locally",
+  using_connected_services: "Using connected services",
+  playing: "Playing",
+  using_tools: "Using tools",
+};
+
+const TOOL_PROGRESS_PHASE = {
+  running: { accentColor: 0xf0b232, icon: "🛠️", title: "Tool activity" },
+  completed: { accentColor: 0x3ba55d, icon: "✅", title: "Tool activity complete" },
+  failed: { accentColor: 0xed4245, icon: "⚠️", title: "Tool activity stopped" },
+} as const;
+
+function toolProgressMarkdown(payload: DiscordToolProgressPayload): string {
+  if (payload.phase === "dismissed") throw new Error("Dismissed tool progress has no visible content");
+  const phase = TOOL_PROGRESS_PHASE[payload.phase];
+  const calls = `${String(payload.toolCalls)} tool call${payload.toolCalls === 1 ? "" : "s"}`;
+  const active =
+    payload.phase === "running" && payload.activeToolCalls > 0
+      ? `${String(payload.activeToolCalls)} active`
+      : undefined;
+  const failed = payload.failedToolCalls > 0 ? `${String(payload.failedToolCalls)} failed` : undefined;
+  const elapsed =
+    payload.elapsedSeconds < 60
+      ? `${String(payload.elapsedSeconds)}s`
+      : `${String(Math.floor(payload.elapsedSeconds / 60))}m ${String(payload.elapsedSeconds % 60)}s`;
+  return [
+    `${phase.icon} **${phase.title}**`,
+    payload.categories.map((category) => TOOL_PROGRESS_LABELS[category]).join(" · "),
+    [calls, active, failed, elapsed].filter((part) => part !== undefined).join(" · "),
+  ].join("\n");
+}
+
+/** Components V2 payload for the official bot body. */
+export function discordToolProgressComponents(
+  payload: DiscordToolProgressPayload,
+): readonly Record<string, unknown>[] {
+  if (payload.phase === "dismissed") throw new Error("Dismissed tool progress has no visible content");
+  return [
+    {
+      type: 17,
+      accent_color: TOOL_PROGRESS_PHASE[payload.phase].accentColor,
+      components: [{ type: 10, content: toolProgressMarkdown(payload) }],
+    },
+  ];
+}
+
+/** Plain Discord formatting for the personal-lab user-session fallback. */
+export function discordToolProgressText(payload: DiscordToolProgressPayload): string {
+  return toolProgressMarkdown(payload)
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
 
 /** Encode a reaction for the Discord REST path (unicode or name:id custom). */
 export function encodeReactionEmoji(emoji: string): string {

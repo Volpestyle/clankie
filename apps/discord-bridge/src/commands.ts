@@ -19,6 +19,7 @@ export const DISCORD_COMMAND_NAME = "clankie";
 /** Subcommand names, exported so authority tests can assert against the surface. */
 export const DISCORD_SUBCOMMANDS = [
   "status",
+  "tools",
   "person-memory",
   "join",
   "leave",
@@ -29,8 +30,24 @@ export const DISCORD_SUBCOMMANDS = [
 export const commands = [
   new SlashCommandBuilder()
     .setName(DISCORD_COMMAND_NAME)
-    .setDescription("Clankie: memory and voice.")
+    .setDescription("Clankie: tools, memory, and voice.")
     .addSubcommand((sub) => sub.setName("status").setDescription("Show the local harness status."))
+    .addSubcommand((sub) =>
+      sub
+        .setName("tools")
+        .setDescription("Show or hide Clankie's tool activity cards in this channel.")
+        .addStringOption((option) =>
+          option
+            .setName("mode")
+            .setDescription("Persist tool activity visibility for this channel.")
+            .setRequired(true)
+            .addChoices(
+              { name: "On", value: "on" },
+              { name: "Off", value: "off" },
+              { name: "Status", value: "status" },
+            ),
+        ),
+    )
     .addSubcommand((sub) =>
       sub
         .setName("person-memory")

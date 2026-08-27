@@ -56,8 +56,11 @@ minutes is a dead stream, so the stall watchdog aborts its pi session and
 settles it as `captain_turn_stalled`. While someone waits on a slow requested
 turn, he can post one short `send_text_update` message to the channel ("hang on,
 pulling the bracket up") without ending it; work he elects to do on his own
-stays quiet. Discord shows him typing for the whole turn rather than for a
-capped minute.
+stays quiet. In channels where the owner enables `/clankie tools mode:on`, the
+host also edits one quiet tool-activity card with public-safe work categories,
+counts, elapsed time, and a terminal state; tool names, arguments, and results
+stay in the local Pi trail ([ADR 0134](adr/0134-discord-tool-work-is-a-status-card.md)).
+Discord shows him typing for the whole turn rather than for a capped minute.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): revision-fenced sends, cursored replay, long-polled

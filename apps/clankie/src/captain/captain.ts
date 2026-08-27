@@ -38,6 +38,7 @@ import { HerdrWatchStore } from "./herdr-watch.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import { discordTurnSessionKey, normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
+import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import type { CaptainPort } from "./port.ts";
@@ -707,6 +708,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane: LaneSession,
     normalized: Awaited<ReturnType<typeof normalizeDiscordTurn>>,
     deliveryId: string,
+    toolProgressEnabled: boolean,
   ): Promise<CaptainChannelTurnResult> {
     lane.turnCounter += 1;
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
@@ -732,11 +734,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           acceptedAt: new Date().toISOString(),
           ...(discordTokensStart === undefined ? {} : { contextTokensStart: discordTokensStart }),
         });
-    const unsubscribeMetrics =
-      metrics === undefined
+    const toolProgress =
+      live || !toolProgressEnabled || normalized.guildId === undefined || deps.discordActions === undefined
+        ? undefined
+        : new DiscordToolProgressReporter(
+            {
+              turnId,
+              actorId: normalized.actorId,
+              guildId: normalized.guildId,
+              channelId: normalized.channelId,
+              messageId: normalized.messageId,
+            },
+            deps.discordActions,
+          );
+    const unsubscribeEvents =
+      metrics === undefined && toolProgress === undefined
         ? () => undefined
         : lane.session.subscribe((event) => {
-            recordPiToolStart(metrics, event);
+            if (metrics !== undefined) recordPiToolStart(metrics, event);
+            if (event.type === "tool_execution_start") {
+              toolProgress?.toolStarted(event.toolCallId, event.toolName);
+            } else if (event.type === "tool_execution_end") {
+              toolProgress?.toolEnded(event.toolCallId, event.isError);
+            }
           });
     let role: "ran" | "absorbed" = "ran";
     let early: CaptainChannelTurnResult | undefined;
@@ -780,10 +800,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       early = { state: "failed", turnId, code: "captain_session_failed" };
     } finally {
       tokensEnd = contextTokenCount(lane.session.getContextUsage());
-      unsubscribeMetrics();
+      unsubscribeEvents();
       if (!normalized.durable) lane.session.dispose();
     }
     if (early !== undefined) {
+      await toolProgress?.fail();
       tryAppendTurnSettled(turnSettled, metrics, settled ?? "failed", new Date(), tokensEnd);
       return early;
     }
@@ -791,10 +812,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // Heard inside another turn's live run: that run's reply answers this
       // message too, so the delivery says so rather than sending words of its
       // own. Distinct from silence — he did answer, just not from here.
+      await toolProgress?.dismiss();
       return { state: "absorbed", captainSessionId: normalized.sessionKey, turnId };
     }
     const message = lane.lastAssistantText.trim();
     if (message.length === 0) {
+      await toolProgress?.fail();
       tryAppendTurnSettled(turnSettled, metrics, "failed", new Date(), tokensEnd);
       return {
         state: "failed",
@@ -807,6 +830,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // merely quotes the sentinel is still a reply, and silencing it would let
     // anyone who says the token in a channel mute him.
     if (message === CAPTAIN_SILENT_REPLY_SENTINEL) {
+      await toolProgress?.dismiss();
       tryAppendTurnSettled(turnSettled, metrics, "completed", new Date(), tokensEnd);
       return { state: "silent", captainSessionId: normalized.sessionKey, turnId };
     }
@@ -815,6 +839,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       kind: "said",
       text: message,
     });
+    await toolProgress?.complete();
     tryAppendTurnSettled(turnSettled, metrics, "completed", new Date(), tokensEnd);
     return {
       state: "settled",
@@ -852,6 +877,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         sessionKey: plan.sessionKey,
         durable: plan.durable,
       };
+      const toolProgressEnabled =
+        normalized.lane === "discord_presence" &&
+        request.trigger.unprompted !== true &&
+        normalized.guildId !== undefined &&
+        discord.toolProgressChannelIds.includes(normalized.channelId);
       if (!normalized.durable) {
         // One-shot for context, durable for evidence: a fresh session per turn
         // (nothing carries forward), but written to disk under the room's own
@@ -869,7 +899,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           plan.systemTools,
           options.repoRoot,
         );
-        return runDiscordTurn(lane, normalized, request.deliveryId);
+        return runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled);
       }
       // Voice keeps the directory it has always written to; text rooms get
       // their own beside it rather than moving in under a name that means
@@ -885,7 +915,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         plan.systemTools,
         options.repoRoot,
       );
-      return runDiscordTurn(lane, normalized, request.deliveryId);
+      return runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled);
     },
 
     serveOperatorConversation(

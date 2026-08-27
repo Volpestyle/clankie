@@ -225,6 +225,8 @@ export {
   type DiscordVoiceTranscriptReadPage,
 } from "./transcript-store.ts";
 export {
+  discordToolProgressComponents,
+  discordToolProgressText,
   encodeReactionEmoji,
   planDiscordRestAction,
   resolveDiscordRestActionResult,

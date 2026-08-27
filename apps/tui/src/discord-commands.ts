@@ -267,6 +267,7 @@ function describeSettings(settings: DiscordSettings): string[] {
     showList("  ingress channels", settings.ingressChannelIds),
     `  dm policy: ${settings.ingressDmPolicy}`,
     `  context messages: ${String(settings.ingressContextMessages)}`,
+    showList("  tool progress channels", settings.toolProgressChannelIds),
     "",
     showList("presence guilds", settings.presenceGuildIds),
     showList("presence channels", settings.presenceChannelIds),

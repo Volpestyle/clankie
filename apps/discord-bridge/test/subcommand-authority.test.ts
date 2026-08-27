@@ -58,6 +58,13 @@ describe("subcommand authority tiers", () => {
     }
   });
 
+  it("keeps tool-card settings owner-only", () => {
+    const body = caseBody("tools");
+    expect(body).toContain("interaction.user.id !== ownerUserId");
+    expect(body).not.toContain(AMBIENT);
+    expect(body).not.toContain(VOICE_PRESENCE);
+  });
+
   it("dispatches on the subcommand under a single guarded namespace", () => {
     expect(source).toContain("interaction.commandName !== DISCORD_COMMAND_NAME");
     expect(source).toContain("switch (interaction.options.getSubcommand())");

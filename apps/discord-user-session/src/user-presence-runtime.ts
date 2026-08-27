@@ -1,4 +1,8 @@
-import { planDiscordRestAction, resolveDiscordRestActionResult } from "@clankie/discord-presence-core";
+import {
+  discordToolProgressText,
+  planDiscordRestAction,
+  resolveDiscordRestActionResult,
+} from "@clankie/discord-presence-core";
 import {
   isDiscordPresenceActionAvailable,
   type DiscordPresenceSessionRecord,
@@ -57,6 +61,26 @@ export class DiscordUserPresenceRuntime {
     }
 
     const payload = write.payload;
+    if (payload.kind === "tool_progress") {
+      const path = `/channels/${payload.channelId}/messages${
+        payload.messageId === undefined ? "" : `/${payload.messageId}`
+      }`;
+      if (payload.phase === "dismissed") {
+        await this.request("DELETE", path);
+        return this.result(write, payload.channelId);
+      }
+      const content = discordToolProgressText(payload);
+      if (payload.messageId !== undefined) {
+        await this.request("PATCH", path, { content, allowed_mentions: { parse: [] } });
+        return this.result(write, payload.channelId, payload.messageId);
+      }
+      const message = await this.request("POST", path, {
+        content,
+        message_reference: { message_id: payload.replyToMessageId },
+        allowed_mentions: { parse: [] },
+      });
+      return this.result(write, payload.channelId, messageId(message));
+    }
     const restPlan = planDiscordRestAction(payload);
     if (restPlan !== undefined) {
       const response = await this.request(restPlan.method.toUpperCase(), restPlan.path, restPlan.body);

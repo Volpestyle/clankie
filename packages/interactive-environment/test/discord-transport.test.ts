@@ -13,6 +13,7 @@ describe("Discord transport bindings", () => {
       "discord.presence.reply",
       "discord.presence.react",
       "discord.presence.send_message",
+      "discord.presence.tool_progress",
       "discord.presence.typing_start",
       "discord.presence.voice_join",
     ] as const;

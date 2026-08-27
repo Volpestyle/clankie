@@ -45,6 +45,10 @@ describe("Discord commands", () => {
     expect(subcommand("person-memory")).toBeDefined();
   });
 
+  it("exposes the persisted per-channel tool-card toggle", () => {
+    expect(choiceValues("tools", "mode")).toEqual(["on", "off", "status"]);
+  });
+
   it("keeps person-memory mutation proposal-only and excludes ambient export/delete", () => {
     const values = choiceValues("person-memory", "action");
     expect(values).toEqual(["propose", "recall"]);

@@ -100,3 +100,7 @@ the launcher starts it.
 `discord.systemActorUserIds` is the Discord users whose text turns get bash,
 files, and herdr. Empty means nobody — Discord stays social. It is not
 `ownerUserId` (DM policy) and not `ambientUserIds` (slash commands).
+
+`discord.toolProgressChannelIds` is the guild channels where requested text
+turns show the content-free tool-activity card. It is empty by default and the
+owner changes it in Discord with `/clankie tools mode:on|off|status`.

@@ -33,6 +33,23 @@ export function planNonWatchCaptainDiscordAction(
         successMessage:
           "I posted that text update. Keep working; your final text reply still posts when the turn ends.",
       };
+    case "tool_progress":
+      return {
+        action: "discord.presence.tool_progress",
+        payload: {
+          kind: "tool_progress",
+          channelId,
+          replyToMessageId: messageId,
+          ...(input.progressMessageId === undefined ? {} : { messageId: input.progressMessageId }),
+          phase: input.phase,
+          categories: input.categories,
+          toolCalls: input.toolCalls,
+          activeToolCalls: input.activeToolCalls,
+          failedToolCalls: input.failedToolCalls,
+          elapsedSeconds: input.elapsedSeconds,
+        },
+        successMessage: "I updated the tool activity card.",
+      };
     case "create_thread":
       return {
         action: "discord.presence.create_thread",
