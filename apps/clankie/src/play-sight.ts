@@ -23,7 +23,7 @@ import {
 } from "@clankie/interactive-environment";
 import type { EmbodimentEnvironmentId } from "@clankie/protocol";
 
-export interface PlayStillCapture {
+interface PlayStillCapture {
   png: Buffer;
   width: number;
   height: number;
@@ -44,7 +44,7 @@ export interface PlaySightProgress {
   readonly objective: string | null;
 }
 
-export interface PlaySightPort {
+interface PlaySightPort {
   still(): PlayStillRead;
   story(): PlayStoryRead;
 }

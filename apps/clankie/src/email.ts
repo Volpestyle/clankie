@@ -9,15 +9,15 @@ import nodemailer from "nodemailer";
 
 export const EMAIL_PROVIDER_ID = "email";
 
-export type EmailRefusalReason = "credential_unavailable" | "not_configured" | "provider_error";
+type EmailRefusalReason = "credential_unavailable" | "not_configured" | "provider_error";
 
-export type EmailRefusal = {
+type EmailRefusal = {
   readonly outcome: "refused";
   readonly reason: EmailRefusalReason;
   readonly detail: string;
 };
 
-export type EmailHeader = {
+type EmailHeader = {
   readonly uid: number;
   readonly folder: string;
   readonly from: string;
@@ -26,7 +26,7 @@ export type EmailHeader = {
   readonly date?: string;
 };
 
-export type EmailMessage = EmailHeader & {
+type EmailMessage = EmailHeader & {
   readonly text: string;
 };
 
@@ -47,7 +47,7 @@ export type EmailPort = {
   }): Promise<{ outcome: "ok"; messageId: string } | EmailRefusal>;
 };
 
-export type ImapSession = {
+type ImapSession = {
   exists(): Promise<number>;
   fetchRange(fromSeq: number, envelopeAndSource: boolean): Promise<readonly FetchedMail[]>;
   search(query: string): Promise<readonly number[]>;
@@ -72,7 +72,7 @@ export type EmailAdapters = {
   ): Promise<string>;
 };
 
-export type ConnectedMailbox = {
+type ConnectedMailbox = {
   readonly username: string;
   readonly password: string;
   readonly settings: EmailSettings;
@@ -193,7 +193,7 @@ export function createEmailPort(options: {
   };
 }
 
-export function defaultEmailAdapters(): EmailAdapters {
+function defaultEmailAdapters(): EmailAdapters {
   return {
     async openImap(account, folder) {
       const client = new ImapFlow({

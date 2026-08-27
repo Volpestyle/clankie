@@ -9,11 +9,12 @@
     "typecheck": "turbo run typecheck",
     "test": "vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug",
     "lint": "oxlint --deny-warnings . && pnpm --filter @clankie/vox lint",
+    "deadcode": "knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers",
     "fmt": "oxfmt --write .",
     "fmt:check": "oxfmt --check . && pnpm --filter @clankie/vox fmt:check",
     "docs:check": "node scripts/check-doc-links.mjs",
     "testing:view": "node docs/testing/serve-archive.mjs",
-    "check": "pnpm fmt:check && pnpm lint && pnpm docs:check && pnpm typecheck && pnpm test",
+    "check": "pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm typecheck && pnpm test",
     "doctor": "node scripts/doctor.mjs",
     "cli:install": "node scripts/install-cli.mjs",
     "clean": "turbo run clean --filter=@clankie/menu-bar --filter=@clankie/vox && rm -rf .turbo .data",
@@ -23,6 +24,7 @@
     "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness"
   },
   "devDependencies": {
+    "knip": "6.32.2",
     "oxfmt": "0.58.0",
     "oxlint": "1.73.0",
     "turbo": "2.10.4",

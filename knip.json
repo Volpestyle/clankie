@@ -1,0 +1,19 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs"],
+  "workspaces": {
+    "apps/clankie": {
+      "entry": ["test/fixtures/browser-mcp-server.mjs"]
+    },
+    "apps/discord-user-session": {
+      "entry": ["src/presence-runtime-module.ts"]
+    },
+    "apps/tui": {
+      "entry": ["bench/transcript-render.ts"]
+    },
+    "integrations/gba-emulator": {
+      "entry": ["scripts/bootstrap-savestate.ts"],
+      "ignoreExportsUsedInFile": true
+    }
+  }
+}

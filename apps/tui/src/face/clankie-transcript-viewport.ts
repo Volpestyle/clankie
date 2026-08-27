@@ -123,7 +123,7 @@ export const UNICODE_SCROLLBAR_GLYPHS: ClankieScrollbarGlyphs = {
   track: "│",
 };
 
-export const ASCII_SCROLLBAR_GLYPHS: ClankieScrollbarGlyphs = {
+const ASCII_SCROLLBAR_GLYPHS: ClankieScrollbarGlyphs = {
   bottomHalf: "#",
   full: "#",
   topHalf: "#",

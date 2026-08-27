@@ -27,7 +27,7 @@ export interface CaptainLaneClient {
   lanes(): Promise<readonly ObservableCaptainLane[]>;
 }
 
-export class CaptainLaneClientError extends Error {
+class CaptainLaneClientError extends Error {
   public constructor(message: string, cause?: unknown) {
     super(message, { cause });
     this.name = "CaptainLaneClientError";

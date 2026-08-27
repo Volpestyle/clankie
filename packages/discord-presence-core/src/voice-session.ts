@@ -84,7 +84,7 @@ const MIN_UTTERANCE_MS = 350;
  * turn a voice channel into a monologue nobody can talk over. Seeding is
  * unbounded; only the spoken response waits.
  */
-export const DEFAULT_NARRATION_MIN_INTERVAL_MS = 12_000;
+const DEFAULT_NARRATION_MIN_INTERVAL_MS = 12_000;
 /**
  * Silence that closes a capture. Unlike the cascade this no longer gates a
  * response — transcription streams while the speaker is still talking — it

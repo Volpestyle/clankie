@@ -39,11 +39,11 @@ function splitList(value: string): string[] {
 }
 
 /** Typed input wins; blank keeps what was already configured. */
-export function resolvePersonaText(typed: string, existing: string): string {
+function resolvePersonaText(typed: string, existing: string): string {
   return typed.trim().length > 0 ? typed.trim() : existing;
 }
 
-export function describePersona(persona: PersonaSettings): string[] {
+function describePersona(persona: PersonaSettings): string[] {
   const notes = persona.characterNotes.trim();
   return [
     `name: ${persona.displayName}`,

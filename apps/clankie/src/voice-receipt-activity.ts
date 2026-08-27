@@ -8,7 +8,7 @@ import { join } from "node:path";
  * dropped, and the scalars already on the receipt.
  */
 
-export interface VoiceSpeechScalar {
+interface VoiceSpeechScalar {
   readonly occurredAt: string;
   readonly kind: "spoken" | "suppressed";
   readonly deliveryId?: string;
@@ -22,7 +22,7 @@ export interface VoiceSpeechScalar {
   readonly outputTokens?: number;
 }
 
-export interface VoiceStaySpeechSummary {
+interface VoiceStaySpeechSummary {
   readonly stayId?: string;
   readonly spoken: number;
   readonly suppressed: number;

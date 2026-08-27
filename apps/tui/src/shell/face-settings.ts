@@ -5,8 +5,8 @@ export type LayoutSettings = {
   readonly statusPlacement: StatusPlacement;
 };
 
-export const CLANKIE_TUI_INPUT_PLACEMENT_ENV = "CLANKIE_TUI_INPUT_PLACEMENT";
-export const CLANKIE_TUI_STATUS_PLACEMENT_ENV = "CLANKIE_TUI_STATUS_PLACEMENT";
+const CLANKIE_TUI_INPUT_PLACEMENT_ENV = "CLANKIE_TUI_INPUT_PLACEMENT";
+const CLANKIE_TUI_STATUS_PLACEMENT_ENV = "CLANKIE_TUI_STATUS_PLACEMENT";
 
 export function parseInputPlacement(value: string | undefined): InputPlacement | undefined {
   const normalized = value?.trim().toLowerCase();

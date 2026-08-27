@@ -987,7 +987,7 @@ const LOCAL_PROVIDER_ID = "ollama";
 const LOCAL_BASE_URL = "http://localhost:11434/v1";
 const LOCAL_CONTEXT_FALLBACK = 32_768;
 
-export interface ProbedLocalModel {
+interface ProbedLocalModel {
   readonly id: string;
   readonly context?: number;
 }
@@ -996,7 +996,7 @@ export interface ProbedLocalModel {
  * Lists an OpenAI-compatible endpoint's models (`GET {baseURL}/models`). Local
  * runtimes are unknown to models.dev, so the endpoint itself is the catalog.
  */
-export async function probeLocalEndpoint(
+async function probeLocalEndpoint(
   baseURL: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<readonly ProbedLocalModel[]> {

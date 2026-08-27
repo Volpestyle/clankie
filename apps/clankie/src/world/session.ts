@@ -7,8 +7,6 @@ import { findOperation } from "@pokeagents/world-protocol";
 import type { WorldBody } from "./body.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "./operations.ts";
 
-export { HOSTED_WORLD_MIND_OPERATIONS, type HostedWorldMindOperation } from "./operations.ts";
-
 const MIND_OPERATIONS = new Set<string>(HOSTED_WORLD_MIND_OPERATIONS);
 
 export type HostedWorldInvokeResult =

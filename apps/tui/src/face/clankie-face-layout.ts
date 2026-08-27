@@ -1,6 +1,6 @@
 import type { OverlayOptions } from "@earendil-works/pi-tui";
 
-export type ClankieFaceRowsOptions = {
+type ClankieFaceRowsOptions = {
   readonly reservedRows: number;
   readonly terminalRows: number;
 };
@@ -48,8 +48,8 @@ export function resolveClankieTranscriptMouseTargetFromBands(
   };
 }
 
-export type ClankieChromeBand = "banner" | "modal" | "status" | "typeahead";
-export type ClankieFaceBand = ClankieChromeBand | "transcript" | "editor";
+type ClankieChromeBand = "banner" | "modal" | "status" | "typeahead";
+type ClankieFaceBand = ClankieChromeBand | "transcript" | "editor";
 export type ClankieFaceBandRows = {
   readonly band: ClankieFaceBand;
   readonly rows: number;

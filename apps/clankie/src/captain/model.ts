@@ -14,7 +14,7 @@ import {
 import { type Credential, type CredentialInfo } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-export class CaptainModelError extends Error {}
+class CaptainModelError extends Error {}
 
 /**
  * Bridges the clankie credential broker (Keychain-backed, written by the TUI

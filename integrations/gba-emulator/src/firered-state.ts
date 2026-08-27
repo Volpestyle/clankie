@@ -180,7 +180,7 @@ export interface FireRedMemorySnapshot {
   iwram: Uint8Array;
 }
 
-export interface FireRedDecodedBattle {
+interface FireRedDecodedBattle {
   battleTypeFlags: number;
   outcome: number;
   activePartySlot: number;
@@ -332,7 +332,7 @@ function decodeInventory(ewram: DataView, iwram: DataView): GbaCoreInventoryEntr
 }
 
 /** Read move power directly from the version-pinned ROM table. */
-export function decodeFireRedMovePower(romBytes: Uint8Array, move: number): number {
+function decodeFireRedMovePower(romBytes: Uint8Array, move: number): number {
   if (!validMove(move)) throw new Error(`FireRed move ${String(move)} is outside the supported domain`);
   const offset = FIRERED_BATTLE_MOVES_ROM_OFFSET + move * FIRERED_BATTLE_MOVE_STRIDE + 1;
   const power = romBytes[offset];

@@ -165,7 +165,7 @@ export class OperatorConversationSelection {
 }
 
 /** Corrupt or unreadable local replay state is never silently ignored. */
-export class OperatorConversationStateStoreError extends Error {
+class OperatorConversationStateStoreError extends Error {
   public constructor(message: string) {
     super(message);
     this.name = "OperatorConversationStateStoreError";

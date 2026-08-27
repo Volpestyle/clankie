@@ -102,7 +102,7 @@ export interface WorldBody {
   readonly close: () => Promise<void>;
 }
 
-export interface WorldSessionSnapshot {
+interface WorldSessionSnapshot {
   readonly worldId: string;
   readonly playerId: string;
   readonly sessionId: string;
@@ -127,7 +127,7 @@ export interface WorldJoinOptions {
   transport?: WorldPlayerTransport;
 }
 
-export interface WorldAudioPacket {
+interface WorldAudioPacket {
   readonly bodyGeneration: number;
   readonly frame: number;
   readonly encoding: "pcm_s16le";
@@ -144,7 +144,7 @@ export interface WorldAudioPacket {
  * `WORLD_ADDRESS` is unix path, `tcp://host:port`, or `tls://host:port`. Absent,
  * the default is the world's unix socket under `WORLD_STATE_DIR`.
  */
-export function resolveWorldTarget(env: NodeJS.ProcessEnv = process.env): string {
+function resolveWorldTarget(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env["WORLD_ADDRESS"]?.trim();
   if (configured !== undefined && configured.length > 0) return configured;
   return worldSocketPath(defaultWorldStateDir(env));

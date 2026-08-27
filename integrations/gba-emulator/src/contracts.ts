@@ -7,7 +7,7 @@ import {
 } from "@clankie/interactive-environment";
 import { z } from "zod";
 
-export const GBA_EMULATOR_INTEGRATION_SCHEMA_VERSION = 1 as const;
+const GBA_EMULATOR_INTEGRATION_SCHEMA_VERSION = 1 as const;
 export const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
 const GridPositionSchema = z
@@ -176,7 +176,7 @@ export const GbaEmulatorTraceSchema = z
   .strict();
 export type GbaEmulatorTrace = z.infer<typeof GbaEmulatorTraceSchema>;
 
-export const GbaDriverReasonCodeSchema = z.enum([
+const GbaDriverReasonCodeSchema = z.enum([
   "route_step_toward_target",
   "engage_trainer",
   "advance_dialog",
@@ -193,7 +193,7 @@ export const GbaDriverReasonCodeSchema = z.enum([
 ]);
 export type GbaDriverReasonCode = z.infer<typeof GbaDriverReasonCodeSchema>;
 
-export const GbaDriverDecisionSchema = z
+const GbaDriverDecisionSchema = z
   .object({
     schemaVersion: z.literal(GBA_EMULATOR_INTEGRATION_SCHEMA_VERSION),
     sequence: z.number().int().positive().max(256),

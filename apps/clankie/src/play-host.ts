@@ -34,7 +34,7 @@ export interface EmbodimentClientPort {
   getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined>;
 }
 
-export interface PlayControl {
+interface PlayControl {
   /** True once a stop ask (or shutdown) wants the playthrough to end. */
   stopRequested(): boolean;
 }
@@ -50,7 +50,7 @@ export interface PlayRunResult {
   resumedFromCheckpointId?: string;
 }
 
-export type PlayExecutionResult =
+type PlayExecutionResult =
   | { kind: "refused"; reason: EmbodimentRefusalReason }
   | { kind: "ran"; result: PlayRunResult };
 

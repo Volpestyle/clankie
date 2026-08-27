@@ -64,7 +64,7 @@ function formatSingleStatusRow(text: string, width: number): string {
   return `${row}${" ".repeat(Math.max(0, safeWidth - visibleWidth(row)))}`;
 }
 
-export function formatStatusRows(text: string, width: number): string[] {
+function formatStatusRows(text: string, width: number): string[] {
   const safeWidth = Math.max(1, width);
   const paddingX = safeWidth > 2 ? 1 : 0;
   const contentWidth = Math.max(1, safeWidth - paddingX * 2);

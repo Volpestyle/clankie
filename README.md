@@ -92,6 +92,7 @@ is a separate private repo (`clankie-app`).
 
 ```bash
 pnpm typecheck
+pnpm deadcode
 pnpm test
 pnpm check           # required final check: fmt, lint, docs links, typecheck, tests
 pnpm gba:free-play   # drive the GBA body from a CLI

@@ -3,10 +3,10 @@ import { dirname, join } from "node:path";
 import { CaptainSessionLaneV2Schema, type CaptainSessionLaneV2 } from "@clankie/protocol";
 import { z } from "zod";
 
-export const TURN_SETTLED_LOG_NAME = "turn-settled.jsonl";
-export const TURN_SETTLED_METRICS_TYPE = "captain.turn.settled" as const;
+const TURN_SETTLED_LOG_NAME = "turn-settled.jsonl";
+const TURN_SETTLED_METRICS_TYPE = "captain.turn.settled" as const;
 
-export const TurnSettledOutcomeSchema = z.enum(["completed", "failed", "interrupted"]);
+const TurnSettledOutcomeSchema = z.enum(["completed", "failed", "interrupted"]);
 export type TurnSettledOutcome = z.infer<typeof TurnSettledOutcomeSchema>;
 
 /**

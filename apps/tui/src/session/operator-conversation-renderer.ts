@@ -14,7 +14,7 @@ export interface OperatorConversationBlockOptions {
   readonly collapsed: boolean;
 }
 
-export interface OperatorConversationBlockHandle {
+interface OperatorConversationBlockHandle {
   setMarkdown(markdown: string): void;
 }
 

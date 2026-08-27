@@ -57,7 +57,7 @@ export interface DiscordAttachmentFetchOptions {
   readonly extractMotionFrames?: MotionFrameExtractor;
 }
 
-export type MotionFrameExtractor = (bytes: Buffer, count: number) => Promise<readonly Buffer[]>;
+type MotionFrameExtractor = (bytes: Buffer, count: number) => Promise<readonly Buffer[]>;
 
 export type DiscordAttachmentResolver = (
   attachments: readonly DiscordPresenceAttachment[],
@@ -182,7 +182,7 @@ async function fetchDiscordBytes<T extends string>(
   return { bytes, mediaType };
 }
 
-export async function extractMotionFrames(bytes: Buffer, count: number): Promise<readonly Buffer[]> {
+async function extractMotionFrames(bytes: Buffer, count: number): Promise<readonly Buffer[]> {
   if (!Number.isInteger(count) || count <= 0 || count > DISCORD_PRESENCE_MOTION_FRAMES_MAX) {
     throw new Error("discord_motion_frame_count_invalid");
   }

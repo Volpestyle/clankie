@@ -37,7 +37,7 @@ const EPISODE_RECALL_LIMIT = 8;
 /** Facts a recall card renders. */
 const FACT_RECALL_LIMIT = 8;
 
-export interface DiscordPersonMemoryReadOptions {
+interface DiscordPersonMemoryReadOptions {
   readonly channelId?: string;
   readonly now?: Date;
 }

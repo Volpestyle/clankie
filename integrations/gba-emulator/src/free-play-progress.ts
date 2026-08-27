@@ -39,7 +39,7 @@ export function positionOf(observations: readonly GbaEmulatorObservation[]): Gba
 }
 
 /** Extract which way he is facing, which distinguishes a turn from a wall. */
-export function facingOf(observations: readonly GbaEmulatorObservation[]): string | null {
+function facingOf(observations: readonly GbaEmulatorObservation[]): string | null {
   for (const observation of observations) {
     if (observation.kind !== "overworld") continue;
     const facing = (observation as unknown as { data?: { facing?: string } }).data?.facing;

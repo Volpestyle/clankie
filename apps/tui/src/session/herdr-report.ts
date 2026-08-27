@@ -5,7 +5,7 @@ const execFileAsync = promisify(execFile);
 
 export type HerdrAgentState = "idle" | "working" | "blocked" | "unknown";
 
-export type HerdrCommandRunner = (
+type HerdrCommandRunner = (
   command: string,
   args: readonly string[],
 ) => Promise<{ stdout: string; stderr: string }>;

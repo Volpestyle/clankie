@@ -7,7 +7,7 @@ import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
 // the same bearer path as `clankie pair`. Fails closed with content-free,
 // actionable messages; never surfaces a response body or token in an error.
 
-export const DEVICES_PATH = "/v1/devices";
+const DEVICES_PATH = "/v1/devices";
 
 const DeviceListSchema = z.array(DeviceListItemSchema);
 

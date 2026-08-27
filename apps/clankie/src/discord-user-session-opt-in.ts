@@ -13,7 +13,7 @@ import {
  * wear a human account right now", which is a single yes/no, not a set.
  */
 
-export const DISCORD_USER_SESSION_OPT_IN_STREAM_ID = "discord-user-session" as const;
+const DISCORD_USER_SESSION_OPT_IN_STREAM_ID = "discord-user-session" as const;
 export const DISCORD_USER_SESSION_OPT_IN_RECORDED = "discord.user_session.opt_in.recorded" as const;
 export const DISCORD_USER_SESSION_OPT_IN_REVOKED = "discord.user_session.opt_in.revoked" as const;
 

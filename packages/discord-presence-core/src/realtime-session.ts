@@ -298,7 +298,7 @@ export interface RealtimeResponseMeta {
   readonly outputTokens?: number;
 }
 
-export interface RealtimeSessionCommonOptions {
+interface RealtimeSessionCommonOptions {
   /** Broker-resolved API key. It goes into the connection headers and must never be persisted, logged, or echoed in error text. */
   readonly apiKey: string;
   /** Injected transport. Defaults to {@link openRealtimeWebSocket} over Node's global WebSocket. */

@@ -28,5 +28,3 @@ export const HOSTED_WORLD_BODY_OPERATIONS = WORLD_OPERATIONS.map((operation) => 
 export const HOSTED_WORLD_MIND_OPERATIONS = WORLD_OPERATIONS.map((operation) => operation.name).filter(
   (name) => HOSTED_WORLD_OPERATION_CLASS[name] === "mind",
 );
-
-export type HostedWorldMindOperation = (typeof HOSTED_WORLD_MIND_OPERATIONS)[number];

@@ -57,7 +57,7 @@ const ARTIFACT_SUBDIRECTORY = "browser";
 const REQUEST_TIMEOUT_MS = 60_000;
 const STARTUP_TIMEOUT_MS = 30_000;
 
-export interface BrowserHostLogger {
+interface BrowserHostLogger {
   info(context: Record<string, unknown>, message: string): void;
   warn(context: Record<string, unknown>, message: string): void;
 }

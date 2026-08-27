@@ -34,7 +34,7 @@ const ArtifactHashesSchema = z
     screenshotSha256: Sha256Schema,
   })
   .strict();
-export const FireRedLiveReceiptSchema = z
+const FireRedLiveReceiptSchema = z
   .object({
     scenarioId: z.literal("firered-oaks-lab-rival"),
     scenarioVersion: z.literal(1),

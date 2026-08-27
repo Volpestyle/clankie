@@ -10,13 +10,13 @@ import { PairingOfferWireSchema, type PairingOfferWire } from "@clankie/protocol
 export const DEFAULT_CONTROL_PLANE_URL = "http://127.0.0.1:4310";
 
 /** Pairing-offer route on the clankie service. */
-export const PAIRING_OFFER_PATH = "/v1/pairing/offer";
+const PAIRING_OFFER_PATH = "/v1/pairing/offer";
 
 /**
  * A single-use pairing offer minted by the clankie service. `deepLink` and `code`
  * are secret-bearing display data: render them, never log or persist them.
  */
-export const PairingOfferSchema = PairingOfferWireSchema;
+const PairingOfferSchema = PairingOfferWireSchema;
 
 export type PairingOffer = PairingOfferWire;
 

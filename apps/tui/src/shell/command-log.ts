@@ -8,22 +8,18 @@ import { ClankieRenderCache } from "../face/clankie-render-cache.ts";
 
 export type CommandLogTone = "error" | "success";
 
-export function formatCommandLogHeader(
-  prompt: string,
-  tone: CommandLogTone,
-  ansi: ClankieFaceAnsiTheme,
-): string {
+function formatCommandLogHeader(prompt: string, tone: CommandLogTone, ansi: ClankieFaceAnsiTheme): string {
   const command = slashCommandLabel(prompt);
   const status = tone === "error" ? ansi.red("error") : ansi.green("done");
   return `${status} ${ansi.cyan(command)}`;
 }
 
-export function slashCommandLabel(prompt: string): string {
+function slashCommandLabel(prompt: string): string {
   const token = prompt.trim().split(/\s+/u)[0];
   return token?.startsWith("/") === true ? token : "/command";
 }
 
-export function commandResultBodyLines(message: string): string[] {
+function commandResultBodyLines(message: string): string[] {
   const normalized = message.trim().replace(/\n{3,}/gu, "\n\n");
   if (normalized.length === 0) return [];
   return normalized.split(/\r?\n/u);

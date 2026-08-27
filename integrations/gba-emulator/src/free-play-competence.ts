@@ -28,7 +28,7 @@ const PositionSchema = z
 
 const MilestoneBaseSchema = z.object({ id: z.string().min(1).max(128) });
 
-export const FreePlayCompetenceMilestoneSchema = z.discriminatedUnion("kind", [
+const FreePlayCompetenceMilestoneSchema = z.discriminatedUnion("kind", [
   MilestoneBaseSchema.extend({ kind: z.literal("reached_position"), position: PositionSchema }).strict(),
   MilestoneBaseSchema.extend({ kind: z.literal("entered_map"), mapId: z.string().min(1).max(128) }).strict(),
   MilestoneBaseSchema.extend({ kind: z.literal("dialog_opened") }).strict(),
@@ -43,7 +43,7 @@ export const FreePlayCompetenceMilestoneSchema = z.discriminatedUnion("kind", [
     count: z.number().int().positive().max(1_024),
   }).strict(),
 ]);
-export type FreePlayCompetenceMilestone = z.infer<typeof FreePlayCompetenceMilestoneSchema>;
+type FreePlayCompetenceMilestone = z.infer<typeof FreePlayCompetenceMilestoneSchema>;
 
 const PinnedStateSchema = z
   .object({
@@ -55,7 +55,7 @@ const PinnedStateSchema = z
   })
   .strict();
 
-export const FreePlayCompetenceStateSchema = z
+const FreePlayCompetenceStateSchema = z
   .object({
     stateId: z.string().min(1).max(128),
     kind: z.enum(["deterministic_double", "rom_gated"]),
@@ -82,7 +82,7 @@ export const FreePlayCompetenceStateSchema = z
   });
 export type FreePlayCompetenceState = z.infer<typeof FreePlayCompetenceStateSchema>;
 
-export const FreePlayCompetenceBenchmarkDefinitionSchema = z
+const FreePlayCompetenceBenchmarkDefinitionSchema = z
   .object({
     schemaVersion: z.literal(1),
     benchmarkId: z.string().min(1).max(128),
@@ -95,9 +95,7 @@ export const FreePlayCompetenceBenchmarkDefinitionSchema = z
     states: z.array(FreePlayCompetenceStateSchema).min(1).max(16),
   })
   .strict();
-export type FreePlayCompetenceBenchmarkDefinition = z.infer<
-  typeof FreePlayCompetenceBenchmarkDefinitionSchema
->;
+type FreePlayCompetenceBenchmarkDefinition = z.infer<typeof FreePlayCompetenceBenchmarkDefinitionSchema>;
 
 const MilestoneHitSchema = z
   .object({
@@ -106,7 +104,7 @@ const MilestoneHitSchema = z
     observationSha256: Sha256Schema,
   })
   .strict();
-export type FreePlayCompetenceMilestoneHit = z.infer<typeof MilestoneHitSchema>;
+type FreePlayCompetenceMilestoneHit = z.infer<typeof MilestoneHitSchema>;
 
 const MetricsSchema = z
   .object({
@@ -129,7 +127,7 @@ const MetricsSchema = z
     coherence: z.number().min(0).max(1).nullable(),
   })
   .strict();
-export type FreePlayCompetenceMetrics = z.infer<typeof MetricsSchema>;
+type FreePlayCompetenceMetrics = z.infer<typeof MetricsSchema>;
 
 const ChecksSchema = z
   .object({
@@ -143,7 +141,7 @@ const ChecksSchema = z
     controlStateDerived: z.boolean(),
   })
   .strict();
-export type FreePlayCompetenceChecks = z.infer<typeof ChecksSchema>;
+type FreePlayCompetenceChecks = z.infer<typeof ChecksSchema>;
 
 const RunReportSchema = z
   .object({
@@ -175,7 +173,7 @@ const RunReportSchema = z
       context.addIssue({ code: "custom", path: ["result"], message: "result disagrees with checks" });
     }
   });
-export type FreePlayCompetenceRunReport = z.infer<typeof RunReportSchema>;
+type FreePlayCompetenceRunReport = z.infer<typeof RunReportSchema>;
 
 export const FreePlayCompetenceBenchmarkReportSchema = z
   .object({
@@ -336,7 +334,7 @@ export function createStateDerivedFreePlayBenchmarkMind(state: FreePlayCompetenc
   };
 }
 
-export function decideStateDerivedAction(
+function decideStateDerivedAction(
   state: FreePlayCompetenceState,
   target: GbaPosition | null,
   view: FreePlayView,

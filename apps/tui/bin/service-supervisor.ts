@@ -35,21 +35,21 @@ export const SERVICE_ORDER: readonly ServiceId[] = [
   "tunnel",
 ];
 
-export type ServiceState = "healthy" | "unhealthy" | "unreachable";
+type ServiceState = "healthy" | "unhealthy" | "unreachable";
 
-export interface ServiceRecord {
+interface ServiceRecord {
   readonly id: ServiceId;
   readonly pid: number;
   readonly version: 1;
 }
 
-export interface ServiceProbe {
+interface ServiceProbe {
   readonly state: ServiceState;
   /** Short operator-facing note, e.g. a presence phase. Never secret-bearing. */
   readonly detail?: string;
 }
 
-export interface ServiceProbeInput {
+interface ServiceProbeInput {
   readonly env: NodeJS.ProcessEnv;
   readonly fetchImpl: typeof fetch;
   /** Operator credential, when the caller holds one. Probes treat it as optional. */
@@ -144,7 +144,7 @@ export interface ServiceStatus {
 const DEFAULT_SERVICE_STARTUP_TIMEOUT_MS = 60_000;
 const STOP_GRACE_MS = 10_000;
 
-export function clankieStateDirectory(env: NodeJS.ProcessEnv = process.env): string {
+function clankieStateDirectory(env: NodeJS.ProcessEnv = process.env): string {
   return join(env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "clankie");
 }
 
@@ -152,11 +152,11 @@ export function serviceStatePath(id: ServiceId, env: NodeJS.ProcessEnv = process
   return join(clankieStateDirectory(env), `${id}-service.json`);
 }
 
-export function serviceLogPath(id: ServiceId, env: NodeJS.ProcessEnv = process.env): string {
+function serviceLogPath(id: ServiceId, env: NodeJS.ProcessEnv = process.env): string {
   return join(clankieStateDirectory(env), `${id}.log`);
 }
 
-export function processIsAlive(pid: number): boolean {
+function processIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -165,7 +165,7 @@ export function processIsAlive(pid: number): boolean {
   }
 }
 
-export function readProcessCommand(pid: number): string {
+function readProcessCommand(pid: number): string {
   try {
     return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim();
   } catch {
@@ -174,7 +174,7 @@ export function readProcessCommand(pid: number): string {
 }
 
 /** Every live process as `[pid, command]`, for finding a service nobody recorded. */
-export function listProcessCommands(): readonly (readonly [number, string])[] {
+function listProcessCommands(): readonly (readonly [number, string])[] {
   try {
     return execFileSync("ps", ["-Ao", "pid=,command="], { encoding: "utf8" })
       .split("\n")
@@ -201,7 +201,7 @@ export function listProcessCommands(): readonly (readonly [number, string])[] {
  * behind forever, and `clankie restart` then refuses to proceed against a
  * process that does not exist. Asking the process table is the direct answer.
  */
-export function findServiceProcessPids(
+function findServiceProcessPids(
   service: Pick<ManagedService, "commandMatches">,
   listImpl: () => readonly (readonly [number, string])[] = listProcessCommands,
 ): readonly number[] {
@@ -210,7 +210,7 @@ export function findServiceProcessPids(
     .map(([pid]) => pid);
 }
 
-export function readServiceRecord(
+function readServiceRecord(
   id: ServiceId,
   env: NodeJS.ProcessEnv = process.env,
   processIsAliveImpl: (pid: number) => boolean = processIsAlive,

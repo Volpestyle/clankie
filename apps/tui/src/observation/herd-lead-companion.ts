@@ -3,13 +3,13 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export type HerdLeadCompanionRunner = (
+type HerdLeadCompanionRunner = (
   command: string,
   args: readonly string[],
   env: NodeJS.ProcessEnv,
 ) => Promise<{ stdout: string; stderr: string }>;
 
-export const HERD_LEAD_BOARD_LABEL = "Herd Lead";
+const HERD_LEAD_BOARD_LABEL = "Herd Lead";
 
 export type HerdLeadCompanionResult =
   | { readonly outcome: "skipped"; readonly reason: "not_in_herdr" }

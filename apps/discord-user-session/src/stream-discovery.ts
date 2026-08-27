@@ -41,7 +41,7 @@ export function buildDiscordStreamKey(input: { guildId: string; channelId: strin
   return `guild:${input.guildId}:${input.channelId}:${input.userId}`;
 }
 
-export function buildDiscordCallStreamKey(input: { channelId: string; userId: string }): string {
+function buildDiscordCallStreamKey(input: { channelId: string; userId: string }): string {
   return `call:${input.channelId}:${input.userId}`;
 }
 

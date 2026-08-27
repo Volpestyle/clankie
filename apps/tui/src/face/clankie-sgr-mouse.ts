@@ -1,4 +1,4 @@
-export type ClankieSgrMouseKind = "press" | "drag" | "release" | "wheel";
+type ClankieSgrMouseKind = "press" | "drag" | "release" | "wheel";
 
 export type ClankieSgrMouseEvent = {
   readonly kind: ClankieSgrMouseKind;

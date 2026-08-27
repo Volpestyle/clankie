@@ -3,7 +3,7 @@ import { streamObject } from "ai";
 
 /** Derived from the SDK signature so it tracks their type, not a guessed name. */
 type StreamProviderOptions = NonNullable<Parameters<typeof streamObject>[0]["providerOptions"]>;
-export const DEFAULT_FREE_PLAY_MODEL_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_FREE_PLAY_MODEL_REQUEST_TIMEOUT_MS = 60_000;
 import { z } from "zod";
 import {
   VoiceDecisionSchema,

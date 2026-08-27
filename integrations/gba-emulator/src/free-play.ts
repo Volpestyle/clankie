@@ -59,7 +59,7 @@ import {
  * checkpoints are append-only sibling identities, and the port banks the
  * present before restoring the past.
  */
-export const FreePlayBodyActionSchema = z.discriminatedUnion("kind", [
+const FreePlayBodyActionSchema = z.discriminatedUnion("kind", [
   /** Capture the current local body as a new immutable checkpoint. */
   z
     .object({
@@ -82,13 +82,13 @@ export const FreePlayBodyActionSchema = z.discriminatedUnion("kind", [
   /** Reboot the game to its configured starting savestate. */
   z.object({ kind: z.literal("restart_game") }).strict(),
 ]);
-export type FreePlayBodyAction = z.infer<typeof FreePlayBodyActionSchema>;
+type FreePlayBodyAction = z.infer<typeof FreePlayBodyActionSchema>;
 
 /** Everything a free-play decision may do: play the game, or move through its saves. */
-export const FreePlayActionSchema = z.union([GbaEmulatorActionSchema, FreePlayBodyActionSchema]);
+const FreePlayActionSchema = z.union([GbaEmulatorActionSchema, FreePlayBodyActionSchema]);
 export type FreePlayAction = z.infer<typeof FreePlayActionSchema>;
 
-export const FreePlayDecisionSchema = z
+const FreePlayDecisionSchema = z
   .object({
     /** Why this action, in Clankie's own voice. */
     monologue: z.string().min(1).max(FREE_PLAY_MONOLOGUE_MAX),
@@ -129,9 +129,7 @@ export const FreePlayDecisionSchema = z
     action: FreePlayActionSchema,
   })
   .strict();
-export type FreePlayDecision = z.infer<typeof FreePlayDecisionSchema>;
-
-export const FreePlayProvenanceSchema = z
+const FreePlayProvenanceSchema = z
   .object({
     body: z.enum(["local", "world"]),
     sessionId: z.string().min(1).max(200).optional(),
@@ -323,7 +321,7 @@ export interface FreePlayView {
   history: readonly { intent: string; action: FreePlayAction; outcome: string; effect: string }[];
 }
 
-export interface FreePlayHardFailure {
+interface FreePlayHardFailure {
   action: FreePlayAction;
   errorCode: string;
   effect: string;
@@ -404,7 +402,7 @@ export const FreePlayTurnSchema = z
   .strict();
 export type FreePlayTurn = z.infer<typeof FreePlayTurnSchema>;
 
-export interface FreePlayVolition {
+interface FreePlayVolition {
   /** Turns where he could have spoken — every turn. */
   offered: number;
   /** Turns he chose to. */
@@ -529,7 +527,7 @@ export interface FreePlayCheckpointPort {
 }
 
 /** Present-tense state for spectators; completed turn detail still arrives through `onTurn`. */
-export type FreePlayPhase = "thinking" | "acting";
+type FreePlayPhase = "thinking" | "acting";
 
 export interface RunFreePlayInput {
   io: GbaDriverIo;

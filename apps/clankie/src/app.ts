@@ -130,7 +130,7 @@ const logger = createLogger({ service: "clankie", version: "0.2.0" });
  * Doctrine is gone, but several wire schemas still carry a profile hash slot.
  * One constant fills them all; nothing compares against it anymore.
  */
-export const PROFILE_HASH = "unversioned";
+const PROFILE_HASH = "unversioned";
 
 const DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 
@@ -226,11 +226,11 @@ function isSubsetGrants(accepted: DeviceGrantSet, offered: DeviceGrantSet): bool
 // Injected in-process capability ports.
 // ---------------------------------------------------------------------------
 
-export interface ActivityObservationReadPort {
+interface ActivityObservationReadPort {
   current(signal?: AbortSignal): Promise<ActivityObservationSnapshot | undefined>;
 }
 
-export interface BrowserToolPort {
+interface BrowserToolPort {
   catalog(signal?: AbortSignal): Promise<BrowserToolCatalog>;
   call(request: CallBrowserToolRequest, signal?: AbortSignal): Promise<CallBrowserToolResult>;
 }
@@ -246,7 +246,7 @@ export interface TrustedCaptainIdentity {
   /** Which Discord body this bearer speaks for. Defaults to `bot`. */
   discordTransportKind?: DiscordTransportKind;
 }
-export type CaptainAuthenticator = (request: Request) => Promise<TrustedCaptainIdentity | undefined>;
+type CaptainAuthenticator = (request: Request) => Promise<TrustedCaptainIdentity | undefined>;
 
 function captainTransportKind(captain: TrustedCaptainIdentity): DiscordTransportKind {
   return captain.discordTransportKind ?? "bot";
@@ -258,12 +258,12 @@ export interface TrustedOperatorIdentity {
 }
 export type OperatorAuthenticator = (request: Request) => Promise<TrustedOperatorIdentity | undefined>;
 
-export interface TrustedDeviceIdentity {
+interface TrustedDeviceIdentity {
   deviceId: string;
   grants: DeviceGrantSet;
   sessionExpiresAt: string;
 }
-export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
+type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 

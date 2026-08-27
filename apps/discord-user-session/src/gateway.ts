@@ -48,7 +48,7 @@ export interface DiscordGatewayMessage {
   readonly embeds: readonly DiscordRawEmbed[];
 }
 
-export interface DiscordGatewayVoiceState {
+interface DiscordGatewayVoiceState {
   readonly guildId?: string;
   readonly channelId?: string;
   readonly userId: string;

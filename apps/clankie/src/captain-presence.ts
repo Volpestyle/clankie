@@ -8,7 +8,7 @@ import {
   type DomainEvent,
 } from "@clankie/protocol";
 
-export const CAPTAIN_PRESENCE_MISSION_ID = "captain-presence";
+const CAPTAIN_PRESENCE_MISSION_ID = "captain-presence";
 
 export interface CaptainPresenceLease {
   readonly captainId: string;
@@ -19,7 +19,7 @@ export interface CaptainPresenceLease {
   readonly state: "live" | "offline";
 }
 
-export interface CaptainPresenceEmission {
+interface CaptainPresenceEmission {
   readonly event: CaptainPresenceEvent;
   readonly eventKey: string;
 }

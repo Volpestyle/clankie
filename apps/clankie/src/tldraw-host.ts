@@ -63,7 +63,7 @@ const DEFAULT_DESIGN_SYSTEM_DIR = join(
   "assets",
 );
 
-export interface TldrawHostLogger {
+interface TldrawHostLogger {
   info(payload: Record<string, unknown>, message: string): void;
   warn(payload: Record<string, unknown>, message: string): void;
 }

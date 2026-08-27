@@ -9,7 +9,7 @@ export type ClankieClipboardEnv = {
 // OSC 52 lets a terminal copy to the system clipboard even over SSH where no
 // local clipboard binary is reachable. tmux/screen need the sequence wrapped in
 // their passthrough so it reaches the outer terminal.
-export function clankieOsc52Sequence(text: string, env: ClankieClipboardEnv = process.env): string {
+function clankieOsc52Sequence(text: string, env: ClankieClipboardEnv = process.env): string {
   const payload = Buffer.from(text, "utf8").toString("base64");
   const sequence = `\x1b]52;c;${payload}\x07`;
   if (env.TMUX !== undefined && env.TMUX !== "") return `\x1bPtmux;\x1b${sequence}\x1b\\`;
@@ -19,7 +19,7 @@ export function clankieOsc52Sequence(text: string, env: ClankieClipboardEnv = pr
 
 // Native clipboard binary for the platform, used alongside OSC 52 so local
 // terminals that ignore OSC 52 (Terminal.app) still copy.
-export function clankieNativeClipboardArgv(
+function clankieNativeClipboardArgv(
   platform: NodeJS.Platform,
   env: ClankieClipboardEnv = process.env,
 ): string[] | undefined {

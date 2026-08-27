@@ -1,9 +1,7 @@
 import { Buffer } from "node:buffer";
 
-export const DISCORD_VOICE_SAMPLE_RATE = 48_000;
-export const DISCORD_VOICE_CHANNELS = 2;
+const DISCORD_VOICE_CHANNELS = 2;
 export const SPEECH_SAMPLE_RATE = 16_000;
-export const OPENAI_TTS_SAMPLE_RATE = 24_000;
 export const PCM_SAMPLE_BYTES = 2;
 
 /** Converts interleaved 48 kHz stereo s16le into 16 kHz mono s16le for speech recognition. */

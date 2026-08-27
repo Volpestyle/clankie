@@ -4,7 +4,6 @@ import { z } from "zod";
 import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
 import {
   inspectService,
-  restartService,
   SERVICE_ORDER,
   startService,
   stopService,
@@ -130,7 +129,7 @@ const PresenceStatusSchema = z.object({
 });
 
 /** Read-only operator projection of the bridge's published presence phase. */
-export const PRESENCE_STATUS_PATH = "/v1/discord/presence-status";
+const PRESENCE_STATUS_PATH = "/v1/discord/presence-status";
 
 /**
  * Phases the service treats as a live, acting presence. Anything else
@@ -346,7 +345,7 @@ function tunnelHostname(env: NodeJS.ProcessEnv): string {
 }
 
 /** The public URL Discord embeds, when one is configured. */
-export function activityTunnelUrl(env: NodeJS.ProcessEnv): string | undefined {
+function activityTunnelUrl(env: NodeJS.ProcessEnv): string | undefined {
   const hostname = tunnelHostname(env);
   return hostname.length === 0 ? undefined : `https://${hostname}`;
 }
@@ -411,10 +410,6 @@ export function managedService(id: ServiceId): ManagedService {
 }
 
 export type ServiceRegistryOptions = ServiceCommandOptions;
-
-export async function restartOne(id: ServiceId, options: ServiceRegistryOptions): Promise<ServiceStatus> {
-  return await restartService(managedService(id), options);
-}
 
 export async function startOne(id: ServiceId, options: ServiceRegistryOptions): Promise<ServiceStatus> {
   return await startService(managedService(id), options);

@@ -31,7 +31,7 @@ export function embodimentEventScope(sessionId: string): string {
   return `embodiment:${sessionId}`;
 }
 
-export const EMBODIMENT_EVENT_TYPES = [
+const EMBODIMENT_EVENT_TYPES = [
   "embodiment.intent.submitted",
   "embodiment.session.claimed",
   "embodiment.session.running",

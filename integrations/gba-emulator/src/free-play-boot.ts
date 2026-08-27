@@ -45,7 +45,7 @@ export interface GbaCheckpointCapability {
   scenario: GbaCheckpointScenario;
 }
 
-export type GbaCheckpointScenario = GbaAdapterScenario & {
+type GbaCheckpointScenario = GbaAdapterScenario & {
   readonly romSha256: string;
   readonly coreWasmSha256: string;
 };

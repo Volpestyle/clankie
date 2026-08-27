@@ -152,10 +152,6 @@ export class DiscordUserPresenceRuntime {
     });
   }
 
-  private post(path: string, body: unknown): Promise<unknown> {
-    return this.request("POST", path, body);
-  }
-
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,

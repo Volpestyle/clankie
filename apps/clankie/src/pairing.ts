@@ -7,16 +7,16 @@ import { type PairingOfferWire } from "@clankie/protocol";
 // into a durable device identity — see devices.ts and the /v1/pairing/* routes.
 
 /** Wire version of the offer shape. */
-export const PAIRING_OFFER_VERSION = 1 as const;
+const PAIRING_OFFER_VERSION = 1 as const;
 
 /** Offers are short-lived by contract: single-use display data, not credentials. */
-export const DEFAULT_PAIRING_OFFER_TTL_MS = 5 * 60_000;
+const DEFAULT_PAIRING_OFFER_TTL_MS = 5 * 60_000;
 
 /** How long a consumed offer's secret/code still reads as "consumed" before it reads as "expired". */
-export const DEFAULT_CONSUMED_GRACE_MS = 5 * 60_000;
+const DEFAULT_CONSUMED_GRACE_MS = 5 * 60_000;
 
 /** Deep-link base recognized by the Clankie app (reference UX: `clankie://connect`). */
-export const PAIRING_DEEP_LINK_BASE = "clankie://connect";
+const PAIRING_DEEP_LINK_BASE = "clankie://connect";
 
 /**
  * Typed-pairing alphabet: unambiguous uppercase (no 0/O, 1/I/L) so a human can

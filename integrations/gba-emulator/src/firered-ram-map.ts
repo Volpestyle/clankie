@@ -18,15 +18,13 @@
 import type { GbaCoreSurroundings, GbaCoreTileView } from "./core-double.ts";
 
 /** EWRAM offset of the player object's current tile coords (two s16 LE: x, y). */
-export const FIRERED_PLAYER_COORDS_OFFSET = 0x36e48;
+const FIRERED_PLAYER_COORDS_OFFSET = 0x36e48;
 /** EWRAM offset of the player object's facing-direction byte. */
-export const FIRERED_PLAYER_FACING_OFFSET = 0x36e58;
+const FIRERED_PLAYER_FACING_OFFSET = 0x36e58;
 /** GBA EWRAM bus base address, for documentation of absolute addresses. */
 export const GBA_EWRAM_BASE = 0x02000000;
 export const GBA_EWRAM_SIZE = 0x40000;
-/** GBA IWRAM bus base address. `gBackupMapLayout` is an IWRAM global. */
-export const GBA_IWRAM_BASE = 0x03000000;
-export const GBA_IWRAM_SIZE = 0x8000;
+const GBA_IWRAM_SIZE = 0x8000;
 
 /**
  * IWRAM offset of `gBackupMapLayout` — `{ s32 width; s32 height; u16 *map; }`.
@@ -44,7 +42,7 @@ export const GBA_IWRAM_SIZE = 0x8000;
  * remembered. A driver that instead accumulates "transitions the emulator
  * refused" only ever learns the walls it has already walked into.
  */
-export const FIRERED_BACKUP_MAP_LAYOUT_OFFSET = 0x5040;
+const FIRERED_BACKUP_MAP_LAYOUT_OFFSET = 0x5040;
 
 /**
  * Tiles of border the backup buffer carries on each side (GBA `MAP_OFFSET`).
@@ -121,7 +119,7 @@ export function decodeFireRedMapGrid(iwram: Uint8Array, ewram: Uint8Array): Fire
  * the buffer as uniformly meaningful would report the void beyond a room's
  * walls as walkable floor.
  */
-export function isInsideFireRedMap(grid: FireRedMapGrid, x: number, y: number): boolean {
+function isInsideFireRedMap(grid: FireRedMapGrid, x: number, y: number): boolean {
   const min = FIRERED_MAP_BORDER_OFFSET;
   return x >= min && y >= min && x < min + grid.mapWidth && y < min + grid.mapHeight;
 }
@@ -133,17 +131,12 @@ function tileAt(grid: FireRedMapGrid, x: number, y: number): number {
   return grid.tiles[y * grid.width + x] ?? 0;
 }
 
-/** Collision bits: 0 means the tile does not block movement. */
-export function fireRedCollisionAt(grid: FireRedMapGrid, x: number, y: number): number {
-  return (tileAt(grid, x, y) >> 10) & 0x3;
-}
-
 /** Elevation bits, which is what makes bridges and stair landings work. */
-export function fireRedElevationAt(grid: FireRedMapGrid, x: number, y: number): number {
+function fireRedElevationAt(grid: FireRedMapGrid, x: number, y: number): number {
   return (tileAt(grid, x, y) >> 12) & 0xf;
 }
 
-export function fireRedMetatileAt(grid: FireRedMapGrid, x: number, y: number): number {
+function fireRedMetatileAt(grid: FireRedMapGrid, x: number, y: number): number {
   return tileAt(grid, x, y) & METATILE_ID_MASK;
 }
 
@@ -161,7 +154,7 @@ export function isFireRedTilePassable(grid: FireRedMapGrid, x: number, y: number
 }
 
 /** Unit step for each facing, in border-inclusive map coords. */
-export const FIRERED_DIRECTION_STEPS = {
+const FIRERED_DIRECTION_STEPS = {
   north: { dx: 0, dy: -1 },
   south: { dx: 0, dy: 1 },
   west: { dx: -1, dy: 0 },
@@ -170,7 +163,7 @@ export const FIRERED_DIRECTION_STEPS = {
 
 export type FireRedDirection = keyof typeof FIRERED_DIRECTION_STEPS;
 
-export function fireRedTileView(grid: FireRedMapGrid, x: number, y: number): GbaCoreTileView {
+function fireRedTileView(grid: FireRedMapGrid, x: number, y: number): GbaCoreTileView {
   if (!isInsideFireRedMap(grid, x, y)) {
     return { x, y, passable: false, elevation: null, metatileId: null };
   }
@@ -237,7 +230,7 @@ const CONNECTION_DIRECTION_BY_VALUE: Record<number, "south" | "north" | "west" |
 };
 
 /** One way off this map through a warp event: a door, stairway, or mat. */
-export interface FireRedWarpEvent {
+interface FireRedWarpEvent {
   /** Warp tile coords in the border-inclusive space player coords use. */
   x: number;
   y: number;
@@ -246,7 +239,7 @@ export interface FireRedWarpEvent {
 }
 
 /** One way off this map by walking over an edge into the adjacent map. */
-export interface FireRedMapConnection {
+interface FireRedMapConnection {
   direction: "north" | "south" | "west" | "east";
   destinationMapGroup: number;
   destinationMapNum: number;
@@ -431,9 +424,9 @@ export function decodeFireRedOverworld(ewram: Uint8Array): FireRedOverworldField
  */
 const OBJECT_EVENT_CURRENT_COORDS = 0x10;
 const OBJECT_EVENT_FACING = 0x20;
-export const FIRERED_OBJECT_EVENTS_OFFSET = FIRERED_PLAYER_COORDS_OFFSET - OBJECT_EVENT_CURRENT_COORDS;
-export const FIRERED_OBJECT_EVENT_STRIDE = 0x24;
-export const FIRERED_OBJECT_EVENT_COUNT = 16;
+const FIRERED_OBJECT_EVENTS_OFFSET = FIRERED_PLAYER_COORDS_OFFSET - OBJECT_EVENT_CURRENT_COORDS;
+const FIRERED_OBJECT_EVENT_STRIDE = 0x24;
+const FIRERED_OBJECT_EVENT_COUNT = 16;
 
 if (FIRERED_PLAYER_FACING_OFFSET - OBJECT_EVENT_FACING !== FIRERED_OBJECT_EVENTS_OFFSET) {
   throw new Error("FireRed player coords and facing disagree about the gObjectEvents base");

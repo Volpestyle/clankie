@@ -73,12 +73,7 @@ import { shouldRouteClankieTranscriptGlobalInput } from "../face/clankie-transcr
 import { ClankieTranscriptMarkdownBlock } from "../face/clankie-transcript-block.ts";
 import { ClankieBashResultComponent, runFaceBashCommand } from "../face/clankie-face-bash.ts";
 import { ClankieCommandTextResultComponent, type CommandLogTone } from "./command-log.ts";
-import {
-  layoutSettingsFromEnv,
-  type InputPlacement,
-  type LayoutSettings,
-  type StatusPlacement,
-} from "./face-settings.ts";
+import { layoutSettingsFromEnv, type LayoutSettings } from "./face-settings.ts";
 import { createFaceThemeBundle, type FaceThemeBundle } from "./theme.ts";
 import { ClankieStatusBarComponent } from "./status-bar.ts";
 import { createSetupFlow, type SetupFlowController } from "./setup-flow.ts";
@@ -1237,4 +1232,4 @@ function isTranscriptNavigationInput(data: string): boolean {
   );
 }
 
-export type { InputPlacement, LayoutSettings, StatusPlacement };
+export type { LayoutSettings };

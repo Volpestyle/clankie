@@ -46,13 +46,13 @@ const FAILURE_COOLDOWN_MS = 60_000;
 /** How long the resolved server list is reused before settings are read again. */
 const SERVER_LIST_TTL_MS = 5_000;
 
-export interface McpHostLogger {
+interface McpHostLogger {
   info(context: Record<string, unknown>, message: string): void;
   warn(context: Record<string, unknown>, message: string): void;
 }
 
 /** One tool on one server, named as the captain will register it. */
-export interface McpToolDescriptor {
+interface McpToolDescriptor {
   readonly server: string;
   /** The tool's name on its server, as `tools/call` expects it. */
   readonly name: string;
@@ -64,9 +64,9 @@ export interface McpToolDescriptor {
   readonly initial: boolean;
 }
 
-export type McpRefusalReason = "unknown_server" | "lane_denied" | "server_unavailable";
+type McpRefusalReason = "unknown_server" | "lane_denied" | "server_unavailable";
 
-export type McpCallResult =
+type McpCallResult =
   | { readonly outcome: "ok"; readonly content: string; readonly isError: boolean }
   | { readonly outcome: "refused"; readonly reason: McpRefusalReason; readonly detail: string };
 
@@ -97,7 +97,7 @@ export interface McpHost {
  * (`mcp.linear.app/mcp`, see `linear-oauth.ts`) and stays available in every
  * room — connecting a tracker you cannot ask about from a room is pointless.
  */
-export const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
+const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
   {
     id: "linear",
     transport: "http",
@@ -147,7 +147,7 @@ interface ServerState {
 }
 
 /** Whether a server declared for `lane` may be reached from this room. */
-export function laneAllows(server: McpServerSettings, lane: CaptainSessionLaneV2): boolean {
+function laneAllows(server: McpServerSettings, lane: CaptainSessionLaneV2): boolean {
   return server.lane === "everywhere" || lane === "operator";
 }
 

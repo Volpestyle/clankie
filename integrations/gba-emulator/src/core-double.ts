@@ -20,7 +20,7 @@ import type { GbaCoreMapGrid } from "./core-seam.ts";
  * identity digest, and the RNG seed. No wall clock, no Math.random, no I/O.
  */
 
-export interface GbaCoreBattleState {
+interface GbaCoreBattleState {
   battleId: string;
   turn: number;
   opponentHp: number;
@@ -149,7 +149,7 @@ export interface GbaCoreState {
   exits?: GbaCoreMapExits | null;
 }
 
-export interface GbaCoreMapExits {
+interface GbaCoreMapExits {
   warps: { x: number; y: number; destinationMapId: string }[];
   connections: { direction: "north" | "south" | "west" | "east"; destinationMapId: string }[];
 }

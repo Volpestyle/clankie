@@ -28,7 +28,7 @@ import {
   type FreePlayTurnEvidence,
 } from "./free-play.ts";
 
-export const FreePlayJournalHeaderV1Schema = z
+const FreePlayJournalHeaderV1Schema = z
   .object({
     kind: z.literal("header"),
     schemaVersion: z.literal(1),
@@ -41,7 +41,7 @@ export const FreePlayJournalHeaderV1Schema = z
     resumedFromCheckpointId: z.string().max(200).nullable(),
   })
   .strict();
-export const FreePlayJournalHeaderV2Schema = FreePlayJournalHeaderV1Schema.extend({
+const FreePlayJournalHeaderV2Schema = FreePlayJournalHeaderV1Schema.extend({
   schemaVersion: z.literal(2),
 });
 export const PlayJourneyIdSchema = z.string().trim().min(1).max(512);
@@ -57,14 +57,14 @@ export const FreePlayJournalHeaderV3Schema = FreePlayJournalHeaderV2Schema.exten
   environmentId: EmbodimentEnvironmentIdSchema,
   venue: EmbodimentVenueSchema,
 });
-export const FreePlayJournalHeaderSchema = z.union([
+const FreePlayJournalHeaderSchema = z.union([
   FreePlayJournalHeaderV1Schema,
   FreePlayJournalHeaderV2Schema,
   FreePlayJournalHeaderV3Schema,
 ]);
 export type FreePlayJournalHeader = z.infer<typeof FreePlayJournalHeaderSchema>;
 
-export const FreePlayJournalScreenshotSchema = z
+const FreePlayJournalScreenshotSchema = z
   .object({
     /** Relative to the journal directory; image bytes stay out of the JSONL. */
     path: z.string().regex(/^\.screenshots\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+\.png$/u),
@@ -92,9 +92,9 @@ export const FreePlayJournalScreenshotSchema = z
       .min(1),
   })
   .strict();
-export type FreePlayJournalScreenshot = z.infer<typeof FreePlayJournalScreenshotSchema>;
+type FreePlayJournalScreenshot = z.infer<typeof FreePlayJournalScreenshotSchema>;
 
-export const FreePlayJournalTurnV1Schema = z
+const FreePlayJournalTurnV1Schema = z
   .object({
     kind: z.literal("turn"),
     schemaVersion: z.literal(1),
@@ -109,7 +109,7 @@ export const FreePlayJournalTurnV1Schema = z
     speechDeliveryId: z.string().min(1).max(128).regex(/^\S+$/u).optional(),
   })
   .strict();
-export const FreePlayJournalTurnV2Schema = FreePlayJournalTurnV1Schema.extend({
+const FreePlayJournalTurnV2Schema = FreePlayJournalTurnV1Schema.extend({
   schemaVersion: z.literal(2),
   evidence: FreePlayTurnEvidenceSchema,
   screenshot: FreePlayJournalScreenshotSchema.optional(),
@@ -124,10 +124,7 @@ export const FreePlayJournalTurnV2Schema = FreePlayJournalTurnV1Schema.extend({
     });
   }
 });
-export const FreePlayJournalTurnSchema = z.union([FreePlayJournalTurnV1Schema, FreePlayJournalTurnV2Schema]);
-export type FreePlayJournalTurn = z.infer<typeof FreePlayJournalTurnSchema>;
-
-export const FreePlayJournalSummaryV1Schema = z
+const FreePlayJournalSummaryV1Schema = z
   .object({
     kind: z.literal("summary"),
     schemaVersion: z.literal(1),
@@ -165,7 +162,7 @@ export const FreePlayJournalSummaryV1Schema = z
     objectivesRetired: z.number().int().nonnegative().default(0),
   })
   .strict();
-export const FreePlayJournalSummaryV2Schema = FreePlayJournalSummaryV1Schema.extend({
+const FreePlayJournalSummaryV2Schema = FreePlayJournalSummaryV1Schema.extend({
   schemaVersion: z.literal(2),
   screenshot: FreePlayJournalScreenshotSchema.optional(),
 });
@@ -173,9 +170,8 @@ export const FreePlayJournalSummarySchema = z.union([
   FreePlayJournalSummaryV1Schema,
   FreePlayJournalSummaryV2Schema,
 ]);
-export type FreePlayJournalSummary = z.infer<typeof FreePlayJournalSummarySchema>;
 
-export const FreePlayJournalLineSchema = z.union([
+const FreePlayJournalLineSchema = z.union([
   FreePlayJournalHeaderV1Schema,
   FreePlayJournalHeaderV2Schema,
   FreePlayJournalHeaderV3Schema,

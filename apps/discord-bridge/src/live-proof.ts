@@ -1,6 +1,6 @@
 import type { DiscordBridgeReceipt } from "@clankie/discord-presence-core";
 
-export interface DiscordLiveProofCheck {
+interface DiscordLiveProofCheck {
   readonly name: string;
   readonly ok: boolean;
   readonly detail: string;

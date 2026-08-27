@@ -8,7 +8,7 @@ import {
 } from "@clankie/interactive-environment";
 import type { DiscordPresenceChannelIdentity, DomainEvent } from "@clankie/protocol";
 
-export const DISCORD_PRESENCE_EVENT_STREAM_ID = "discord-presence" as const;
+const DISCORD_PRESENCE_EVENT_STREAM_ID = "discord-presence" as const;
 
 export class DiscordPresenceSessionProjection {
   private readonly sessions = new Map<string, DiscordPresenceSessionRecord>();

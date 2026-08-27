@@ -24,7 +24,7 @@ export interface PlayPorts {
   getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined>;
 }
 
-export interface PlayAskContext {
+interface PlayAskContext {
   /** The surface the ask came from; bounded telemetry, never authority. */
   originLane: CaptainSessionLaneV2;
   /** The asker as the surface authenticated them; a content-free id. */
@@ -45,7 +45,7 @@ const DEFAULT_POLL_MS = 400;
  * The owner's default (2026-07-26): no cap on turns or duration — he plays
  * until asked to stop. The env knobs restore a cap when one is wanted.
  */
-export function defaultPlayBudget(env: NodeJS.ProcessEnv = process.env): EmbodimentBudget {
+function defaultPlayBudget(env: NodeJS.ProcessEnv = process.env): EmbodimentBudget {
   const turns = Number.parseInt(env["CLANKIE_PLAY_MAX_TURNS"] ?? "", 10);
   const durationMs = Number.parseInt(env["CLANKIE_PLAY_MAX_DURATION_MS"] ?? "", 10);
   return {

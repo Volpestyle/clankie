@@ -45,8 +45,6 @@ export const VoiceDecisionSchema = z
   })
   .strict();
 
-export type VoiceDecision = z.infer<typeof VoiceDecisionSchema>;
-
 /** Everything Voice is allowed to know. Deliberately no action surface. */
 export interface VoiceView {
   turn: number;

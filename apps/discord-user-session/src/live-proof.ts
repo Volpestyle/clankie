@@ -1,7 +1,7 @@
 import type { DiscordBridgeReceipt } from "@clankie/discord-presence-core";
 import { VOX_IPC_PROTOCOL_VERSION } from "@clankie/vox-client";
 
-export interface StreamWatchLiveProofCheck {
+interface StreamWatchLiveProofCheck {
   readonly name: string;
   readonly ok: boolean;
   readonly detail: string;

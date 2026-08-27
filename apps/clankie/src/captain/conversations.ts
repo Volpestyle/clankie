@@ -50,7 +50,7 @@ interface ConversationMeta {
 }
 
 /** Optional seat for a turn that arrived from a herdr-hosted console. */
-export interface ConversationTurnSeat {
+interface ConversationTurnSeat {
   readonly herdrPaneId: string;
 }
 

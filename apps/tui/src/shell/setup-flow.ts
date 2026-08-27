@@ -22,7 +22,7 @@ import {
   type InteractivePromptOption,
 } from "../face/clankie-interactive-flow.ts";
 
-export type FlowLineTone = "error" | "info" | "success" | "warning";
+type FlowLineTone = "error" | "info" | "success" | "warning";
 
 export interface MenuOption {
   readonly value: string;

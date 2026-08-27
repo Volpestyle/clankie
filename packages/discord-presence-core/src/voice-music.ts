@@ -11,8 +11,6 @@ import { VoxClientError, type VoxClient, type VoxControlEvent } from "@clankie/v
  * never parses chat. Vox is the sole media sink for both Discord bodies.
  */
 
-export type VoiceMusicCommandKind = "play" | "queue" | "skip" | "pause" | "resume" | "stop" | "now";
-
 export type VoiceMusicCommand =
   | { readonly kind: "play"; readonly url: string }
   | { readonly kind: "queue"; readonly url: string }

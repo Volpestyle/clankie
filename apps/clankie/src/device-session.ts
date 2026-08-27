@@ -13,7 +13,7 @@ import { z } from "zod";
 // device sessions.
 
 /** Device sessions live for a week and are renewed by refresh. */
-export const DEFAULT_DEVICE_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const DEFAULT_DEVICE_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /** Completion tokens (redeem → complete) are single-use and short-lived; == pending-device TTL. */
 export const COMPLETION_TOKEN_TTL_MS = 10 * 60_000;
@@ -21,7 +21,7 @@ export const COMPLETION_TOKEN_TTL_MS = 10 * 60_000;
 const KEY_BYTES = 32;
 const KEY_MODE = 0o600;
 
-export const DeviceSessionClaimsSchema = z
+const DeviceSessionClaimsSchema = z
   .object({
     version: z.literal(1),
     deviceId: z.string().min(1),

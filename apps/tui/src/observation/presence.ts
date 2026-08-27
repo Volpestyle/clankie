@@ -6,7 +6,7 @@
 import { z } from "zod";
 
 /** Read-only operator projection of the published presence phase. */
-export const PRESENCE_STATUS_PATH = "/v1/discord/presence-status";
+const PRESENCE_STATUS_PATH = "/v1/discord/presence-status";
 
 const PresenceStatusSchema = z.object({
   schemaVersion: z.literal(1),

@@ -33,7 +33,7 @@ import type { MgbaCoreIdentity } from "./mgba-core.ts";
  * moved the player onto it. Anything unprobed is treated as blocked.
  */
 
-export const REAL_GBA_SCENARIO_SCHEMA_VERSION = 1 as const;
+const REAL_GBA_SCENARIO_SCHEMA_VERSION = 1 as const;
 
 const TileSchema = z
   .object({ x: z.number().int().nonnegative().max(4_096), y: z.number().int().nonnegative().max(4_096) })
@@ -119,7 +119,7 @@ export const RealGbaRouteScenarioSchema = z
   });
 export type RealGbaRouteScenario = z.infer<typeof RealGbaRouteScenarioSchema>;
 
-export const RealGbaReasonCodeSchema = z.enum([
+const RealGbaReasonCodeSchema = z.enum([
   "route_step_toward_target",
   "open_start_menu",
   "move_start_menu_cursor",
@@ -143,9 +143,9 @@ export const RealGbaReasonCodeSchema = z.enum([
   "halt_route_unreachable",
   "halt_decision_budget_exhausted",
 ]);
-export type RealGbaReasonCode = z.infer<typeof RealGbaReasonCodeSchema>;
+type RealGbaReasonCode = z.infer<typeof RealGbaReasonCodeSchema>;
 
-export const RealGbaDecisionSchema = z
+const RealGbaDecisionSchema = z
   .object({
     schemaVersion: z.literal(REAL_GBA_SCENARIO_SCHEMA_VERSION),
     sequence: z.number().int().positive().max(256),
@@ -183,9 +183,9 @@ export const RealGbaDecisionSchema = z
       });
     }
   });
-export type RealGbaDecision = z.infer<typeof RealGbaDecisionSchema>;
+type RealGbaDecision = z.infer<typeof RealGbaDecisionSchema>;
 
-export const RealGbaDecisionTraceSchema = z
+const RealGbaDecisionTraceSchema = z
   .object({
     schemaVersion: z.literal(REAL_GBA_SCENARIO_SCHEMA_VERSION),
     scenarioId: z.string().min(1).max(128),
@@ -214,7 +214,7 @@ export const RealGbaDecisionTraceSchema = z
       previousFrame = decision.observedFrame;
     }
   });
-export type RealGbaDecisionTrace = z.infer<typeof RealGbaDecisionTraceSchema>;
+type RealGbaDecisionTrace = z.infer<typeof RealGbaDecisionTraceSchema>;
 
 const RealArtifactReferenceSchema = z
   .object({
@@ -226,7 +226,7 @@ const RealArtifactReferenceSchema = z
   })
   .strict();
 
-export const RealGbaScenarioReportSchema = z
+const RealGbaScenarioReportSchema = z
   .object({
     schemaVersion: z.literal(REAL_GBA_SCENARIO_SCHEMA_VERSION),
     scenarioId: z.string().min(1).max(128),
@@ -294,7 +294,7 @@ export const RealGbaScenarioReportSchema = z
       });
     }
   });
-export type RealGbaScenarioReport = z.infer<typeof RealGbaScenarioReportSchema>;
+type RealGbaScenarioReport = z.infer<typeof RealGbaScenarioReportSchema>;
 
 const ACTION_LIMITS = { maxInputs: 8, maxFrames: 600, timeoutMs: 5_000 } as const;
 const RUN_CLOCK = "2026-07-19T00:00:00.000Z";

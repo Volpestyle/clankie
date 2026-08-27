@@ -8,10 +8,10 @@ import type { ProviderCredential, RedactedCredential } from "@clankie/credential
 import { describeRedactedCredential, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
-export const LINEAR_PROVIDER_ID = "linear";
-export const EMAIL_PROVIDER_ID = "email";
-export const LINEAR_KEY_URL = "https://linear.app/settings/account/security";
-export const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
+const LINEAR_PROVIDER_ID = "linear";
+const EMAIL_PROVIDER_ID = "email";
+const LINEAR_KEY_URL = "https://linear.app/settings/account/security";
+const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 
 export type EmailPresetId = "gmail" | "icloud" | "fastmail" | "outlook" | "custom";
 

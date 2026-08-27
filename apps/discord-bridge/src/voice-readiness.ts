@@ -35,7 +35,7 @@ import { asRecord, discordId, discordIdSet, type DiscordReadinessCheck } from ".
 import { probeVoxProcess, type VoxProcessProbeResult } from "./vox-process.ts";
 
 /** Content-free realtime configuration echo: provider, models, and truncation scalars only. */
-export interface VoiceRealtimeReadiness {
+interface VoiceRealtimeReadiness {
   readonly provider: VoiceRealtimeProvider;
   readonly transcribeModel: string;
   readonly realtimeModel: string;
@@ -70,7 +70,7 @@ interface DiscordRestReadPort {
  * One stage of the live wake probe: whether it passed and a content-free
  * detail line. No transcript, response, or audio ever enters a result.
  */
-export interface VoiceWakeProbeStage {
+interface VoiceWakeProbeStage {
   readonly ok: boolean;
   readonly detail: string;
 }
@@ -85,7 +85,7 @@ export interface VoiceWakeTransitionProbeResult {
  * Injected by tests (fakes) and defaulted to {@link probeVoiceWakeTransition}
  * by the CLI path, mirroring how the Discord REST probes default live.
  */
-export type VoiceWakeTransitionProbe = () => Promise<VoiceWakeTransitionProbeResult>;
+type VoiceWakeTransitionProbe = () => Promise<VoiceWakeTransitionProbeResult>;
 
 export interface InspectDiscordVoiceReadinessOptions {
   readonly env: NodeJS.ProcessEnv;
