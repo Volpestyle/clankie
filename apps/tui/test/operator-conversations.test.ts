@@ -123,6 +123,7 @@ function client(extra: OperatorConversation[] = []): OperatorConversationClient 
       revision: input.expectedRevision + 1,
       safeCursor: "event:1",
     }),
+    cancel: async () => false,
     autonomy: async () => ({ enabled: true }),
   };
 }
@@ -152,7 +153,7 @@ function streamEvent(
   cursor: string,
   body:
     | { readonly type: "message"; readonly role: "captain"; readonly text: string; readonly streaming: false }
-    | { readonly type: "turn"; readonly runId: string; readonly phase: "completed" },
+    | { readonly type: "turn"; readonly runId: string; readonly phase: "completed" | "cancelled" },
 ): OperatorConversationStreamEvent {
   return {
     ...body,
@@ -645,6 +646,64 @@ describe("TUI selected-conversation prompt path", () => {
     expect(renderOperatorConversationRecovery(recovery)).toContain("cursor_expired");
     expect(renderOperatorConversationRecovery(recovery)).toContain("resumed");
     expect(renderOperatorConversationRecovery(recovery)).not.toContain(recovery.message);
+  });
+
+  it("interrupts the active run and settles on the durable cancelled event", async () => {
+    const { store } = await tempTailStore();
+    const selection = new OperatorConversationSelection(client());
+    await selection.selectDefault();
+    const cancels: string[] = [];
+    let releaseTail: (() => void) | undefined;
+    const tailGate = new Promise<void>((resolve) => {
+      releaseTail = resolve;
+    });
+    let markSent: (() => void) | undefined;
+    const sent = new Promise<void>((resolve) => {
+      markSent = resolve;
+    });
+    const routed: OperatorConversationClient = {
+      ...client(),
+      send: async (turn) => {
+        const result = await client().send(turn);
+        markSent?.();
+        return { ...result, runId: "run-live" };
+      },
+      cancel: async (conversationId, runId) => {
+        cancels.push(`${conversationId}:${runId}`);
+        releaseTail?.();
+        return true;
+      },
+      tail: async function* () {
+        await tailGate;
+        yield {
+          kind: "event",
+          event: streamEvent("global-default", "global-default:cancelled", {
+            type: "turn",
+            runId: "run-live",
+            phase: "cancelled",
+          }),
+        };
+      },
+    };
+    const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
+    await session.initialize();
+    // No active run yet: nothing to interrupt.
+    expect(await session.interruptActive()).toBe(false);
+
+    const recorded = recordingSink();
+    const active = session.prompt("think about something big", recorded.sink);
+    await sent;
+    // Let prompt() advance past its send await and record the active run.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(await session.interruptActive()).toBe(true);
+    await active;
+
+    expect(cancels).toEqual(["global-default:run-live"]);
+    expect(recorded.events).toContainEqual(
+      expect.objectContaining({ type: "turn", runId: "run-live", phase: "cancelled" }),
+    );
+    // The run settled; a late Esc has nothing left to cancel.
+    expect(await session.interruptActive()).toBe(false);
   });
 
   it("renders notices and failures; conversation content and healthy lifecycle stay off the notice path", () => {

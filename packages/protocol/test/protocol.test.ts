@@ -366,8 +366,25 @@ describe("protocol", () => {
       },
     });
     expect(terminalRequest).toMatchObject({ op: "terminal_tail", observation: { columns: 120, rows: 40 } });
-    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(10);
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(10);
+    expect(
+      OperatorConversationServiceRequestSchema.parse({
+        op: "cancel",
+        schemaVersion: 1,
+        conversationId: "global-default",
+        runId: "run-1f00",
+      }),
+    ).toMatchObject({ op: "cancel", runId: "run-1f00" });
+    expect(
+      OperatorConversationServiceResultSchema.parse({
+        op: "cancel",
+        schemaVersion: 1,
+        conversationId: "global-default",
+        runId: "run-1f00",
+        cancelled: true,
+      }),
+    ).toMatchObject({ op: "cancel", cancelled: true });
+    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(11);
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(11);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 

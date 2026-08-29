@@ -760,6 +760,17 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       turn: SubmitOperatorConversationTurnSchema,
     })
     .strict(),
+  // `cancel` interrupts one accepted run: the captain aborts the live model
+  // turn and the durable log settles that run as `cancelled`. Cancelling a run
+  // that is unknown or already settled reports `cancelled: false`.
+  z
+    .object({
+      op: z.literal("cancel"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      runId: OperatorConversationRunIdSchema,
+    })
+    .strict(),
   z
     .object({
       op: z.literal("autonomy"),
@@ -837,6 +848,15 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("cancel"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      runId: OperatorConversationRunIdSchema,
+      cancelled: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("autonomy"),
       schemaVersion: z.literal(1),
       status: OperatorAutonomyStatusSchema,
@@ -905,6 +925,8 @@ export interface OperatorConversationServiceClient {
     signal?: AbortSignal,
   ): AsyncIterable<OperatorConversationTailItem>;
   send(turn: SubmitOperatorConversationTurn): Promise<SubmitOperatorConversationTurnResult>;
+  /** Interrupt one accepted run; false when it is unknown or already settled. */
+  cancel(conversationId: string, runId: string): Promise<boolean>;
   autonomy(conversationId: string, command: OperatorAutonomyCommand): Promise<OperatorAutonomyStatus>;
 }
 
@@ -979,6 +1001,11 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "send", schemaVersion: 1, turn });
       if (result.op !== "send") throw new Error(`Unexpected ${result.op} result for send`);
       return result.result;
+    },
+    async cancel(conversationId, runId) {
+      const result = await dispatch({ op: "cancel", schemaVersion: 1, conversationId, runId });
+      if (result.op !== "cancel") throw new Error(`Unexpected ${result.op} result for cancel`);
+      return result.cancelled;
     },
     async autonomy(conversationId, command) {
       const result = await dispatch({ op: "autonomy", schemaVersion: 1, conversationId, command });

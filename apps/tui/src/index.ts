@@ -248,6 +248,9 @@ const shell = new ClankieFaceShell({
       await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
     }
   },
+  // Esc while a turn streams: cancel the run server-side (Clankie stops); the
+  // tail settles on the durable `cancelled` event. Detach remains the fallback.
+  onInterrupt: () => conversationPrompt.interruptActive(),
   onExit: async () => {
     presence.stop();
     herdrRoster.stop();

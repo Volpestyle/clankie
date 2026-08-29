@@ -152,10 +152,14 @@ on|off` remain available for direct use. Restart Clankie to apply a change.
   runtime (Ollama, LM Studio, vLLM) by base URL, reads its model list from
   `GET {baseURL}/models`, and needs no credential. The service picks the new
   provider up on `clankie restart captain`.
-- `/layout` moves the input and status bands and toggles the header.
-- `Ctrl+T` focuses the transcript. `!` on empty input opens the inline shell.
-  Esc detaches from an in-flight turn; the service continues it and the console
-  resumes its tail before another prompt.
+- `/layout` shows or hides the header banner.
+- `!` on empty input opens the inline shell. `Ctrl+O` toggles tool and bash
+  output between preview and full; clicking a block toggles just that one.
+  Esc interrupts an in-flight turn: the service aborts Clankie's live model
+  turn and the run settles as `cancelled` in the durable log. When the run
+  cannot be cancelled (an older service, or it already settled) — or on a
+  second Esc — the console detaches instead and the service continues the
+  turn.
 - `clankie health` reports operator credential source and env/store consistency
   without fingerprints or secret values. Remove an active
   `CLANKIE_OPERATOR_TOKEN` override before rotating the stored credential.

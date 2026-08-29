@@ -72,6 +72,8 @@ export interface ConversationTurnContext {
   /** Conversation-store run id; one metrics line uses this, including absorbed steers. */
   readonly runId: string;
   readonly acceptedAt: string;
+  /** Aborts when the operator interrupts this run (`cancel` op); the runner stops the live model turn. */
+  readonly signal: AbortSignal;
 }
 
 /** Runs one accepted operator turn against the captain's model session. */
@@ -109,6 +111,12 @@ export class ConversationStore {
   private readonly metas = new Map<string, ConversationMeta>();
   private readonly chains = new Map<string, Promise<void>>();
   private readonly runs = new Map<string, Promise<boolean>>();
+  /** Live (accepted, unsettled) runs an operator `cancel` can interrupt. */
+  private readonly runControllers = new Map<
+    string,
+    { readonly conversationId: string; readonly controller: AbortController }
+  >();
+  private readonly cancelRequests = new Set<string>();
   private readonly seatSends = new Map<string, Promise<void>>();
   private readonly runCounts = new Map<string, number>();
   /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
@@ -229,11 +237,32 @@ export class ConversationStore {
         return { op: "tail", schemaVersion: 1, result: this.replay(request.tail) };
       case "send":
         return { op: "send", schemaVersion: 1, result: await this.send(request.turn) };
+      case "cancel":
+        return {
+          op: "cancel",
+          schemaVersion: 1,
+          conversationId: request.conversationId,
+          runId: request.runId,
+          cancelled: this.cancel(request.conversationId, request.runId),
+        };
       default: {
         const exhaustive: never = request;
         throw new Error(`Unknown operator conversation op ${JSON.stringify(exhaustive)}`);
       }
     }
+  }
+
+  /**
+   * Interrupt one accepted run. A live run's abort signal fires (the captain
+   * stops the model turn); a still-queued run settles as cancelled without ever
+   * invoking the runner. Unknown or already settled runs report false.
+   */
+  public cancel(conversationId: string, runId: string): boolean {
+    const entry = this.runControllers.get(runId);
+    if (entry === undefined || entry.conversationId !== conversationId) return false;
+    this.cancelRequests.add(runId);
+    entry.controller.abort();
+    return true;
   }
 
   /** Keeps an accepted detached run alive for the transport's waitUntil. */
@@ -492,6 +521,8 @@ export class ConversationStore {
 
     const conversationId = meta.conversationId;
     this.runCounts.set(conversationId, (this.runCounts.get(conversationId) ?? 0) + 1);
+    const controller = new AbortController();
+    this.runControllers.set(runId, { conversationId, controller });
     // Steer only while an autonomous invoke is in flight. A continuation still
     // sitting on the FIFO must not open the lane — that let a later human send
     // jump an in-flight human turn (ADR 0091 / ADR 0130).
@@ -499,6 +530,8 @@ export class ConversationStore {
 
     const previous = this.chains.get(conversationId) ?? Promise.resolve();
     const invoke = (): Promise<void> => {
+      // Cancelled while still queued: settle without ever invoking the runner.
+      if (controller.signal.aborted) return Promise.resolve();
       if (!publishOperatorMessage) {
         this.internalRuns.set(conversationId, (this.internalRuns.get(conversationId) ?? 0) + 1);
       }
@@ -513,6 +546,7 @@ export class ConversationStore {
         {
           runId,
           acceptedAt: meta.updatedAt,
+          signal: controller.signal,
           ...(publishOperatorMessage ? {} : { internal: true as const }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),
@@ -524,11 +558,24 @@ export class ConversationStore {
     const work = joinLiveInternal ? invoke() : previous.then(invoke);
     const run = work
       .then(() => {
-        this.append(meta, { type: "turn", runId, phase: "completed" });
+        const cancelled = this.cancelRequests.has(runId);
+        this.append(
+          meta,
+          cancelled
+            ? { type: "turn", runId, phase: "cancelled", reasonCode: "operator_interrupt" }
+            : { type: "turn", runId, phase: "completed" },
+        );
         if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "waiting";
-        return true;
+        return !cancelled;
       })
       .catch((error: unknown) => {
+        // An interrupt that surfaces as a runner throw is still a cancellation,
+        // not a failure.
+        if (this.cancelRequests.has(runId)) {
+          this.append(meta, { type: "turn", runId, phase: "cancelled", reasonCode: "operator_interrupt" });
+          if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "waiting";
+          return false;
+        }
         this.append(meta, {
           type: "turn",
           runId,
@@ -543,6 +590,8 @@ export class ConversationStore {
         this.saveMeta(meta);
         this.trimEventLog(meta);
         this.runs.delete(runId);
+        this.runControllers.delete(runId);
+        this.cancelRequests.delete(runId);
         const remaining = (this.runCounts.get(conversationId) ?? 1) - 1;
         if (remaining <= 0) this.runCounts.delete(conversationId);
         else this.runCounts.set(conversationId, remaining);

@@ -100,12 +100,19 @@ export interface FaceShellOptions {
   readonly statusExtras?: () => readonly string[];
   /** Handles a plain prompt (not a slash command, not `!`). */
   readonly onPrompt?: (prompt: string, shell: ClankieFaceShell, signal: AbortSignal) => Promise<void>;
+  /**
+   * Interrupts the in-flight turn server-side (Esc). Resolves false when the
+   * turn could not be cancelled, in which case the shell detaches observation
+   * instead so Esc never leaves the console stuck.
+   */
+  readonly onInterrupt?: () => Promise<boolean>;
   readonly onExit?: () => Promise<void> | void;
 }
 
 type ActivePromptTurn = {
   readonly controller: AbortController;
   loader?: Loader | undefined;
+  interrupting?: boolean;
 };
 
 /** pi's IdleStatus: hold the loader's two rows so the editor doesn't jump. */
@@ -693,7 +700,7 @@ export class ClankieFaceShell {
   }
 
   private loaderText(message: string): string {
-    return `${message} (esc to detach)`;
+    return `${message} (esc to interrupt)`;
   }
 
   // --- input routing ---
@@ -926,9 +933,27 @@ export class ClankieFaceShell {
     const turn = this.activeTurn;
     if (turn === undefined || turn.controller.signal.aborted) return false;
 
-    turn.loader?.setMessage("Detaching — Clankie continues...");
-    this.refreshStatus("detaching — Clankie continues");
-    turn.controller.abort();
+    const onInterrupt = this.options.onInterrupt;
+    // No interrupt path, or a second Esc while one is pending: detach —
+    // stop observing and free the console while the turn continues.
+    if (onInterrupt === undefined || turn.interrupting === true) {
+      turn.loader?.setMessage("Detaching — Clankie continues...");
+      this.refreshStatus("detaching — Clankie continues");
+      turn.controller.abort();
+      this.tui.requestRender();
+      return true;
+    }
+    turn.interrupting = true;
+    turn.loader?.setMessage("Interrupting...");
+    this.refreshStatus("interrupting");
+    void onInterrupt().then((cancelled) => {
+      if (cancelled || this.activeTurn !== turn || turn.controller.signal.aborted) return;
+      // The service could not cancel this run; fall back to detaching.
+      turn.loader?.setMessage("Detaching — Clankie continues...");
+      this.refreshStatus("detaching — Clankie continues");
+      turn.controller.abort();
+      this.tui.requestRender();
+    });
     this.tui.requestRender();
     return true;
   }

@@ -505,6 +505,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         true,
         context.workspace ?? options.repoRoot,
       );
+      // Operator interrupt: stop the live model turn. Aborting mid-stream makes
+      // pi settle the message as aborted; partial text still publishes below so
+      // the transcript shows what he had said before the interrupt.
+      if (context.signal.aborted) return;
+      const onInterrupt = (): void => {
+        void lane.session.abort().catch(() => undefined);
+      };
+      context.signal.addEventListener("abort", onInterrupt, { once: true });
       let releaseStarting: (() => void) | undefined;
       if (lane.running === undefined && lane.starting === undefined && !lane.session.isStreaming) {
         lane.starting = new Promise<void>((resolve) => {
@@ -653,11 +661,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (goalWasActive || autonomy.getGoal(conversationId)?.status === "active") {
           autonomy.finishTurn(conversationId, runTokens);
         }
-        settled = "completed";
+        settled = context.signal.aborted ? "interrupted" : "completed";
       } catch (error) {
-        if (metrics !== undefined) settled = "failed";
+        if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
         throw error;
       } finally {
+        context.signal.removeEventListener("abort", onInterrupt);
         if (settled !== undefined) {
           tryAppendTurnSettled(
             turnSettled,

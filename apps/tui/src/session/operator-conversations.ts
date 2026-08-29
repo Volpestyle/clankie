@@ -393,6 +393,8 @@ export class OperatorConversationPromptSession {
   private readonly tails: OperatorConversationTailStore;
   private readonly herdrPaneId: () => string | undefined;
   private readonly restores = new Map<string, Promise<boolean>>();
+  /** The accepted run the console is currently observing, if any. */
+  private activeRun: { readonly conversationId: string; readonly runId: string } | undefined;
 
   public constructor(input: {
     readonly client: OperatorConversationClient;
@@ -493,6 +495,37 @@ export class OperatorConversationPromptSession {
     if (accepted.status === "seat_offline") {
       throw new OperatorConversationClientError("That agent is offline; retry when its pane is live");
     }
+    this.activeRun = { conversationId, runId: accepted.runId };
+    try {
+      await this.observeRun(conversationId, accepted.runId, sink, signal);
+    } finally {
+      if (this.activeRun?.runId === accepted.runId) this.activeRun = undefined;
+    }
+  }
+
+  /**
+   * Interrupt the run this console is currently observing: the service aborts
+   * the live model turn and the tail settles on its `cancelled` event. False
+   * when no run is active or the service could not cancel it (already settled,
+   * or an older service without the cancel op) — the caller falls back to
+   * detaching its observation.
+   */
+  public async interruptActive(): Promise<boolean> {
+    const active = this.activeRun;
+    if (active === undefined) return false;
+    try {
+      return await this.client.cancel(active.conversationId, active.runId);
+    } catch {
+      return false;
+    }
+  }
+
+  private async observeRun(
+    conversationId: string,
+    runId: string,
+    sink: OperatorConversationEventSink,
+    signal?: AbortSignal,
+  ): Promise<void> {
     tail: while (signal?.aborted !== true) {
       const cursor = this.tails.cursor(conversationId);
       try {
@@ -516,7 +549,7 @@ export class OperatorConversationPromptSession {
           await this.tails.writeCursor(conversationId, item.event.cursor);
           if (
             item.event.type === "turn" &&
-            item.event.runId === accepted.runId &&
+            item.event.runId === runId &&
             ["completed", "failed", "cancelled"].includes(item.event.phase)
           ) {
             return;

@@ -266,7 +266,7 @@ describe("shell assembly", () => {
     expect(cancel).not.toHaveBeenCalled();
   });
 
-  it("always detaches an active turn on Escape", () => {
+  it("detaches an active turn on Escape when no interrupt path exists", () => {
     const shell = new ClankieFaceShell({
       commands: buildConsoleCommands({}),
       cwd: process.cwd(),
@@ -282,5 +282,45 @@ describe("shell assembly", () => {
 
     expect(internals.routeInput("\x1b")).toEqual({ consume: true });
     expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("routes Escape to the server-side interrupt, detaching only as fallback", async () => {
+    const interrupts: boolean[] = [];
+    let interruptResult = true;
+    const shell = new ClankieFaceShell({
+      commands: buildConsoleCommands({}),
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+      onInterrupt: async () => {
+        interrupts.push(true);
+        return interruptResult;
+      },
+    });
+    const controller = new AbortController();
+    const internals = shell as unknown as {
+      activeTurn: { controller: AbortController; interrupting?: boolean } | undefined;
+      routeInput(data: string): { consume?: boolean } | undefined;
+    };
+    internals.activeTurn = { controller };
+
+    // First Esc interrupts server-side; observation keeps streaming.
+    expect(internals.routeInput("\x1b")).toEqual({ consume: true });
+    await Promise.resolve();
+    expect(interrupts).toHaveLength(1);
+    expect(controller.signal.aborted).toBe(false);
+
+    // A second Esc while the interrupt is pending falls back to detaching.
+    expect(internals.routeInput("\x1b")).toEqual({ consume: true });
+    expect(controller.signal.aborted).toBe(true);
+
+    // A failed cancel detaches on its own so Esc never strands the console.
+    interruptResult = false;
+    const second = new AbortController();
+    internals.activeTurn = { controller: second };
+    expect(internals.routeInput("\x1b")).toEqual({ consume: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(second.signal.aborted).toBe(true);
   });
 });
