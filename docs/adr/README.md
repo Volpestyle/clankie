@@ -30,7 +30,10 @@ later ADRs link back to the decision they amend or replace.
 | [`clankie-memory.tldraw`](../diagrams/clankie-memory.tldraw)                             | Historical [`clankie-memory.jpg`](../diagrams/clankie-memory.jpg)                             |
 | [`clankie-docs-diagrams.tldraw`](../diagrams/clankie-docs-diagrams.tldraw)               | Historical per-ADR JPG exports that remain linked                                             |
 | [`clankie-docs-diagrams-2.tldraw`](../diagrams/clankie-docs-diagrams-2.tldraw)           | Historical app, package, and ADR JPG exports that remain linked                               |
+| [`seat-conversations.tldraw`](../diagrams/seat-conversations.tldraw)                     | [`0135-a-herdr-seat-is-a-conversation.jpg`](../diagrams/0135-a-herdr-seat-is-a-conversation.jpg) (ADR 0135) |
 
-Current architecture decisions use Mermaid in the owning Markdown. Retained JPG
-exports preserve the architecture at their publication date; do not treat them
-as current or hand-edit/fabricate a binary render without its source.
+Current architecture decisions use Mermaid in the owning Markdown; a decision
+whose system spans repos may additionally keep an editable tldraw source listed
+here with its export. Retained JPG exports preserve the architecture at their
+publication date; do not treat them as current or hand-edit/fabricate a binary
+render without its source.

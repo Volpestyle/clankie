@@ -115,6 +115,13 @@ flowchart LR
   Registry -.->|"list / replay"| Captain["Clankie (head of staff)"]
 ```
 
+The full cross-repo picture — both repos, the trust boundary, the send and
+projection loops, and the retired terminal transport:
+
+![Seat conversation architecture](../diagrams/0135-a-herdr-seat-is-a-conversation.jpg)
+
+[Editable turbopuffer tldraw source](../diagrams/seat-conversations.tldraw)
+
 ### Phases
 
 DMs first: roster, seat threads, direct send, status/summary projection.
