@@ -475,6 +475,7 @@ process.on("SIGTERM", () => requestShutdown("SIGTERM"));
 function createConfiguredPlayExecution(): PlayExecution {
   return createGbaPlayExecution({
     logger,
+    repoRoot,
     activityObservations,
     playSight,
     hostedWorld,
