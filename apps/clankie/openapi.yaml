@@ -349,8 +349,9 @@ paths:
       operationId: postOperatorDispatch
       summary: Operator conversation contract
       description: |
-        One route, discriminated `op`: `list`, `get`, `create`, `close`, `send`,
-        `replay`, `tail`, `autonomy`. The TUI and relay both speak this.
+        One route, discriminated `op`: `list`, `roster`, `get`, `create`,
+        `close`, `send`, `replay`, `tail`, `autonomy`. The TUI and relay both
+        speak this. Seat scopes identify Herdr direct-send/projection threads.
       security: [{ captainBearer: [] }]
       requestBody:
         required: true
@@ -360,6 +361,9 @@ paths:
               list:
                 summary: List conversations
                 value: { op: list, schemaVersion: 1 }
+              roster:
+                summary: List live Herdr seats
+                value: { op: roster, schemaVersion: 1 }
               create:
                 summary: Create a global conversation
                 value:

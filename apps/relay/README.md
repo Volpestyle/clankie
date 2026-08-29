@@ -8,7 +8,7 @@ authorization: every request carries a device-session bearer.
 
 The HTTP surface composes the unchanged `@clankie/protocol` operator-conversation registry contract:
 
-- `POST /operator/v1/dispatch` accepts strict `list`, `get`, `create`, `send`, and `replay` requests.
+- `POST /operator/v1/dispatch` accepts strict `list`, `roster`, `get`, `create`, `close`, `send`, and `replay` requests. Seat-scoped creates and sends use the same authenticated boundary.
 - `POST /operator/v1/tail` accepts the same strict `tail` request and emits newline-delimited `{ kind: "event", event }`, `{ kind: "recovery", recovery }`, or terminal `{ kind: "auth_failure", failure }` frames.
 
 The relay checks the current device record and `chat` grant against the clankie
@@ -22,6 +22,7 @@ Captain session IDs, continuation tokens, provider credentials, and arbitrary
 provider payloads do not cross the boundary.
 
 Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
+Transient `seat_offline` refusals collapse concurrently but are not retained, so a retry observes a pane that has returned.
 
 ![Relay device-request architecture](../../docs/diagrams/relay-architecture.jpg)
 

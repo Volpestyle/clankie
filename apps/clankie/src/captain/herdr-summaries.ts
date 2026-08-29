@@ -13,7 +13,7 @@ export interface HerdrSummariesFile {
   readonly agents: Record<string, HerdrAgentSummary>;
 }
 
-function herdrSummariesPath(env: NodeJS.ProcessEnv = process.env): string {
+export function herdrSummariesPath(env: NodeJS.ProcessEnv = process.env): string {
   return (
     env.HERD_LEAD_SUMMARIES_CACHE?.trim() ||
     join(

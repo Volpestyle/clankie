@@ -672,18 +672,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         unsubscribe();
       }
     },
-    (conversationId) => {
+    (conversationId, scope) => {
       autonomy.clearConversation(conversationId);
       herdrWatches.cancelConversation(conversationId);
+      if (scope.kind === "seat") herdrWatches.untrackSeat(scope.seatId);
       const key = `operator:${conversationId}`;
       const pending = sessions.get(key);
       sessions.delete(key);
       void pending?.then((lane) => lane.session.dispose()).catch(() => undefined);
     },
+    (seatId, message) => herdrWatches.sendToSeat(seatId, message),
   );
 
   autonomy.start(async (conversationId, prompt) => {
-    if (!conversations.has(conversationId)) {
+    if (!conversations.has(conversationId) || conversations.isSeatConversation(conversationId)) {
       autonomy.clearConversation(conversationId);
       return;
     }
@@ -694,15 +696,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   });
 
-  herdrWatches.start((conversationId, prompt) => {
-    if (!conversations.has(conversationId)) {
-      herdrWatches.cancelConversation(conversationId);
+  herdrWatches.start(
+    (conversationId, prompt) => {
+      if (!conversations.has(conversationId) || conversations.isSeatConversation(conversationId)) {
+        herdrWatches.cancelConversation(conversationId);
+        return Promise.resolve();
+      }
+      const result = conversations.submitInternal(conversationId, prompt);
+      if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
       return Promise.resolve();
-    }
-    const result = conversations.submitInternal(conversationId, prompt);
-    if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
-    return Promise.resolve();
-  });
+    },
+    (seatId, projection) => {
+      conversations.publishSeatEvent(
+        seatId,
+        projection.kind === "summary"
+          ? { type: "message", role: "agent", text: projection.text, streaming: false }
+          : { type: "activity", phase: projection.status === "working" ? "responding" : "waiting" },
+      );
+    },
+  );
+  for (const seatId of conversations.seatIds()) herdrWatches.trackSeat(seatId);
 
   async function runDiscordTurn(
     lane: LaneSession,
@@ -918,12 +931,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled);
     },
 
-    serveOperatorConversation(
+    async serveOperatorConversation(
       request: OperatorConversationServiceRequest,
     ): Promise<OperatorConversationServiceResult> {
       if (request.op === "autonomy") {
         if (!conversations.has(request.conversationId)) {
           throw new Error(`Unknown conversation ${request.conversationId}`);
+        }
+        if (conversations.isSeatConversation(request.conversationId)) {
+          throw new Error("Seat conversations do not have captain autonomy");
         }
         return Promise.resolve({
           op: "autonomy",
@@ -932,9 +948,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         });
       }
       if (request.op === "roster") {
-        return readFleetSeats().then((seats) => ({ op: "roster", schemaVersion: 1, seats: [...seats] }));
+        const seats = await readFleetSeats();
+        return {
+          op: "roster",
+          schemaVersion: 1,
+          seats: seats.map((seat) => {
+            const conversationId = conversations.conversationIdForSeat(seat.seatId);
+            return { ...seat, ...(conversationId === undefined ? {} : { conversationId }) };
+          }),
+        };
       }
-      return conversations.serve(request);
+      const result = await conversations.serve(request);
+      if (request.op === "create" && request.scope.kind === "seat") {
+        herdrWatches.trackSeat(request.scope.seatId);
+      }
+      return result;
     },
 
     async observeLanes(): Promise<readonly ObservableCaptainLane[]> {

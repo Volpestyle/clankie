@@ -1,8 +1,19 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unwatchFile,
+  watchFile,
+  writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
+import { stripVTControlCharacters } from "node:util";
+import { OPERATOR_CONVERSATION_SUMMARY_MAX } from "@clankie/protocol";
 import { z } from "zod";
+import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 
 const HerdrWatchRecordSchema = z
   .object({
@@ -37,6 +48,9 @@ export interface HerdrWatchRunner {
   get(target: string): Promise<HerdrAgentSnapshot>;
   resolveTerminal(terminalId: string): Promise<HerdrAgentSnapshot | undefined>;
   wait(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
+  waitForChange?(target: string, currentStatus: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
+  sendText?(target: string, text: string): Promise<void>;
+  pressEnter?(target: string): Promise<void>;
 }
 
 export type HerdrWatchArmResult =
@@ -62,9 +76,15 @@ export interface HerdrWatchPort {
 }
 
 type InternalWake = (conversationId: string, prompt: string) => Promise<void>;
+type HerdrSeatProjection =
+  | { readonly kind: "status"; readonly status: string }
+  | { readonly kind: "summary"; readonly text: string };
+type ProjectSeat = (seatId: string, projection: HerdrSeatProjection) => void;
 
 const SETTLED_STATUSES = new Set(["idle", "done", "blocked"]);
+const AGENT_STATUSES = ["idle", "working", "blocked", "done", "unknown"] as const;
 const RETRY_ADMISSION_MS = 5_000;
+const HERDR_COMMAND_TIMEOUT_MS = 5_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -110,7 +130,10 @@ function runHerdr(args: readonly string[], signal?: AbortSignal): Promise<string
     execFile(
       "herdr",
       [...args],
-      { maxBuffer: 1024 * 1024, ...(signal === undefined ? {} : { signal }) },
+      {
+        maxBuffer: 1024 * 1024,
+        ...(signal === undefined ? { timeout: HERDR_COMMAND_TIMEOUT_MS } : { signal }),
+      },
       (error, stdout, stderr) => {
         if (error !== null) {
           if (signal?.aborted === true) {
@@ -132,6 +155,23 @@ function defaultRunner(): HerdrWatchRunner {
     resolveTerminal: async (terminalId) =>
       parseHerdrPaneList(await runHerdr(["pane", "list"])).find((pane) => pane.terminalId === terminalId),
     wait: async (target, signal) => parseHerdrAgentResult(await runHerdr(["agent", "wait", target], signal)),
+    waitForChange: async (target, currentStatus, signal) =>
+      parseHerdrAgentResult(
+        await runHerdr(
+          [
+            "agent",
+            "wait",
+            target,
+            ...AGENT_STATUSES.filter((status) => status !== currentStatus).flatMap((status) => [
+              "--until",
+              status,
+            ]),
+          ],
+          signal,
+        ),
+      ),
+    sendText: (target, text) => runHerdr(["pane", "send-text", target, text]).then(() => undefined),
+    pressEnter: (target) => runHerdr(["pane", "send-keys", target, "Enter"]).then(() => undefined),
   };
 }
 
@@ -140,21 +180,73 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly path: string;
   private readonly runner: HerdrWatchRunner;
   private readonly controllers = new Map<string, AbortController>();
+  private readonly seatControllers = new Map<string, AbortController>();
+  private readonly seatStatuses = new Map<string, string>();
+  private readonly seatSummaries = new Map<string, string>();
   private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
+  private readonly summariesPath: string;
+  private readonly summaryWatchIntervalMs: number;
   private state: PersistedHerdrWatches;
   private wake: InternalWake | undefined;
+  private projectSeat: ProjectSeat | undefined;
+  private watchingSummaries = false;
   private stateUnreadable = false;
   private closed = false;
 
-  public constructor(path: string, options: { readonly runner?: HerdrWatchRunner } = {}) {
+  public constructor(
+    path: string,
+    options: {
+      readonly runner?: HerdrWatchRunner;
+      readonly summariesPath?: string;
+      readonly summaryWatchIntervalMs?: number;
+    } = {},
+  ) {
     this.path = path;
     this.runner = options.runner ?? defaultRunner();
+    this.summariesPath = options.summariesPath ?? herdrSummariesPath();
+    this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
     this.state = this.read();
   }
 
-  public start(wake: InternalWake): void {
+  public start(wake: InternalWake, projectSeat?: ProjectSeat): void {
     this.wake = wake;
+    this.projectSeat = projectSeat;
     for (const watch of this.state.watches) this.launch(watch);
+  }
+
+  public async sendToSeat(seatId: string, text: string): Promise<boolean> {
+    if (this.closed || this.runner.sendText === undefined || this.runner.pressEnter === undefined)
+      return false;
+    try {
+      const current = await this.runner.resolveTerminal(seatId);
+      if (!isMessageableSeat(current)) return false;
+      await this.runner.sendText(current.paneId, text);
+      const submitted = await this.runner.resolveTerminal(seatId);
+      if (!isMessageableSeat(submitted)) return false;
+      await this.runner.pressEnter(submitted.paneId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public trackSeat(seatId: string): void {
+    if (this.closed || this.projectSeat === undefined || this.seatControllers.has(seatId)) return;
+    const controller = new AbortController();
+    this.seatControllers.set(seatId, controller);
+    this.ensureSummaryWatch();
+    void this.runSeat(seatId, controller.signal).finally(() => {
+      if (this.seatControllers.get(seatId) === controller) this.seatControllers.delete(seatId);
+      if (this.seatControllers.size === 0) this.stopSummaryWatch();
+    });
+  }
+
+  public untrackSeat(seatId: string): void {
+    this.seatControllers.get(seatId)?.abort();
+    this.seatControllers.delete(seatId);
+    this.seatStatuses.delete(seatId);
+    this.seatSummaries.delete(seatId);
+    if (this.seatControllers.size === 0) this.stopSummaryWatch();
   }
 
   public async watch(conversationId: string, target: string, reason: string): Promise<HerdrWatchArmResult> {
@@ -220,11 +312,91 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public close(): void {
     this.closed = true;
     this.wake = undefined;
+    this.projectSeat = undefined;
     for (const controller of this.controllers.values()) controller.abort();
     this.controllers.clear();
+    for (const controller of this.seatControllers.values()) controller.abort();
+    this.seatControllers.clear();
+    this.stopSummaryWatch();
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
   }
+
+  private async runSeat(seatId: string, signal: AbortSignal): Promise<void> {
+    while (!signal.aborted) {
+      try {
+        const current = await this.runner.resolveTerminal(seatId);
+        if (!isMessageableSeat(current)) {
+          this.publishSeatStatus(seatId, "offline");
+          await delay(RETRY_ADMISSION_MS);
+          continue;
+        }
+        this.publishSeatStatus(seatId, current.status);
+        this.publishSeatSummary(seatId, current.paneId, readHerdrSummariesFile(this.summariesPath).agents);
+        if (this.runner.waitForChange === undefined) return;
+        await this.runner.waitForChange(current.paneId, current.status, signal);
+      } catch {
+        if (signal.aborted) return;
+        this.publishSeatStatus(seatId, "offline");
+        await delay(RETRY_ADMISSION_MS);
+      }
+    }
+  }
+
+  private publishSeatStatus(seatId: string, status: string): void {
+    if (this.seatStatuses.get(seatId) === status) return;
+    this.seatStatuses.set(seatId, status);
+    this.projectSeat?.(seatId, { kind: "status", status });
+  }
+
+  private publishSeatSummary(
+    seatId: string,
+    paneId: string,
+    summaries: Readonly<Record<string, HerdrAgentSummary>>,
+  ): void {
+    const raw = summaries[paneId]?.summary;
+    const text =
+      raw === undefined
+        ? undefined
+        : bounded(stripVTControlCharacters(raw).trim(), OPERATOR_CONVERSATION_SUMMARY_MAX);
+    if (text === undefined) {
+      this.seatSummaries.delete(seatId);
+      return;
+    }
+    if (this.seatSummaries.get(seatId) === text) return;
+    this.seatSummaries.set(seatId, text);
+    this.projectSeat?.(seatId, { kind: "summary", text });
+  }
+
+  private ensureSummaryWatch(): void {
+    if (this.watchingSummaries) return;
+    watchFile(
+      this.summariesPath,
+      { interval: this.summaryWatchIntervalMs, persistent: false },
+      this.onSummariesChanged,
+    );
+    this.watchingSummaries = true;
+  }
+
+  private stopSummaryWatch(): void {
+    if (!this.watchingSummaries) return;
+    unwatchFile(this.summariesPath, this.onSummariesChanged);
+    this.watchingSummaries = false;
+  }
+
+  private readonly onSummariesChanged = (): void => {
+    const summaries = readHerdrSummariesFile(this.summariesPath).agents;
+    for (const seatId of this.seatControllers.keys()) {
+      void this.runner
+        .resolveTerminal(seatId)
+        .then((current) => {
+          if (this.seatControllers.has(seatId) && isMessageableSeat(current)) {
+            this.publishSeatSummary(seatId, current.paneId, summaries);
+          }
+        })
+        .catch(() => undefined);
+    }
+  };
 
   private launch(record: HerdrWatchRecord): void {
     if (this.closed || this.wake === undefined || this.controllers.has(record.id)) return;
@@ -304,4 +476,19 @@ function watchPrompt(record: HerdrWatchRecord, agent?: HerdrAgentSnapshot, failu
     observation,
     "Inspect the pane and its side effects now. A settled status is a cue to harvest, not proof that the work is correct. Do not replace this watcher with timed polling.",
   ].join("\n\n");
+}
+
+function bounded(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
+  return agent !== undefined && agent.agent !== "shell" && agent.agent !== "unknown";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 }

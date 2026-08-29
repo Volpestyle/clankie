@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatHerdrSessionCensus,
   parseHerdrAgentList,
+  readFleetSeats,
   readHerdrSessionCensus,
 } from "../src/captain/herdr-census.ts";
 import { operatorPromptWithHerdrSeat } from "../src/captain/herdr-seat.ts";
@@ -68,6 +69,23 @@ describe("herdr session census", () => {
     await expect(
       readHerdrSessionCensus("w15:p6", { runCommand: () => Promise.reject(missing) }),
     ).resolves.toEqual({ outcome: "unavailable", error: "herdr is not on PATH" });
+  });
+
+  it("uses stable terminal ids for roster seats and excludes shells", async () => {
+    const roster = {
+      result: {
+        agents: [
+          { pane_id: "w15:p8", terminal_id: "term-worker", agent: "codex", agent_status: "idle" },
+          { pane_id: "w15:p9", terminal_id: "term-shell", agent: "shell", agent_status: "unknown" },
+          { pane_id: "w15:pQ", agent: "claude", agent_status: "idle" },
+        ],
+      },
+    };
+    await expect(
+      readFleetSeats({
+        runCommand: () => Promise.resolve({ stdout: JSON.stringify(roster), stderr: "" }),
+      }),
+    ).resolves.toEqual([{ seatId: "term-worker", harness: "codex", status: "idle", title: "" }]);
   });
 });
 

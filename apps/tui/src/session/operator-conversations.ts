@@ -490,6 +490,9 @@ export class OperatorConversationPromptSession {
     if (accepted.status === "revision_conflict") {
       throw new OperatorConversationClientError("This conversation changed elsewhere; retry the prompt");
     }
+    if (accepted.status === "seat_offline") {
+      throw new OperatorConversationClientError("That agent is offline; retry when its pane is live");
+    }
     tail: while (signal?.aborted !== true) {
       const cursor = this.tails.cursor(conversationId);
       try {

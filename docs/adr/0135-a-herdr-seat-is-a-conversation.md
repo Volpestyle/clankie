@@ -86,8 +86,8 @@ the send with a typed failure; the thread stays readable.
 
 ### What becomes bubbles
 
-A pty stream is not messages. The seat thread carries the *readable
-projection*, built from signals the service already has:
+A pty stream is not messages. The seat thread carries the _readable
+projection_, built from signals the service already has:
 
 - `activity` events from agent-status transitions — `working` is literally a
   typing indicator; `done`/`blocked`/`idle` are delivery states.
@@ -148,7 +148,7 @@ roster machinery.
   surface: configuring live captain chat configures the fleet lane.
 - Any harness gets a DM for free — the pane pty is the universal contract;
   harness differences are contact-card metadata.
-- ADR 0097's "no general herdr tool suite" holds for captain *tools*; the
+- ADR 0097's "no general herdr tool suite" holds for captain _tools_; the
   service's herdr machinery nonetheless grows a standing projection loop
   (roster cache, seat watchers, summary tailing) that must fail soft the way
   the census does — a down herdr socket renders seats offline, never a failed

@@ -63,11 +63,13 @@ stay in the local Pi trail ([ADR 0134](adr/0134-discord-tool-work-is-a-status-ca
 Discord shows him typing for the whole turn rather than for a capped minute.
 
 The TUI and relay speak the same operator-conversation contract
-(`/operator/v1/dispatch`): revision-fenced sends, cursored replay, long-polled
-tails. A TUI process creates a fresh conversation unless `--chat` explicitly
-resumes one. Conversation and Pi session are one lifetime: bounded retention
-removes their shared directory, while public event logs rotate with typed cursor
-recovery ([ADR 0111](adr/0111-a-console-process-starts-one-conversation.md)).
+(`/operator/v1/dispatch`): fleet roster, revision-fenced sends, cursored replay,
+and long-polled tails. Herdr seat conversations are direct send and readable
+projection lanes with no Pi session ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)).
+A TUI process creates a fresh captain conversation unless `--chat` explicitly
+resumes one. A captain conversation and its Pi session are one lifetime: bounded
+retention removes their shared directory, while public event logs rotate with
+typed cursor recovery ([ADR 0111](adr/0111-a-console-process-starts-one-conversation.md)).
 Conversations are files under `~/.clankie/captain/`. Each settled operator or
 Discord captain turn also appends one metrics line to
 `~/.clankie/captain/turn-settled.jsonl`: tool-name counts, first mutating tool,

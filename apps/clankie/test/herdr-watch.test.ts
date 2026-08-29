@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -117,6 +117,65 @@ describe("HerdrWatchStore", () => {
       status: "done",
     });
     expect(wait).not.toHaveBeenCalled();
+    store.close();
+  });
+
+  it("sends through the current pane and projects status and changed summaries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-seat-watch-"));
+    roots.push(root);
+    const summariesPath = join(root, "summaries.json");
+    await writeFile(
+      summariesPath,
+      JSON.stringify({ at: new Date().toISOString(), agents: { "w18:p1": { summary: "Initial" } } }),
+    );
+    let current = working;
+    const changed = deferred<HerdrAgentSnapshot>();
+    const sendText = vi.fn(() => Promise.resolve());
+    const pressEnter = vi.fn(() => Promise.resolve());
+    const runner: HerdrWatchRunner = {
+      get: () => Promise.resolve(current),
+      resolveTerminal: () => Promise.resolve(current),
+      wait: () => Promise.resolve(done),
+      waitForChange: (_target, status, signal) =>
+        status === "working"
+          ? changed.promise
+          : new Promise((_resolve, reject) =>
+              signal.addEventListener("abort", () => reject(new Error("aborted"))),
+            ),
+      sendText,
+      pressEnter,
+    };
+    const project = vi.fn();
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner,
+      summariesPath,
+      summaryWatchIntervalMs: 10,
+    });
+    store.start(() => Promise.resolve(), project);
+    store.trackSeat("term-potato");
+
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenCalledWith("term-potato", { kind: "status", status: "working" }),
+    );
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenCalledWith("term-potato", { kind: "summary", text: "Initial" }),
+    );
+    await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(true);
+    expect(sendText).toHaveBeenCalledWith("w18:p1", "hello");
+    expect(pressEnter).toHaveBeenCalledWith("w18:p1");
+
+    await writeFile(
+      summariesPath,
+      JSON.stringify({ at: new Date().toISOString(), agents: { "w18:p1": { summary: "Finished" } } }),
+    );
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenCalledWith("term-potato", { kind: "summary", text: "Finished" }),
+    );
+    current = done;
+    changed.resolve(done);
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenCalledWith("term-potato", { kind: "status", status: "done" }),
+    );
     store.close();
   });
 });

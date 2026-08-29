@@ -55,6 +55,7 @@ function client(extra: OperatorConversation[] = []): OperatorConversationClient 
   const conversations = [DEFAULT, ...extra];
   return {
     list: async () => conversations,
+    roster: async () => [],
     get: async (id) => conversations.find((conversation) => conversation.conversationId === id),
     create: async (input) => ({ ...DEFAULT, ...input, conversationId: "created", isDefault: false }),
     close: async () => false,

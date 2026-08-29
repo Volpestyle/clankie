@@ -56,7 +56,7 @@ afterEach(async () => {
 });
 
 describe("authenticated operator conversation relay", () => {
-  it("lists, gets, creates, and closes through the callable contract", async () => {
+  it("lists, gets, creates seat threads, reads the roster, and closes through the callable contract", async () => {
     const seen: OperatorConversationServiceRequest[] = [];
     const relay = await startRelay({
       dispatch: async (request) => {
@@ -66,11 +66,31 @@ describe("authenticated operator conversation relay", () => {
         if (request.op === "close") {
           return { op: "close", schemaVersion: 1, conversationId: request.conversationId, closed: true };
         }
+        if (request.op === "roster") {
+          return {
+            op: "roster",
+            schemaVersion: 1,
+            seats: [
+              {
+                seatId: "term-worker",
+                harness: "codex",
+                status: "idle",
+                title: "Worker",
+                conversationId: "conversation-2",
+              },
+            ],
+          };
+        }
         if (request.op === "create") {
           return {
             op: "create",
             schemaVersion: 1,
-            conversation: { ...conversation, conversationId: "conversation-2", isDefault: false },
+            conversation: {
+              ...conversation,
+              conversationId: "conversation-2",
+              scope: request.scope,
+              isDefault: false,
+            },
           };
         }
         throw new Error("unexpected op");
@@ -80,14 +100,20 @@ describe("authenticated operator conversation relay", () => {
     for (const request of [
       { op: "list", schemaVersion: 1 },
       { op: "get", schemaVersion: 1, conversationId: "global-default" },
-      { op: "create", schemaVersion: 1, scope: { kind: "global" }, title: "Second lead" },
+      {
+        op: "create",
+        schemaVersion: 1,
+        scope: { kind: "seat", seatId: "term-worker" },
+        title: "Worker",
+      },
+      { op: "roster", schemaVersion: 1 },
       { op: "close", schemaVersion: 1, conversationId: "conversation-2" },
     ] as const) {
       const response = await post(relay.url, "/operator/v1/dispatch", request);
       expect(response.status).toBe(200);
       OperatorConversationServiceResultSchema.parse(await response.json());
     }
-    expect(seen.map((request) => request.op)).toEqual(["list", "get", "create", "close"]);
+    expect(seen.map((request) => request.op)).toEqual(["list", "get", "create", "roster", "close"]);
   });
 
   it("requires application auth independent of Tailscale and observes immediate revocation", async () => {
@@ -137,6 +163,7 @@ describe("authenticated operator conversation relay", () => {
 
   it("deduplicates identical turn delivery and preserves typed stale-revision conflicts", async () => {
     let sends = 0;
+    let offline = true;
     const relay = await startRelay({
       dispatch: async (request) => {
         if (request.op !== "send") throw new Error("send expected");
@@ -155,13 +182,28 @@ describe("authenticated operator conversation relay", () => {
             },
           };
         }
+        if (request.turn.kind === "message" && request.turn.message === "offline" && offline) {
+          offline = false;
+          return {
+            op: "send",
+            schemaVersion: 1,
+            result: {
+              schemaVersion: 1,
+              status: "seat_offline",
+              conversationId: "seat-thread",
+              seatId: "term-worker",
+              currentRevision: 0,
+              safeCursor: "cursor:empty",
+            },
+          };
+        }
         return {
           op: "send",
           schemaVersion: 1,
           result: {
             schemaVersion: 1,
             status: "accepted",
-            conversationId: "global-default",
+            conversationId: request.turn.conversationId,
             runId: "run-1",
             revision: 1,
             safeCursor: "cursor:accepted",
@@ -186,6 +228,22 @@ describe("authenticated operator conversation relay", () => {
       currentRevision: 1,
     });
     expect(sends).toBe(2);
+
+    const offlineTurn = {
+      ...sendRequest("offline", 0),
+      turn: { ...sendRequest("offline", 0).turn, conversationId: "seat-thread" },
+    };
+    expect((await (await post(relay.url, "/operator/v1/dispatch", offlineTurn)).json()).result).toMatchObject(
+      {
+        status: "seat_offline",
+      },
+    );
+    expect((await (await post(relay.url, "/operator/v1/dispatch", offlineTurn)).json()).result).toMatchObject(
+      {
+        status: "accepted",
+      },
+    );
+    expect(sends).toBe(4);
   });
 
   it("fails closed when an upstream record tries to expose private Eve state", async () => {

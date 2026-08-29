@@ -82,6 +82,8 @@ export type ConversationRunner = (
   context: ConversationTurnContext,
 ) => Promise<void>;
 
+type SeatSender = (seatId: string, message: string) => Promise<boolean>;
+
 /**
  * A workspace scope names the directory the conversation's session works in.
  * That directory becomes the cwd of an unsandboxed shell, so the registry
@@ -107,18 +109,26 @@ export class ConversationStore {
   private readonly metas = new Map<string, ConversationMeta>();
   private readonly chains = new Map<string, Promise<void>>();
   private readonly runs = new Map<string, Promise<boolean>>();
+  private readonly seatSends = new Map<string, Promise<void>>();
   private readonly runCounts = new Map<string, number>();
   /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
   private readonly internalRuns = new Map<string, number>();
 
   private readonly root: string;
   private readonly runner: ConversationRunner;
-  private readonly onPrune: ((conversationId: string) => void) | undefined;
+  private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
+  private readonly sendToSeat: SeatSender | undefined;
 
-  public constructor(root: string, runner: ConversationRunner, onPrune?: (conversationId: string) => void) {
+  public constructor(
+    root: string,
+    runner: ConversationRunner,
+    onPrune?: (conversationId: string, scope: OperatorConversationScope) => void,
+    sendToSeat?: SeatSender,
+  ) {
     this.root = root;
     this.runner = runner;
     this.onPrune = onPrune;
+    this.sendToSeat = sendToSeat;
     mkdirSync(root, { recursive: true });
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -218,7 +228,7 @@ export class ConversationStore {
       case "tail":
         return { op: "tail", schemaVersion: 1, result: this.replay(request.tail) };
       case "send":
-        return { op: "send", schemaVersion: 1, result: this.send(request.turn) };
+        return { op: "send", schemaVersion: 1, result: await this.send(request.turn) };
       default: {
         const exhaustive: never = request;
         throw new Error(`Unknown operator conversation op ${JSON.stringify(exhaustive)}`);
@@ -239,22 +249,55 @@ export class ConversationStore {
     return this.metas.has(conversationId);
   }
 
+  public isSeatConversation(conversationId: string): boolean {
+    return this.metas.get(conversationId)?.scope.kind === "seat";
+  }
+
+  public conversationIdForSeat(seatId: string): string | undefined {
+    return [...this.metas.values()].find((meta) => meta.scope.kind === "seat" && meta.scope.seatId === seatId)
+      ?.conversationId;
+  }
+
+  public seatIds(): readonly string[] {
+    return [...this.metas.values()].flatMap((meta) =>
+      meta.scope.kind === "seat" ? [meta.scope.seatId] : [],
+    );
+  }
+
+  public publishSeatEvent(seatId: string, body: OperatorConversationEventBody): void {
+    const conversationId = this.conversationIdForSeat(seatId);
+    const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
+    if (meta === undefined) return;
+    const events = this.readEvents(meta.conversationId);
+    if (body.type === "activity") {
+      const previous = events.reverse().find((event) => event.type === "activity");
+      if (previous?.type === "activity" && previous.phase === body.phase) return;
+    }
+    if (body.type === "message" && body.role === "agent") {
+      const previous = events.reverse().find((event) => event.type === "message" && event.role === "agent");
+      if (previous?.type === "message" && previous.role === "agent" && previous.text === body.text) return;
+    }
+    this.append(meta, body);
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+  }
+
   /** Queue a host-authored continuation without forging an operator message. */
   public submitInternal(conversationId: string, message: string): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new Error(`Unknown conversation ${conversationId}`);
+    if (meta.scope.kind === "seat") throw new Error("Seat conversations do not run captain turns");
     return this.enqueue(meta, message, undefined, false);
   }
 
   public async close(): Promise<void> {
-    await Promise.allSettled(this.runs.values());
+    await Promise.allSettled([...this.runs.values(), ...this.seatSends.values()]);
   }
 
   private create(scope: OperatorConversationScope, title: string): OperatorConversation {
     if (scope.kind === "seat") {
-      // ADR 0135: seat threads need the direct-send lane and seat projection
-      // before a registry record would be truthful.
-      throw new Error("Seat conversations are not implemented yet");
+      const existing = this.conversationIdForSeat(scope.seatId);
+      if (existing !== undefined) return publicConversation(this.metas.get(existing)!);
     }
     const workspace = workspaceOf(scope);
     if (workspace !== undefined && !statSync(workspace, { throwIfNoEntry: false })?.isDirectory()) {
@@ -347,11 +390,12 @@ export class ConversationStore {
     };
   }
 
-  private send(turn: SubmitOperatorConversationTurn): SubmitOperatorConversationTurnResult {
+  private async send(turn: SubmitOperatorConversationTurn): Promise<SubmitOperatorConversationTurnResult> {
     const meta = this.metas.get(turn.conversationId);
     if (meta === undefined) {
       throw new Error(`Unknown conversation ${turn.conversationId}`);
     }
+    if (meta.scope.kind === "seat") return this.queueSeatSend(meta, meta.scope.seatId, turn);
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
       return {
@@ -364,6 +408,68 @@ export class ConversationStore {
       };
     }
     return this.enqueue(meta, turn.message, turn.herdrPaneId, true);
+  }
+
+  private queueSeatSend(
+    meta: ConversationMeta,
+    seatId: string,
+    turn: SubmitOperatorConversationTurn,
+  ): Promise<SubmitOperatorConversationTurnResult> {
+    const previous = this.seatSends.get(meta.conversationId) ?? Promise.resolve();
+    const pending = previous.then(() => this.deliverSeatTurn(meta, seatId, turn));
+    const settled = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.seatSends.set(meta.conversationId, settled);
+    void settled.finally(() => {
+      if (this.seatSends.get(meta.conversationId) === settled) this.seatSends.delete(meta.conversationId);
+    });
+    return pending;
+  }
+
+  private async deliverSeatTurn(
+    meta: ConversationMeta,
+    seatId: string,
+    turn: SubmitOperatorConversationTurn,
+  ): Promise<SubmitOperatorConversationTurnResult> {
+    const safeCursor = this.lastCursor(meta);
+    if (turn.expectedRevision !== meta.revision) {
+      return {
+        schemaVersion: 1,
+        status: "revision_conflict",
+        conversationId: meta.conversationId,
+        expectedRevision: turn.expectedRevision,
+        currentRevision: meta.revision,
+        safeCursor,
+      };
+    }
+    if (!(await this.sendToSeat?.(seatId, turn.message))) {
+      return {
+        schemaVersion: 1,
+        status: "seat_offline",
+        conversationId: meta.conversationId,
+        seatId,
+        currentRevision: meta.revision,
+        safeCursor,
+      };
+    }
+    const runId = `run-${randomUUID()}`;
+    meta.revision += 1;
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+    this.append(meta, { type: "message", role: "operator", text: turn.message, streaming: false });
+    this.append(meta, { type: "turn", runId, phase: "accepted" });
+    this.append(meta, { type: "turn", runId, phase: "completed" });
+    this.prune(meta.conversationId);
+    return {
+      schemaVersion: 1,
+      status: "accepted",
+      conversationId: meta.conversationId,
+      runId,
+      revision: meta.revision,
+      safeCursor,
+    };
   }
 
   private enqueue(
@@ -566,6 +672,7 @@ export class ConversationStore {
           (meta) =>
             !meta.isDefault &&
             meta.sessionState !== "active" &&
+            !this.seatSends.has(meta.conversationId) &&
             meta.conversationId !== protectedConversationId,
         )
         .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
@@ -593,12 +700,19 @@ export class ConversationStore {
     this.internalRuns.delete(meta.conversationId);
     this.counts.delete(meta.conversationId);
     this.sequences.delete(meta.conversationId);
-    this.onPrune?.(meta.conversationId);
+    this.onPrune?.(meta.conversationId, meta.scope);
   }
 
   private removeConversation(conversationId: string): boolean {
     const meta = this.metas.get(conversationId);
-    if (meta === undefined || meta.isDefault || meta.sessionState === "active") return false;
+    if (
+      meta === undefined ||
+      meta.isDefault ||
+      meta.sessionState === "active" ||
+      this.seatSends.has(conversationId)
+    ) {
+      return false;
+    }
     this.remove(meta);
     return true;
   }

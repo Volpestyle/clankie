@@ -108,9 +108,7 @@ function bounded(text: string, max: number): string {
  * The fleet as messageable seats (ADR 0135). Fail-soft: a down herdr socket
  * renders an empty roster — seats offline, never a failed conversation surface.
  */
-export async function readFleetSeats(
-  options: { readonly runCommand?: HerdrCensusRunner } = {},
-): Promise<
+export async function readFleetSeats(options: { readonly runCommand?: HerdrCensusRunner } = {}): Promise<
   readonly {
     seatId: string;
     harness: string;
@@ -125,12 +123,15 @@ export async function readFleetSeats(
     const { stdout } = await run("herdr", ["agent", "list"]);
     const summaries = readHerdrSummariesFile().agents;
     return parseHerdrAgentList(stdout)
-      .filter((entry) => entry.agent !== "shell")
+      .filter(
+        (entry): entry is HerdrCensusAgent & { readonly terminalId: string } =>
+          entry.agent !== "shell" && entry.terminalId !== undefined,
+      )
       .slice(0, MAX_AGENTS)
       .map((entry) => {
         const written = summaries[entry.paneId];
         return {
-          seatId: entry.terminalId ?? entry.paneId,
+          seatId: entry.terminalId,
           harness: entry.agent,
           status: entry.status,
           title: bounded(entry.title, 200),

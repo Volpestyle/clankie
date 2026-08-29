@@ -467,9 +467,23 @@ export const OperatorConversationRevisionConflictSchema = z
   .strict();
 export type OperatorConversationRevisionConflict = z.infer<typeof OperatorConversationRevisionConflictSchema>;
 
+/** A seat thread stays readable when its Herdr pane is not currently live. */
+export const OperatorConversationSeatOfflineSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("seat_offline"),
+    conversationId: OperatorConversationIdSchema,
+    seatId: OperatorConversationEventRefSchema,
+    currentRevision: z.number().int().nonnegative(),
+    safeCursor: OperatorConversationCursorSchema,
+  })
+  .strict();
+export type OperatorConversationSeatOffline = z.infer<typeof OperatorConversationSeatOfflineSchema>;
+
 export const SubmitOperatorConversationTurnResultSchema = z.discriminatedUnion("status", [
   OperatorConversationTurnAcceptedSchema,
   OperatorConversationRevisionConflictSchema,
+  OperatorConversationSeatOfflineSchema,
 ]);
 export type SubmitOperatorConversationTurnResult = z.infer<typeof SubmitOperatorConversationTurnResultSchema>;
 
@@ -686,6 +700,7 @@ export type OperatorConversationTailItem =
  */
 export interface OperatorConversationServiceClient {
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
+  roster(): Promise<readonly OperatorFleetSeat[]>;
   get(conversationId: string): Promise<OperatorConversation | undefined>;
   create(input: {
     readonly scope: OperatorConversationScope;
@@ -722,6 +737,11 @@ export function createOperatorConversationServiceClient(
       });
       if (result.op !== "list") throw new Error(`Unexpected ${result.op} result for list`);
       return result.conversations;
+    },
+    async roster() {
+      const result = await dispatch({ op: "roster", schemaVersion: 1 });
+      if (result.op !== "roster") throw new Error(`Unexpected ${result.op} result for roster`);
+      return result.seats;
     },
     async get(conversationId) {
       const result = await dispatch({ op: "get", schemaVersion: 1, conversationId });

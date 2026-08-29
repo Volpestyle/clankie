@@ -250,6 +250,16 @@ describe("protocol", () => {
         safeCursor: "event:9",
       }),
     ).toMatchObject({ status: "accepted", runId: "run:1" });
+    expect(
+      SubmitOperatorConversationTurnResultSchema.parse({
+        schemaVersion: 1,
+        status: "seat_offline",
+        conversationId: "seat-thread",
+        seatId: "term-potato",
+        currentRevision: 4,
+        safeCursor: "event:9",
+      }),
+    ).toMatchObject({ status: "seat_offline", seatId: "term-potato" });
     expect(() =>
       SubmitOperatorConversationTurnResultSchema.parse({
         schemaVersion: 1,
@@ -331,16 +341,14 @@ describe("protocol", () => {
         command: { action: "set_goal", objective: "Ship it", tokenBudget: 0 },
       }),
     ).toThrow();
-    expect(
-      OperatorConversationServiceRequestSchema.parse({ op: "roster", schemaVersion: 1 }),
-    ).toMatchObject({ op: "roster" });
+    expect(OperatorConversationServiceRequestSchema.parse({ op: "roster", schemaVersion: 1 })).toMatchObject({
+      op: "roster",
+    });
     expect(
       OperatorConversationServiceResultSchema.parse({
         op: "roster",
         schemaVersion: 1,
-        seats: [
-          { seatId: "term_65a2015731452d", harness: "codex", status: "idle", title: "clankie" },
-        ],
+        seats: [{ seatId: "term_65a2015731452d", harness: "codex", status: "idle", title: "clankie" }],
       }),
     ).toMatchObject({ op: "roster", seats: [{ seatId: "term_65a2015731452d" }] });
     expect(OperatorConversationServiceResultSchema.options).toHaveLength(9);
@@ -540,6 +548,21 @@ describe("protocol", () => {
 
     await expect(client.close("conversation-1")).resolves.toBe(true);
     expect(requests).toEqual([{ op: "close", schemaVersion: 1, conversationId: "conversation-1" }]);
+  });
+
+  it("reads the fleet roster through the canonical service client", async () => {
+    const client = createOperatorConversationServiceClient(async (request) => {
+      expect(request).toEqual({ op: "roster", schemaVersion: 1 });
+      return {
+        op: "roster",
+        schemaVersion: 1,
+        seats: [{ seatId: "term-potato", harness: "codex", status: "idle", title: "worker" }],
+      };
+    });
+
+    await expect(client.roster()).resolves.toEqual([
+      { seatId: "term-potato", harness: "codex", status: "idle", title: "worker" },
+    ]);
   });
 
   it("surfaces typed tail recovery and stops instead of silently resyncing", async () => {

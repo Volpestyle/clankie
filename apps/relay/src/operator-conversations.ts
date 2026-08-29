@@ -235,10 +235,15 @@ class TurnIdempotencyStore {
       .digest("base64url");
     const existing = this.entries.get(key);
     if (existing !== undefined) return existing.result;
-    const result = dispatch().catch((error: unknown) => {
-      this.entries.delete(key);
-      throw error;
-    });
+    const result = dispatch()
+      .then((value) => {
+        if (value.op === "send" && value.result.status === "seat_offline") this.entries.delete(key);
+        return value;
+      })
+      .catch((error: unknown) => {
+        this.entries.delete(key);
+        throw error;
+      });
     this.entries.set(key, { expiresAt: this.clock() + IDEMPOTENCY_TTL_MS, result });
     while (this.entries.size > IDEMPOTENCY_MAX_ENTRIES) {
       const oldest = this.entries.keys().next().value as string | undefined;
