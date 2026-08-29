@@ -75,7 +75,10 @@ export interface MemoryStores {
 }
 
 export function defaultMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.CLANKIE_MEMORY_DIR?.trim() || join(homedir(), ".clankie", "memory");
+  // Follows CLANKIE_STATE so an isolated state root never reads the real memory.
+  return (
+    env.CLANKIE_MEMORY_DIR?.trim() || join(env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"), "memory")
+  );
 }
 
 const PersonFileSchema = z.array(DiscordPersonMemoryFactSchema).max(MAX_FACTS_PER_PERSON);
