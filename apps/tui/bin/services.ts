@@ -1,6 +1,11 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parsePositiveInt, resolveDiscordActiveBody } from "@clankie/settings";
-import { z } from "zod";
+import {
+  pickPresenceSession,
+  PRESENCE_STATUS_PATH,
+  PresenceStatusSchema,
+} from "../src/observation/presence-status.ts";
 import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
 import {
   inspectService,
@@ -63,10 +68,30 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
  * as "running but not launcher-owned" and refuses to start or stop the real
  * one. With a fleet of agents working in this repo that fires constantly.
  */
-function pnpmStart(pkg: string): Pick<ManagedService, "spawnArgs" | "commandMatches"> {
+function workspaceStart(
+  pkg: string,
+  installedEntrypoint: string,
+): Pick<ManagedService, "spawnArgs" | "resolveProcess" | "commandMatches"> {
   const argv = ["--filter", pkg, "start"];
   const spawnShape = argv.join(" ");
-  return { spawnArgs: argv, commandMatches: (command) => command.includes(spawnShape) };
+  return {
+    spawnArgs: argv,
+    resolveProcess: ({ repoRoot }) => {
+      const entrypoint = join(repoRoot, installedEntrypoint);
+      const node = join(repoRoot, "libexec", "node");
+      return existsSync(node) && existsSync(entrypoint)
+        ? { command: node, args: [entrypoint] }
+        : { command: "pnpm", args: argv };
+    },
+    commandMatches: (command) =>
+      command.includes(spawnShape) ||
+      (command.includes("/libexec/node ") && command.includes(`/${installedEntrypoint}`)),
+  };
+}
+
+function runtimeModule(repoRoot: string, app: "discord-bridge" | "discord-user-session"): string {
+  const compiled = join(repoRoot, "apps", app, "src", "presence-runtime-module.js");
+  return existsSync(compiled) ? compiled : join(repoRoot, "apps", app, "src", "presence-runtime-module.ts");
 }
 
 export function parseServiceTarget(raw: string | undefined): ServiceTarget {
@@ -116,27 +141,6 @@ function serviceUrl(env: NodeJS.ProcessEnv): string {
   return env.CLANKIE_CONTROL_PLANE_URL ?? env.CLANKIE_CAPTAIN_URL ?? DEFAULT_CONTROL_PLANE_URL;
 }
 
-const PresenceStatusSchema = z.object({
-  schemaVersion: z.literal(1),
-  sessions: z.array(
-    z.object({
-      phase: z.string().min(1),
-      gatewayConnected: z.boolean(),
-      voiceGuildCount: z.number().int().nonnegative(),
-      activityCount: z.number().int().nonnegative(),
-    }),
-  ),
-});
-
-/** Read-only operator projection of the bridge's published presence phase. */
-const PRESENCE_STATUS_PATH = "/v1/discord/presence-status";
-
-/**
- * Phases the service treats as a live, acting presence. Anything else
- * (`connecting`, `degraded`, `failed`, `off`) is reported verbatim so the
- * operator sees the real phase rather than a flattened "ok".
- */
-const LIVE_PRESENCE_PHASES: ReadonlySet<string> = new Set(["present", "voice_active", "go_live_active"]);
 const DEFAULT_PLAY_SHUTDOWN_DEADLINE_MS = 15_000;
 const PLAY_SHUTDOWN_SUPERVISOR_CUSHION_MS = 2_000;
 
@@ -163,8 +167,7 @@ async function readPresenceDetail(input: {
     if (!response.ok) return undefined;
     const parsed = PresenceStatusSchema.safeParse(await response.json());
     if (!parsed.success) return undefined;
-    const live = parsed.data.sessions.filter((session) => LIVE_PRESENCE_PHASES.has(session.phase));
-    const session = live[0] ?? parsed.data.sessions[0];
+    const session = pickPresenceSession(parsed.data);
     if (session === undefined) return "no presence session";
     const voice = session.voiceGuildCount > 0 ? `, voice in ${String(session.voiceGuildCount)}` : "";
     return `session ${session.phase}${voice}`;
@@ -175,14 +178,14 @@ async function readPresenceDetail(input: {
 }
 
 /**
- * The single clankie service. No build step and no generation hash: `pnpm
- * --filter @clankie/clankie start` runs it, and `/health` answering on its
- * port is what "up" means.
+ * The single clankie service. A checkout runs it through pnpm; an installed
+ * release runs its bundled entrypoint with its bundled Node. `/health`
+ * answering on its port is what "up" means.
  */
 const CLANKIE: ManagedService = {
   id: "clankie",
   label: "Clankie",
-  ...pnpmStart("@clankie/clankie"),
+  ...workspaceStart("@clankie/clankie", "apps/clankie/src/index.js"),
   stopGraceMs: clankieStopGraceMs,
   /**
    * The presence runtime module is a repository path, not a preference, so the
@@ -196,11 +199,9 @@ const CLANKIE: ManagedService = {
   serviceEnv: ({ env, repoRoot, captainToken }) => ({
     ...env,
     CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE:
-      env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE ??
-      join(repoRoot, "apps", "discord-bridge", "src", "presence-runtime-module.ts"),
+      env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE ?? runtimeModule(repoRoot, "discord-bridge"),
     CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE:
-      env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE ??
-      join(repoRoot, "apps", "discord-user-session", "src", "presence-runtime-module.ts"),
+      env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE ?? runtimeModule(repoRoot, "discord-user-session"),
     ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
   }),
   probe: async ({ env, fetchImpl }) => {
@@ -219,7 +220,7 @@ const CLANKIE: ManagedService = {
 const DISCORD_BRIDGE: ManagedService = {
   id: "discord-bridge",
   label: "Discord bridge",
-  ...pnpmStart("@clankie/discord-bridge"),
+  ...workspaceStart("@clankie/discord-bridge", "apps/discord-bridge/src/index.js"),
   enabled: (env) => resolveDiscordActiveBody(env) === "bot",
   // Its live presence claim is only valid against the service instance that
   // issued it, so a clankie restart requires a bridge restart.
@@ -270,7 +271,7 @@ const DISCORD_BRIDGE: ManagedService = {
 const DISCORD_USER_SESSION: ManagedService = {
   id: "discord-user-session",
   label: "Discord lab body",
-  ...pnpmStart("@clankie/discord-user-session"),
+  ...workspaceStart("@clankie/discord-user-session", "apps/discord-user-session/src/index.js"),
   restartsWith: ["clankie"],
   enabled: (env) =>
     env.DISCORD_USER_SESSION_ENABLED === "true" && resolveDiscordActiveBody(env) === "user_session",
@@ -284,8 +285,7 @@ const DISCORD_USER_SESSION: ManagedService = {
     return {
       ...rest,
       CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE:
-        env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE ??
-        join(repoRoot, "apps", "discord-user-session", "src", "presence-runtime-module.ts"),
+        env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE ?? runtimeModule(repoRoot, "discord-user-session"),
     };
   },
   probe: async ({ env, fetchImpl, record, matchingPids }) => {
@@ -321,7 +321,7 @@ const DISCORD_USER_SESSION: ManagedService = {
 const ACTIVITY: ManagedService = {
   id: "activity",
   label: "Activity surface",
-  ...pnpmStart("@clankie/discord-activity"),
+  ...workspaceStart("@clankie/discord-activity", "apps/discord-activity/src/index.js"),
   probe: async ({ env, fetchImpl }) => {
     const port = env["CLANKIE_ACTIVITY_PORT"] ?? "4320";
     try {

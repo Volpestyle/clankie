@@ -4,11 +4,17 @@
 import { resolve } from "node:path";
 import { ensureCaptainCredential, ensureOperatorCredential } from "@clankie/credential-broker";
 import { discordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
+import packageMetadata from "../../../package.json" with { type: "json" };
 import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "./headless-captain.ts";
 import { startOne } from "./services.ts";
 import { parseDirectConversation } from "../src/session/operator-conversations.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
+
+if (process.argv[2] === "--version" || process.argv[2] === "-V") {
+  process.stdout.write(`clankie ${packageMetadata.version}\n`);
+  process.exit(0);
+}
 
 // Every child fills its own env from settings. The launcher consumes only the
 // active-body switches and activity tunnel, so project just those; copying the

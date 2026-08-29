@@ -13,4 +13,9 @@ The architecture uses or interoperates with, but does not vendor, the following 
 - Herdr — review its current AGPL/commercial terms before bundling or copying code. Treat it as an optional external agent-pane host unless counsel approves another arrangement.
 - Codex and Claude integrations are provider adapters. Follow each provider's current authentication, product, and distribution terms.
 
-This file is an engineering inventory, not legal advice. Generate a complete SBOM and license report before a public release.
+Every downloadable release includes `SBOM.cdx.json`,
+`THIRD_PARTY_LICENSES.md`, and the license texts collected from its bundled
+JavaScript and native dependency graphs. The release build fails when a bundled
+dependency has no declared license or corresponding text.
+
+This file is an engineering inventory, not legal advice.

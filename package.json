@@ -17,6 +17,8 @@
     "check": "pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm typecheck && pnpm test",
     "doctor": "node scripts/doctor.mjs",
     "cli:install": "node scripts/install-cli.mjs",
+    "release:build": "node scripts/build-release.mjs",
+    "release:smoke": "node scripts/smoke-release.mjs",
     "clean": "turbo run clean --filter=@clankie/menu-bar --filter=@clankie/vox && rm -rf .turbo .data",
     "gba:free-play": "pnpm --filter @clankie/gba-emulator free-play",
     "gba:free-play-live": "pnpm --filter @clankie/clankie free-play-live",
@@ -24,6 +26,7 @@
     "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness"
   },
   "devDependencies": {
+    "esbuild": "0.28.1",
     "knip": "6.32.2",
     "oxfmt": "0.58.0",
     "oxlint": "1.73.0",

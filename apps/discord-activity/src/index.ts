@@ -1,4 +1,6 @@
 import { ensureActivityProducerCredential } from "@clankie/credential-broker";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { RenderedSurfaceHub } from "./frame-hub.ts";
 import { createFrameProducerServer } from "./producer.ts";
 import { createDiscordActivityServer } from "./server.ts";
@@ -8,7 +10,10 @@ import { createDiscordActivityServer } from "./server.ts";
  * Discord credentials, no authority, and no emulator core. The host
  * feeds it frames through the loopback producer endpoint.
  */
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (
+  process.argv[1] !== undefined &&
+  realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
+) {
   const port = positiveInt(process.env.CLANKIE_ACTIVITY_PORT ?? "4320", "CLANKIE_ACTIVITY_PORT");
   const hub = new RenderedSurfaceHub();
   const activity = createDiscordActivityServer({ hub });

@@ -281,7 +281,11 @@ function scheduleRestartAfterTurn(
   handoff: RestartTurnHandoff,
   options: HeadlessCaptainCommandOptions,
 ): void {
-  const cliEntryPath = options.cliEntryPath ?? process.argv[1];
+  const cliEntryPath =
+    options.cliEntryPath ??
+    options.env?.CLANKIE_LAUNCHER_PATH ??
+    process.env.CLANKIE_LAUNCHER_PATH ??
+    process.argv[1];
   if (cliEntryPath === undefined || cliEntryPath.length === 0) {
     throw new Error("Cannot locate the clankie launcher for a deferred restart.");
   }

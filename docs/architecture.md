@@ -276,12 +276,23 @@ broker, and every report describes observed outcomes rather than intentions.
 [`adr/`](adr/) records the active decisions for play mechanics, voice, presence,
 media, browsing, and operator control.
 
+## Distribution
+
+The macOS Apple silicon release preserves these process boundaries inside one
+self-contained, versioned directory. A native `clankie` launcher starts the
+bundled TUI and Node runtime; the supervisor starts compiled service entrypoints
+instead of pnpm workspace scripts. Runtime state and credentials remain outside
+the immutable release. [ADR 0136](adr/0136-a-release-is-one-command-and-one-runtime.md)
+records the decision, and [`distribution.md`](distribution.md) documents the
+artifact and installer.
+
 ## Canonical Homes
 
 | Concern                           | Canonical reference                                                                       |
 | --------------------------------- | ----------------------------------------------------------------------------------------- |
 | HTTP API                          | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                               |
 | Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                             |
+| Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                 |
 | macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                   |
 | Official Discord bot operation    | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                       |
 | Shared Discord behavior           | [`packages/discord-presence-core/README.md`](../packages/discord-presence-core/README.md) |

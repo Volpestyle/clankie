@@ -591,9 +591,16 @@ describe("service targets", () => {
   it("recognizes the service's own spawn, not every mention of its package", () => {
     const matches = managedService("clankie").commandMatches;
     expect(matches("node /path/pnpm.mjs --filter @clankie/clankie start")).toBe(true);
+    expect(
+      matches(
+        "/Users/person/.local/share/clankie/current/libexec/node " +
+          "/Users/person/.local/share/clankie/current/apps/clankie/src/index.js",
+      ),
+    ).toBe(true);
     // Agent shells that merely name the package are not a running service.
     expect(matches("pnpm --filter @clankie/clankie test")).toBe(false);
     expect(matches("rg @clankie/clankie apps/tui")).toBe(false);
+    expect(matches("rg apps/clankie/src/index.js")).toBe(false);
   });
 
   it("rejects an unknown target instead of guessing", () => {
@@ -777,15 +784,27 @@ describe("captain credential injection", () => {
     readonly spawnImpl: typeof spawn;
     readonly started: () => boolean;
     readonly envFor: () => NodeJS.ProcessEnv | undefined;
+    readonly command: () => string | undefined;
+    readonly args: () => readonly string[] | undefined;
   } {
     let captured: NodeJS.ProcessEnv | undefined;
+    let capturedCommand: string | undefined;
+    let capturedArgs: readonly string[] | undefined;
     let launched = false;
-    const spawnImpl = ((_command: string, _args: string[], options: { env?: NodeJS.ProcessEnv }) => {
+    const spawnImpl = ((command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
       captured = options.env;
+      capturedCommand = command;
+      capturedArgs = args;
       launched = true;
       return runningChild(9_700);
     }) as unknown as typeof spawn;
-    return { spawnImpl, started: () => launched, envFor: () => captured };
+    return {
+      spawnImpl,
+      started: () => launched,
+      envFor: () => captured,
+      command: () => capturedCommand,
+      args: () => capturedArgs,
+    };
   }
 
   /** Service health that reports down until the process has been spawned. */
@@ -817,6 +836,41 @@ describe("captain credential injection", () => {
     );
     expect(envFor()?.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE).toBe(
       "/repo/apps/discord-user-session/src/presence-runtime-module.ts",
+    );
+  });
+
+  it("runs the compiled service and runtime modules from an installed release", async () => {
+    const env = await stateEnv();
+    const runtimeRoot = await mkdtemp(join(tmpdir(), "clankie-runtime-"));
+    tempDirs.push(runtimeRoot);
+    for (const path of [
+      "libexec/node",
+      "apps/clankie/src/index.js",
+      "apps/discord-bridge/src/presence-runtime-module.js",
+      "apps/discord-user-session/src/presence-runtime-module.js",
+    ]) {
+      const target = join(runtimeRoot, path);
+      await mkdir(join(target, ".."), { recursive: true });
+      await writeFile(target, "");
+    }
+    const captured = capturingSpawn();
+
+    await startService(managedService("clankie"), {
+      repoRoot: runtimeRoot,
+      env,
+      spawnImpl: captured.spawnImpl,
+      processIsAliveImpl: () => true,
+      listProcessCommandsImpl: noProcesses,
+      fetchImpl: healthAfterStart(captured.started),
+    });
+
+    expect(captured.command()).toBe(join(runtimeRoot, "libexec", "node"));
+    expect(captured.args()).toEqual([join(runtimeRoot, "apps", "clankie", "src", "index.js")]);
+    expect(captured.envFor()?.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).toBe(
+      join(runtimeRoot, "apps", "discord-bridge", "src", "presence-runtime-module.js"),
+    );
+    expect(captured.envFor()?.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE).toBe(
+      join(runtimeRoot, "apps", "discord-user-session", "src", "presence-runtime-module.js"),
     );
   });
 

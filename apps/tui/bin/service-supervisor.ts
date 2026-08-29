@@ -67,8 +67,9 @@ export interface ManagedService {
   readonly id: ServiceId;
   readonly label: string;
   /**
-   * Executable to spawn. Defaults to `pnpm`, which every workspace service
-   * uses; named so the registry can also own a process that is not one of ours
+   * Executable to spawn. Defaults to `pnpm` for source checkouts; installed
+   * services override it through `resolveProcess`. Named so the registry can
+   * also own a process that is not one of ours
    * — the activity tunnel is a `cloudflared` binary and was the last thing an
    * operator had to start, remember, and notice the death of by hand.
    */
@@ -80,6 +81,14 @@ export interface ManagedService {
    * filter.
    */
   readonly spawnArgs: readonly string[] | ((env: NodeJS.ProcessEnv) => readonly string[]);
+  /**
+   * Installed releases run compiled entrypoints with their bundled Node binary;
+   * source checkouts keep using the workspace command above.
+   */
+  readonly resolveProcess?: (input: { readonly env: NodeJS.ProcessEnv; readonly repoRoot: string }) => {
+    readonly command: string;
+    readonly args: readonly string[];
+  };
   /**
    * Whether this service should run at all in this environment. A service that
    * answers false is never spawned and reports its own reason from `probe`,
@@ -435,9 +444,13 @@ export async function startService(
     options.onStatus?.(`Starting ${service.label}…`);
     const serviceEnv =
       service.serviceEnv?.({ env, repoRoot: options.repoRoot, captainToken: options.captainToken }) ?? env;
-    const spawnArgs =
+    const fallbackArgs =
       typeof service.spawnArgs === "function" ? service.spawnArgs(serviceEnv) : service.spawnArgs;
-    child = (options.spawnImpl ?? spawn)(service.command ?? "pnpm", [...spawnArgs], {
+    const resolved = service.resolveProcess?.({ env: serviceEnv, repoRoot: options.repoRoot }) ?? {
+      command: service.command ?? "pnpm",
+      args: fallbackArgs,
+    };
+    child = (options.spawnImpl ?? spawn)(resolved.command, [...resolved.args], {
       cwd: options.repoRoot,
       detached: true,
       env: serviceEnv,

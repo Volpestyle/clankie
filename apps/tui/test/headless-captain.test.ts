@@ -228,8 +228,11 @@ describe("headless clankie commands", () => {
 
     const exitCode = await runHeadlessCaptainCommand(["restart", "captain"], {
       repoRoot: "/repo",
-      cliEntryPath: "/repo/apps/tui/bin/clankie.ts",
-      env: { ...(await stateEnv()), PI_SESSION_FILE: sessionFile },
+      env: {
+        ...(await stateEnv()),
+        PI_SESSION_FILE: sessionFile,
+        CLANKIE_LAUNCHER_PATH: "/release/bin/clankie",
+      },
       spawnImpl: ((command: string, args: string[]) => {
         spawns.push({ command, args });
         return runningChild(9_100);
@@ -248,7 +251,7 @@ describe("headless clankie commands", () => {
     expect(stderr.text()).toContain("after this conversation turn completes");
     expect(spawns).toEqual([
       {
-        command: "/repo/apps/tui/bin/clankie.ts",
+        command: "/release/bin/clankie",
         args: ["restart", "clankie", "--after-operator-turn", eventsPath, "run-active"],
       },
     ]);

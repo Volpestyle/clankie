@@ -45,15 +45,26 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
 
 ## Get started
 
-Requirements: Node 24+, pnpm 11+, Git. Building the native Vox package also
-requires Rust 1.88+ and CMake.
+On macOS 14 or newer with Apple silicon:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
+clankie              # start the service and open the TUI
+```
+
+The release includes its Node runtime, services, assets, and native Vox media
+process. See [`docs/distribution.md`](docs/distribution.md) for the installed
+layout, version pinning, and release process.
+
+For development from a checkout, install Node 24+, pnpm 11+, Git, Rust 1.88+,
+and CMake:
 
 ```bash
 corepack enable
 pnpm install
 pnpm doctor          # toolchain and credential status
 pnpm cli:install     # symlink the `clankie` launcher into ~/.local/bin
-clankie              # start the service and open the TUI
+clankie
 ```
 
 The credential broker is the canonical secret store (macOS Keychain, or a
@@ -100,6 +111,7 @@ pnpm discord:readiness
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the system shape,
+[`docs/distribution.md`](docs/distribution.md) for binary installation,
 [`docs/credentials.md`](docs/credentials.md) for bot/user/internal token
 boundaries, and [`docs/discord-media.md`](docs/discord-media.md) for YouTube
 music, the Activity, Go Live, and share watching. Read [`AGENTS.md`](AGENTS.md)
