@@ -108,6 +108,32 @@ try {
   );
 }
 
+// The herdr plugin is optional and repo-owned: linked from this checkout, it
+// contributes Clankie's board/console/status panes to any herdr workspace.
+if (results.find((entry) => entry.name === "herdr")?.ok) {
+  const pluginRoot = join(root, "integrations", "herdr-plugin");
+  try {
+    const { stdout } = await execFileAsync("herdr", ["plugin", "list", "--plugin", "clankie", "--json"], {
+      timeout: 5_000,
+    });
+    const [plugin] = JSON.parse(stdout).result?.plugins ?? [];
+    result(
+      "herdr plugin",
+      false,
+      plugin?.enabled === true,
+      plugin
+        ? `${plugin.enabled ? "enabled" : "linked but disabled"}: ${plugin.manifest_path}`
+        : "not linked",
+      plugin
+        ? "Run `herdr plugin enable clankie`."
+        : `Run \`herdr plugin link ${pluginRoot}\` for Clankie's herdr panes; see its README.`,
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.split("\n")[0] : "unknown error";
+    result("herdr plugin", false, false, `status unavailable (${detail})`, "");
+  }
+}
+
 const width = Math.max(...results.map((entry) => entry.name.length));
 for (const entry of results) {
   const marker = entry.ok ? "PASS" : entry.required ? "FAIL" : "SKIP";
