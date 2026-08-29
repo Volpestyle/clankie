@@ -340,6 +340,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   private async runSeat(seatId: string, signal: AbortSignal): Promise<void> {
+    let seeded = false;
     while (!signal.aborted) {
       try {
         const current = await this.runner.resolveTerminal(seatId);
@@ -350,6 +351,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
         }
         this.publishSeatStatus(seatId, current.status);
         this.publishSeatSummary(seatId, current.paneId, readHerdrSummariesFile(this.summariesPath).agents);
+        // Seed the thread with the pane's last settled answer so a freshly
+        // opened seat conversation starts with what the agent already said.
+        // The registry dedups an identical re-projection (restart, re-track).
+        if (!seeded && REPLY_STATUSES.has(current.status)) {
+          const reply = await this.readSeatReply(current, "recent-unwrapped");
+          if (reply !== undefined) this.projectSeat?.(seatId, { kind: "reply", text: reply });
+        }
+        seeded = true;
         if (this.runner.waitForChange === undefined) return;
         const piBaseline =
           current.status === "working" && current.agent === "pi"

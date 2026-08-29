@@ -190,6 +190,37 @@ describe("HerdrWatchStore", () => {
     store.close();
   });
 
+  it("seeds a tracked seat that is already settled with its last distilled answer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-seat-seed-"));
+    roots.push(root);
+    const read = vi.fn(() => Promise.resolve("※ recap: Already shipped before tracking."));
+    const project = vi.fn();
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: {
+        get: () => Promise.resolve(done),
+        resolveTerminal: () => Promise.resolve(done),
+        wait: () => Promise.resolve(done),
+        waitForChange: (_target, _status, signal) =>
+          new Promise((_resolve, reject) =>
+            signal.addEventListener("abort", () => reject(new Error("aborted"))),
+          ),
+        read,
+      },
+    });
+    store.start(() => Promise.resolve(), project);
+    store.trackSeat("term-potato");
+
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenCalledWith("term-potato", {
+        kind: "reply",
+        text: "Already shipped before tracking.",
+      }),
+    );
+    expect(read).toHaveBeenCalledWith("w18:p1", "claude", "recent-unwrapped");
+    expect(read).toHaveBeenCalledOnce();
+    store.close();
+  });
+
   it("keeps status observation alive when settled reply capture fails", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-seat-reply-failure-"));
     roots.push(root);

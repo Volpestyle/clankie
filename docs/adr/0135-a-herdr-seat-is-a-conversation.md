@@ -94,6 +94,10 @@ projection_, built from signals the service already has:
 - `message` events (role `agent`) from distilled output: the herd-lead
   summaries where written, harness-native turn boundaries where a lane learns
   to read them. Producer owns redaction and bounding, as everywhere else.
+- A seed at track time: a seat already settled when its projection starts
+  contributes its current distilled answer, so a freshly opened thread begins
+  with what the agent last said rather than empty. The registry dedups an
+  identical re-projection, which makes re-tracking after a restart safe.
 - The operator's own sends.
 
 Raw scrollback never enters the message lane. The terminal destination remains
