@@ -20,6 +20,52 @@ describe("shell assembly", () => {
     expect(shell.headerVisible).toBe(true);
   });
 
+  it("settles a streamed message into the block it was typed in", () => {
+    const shell = new ClankieFaceShell({
+      commands: buildConsoleCommands({}),
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+    });
+    const chat = (
+      shell as unknown as {
+        chat: { children: readonly unknown[]; render(width: number): string[] };
+      }
+    ).chat;
+    shell.updateLiveAssistant("typing this");
+    shell.updateLiveAssistant("typing this out loud");
+    const blocksWhileTyping = chat.children.length;
+    shell.insertAssistantMarkdown("the finished answer");
+
+    // oxlint-disable-next-line no-control-regex -- intentionally strips ANSI escape sequences
+    const ansiPattern = /\x1b\[[0-9;]*m/gu;
+    const text = chat.render(80).join("\n").replace(ansiPattern, "");
+    // The draft never becomes a second block, and the settled text replaces it.
+    expect(chat.children.length).toBe(blocksWhileTyping);
+    expect(text).toContain("the finished answer");
+    expect(text).not.toContain("typing this out loud");
+  });
+
+  it("keeps what he typed when a draft ends with no settled message", () => {
+    const shell = new ClankieFaceShell({
+      commands: buildConsoleCommands({}),
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+    });
+    shell.updateLiveAssistant("half a sentence");
+    shell.clearLiveAssistant();
+    shell.insertAssistantMarkdown("a later reply");
+
+    const chat = (shell as unknown as { chat: { render(width: number): string[] } }).chat;
+    // oxlint-disable-next-line no-control-regex -- intentionally strips ANSI escape sequences
+    const ansiPattern = /\x1b\[[0-9;]*m/gu;
+    const text = chat.render(80).join("\n").replace(ansiPattern, "");
+    // An interrupted turn keeps the words he got out, above the next reply.
+    expect(text).toContain("half a sentence");
+    expect(text).toContain("a later reply");
+  });
+
   it("renders conversation content through pi's chat components", () => {
     const shell = new ClankieFaceShell({
       commands: buildConsoleCommands({}),

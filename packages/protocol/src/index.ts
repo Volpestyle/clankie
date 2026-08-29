@@ -106,6 +106,12 @@ export const OPERATOR_CONVERSATION_REF_MAX = 512;
 export const OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX = 32;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX = 500;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_DEFAULT = 200;
+/**
+ * Longest a tail request may park on the server waiting for the next change
+ * ([ADR 0141](../../../docs/adr/0141-the-console-watches-him-type.md)). Bounded
+ * so a parked request never outlives a proxy hop or a service restart.
+ */
+export const OPERATOR_CONVERSATION_TAIL_WAIT_MS_MAX = 20_000;
 /** Public list responses are bounded so the app boundary carries no unbounded collection. */
 export const OPERATOR_CONVERSATION_LIST_MAX = 1_000;
 
@@ -370,9 +376,37 @@ export const ReplayOperatorConversationRequestSchema = z
     surfaceClientId: OperatorSurfaceClientIdSchema,
     cursor: OperatorConversationCursorSchema.optional(),
     limit: z.number().int().positive().max(OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX).optional(),
+    /**
+     * Highest live-draft sequence this surface has already rendered. A tail that
+     * would return neither a new event nor a newer draft parks for `waitMs`
+     * instead of answering empty.
+     */
+    liveSequence: z.number().int().nonnegative().optional(),
+    /**
+     * How long a `tail` may park waiting for the next change. Absent or `0`
+     * answers immediately, which is what `replay` always does.
+     */
+    waitMs: z.number().int().nonnegative().max(OPERATOR_CONVERSATION_TAIL_WAIT_MS_MAX).optional(),
   })
   .strict();
 export type ReplayOperatorConversationRequest = z.infer<typeof ReplayOperatorConversationRequestSchema>;
+
+/**
+ * The captain's answer as it is being typed — a volatile view, never a durable
+ * event ([ADR 0141](../../../docs/adr/0141-the-console-watches-him-type.md)).
+ * `text` is the whole message so far, not a delta, so a surface that misses a
+ * page renders the right thing anyway. It exists only while a message streams;
+ * the durable `message` event that settles it is the record.
+ */
+export const OperatorConversationLiveDraftSchema = z
+  .object({
+    /** Monotonic per conversation. A surface compares it to skip work it has already drawn. */
+    sequence: z.number().int().positive(),
+    role: z.literal("captain"),
+    text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
+  })
+  .strict();
+export type OperatorConversationLiveDraft = z.infer<typeof OperatorConversationLiveDraftSchema>;
 
 /** One bounded replay page with explicit retained lower bound and resume cursor. */
 export const OperatorConversationReplayPageSchema = z
@@ -389,6 +423,8 @@ export const OperatorConversationReplayPageSchema = z
     /** Latest durable cursor (upper bound). */
     safeCursor: OperatorConversationCursorSchema,
     hasMore: z.boolean(),
+    /** The message being typed right now, when one is. Volatile; absent between messages. */
+    live: OperatorConversationLiveDraftSchema.optional(),
   })
   .strict();
 export type OperatorConversationReplayPage = z.infer<typeof OperatorConversationReplayPageSchema>;
@@ -886,6 +922,12 @@ export type OperatorConversationServiceResult = z.infer<typeof OperatorConversat
  */
 export type OperatorConversationServiceDispatch = (
   request: OperatorConversationServiceRequest,
+  /**
+   * Aborts the in-flight request. A parked `tail` is the one call that outlives
+   * a surface going away (backgrounded app, unmounted view), so a transport
+   * that can cancel is handed the caller's signal rather than stranding it.
+   */
+  signal?: AbortSignal,
 ) => Promise<OperatorConversationServiceResult>;
 
 /**
@@ -897,7 +939,13 @@ export type OperatorConversationServiceDispatch = (
  */
 export type OperatorConversationTailItem =
   | { readonly kind: "event"; readonly event: OperatorConversationStreamEvent }
-  | { readonly kind: "recovery"; readonly recovery: OperatorConversationRecovery };
+  | { readonly kind: "recovery"; readonly recovery: OperatorConversationRecovery }
+  /**
+   * The live draft changed: `draft` is the message being typed, or `undefined`
+   * once it settles into a durable `message` event. Carries no cursor — a
+   * surface that only wants the record ignores this kind entirely.
+   */
+  | { readonly kind: "live"; readonly draft: OperatorConversationLiveDraft | undefined };
 
 /**
  * The named public client any RN/macOS/TUI surface uses. It depends only on
@@ -932,10 +980,14 @@ export interface OperatorConversationServiceClient {
 
 export function createOperatorConversationServiceClient(
   dispatch: OperatorConversationServiceDispatch,
-  options: { readonly tailIdleMs?: number } = {},
+  options: { readonly tailIdleMs?: number; readonly tailWaitMs?: number } = {},
 ): OperatorConversationServiceClient {
   const tailIdleMs = options.tailIdleMs ?? 250;
-  const sleep = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, tailIdleMs));
+  // A service that honours `waitMs` parks the request instead of answering
+  // empty, so the idle sleep below only pays out the remainder it did not
+  // spend waiting — an older service that ignores it keeps today's cadence.
+  const tailWaitMs = Math.min(options.tailWaitMs ?? 10_000, OPERATOR_CONVERSATION_TAIL_WAIT_MS_MAX);
+  const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   return {
     async list(scope) {
       const result = await dispatch({
@@ -978,12 +1030,22 @@ export function createOperatorConversationServiceClient(
     },
     async *tail(request, signal) {
       let cursor = request.cursor;
+      let liveSequence = 0;
       while (signal?.aborted !== true) {
-        const result = await dispatch({
-          op: "tail",
-          schemaVersion: 1,
-          tail: { ...request, ...(cursor === undefined ? {} : { cursor }) },
-        });
+        const startedAt = Date.now();
+        const result = await dispatch(
+          {
+            op: "tail",
+            schemaVersion: 1,
+            tail: {
+              ...request,
+              ...(cursor === undefined ? {} : { cursor }),
+              liveSequence,
+              waitMs: tailWaitMs,
+            },
+          },
+          signal,
+        );
         if (result.op !== "tail") throw new Error(`Unexpected ${result.op} result for tail`);
         const page = result.result;
         if (page.status === "recover") {
@@ -994,7 +1056,18 @@ export function createOperatorConversationServiceClient(
         }
         for (const event of page.events) yield { kind: "event", event };
         cursor = page.nextCursor;
-        if (page.events.length === 0) await sleep();
+        // A settled message clears the draft, so an absent `live` after one was
+        // showing is itself the news: the surface takes its live block down.
+        const draftSequence = page.live?.sequence ?? 0;
+        const draftChanged = draftSequence !== liveSequence;
+        if (draftChanged) {
+          liveSequence = draftSequence;
+          yield { kind: "live", draft: page.live };
+        }
+        if (page.events.length === 0 && !draftChanged) {
+          const remaining = tailIdleMs - (Date.now() - startedAt);
+          if (remaining > 0) await sleep(remaining);
+        }
       }
     },
     async send(turn) {

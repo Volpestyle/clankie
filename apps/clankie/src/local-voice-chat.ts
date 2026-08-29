@@ -203,6 +203,8 @@ export class LocalVoiceChatSession {
       this.abort.signal,
     )) {
       if (item.kind === "recovery") return HANDOFF_FAILURE;
+      // Voice waits for what he settled on, not for what he is still typing.
+      if (item.kind === "live") continue;
       const event = item.event;
       if (event.type === "message" && event.role === "captain" && !event.streaming) reply = event.text;
       if (event.type === "input_requested") {

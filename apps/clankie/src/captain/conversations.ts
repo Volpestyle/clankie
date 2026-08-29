@@ -10,18 +10,20 @@ import {
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import type {
-  OperatorConversation,
-  OperatorConversationContextUsage,
-  OperatorConversationEventBody,
-  OperatorConversationScope,
-  OperatorConversationServiceRequest,
-  OperatorConversationServiceResult,
-  OperatorConversationStreamEvent,
-  ReplayOperatorConversationRequest,
-  ReplayOperatorConversationResult,
-  SubmitOperatorConversationTurn,
-  SubmitOperatorConversationTurnResult,
+import {
+  OPERATOR_CONVERSATION_TEXT_MAX,
+  type OperatorConversation,
+  type OperatorConversationContextUsage,
+  type OperatorConversationEventBody,
+  type OperatorConversationLiveDraft,
+  type OperatorConversationScope,
+  type OperatorConversationServiceRequest,
+  type OperatorConversationServiceResult,
+  type OperatorConversationStreamEvent,
+  type ReplayOperatorConversationRequest,
+  type ReplayOperatorConversationResult,
+  type SubmitOperatorConversationTurn,
+  type SubmitOperatorConversationTurnResult,
 } from "@clankie/protocol";
 
 type ConversationServiceRequest = Exclude<
@@ -35,6 +37,8 @@ type ConversationServiceResult = Exclude<
 
 const CURSOR_WIDTH = 12;
 const ZERO_CURSOR = "0".repeat(CURSOR_WIDTH);
+/** Under the relay's 30s upstream dispatch timeout, with headroom. */
+const DEFAULT_TAIL_WAIT_MS = 25_000;
 export const OPERATOR_CONVERSATION_RETAINED_MAX = 64;
 export const OPERATOR_CONVERSATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const OPERATOR_CONVERSATION_RETAINED_BYTES_MAX = 256 * 1024 * 1024;
@@ -74,6 +78,12 @@ export interface ConversationTurnContext {
   readonly acceptedAt: string;
   /** Aborts when the operator interrupts this run (`cancel` op); the runner stops the live model turn. */
   readonly signal: AbortSignal;
+  /**
+   * Show the message being typed, or `undefined` to take it down. Volatile: it
+   * reaches watching surfaces through the tail's `live` field and never becomes
+   * a durable event. The runner throttles; the store just holds the latest.
+   */
+  readonly draft: (text: string | undefined) => void;
 }
 
 /** Runs one accepted operator turn against the captain's model session. */
@@ -126,17 +136,26 @@ export class ConversationStore {
   private readonly runner: ConversationRunner;
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
   private readonly sendToSeat: SeatSender | undefined;
+  /** Longest a parked tail may wait here, whatever a caller asks for. */
+  private readonly tailWaitMs: number;
+  /** Per-conversation parked tails, woken by `append` and by a live draft. */
+  private readonly tailListeners = new Map<string, Set<() => void>>();
+  /** The message the captain is typing right now, per conversation. Never durable. */
+  private readonly drafts = new Map<string, OperatorConversationLiveDraft>();
+  private draftSequence = 0;
 
   public constructor(
     root: string,
     runner: ConversationRunner,
     onPrune?: (conversationId: string, scope: OperatorConversationScope) => void,
     sendToSeat?: SeatSender,
+    tailWaitMs = DEFAULT_TAIL_WAIT_MS,
   ) {
     this.root = root;
     this.runner = runner;
     this.onPrune = onPrune;
     this.sendToSeat = sendToSeat;
+    this.tailWaitMs = tailWaitMs;
     mkdirSync(root, { recursive: true });
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -233,8 +252,22 @@ export class ConversationStore {
         };
       case "replay":
         return { op: "replay", schemaVersion: 1, result: this.replay(request.replay) };
-      case "tail":
-        return { op: "tail", schemaVersion: 1, result: this.replay(request.tail) };
+      case "tail": {
+        // Hanging long-poll: a page with no news parks until this conversation
+        // changes (or the wait elapses), so an idle tail costs one request per
+        // wait window instead of one per client poll interval, and a live draft
+        // reaches the surface as fast as the round trip allows. "No news" means
+        // no unseen event AND no draft the caller has not already drawn.
+        let result = this.replay(request.tail);
+        const waitMs = Math.min(request.tail.waitMs ?? 0, this.tailWaitMs);
+        if (waitMs > 0 && result.status === "page" && result.events.length === 0 && !result.hasMore) {
+          if ((result.live?.sequence ?? 0) === (request.tail.liveSequence ?? 0)) {
+            await this.waitForChange(request.tail.conversationId, waitMs);
+            result = this.replay(request.tail);
+          }
+        }
+        return { op: "tail", schemaVersion: 1, result };
+      }
       case "send":
         return { op: "send", schemaVersion: 1, result: await this.send(request.turn) };
       case "cancel":
@@ -416,6 +449,9 @@ export class ConversationStore {
       nextCursor: page.length === 0 ? from : page[page.length - 1]!.cursor,
       safeCursor,
       hasMore: page.length < remaining.length,
+      // The volatile half of the page: what he is typing right now. A surface
+      // that ignores it still gets every settled message from `events`.
+      ...(this.drafts.has(meta.conversationId) ? { live: this.drafts.get(meta.conversationId)! } : {}),
     };
   }
 
@@ -547,6 +583,9 @@ export class ConversationStore {
           runId,
           acceptedAt: meta.updatedAt,
           signal: controller.signal,
+          draft: (text) => {
+            this.setLiveDraft(conversationId, text);
+          },
           ...(publishOperatorMessage ? {} : { internal: true as const }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),
@@ -595,6 +634,9 @@ export class ConversationStore {
         const remaining = (this.runCounts.get(conversationId) ?? 1) - 1;
         if (remaining <= 0) this.runCounts.delete(conversationId);
         else this.runCounts.set(conversationId, remaining);
+        // Nothing is typing here any more: a draft stranded by a failed or
+        // interrupted turn comes down with the last run, not on the next one.
+        if (remaining <= 0) this.setLiveDraft(conversationId, undefined);
         if (!publishOperatorMessage) {
           const remainingInternal = (this.internalRuns.get(conversationId) ?? 1) - 1;
           if (remainingInternal <= 0) this.internalRuns.delete(conversationId);
@@ -639,6 +681,58 @@ export class ConversationStore {
       this.saveMeta(meta);
     }
     if (meta.sessionState !== "active") this.trimEventLog(meta);
+    this.wakeTails(meta.conversationId);
+  }
+
+  private waitForChange(conversationId: string, waitMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      let listeners = this.tailListeners.get(conversationId);
+      if (listeners === undefined) {
+        listeners = new Set();
+        this.tailListeners.set(conversationId, listeners);
+      }
+      const registered = listeners;
+      const done = (): void => {
+        clearTimeout(timer);
+        registered.delete(done);
+        if (registered.size === 0) this.tailListeners.delete(conversationId);
+        resolve();
+      };
+      const timer = setTimeout(done, waitMs);
+      timer.unref?.();
+      registered.add(done);
+    });
+  }
+
+  private wakeTails(conversationId: string): void {
+    const listeners = this.tailListeners.get(conversationId);
+    if (listeners === undefined) return;
+    // Each listener removes only itself as it resolves, and a set never
+    // revisits an element it has already yielded, so this walks the live set.
+    for (const listener of listeners) listener();
+  }
+
+  /**
+   * The captain's answer as it is being typed ([ADR 0141](../../../../docs/adr/0141-the-console-watches-him-type.md)).
+   * A draft is volatile: it lives in memory, never in `events.jsonl`, so replay,
+   * retention, cursors, and every surface that only wants the record are
+   * untouched by streaming. `undefined` takes the draft down — the durable
+   * `message` event that settles it is the record. Callers throttle; every call
+   * wakes the parked tails.
+   */
+  public setLiveDraft(conversationId: string, text: string | undefined): void {
+    if (!this.metas.has(conversationId)) return;
+    if (text === undefined || text.length === 0) {
+      if (this.drafts.delete(conversationId)) this.wakeTails(conversationId);
+      return;
+    }
+    this.draftSequence += 1;
+    this.drafts.set(conversationId, {
+      sequence: this.draftSequence,
+      role: "captain",
+      text: text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX),
+    });
+    this.wakeTails(conversationId);
   }
 
   private readonly counts = new Map<string, number>();

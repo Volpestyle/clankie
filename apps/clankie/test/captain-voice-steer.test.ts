@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createDraftPacer,
   DISCORD_TURN_STALL_MS,
   runDurableTurn,
   runOneShotDiscordTurn,
@@ -269,5 +270,38 @@ describe("runTurnWithStallWatchdog", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("createDraftPacer", () => {
+  it("sends the first draft at once, then at most one per interval", () => {
+    const sent: string[] = [];
+    let clock = 1_000;
+    const pacer = createDraftPacer((text) => sent.push(text), { intervalMs: 60, now: () => clock });
+
+    pacer.push("h");
+    pacer.push("he");
+    clock += 59;
+    pacer.push("hel");
+    clock += 1;
+    pacer.push("hell");
+    clock += 5;
+    pacer.push("hello");
+
+    // Every draft carries the whole message, so the swallowed ones cost nothing.
+    expect(sent).toEqual(["h", "hell"]);
+  });
+
+  it("opens the gate again for the first token of the next message", () => {
+    const sent: string[] = [];
+    let clock = 1_000;
+    const pacer = createDraftPacer((text) => sent.push(text), { intervalMs: 60, now: () => clock });
+
+    pacer.push("done");
+    clock += 5;
+    pacer.reset();
+    pacer.push("next");
+
+    expect(sent).toEqual(["done", "next"]);
   });
 });

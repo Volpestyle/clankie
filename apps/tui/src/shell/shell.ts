@@ -240,6 +240,8 @@ export class ClankieFaceShell {
     { expanded: boolean; setExpanded(expanded: boolean): void }
   >();
   private outputExpanded = false;
+  /** The block holding the message he is typing, until it settles or the turn ends. */
+  private liveAssistantBlock: Container | undefined;
   private clickPress: { readonly col: number; readonly row: number } | undefined;
   private clickDragged = false;
 
@@ -449,10 +451,46 @@ export class ClankieFaceShell {
   }
 
   insertAssistantMarkdown(text: string): void {
+    // A message he was seen typing settles in the block it streamed into, so
+    // the finished text replaces the draft where it already sits (ADR 0141).
+    const live = this.liveAssistantBlock;
+    if (live !== undefined) {
+      this.liveAssistantBlock = undefined;
+      live.clear();
+      live.addChild(new AssistantMessageComponent(assistantEnvelope([{ text, type: "text" }])));
+      this.tui.requestRender();
+      return;
+    }
     // AssistantMessageComponent carries its own leading spacer.
     this.appendChatBlock(new AssistantMessageComponent(assistantEnvelope([{ text, type: "text" }])), {
       spacer: false,
     });
+  }
+
+  /**
+   * Draw the message he is typing right now. The block is a real transcript
+   * block from the first token, so the settled message lands in place instead
+   * of appearing a second time below it.
+   */
+  updateLiveAssistant(text: string): void {
+    let block = this.liveAssistantBlock;
+    if (block === undefined) {
+      block = new Container();
+      this.liveAssistantBlock = block;
+      this.appendChatBlock(block, { spacer: false });
+    }
+    block.clear();
+    block.addChild(new AssistantMessageComponent(assistantEnvelope([{ text, type: "text" }])));
+    this.tui.requestRender();
+  }
+
+  /**
+   * Stop treating the open block as a draft. What he had typed stays on screen:
+   * a draft with no settled message behind it is an interrupted or failed turn,
+   * and the words he got out are the honest record of it.
+   */
+  clearLiveAssistant(): void {
+    this.liveAssistantBlock = undefined;
   }
 
   insertReasoning(text: string): void {
@@ -540,6 +578,7 @@ export class ClankieFaceShell {
 
   clearTranscript(): void {
     this.chat.clear();
+    this.liveAssistantBlock = undefined;
     this.activeToolBlocks.clear();
     this.expandableBlocks.clear();
     this.tui.requestRender();

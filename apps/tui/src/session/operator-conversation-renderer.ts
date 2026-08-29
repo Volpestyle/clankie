@@ -14,6 +14,10 @@ import type { OperatorConversationEventSink } from "./operator-conversations.ts"
 export interface OperatorConversationRenderTarget {
   insertUserMessage(text: string): void;
   insertAssistantMarkdown(text: string): void;
+  /** Draw the message being typed; the settled message lands in the same block. */
+  updateLiveAssistant(text: string): void;
+  /** Stop treating the open block as a draft, leaving what he typed on screen. */
+  clearLiveAssistant(): void;
   insertReasoning(text: string): void;
   beginToolCall(toolCallId: string, name: string, argumentsDetail?: string): void;
   completeToolCall(
@@ -139,8 +143,23 @@ export function createOperatorConversationShellSink(
         const markdown = renderOperatorConversationNotice(event);
         if (markdown !== undefined) shell.insertMarkdown(markdown);
       }
-      if (event.type === "turn") shell.refreshStatus(`conversation turn ${event.phase}`);
+      if (event.type === "turn") {
+        // A turn that ends without settling its draft (failed, cancelled) keeps
+        // the words on screen but must stop owning the block, or the next
+        // message would be typed into the middle of the last one.
+        if (event.phase !== "accepted") shell.clearLiveAssistant();
+        shell.refreshStatus(`conversation turn ${event.phase}`);
+      }
       if (event.type === "context") options.onContextUsage?.(event.usage);
+    },
+    live(draft): void {
+      if (draft === undefined) {
+        shell.clearLiveAssistant();
+        return;
+      }
+      shell.updateLiveAssistant(draft.text);
+      // He is visibly answering; the spinner has nothing left to say.
+      shell.setTurnLoaderMessage?.("Responding...");
     },
     recovery(recovery): void {
       shell.insertMarkdown(renderOperatorConversationRecovery(recovery));

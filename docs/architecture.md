@@ -64,8 +64,12 @@ Discord shows him typing for the whole turn rather than for a capped minute.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): fleet roster, revision-fenced sends, cursored replay,
-and long-polled tails. Herdr seat conversations are direct send and readable
-projection lanes with no Pi session ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)).
+and long-polled tails. A tail carries two things: the durable events, and the
+message the captain is typing right now — a volatile draft held in memory,
+never in the event log, that the settled `message` event replaces in the block
+it streamed into ([ADR 0141](adr/0141-the-console-watches-him-type.md)). Herdr
+seat conversations are direct send and readable projection lanes with no Pi
+session ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)).
 A TUI process creates a fresh captain conversation unless `--chat` explicitly
 resumes one. A captain conversation and its Pi session are one lifetime: bounded
 retention removes their shared directory, while public event logs rotate with

@@ -11,6 +11,7 @@ import {
   OperatorConversationServiceResultSchema,
   OperatorSurfaceClientIdSchema,
   type OperatorConversation,
+  type OperatorConversationLiveDraft,
   type OperatorConversationRecovery,
   type OperatorConversationScope,
   type OperatorConversationServiceClient,
@@ -93,11 +94,14 @@ export function createCaptainRouteClient(input: {
 export function createCaptainOperatorConversationClient(
   fetcher: CaptainRouteFetcher,
 ): OperatorConversationClient {
-  const dispatch: OperatorConversationServiceDispatch = async (request) => {
+  const dispatch: OperatorConversationServiceDispatch = async (request, signal) => {
     const response = await fetcher.fetch(OPERATOR_CONVERSATION_DISPATCH_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request),
+      // A parked tail is the one request that outlives the turn it observes;
+      // an interrupt has to cancel it rather than wait out the server's window.
+      ...(signal === undefined ? {} : { signal }),
     });
     if (!response.ok) {
       throw new Error(`Operator conversation dispatch failed with status ${response.status}`);
@@ -378,6 +382,11 @@ function isStoredTailState(input: unknown): input is StoredOperatorConversationT
 export interface OperatorConversationEventSink {
   event(event: OperatorConversationStreamEvent): void;
   recovery(recovery: OperatorConversationRecovery): void;
+  /**
+   * The message being typed changed, or `undefined` once it settles into a
+   * durable `message` event. Volatile: nothing here is ever replayed.
+   */
+  live(draft: OperatorConversationLiveDraft | undefined): void;
 }
 
 /**
@@ -544,6 +553,12 @@ export class OperatorConversationPromptSession {
             if (!item.recovery.recoverable) return;
             await this.tails.writeCursor(conversationId, item.recovery.resetCursor);
             continue tail;
+          }
+          if (item.kind === "live") {
+            // A draft carries no cursor: it is a view of an unfinished message,
+            // so it never moves this surface's durable position.
+            sink.live(item.draft);
+            continue;
           }
           sink.event(item.event);
           await this.tails.writeCursor(conversationId, item.event.cursor);

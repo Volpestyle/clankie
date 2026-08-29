@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import {
@@ -90,6 +90,40 @@ export const DISCORD_TURN_STALL_MS = 5 * 60_000;
  * the overshoot to one tick of *awake* time no matter how long the host slept.
  */
 const STALL_TICK_MS = 5_000;
+
+/**
+ * How often a live draft may leave the captain
+ * ([ADR 0141](../../../../docs/adr/0141-the-console-watches-him-type.md)).
+ * Roughly sixteen frames a second: fast enough to read as typing, slow enough
+ * that a parked tail answers on a rhythm rather than on every token.
+ */
+const OPERATOR_DRAFT_INTERVAL_MS = 60;
+
+/**
+ * Paces live drafts. Pi hands over a token at a time and every draft carries
+ * the whole message so far, so dropping one costs nothing and sending all of
+ * them would answer a parked tail hundreds of times a second. `reset` opens the
+ * gate again so the first token of a new message shows up at once.
+ */
+export function createDraftPacer(
+  emit: (text: string) => void,
+  options: { readonly intervalMs?: number; readonly now?: () => number } = {},
+): { push(text: string): void; reset(): void } {
+  const intervalMs = options.intervalMs ?? OPERATOR_DRAFT_INTERVAL_MS;
+  const now = options.now ?? Date.now;
+  let lastAtMs: number | undefined;
+  return {
+    push(text: string): void {
+      const at = now();
+      if (lastAtMs !== undefined && at - lastAtMs < intervalMs) return;
+      lastAtMs = at;
+      emit(text);
+    },
+    reset(): void {
+      lastAtMs = undefined;
+    },
+  };
+}
 
 /**
  * An empty memory still says so. A missing card reads as "you have no memory",
@@ -421,7 +455,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         mcpExtension(deps, lane),
       ],
       noPromptTemplates: true,
-      additionalSkillPaths: [join(options.repoRoot, ".agents", "skills")],
+      additionalSkillPaths: [
+        join(options.repoRoot, ".agents", "skills"),
+        join(options.repoRoot, ".agents", "dev-skills"),
+      ].filter((path) => existsSync(path)),
       settingsManager: piSettings,
     });
     await loader.reload();
@@ -545,6 +582,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         activity = phase;
         publish({ type: "activity", phase });
       };
+      const drafts = createDraftPacer((text) => {
+        context.draft(text);
+      });
       const unsubscribe = live
         ? () => undefined
         : lane.session.subscribe((event) => {
@@ -559,6 +599,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 event.assistantMessageEvent.type === "text_delta"
               ) {
                 publishActivity("responding");
+                drafts.push(assistantText(event.assistantMessageEvent.partial));
               } else if (
                 event.assistantMessageEvent.type === "toolcall_start" ||
                 event.assistantMessageEvent.type === "toolcall_delta"
@@ -606,6 +647,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               }
             } else if (event.type === "message_end" && event.message.role === "assistant") {
               runTokens += event.message.usage.totalTokens;
+              // Every message he finishes is a message he said — including the
+              // one he says before reaching for a tool. The draft comes down
+              // here because this durable event is what replaces it.
+              context.draft(undefined);
+              drafts.reset();
+              const said = assistantText(event.message).trim();
+              if (said.length > 0)
+                publish({ type: "message", role: "captain", text: said, streaming: false });
               const usage = lane.session.getContextUsage();
               if (usage !== undefined) {
                 publish({
@@ -652,7 +701,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         });
         if (role === "absorbed") return;
         const text = lane.lastAssistantText.trim();
-        publish({ type: "message", role: "captain", text, streaming: false });
         await laneLog.append("operator", conversationId, {
           at: new Date().toISOString(),
           kind: "said",

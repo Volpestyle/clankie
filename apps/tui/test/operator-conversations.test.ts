@@ -41,6 +41,7 @@ function recordingTarget(): {
   markdown: string[];
   statuses: string[];
   loaders: string[];
+  liveDrafts: string[];
 } {
   const userMessages: string[] = [];
   const assistantMessages: string[] = [];
@@ -49,8 +50,10 @@ function recordingTarget(): {
   const markdown: string[] = [];
   const statuses: string[] = [];
   const loaders: string[] = [];
+  const liveDrafts: string[] = [];
   return {
     assistantMessages,
+    liveDrafts,
     loaders,
     markdown,
     reasoning,
@@ -68,6 +71,8 @@ function recordingTarget(): {
       insertMarkdown: (text) => markdown.push(text),
       insertReasoning: (text) => reasoning.push(text),
       insertUserMessage: (text) => userMessages.push(text),
+      updateLiveAssistant: (text) => liveDrafts.push(text),
+      clearLiveAssistant: () => liveDrafts.push("(cleared)"),
       refreshStatus: (label) => statuses.push(label),
       setTurnLoaderMessage: (message) => loaders.push(message),
     },
@@ -177,6 +182,7 @@ function recordingSink(): {
     recoveries,
     sink: {
       event: (event) => events.push(event),
+      live: () => undefined,
       recovery: (recovery) => recoveries.push(recovery),
     },
   };
@@ -868,6 +874,54 @@ describe("TUI selected-conversation prompt path", () => {
       streaming: false,
     });
     expect(recorded.userMessages).toEqual(["hi"]);
+  });
+
+  it("draws the message being typed and hands it to the settled block", () => {
+    const recorded = recordingTarget();
+    const sink = createOperatorConversationShellSink(recorded.target);
+
+    sink.live({ sequence: 1, role: "captain", text: "half a thou" });
+    sink.live({ sequence: 2, role: "captain", text: "half a thought" });
+    sink.event({
+      schemaVersion: 1,
+      conversationId: "global-default",
+      cursor: "global-default:event",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+      type: "message",
+      role: "captain",
+      text: "half a thought, finished",
+      streaming: false,
+    });
+    sink.live(undefined);
+
+    expect(recorded.liveDrafts).toEqual(["half a thou", "half a thought", "(cleared)"]);
+    expect(recorded.assistantMessages).toEqual(["half a thought, finished"]);
+    // The settled message still goes through the ordinary assistant path; the
+    // shell is what lands it in the block the draft was drawn in.
+    expect(recorded.assistantMessages).toEqual(["half a thought, finished"]);
+    expect(recorded.loaders.at(-1)).toBe("Responding...");
+  });
+
+  it("releases the draft block when a turn ends without settling it", () => {
+    const recorded = recordingTarget();
+    const sink = createOperatorConversationShellSink(recorded.target);
+
+    sink.live({ sequence: 1, role: "captain", text: "half a sen" });
+    sink.event({
+      schemaVersion: 1,
+      conversationId: "global-default",
+      cursor: "global-default:event",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+      type: "turn",
+      runId: "run-1",
+      phase: "cancelled",
+      reasonCode: "operator_interrupt",
+    });
+
+    // What he got out stays on screen; the next message starts its own block.
+    expect(recorded.liveDrafts).toEqual(["half a sen", "(cleared)"]);
   });
 
   it("routes conversation content onto typed transcript blocks", () => {

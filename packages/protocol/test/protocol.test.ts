@@ -639,6 +639,93 @@ describe("protocol", () => {
     ]);
   });
 
+  it("yields the live draft, once per change, and takes it down when it settles", async () => {
+    const pages = [
+      { live: { sequence: 4, role: "captain" as const, text: "half a thou" }, events: [] },
+      { live: { sequence: 4, role: "captain" as const, text: "half a thou" }, events: [] },
+      { live: { sequence: 5, role: "captain" as const, text: "half a thought" }, events: [] },
+      { events: [] },
+    ];
+    const seen: (number | undefined)[] = [];
+    let index = 0;
+    const dispatch = (
+      request: OperatorConversationServiceRequest,
+    ): Promise<OperatorConversationServiceResult> => {
+      if (request.op !== "tail") throw new Error(`unexpected op ${request.op}`);
+      seen.push(request.tail.liveSequence);
+      const page = pages[Math.min(index++, pages.length - 1)]!;
+      return Promise.resolve({
+        op: "tail",
+        schemaVersion: 1,
+        result: {
+          schemaVersion: 1,
+          status: "page",
+          conversationId: "c",
+          surfaceClientId: "rn",
+          events: page.events,
+          retainedFromCursor: "000000000000",
+          nextCursor: "000000000001",
+          safeCursor: "000000000001",
+          hasMore: false,
+          ...(page.live === undefined ? {} : { live: page.live }),
+        },
+      });
+    };
+    // No idle sleep: this exercises the item stream, not the pacing.
+    const client = createOperatorConversationServiceClient(dispatch, { tailIdleMs: 0 });
+    const items: OperatorConversationTailItem[] = [];
+    for await (const item of client.tail({
+      schemaVersion: 1,
+      conversationId: "c",
+      surfaceClientId: "rn",
+    })) {
+      items.push(item);
+      if (items.length >= 3) break;
+    }
+
+    // One item per change: the repeated draft is not re-yielded, and the page
+    // that no longer carries one takes it down.
+    expect(items.map((item) => (item.kind === "live" ? item.draft?.text : item.kind))).toEqual([
+      "half a thou",
+      "half a thought",
+      undefined,
+    ]);
+    // Each request reports what this surface has already drawn.
+    expect(seen.slice(0, 4)).toEqual([0, 4, 4, 5]);
+  });
+
+  it("asks the service to park the tail rather than fast-polling it", async () => {
+    let waited: number | undefined;
+    const dispatch = (
+      request: OperatorConversationServiceRequest,
+    ): Promise<OperatorConversationServiceResult> => {
+      if (request.op !== "tail") throw new Error(`unexpected op ${request.op}`);
+      waited = request.tail.waitMs;
+      return Promise.resolve({
+        op: "tail",
+        schemaVersion: 1,
+        result: {
+          schemaVersion: 1,
+          status: "recover",
+          conversationId: "c",
+          code: "cursor_reset",
+          recoverable: true,
+          resetCursor: "000000000001",
+          message: "stop",
+        },
+      });
+    };
+    const client = createOperatorConversationServiceClient(dispatch, { tailWaitMs: 9_000 });
+    for await (const item of client.tail({
+      schemaVersion: 1,
+      conversationId: "c",
+      surfaceClientId: "rn",
+    })) {
+      expect(item.kind).toBe("recovery");
+    }
+    expect(waited).toBe(9_000);
+  });
+
   it("surfaces typed tail recovery and stops instead of silently resyncing", async () => {
     const dispatch = (
       request: OperatorConversationServiceRequest,
