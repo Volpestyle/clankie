@@ -383,8 +383,8 @@ describe("protocol", () => {
         cancelled: true,
       }),
     ).toMatchObject({ op: "cancel", cancelled: true });
-    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(11);
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(11);
+    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(12);
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(12);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 
@@ -622,6 +622,30 @@ describe("protocol", () => {
 
     await expect(client.close("conversation-1")).resolves.toBe(true);
     expect(requests).toEqual([{ op: "close", schemaVersion: 1, conversationId: "conversation-1" }]);
+  });
+
+  it("forks through the canonical service client", async () => {
+    const client = createOperatorConversationServiceClient(async (request) => ({
+      op: "fork",
+      schemaVersion: 1,
+      conversation: {
+        schemaVersion: 1,
+        conversationId: "side-1",
+        parentConversationId: request.op === "fork" ? request.parentConversationId : "unexpected",
+        scope: { kind: "global" },
+        title: "BTW",
+        isDefault: false,
+        createdAt: "2026-08-29T00:00:00.000Z",
+        updatedAt: "2026-08-29T00:00:00.000Z",
+        sessionState: "waiting",
+        revision: 0,
+      },
+    }));
+
+    await expect(client.fork("conversation-1")).resolves.toMatchObject({
+      conversationId: "side-1",
+      parentConversationId: "conversation-1",
+    });
   });
 
   it("reads the fleet roster through the canonical service client", async () => {

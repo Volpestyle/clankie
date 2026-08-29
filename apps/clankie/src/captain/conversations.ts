@@ -55,6 +55,7 @@ interface ConversationMeta {
   revision: number;
   sessionState: OperatorConversation["sessionState"];
   contextUsage?: OperatorConversationContextUsage;
+  readonly parentConversationId?: string;
   /** Exclusive replay boundary immediately before the oldest retained event. */
   retainedFromCursor?: string;
 }
@@ -73,6 +74,8 @@ export interface ConversationTurnContext {
   readonly workspace?: string;
   readonly seat?: ConversationTurnSeat;
   readonly internal?: true;
+  /** Side conversations inherit a Pi branch but never continue their parent's active task. */
+  readonly side?: true;
   /** Conversation-store run id; one metrics line uses this, including absorbed steers. */
   readonly runId: string;
   readonly acceptedAt: string;
@@ -95,6 +98,11 @@ export type ConversationRunner = (
 ) => Promise<void>;
 
 type SeatSender = (seatId: string, message: string) => Promise<boolean>;
+type ConversationForker = (input: {
+  readonly parentConversationId: string;
+  readonly conversationId: string;
+  readonly workspace?: string;
+}) => Promise<void>;
 
 /**
  * A workspace scope names the directory the conversation's session works in.
@@ -136,6 +144,7 @@ export class ConversationStore {
   private readonly runner: ConversationRunner;
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
   private readonly sendToSeat: SeatSender | undefined;
+  private readonly forkConversation: ConversationForker | undefined;
   /** Longest a parked tail may wait here, whatever a caller asks for. */
   private readonly tailWaitMs: number;
   /** Per-conversation parked tails, woken by `append` and by a live draft. */
@@ -150,12 +159,14 @@ export class ConversationStore {
     onPrune?: (conversationId: string, scope: OperatorConversationScope) => void,
     sendToSeat?: SeatSender,
     tailWaitMs = DEFAULT_TAIL_WAIT_MS,
+    forkConversation?: ConversationForker,
   ) {
     this.root = root;
     this.runner = runner;
     this.onPrune = onPrune;
     this.sendToSeat = sendToSeat;
     this.tailWaitMs = tailWaitMs;
+    this.forkConversation = forkConversation;
     mkdirSync(root, { recursive: true });
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -172,6 +183,10 @@ export class ConversationStore {
       } catch {
         // An unreadable conversation is skipped, never fatal to boot.
       }
+    }
+    // Side forks have no resumable console owner after a service restart.
+    for (const meta of this.metas.values()) {
+      if (meta.parentConversationId !== undefined) this.remove(meta);
     }
     this.ensureDefaultGlobalConversation();
     this.prune();
@@ -243,12 +258,18 @@ export class ConversationStore {
       }
       case "create":
         return { op: "create", schemaVersion: 1, conversation: this.create(request.scope, request.title) };
+      case "fork":
+        return {
+          op: "fork",
+          schemaVersion: 1,
+          conversation: await this.fork(request.parentConversationId),
+        };
       case "close":
         return {
           op: "close",
           schemaVersion: 1,
           conversationId: request.conversationId,
-          closed: this.removeConversation(request.conversationId),
+          closed: await this.removeConversation(request.conversationId),
         };
       case "replay":
         return { op: "replay", schemaVersion: 1, result: this.replay(request.replay) };
@@ -380,6 +401,47 @@ export class ConversationStore {
     mkdirSync(join(this.root, meta.conversationId), { recursive: true });
     this.metas.set(meta.conversationId, meta);
     this.saveMeta(meta);
+    this.prune(meta.conversationId);
+    return publicConversation(meta);
+  }
+
+  private async fork(parentConversationId: string): Promise<OperatorConversation> {
+    const parent = this.metas.get(parentConversationId);
+    if (parent === undefined) throw new Error(`Unknown conversation ${parentConversationId}`);
+    if (parent.scope.kind === "seat") throw new Error("Seat conversations cannot be forked");
+    if (parent.parentConversationId !== undefined) throw new Error("A side conversation is already open");
+    if ([...this.metas.values()].some((meta) => meta.parentConversationId === parentConversationId)) {
+      throw new Error("A side conversation is already open");
+    }
+    if (this.forkConversation === undefined) throw new Error("Side conversations are unavailable");
+
+    const now = new Date().toISOString();
+    const meta: ConversationMeta = {
+      conversationId: `conv-${randomUUID()}`,
+      scope: parent.scope,
+      title: "BTW",
+      isDefault: false,
+      createdAt: now,
+      updatedAt: now,
+      revision: 0,
+      sessionState: "waiting",
+      parentConversationId,
+      ...(parent.contextUsage === undefined ? {} : { contextUsage: parent.contextUsage }),
+    };
+    mkdirSync(join(this.root, meta.conversationId), { recursive: true });
+    this.metas.set(meta.conversationId, meta);
+    this.saveMeta(meta);
+    try {
+      const workspace = workspaceOf(parent.scope);
+      await this.forkConversation({
+        parentConversationId,
+        conversationId: meta.conversationId,
+        ...(workspace === undefined ? {} : { workspace }),
+      });
+    } catch (error) {
+      this.remove(meta);
+      throw error;
+    }
     this.prune(meta.conversationId);
     return publicConversation(meta);
   }
@@ -587,6 +649,7 @@ export class ConversationStore {
             this.setLiveDraft(conversationId, text);
           },
           ...(publishOperatorMessage ? {} : { internal: true as const }),
+          ...(meta.parentConversationId === undefined ? {} : { side: true as const }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),
         },
@@ -809,6 +872,11 @@ export class ConversationStore {
    * including their public event log and their one Pi session tree.
    */
   private prune(protectedConversationId?: string): void {
+    const sideParents = new Set(
+      [...this.metas.values()].flatMap((meta) =>
+        meta.parentConversationId === undefined ? [] : [meta.parentConversationId],
+      ),
+    );
     const removable = (): ConversationMeta[] =>
       [...this.metas.values()]
         .filter(
@@ -816,6 +884,7 @@ export class ConversationStore {
             !meta.isDefault &&
             meta.sessionState !== "active" &&
             !this.seatSends.has(meta.conversationId) &&
+            !sideParents.has(meta.conversationId) &&
             meta.conversationId !== protectedConversationId,
         )
         .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
@@ -846,15 +915,31 @@ export class ConversationStore {
     this.onPrune?.(meta.conversationId, meta.scope);
   }
 
-  private removeConversation(conversationId: string): boolean {
+  private async removeConversation(conversationId: string): Promise<boolean> {
     const meta = this.metas.get(conversationId);
     if (
       meta === undefined ||
       meta.isDefault ||
-      meta.sessionState === "active" ||
-      this.seatSends.has(conversationId)
+      this.seatSends.has(conversationId) ||
+      [...this.metas.values()].some((candidate) => candidate.parentConversationId === conversationId)
     ) {
       return false;
+    }
+    if (meta.sessionState === "active" && meta.parentConversationId === undefined) return false;
+    if (meta.parentConversationId !== undefined) {
+      const activeRuns = [...this.runControllers.entries()].filter(
+        ([, entry]) => entry.conversationId === conversationId,
+      );
+      for (const [runId, entry] of activeRuns) {
+        this.cancelRequests.add(runId);
+        entry.controller.abort();
+      }
+      await Promise.allSettled(
+        activeRuns.flatMap(([runId]) => {
+          const run = this.runs.get(runId);
+          return run === undefined ? [] : [run];
+        }),
+      );
     }
     this.remove(meta);
     return true;
@@ -897,5 +982,6 @@ function publicConversation(meta: ConversationMeta): OperatorConversation {
     sessionState: meta.sessionState,
     revision: meta.revision,
     ...(meta.contextUsage === undefined ? {} : { contextUsage: meta.contextUsage }),
+    ...(meta.parentConversationId === undefined ? {} : { parentConversationId: meta.parentConversationId }),
   };
 }

@@ -29,7 +29,7 @@ export type FloorState = "dormant" | "engaged";
 export interface VoiceFloorOptions {
   /** `characterNames(persona)`: displayName + aliases, lowercased. */
   readonly names: readonly string[];
-  /** Same setting, same meaning as the text plane: `all` wakes on anything. */
+  /** Same setting, same meaning as the text plane: `all` offers every utterance. */
   readonly replyPolicy: "addressed" | "all";
   /** Sets the unprompted-turn rate-cap defaults; ADR 0051 reserved it for exactly this. */
   readonly chattiness: "quiet" | "balanced" | "chatty";
@@ -50,14 +50,15 @@ export interface VoiceTranscriptEvent {
 }
 
 export type FloorDecision =
-  | { readonly action: "wake"; readonly reason: "addressed" | "mentioned" | "reply_policy_all" | "volition" }
+  | { readonly action: "wake"; readonly reason: "addressed" | "volition" }
   /** Engaged: a clean hail; floor moves. Speech is still an offer he may decline. */
   | { readonly action: "hold" }
   /**
    * A turn whose correct answer may be silence: the holder kept talking
-   * without naming him, or his name came up without a clean hail.
+   * without naming him, his name came up without a clean hail, or the owner
+   * configured every dormant utterance to reach him.
    */
-  | { readonly action: "offer"; readonly reason?: "mentioned" | "holder" }
+  | { readonly action: "offer"; readonly reason?: "mentioned" | "holder" | "reply_policy_all" }
   /**
    * Someone else spoke without addressing him. Inject it; do not spend a turn.
    * Does not refresh decay.
@@ -290,7 +291,7 @@ export class VoiceFloor {
     return { action: "listen" };
   }
 
-  /** Dormant judgment of one transcript; mutates into engaged on a wake. */
+  /** Dormant judgment of one transcript; only a real address mutates immediately. */
   private wakeFor(event: VoiceTranscriptEvent): FloorDecision | undefined {
     if (!hasSpeech(event.text)) return undefined;
     const kind = classifyVoiceAddress(event.text, this.names);
@@ -302,8 +303,7 @@ export class VoiceFloor {
       return { action: "offer", reason: "mentioned" };
     }
     if (this.replyPolicy === "all") {
-      this.engage(event.speakerId, event.atMs);
-      return { action: "wake", reason: "reply_policy_all" };
+      return { action: "offer", reason: "reply_policy_all" };
     }
     return undefined;
   }

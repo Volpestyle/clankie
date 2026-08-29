@@ -37,6 +37,7 @@ import {
 import { conversationWorkspace, launchWorkspace, resolveWorkspacePath } from "./session/workspace.ts";
 import { createOperatorConversationShellSink } from "./session/operator-conversation-renderer.ts";
 import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/lane-observation.ts";
+import { createDiscordVoiceTranscriptClient } from "./session/voice-transcripts.ts";
 import { HerdrRoster } from "./observation/herdr-roster.ts";
 import { herdrPaneIdFromEnv, reportHerdrAgent, reportHerdrMetadata } from "./session/herdr-report.ts";
 import { PresencePoller } from "./observation/presence.ts";
@@ -95,8 +96,10 @@ const conversationClient = createCaptainOperatorConversationClient(captainRouteC
 const laneTrace = new CaptainLaneTraceController({
   lanes: createCaptainLaneClient(captainRouteClient),
 });
+const voiceTranscripts = createDiscordVoiceTranscriptClient(captainRouteClient);
 const conversationSelection = new OperatorConversationSelection(conversationClient);
 let currentContextUsage: OperatorConversationContextUsage | undefined;
+let sideConversation: { readonly parentConversationId: string; readonly conversationId: string } | undefined;
 const conversationPrompt = new OperatorConversationPromptSession({
   client: conversationClient,
   selection: conversationSelection,
@@ -142,15 +145,23 @@ const conversationsContext = {
     return await conversationClient.autonomy(conversationId, command);
   },
   select: async (conversationId: string) => {
-    const conversation = await conversationSelection.select(conversationId);
-    currentConversationTitle = conversation.title;
-    currentContextUsage = conversation.contextUsage;
-    currentWorkspace = conversationWorkspace(conversation) ?? repoRoot;
-    // The console's own shell escape, path completion, and footer follow the
-    // captain into the directory his session now works in.
-    shell.setCwd(currentWorkspace);
-    shell.refreshStatusView();
+    await shell.detachActiveTurn();
+    const conversation = await selectConversation(conversationId);
+    shell.clearTranscript();
+    if (!(await conversationPrompt.restoreHistory(conversationShellSink()))) {
+      throw new Error("The selected conversation history is no longer available");
+    }
+    shell.refreshStatus("ready");
     return conversation;
+  },
+  fork: async () => {
+    const parentConversationId = conversationSelection.conversationId;
+    if (parentConversationId === undefined) throw new Error("No conversation is selected");
+    if (sideConversation !== undefined) throw new Error("A side conversation is already open");
+    const child = await conversationClient.fork(parentConversationId);
+    const selected = await selectConversation(child.conversationId);
+    sideConversation = { parentConversationId, conversationId: child.conversationId };
+    return selected;
   },
   create: async (title?: string) => {
     const conversationId = conversationSelection.conversationId;
@@ -175,6 +186,27 @@ const conversationsContext = {
     return await conversationsContext.select(conversation.conversationId);
   },
 };
+
+async function selectConversation(conversationId: string) {
+  const conversation = await conversationSelection.select(conversationId);
+  currentConversationTitle = conversation.title;
+  currentContextUsage = conversation.contextUsage;
+  currentWorkspace = conversationWorkspace(conversation) ?? repoRoot;
+  // The console's own shell escape, path completion, and footer follow the
+  // captain into the directory his session now works in.
+  shell.setCwd(currentWorkspace);
+  shell.refreshStatusView();
+  return conversation;
+}
+
+function conversationShellSink() {
+  return createOperatorConversationShellSink(shell, {
+    onContextUsage: (usage) => {
+      currentContextUsage = usage;
+      shell.refreshStatusView();
+    },
+  });
+}
 
 const settingsStore = new SettingsStore();
 const brokeredCommands = {
@@ -222,13 +254,17 @@ const shell = new ClankieFaceShell({
   skills: skillCatalog,
   bannerFields: { title: "Clankie" },
   historyPath: join(tuiStateRoot, "prompt-history.jsonl"),
+  voiceTranscripts,
   // The pi-style footer: cwd · conversation, context %, model, presence.
   footerData: () => ({
     contextUsage: currentContextUsage,
     model: currentModelDisplay,
     title: currentConversationTitle,
   }),
-  statusExtras: () => [formatCaptainPresenceStatus(presence.snapshot)],
+  statusExtras: () => [
+    ...(sideConversation === undefined ? [] : ["side · ctrl+c to return"]),
+    formatCaptainPresenceStatus(presence.snapshot),
+  ],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal) => {
     await reportHerdrAgent("working", { source: "clankie", agent: "clankie", message: "turn" });
@@ -251,12 +287,30 @@ const shell = new ClankieFaceShell({
   // Esc while a turn streams: cancel the run server-side (Clankie stops); the
   // tail settles on the durable `cancelled` event. Detach remains the fallback.
   onInterrupt: () => conversationPrompt.interruptActive(),
+  onSideExit: returnFromSideConversation,
   onExit: async () => {
     presence.stop();
     herdrRoster.stop();
+    if (sideConversation !== undefined) {
+      await conversationClient.close(sideConversation.conversationId);
+      sideConversation = undefined;
+    }
     await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
   },
 });
+
+async function returnFromSideConversation(): Promise<void> {
+  const side = sideConversation;
+  if (side === undefined) return;
+  if (!(await conversationClient.close(side.conversationId))) {
+    throw new Error("The side conversation could not be closed");
+  }
+  await selectConversation(side.parentConversationId);
+  sideConversation = undefined;
+  shell.endSideConversation();
+  await conversationPrompt.restore(conversationShellSink());
+  shell.refreshStatus("ready");
+}
 
 async function applyModelDisplay(config: ClankieConfig): Promise<void> {
   try {
@@ -316,21 +370,11 @@ shell.insertMarkdown(
 );
 shell.refreshStatus("ready");
 if (conversationSelection.conversationId !== undefined) {
-  void conversationPrompt
-    .restore(
-      createOperatorConversationShellSink(shell, {
-        onContextUsage: (usage) => {
-          currentContextUsage = usage;
-          shell.refreshStatusView();
-        },
-      }),
-    )
-    .catch(() => {
-      shell.insertMarkdown(
-        "**Conversation restore unavailable**\n\nThe durable transcript could not be restored. No prompt was sent.",
-      );
-      shell.refreshStatus("conversation restore unavailable");
-    });
+  void conversationPrompt.restoreHistory(conversationShellSink()).catch((error: unknown) => {
+    const detail = error instanceof Error ? error.message : "Unknown restore error";
+    shell.insertMarkdown(`**Conversation restore unavailable**\n\n${detail}. No prompt was sent.`);
+    shell.refreshStatus("conversation restore unavailable");
+  });
 }
 void loadConfig({ env: process.env, cwd: repoRoot })
   .then(({ config }) => {

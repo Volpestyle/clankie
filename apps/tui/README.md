@@ -29,6 +29,7 @@ The fullscreen console requires a TTY. Install the launcher with
 clankie                         # start the core service and open the console
 clankie --chat <conversationId> # select a server-owned conversation
 clankie status                  # probe every launcher-owned service
+clankie doctor                  # this install: checkout vs release, models, credentials, optional herdr
 clankie restart [service]       # restart in dependency order
 clankie down [service]          # stop in reverse dependency order
 clankie pair                    # show a one-time device pairing QR and code
@@ -99,11 +100,15 @@ credential holder.
 - `/conversation` opens a searchable dialog for retained conversations;
   `/conversation <name-or-path>` switches directly. `/chat` remains an alias.
   Press `x` to close the highlighted inactive conversation; active and default
-  conversations stay protected. Each console has its own bounded replay cursor;
-  switching never creates a device-local session.
+  conversations stay protected. Switching rebuilds the visible transcript from
+  the retained conversation log, then continues from the console's bounded
+  replay cursor; it never creates a device-local session.
 - `/new [title]` starts and selects a conversation with fresh model context in
   the current workspace. The previous conversation remains available through
   `/conversation`.
+- `/btw [question]` (alias `/side`) opens an ephemeral side conversation from
+  the current Pi branch. Its inherited history is reference-only; Ctrl+C
+  discards the fork and restores the main transcript.
 - `/goal` shows the selected conversation's durable goal. `/goal <objective>`
   starts one; `--tokens <n>` gives it a hard model-token budget, and
   `pause|resume|clear` remain owner controls. Clankie proposes goals in chat;
@@ -126,6 +131,12 @@ on|off` remain available for direct use. Restart Clankie to apply a change.
   separate confirmation. Hosted-world saves remain on their world server.
 - `/memory` browses and edits episodes and permitted Discord person facts through
   operator-only APIs.
+- `/vt` (aliases `/voice-log`, `/voice-transcripts`) opens a live overlay of
+  retained Discord voice transcripts. `Ctrl+Shift+V` toggles the same view;
+  Esc or `/vt off` closes it. Exact speech appears only when
+  `discord.voiceTranscriptLoggingEnabled` is on ([ADR 0121](../../docs/adr/0121-development-voice-transcripts-are-explicit.md));
+  otherwise the overlay points at `/discord`. This is not `/trace`: voice lanes
+  there are captain handoffs, not the Discord conversation.
 - `/status` shows presence, conversation, workspace, model context, activity
   availability, and the Herdr pane roster when seated inside Herdr.
 - `/board`, `/board focus`, and `/board close` manage the herdr-lead companion

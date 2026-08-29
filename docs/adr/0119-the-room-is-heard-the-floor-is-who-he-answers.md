@@ -32,6 +32,7 @@ flowchart TD
   F -->|addressed| S[wake/hold + offer]
   F -->|mentioned| M[wake/offer — he may stay silent]
   F -->|holder, unnamed| O[offer]
+  F -->|reply policy all, dormant| P[offer — engage only if he speaks]
   F -->|no name| L[listen / volition]
 ```
 
@@ -60,7 +61,10 @@ So:
    direct question.
 5. **Holder nameless speech** is still `offer`. Occupant display names label
    utterances; identity stays `speakerId`.
-6. **A running `ask_clankie` holds the floor, for a bounded time.** Looking
+6. **`replyPolicy: all` offers every dormant utterance without manufacturing
+   an engagement.** If he speaks, that speaker takes the floor; if he stays
+   silent, the next utterance receives a fresh offer.
+7. **A running `ask_clankie` holds the floor, for a bounded time.** Looking
    something up is work, and a 90-second lookup must not decay mid-answer, so
    a heartbeat refreshes the floor while the handoff runs. It stops after
    `FLOOR_WORK_MAX_MS`, matched to the captain's own stall watchdog: past that
@@ -110,5 +114,5 @@ held for reorder, so a re-address can still barge in. Other finals wait at most
 - Offer settlement is per pending turn. A session-wide flag would drop the
   second of two quick offers and emit a volition receipt on every addressed
   turn.
-- `holderId` moves on a clean hail, or when he takes a mention offer. A bare
-  mention does not steal barge-in.
+- `holderId` moves on a clean hail, or when he takes a mention or all-policy
+  offer. A silent offer does not manufacture a conversation or steal barge-in.

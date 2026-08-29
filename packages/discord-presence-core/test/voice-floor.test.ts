@@ -45,12 +45,16 @@ describe("waking", () => {
     });
   });
 
-  it("under the all policy, any speech wakes him", () => {
+  it("under the all policy, any speech is offered without fabricating engagement", () => {
     const f = floor({ replyPolicy: "all" });
     expect(f.observeTranscript(said("bob", "morning everyone", 0))).toEqual({
-      action: "wake",
+      action: "offer",
       reason: "reply_policy_all",
     });
+    expect(f.state).toBe("dormant");
+    expect(f.floorHolderId).toBeUndefined();
+    f.noteSpeechFrom("bob", 0);
+    expect(f.state).toBe("engaged");
     expect(f.floorHolderId).toBe("bob");
   });
 
@@ -172,6 +176,7 @@ describe("holding the floor", () => {
   it("under the all policy, engaged crosstalk is still overheard", () => {
     const f = floor({ replyPolicy: "all" });
     f.observeTranscript(said("alice", "morning", 0));
+    f.noteSpeechFrom("alice", 0);
     expect(f.observeTranscript(said("bob", "morning alice", 5_000))).toEqual({ action: "listen" });
     expect(f.floorHolderId).toBe("alice");
   });

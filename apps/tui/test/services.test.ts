@@ -934,7 +934,12 @@ describe("restart carries dependents", () => {
     // The failure this prevents: the service rebuilds presence from its event
     // store, the still-running bridge keeps a claim for the old revision, and
     // every reply it posts is rejected `discord_presence_live_claim_stale`.
-    expect(resolveRestartTargets("clankie")).toEqual(["clankie", "relay", "discord-bridge", "discord-user-session"]);
+    expect(resolveRestartTargets("clankie")).toEqual([
+      "clankie",
+      "relay",
+      "discord-bridge",
+      "discord-user-session",
+    ]);
   });
 
   it("leaves a leaf service on its own", () => {

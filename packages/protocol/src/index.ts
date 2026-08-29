@@ -191,6 +191,8 @@ export const OperatorConversationSchema = z
     sessionState: OperatorConversationSessionStateSchema,
     revision: z.number().int().nonnegative(),
     contextUsage: OperatorConversationContextUsageSchema.optional(),
+    /** Present only for an ephemeral side conversation forked from this parent. */
+    parentConversationId: OperatorConversationIdSchema.optional(),
   })
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
@@ -767,6 +769,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
+      op: z.literal("fork"),
+      schemaVersion: z.literal(1),
+      parentConversationId: OperatorConversationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("close"),
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
@@ -849,6 +858,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
   z
     .object({
       op: z.literal("create"),
+      schemaVersion: z.literal(1),
+      conversation: OperatorConversationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("fork"),
       schemaVersion: z.literal(1),
       conversation: OperatorConversationSchema,
     })
@@ -960,6 +976,8 @@ export interface OperatorConversationServiceClient {
     readonly scope: OperatorConversationScope;
     readonly title: string;
   }): Promise<OperatorConversation>;
+  /** Clone the current Pi branch into an ephemeral child conversation. */
+  fork(parentConversationId: string): Promise<OperatorConversation>;
   close(conversationId: string): Promise<boolean>;
   replay(request: ReplayOperatorConversationRequest): Promise<ReplayOperatorConversationResult>;
   /**
@@ -1016,6 +1034,11 @@ export function createOperatorConversationServiceClient(
         title: input.title,
       });
       if (result.op !== "create") throw new Error(`Unexpected ${result.op} result for create`);
+      return result.conversation;
+    },
+    async fork(parentConversationId) {
+      const result = await dispatch({ op: "fork", schemaVersion: 1, parentConversationId });
+      if (result.op !== "fork") throw new Error(`Unexpected ${result.op} result for fork`);
       return result.conversation;
     },
     async close(conversationId) {

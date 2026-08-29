@@ -1317,6 +1317,40 @@ describe("audio path", () => {
 });
 
 describe("floor decisions", () => {
+  it("keeps an all-policy silent turn dormant so the next line gets a fresh offer", async () => {
+    const harness = await joinedHarness({ floorOverrides: { replyPolicy: "all" } });
+    await harness.consent(ALICE);
+    await harness.say(ALICE, "thank you");
+    const conversation = harness.conversation();
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({
+      action: "offer",
+      reason: "reply_policy_all",
+      state: "dormant",
+    });
+    expect(at(conversation.textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
+    conversation.input.onResponseDone({
+      responseId: "resp_silent",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.session.status().floorState).toBe("dormant");
+    expect(harness.timers.pending().map((timer) => timer.delayMs)).toContain(ENGAGED_HOLD_MS);
+
+    await harness.say(ALICE, "are you there?");
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({
+      action: "offer",
+      reason: "reply_policy_all",
+      state: "dormant",
+    });
+    expect(conversation.responseCreates).toBe(2);
+    expect(at(conversation.textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
+    conversation.input.onAudioDelta(pcmDelta(480), "item_reply");
+    await flush();
+    expect(harness.session.status().floorState).toBe("engaged");
+  });
+
   it("an addressed wake briefs, opens, seeds an attributed ring, and responds", async () => {
     const harness = await engagedHarness();
     const deliveryId = at(harness.ofType("utterance"), 0).deliveryId;

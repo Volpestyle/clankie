@@ -63,12 +63,14 @@ import {
   type ClankieCommandTypeaheadState,
 } from "../face/clankie-command-ui.ts";
 import { runFaceBashCommand } from "../face/clankie-face-bash.ts";
+import { ClankieVoiceTranscriptOverlay } from "../face/clankie-voice-transcripts.ts";
+import { followVoiceTranscripts, type DiscordVoiceTranscriptClient } from "../session/voice-transcripts.ts";
+import { clankieSlashSkillSuffix, resolveClankieSlashSkill } from "../skill-catalog.ts";
 import { ClankieCommandTextResultComponent, type CommandLogTone } from "./command-log.ts";
 import { createFaceThemeBundle, type FaceThemeBundle } from "./theme.ts";
 import { ClankieFooterComponent, displayHomePath, type ClankieFooterData } from "./footer.ts";
 import { createSetupFlow, type SetupFlowController } from "./setup-flow.ts";
 import { appendPromptHistory, readPromptHistory } from "./prompt-history.ts";
-import { clankieSlashSkillSuffix, resolveClankieSlashSkill } from "../skill-catalog.ts";
 
 export type FaceBlockHandle = {
   setMarkdown(markdown: string): void;
@@ -81,6 +83,8 @@ export interface FaceShellCommand {
   readonly description: string;
   readonly argumentHint?: string;
   readonly takesArgument: boolean;
+  /** Explicit opt-in for read-only commands that remain available inside `/btw`. */
+  readonly availableInSideConversation?: boolean;
   run(argument: string, shell: ClankieFaceShell): Promise<void> | void;
 }
 
@@ -98,6 +102,8 @@ export interface FaceShellOptions {
   readonly footerData?: () => ClankieFooterData;
   /** Extra footer status segments (presence, activity, …) on the last footer line. */
   readonly statusExtras?: () => readonly string[];
+  /** Captain-authenticated page of retained Discord voice transcripts (ADR 0121). */
+  readonly voiceTranscripts?: DiscordVoiceTranscriptClient;
   /** Handles a plain prompt (not a slash command, not `!`). */
   readonly onPrompt?: (prompt: string, shell: ClankieFaceShell, signal: AbortSignal) => Promise<void>;
   /**
@@ -106,6 +112,8 @@ export interface FaceShellOptions {
    * instead so Esc never leaves the console stuck.
    */
   readonly onInterrupt?: () => Promise<boolean>;
+  /** Discards the ephemeral `/btw` fork and selects its parent. */
+  readonly onSideExit?: () => Promise<void>;
   readonly onExit?: () => Promise<void> | void;
 }
 
@@ -220,6 +228,8 @@ export class ClankieFaceShell {
   private currentStatusLabel = "ready";
   private commandTypeaheadState: ClankieCommandTypeaheadState | undefined;
   private commandPaletteOverlay: OverlayHandle | undefined;
+  private voiceTranscriptOverlay: OverlayHandle | undefined;
+  private voiceTranscriptFollow: AbortController | undefined;
 
   /** Follows the selected conversation's workspace, so `!` lands where he works. */
   private cwdValue: string;
@@ -231,6 +241,18 @@ export class ClankieFaceShell {
   private activeTurn: ActivePromptTurn | undefined;
   private activeLoader: Loader | undefined;
   private runningTurn: Promise<void> | undefined;
+  private returningFromSideConversation = false;
+  private parentTranscript:
+    | {
+        readonly children: readonly Component[];
+        readonly activeToolBlocks: ReadonlyMap<string, ToolExecutionComponent>;
+        readonly expandableBlocks: ReadonlyMap<
+          Component,
+          { expanded: boolean; setExpanded(expanded: boolean): void }
+        >;
+        readonly liveAssistantBlock?: Container;
+      }
+    | undefined;
 
   /** Live tool executions keyed by toolCallId until their result lands. */
   private readonly activeToolBlocks = new Map<string, ToolExecutionComponent>();
@@ -392,6 +414,7 @@ export class ClankieFaceShell {
     if (this.shutdownStarted) return process.exit(code);
     this.shutdownStarted = true;
     if (options?.abortTurn === true) this.activeTurn?.controller.abort();
+    this.closeVoiceTranscripts();
     this.stopTurnLoader();
     // pi's fullscreen exit default: leave the transcript in the terminal's
     // scrollback after the alternate screen closes.
@@ -584,6 +607,45 @@ export class ClankieFaceShell {
     this.tui.requestRender();
   }
 
+  get sideConversationActive(): boolean {
+    return this.parentTranscript !== undefined;
+  }
+
+  /** Stop drawing the active parent tail; its server-side turn keeps running and replays on return. */
+  async detachActiveTurn(): Promise<void> {
+    if (this.activeTurn === undefined) return;
+    this.activeTurn.controller.abort();
+    await this.runningTurn;
+  }
+
+  /** Keep the parent transcript on screen while side-conversation blocks append beneath it. */
+  beginSideConversation(): void {
+    if (this.parentTranscript !== undefined) throw new Error("A side conversation is already open");
+    this.parentTranscript = {
+      children: [...this.chat.children],
+      activeToolBlocks: new Map(this.activeToolBlocks),
+      expandableBlocks: new Map(this.expandableBlocks),
+      ...(this.liveAssistantBlock === undefined ? {} : { liveAssistantBlock: this.liveAssistantBlock }),
+    };
+    this.tui.requestRender();
+  }
+
+  /** Restore the exact parent UI snapshot after its ephemeral child is discarded. */
+  endSideConversation(): void {
+    const parent = this.parentTranscript;
+    if (parent === undefined) return;
+    this.chat.clear();
+    for (const child of parent.children) this.chat.addChild(child);
+    this.activeToolBlocks.clear();
+    for (const [id, block] of parent.activeToolBlocks) this.activeToolBlocks.set(id, block);
+    this.expandableBlocks.clear();
+    for (const [block, state] of parent.expandableBlocks) this.expandableBlocks.set(block, state);
+    this.liveAssistantBlock = parent.liveAssistantBlock;
+    this.parentTranscript = undefined;
+    this.returningFromSideConversation = false;
+    this.tui.requestRender();
+  }
+
   /** pi's Ctrl+O: swap every tool/bash block between preview and full output. */
   private toggleOutputExpansion(): void {
     this.outputExpanded = !this.outputExpanded;
@@ -750,6 +812,10 @@ export class ClankieFaceShell {
       this.openCommandPalette();
       return { consume: true };
     }
+    if (matchesKey(data, Key.ctrlShift("v")) && !this.setupFlow.isWaitingForInput()) {
+      this.toggleVoiceTranscripts();
+      return { consume: true };
+    }
     if (matchesKey(data, Key.ctrl("o")) && !this.setupFlow.isWaitingForInput()) {
       this.toggleOutputExpansion();
       return { consume: true };
@@ -764,8 +830,24 @@ export class ClankieFaceShell {
         this.closeCommandPalette();
         return { consume: true };
       }
+      if (this.voiceTranscriptOverlay?.isFocused() === true) {
+        this.closeVoiceTranscripts();
+        return { consume: true };
+      }
       if (this.setupFlow.isWaitingForInput()) {
         this.setupFlow.handleSubmit("/cancel");
+        return { consume: true };
+      }
+      if (this.parentTranscript !== undefined && this.options.onSideExit !== undefined) {
+        if (this.returningFromSideConversation) return { consume: true };
+        this.returningFromSideConversation = true;
+        this.activeTurn?.controller.abort();
+        this.refreshStatus("returning to main conversation");
+        void this.options.onSideExit().catch((error: unknown) => {
+          this.returningFromSideConversation = false;
+          this.insertCommandResult("/btw", formatError(error), "error");
+          this.refreshStatus("side conversation return failed");
+        });
         return { consume: true };
       }
       void this.shutdown(0, { abortTurn: true });
@@ -774,6 +856,10 @@ export class ClankieFaceShell {
     if (matchesKey(data, Key.escape) && this.setupFlow.isWaitingForInput()) {
       if (this.setupFlow.hasActivePrompt()) return undefined;
       this.setupFlow.handleSubmit("/cancel");
+      return { consume: true };
+    }
+    if (matchesKey(data, Key.escape) && this.voiceTranscriptOverlay !== undefined) {
+      this.closeVoiceTranscripts();
       return { consume: true };
     }
     if (matchesKey(data, Key.escape) && this.handleActiveTurnEscape()) return { consume: true };
@@ -879,6 +965,64 @@ export class ClankieFaceShell {
     this.tui.requestRender();
   }
 
+  /** Opens the live Discord voice-transcript overlay, or focuses it if already open. */
+  openVoiceTranscripts(): boolean {
+    if (this.options.voiceTranscripts === undefined) return false;
+    if (this.voiceTranscriptOverlay !== undefined) {
+      this.voiceTranscriptOverlay.focus();
+      this.tui.requestRender();
+      return true;
+    }
+    this.closeCommandPalette();
+    const overlay = new ClankieVoiceTranscriptOverlay(
+      {
+        onClose: () => this.closeVoiceTranscripts(),
+        onRender: () => this.tui.requestRender(),
+      },
+      this.theme.commandUiTheme,
+    );
+    this.voiceTranscriptOverlay = this.showModalOverlay(overlay, {
+      anchor: "center",
+      maxHeight: "80%",
+      margin: { bottom: 2, left: 2, right: 2, top: 2 },
+      minWidth: 48,
+      width: "88%",
+    });
+    const controller = new AbortController();
+    this.voiceTranscriptFollow = controller;
+    void followVoiceTranscripts({
+      client: this.options.voiceTranscripts,
+      signal: controller.signal,
+      onSnapshot: (snapshot) => overlay.setSnapshot(snapshot),
+      onNotice: (message) => overlay.setNotice(message),
+    }).catch((error: unknown) => {
+      overlay.setNotice(error instanceof Error ? error.message : String(error));
+    });
+    this.voiceTranscriptOverlay.focus();
+    this.tui.requestRender();
+    return true;
+  }
+
+  closeVoiceTranscripts(): void {
+    this.voiceTranscriptFollow?.abort();
+    this.voiceTranscriptFollow = undefined;
+    const handle = this.voiceTranscriptOverlay;
+    this.voiceTranscriptOverlay = undefined;
+    if (handle !== undefined) handle.hide();
+    this.tui.setFocus(this.editor);
+    this.tui.requestRender();
+  }
+
+  private toggleVoiceTranscripts(): void {
+    if (this.voiceTranscriptOverlay !== undefined) {
+      this.closeVoiceTranscripts();
+      return;
+    }
+    if (!this.openVoiceTranscripts()) {
+      this.insertCommandResult("/vt", "Clankie's voice transcript listing is unavailable.", "error");
+    }
+  }
+
   // --- overlays ---
 
   showModalOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
@@ -914,7 +1058,7 @@ export class ClankieFaceShell {
       return;
     }
     this.rememberPrompt(prompt);
-    await this.submitPrompt(prompt);
+    await this.submitUserPrompt(prompt);
   }
 
   private async handleSlashPrompt(prompt: string): Promise<void> {
@@ -923,18 +1067,26 @@ export class ClankieFaceShell {
     const command = resolveClankieCommand(this.options.commands, token)?.command;
     if (command === undefined) {
       if (resolveClankieSlashSkill(prompt, this.options.skills ?? []) !== undefined) {
+        if (this.parentTranscript !== undefined) {
+          this.insertCommandResult(prompt, "Skills are unavailable inside /btw.", "error");
+          return;
+        }
         if (this.respondingState) {
           this.editor.setText(prompt);
           this.refreshCommandSurface(prompt);
           return;
         }
-        await this.submitPrompt(prompt);
+        await this.submitUserPrompt(prompt);
         return;
       }
       this.insertCommandResult(prompt, `Unknown command /${token}. Run /help for the command list.`, "error");
       return;
     }
     const argument = withoutSlash.slice(token.length).trim();
+    if (this.parentTranscript !== undefined && command.availableInSideConversation !== true) {
+      this.insertCommandResult(prompt, `/${command.name} is unavailable inside /btw.`, "error");
+      return;
+    }
     if (argument.length > 0 && !command.takesArgument) {
       this.insertCommandResult(prompt, `/${command.name} does not take an argument.`, "error");
       return;
@@ -946,7 +1098,7 @@ export class ClankieFaceShell {
     }
   }
 
-  private async submitPrompt(prompt: string): Promise<void> {
+  async submitUserPrompt(prompt: string): Promise<void> {
     const onPrompt = this.options.onPrompt;
     if (onPrompt === undefined) {
       this.insertMarkdown("**Notice**\n\nNo Clankie session is connected; prompts go nowhere yet.");

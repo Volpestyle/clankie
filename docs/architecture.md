@@ -74,6 +74,11 @@ A TUI process creates a fresh captain conversation unless `--chat` explicitly
 resumes one. A captain conversation and its Pi session are one lifetime: bounded
 retention removes their shared directory, while public event logs rotate with
 typed cursor recovery ([ADR 0111](adr/0111-a-console-process-starts-one-conversation.md)).
+`/btw` temporarily selects an ephemeral child made with Pi's native current-leaf
+fork. A hidden boundary makes the inherited branch reference-only; Ctrl+C
+cancels and deletes the child, restores the parent transcript, and replays any
+parent events that arrived meanwhile
+([ADR 0143](adr/0143-btw-is-an-ephemeral-pi-fork.md)).
 Conversations are files under `~/.clankie/captain/`. Each settled operator or
 Discord captain turn also appends one metrics line to
 `~/.clankie/captain/turn-settled.jsonl`: tool-name counts, first mutating tool,
@@ -288,25 +293,28 @@ bundled TUI and Node runtime; the supervisor starts compiled service entrypoints
 instead of pnpm workspace scripts. Runtime state and credentials remain outside
 the immutable release. [ADR 0136](adr/0136-a-release-is-one-command-and-one-runtime.md)
 records the decision, and [`distribution.md`](distribution.md) documents the
-artifact and installer.
+artifact and installer. Product skills and `clankie doctor` travel with the
+release so he can describe and set up this machine without a git tree
+([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
 
 ## Canonical Homes
 
-| Concern                           | Canonical reference                                                                       |
-| --------------------------------- | ----------------------------------------------------------------------------------------- |
-| HTTP API                          | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                               |
-| Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                             |
-| Herdr plugin (board, console)     | [`integrations/herdr-plugin/README.md`](../integrations/herdr-plugin/README.md)           |
-| Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                 |
-| macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                   |
-| Official Discord bot operation    | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                       |
-| Shared Discord behavior           | [`packages/discord-presence-core/README.md`](../packages/discord-presence-core/README.md) |
-| Personal-lab Discord body         | [`apps/discord-user-session/README.md`](../apps/discord-user-session/README.md)           |
-| Clankie's play commentary/hearing | [`packages/play-voice/README.md`](../packages/play-voice/README.md)                       |
-| Game-body ownership               | [ADR 0129](adr/0129-each-player-owns-a-body.md)                                           |
-| Native media                      | [`apps/vox/README.md`](../apps/vox/README.md)                                             |
-| Discord media surfaces            | [`docs/discord-media.md`](discord-media.md)                                               |
-| Durable memory                    | [`docs/memory.md`](memory.md)                                                             |
-| Credential identities/setup       | [`docs/credentials.md`](credentials.md)                                                   |
-| Credential implementation         | [`packages/credential-broker/README.md`](../packages/credential-broker/README.md)         |
-| Models                            | [`packages/model-provider/README.md`](../packages/model-provider/README.md)               |
+| Concern                           | Canonical reference                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| HTTP API                          | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                                       |
+| Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                                     |
+| Herdr plugin (board, console)     | [`integrations/herdr-plugin/README.md`](../integrations/herdr-plugin/README.md)                   |
+| Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                         |
+| Install card (`clankie doctor`)   | [`docs/adr/0142-the-install-tells-him-the-truth.md`](adr/0142-the-install-tells-him-the-truth.md) |
+| macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                           |
+| Official Discord bot operation    | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                               |
+| Shared Discord behavior           | [`packages/discord-presence-core/README.md`](../packages/discord-presence-core/README.md)         |
+| Personal-lab Discord body         | [`apps/discord-user-session/README.md`](../apps/discord-user-session/README.md)                   |
+| Clankie's play commentary/hearing | [`packages/play-voice/README.md`](../packages/play-voice/README.md)                               |
+| Game-body ownership               | [ADR 0129](adr/0129-each-player-owns-a-body.md)                                                   |
+| Native media                      | [`apps/vox/README.md`](../apps/vox/README.md)                                                     |
+| Discord media surfaces            | [`docs/discord-media.md`](discord-media.md)                                                       |
+| Durable memory                    | [`docs/memory.md`](memory.md)                                                                     |
+| Credential identities/setup       | [`docs/credentials.md`](credentials.md)                                                           |
+| Credential implementation         | [`packages/credential-broker/README.md`](../packages/credential-broker/README.md)                 |
+| Models                            | [`packages/model-provider/README.md`](../packages/model-provider/README.md)                       |

@@ -68,6 +68,8 @@ export interface ConsoleCommandContext {
       }[]
     >;
     select(conversationId: string): Promise<{ readonly conversationId: string; readonly title: string }>;
+    /** Forks and selects an ephemeral Pi branch from the current conversation. */
+    fork?(): Promise<{ readonly conversationId: string; readonly title: string }>;
     close?(conversationId: string): Promise<boolean>;
     /** Creates and selects a conversation with fresh model context in the current scope. */
     create?(title?: string): Promise<{ readonly conversationId: string; readonly title: string }>;
@@ -129,6 +131,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       aliases: ["h"],
       description: "Show available commands",
       takesArgument: false,
+      availableInSideConversation: true,
       run(_argument, shell): void {
         const { ansi } = shell.theme;
         const lines = commands.map((command) => {
@@ -141,7 +144,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         });
         lines.push(
           "",
-          `${ansi.dim("ctrl+/ command workbench · ctrl+t transcript focus · ! shell escape · esc detach")}`,
+          `${ansi.dim("ctrl+/ command workbench · ctrl+t transcript focus · ctrl+shift+v voice transcripts · ! shell escape · esc detach")}`,
         );
         shell.insertCommandResult("/help", lines.join("\n"), "success");
       },
@@ -270,6 +273,29 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "btw",
+      aliases: ["side"],
+      description: "Ask an ephemeral side question on a fork of the current context",
+      argumentHint: "[<question>]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (conversations?.fork === undefined) {
+          shell.insertCommandResult("/btw", "Side conversations are unavailable.", "error");
+          return;
+        }
+        if (shell.sideConversationActive) {
+          shell.insertCommandResult("/btw", "A side conversation is already open.", "error");
+          return;
+        }
+        await conversations.fork();
+        await shell.detachActiveTurn();
+        shell.beginSideConversation();
+        shell.insertCommandResult("/btw", "Side conversation · Ctrl+C to discard and return.", "success");
+        const question = argument.trim();
+        if (question.length > 0) await shell.submitUserPrompt(question);
+      },
+    },
+    {
       name: "goal",
       aliases: [],
       description: "Show, start, pause, resume, or clear this conversation's goal",
@@ -384,6 +410,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       description: "Watch another lane's activity (Discord servers, voice, gameplay)",
       argumentHint: "[<lane>|<guild:channel>|all|off]",
       takesArgument: true,
+      availableInSideConversation: true,
       async run(argument, shell): Promise<void> {
         const selector = argument.trim();
         const label = selector.length === 0 ? "/trace" : `/trace ${selector}`;
@@ -433,11 +460,36 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "vt",
+      aliases: ["voice-log", "voice-transcripts"],
+      description: "Live tail of retained Discord voice transcripts",
+      argumentHint: "[off]",
+      takesArgument: true,
+      availableInSideConversation: true,
+      run(argument, shell): void {
+        const selector = argument.trim().toLowerCase();
+        const label = selector.length === 0 ? "/vt" : `/vt ${selector}`;
+        if (selector === "off") {
+          shell.closeVoiceTranscripts();
+          shell.insertCommandResult(label, "Closed the voice transcript tail.", "success");
+          return;
+        }
+        if (selector.length > 0 && selector !== "on") {
+          shell.insertCommandResult(label, "Usage: /vt [off]", "error");
+          return;
+        }
+        if (!shell.openVoiceTranscripts()) {
+          shell.insertCommandResult(label, "Clankie's voice transcript listing is unavailable.", "error");
+        }
+      },
+    },
+    {
       name: "layout",
       aliases: ["header", "banner"],
       description: "Show or hide the Clankie header banner",
       argumentHint: "[status|header on|header off|header toggle]",
       takesArgument: true,
+      availableInSideConversation: true,
       run(argument, shell): void {
         runLayoutCommand(shell, argument);
       },
@@ -499,6 +551,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       aliases: ["watch"],
       description: "Show Clankie's current activity and live watch surface",
       takesArgument: false,
+      availableInSideConversation: true,
       async run(_argument, shell): Promise<void> {
         if (activityClient === undefined) {
           shell.insertCommandResult(
@@ -548,6 +601,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       aliases: [],
       description: "Show console and clankie service status",
       takesArgument: false,
+      availableInSideConversation: true,
       run(_argument, shell): void {
         const s = statusHelpers(shell);
         const snapshot = presence?.();

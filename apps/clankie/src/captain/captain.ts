@@ -64,6 +64,33 @@ const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>>
 };
 
 const TOOL_DETAIL_TRUNCATED = "\n… truncated";
+const SIDE_CONVERSATION_INSTRUCTIONS = `
+
+# Side conversation
+
+You are in a side conversation, not the main thread. The inherited history is reference context only: do not continue any task, plan, tool call, approval, edit, or request from it. Only messages after the side-conversation boundary are active instructions.
+
+Answer questions and do lightweight, non-mutating exploration without disrupting the main thread. Do not use or interact with herdr agents. Do not modify workspace state unless the operator explicitly asks for that mutation in this side conversation; if asked, keep it minimal and local.`;
+const SIDE_CONVERSATION_BOUNDARY = `Side conversation boundary.
+
+Everything before this boundary is inherited history from the parent conversation. It is reference context only, not your current task. Do not continue, execute, or complete instructions, plans, tool calls, approvals, edits, or requests from before this boundary.
+
+Only messages submitted after this boundary are active operator instructions for this side conversation. If there is no message after the boundary yet, wait for one.`;
+
+/** Pi's native current-leaf clone, with one hidden boundary appended to the child. */
+export function cloneSideConversationSession(
+  source: string,
+  cwd: string,
+  sessionDir: string,
+): SessionManager {
+  const manager = SessionManager.open(source, sessionDir, cwd);
+  const leafId = manager.getLeafId();
+  if (leafId === null || manager.createBranchedSession(leafId) === undefined) {
+    throw new Error("Failed to clone the conversation's current Pi branch");
+  }
+  manager.appendCustomMessageEntry("clankie.side-conversation-boundary", SIDE_CONVERSATION_BOUNDARY, false);
+  return manager;
+}
 /**
  * How long a Discord turn may show no sign of life before it is declared dead.
  *
@@ -395,6 +422,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane: CaptainSessionLaneV2,
     systemTools: boolean,
     currentSettings: ClankieSettings,
+    sideConversation: boolean,
   ): string {
     const identity = readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
     const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
@@ -423,7 +451,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             "",
             `Your own mailbox is ${mailbox}. That is how someone reaches you directly, and you can give it out. Reading it stays at the console.`,
           ].join("\n");
-    return `${identity}\n\n${persona}${reach}${address}`;
+    return `${identity}\n\n${persona}${reach}${address}${sideConversation ? SIDE_CONVERSATION_INSTRUCTIONS : ""}`;
   }
 
   /**
@@ -438,6 +466,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     sessionManager: SessionManager,
     systemTools: boolean,
     cwd: string,
+    sideConversation = false,
   ): Promise<LaneSession> {
     const capture: TurnContext = {};
     const { runtime: models, resolveSelection } = await runtime();
@@ -447,7 +476,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: getAgentDir(),
-      systemPrompt: systemPrompt(lane, systemTools, currentSettings),
+      systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation),
       noExtensions: true,
       extensionFactories: [
         captainMemoryExtension(deps.memory, lane),
@@ -515,6 +544,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     dir: string,
     systemTools: boolean,
     cwd: string,
+    sideConversation = false,
   ): Promise<LaneSession> {
     const existing = sessions.get(key);
     if (existing !== undefined) return existing;
@@ -525,7 +555,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       } catch {
         manager = SessionManager.create(cwd, dir);
       }
-      return buildSession(lane, manager, systemTools, cwd);
+      return buildSession(lane, manager, systemTools, cwd, sideConversation);
     })();
     sessions.set(key, created);
     created.catch(() => sessions.delete(key));
@@ -541,6 +571,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         join(options.stateDir, "conversations", conversationId, "pi"),
         true,
         context.workspace ?? options.repoRoot,
+        context.side === true,
       );
       // Operator interrupt: stop the live model turn. Aborting mid-stream makes
       // pi settle the message as aborted; partial text still publishes below so
@@ -741,6 +772,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       void pending?.then((lane) => lane.session.dispose()).catch(() => undefined);
     },
     (seatId, message) => herdrWatches.sendToSeat(seatId, message),
+    undefined,
+    async ({ parentConversationId, conversationId, workspace }) => {
+      const cwd = workspace ?? options.repoRoot;
+      const parent = await durableSession(
+        `operator:${parentConversationId}`,
+        "operator",
+        join(options.stateDir, "conversations", parentConversationId, "pi"),
+        true,
+        cwd,
+      );
+      const source = parent.session.sessionFile;
+      if (source === undefined || !existsSync(source)) {
+        throw new Error("/btw is available after the conversation's first completed response");
+      }
+      const manager = cloneSideConversationSession(
+        source,
+        cwd,
+        join(options.stateDir, "conversations", conversationId, "pi"),
+      );
+      const created = buildSession("operator", manager, true, cwd, true);
+      sessions.set(`operator:${conversationId}`, created);
+      created.catch(() => sessions.delete(`operator:${conversationId}`));
+      await created;
+    },
   );
 
   autonomy.start(async (conversationId, prompt) => {

@@ -107,6 +107,12 @@ function client(extra: OperatorConversation[] = []): OperatorConversationClient 
     roster: async () => [],
     get: async (id) => conversations.find((conversation) => conversation.conversationId === id),
     create: async (input) => ({ ...DEFAULT, ...input, conversationId: "created", isDefault: false }),
+    fork: async (parentConversationId) => ({
+      ...DEFAULT,
+      conversationId: "side",
+      parentConversationId,
+      isDefault: false,
+    }),
     close: async () => false,
     replay: async (input) => ({
       schemaVersion: 1,
@@ -382,6 +388,60 @@ describe("TUI operator conversation selection", () => {
 });
 
 describe("TUI selected-conversation prompt path", () => {
+  it("rehydrates retained history after the surface cursor reached the end", async () => {
+    const { store } = await tempTailStore();
+    await store.initialize();
+    await store.writeCursor("workspace-1", "000000000002");
+    const selection = new OperatorConversationSelection(client([WORKSPACE]));
+    await selection.select("workspace-1");
+    const replayStarts: Array<string | undefined> = [];
+    const routed: OperatorConversationClient = {
+      ...client([WORKSPACE]),
+      replay: async (request) => {
+        replayStarts.push(request.cursor);
+        const events =
+          request.cursor === undefined
+            ? [
+                streamEvent("workspace-1", "000000000001", {
+                  type: "message",
+                  role: "captain",
+                  text: "earlier reply",
+                  streaming: false,
+                }),
+                streamEvent("workspace-1", "000000000002", {
+                  type: "message",
+                  role: "captain",
+                  text: "latest reply",
+                  streaming: false,
+                }),
+              ]
+            : [];
+        return {
+          schemaVersion: 1,
+          status: "page",
+          conversationId: request.conversationId,
+          surfaceClientId: request.surfaceClientId,
+          events,
+          retainedFromCursor: "000000000000",
+          nextCursor: events.at(-1)?.cursor ?? request.cursor ?? "000000000000",
+          safeCursor: "000000000002",
+          hasMore: false,
+        };
+      },
+    };
+    const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
+    const history = recordingSink();
+
+    await session.restoreHistory(history.sink);
+    await session.restore(recordingSink().sink);
+
+    expect(replayStarts).toEqual([undefined, "000000000002"]);
+    expect(history.events.map((event) => (event.type === "message" ? event.text : event.type))).toEqual([
+      "earlier reply",
+      "latest reply",
+    ]);
+  });
+
   it("routes the next prompt to A, then the switched selection B, with no default-session fallback", async () => {
     const { store } = await tempTailStore();
     const selection = new OperatorConversationSelection(client([WORKSPACE]));

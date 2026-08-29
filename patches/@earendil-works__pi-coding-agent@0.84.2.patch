@@ -1,0 +1,20 @@
+diff --git a/dist/modes/interactive/components/tool-execution.js b/dist/modes/interactive/components/tool-execution.js
+index 4273855bed8013448c7665a80a86f3d7543b0242..3e187f8ea897ce26238d51ab1f85a9fc961b97ad 100644
+--- a/dist/modes/interactive/components/tool-execution.js
++++ b/dist/modes/interactive/components/tool-execution.js
+@@ -317,8 +317,14 @@ export class ToolExecutionComponent extends Container {
+             text += `\n\n${content}`;
+         }
+         const output = this.getTextOutput();
+         if (output) {
+-            text += `\n${output}`;
++            const lines = output.split("\n");
++            const displayLines = this.expanded ? lines : lines.slice(0, FALLBACK_PREVIEW_LINES);
++            const remaining = lines.length - displayLines.length;
++            text += `\n${displayLines.join("\n")}`;
++            if (remaining > 0) {
++                text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
++            }
+         }
+         return text;
+     }

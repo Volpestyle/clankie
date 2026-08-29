@@ -428,13 +428,20 @@ export class OperatorConversationPromptSession {
     return await this.restoreConversation(conversationId, sink);
   }
 
+  /** Rebuilds an empty transcript from the conversation's retained beginning. */
+  public async restoreHistory(sink: OperatorConversationEventSink): Promise<boolean> {
+    const conversationId = this.requiredConversationId();
+    return await this.restoreConversation(conversationId, sink, true);
+  }
+
   private async restoreConversation(
     conversationId: string,
     sink: OperatorConversationEventSink,
+    fromBeginning = false,
   ): Promise<boolean> {
     const active = this.restores.get(conversationId);
     if (active !== undefined) return await active;
-    const run = this.restoreConversationNow(conversationId, sink).finally(() => {
+    const run = this.restoreConversationNow(conversationId, sink, fromBeginning).finally(() => {
       this.restores.delete(conversationId);
     });
     this.restores.set(conversationId, run);
@@ -444,8 +451,9 @@ export class OperatorConversationPromptSession {
   private async restoreConversationNow(
     conversationId: string,
     sink: OperatorConversationEventSink,
+    fromBeginning: boolean,
   ): Promise<boolean> {
-    let cursor = this.tails.cursor(conversationId);
+    let cursor = fromBeginning ? undefined : this.tails.cursor(conversationId);
     for (;;) {
       const page = await this.client.replay({
         schemaVersion: 1,

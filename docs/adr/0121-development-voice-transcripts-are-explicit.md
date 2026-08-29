@@ -65,7 +65,9 @@ the same current setting as context for his own disclosure.
 ## Consequences
 
 - A developer can reproduce what Clankie heard after a call and correlate it
-  with receipts through `deliveryId` and `stayId`.
+  with receipts through `deliveryId` and `stayId`. The operator console tails
+  the same captain-authenticated page (`/vt`, `Ctrl+Shift+V`) without reading
+  the JSONL from disk or mixing speech into `/trace`.
 - Enabling retention increases the sensitivity and unbounded size of the local
   state directory. The owner explicitly manages and deletes that log.
 - The file records inbound final speech, not exact native-realtime audio output;

@@ -43,7 +43,10 @@ while a turn is active and always protects the default global conversation.
 The conversation remains the only durable model-session identity. It owns one
 Pi session tree and one public event log in the same directory. The TUI keeps
 only an in-memory selected id. Its durable tail file is a delivery checkpoint,
-not a session: one surface id and at most 256 recent conversation cursors.
+not a session or a transcript cache: one surface id and at most 256 recent
+conversation cursors. Because the fullscreen transcript is process memory, an
+explicit selection hydrates it from the retained log boundary before incremental
+tailing resumes at the newly rendered cursor.
 
 ```mermaid
 flowchart LR

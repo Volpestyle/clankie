@@ -207,8 +207,8 @@ export const UNPROMPTED_TURN_ITEM =
  */
 export const ENGAGED_OFFER_TURN_ITEM =
   "System note, not spoken by anyone in the room: nobody named you in that line. " +
-  "Answer only if it is clearly for you — a follow-up to what you just said. " +
-  "If they are talking to someone else, produce no output at all. Silence is the correct answer then.";
+  "Decide from the attributed conversation whether it is directed to you or worth answering anyway. " +
+  "If it is clearly for someone else, produce no output at all. Silence is the correct answer then.";
 /**
  * Offered when his name came up. Address matching is deliberately loose so a
  * garbled "hey clankie" still opens the session; talking-about-him vs talking
@@ -1604,6 +1604,9 @@ export class DiscordVoiceSession {
     }
     if (taken && pending.speakerId !== undefined) {
       this.floor.noteSpeechFrom(pending.speakerId, this.clock());
+    } else if (this.floor.state !== "engaged") {
+      this.stopTick();
+      this.armHold();
     }
   }
 

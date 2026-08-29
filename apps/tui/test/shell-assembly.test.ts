@@ -66,6 +66,72 @@ describe("shell assembly", () => {
     expect(text).toContain("a later reply");
   });
 
+  it("runs /btw while the parent task runs and restores its transcript on Ctrl+C", async () => {
+    let forked = 0;
+    const commands = buildConsoleCommands({
+      conversations: {
+        conversationId: "main",
+        conversations: async () => [],
+        select: async (conversationId) => ({ conversationId, title: "Main" }),
+        fork: async () => {
+          forked += 1;
+          return { conversationId: "side", title: "BTW" };
+        },
+      },
+    });
+    let parentDetached = false;
+    let shell!: ClankieFaceShell;
+    shell = new ClankieFaceShell({
+      commands,
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+      onPrompt: async (prompt, _shell, signal) => {
+        if (prompt === "main task") {
+          await new Promise<void>((resolve) =>
+            signal.addEventListener(
+              "abort",
+              () => {
+                parentDetached = true;
+                resolve();
+              },
+              { once: true },
+            ),
+          );
+          return;
+        }
+        shell.insertAssistantMarkdown("side answer");
+      },
+      onSideExit: async () => shell.endSideConversation(),
+    });
+    shell.insertAssistantMarkdown("parent answer");
+    const internals = shell as unknown as {
+      runningTurn: Promise<void> | undefined;
+      routeInput(data: string): { consume?: boolean } | undefined;
+    };
+    const parentRun = shell.submitUserPrompt("main task");
+    internals.runningTurn = parentRun.finally(() => {
+      internals.runningTurn = undefined;
+    });
+    const btw = commands.find((command) => command.name === "btw");
+    if (btw === undefined) throw new Error("btw command not found");
+
+    await btw.run("side question", shell);
+    expect(forked).toBe(1);
+    expect(parentDetached).toBe(true);
+    expect(shell.sideConversationActive).toBe(true);
+    expect(internals.routeInput("\x03")).toEqual({ consume: true });
+    await vi.waitFor(() => expect(shell.sideConversationActive).toBe(false));
+
+    const chat = (shell as unknown as { chat: { render(width: number): string[] } }).chat;
+    // oxlint-disable-next-line no-control-regex -- intentionally strips ANSI escape sequences
+    const ansiPattern = /\x1b\[[0-9;]*m/gu;
+    const text = chat.render(80).join("\n").replace(ansiPattern, "");
+    expect(text).toContain("parent answer");
+    expect(text).not.toContain("side question");
+    expect(text).not.toContain("side answer");
+  });
+
   it("renders conversation content through pi's chat components", () => {
     const shell = new ClankieFaceShell({
       commands: buildConsoleCommands({}),
@@ -77,7 +143,10 @@ describe("shell assembly", () => {
     shell.insertAssistantMarkdown("a **bold** reply");
     shell.insertReasoning("thinking out loud");
     shell.beginToolCall("call-1", "get_self_state", '{"includePresence":true}');
-    shell.completeToolCall("call-1", "get_self_state", { failed: false, detail: "status: idle" });
+    shell.completeToolCall("call-1", "get_self_state", {
+      failed: false,
+      detail: Array.from({ length: 12 }, (_, index) => `state-${index + 1}`).join("\n"),
+    });
     shell.insertMarkdown("**Notice**\n\na markdown notice");
 
     const chat = (shell as unknown as { chat: { render(width: number): string[] } }).chat;
@@ -88,7 +157,16 @@ describe("shell assembly", () => {
     expect(text).toContain("bold");
     expect(text).toContain("thinking out loud");
     expect(text).toContain("get_self_state");
+    expect(text).toContain("state-10");
+    expect(text).not.toContain("state-11");
     expect(text).toContain("a markdown notice");
+
+    const routeInput = (
+      shell as unknown as { routeInput(data: string): { consume?: boolean } | undefined }
+    ).routeInput.bind(shell);
+    expect(routeInput("\x0f")).toEqual({ consume: true });
+    const expandedText = chat.render(80).join("\n").replace(ansiPattern, "");
+    expect(expandedText).toContain("state-12");
   });
 
   it("maps a transcript click row to the block under it", () => {

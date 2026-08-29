@@ -284,7 +284,7 @@ function commandCategory(commandName: string): string {
     return "model/auth";
   if (["trace", "layout", "status", "board", "clear", "exit"].includes(commandName)) return "runtime";
   if (commandName === "connect") return "tools";
-  if (["voice", "discord"].includes(commandName)) return "discord";
+  if (["voice", "discord", "vt"].includes(commandName)) return "discord";
   return "command";
 }
 
@@ -305,6 +305,8 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
         ["status", "all", "off", "discord_presence", "discord_voice", "gameplay"],
         ["/trace discord_presence", "/trace all", "/trace off"],
       );
+    case "vt":
+      return values(["off"], ["/vt", "/vt off"]);
     case "layout":
       return layoutArguments(context);
     case "connect":
