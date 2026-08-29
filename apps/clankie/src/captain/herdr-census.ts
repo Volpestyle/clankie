@@ -14,6 +14,8 @@ export interface HerdrCensusAgent {
   readonly agent: string;
   readonly status: string;
   readonly title: string;
+  /** Stable across pane-id compaction; the seat identity for ADR 0135. */
+  readonly terminalId?: string;
 }
 
 export type HerdrSessionCensus =
@@ -55,6 +57,9 @@ export function parseHerdrAgentList(stdout: string): HerdrCensusAgent[] {
       agent,
       status: typeof pane.agent_status === "string" ? pane.agent_status : "unknown",
       title: titleOf(pane),
+      ...(typeof pane.terminal_id === "string" && pane.terminal_id.length > 0
+        ? { terminalId: pane.terminal_id }
+        : {}),
     });
   }
   return agents;
@@ -90,6 +95,52 @@ export function formatHerdrSessionCensus(
   if (done > 0) lines.push(`  ${done} done — finished work nobody has read. Harvest first.`);
   if (blocked > 0) lines.push(`  ${blocked} blocked — waiting on a human. Surface those before dispatching.`);
   return lines.join("\n");
+}
+
+/** Matches the protocol's OPERATOR_CONVERSATION_SUMMARY_MAX bound. */
+const SEAT_SUMMARY_MAX = 512;
+
+function bounded(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/**
+ * The fleet as messageable seats (ADR 0135). Fail-soft: a down herdr socket
+ * renders an empty roster — seats offline, never a failed conversation surface.
+ */
+export async function readFleetSeats(
+  options: { readonly runCommand?: HerdrCensusRunner } = {},
+): Promise<
+  readonly {
+    seatId: string;
+    harness: string;
+    status: string;
+    title: string;
+    summary?: string;
+    next?: string;
+  }[]
+> {
+  const run = options.runCommand ?? defaultRunner;
+  try {
+    const { stdout } = await run("herdr", ["agent", "list"]);
+    const summaries = readHerdrSummariesFile().agents;
+    return parseHerdrAgentList(stdout)
+      .filter((entry) => entry.agent !== "shell")
+      .slice(0, MAX_AGENTS)
+      .map((entry) => {
+        const written = summaries[entry.paneId];
+        return {
+          seatId: entry.terminalId ?? entry.paneId,
+          harness: entry.agent,
+          status: entry.status,
+          title: bounded(entry.title, 200),
+          ...(written === undefined ? {} : { summary: bounded(written.summary, SEAT_SUMMARY_MAX) }),
+          ...(written?.next === undefined ? {} : { next: bounded(written.next, SEAT_SUMMARY_MAX) }),
+        };
+      });
+  } catch {
+    return [];
+  }
 }
 
 /** Live agent census for a seated turn. Fail-soft: a down socket is not a failed turn. */

@@ -127,8 +127,28 @@ const OperatorConversationEventRefSchema = z.string().trim().min(1).max(OPERATOR
 export const OperatorConversationScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("global") }).strict(),
   z.object({ kind: z.literal("workspace"), workspaceId: z.string().trim().min(1).max(512) }).strict(),
+  /** One DM thread per fleet seat (ADR 0135). `seatId` is herdr's stable terminal identity. */
+  z.object({ kind: z.literal("seat"), seatId: z.string().trim().min(1).max(512) }).strict(),
 ]);
 export type OperatorConversationScope = z.infer<typeof OperatorConversationScopeSchema>;
+
+/** Bounded fleet roster entry: one herdr seat as a messageable contact (ADR 0135). */
+export const OPERATOR_FLEET_ROSTER_MAX = 48;
+export const OperatorFleetSeatSchema = z
+  .object({
+    seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    /** Harness kind — claude, codex, pi, … — contact-card metadata, never routing. */
+    harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
+    status: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
+    title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+    /** Herd-lead distilled summary, when one has been written for the seat's pane. */
+    summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+    next: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+    /** Present once the seat's DM thread exists in the registry. */
+    conversationId: OperatorConversationIdSchema.optional(),
+  })
+  .strict();
+export type OperatorFleetSeat = z.infer<typeof OperatorFleetSeatSchema>;
 
 export const OperatorConversationSessionStateSchema = z.enum([
   "unbound",
@@ -249,7 +269,8 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("message"),
-    role: z.enum(["operator", "captain"]),
+    /** `agent` is a fleet seat speaking in its own thread (ADR 0135). */
+    role: z.enum(["operator", "captain", "agent"]),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
   }).strict(),
@@ -561,6 +582,12 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       command: OperatorAutonomyCommandSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("roster"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
 
@@ -620,6 +647,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("autonomy"),
       schemaVersion: z.literal(1),
       status: OperatorAutonomyStatusSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("roster"),
+      schemaVersion: z.literal(1),
+      seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
     })
     .strict(),
 ]);

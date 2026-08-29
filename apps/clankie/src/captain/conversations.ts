@@ -24,8 +24,14 @@ import type {
   SubmitOperatorConversationTurnResult,
 } from "@clankie/protocol";
 
-type ConversationServiceRequest = Exclude<OperatorConversationServiceRequest, { op: "autonomy" }>;
-type ConversationServiceResult = Exclude<OperatorConversationServiceResult, { op: "autonomy" }>;
+type ConversationServiceRequest = Exclude<
+  OperatorConversationServiceRequest,
+  { op: "autonomy" } | { op: "roster" }
+>;
+type ConversationServiceResult = Exclude<
+  OperatorConversationServiceResult,
+  { op: "autonomy" } | { op: "roster" }
+>;
 
 const CURSOR_WIDTH = 12;
 const ZERO_CURSOR = "0".repeat(CURSOR_WIDTH);
@@ -245,6 +251,11 @@ export class ConversationStore {
   }
 
   private create(scope: OperatorConversationScope, title: string): OperatorConversation {
+    if (scope.kind === "seat") {
+      // ADR 0135: seat threads need the direct-send lane and seat projection
+      // before a registry record would be truthful.
+      throw new Error("Seat conversations are not implemented yet");
+    }
     const workspace = workspaceOf(scope);
     if (workspace !== undefined && !statSync(workspace, { throwIfNoEntry: false })?.isDirectory()) {
       throw new Error(`Workspace ${workspace} is not a directory on this machine`);
@@ -611,9 +622,10 @@ function directoryBytes(path: string): number {
 }
 
 function sameScope(a: OperatorConversationScope, b: OperatorConversationScope): boolean {
-  return (
-    a.kind === b.kind && (a.kind !== "workspace" || b.kind !== "workspace" || a.workspaceId === b.workspaceId)
-  );
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "workspace" && b.kind === "workspace") return a.workspaceId === b.workspaceId;
+  if (a.kind === "seat" && b.kind === "seat") return a.seatId === b.seatId;
+  return true;
 }
 
 function publicConversation(meta: ConversationMeta): OperatorConversation {

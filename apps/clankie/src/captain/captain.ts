@@ -33,7 +33,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ConversationStore } from "./conversations.ts";
 import { AutonomyStore } from "./autonomy.ts";
-import { readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.ts";
+import { readFleetSeats, readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
@@ -930,6 +930,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           schemaVersion: 1,
           status: autonomy.command(request.conversationId, request.command),
         });
+      }
+      if (request.op === "roster") {
+        return readFleetSeats().then((seats) => ({ op: "roster", schemaVersion: 1, seats: [...seats] }));
       }
       return conversations.serve(request);
     },
