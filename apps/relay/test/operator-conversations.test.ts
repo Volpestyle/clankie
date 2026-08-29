@@ -7,6 +7,8 @@ import {
   OperatorConversationServiceResultSchema,
   OperatorConversationRecoverySchema,
   OperatorConversationStreamEventSchema,
+  OPERATOR_TERMINAL_TAIL_PATH,
+  OperatorTerminalTailItemSchema,
   type OperatorConversationRecovery,
   type OperatorConversationServiceDispatch,
   type OperatorConversationServiceRequest,
@@ -508,6 +510,89 @@ describe("Eve NDJSON replay/tail", () => {
   });
 });
 
+describe("native terminal NDJSON tail", () => {
+  it("streams bounded Herdr frames under terminalObserve without requiring chat", async () => {
+    const seen: OperatorConversationServiceRequest[] = [];
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, chat: false } },
+        }),
+      },
+      tailMaxPages: 1,
+      dispatch: async (request) => {
+        seen.push(request);
+        if (request.op !== "terminal_tail") throw new Error("terminal tail expected");
+        return terminalPage(request);
+      },
+    });
+    const response = await post(relay.url, OPERATOR_TERMINAL_TAIL_PATH, terminalTailRequest());
+    expect(response.status).toBe(200);
+    const items = parseTerminalNdjson(await response.text());
+    expect(items).toMatchObject([
+      {
+        kind: "frame",
+        streamId: "stream-1",
+        frame: { terminalId: "term-worker", sequence: 1, data: "G1sySg==", full: true },
+      },
+    ]);
+    expect(seen).toMatchObject([{ op: "terminal_tail", observation: { terminalId: "term-worker" } }]);
+    const wrongRoute = await post(relay.url, "/operator/v1/dispatch", terminalTailRequest());
+    expect(wrongRoute.status).toBe(400);
+    expect(await wrongRoute.json()).toEqual({ error: "terminal_tail_route_required" });
+  });
+
+  it("requires and continuously rechecks the terminalObserve grant", async () => {
+    const denied = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, terminalObserve: false } },
+        }),
+      },
+      dispatch: async () => {
+        throw new Error("must not dispatch");
+      },
+    });
+    const initial = await post(denied.url, OPERATOR_TERMINAL_TAIL_PATH, terminalTailRequest());
+    expect(initial.status).toBe(403);
+    expect(await initial.json()).toEqual({ error: "terminal_observe_grant_required" });
+
+    let authCalls = 0;
+    const revoked = await startRelay({
+      authorizeDevice: {
+        authorize: async () => {
+          authCalls += 1;
+          return {
+            authorized: true,
+            device: {
+              ...activeDevice,
+              grants: { ...activeDevice.grants, terminalObserve: authCalls === 1 },
+            },
+          };
+        },
+      },
+      dispatch: async (request) => {
+        if (request.op !== "terminal_tail") throw new Error("terminal tail expected");
+        return terminalPage(request);
+      },
+    });
+    const response = await post(revoked.url, OPERATOR_TERMINAL_TAIL_PATH, terminalTailRequest());
+    expect(parseTerminalNdjson(await response.text())).toEqual([
+      {
+        kind: "auth_failure",
+        failure: {
+          schemaVersion: 1,
+          outcome: "auth_failed",
+          reason: "terminal_observe_grant_required",
+        },
+      },
+    ]);
+    expect(authCalls).toBe(2);
+  });
+});
+
 describe("relay auth hops", () => {
   it("checks the control-plane projection and maps typed revoke/expiry outcomes", async () => {
     const authorizer = new ControlPlaneDeviceAuthorizer({
@@ -623,6 +708,49 @@ function emptyTailPage(request: Extract<OperatorConversationServiceRequest, { op
   };
 }
 
+function terminalTailRequest() {
+  return {
+    op: "terminal_tail" as const,
+    schemaVersion: 1 as const,
+    observation: {
+      schemaVersion: 1 as const,
+      terminalId: "term-worker",
+      surfaceClientId: "native-ios",
+      columns: 120,
+      rows: 40,
+      limit: 1,
+    },
+  };
+}
+
+function terminalPage(request: Extract<OperatorConversationServiceRequest, { op: "terminal_tail" }>) {
+  return {
+    op: "terminal_tail" as const,
+    schemaVersion: 1 as const,
+    result: {
+      schemaVersion: 1 as const,
+      status: "page" as const,
+      terminalId: request.observation.terminalId,
+      surfaceClientId: request.observation.surfaceClientId,
+      cursor: { streamId: "stream-1", sequence: 1 },
+      frames: [
+        {
+          schemaVersion: 1 as const,
+          type: "terminal.frame" as const,
+          terminalId: request.observation.terminalId,
+          sequence: 1,
+          encoding: "base64" as const,
+          data: "G1sySg==",
+          columns: 120,
+          rows: 40,
+          full: true,
+        },
+      ],
+      hasMore: false,
+    },
+  };
+}
+
 type TailFrame =
   | { readonly kind: "event"; readonly event: OperatorConversationStreamEvent }
   | { readonly kind: "recovery"; readonly recovery: OperatorConversationRecovery }
@@ -666,6 +794,14 @@ function parseNdjson(text: string): TailFrame[] {
       }
       throw new Error("unknown operator conversation tail frame");
     });
+}
+
+function parseTerminalNdjson(text: string) {
+  return text
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => OperatorTerminalTailItemSchema.parse(JSON.parse(line) as unknown));
 }
 
 async function startRelay(

@@ -26,6 +26,9 @@ import {
   OperatorConversationServiceRequestSchema,
   OperatorConversationServiceResultSchema,
   OperatorConversationStreamEventSchema,
+  OperatorTerminalFrameSchema,
+  OperatorTerminalObservationResultSchema,
+  OperatorTerminalTailItemSchema,
   ReplayOperatorConversationResultSchema,
   SubmitOperatorConversationTurnResultSchema,
   SubmitOperatorConversationTurnSchema,
@@ -351,8 +354,62 @@ describe("protocol", () => {
         seats: [{ seatId: "term_65a2015731452d", harness: "codex", status: "idle", title: "clankie" }],
       }),
     ).toMatchObject({ op: "roster", seats: [{ seatId: "term_65a2015731452d" }] });
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(9);
+    const terminalRequest = OperatorConversationServiceRequestSchema.parse({
+      op: "terminal_tail",
+      schemaVersion: 1,
+      observation: {
+        schemaVersion: 1,
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "native-ios",
+        columns: 120,
+        rows: 40,
+      },
+    });
+    expect(terminalRequest).toMatchObject({ op: "terminal_tail", observation: { columns: 120, rows: 40 } });
+    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(10);
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(10);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
+  });
+
+  it("models bounded native terminal frames and typed reset outcomes", () => {
+    const frame = OperatorTerminalFrameSchema.parse({
+      schemaVersion: 1,
+      type: "terminal.frame",
+      terminalId: "term_65a2015731452d",
+      sequence: 1,
+      encoding: "base64",
+      data: "G1sySg==",
+      columns: 120,
+      rows: 40,
+      full: true,
+    });
+    expect(
+      OperatorTerminalTailItemSchema.parse({ kind: "frame", streamId: "stream-1", frame }),
+    ).toMatchObject({
+      kind: "frame",
+      frame: { sequence: 1, full: true },
+    });
+    expect(
+      OperatorTerminalObservationResultSchema.parse({
+        schemaVersion: 1,
+        status: "reset",
+        terminalId: frame.terminalId,
+        surfaceClientId: "native-ios",
+        reason: "sequence_expired",
+      }),
+    ).toMatchObject({ status: "reset", reason: "sequence_expired" });
+    expect(() => OperatorTerminalFrameSchema.parse({ ...frame, data: "not base64" })).toThrow();
+    expect(() =>
+      OperatorTerminalObservationResultSchema.parse({
+        schemaVersion: 1,
+        status: "page",
+        terminalId: "another-terminal",
+        surfaceClientId: "native-ios",
+        cursor: { streamId: "stream-1", sequence: 1 },
+        frames: [frame],
+        hasMore: false,
+      }),
+    ).toThrow();
   });
 
   it("dual-reads discord_presence while freezing it out of v1 and freezes presence write bot transport", () => {

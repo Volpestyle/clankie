@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { once } from "node:events";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OPERATOR_TERMINAL_TAIL_PATH,
   OperatorConversationServiceRequestSchema,
   OperatorConversationServiceResultSchema,
   type OperatorConversationServiceDispatch,
@@ -36,15 +37,19 @@ export interface OperatorConversationRelayOptions {
 }
 
 /**
- * Authenticated HTTP/NDJSON projection of the unchanged VUH-769 callable
- * contract. Returns true only for routes this boundary owns.
+ * Authenticated HTTP/NDJSON projection of the callable operator contract.
+ * Returns true only for routes this boundary owns.
  */
 export function createOperatorConversationRelayHandler(options: OperatorConversationRelayOptions) {
   const logger = options.logger ?? silentLogger;
   const idempotency = new TurnIdempotencyStore(options.clock ?? Date.now);
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
-    if (path !== OPERATOR_CONVERSATION_DISPATCH_PATH && path !== OPERATOR_CONVERSATION_TAIL_PATH) {
+    if (
+      path !== OPERATOR_CONVERSATION_DISPATCH_PATH &&
+      path !== OPERATOR_CONVERSATION_TAIL_PATH &&
+      path !== OPERATOR_TERMINAL_TAIL_PATH
+    ) {
       return false;
     }
     if (request.method !== "POST") {
@@ -62,16 +67,16 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeAuthDenial(response, authorization.denial);
       return true;
     }
-    if (!authorization.device.grants.chat) {
-      writeJson(response, 403, { error: "chat_grant_required" });
-      return true;
-    }
-
     let serviceRequest: OperatorConversationServiceRequest;
     try {
       serviceRequest = OperatorConversationServiceRequestSchema.parse(await readJson(request));
     } catch {
       writeJson(response, 400, { error: "invalid_conversation_request" });
+      return true;
+    }
+    const grant = serviceRequest.op === "terminal_tail" ? "terminalObserve" : "chat";
+    if (!authorization.device.grants[grant]) {
+      writeGrantDenial(response, grant);
       return true;
     }
     if (path === OPERATOR_CONVERSATION_TAIL_PATH) {
@@ -89,6 +94,25 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       });
       return true;
     }
+    if (path === OPERATOR_TERMINAL_TAIL_PATH) {
+      if (serviceRequest.op !== "terminal_tail") {
+        writeJson(response, 400, { error: "terminal_tail_request_required" });
+        return true;
+      }
+      await streamTerminalTail({
+        response,
+        request: serviceRequest,
+        token,
+        initialAuthorization: authorization,
+        options,
+        logger,
+      });
+      return true;
+    }
+    if (serviceRequest.op === "terminal_tail") {
+      writeJson(response, 400, { error: "terminal_tail_route_required" });
+      return true;
+    }
 
     try {
       const result =
@@ -97,7 +121,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               options.dispatch(serviceRequest),
             )
           : await options.dispatch(serviceRequest);
-      const publicResult = publicConversationResult(result);
+      const publicResult = publicServiceResult(result);
       writeJson(response, 200, publicResult);
       logger.info(logFields(authorization, serviceRequest, 200, publicResult), "conversation relay request");
     } catch {
@@ -156,7 +180,7 @@ async function streamTail(input: StreamTailInput): Promise<void> {
     }
     let result: OperatorConversationServiceResult;
     try {
-      result = publicConversationResult(
+      result = publicServiceResult(
         await options.dispatch({
           ...request,
           tail: { ...request.tail, ...(cursor === undefined ? {} : { cursor }) },
@@ -180,7 +204,7 @@ async function streamTail(input: StreamTailInput): Promise<void> {
       return;
     }
     authorization = await options.authorizeDevice.authorize(input.token);
-    const emissionDenial = tailAuthorizationDenial(authorization);
+    const emissionDenial = tailAuthorizationDenial(authorization, "chat");
     if (emissionDenial !== undefined) {
       logger.warn(
         {
@@ -208,6 +232,109 @@ async function streamTail(input: StreamTailInput): Promise<void> {
       return;
     }
     if (page.events.length === 0) await sleep(options.tailPollMs ?? 250);
+  }
+}
+
+interface StreamTerminalTailInput {
+  readonly response: ServerResponse;
+  readonly request: Extract<OperatorConversationServiceRequest, { op: "terminal_tail" }>;
+  readonly token: string;
+  readonly initialAuthorization: Extract<RelayDeviceAuthorization, { authorized: true }>;
+  readonly options: OperatorConversationRelayOptions;
+  readonly logger: RelayConversationLogger;
+}
+
+async function streamTerminalTail(input: StreamTerminalTailInput): Promise<void> {
+  const { response, request, options, logger } = input;
+  response.statusCode = 200;
+  response.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+  response.setHeader("cache-control", "no-store");
+  response.setHeader("x-content-type-options", "nosniff");
+  let cursor = request.observation.cursor;
+  let pages = 0;
+  let authorization: RelayDeviceAuthorization = input.initialAuthorization;
+  while (!response.destroyed) {
+    if (pages > 0) authorization = await options.authorizeDevice.authorize(input.token);
+    const pollDenial = tailAuthorizationDenial(authorization, "terminalObserve");
+    if (pollDenial !== undefined) {
+      logger.warn(
+        {
+          route: "terminal_tail",
+          terminalId: redactSensitiveString(request.observation.terminalId),
+          surfaceClientId: redactSensitiveString(request.observation.surfaceClientId),
+          denial: pollDenial,
+        },
+        "terminal tail authorization revoked",
+      );
+      await writeTailAuthFailure(response, pollDenial);
+      return;
+    }
+
+    let result: OperatorConversationServiceResult;
+    try {
+      result = publicServiceResult(
+        await options.dispatch({
+          ...request,
+          observation: {
+            ...request.observation,
+            ...(cursor === undefined ? {} : { cursor }),
+          },
+        }),
+      );
+    } catch {
+      logger.warn(
+        {
+          route: "terminal_tail",
+          terminalId: redactSensitiveString(request.observation.terminalId),
+          surfaceClientId: redactSensitiveString(request.observation.surfaceClientId),
+        },
+        "terminal tail upstream failure",
+      );
+      response.destroy();
+      return;
+    }
+    if (result.op !== "terminal_tail") {
+      response.destroy();
+      return;
+    }
+
+    authorization = await options.authorizeDevice.authorize(input.token);
+    const emissionDenial = tailAuthorizationDenial(authorization, "terminalObserve");
+    if (emissionDenial !== undefined) {
+      logger.warn(
+        {
+          route: "terminal_tail",
+          terminalId: redactSensitiveString(request.observation.terminalId),
+          surfaceClientId: redactSensitiveString(request.observation.surfaceClientId),
+          denial: emissionDenial,
+        },
+        "terminal tail authorization revoked",
+      );
+      await writeTailAuthFailure(response, emissionDenial);
+      return;
+    }
+
+    const page = result.result;
+    if (page.status === "reset") {
+      await writeNdjson(response, { kind: "reset", reset: page });
+      response.end();
+      return;
+    }
+    if (page.status === "unavailable") {
+      await writeNdjson(response, { kind: "unavailable", unavailable: page });
+      response.end();
+      return;
+    }
+    for (const frame of page.frames) {
+      await writeNdjson(response, { kind: "frame", streamId: page.cursor.streamId, frame });
+    }
+    cursor = page.cursor;
+    pages += 1;
+    if (options.tailMaxPages !== undefined && pages >= options.tailMaxPages) {
+      response.end();
+      return;
+    }
+    if (page.frames.length === 0) await sleep(options.tailPollMs ?? 250);
   }
 }
 
@@ -276,16 +403,20 @@ function logFields(
           ? request.tail
           : request.op === "send"
             ? request.turn
-            : undefined;
+            : request.op === "terminal_tail"
+              ? request.observation
+              : undefined;
   const resultStatus =
     result?.op === "send"
       ? result.result.status
       : result?.op === "replay" || result?.op === "tail"
         ? result.result.status
-        : undefined;
+        : result?.op === "terminal_tail"
+          ? result.result.status
+          : undefined;
   return {
     service: "clankie-relay",
-    route: "operator_conversation",
+    route: request.op === "terminal_tail" ? "operator_terminal" : "operator_conversation",
     op: request.op,
     deviceId: redactSensitiveString(authorization.device.deviceId),
     statusCode,
@@ -295,13 +426,22 @@ function logFields(
     ...(subject === undefined || !("surfaceClientId" in subject)
       ? {}
       : { surfaceClientId: redactSensitiveString(subject.surfaceClientId) }),
+    ...(subject === undefined || !("terminalId" in subject)
+      ? {}
+      : { terminalId: redactSensitiveString(subject.terminalId) }),
     ...(resultStatus === undefined ? {} : { resultStatus }),
   };
 }
 
-function tailAuthorizationDenial(authorization: RelayDeviceAuthorization): string | undefined {
+type StreamGrant = "chat" | "terminalObserve";
+
+function tailAuthorizationDenial(
+  authorization: RelayDeviceAuthorization,
+  grant: StreamGrant,
+): string | undefined {
   if (!authorization.authorized) return authorization.denial;
-  return authorization.device.grants.chat ? undefined : "chat_grant_required";
+  if (authorization.device.grants[grant]) return undefined;
+  return grant === "chat" ? "chat_grant_required" : "terminal_observe_grant_required";
 }
 
 async function writeTailAuthFailure(response: ServerResponse, reason: string): Promise<void> {
@@ -312,7 +452,7 @@ async function writeTailAuthFailure(response: ServerResponse, reason: string): P
   response.end();
 }
 
-function publicConversationResult(value: unknown): OperatorConversationServiceResult {
+function publicServiceResult(value: unknown): OperatorConversationServiceResult {
   const parsed = OperatorConversationServiceResultSchema.parse(value);
   return OperatorConversationServiceResultSchema.parse(redactPublicValue(parsed));
 }
@@ -372,6 +512,12 @@ function writeAuthDenial(response: ServerResponse, denial: RelayDeviceAuthDenial
           ? "device_authorization_unavailable"
           : "device_authentication_required";
   writeJson(response, status, { error });
+}
+
+function writeGrantDenial(response: ServerResponse, grant: StreamGrant): void {
+  writeJson(response, 403, {
+    error: grant === "chat" ? "chat_grant_required" : "terminal_observe_grant_required",
+  });
 }
 
 function writeJson(response: ServerResponse, status: number, body: unknown): void {

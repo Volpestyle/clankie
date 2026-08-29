@@ -6,16 +6,22 @@ authorization: every request carries a device-session bearer.
 
 ## Operator conversation boundary
 
-The HTTP surface composes the unchanged `@clankie/protocol` operator-conversation registry contract:
+The HTTP surface composes the strict `@clankie/protocol` operator service contract:
 
 - `POST /operator/v1/dispatch` accepts strict `list`, `roster`, `get`, `create`, `close`, `send`, and `replay` requests. Seat-scoped creates and sends use the same authenticated boundary.
 - `POST /operator/v1/tail` accepts the same strict `tail` request and emits newline-delimited `{ kind: "event", event }`, `{ kind: "recovery", recovery }`, or terminal `{ kind: "auth_failure", failure }` frames.
+- `POST /operator/v1/terminal-tail` accepts a strict `terminal_tail` request and emits bounded native-consumable ANSI `frame`, `reset`, `unavailable`, or `auth_failure` items.
 
 The relay checks the current device record and `chat` grant against the clankie
 service on every request, between tail polls, and immediately before emitting a
 tail page. Expiry, revocation, and grant removal therefore take effect without a
 reconnect. It uses its own captain service credential for the upstream hop;
 device credentials never cross it.
+
+Terminal tails apply the same checks with the distinct `terminalObserve` grant.
+They address Herdr panes by stable terminal id and end with a typed reset when a
+native surface must reconnect for a fresh full redraw. Terminal input is not
+exposed.
 
 Responses pass the strict public schema and value redaction before emission.
 Captain session IDs, continuation tokens, provider credentials, and arbitrary

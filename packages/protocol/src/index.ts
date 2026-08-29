@@ -488,6 +488,175 @@ export const SubmitOperatorConversationTurnResultSchema = z.discriminatedUnion("
 export type SubmitOperatorConversationTurnResult = z.infer<typeof SubmitOperatorConversationTurnResultSchema>;
 
 // ---------------------------------------------------------------------------
+// Pane terminal observation (ADR 0138).
+//
+// Herdr owns terminal rendering and emits an initial full ANSI redraw followed
+// by sequenced diffs. The operator boundary only pages those bounded bytes; it
+// does not reconstruct a terminal or expose Herdr's private client socket.
+// ---------------------------------------------------------------------------
+
+export const OPERATOR_TERMINAL_TAIL_PATH = "/operator/v1/terminal-tail";
+export const OPERATOR_TERMINAL_DIMENSION_MAX = 1_000;
+export const OPERATOR_TERMINAL_FRAME_BASE64_MAX = 16 * 1024 * 1024;
+export const OPERATOR_TERMINAL_TAIL_FRAMES_MAX = 64;
+
+export const OperatorTerminalIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
+export type OperatorTerminalId = z.infer<typeof OperatorTerminalIdSchema>;
+
+export const OperatorTerminalCursorSchema = z
+  .object({
+    streamId: OperatorConversationEventRefSchema,
+    sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+export type OperatorTerminalCursor = z.infer<typeof OperatorTerminalCursorSchema>;
+
+function isCanonicalBase64(value: string): boolean {
+  if (value.length === 0 || value.length % 4 !== 0) return false;
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) {
+    return false;
+  }
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  if (value.endsWith("==")) return (alphabet.indexOf(value.at(-3)!) & 0b1111) === 0;
+  if (value.endsWith("=")) return (alphabet.indexOf(value.at(-2)!) & 0b11) === 0;
+  return true;
+}
+
+export const OperatorTerminalFrameSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    type: z.literal("terminal.frame"),
+    terminalId: OperatorTerminalIdSchema,
+    sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    encoding: z.literal("base64"),
+    data: z
+      .string()
+      .max(OPERATOR_TERMINAL_FRAME_BASE64_MAX)
+      .refine(isCanonicalBase64, { message: "expected non-empty canonical base64" }),
+    columns: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX),
+    rows: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX),
+    /** A full frame resets the native renderer; later frames are ANSI diffs. */
+    full: z.boolean(),
+  })
+  .strict();
+export type OperatorTerminalFrame = z.infer<typeof OperatorTerminalFrameSchema>;
+
+export const OperatorTerminalObservationRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    terminalId: OperatorTerminalIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    columns: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX).optional(),
+    rows: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX).optional(),
+    cursor: OperatorTerminalCursorSchema.optional(),
+    limit: z.number().int().positive().max(OPERATOR_TERMINAL_TAIL_FRAMES_MAX).optional(),
+  })
+  .strict();
+export type OperatorTerminalObservationRequest = z.infer<typeof OperatorTerminalObservationRequestSchema>;
+
+export const OperatorTerminalObservationPageSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("page"),
+    terminalId: OperatorTerminalIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    cursor: OperatorTerminalCursorSchema,
+    frames: z.array(OperatorTerminalFrameSchema).max(OPERATOR_TERMINAL_TAIL_FRAMES_MAX),
+    hasMore: z.boolean(),
+  })
+  .strict()
+  .superRefine((page, context) => {
+    if (
+      page.frames.reduce((total, frame) => total + frame.data.length, 0) > OPERATOR_TERMINAL_FRAME_BASE64_MAX
+    ) {
+      context.addIssue({ code: "custom", path: ["frames"], message: "terminal page exceeds byte bound" });
+    }
+    for (const [index, frame] of page.frames.entries()) {
+      if (frame.terminalId !== page.terminalId) {
+        context.addIssue({
+          code: "custom",
+          path: ["frames", index, "terminalId"],
+          message: "terminal frame belongs to another terminal",
+        });
+      }
+      if (index > 0 && frame.sequence !== page.frames[index - 1]!.sequence + 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["frames", index, "sequence"],
+          message: "terminal page frames must be contiguous",
+        });
+      }
+    }
+    const last = page.frames.at(-1);
+    if (last !== undefined && last.sequence !== page.cursor.sequence) {
+      context.addIssue({
+        code: "custom",
+        path: ["cursor", "sequence"],
+        message: "terminal page cursor must follow its last frame",
+      });
+    }
+  });
+export type OperatorTerminalObservationPage = z.infer<typeof OperatorTerminalObservationPageSchema>;
+
+export const OperatorTerminalObservationResetSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("reset"),
+    terminalId: OperatorTerminalIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    reason: z.enum(["stream_lost", "sequence_expired"]),
+  })
+  .strict();
+export type OperatorTerminalObservationReset = z.infer<typeof OperatorTerminalObservationResetSchema>;
+
+export const OperatorTerminalObservationUnavailableSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("unavailable"),
+    terminalId: OperatorTerminalIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    reason: z.enum(["herdr_unavailable", "terminal_unavailable", "observer_closed", "invalid_frame"]),
+  })
+  .strict();
+export type OperatorTerminalObservationUnavailable = z.infer<
+  typeof OperatorTerminalObservationUnavailableSchema
+>;
+
+export const OperatorTerminalObservationResultSchema = z.discriminatedUnion("status", [
+  OperatorTerminalObservationPageSchema,
+  OperatorTerminalObservationResetSchema,
+  OperatorTerminalObservationUnavailableSchema,
+]);
+export type OperatorTerminalObservationResult = z.infer<typeof OperatorTerminalObservationResultSchema>;
+
+export const OperatorTerminalTailItemSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("frame"),
+      streamId: OperatorConversationEventRefSchema,
+      frame: OperatorTerminalFrameSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal("reset"), reset: OperatorTerminalObservationResetSchema }).strict(),
+  z
+    .object({ kind: z.literal("unavailable"), unavailable: OperatorTerminalObservationUnavailableSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("auth_failure"),
+      failure: z
+        .object({
+          schemaVersion: z.literal(1),
+          outcome: z.literal("auth_failed"),
+          reason: z.enum(["invalid", "expired", "revoked", "unavailable", "terminal_observe_grant_required"]),
+        })
+        .strict(),
+    })
+    .strict(),
+]);
+export type OperatorTerminalTailItem = z.infer<typeof OperatorTerminalTailItemSchema>;
+
+// ---------------------------------------------------------------------------
 // Callable service contract (VUH-769). A transport-neutral request/result
 // envelope any authenticated boundary (the service, the relay) mounts and
 // any RN/macOS/TUI client calls. This is the callable contract; VUH-864 owns the
@@ -602,6 +771,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("terminal_tail"),
+      schemaVersion: z.literal(1),
+      observation: OperatorTerminalObservationRequestSchema,
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
 
@@ -668,6 +844,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("roster"),
       schemaVersion: z.literal(1),
       seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("terminal_tail"),
+      schemaVersion: z.literal(1),
+      result: OperatorTerminalObservationResultSchema,
     })
     .strict(),
 ]);
@@ -2050,11 +2233,9 @@ export type DevicePlatform = z.infer<typeof DevicePlatformSchema>;
 
 /**
  * Per-device capability grants — field-for-field the app's `PairingGrantSet`.
- * `terminalControl` is never granted in this slice: the runner terminal gateway
- * is observe-only, so {@link DeviceRecordSchema} rejects any record that carries
- * it. The grant→terminal-scope mapping (`terminalObserve`→`observe`,
- * `terminalControl`→`control`) lives in `@clankie/terminal-protocol` and is not
- * wired here.
+ * `terminalObserve` authorizes the relay's read-only pane stream (ADR 0138).
+ * `terminalControl` is never granted in this slice, so
+ * {@link DeviceRecordSchema} rejects any record that carries it.
  */
 export const DeviceGrantSetSchema = z.object({
   chat: z.boolean(),

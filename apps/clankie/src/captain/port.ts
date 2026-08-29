@@ -14,7 +14,7 @@ import type {
 export interface CaptainPort {
   /** One Discord text/voice message becomes one captain turn. */
   submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult>;
-  /** Operator conversations (TUI and relay) — same wire contract as before. */
+  /** Callable operator service for conversations and read-only terminal tails. */
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
   ): Promise<OperatorConversationServiceResult>;

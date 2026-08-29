@@ -26,11 +26,11 @@ import type {
 
 type ConversationServiceRequest = Exclude<
   OperatorConversationServiceRequest,
-  { op: "autonomy" } | { op: "roster" }
+  { op: "autonomy" } | { op: "roster" } | { op: "terminal_tail" }
 >;
 type ConversationServiceResult = Exclude<
   OperatorConversationServiceResult,
-  { op: "autonomy" } | { op: "roster" }
+  { op: "autonomy" } | { op: "roster" } | { op: "terminal_tail" }
 >;
 
 const CURSOR_WIDTH = 12;
