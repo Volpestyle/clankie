@@ -6,11 +6,9 @@ import {
   resolveDiscordBridgeCredential,
   resolveDiscordVoiceBridgeCredential,
 } from "@clankie/credential-broker";
-import { createPlayVoiceListener, PLAY_VOICE_DEFAULT_PORT, PLAY_VOICE_PATH } from "@clankie/play-voice";
-import { homedir } from "node:os";
+import { PLAY_VOICE_PATH, startPlayVoiceListener } from "@clankie/play-voice";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { isAbsolute, join, relative } from "node:path";
 import {
   ChannelType,
   Client,
@@ -39,6 +37,7 @@ import {
   createVoiceRealtimePorts,
   discordVoiceTranscriptLogPath,
   DiscordBridgeReceiptStore,
+  coalesceOnce,
   DiscordPresenceSession,
   DiscordTextIngress,
   DiscordVoiceIngress,
@@ -46,12 +45,14 @@ import {
   DiscordVoiceTranscriptStore,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
-  planNonWatchCaptainDiscordAction,
+  admitCaptainDiscordAction,
+  executePlannedCaptainDiscordAction,
   parseVoiceRealtimeEnv,
   routeDiscordRoomText,
   selectInboundImageAttachments,
   tryHandleCaptainDiscordActionRequest,
   tryHandleMusicControlRequest,
+  resolveDiscordReceiptPath,
   resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
   VoiceIdleAutoLeave,
@@ -63,7 +64,6 @@ import {
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
 } from "@clankie/discord-presence-core";
-import { discordPresenceLaneAddress } from "@clankie/interactive-environment";
 import {
   DiscordPresenceWriteSchema,
   type DiscordCaptainActionInput,
@@ -189,7 +189,12 @@ const roleBindings: DiscordRoleBindings = {
 };
 const voiceJoinPolicy = parseDiscordVoiceJoinPolicy(process.env.DISCORD_VOICE_JOIN_POLICY);
 const receipts = new DiscordBridgeReceiptStore({
-  path: bridgeReceiptPath(),
+  path: resolveDiscordReceiptPath({
+    configured: process.env.DISCORD_BRIDGE_RECEIPT_PATH,
+    envName: "DISCORD_BRIDGE_RECEIPT_PATH",
+    defaultFileName: "discord-live-receipts.jsonl",
+    requireOutsideWorkspace: true,
+  }),
 });
 const textIngressEnabled = process.env.DISCORD_TEXT_INGRESS_ENABLED === "true";
 const textIngressContextLimit = parseContextMessageLimit(process.env.DISCORD_INGRESS_CONTEXT_MESSAGES);
@@ -383,10 +388,10 @@ const voiceIdleAutoLeave =
 // Clankie's play voice seam (ADR 0064): local or hosted play reports what it
 // just did, and the active Discord body lets his live persona decide whether to
 // commentate. No voice session means no listener and no Discord capability.
-const playVoiceListener =
+const startedPlayVoice =
   voiceSession === undefined
     ? undefined
-    : createPlayVoiceListener({
+    : await startPlayVoiceListener({
         // The active body owns the listener, so it owns first-run minting.
         token: await ensurePlayVoiceCredential({ store: credentialStore }),
         narrate: (text, options) => voiceSession.narrate(text, options),
@@ -399,18 +404,19 @@ const playVoiceListener =
         // Read at attach time so a play loop that starts mid-call learns the
         // room immediately instead of waiting for the next join or leave.
         room: () => ({ listening: voiceSession.status().active }),
+        // Hearing is push-only: lines that already passed the consent boundary
+        // are handed on as they happen.
+        subscribeTranscript: (onLine) => voiceSession.subscribeTranscript(onLine),
       });
-let stopPlayVoiceTranscript: (() => void) | undefined;
-if (playVoiceListener !== undefined && voiceSession !== undefined) {
-  const port = await playVoiceListener.listen(PLAY_VOICE_DEFAULT_PORT);
-  // Hearing is push-only, so the bridge starts retaining nothing new: lines
-  // that already passed the consent boundary are handed on as they happen.
-  stopPlayVoiceTranscript = voiceSession.subscribeTranscript((line) =>
-    playVoiceListener.publishUtterance(line),
-  );
+const playVoiceListener = startedPlayVoice?.listener;
+let stopPlayVoiceTranscript = startedPlayVoice?.stopTranscript;
+if (startedPlayVoice !== undefined) {
   // Text lands on the same seam (see `messageCreate`), so the room can steer a
   // playthrough without anyone opting into voice capture.
-  console.info({ port, path: PLAY_VOICE_PATH }, "Discord bridge play voice seam listening on loopback");
+  console.info(
+    { port: startedPlayVoice.port, path: PLAY_VOICE_PATH },
+    "Discord bridge play voice seam listening on loopback",
+  );
 }
 // The gateway is the authority on which servers he is in and how much of each
 // he can see; the presence record is how that knowledge reaches the captain.
@@ -1271,35 +1277,17 @@ async function locateVoiceMember(
 async function executeCaptainDiscordAction(
   input: DiscordCaptainActionInput,
 ): Promise<DiscordCaptainActionResult> {
-  if (input.guildId === undefined) {
-    return { ok: false, message: "That Discord action is not available in DMs." };
-  }
+  const admitted = admitCaptainDiscordAction({
+    action: input,
+    admittedGuildIds: ingressGuildIds,
+    admittedChannelIds: ingressChannelIds,
+    ownsProgressMessage: (id) => toolProgressMessageIds.has(id),
+  });
+  if (admitted.kind === "refuse") return admitted.result;
   let channelId = input.channelId;
-  let plan = planNonWatchCaptainDiscordAction(input);
-  if (plan !== undefined) {
-    if (
-      input.action === "tool_progress" &&
-      input.progressMessageId !== undefined &&
-      !toolProgressMessageIds.has(input.progressMessageId)
-    ) {
-      return { ok: false, message: "That tool activity card does not belong to this process." };
-    }
-    if (
-      !ingressGuildIds.has(input.guildId) ||
-      (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
-    ) {
-      return {
-        ok: false,
-        message:
-          input.action === "react" || input.action === "unreact"
-            ? "That message is outside my admitted Discord channels."
-            : input.action === "send_text_update" || input.action === "tool_progress"
-              ? "That channel is outside my admitted Discord channels."
-              : "Threads only work in my admitted server channels.",
-      };
-    }
-  } else {
-    const guild = client.guilds.cache.get(input.guildId);
+  let plan = admitted.kind === "plan" ? admitted.plan : undefined;
+  if (plan === undefined) {
+    const guild = client.guilds.cache.get(admitted.guildId);
     const member =
       guild === undefined
         ? undefined
@@ -1320,10 +1308,10 @@ async function executeCaptainDiscordAction(
     const active = voiceSession?.status();
     if (
       channelId.length === 0 ||
-      !voiceGuildIds.has(input.guildId) ||
+      !voiceGuildIds.has(admitted.guildId) ||
       (voiceChannelIds.size > 0 && !voiceChannelIds.has(channelId)) ||
       active?.active !== true ||
-      active.guildId !== input.guildId ||
+      active.guildId !== admitted.guildId ||
       active.channelId !== channelId
     ) {
       return { ok: false, message: "I need to be in your admitted voice channel first." };
@@ -1333,8 +1321,8 @@ async function executeCaptainDiscordAction(
         input.action === "watch_start" ? "discord.presence.activity_start" : "discord.presence.activity_stop",
       payload:
         input.action === "watch_start"
-          ? { kind: "activity_start", guildId: input.guildId, channelId, surface: "gba_emulator" }
-          : { kind: "activity_stop", guildId: input.guildId, channelId },
+          ? { kind: "activity_start", guildId: admitted.guildId, channelId, surface: "gba_emulator" }
+          : { kind: "activity_stop", guildId: admitted.guildId, channelId },
       successMessage:
         input.action === "watch_start"
           ? "I posted the live play launch in voice."
@@ -1343,34 +1331,17 @@ async function executeCaptainDiscordAction(
   }
 
   try {
-    const health = await presencePort.getHealth();
-    const action = await presencePort.executeDiscordPresenceAction(
-      DiscordPresenceWriteSchema.parse({
-        schemaVersion: 1,
-        idempotencyKey: `captain:${input.callId}:${input.action}`,
-        action: plan.action,
-        identity: {
-          presenceSessionId: discordPresenceLaneAddress({ guildId: input.guildId, channelId }),
-          correlationId: `discord-captain-action:${input.callId}`,
-          profileHash: health.profileHash,
-          characterId,
-          credentialRef: "discord_bot",
-          transportKind: "bot",
-        },
-        payload: plan.payload,
-      }),
-    );
-    if (input.action === "tool_progress") {
-      if (action.messageId !== undefined) toolProgressMessageIds.add(action.messageId);
-      if (input.phase !== "running" && input.progressMessageId !== undefined) {
-        toolProgressMessageIds.delete(input.progressMessageId);
-      }
-    }
-    return {
-      ok: true,
-      message: plan.successMessage,
-      ...(action.messageId === undefined ? {} : { messageId: action.messageId }),
-    };
+    return await executePlannedCaptainDiscordAction({
+      call: input,
+      plan,
+      guildId: admitted.guildId,
+      channelId,
+      characterId,
+      credentialRef: "discord_bot",
+      transportKind: "bot",
+      presencePort,
+      progressMessageIds: toolProgressMessageIds,
+    });
   } catch (error) {
     return {
       ok: false,
@@ -1456,24 +1427,6 @@ function selectDiscordMessageImages(message: Message) {
   );
 }
 
-function bridgeReceiptPath(): string {
-  const configured = process.env.DISCORD_BRIDGE_RECEIPT_PATH;
-  if (configured) {
-    const fromWorkspace = relative(process.cwd(), configured);
-    if (
-      !isAbsolute(configured) ||
-      fromWorkspace === "" ||
-      (!fromWorkspace.startsWith("..") && !isAbsolute(fromWorkspace))
-    ) {
-      throw new Error("DISCORD_BRIDGE_RECEIPT_PATH must be absolute and outside the repository workspace");
-    }
-    return configured;
-  }
-  const stateHome = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
-  if (!isAbsolute(stateHome)) throw new Error("XDG_STATE_HOME must be absolute");
-  return join(stateHome, "clankie", "discord-live-receipts.jsonl");
-}
-
 function recordReceipt(
   type: DiscordBridgeReceiptType,
   data: DiscordBridgeReceipt["data"],
@@ -1513,45 +1466,40 @@ function reportPresencePhaseFailure(error: unknown): void {
   );
 }
 
-let shutdownPromise: Promise<void> | undefined;
 let musicControlServer: ReturnType<typeof createServer> | undefined;
-async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  if (shutdownPromise !== undefined) return shutdownPromise;
-  shutdownPromise = (async () => {
-    await shutdownDiscordBridge({
-      stopIngress: async () => {
-        shuttingDown = true;
-        voiceIdleAutoLeave?.stop();
-        if (membershipSyncTimer !== undefined) clearTimeout(membershipSyncTimer);
-        if (catchUpTimer !== undefined) clearInterval(catchUpTimer);
-        await Promise.all([
-          (async () => {
-            stopPlayVoiceTranscript?.();
-            stopPlayVoiceTranscript = undefined;
-            await playVoiceListener?.close();
-          })(),
-          new Promise<void>((resolve) => {
-            if (musicControlServer?.listening !== true) return resolve();
-            musicControlServer.close(() => resolve());
-          }),
-        ]);
-      },
-      leaveVoice: () =>
-        voiceGateway?.leave("bridge_shutdown") ?? voiceSession?.leave("bridge_shutdown") ?? Promise.resolve(),
-      disposeVoiceSession: () => voiceSession?.dispose() ?? Promise.resolve(),
-      disposeVoiceGateway: () => voiceGateway?.dispose(),
-      closeVox: () => vox?.close(),
-      destroyDiscord: () => client.destroy(),
-      stopPresence: async () => {
-        await presenceSession.stop();
-      },
-      recordStopped: async () => {
-        await recordReceipt("discord.bridge.stopped", { signal });
-      },
-    });
-  })();
-  return shutdownPromise;
-}
+const shutdown = coalesceOnce(async (signal: NodeJS.Signals) => {
+  await shutdownDiscordBridge({
+    stopIngress: async () => {
+      shuttingDown = true;
+      voiceIdleAutoLeave?.stop();
+      if (membershipSyncTimer !== undefined) clearTimeout(membershipSyncTimer);
+      if (catchUpTimer !== undefined) clearInterval(catchUpTimer);
+      await Promise.all([
+        (async () => {
+          stopPlayVoiceTranscript?.();
+          stopPlayVoiceTranscript = undefined;
+          await playVoiceListener?.close();
+        })(),
+        new Promise<void>((resolve) => {
+          if (musicControlServer?.listening !== true) return resolve();
+          musicControlServer.close(() => resolve());
+        }),
+      ]);
+    },
+    leaveVoice: () =>
+      voiceGateway?.leave("bridge_shutdown") ?? voiceSession?.leave("bridge_shutdown") ?? Promise.resolve(),
+    disposeVoiceSession: () => voiceSession?.dispose() ?? Promise.resolve(),
+    disposeVoiceGateway: () => voiceGateway?.dispose(),
+    closeVox: () => vox?.close(),
+    destroyDiscord: () => client.destroy(),
+    stopPresence: async () => {
+      await presenceSession.stop();
+    },
+    recordStopped: async () => {
+      await recordReceipt("discord.bridge.stopped", { signal });
+    },
+  });
+});
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

@@ -3,6 +3,7 @@ import {
   createDefaultCredentialStore,
   resolveDiscordVoiceBridgeCredential,
 } from "@clankie/credential-broker";
+import { writeCheckReport } from "@clankie/discord-presence-core";
 import { inspectDiscordVoiceReadiness } from "./voice-readiness.ts";
 import {
   applyDiscordSettingsToEnvironment,
@@ -36,16 +37,11 @@ const report = await inspectDiscordVoiceReadiness({
   api,
 });
 
-if (process.argv.includes("--json")) {
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-} else {
-  const width = Math.max(...report.checks.map((check) => check.name.length));
-  for (const check of report.checks) {
-    process.stdout.write(`${check.ok ? "PASS" : "FAIL"}  ${check.name.padEnd(width)}  ${check.detail}\n`);
-    if (!check.ok && check.remediation) {
-      process.stdout.write(`      ${"".padEnd(width)}  ${check.remediation}\n`);
-    }
-  }
-  process.stdout.write(`\nDiscord group voice readiness: ${report.ready ? "READY" : "NOT READY"}\n`);
-}
+writeCheckReport({
+  checks: report.checks,
+  json: process.argv.includes("--json"),
+  jsonPayload: report,
+  title: "Discord group voice readiness",
+  outcome: report.ready ? "READY" : "NOT READY",
+});
 if (!report.ready) process.exitCode = 1;

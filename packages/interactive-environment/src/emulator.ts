@@ -186,34 +186,6 @@ const GbaEmulatorCommandBaseSchema = z
   })
   .strict();
 
-export const GbaEmulatorJoinCommandSchema = GbaEmulatorCommandBaseSchema.extend({
-  type: z.literal("join"),
-  session: GbaEmulatorSessionSpecSchema,
-})
-  .strict()
-  .superRefine((command, context) => {
-    const commandAuthority = command.context.authority;
-    const sessionAuthority = command.session.requestedBy;
-    if (
-      commandAuthority.tier !== sessionAuthority.tier ||
-      commandAuthority.principal.kind !== sessionAuthority.principal.kind ||
-      commandAuthority.principal.id !== sessionAuthority.principal.id
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["session", "requestedBy"],
-        message: "join authority mismatch",
-      });
-    }
-  });
-export const GbaEmulatorStatusCommandSchema = GbaEmulatorCommandBaseSchema.extend({
-  type: z.literal("status"),
-  sessionId: EnvironmentSessionIdSchema.optional(),
-}).strict();
-export const GbaEmulatorCancelJoinCommandSchema = GbaEmulatorCommandBaseSchema.extend({
-  type: z.literal("cancel_join"),
-  sessionId: EnvironmentSessionIdSchema,
-}).strict();
 export const GbaEmulatorStartActionCommandSchema = GbaEmulatorCommandBaseSchema.extend({
   type: z.literal("start_action"),
   sessionId: EnvironmentSessionIdSchema,
@@ -221,50 +193,11 @@ export const GbaEmulatorStartActionCommandSchema = GbaEmulatorCommandBaseSchema.
   action: GbaEmulatorActionRequestSchema,
 }).strict();
 export type GbaEmulatorStartActionCommand = z.infer<typeof GbaEmulatorStartActionCommandSchema>;
-export const GbaEmulatorActionStatusCommandSchema = GbaEmulatorCommandBaseSchema.extend({
-  type: z.literal("action_status"),
-  sessionId: EnvironmentSessionIdSchema,
-  actionId: ActionIdSchema,
-}).strict();
-export const GbaEmulatorCancelActionCommandSchema = GbaEmulatorCommandBaseSchema.extend({
-  type: z.literal("cancel_action"),
-  sessionId: EnvironmentSessionIdSchema,
-  actionId: ActionIdSchema,
-  reason: z.string().min(1).max(512),
-}).strict();
-export const GbaEmulatorSteerCommandSchema = GbaEmulatorCommandBaseSchema.extend({
-  type: z.literal("steer"),
-  sessionId: EnvironmentSessionIdSchema,
-  intent: z.string().min(1).max(512),
-}).strict();
 export const GbaEmulatorPauseCommandSchema = GbaEmulatorCommandBaseSchema.extend({
   type: z.literal("pause"),
   sessionId: EnvironmentSessionIdSchema,
   reason: z.string().min(1).max(512),
 }).strict();
-export const GbaEmulatorResumeCommandSchema = GbaEmulatorCommandBaseSchema.extend({
-  type: z.literal("resume"),
-  sessionId: EnvironmentSessionIdSchema,
-}).strict();
-export const GbaEmulatorDisconnectCommandSchema = GbaEmulatorCommandBaseSchema.extend({
-  type: z.literal("disconnect"),
-  sessionId: EnvironmentSessionIdSchema,
-  reason: z.string().min(1).max(512),
-}).strict();
-
-export const GbaEmulatorCommandSchema = z.union([
-  GbaEmulatorJoinCommandSchema,
-  GbaEmulatorStatusCommandSchema,
-  GbaEmulatorCancelJoinCommandSchema,
-  GbaEmulatorStartActionCommandSchema,
-  GbaEmulatorActionStatusCommandSchema,
-  GbaEmulatorCancelActionCommandSchema,
-  GbaEmulatorSteerCommandSchema,
-  GbaEmulatorPauseCommandSchema,
-  GbaEmulatorResumeCommandSchema,
-  GbaEmulatorDisconnectCommandSchema,
-]);
-export type GbaEmulatorCommand = z.infer<typeof GbaEmulatorCommandSchema>;
 
 const ObservationSummarySchema = z.string().min(1).max(1_024);
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);

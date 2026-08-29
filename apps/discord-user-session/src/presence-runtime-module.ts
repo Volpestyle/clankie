@@ -2,7 +2,7 @@ import {
   createDefaultCredentialStore,
   DiscordUserSessionCredentialProvider,
 } from "@clankie/credential-broker";
-import { parseDiscordIdSet } from "@clankie/discord-presence-core";
+import { parseDiscordIdSet, presenceActGrantRequest } from "@clankie/discord-presence-core";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import type {
   DiscordPresenceWrite,
@@ -54,19 +54,7 @@ export function createDiscordUserPresenceRuntime(
   });
   return {
     async execute(write, session) {
-      const guildIds = "guildId" in write.payload ? [write.payload.guildId] : [];
-      const channelIds = "channelId" in write.payload ? [write.payload.channelId] : [];
-      const principalId = write.identity.workerRunId ?? write.identity.characterId;
-      const capabilityScopeId =
-        write.identity.missionId ?? `discord-presence:${write.identity.presenceSessionId ?? "unknown"}`;
-      const request = {
-        principalId,
-        missionId: capabilityScopeId,
-        profileHash: write.identity.profileHash,
-        capability: "discord.presence.act" as const,
-        guildIds,
-        channelIds,
-      };
+      const request = presenceActGrantRequest(write);
       const grant = await provider.issueGrant(request);
       const userToken = await provider.resolveUserToken({ grant, ...request });
       return new DiscordUserPresenceRuntime({

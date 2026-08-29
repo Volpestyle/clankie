@@ -1,5 +1,5 @@
 import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@clankie/credential-broker";
-import { parseDiscordIdSet } from "@clankie/discord-presence-core";
+import { parseDiscordIdSet, presenceActGrantRequest } from "@clankie/discord-presence-core";
 import type { DiscordActivitySurface, DiscordPresenceWrite } from "@clankie/protocol";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import { discordAttachmentRoot } from "@clankie/settings";
@@ -34,21 +34,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
   });
   return {
     async execute(write, session) {
-      const guildIds = "guildId" in write.payload ? [write.payload.guildId] : [];
-      const channelIds = "channelId" in write.payload ? [write.payload.channelId] : [];
-      const principalId = write.identity.workerRunId ?? write.identity.characterId;
-      // Capability grants retain a legacy missionId wire slot. Keep presence
-      // grants isolated under the stable presence session id.
-      const capabilityScopeId =
-        write.identity.missionId ?? `discord-presence:${write.identity.presenceSessionId ?? "unknown"}`;
-      const request = {
-        principalId,
-        missionId: capabilityScopeId,
-        profileHash: write.identity.profileHash,
-        capability: "discord.presence.act" as const,
-        guildIds,
-        channelIds,
-      };
+      const request = presenceActGrantRequest(write);
       const grant = await provider.issueGrant(request);
       const botToken = await provider.resolveBotToken({ grant, ...request });
       return new DiscordBotPresenceRuntime({

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DeviceListItemSchema, type DeviceListItem } from "@clankie/protocol";
+import { operatorRequest } from "./operator-request.ts";
 import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
 
 // Narrow operator client for device management (VUH-727): list paired devices
@@ -47,34 +48,22 @@ export interface DevicesRequestOptions {
   readonly signal?: AbortSignal;
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
-function requireOperatorToken(options: DevicesRequestOptions): string {
-  const token = options.operatorToken?.trim();
-  if (token === undefined || token.length === 0) throw new DevicesCommandError("unauthorized");
-  return token;
-}
-
 async function operatorFetch(
   path: string,
   method: "GET" | "POST",
   options: DevicesRequestOptions,
 ): Promise<Response> {
-  const token = requireOperatorToken(options);
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const url = new URL(path, options.controlPlaneUrl ?? DEFAULT_CONTROL_PLANE_URL);
-  try {
-    return await fetchImpl(url, {
-      method,
-      headers: { authorization: `Bearer ${token}` },
+  return operatorRequest(
+    path,
+    method,
+    {
+      controlPlaneUrl: options.controlPlaneUrl ?? DEFAULT_CONTROL_PLANE_URL,
+      ...(options.operatorToken === undefined ? {} : { operatorToken: options.operatorToken }),
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-  } catch (error) {
-    if (options.signal?.aborted === true || isAbortError(error)) throw new DevicesCommandError("interrupted");
-    throw new DevicesCommandError("unavailable");
-  }
+    },
+    DevicesCommandError,
+  );
 }
 
 /** List paired devices. Throws {@link DevicesCommandError} on every failure. */

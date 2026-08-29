@@ -3,25 +3,7 @@
  * service's presence-status projection. Shows the live presence phase
  * (`present`, `voice_active`, …) or the reason nothing can be shown.
  */
-import { z } from "zod";
-
-/** Read-only operator projection of the published presence phase. */
-const PRESENCE_STATUS_PATH = "/v1/discord/presence-status";
-
-const PresenceStatusSchema = z.object({
-  schemaVersion: z.literal(1),
-  sessions: z.array(
-    z.object({
-      phase: z.string().min(1),
-      gatewayConnected: z.boolean(),
-      voiceGuildCount: z.number().int().nonnegative(),
-      activityCount: z.number().int().nonnegative(),
-    }),
-  ),
-});
-
-/** Phases that count as a live, acting presence. */
-const LIVE_PRESENCE_PHASES: ReadonlySet<string> = new Set(["present", "voice_active", "go_live_active"]);
+import { pickPresenceSession, PRESENCE_STATUS_PATH, PresenceStatusSchema } from "./presence-status.ts";
 
 export interface PresenceSnapshot {
   readonly phase: string;
@@ -90,8 +72,7 @@ export class PresencePoller {
       if (!response.ok) return { phase: "service unavailable" };
       const parsed = PresenceStatusSchema.safeParse(await response.json());
       if (!parsed.success) return { phase: "status unavailable" };
-      const live = parsed.data.sessions.filter((session) => LIVE_PRESENCE_PHASES.has(session.phase));
-      const session = live[0] ?? parsed.data.sessions[0];
+      const session = pickPresenceSession(parsed.data);
       return session === undefined ? { phase: "not connected" } : { phase: session.phase };
     } catch {
       return { phase: "unreachable" };

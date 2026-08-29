@@ -1,4 +1,5 @@
 import { PairingOfferWireSchema, type PairingOfferWire } from "@clankie/protocol";
+import { operatorRequest } from "./operator-request.ts";
 
 // Narrow client for the device pairing-offer boundary. `clankie pair`
 // requests a short-lived, single-use pairing offer from the clankie service and
@@ -60,36 +61,24 @@ export interface RequestPairingOfferOptions {
   readonly signal?: AbortSignal;
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /**
  * Request one single-use pairing offer. Throws {@link PairingOfferError} on every
  * failure so the caller can fail closed uniformly. Never surfaces response-body
  * text or secrets in the thrown message.
  */
 export async function requestPairingOffer(options: RequestPairingOfferOptions = {}): Promise<PairingOffer> {
-  const operatorToken = options.operatorToken?.trim();
-  if (operatorToken === undefined || operatorToken.length === 0) {
-    throw new PairingOfferError("unauthorized");
-  }
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const url = new URL(PAIRING_OFFER_PATH, options.controlPlaneUrl ?? DEFAULT_CONTROL_PLANE_URL);
-
-  let response: Response;
-  try {
-    response = await fetchImpl(url, {
-      method: "POST",
-      headers: { authorization: `Bearer ${operatorToken}`, "content-type": "application/json" },
-      body: "{}",
+  const response = await operatorRequest(
+    PAIRING_OFFER_PATH,
+    "POST",
+    {
+      controlPlaneUrl: options.controlPlaneUrl ?? DEFAULT_CONTROL_PLANE_URL,
+      ...(options.operatorToken === undefined ? {} : { operatorToken: options.operatorToken }),
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-  } catch (error) {
-    if (options.signal?.aborted === true || isAbortError(error)) throw new PairingOfferError("interrupted");
-    // ECONNREFUSED (service not running) and other transport faults: fail closed.
-    throw new PairingOfferError("unavailable");
-  }
+    },
+    PairingOfferError,
+    { jsonBody: {}, contentType: "application/json" },
+  );
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new PairingOfferError("unauthorized");

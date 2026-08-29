@@ -1,3 +1,4 @@
+import { envOverrideReaders } from "./env-override.ts";
 import { VoiceSettingsSchema, type VoiceSettings } from "./schema.ts";
 
 /**
@@ -16,30 +17,23 @@ export function resolveVoiceSettings(
   stored: VoiceSettings,
   env: NodeJS.ProcessEnv = process.env,
 ): ResolvedVoiceSettings {
-  const overridden: string[] = [];
   const merged: Record<string, unknown> = { ...stored };
+  const { overridden, takeString } = envOverrideReaders(env);
 
-  const takeString = (field: keyof VoiceSettings, name: string): void => {
-    const value = env[name]?.trim();
-    if (value === undefined || value.length === 0) return;
-    merged[field] = value;
-    overridden.push(name);
-  };
-
-  takeString("realtimeProvider", "CLANKIE_VOICE_REALTIME_PROVIDER");
-  takeString("ttsProvider", "CLANKIE_VOICE_TTS_PROVIDER");
+  takeString(merged, "realtimeProvider", "CLANKIE_VOICE_REALTIME_PROVIDER");
+  takeString(merged, "ttsProvider", "CLANKIE_VOICE_TTS_PROVIDER");
   const provider = merged.realtimeProvider === "xai" ? "xai" : "openai";
   if (provider === "xai") {
-    takeString("xAiRealtimeModel", "CLANKIE_VOICE_REALTIME_MODEL");
-    takeString("xAiVoice", "CLANKIE_VOICE_REALTIME_VOICE");
-    takeString("xAiReasoningEffort", "CLANKIE_VOICE_XAI_REASONING_EFFORT");
+    takeString(merged, "xAiRealtimeModel", "CLANKIE_VOICE_REALTIME_MODEL");
+    takeString(merged, "xAiVoice", "CLANKIE_VOICE_REALTIME_VOICE");
+    takeString(merged, "xAiReasoningEffort", "CLANKIE_VOICE_XAI_REASONING_EFFORT");
   } else {
-    takeString("openAiRealtimeModel", "CLANKIE_VOICE_REALTIME_MODEL");
-    takeString("openAiTranscribeModel", "CLANKIE_VOICE_TRANSCRIBE_MODEL");
-    takeString("openAiVoice", "CLANKIE_VOICE_REALTIME_VOICE");
+    takeString(merged, "openAiRealtimeModel", "CLANKIE_VOICE_REALTIME_MODEL");
+    takeString(merged, "openAiTranscribeModel", "CLANKIE_VOICE_TRANSCRIBE_MODEL");
+    takeString(merged, "openAiVoice", "CLANKIE_VOICE_REALTIME_VOICE");
   }
-  takeString("elevenLabsVoiceId", "CLANKIE_VOICE_ELEVENLABS_VOICE_ID");
-  takeString("elevenLabsModelId", "CLANKIE_VOICE_ELEVENLABS_MODEL_ID");
+  takeString(merged, "elevenLabsVoiceId", "CLANKIE_VOICE_ELEVENLABS_VOICE_ID");
+  takeString(merged, "elevenLabsModelId", "CLANKIE_VOICE_ELEVENLABS_MODEL_ID");
 
   return {
     settings: VoiceSettingsSchema.parse(merged),

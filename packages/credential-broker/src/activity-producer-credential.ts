@@ -1,6 +1,5 @@
-import { randomBytes } from "node:crypto";
 import type { CredentialStore } from "./credential-store.ts";
-import { ensureStoredBearer, mintStoredBearer, resolveStoredBearer } from "./stored-bearer.ts";
+import { defineBrokeredBearer } from "./stored-bearer.ts";
 
 /**
  * Local bearer for the activity plane's frame producer endpoint (ADR 0047).
@@ -38,56 +37,38 @@ export interface ActivityProducerCredentialOptions {
   readonly store?: CredentialStore;
 }
 
-interface MintActivityProducerCredentialOptions extends ActivityProducerCredentialOptions {
-  readonly randomBytes?: (size: number) => Buffer;
-}
+const bearer = defineBrokeredBearer({
+  providerId: ACTIVITY_PRODUCER_CREDENTIAL_PROVIDER_ID,
+  prefix: ACTIVITY_PRODUCER_TOKEN_PREFIX,
+  pattern: ACTIVITY_PRODUCER_TOKEN_PATTERN,
+  mintSubject: "activity producer",
+  resolveSubject: "activity producer",
+  ErrorClass: ActivityProducerCredentialError,
+  forbiddenEnv: {
+    name: ACTIVITY_PRODUCER_FORBIDDEN_ENV,
+    throwForbidden: (envName) =>
+      new ActivityProducerCredentialError(
+        "environment_token_forbidden",
+        `${envName} must not be set; the activity producer bearer lives in the credential broker`,
+      ),
+  },
+});
 
 /** Mints the local bearer shared by the activity server and the runner sink. */
-export function mintActivityProducerToken(random: (size: number) => Buffer = randomBytes): string {
-  return mintStoredBearer(ACTIVITY_PRODUCER_TOKEN_PREFIX, "activity producer", random);
-}
+export const mintActivityProducerToken = bearer.mint;
 
 /**
  * Refuse to start when the token is supplied through the environment. A process
  * that accepts both would silently prefer the weaker source.
  */
-export function assertNoEnvironmentActivityProducerToken(env: NodeJS.ProcessEnv = process.env): void {
-  if (env[ACTIVITY_PRODUCER_FORBIDDEN_ENV]) {
-    throw new ActivityProducerCredentialError(
-      "environment_token_forbidden",
-      `${ACTIVITY_PRODUCER_FORBIDDEN_ENV} must not be set; the activity producer bearer lives in the credential broker`,
-    );
-  }
-}
+export const assertNoEnvironmentActivityProducerToken = bearer.assertNoEnvironmentToken;
 
 /** Reads the broker-owned producer bearer. Returns undefined when unset. */
-export async function resolveActivityProducerCredential(
-  options: ActivityProducerCredentialOptions = {},
-): Promise<string | undefined> {
-  assertNoEnvironmentActivityProducerToken(options.env ?? process.env);
-  return resolveStoredBearer(
-    options,
-    ACTIVITY_PRODUCER_CREDENTIAL_PROVIDER_ID,
-    ACTIVITY_PRODUCER_TOKEN_PATTERN,
-    "activity producer",
-    ActivityProducerCredentialError,
-  );
-}
+export const resolveActivityProducerCredential = bearer.resolve;
 
 /**
  * Activity-server-owned first-run bootstrap. The server owns the listener, so it
  * owns the mint; the runner only ever resolves, which avoids a cross-process
  * mint race producing two different tokens.
  */
-export async function ensureActivityProducerCredential(
-  options: MintActivityProducerCredentialOptions = {},
-): Promise<string> {
-  return ensureStoredBearer(
-    options,
-    ACTIVITY_PRODUCER_CREDENTIAL_PROVIDER_ID,
-    () => mintActivityProducerToken(options.randomBytes),
-    resolveActivityProducerCredential,
-    "activity producer",
-    ActivityProducerCredentialError,
-  );
-}
+export const ensureActivityProducerCredential = bearer.ensure;

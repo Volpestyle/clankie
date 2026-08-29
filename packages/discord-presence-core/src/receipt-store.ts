@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { z } from "zod";
 
 const currentReceiptTypes = [
@@ -185,6 +186,36 @@ export class DiscordBridgeReceiptStore {
 
 export function parseDiscordBridgeReceipt(value: unknown): DiscordBridgeReceipt {
   return DiscordBridgeReceiptSchema.parse(value);
+}
+
+/**
+ * Default JSONL path under XDG state. Writers also gate an override to an
+ * absolute path outside the workspace; CLIs that only read may skip that gate.
+ */
+export function resolveDiscordReceiptPath(input: {
+  configured: string | undefined;
+  envName: string;
+  defaultFileName: string;
+  env?: NodeJS.ProcessEnv;
+  requireOutsideWorkspace?: boolean;
+}): string {
+  const env = input.env ?? process.env;
+  if (input.configured) {
+    if (input.requireOutsideWorkspace === true) {
+      const fromWorkspace = relative(process.cwd(), input.configured);
+      if (
+        !isAbsolute(input.configured) ||
+        fromWorkspace === "" ||
+        (!fromWorkspace.startsWith("..") && !isAbsolute(fromWorkspace))
+      ) {
+        throw new Error(`${input.envName} must be absolute and outside the repository workspace`);
+      }
+    }
+    return input.configured;
+  }
+  const stateHome = env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
+  if (!isAbsolute(stateHome)) throw new Error("XDG_STATE_HOME must be absolute");
+  return join(stateHome, "clankie", input.defaultFileName);
 }
 
 /** Read bounded JSONL evidence, tolerating only a final unterminated write. */

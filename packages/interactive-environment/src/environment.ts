@@ -74,11 +74,6 @@ export const EnvironmentResourceBoundsV2Schema = z.discriminatedUnion("profile",
 ]);
 export type EnvironmentResourceBoundsV2 = z.infer<typeof EnvironmentResourceBoundsV2Schema>;
 
-/** @deprecated Use EnvironmentResourceBoundsV2Schema for new sessions. */
-export const EnvironmentResourceBoundsSchema = EnvironmentResourceBoundsV1Schema;
-/** @deprecated Frozen v1 type retained for source compatibility. */
-export type EnvironmentResourceBounds = EnvironmentResourceBoundsV1;
-
 export const EnvironmentSessionSpecV1Schema = z
   .object({
     schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),

@@ -118,10 +118,15 @@ export {
   type VoicePresenceControlInput,
 } from "./voice-control.ts";
 export {
+  admitCaptainDiscordAction,
+  executePlannedCaptainDiscordAction,
   planNonWatchCaptainDiscordAction,
   tryHandleCaptainDiscordActionRequest,
+  type CaptainDiscordActionAdmission,
   type CaptainDiscordActionPlan,
 } from "./captain-action-control.ts";
+export { presenceActGrantRequest } from "./presence-grant.ts";
+export { coalesceOnce, runShutdownSteps } from "./shutdown.ts";
 export {
   DiscordVoiceConsentRegistry,
   type DiscordVoiceConsentPolicy,
@@ -213,10 +218,12 @@ export {
   DiscordBridgeReceiptStore,
   parseDiscordBridgeReceipt,
   readDiscordBridgeReceipts,
+  resolveDiscordReceiptPath,
   type DiscordBridgeReceipt,
   type DiscordBridgeReceiptType,
   type DiscordBridgeReceiptStoreOptions,
 } from "./receipt-store.ts";
+export { writeCheckReport, type CheckReportLine } from "./check-report.ts";
 export {
   discordVoiceTranscriptLogPath,
   DiscordVoiceTranscriptLogEntrySchema,

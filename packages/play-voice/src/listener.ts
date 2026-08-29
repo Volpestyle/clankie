@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
   PLAY_UTTERANCE_MAX_CHARS,
+  PLAY_VOICE_DEFAULT_PORT,
   PLAY_VOICE_PATH,
   PLAY_VOICE_SCHEMA_VERSION,
   PlayClientMessageSchema,
@@ -102,6 +103,22 @@ export interface PlayVoiceListener {
 
 const DEFAULT_MAX_PAYLOAD_BYTES = 64 * 1024;
 const OPEN = 1;
+
+/**
+ * Create the loopback listener, bind it, and forward transcript lines into it.
+ * Both Discord bodies host this the same way; stay-id stitching stays in emit.
+ */
+export async function startPlayVoiceListener(
+  options: PlayVoiceListenerOptions & {
+    subscribeTranscript: (onLine: (line: string) => void) => () => void;
+    port?: number;
+  },
+): Promise<{ listener: PlayVoiceListener; stopTranscript: () => void; port: number }> {
+  const listener = createPlayVoiceListener(options);
+  const port = await listener.listen(options.port ?? PLAY_VOICE_DEFAULT_PORT);
+  const stopTranscript = options.subscribeTranscript((line) => listener.publishUtterance(line));
+  return { listener, stopTranscript, port };
+}
 
 export function createPlayVoiceListener(options: PlayVoiceListenerOptions): PlayVoiceListener {
   if (options.token.trim().length === 0) {

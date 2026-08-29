@@ -9,9 +9,8 @@ describe("official bot play voice wiring", () => {
     };
 
     expect(manifest.dependencies).toHaveProperty("@clankie/play-voice");
-    expect(source).toContain("createPlayVoiceListener");
+    expect(source).toContain("startPlayVoiceListener");
     expect(source).toContain("ensurePlayVoiceCredential({ store: credentialStore })");
-    expect(source).toContain("playVoiceListener.listen(PLAY_VOICE_DEFAULT_PORT)");
     expect(source).toContain("voiceSession.narrate(text, options)");
     expect(source).toContain("voiceSession.subscribeTranscript");
     expect(source).toContain("playVoiceListener?.publishUtterance(routedRoomText.text)");
@@ -19,10 +18,11 @@ describe("official bot play voice wiring", () => {
     expect(source).toContain("await playVoiceListener?.close()");
     expect(source).not.toContain("CLANKIE_POSSESSOR_VOICE");
 
-    const listenAt = source.indexOf("await playVoiceListener.listen(PLAY_VOICE_DEFAULT_PORT)");
-    expect(source).toContain("voiceSession === undefined\n    ? undefined\n    : createPlayVoiceListener");
-    expect(listenAt).toBeGreaterThan(-1);
-    expect(listenAt).toBeLessThan(source.indexOf("voiceSession.subscribeTranscript", listenAt));
-    expect(listenAt).toBeLessThan(source.indexOf("await client.login(token)"));
+    const startAt = source.indexOf("await startPlayVoiceListener");
+    expect(source).toContain(
+      "voiceSession === undefined\n    ? undefined\n    : await startPlayVoiceListener",
+    );
+    expect(startAt).toBeGreaterThan(-1);
+    expect(startAt).toBeLessThan(source.indexOf("await client.login(token)"));
   });
 });

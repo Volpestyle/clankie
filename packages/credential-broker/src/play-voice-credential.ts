@@ -1,6 +1,5 @@
-import { randomBytes } from "node:crypto";
 import type { CredentialStore } from "./credential-store.ts";
-import { ensureStoredBearer, mintStoredBearer, resolveStoredBearer } from "./stored-bearer.ts";
+import { defineBrokeredBearer } from "./stored-bearer.ts";
 
 /**
  * Local bearer for Clankie's play voice seam (ADR 0064).
@@ -42,56 +41,38 @@ export interface PlayVoiceCredentialOptions {
   readonly store?: CredentialStore;
 }
 
-interface MintPlayVoiceCredentialOptions extends PlayVoiceCredentialOptions {
-  readonly randomBytes?: (size: number) => Buffer;
-}
+const bearer = defineBrokeredBearer({
+  providerId: PLAY_VOICE_CREDENTIAL_PROVIDER_ID,
+  prefix: PLAY_VOICE_TOKEN_PREFIX,
+  pattern: PLAY_VOICE_TOKEN_PATTERN,
+  mintSubject: "play voice",
+  resolveSubject: "play voice",
+  ErrorClass: PlayVoiceCredentialError,
+  forbiddenEnv: {
+    name: PLAY_VOICE_FORBIDDEN_ENV,
+    throwForbidden: (envName) =>
+      new PlayVoiceCredentialError(
+        "environment_token_forbidden",
+        `${envName} must not be set; the play voice bearer lives in the credential broker`,
+      ),
+  },
+});
 
 /** Mints the local bearer shared by the active Discord body and Clankie's play client. */
-export function mintPlayVoiceToken(random: (size: number) => Buffer = randomBytes): string {
-  return mintStoredBearer(PLAY_VOICE_TOKEN_PREFIX, "play voice", random);
-}
+export const mintPlayVoiceToken = bearer.mint;
 
 /**
  * Refuse to start when the token is supplied through the environment. A process
  * that accepts both would silently prefer the weaker source.
  */
-export function assertNoEnvironmentPlayVoiceToken(env: NodeJS.ProcessEnv = process.env): void {
-  if (env[PLAY_VOICE_FORBIDDEN_ENV]) {
-    throw new PlayVoiceCredentialError(
-      "environment_token_forbidden",
-      `${PLAY_VOICE_FORBIDDEN_ENV} must not be set; the play voice bearer lives in the credential broker`,
-    );
-  }
-}
+export const assertNoEnvironmentPlayVoiceToken = bearer.assertNoEnvironmentToken;
 
 /** Reads the broker-owned play bearer. Returns undefined when unset. */
-export async function resolvePlayVoiceCredential(
-  options: PlayVoiceCredentialOptions = {},
-): Promise<string | undefined> {
-  assertNoEnvironmentPlayVoiceToken(options.env ?? process.env);
-  return resolveStoredBearer(
-    options,
-    PLAY_VOICE_CREDENTIAL_PROVIDER_ID,
-    PLAY_VOICE_TOKEN_PATTERN,
-    "play voice",
-    PlayVoiceCredentialError,
-  );
-}
+export const resolvePlayVoiceCredential = bearer.resolve;
 
 /**
  * Active-body-owned first-run bootstrap. The Discord body owns the listener, so
  * it owns the mint; play only ever resolves, which avoids a cross-process mint
  * race producing two different tokens.
  */
-export async function ensurePlayVoiceCredential(
-  options: MintPlayVoiceCredentialOptions = {},
-): Promise<string> {
-  return ensureStoredBearer(
-    options,
-    PLAY_VOICE_CREDENTIAL_PROVIDER_ID,
-    () => mintPlayVoiceToken(options.randomBytes),
-    resolvePlayVoiceCredential,
-    "play voice",
-    PlayVoiceCredentialError,
-  );
-}
+export const ensurePlayVoiceCredential = bearer.ensure;

@@ -1,3 +1,4 @@
+import { envOverrideReaders } from "./env-override.ts";
 import { DiscordSettingsSchema, type DiscordSettings } from "./schema.ts";
 
 /**
@@ -23,86 +24,53 @@ export function resolveDiscordSettings(
   stored: DiscordSettings,
   env: NodeJS.ProcessEnv = process.env,
 ): ResolvedDiscordSettings {
-  const overridden: string[] = [];
   const merged: Record<string, unknown> = { ...stored };
+  const { overridden, takeString, takeList, takeBoolean, takeInteger } = envOverrideReaders(env);
 
-  const takeString = (field: keyof DiscordSettings, name: string): void => {
-    const value = env[name]?.trim();
-    if (value === undefined || value.length === 0) return;
-    merged[field] = value;
-    overridden.push(name);
-  };
+  takeString(merged, "applicationId", "DISCORD_APPLICATION_ID");
+  takeString(merged, "guildId", "DISCORD_GUILD_ID");
+  takeList(merged, "ambientRoleIds", "DISCORD_AMBIENT_ROLE_IDS");
+  takeList(merged, "ambientUserIds", "DISCORD_AMBIENT_USER_IDS");
+  takeList(merged, "approvalRoleIds", "DISCORD_APPROVAL_ROLE_IDS");
+  takeString(merged, "ownerUserId", "DISCORD_OWNER_USER_ID");
+  takeList(merged, "systemActorUserIds", "DISCORD_SYSTEM_ACTOR_USER_IDS");
+  takeList(merged, "systemActorGuildIds", "DISCORD_SYSTEM_ACTOR_GUILD_IDS");
+  takeList(merged, "systemActorChannelIds", "DISCORD_SYSTEM_ACTOR_CHANNEL_IDS");
 
-  const takeList = (field: keyof DiscordSettings, name: string): void => {
-    const value = env[name];
-    if (value === undefined) return;
-    merged[field] = value
-      .split(",")
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0);
-    overridden.push(name);
-  };
+  takeBoolean(merged, "textIngressEnabled", "DISCORD_TEXT_INGRESS_ENABLED");
+  takeList(merged, "ingressGuildIds", "DISCORD_INGRESS_GUILD_IDS");
+  takeList(merged, "ingressChannelIds", "DISCORD_INGRESS_CHANNEL_IDS");
+  takeString(merged, "ingressDmPolicy", "DISCORD_INGRESS_DM_POLICY");
+  takeList(merged, "ingressDmUserIds", "DISCORD_INGRESS_DM_USER_IDS");
+  takeInteger(merged, "ingressContextMessages", "DISCORD_INGRESS_CONTEXT_MESSAGES");
 
-  const takeBoolean = (field: keyof DiscordSettings, name: string): void => {
-    const value = env[name]?.trim();
-    if (value === undefined || value.length === 0) return;
-    merged[field] = value === "true";
-    overridden.push(name);
-  };
+  takeList(merged, "presenceGuildIds", "DISCORD_PRESENCE_GUILD_IDS");
+  takeList(merged, "presenceChannelIds", "DISCORD_PRESENCE_CHANNEL_IDS");
 
-  const takeInteger = (field: keyof DiscordSettings, name: string): void => {
-    const value = env[name]?.trim();
-    if (value === undefined || value.length === 0) return;
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isSafeInteger(parsed)) return;
-    merged[field] = parsed;
-    overridden.push(name);
-  };
-
-  takeString("applicationId", "DISCORD_APPLICATION_ID");
-  takeString("guildId", "DISCORD_GUILD_ID");
-  takeList("ambientRoleIds", "DISCORD_AMBIENT_ROLE_IDS");
-  takeList("ambientUserIds", "DISCORD_AMBIENT_USER_IDS");
-  takeList("approvalRoleIds", "DISCORD_APPROVAL_ROLE_IDS");
-  takeString("ownerUserId", "DISCORD_OWNER_USER_ID");
-  takeList("systemActorUserIds", "DISCORD_SYSTEM_ACTOR_USER_IDS");
-  takeList("systemActorGuildIds", "DISCORD_SYSTEM_ACTOR_GUILD_IDS");
-  takeList("systemActorChannelIds", "DISCORD_SYSTEM_ACTOR_CHANNEL_IDS");
-
-  takeBoolean("textIngressEnabled", "DISCORD_TEXT_INGRESS_ENABLED");
-  takeList("ingressGuildIds", "DISCORD_INGRESS_GUILD_IDS");
-  takeList("ingressChannelIds", "DISCORD_INGRESS_CHANNEL_IDS");
-  takeString("ingressDmPolicy", "DISCORD_INGRESS_DM_POLICY");
-  takeList("ingressDmUserIds", "DISCORD_INGRESS_DM_USER_IDS");
-  takeInteger("ingressContextMessages", "DISCORD_INGRESS_CONTEXT_MESSAGES");
-
-  takeList("presenceGuildIds", "DISCORD_PRESENCE_GUILD_IDS");
-  takeList("presenceChannelIds", "DISCORD_PRESENCE_CHANNEL_IDS");
-
-  takeBoolean("voiceEnabled", "DISCORD_VOICE_ENABLED");
-  takeList("voiceGuildIds", "DISCORD_VOICE_GUILD_IDS");
-  takeList("voiceChannelIds", "DISCORD_VOICE_CHANNEL_IDS");
-  takeString("voiceChannelId", "DISCORD_VOICE_CHANNEL_ID");
-  takeString("voiceJoinPolicy", "DISCORD_VOICE_JOIN_POLICY");
-  takeString("voiceConsentPolicy", "DISCORD_VOICE_CONSENT_POLICY");
-  takeBoolean("voiceTranscriptLoggingEnabled", "DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED");
+  takeBoolean(merged, "voiceEnabled", "DISCORD_VOICE_ENABLED");
+  takeList(merged, "voiceGuildIds", "DISCORD_VOICE_GUILD_IDS");
+  takeList(merged, "voiceChannelIds", "DISCORD_VOICE_CHANNEL_IDS");
+  takeString(merged, "voiceChannelId", "DISCORD_VOICE_CHANNEL_ID");
+  takeString(merged, "voiceJoinPolicy", "DISCORD_VOICE_JOIN_POLICY");
+  takeString(merged, "voiceConsentPolicy", "DISCORD_VOICE_CONSENT_POLICY");
+  takeBoolean(merged, "voiceTranscriptLoggingEnabled", "DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED");
   const activeBody = env.DISCORD_ACTIVE_BODY?.trim();
   if (activeBody === "bot" || activeBody === "user_session") {
     merged.activeBody = activeBody;
     overridden.push("DISCORD_ACTIVE_BODY");
   }
 
-  takeBoolean("userSessionEnabled", "DISCORD_USER_SESSION_ENABLED");
-  takeList("userSessionGuildIds", "DISCORD_USER_SESSION_GUILD_IDS");
-  takeList("userSessionChannelIds", "DISCORD_USER_SESSION_CHANNEL_IDS");
-  takeBoolean("userSessionVoiceEnabled", "DISCORD_USER_SESSION_VOICE_ENABLED");
-  takeList("userSessionVoiceChannelIds", "DISCORD_USER_SESSION_VOICE_CHANNEL_IDS");
-  takeString("userSessionDmPolicy", "DISCORD_USER_SESSION_DM_POLICY");
-  takeList("userSessionDmUserIds", "DISCORD_USER_SESSION_DM_USER_IDS");
+  takeBoolean(merged, "userSessionEnabled", "DISCORD_USER_SESSION_ENABLED");
+  takeList(merged, "userSessionGuildIds", "DISCORD_USER_SESSION_GUILD_IDS");
+  takeList(merged, "userSessionChannelIds", "DISCORD_USER_SESSION_CHANNEL_IDS");
+  takeBoolean(merged, "userSessionVoiceEnabled", "DISCORD_USER_SESSION_VOICE_ENABLED");
+  takeList(merged, "userSessionVoiceChannelIds", "DISCORD_USER_SESSION_VOICE_CHANNEL_IDS");
+  takeString(merged, "userSessionDmPolicy", "DISCORD_USER_SESSION_DM_POLICY");
+  takeList(merged, "userSessionDmUserIds", "DISCORD_USER_SESSION_DM_USER_IDS");
 
-  takeString("activityApplicationIdGba", "DISCORD_ACTIVITY_APPLICATION_ID_GBA");
-  takeString("activityTunnelName", "CLANKIE_ACTIVITY_TUNNEL_NAME");
-  takeString("activityTunnelHostname", "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME");
+  takeString(merged, "activityApplicationIdGba", "DISCORD_ACTIVITY_APPLICATION_ID_GBA");
+  takeString(merged, "activityTunnelName", "CLANKIE_ACTIVITY_TUNNEL_NAME");
+  takeString(merged, "activityTunnelHostname", "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME");
 
   return {
     settings: DiscordSettingsSchema.parse(merged),

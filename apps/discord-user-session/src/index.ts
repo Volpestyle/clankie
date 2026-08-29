@@ -6,7 +6,7 @@ import {
   resolveDiscordUserBridgeCredential,
   resolveDiscordUserVoiceBridgeCredential,
 } from "@clankie/credential-broker";
-import { createPlayVoiceListener, PLAY_VOICE_DEFAULT_PORT, PLAY_VOICE_PATH } from "@clankie/play-voice";
+import { PLAY_VOICE_PATH, startPlayVoiceListener } from "@clankie/play-voice";
 import {
   createAdvertisedDiscordPresencePort,
   discordVoiceTranscriptLogPath,
@@ -21,7 +21,8 @@ import {
   DiscordVoiceTranscriptStore,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
-  planNonWatchCaptainDiscordAction,
+  admitCaptainDiscordAction,
+  executePlannedCaptainDiscordAction,
   parseVoiceRealtimeEnv,
   routeDiscordRoomText,
   selectInboundImageAttachments,
@@ -30,6 +31,7 @@ import {
   voiceEvidenceReceiptType,
   tryHandleCaptainDiscordActionRequest,
   tryHandleMusicControlRequest,
+  resolveDiscordReceiptPath,
   resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
@@ -37,17 +39,13 @@ import {
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
 } from "@clankie/discord-presence-core";
-import { discordPresenceLaneAddress } from "@clankie/interactive-environment";
-import {
-  DiscordPresenceWriteSchema,
-  type DiscordCaptainActionInput,
-  type DiscordCaptainActionResult,
-  type DiscordVoiceEvidence,
-  type DiscordVoicePresenceResult,
+import type {
+  DiscordCaptainActionInput,
+  DiscordCaptainActionResult,
+  DiscordVoiceEvidence,
+  DiscordVoicePresenceResult,
 } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { isAbsolute, join, relative } from "node:path";
 import {
   applyDiscordSettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
@@ -132,7 +130,14 @@ const voiceApi =
     ? undefined
     : new ClankieApiClient({ baseUrl: apiUrl, captainToken: voiceBridgeToken });
 
-const receipts = new DiscordBridgeReceiptStore({ path: receiptPath() });
+const receipts = new DiscordBridgeReceiptStore({
+  path: resolveDiscordReceiptPath({
+    configured: process.env.DISCORD_USER_SESSION_RECEIPT_PATH,
+    envName: "DISCORD_USER_SESSION_RECEIPT_PATH",
+    defaultFileName: "discord-user-session-receipts.jsonl",
+    requireOutsideWorkspace: true,
+  }),
+});
 
 // Every gate is checked before a single byte reaches Discord: enablement flag,
 // brokered credential, durable owner opt-in, and non-empty allowlists. A
@@ -337,10 +342,10 @@ if (voiceSession !== undefined && voiceTranscriptStore !== undefined) {
   console.info({ path: discordVoiceTranscriptLogPath() }, "Full Discord voice transcript logging enabled");
 }
 
-const playVoiceListener =
+const startedPlayVoice =
   voiceSession === undefined
     ? undefined
-    : createPlayVoiceListener({
+    : await startPlayVoiceListener({
         token: await ensurePlayVoiceCredential({ store: credentialStore }),
         narrate: (text, options) => voiceSession.narrate(text, options),
         emit: (evidence) => {
@@ -350,14 +355,15 @@ const playVoiceListener =
           );
         },
         room: () => ({ listening: voiceSession.status().active }),
+        subscribeTranscript: (onLine) => voiceSession.subscribeTranscript(onLine),
       });
-let stopPlayVoiceTranscript: (() => void) | undefined;
-if (playVoiceListener !== undefined && voiceSession !== undefined) {
-  const port = await playVoiceListener.listen(PLAY_VOICE_DEFAULT_PORT);
-  stopPlayVoiceTranscript = voiceSession.subscribeTranscript((line) =>
-    playVoiceListener.publishUtterance(line),
+const playVoiceListener = startedPlayVoice?.listener;
+let stopPlayVoiceTranscript = startedPlayVoice?.stopTranscript;
+if (startedPlayVoice !== undefined) {
+  console.info(
+    { port: startedPlayVoice.port, path: PLAY_VOICE_PATH },
+    "Discord user-session play voice seam listening on loopback",
   );
-  console.info({ port, path: PLAY_VOICE_PATH }, "Discord user-session play voice seam listening on loopback");
 }
 
 const voiceIdleAutoLeave =
@@ -664,42 +670,27 @@ async function executeCaptainDiscordAction(
   input: DiscordCaptainActionInput,
 ): Promise<DiscordCaptainActionResult> {
   if (shuttingDown) return { ok: false, message: "My Discord body is shutting down." };
-  if (input.guildId === undefined) {
-    return { ok: false, message: "That Discord action is not available in DMs." };
-  }
+  const admitted = admitCaptainDiscordAction({
+    action: input,
+    admittedGuildIds: guildIds,
+    admittedChannelIds: channelIds,
+    ownsProgressMessage: (id) => toolProgressMessageIds.has(id),
+  });
+  if (admitted.kind === "refuse") return admitted.result;
   let channelId = input.channelId;
-  let plan = planNonWatchCaptainDiscordAction(input);
-  if (plan !== undefined) {
-    if (
-      input.action === "tool_progress" &&
-      input.progressMessageId !== undefined &&
-      !toolProgressMessageIds.has(input.progressMessageId)
-    ) {
-      return { ok: false, message: "That tool activity card does not belong to this process." };
-    }
-    if (!guildIds.has(input.guildId) || (channelIds.size > 0 && !channelIds.has(input.channelId))) {
-      return {
-        ok: false,
-        message:
-          input.action === "react" || input.action === "unreact"
-            ? "That message is outside my admitted Discord channels."
-            : input.action === "send_text_update" || input.action === "tool_progress"
-              ? "That channel is outside my admitted Discord channels."
-              : "Threads only work in my admitted server channels.",
-      };
-    }
-  } else {
+  let plan = admitted.kind === "plan" ? admitted.plan : undefined;
+  if (plan === undefined) {
     if (ownerUserId === undefined || input.actorId !== ownerUserId) {
       return { ok: false, message: "Only my owner can put my lab play surface in voice." };
     }
-    channelId = gateway.voiceChannelFor(input.guildId, input.actorId) ?? "";
+    channelId = gateway.voiceChannelFor(admitted.guildId, input.actorId) ?? "";
     const active = voiceSession?.status();
     if (
       channelId.length === 0 ||
-      !guildIds.has(input.guildId) ||
+      !guildIds.has(admitted.guildId) ||
       !voiceChannelIds.has(channelId) ||
       active?.active !== true ||
-      active.guildId !== input.guildId ||
+      active.guildId !== admitted.guildId ||
       active.channelId !== channelId
     ) {
       return { ok: false, message: "I need to be in your admitted voice channel first." };
@@ -709,8 +700,8 @@ async function executeCaptainDiscordAction(
         input.action === "watch_start" ? "discord.presence.go_live_start" : "discord.presence.go_live_stop",
       payload:
         input.action === "watch_start"
-          ? { kind: "go_live_start", guildId: input.guildId, channelId }
-          : { kind: "go_live_stop", guildId: input.guildId },
+          ? { kind: "go_live_start", guildId: admitted.guildId, channelId }
+          : { kind: "go_live_stop", guildId: admitted.guildId },
       successMessage:
         input.action === "watch_start"
           ? "I'm sharing the live play surface."
@@ -719,57 +710,20 @@ async function executeCaptainDiscordAction(
   }
 
   try {
-    const health = await presencePort.getHealth();
-    const action = await presencePort.executeDiscordPresenceAction(
-      DiscordPresenceWriteSchema.parse({
-        schemaVersion: 1,
-        idempotencyKey: `captain:${input.callId}:${input.action}`,
-        action: plan.action,
-        identity: {
-          presenceSessionId: discordPresenceLaneAddress({ guildId: input.guildId, channelId }),
-          correlationId: `discord-captain-action:${input.callId}`,
-          profileHash: health.profileHash,
-          characterId,
-          credentialRef: DISCORD_USER_SESSION_PROVIDER_ID,
-          transportKind: "user_session",
-        },
-        payload: plan.payload,
-      }),
-    );
-    if (input.action === "tool_progress") {
-      if (action.messageId !== undefined) toolProgressMessageIds.add(action.messageId);
-      if (input.phase !== "running" && input.progressMessageId !== undefined) {
-        toolProgressMessageIds.delete(input.progressMessageId);
-      }
-    }
-    return {
-      ok: true,
-      message: plan.successMessage,
-      ...(action.messageId === undefined ? {} : { messageId: action.messageId }),
-    };
+    return await executePlannedCaptainDiscordAction({
+      call: input,
+      plan,
+      guildId: admitted.guildId,
+      channelId,
+      characterId,
+      credentialRef: DISCORD_USER_SESSION_PROVIDER_ID,
+      transportKind: "user_session",
+      presencePort,
+      progressMessageIds: toolProgressMessageIds,
+    });
   } catch {
     return { ok: false, message: "My Discord body refused that action." };
   }
-}
-
-function receiptPath(): string {
-  const configured = process.env.DISCORD_USER_SESSION_RECEIPT_PATH;
-  if (configured) {
-    const fromWorkspace = relative(process.cwd(), configured);
-    if (
-      !isAbsolute(configured) ||
-      fromWorkspace === "" ||
-      (!fromWorkspace.startsWith("..") && !isAbsolute(fromWorkspace))
-    ) {
-      throw new Error(
-        "DISCORD_USER_SESSION_RECEIPT_PATH must be absolute and outside the repository workspace",
-      );
-    }
-    return configured;
-  }
-  const stateHome = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
-  if (!isAbsolute(stateHome)) throw new Error("XDG_STATE_HOME must be absolute");
-  return join(stateHome, "clankie", "discord-user-session-receipts.jsonl");
 }
 
 function recordReceipt(

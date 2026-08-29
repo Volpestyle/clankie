@@ -6,6 +6,7 @@ import {
   DiscordBridgeReceiptStore,
   parseDiscordBridgeReceipt,
   readDiscordBridgeReceipts,
+  resolveDiscordReceiptPath,
 } from "../src/receipt-store.ts";
 
 const roots: string[] = [];
@@ -188,5 +189,50 @@ describe("DiscordBridgeReceiptStore", () => {
     expect(
       parseDiscordBridgeReceipt({ ...base, data: { width: 1280, height: 720, userId: "u1" } }).data,
     ).toMatchObject({ width: 1280, height: 720 });
+  });
+});
+
+describe("resolveDiscordReceiptPath", () => {
+  it("defaults under XDG_STATE_HOME", () => {
+    expect(
+      resolveDiscordReceiptPath({
+        configured: undefined,
+        envName: "DISCORD_BRIDGE_RECEIPT_PATH",
+        defaultFileName: "discord-live-receipts.jsonl",
+        env: { XDG_STATE_HOME: "/tmp/state" },
+      }),
+    ).toBe("/tmp/state/clankie/discord-live-receipts.jsonl");
+  });
+
+  it("returns a configured path when the writer gate is off", () => {
+    expect(
+      resolveDiscordReceiptPath({
+        configured: "relative.jsonl",
+        envName: "DISCORD_BRIDGE_RECEIPT_PATH",
+        defaultFileName: "discord-live-receipts.jsonl",
+      }),
+    ).toBe("relative.jsonl");
+  });
+
+  it("rejects a workspace path when writers require outside-workspace", () => {
+    expect(() =>
+      resolveDiscordReceiptPath({
+        configured: join(process.cwd(), "receipts.jsonl"),
+        envName: "DISCORD_BRIDGE_RECEIPT_PATH",
+        defaultFileName: "discord-live-receipts.jsonl",
+        requireOutsideWorkspace: true,
+      }),
+    ).toThrow(/absolute and outside/u);
+  });
+
+  it("accepts an absolute path outside the workspace", () => {
+    expect(
+      resolveDiscordReceiptPath({
+        configured: "/tmp/discord-live-receipts.jsonl",
+        envName: "DISCORD_BRIDGE_RECEIPT_PATH",
+        defaultFileName: "discord-live-receipts.jsonl",
+        requireOutsideWorkspace: true,
+      }),
+    ).toBe("/tmp/discord-live-receipts.jsonl");
   });
 });

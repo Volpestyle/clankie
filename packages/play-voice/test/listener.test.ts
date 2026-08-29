@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import {
   createPlayVoiceListener,
+  startPlayVoiceListener,
   type PlayVoiceListener,
   type PlayVoiceListenerEvidence,
 } from "../src/listener.ts";
@@ -291,5 +292,26 @@ describe("play voice listener", () => {
     expect(serialized).not.toContain("laboratory wall");
     expect(serialized).not.toContain("private words");
     socket.close();
+  });
+
+  it("binds, forwards transcript lines, and stops on request", async () => {
+    const events: string[] = [];
+    const started = await startPlayVoiceListener({
+      token: TOKEN,
+      narrate: async () => undefined,
+      subscribeTranscript: (onLine) => {
+        events.push("subscribed");
+        onLine("james: go left");
+        return () => {
+          events.push("stopped");
+        };
+      },
+      port: 0,
+    });
+    listener = started.listener;
+    expect(started.port).toBeGreaterThan(0);
+    expect(events).toEqual(["subscribed"]);
+    started.stopTranscript();
+    expect(events).toEqual(["subscribed", "stopped"]);
   });
 });
