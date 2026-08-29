@@ -44,6 +44,7 @@ export async function discoverClankieSkills(
   for (const root of [
     join(repoRoot, ".pi", "skills"),
     join(repoRoot, ".agents", "skills"),
+    join(repoRoot, ".agents", "dev-skills"),
     join(piAgentDir, "skills"),
     join(home, ".agents", "skills"),
   ]) {

@@ -1,6 +1,8 @@
 # ADR 0136: A release is one command and one runtime
 
-Status: accepted (James, 2026-08-29).
+Status: accepted (James, 2026-08-29). Which skills and herdr plugin files the
+archive copies is amended by
+[ADR 0142](0142-the-install-tells-him-the-truth.md).
 
 ## Context
 

@@ -149,3 +149,33 @@ A useful receipt names the code revision and artifact digests, the public path,
 each advertised capability and outcome, exact check commands and exit codes,
 and any unpinned input. Use `trace-clankie` afterward to correlate durable
 runtime trails when the live result disagrees with the test.
+
+## Checkout-only live proofs
+
+These commands exist in a source checkout. They are not on an installed
+release; `clankie doctor` saying `kind: checkout` is the gate.
+
+Personal-lab screen watch or Go Live, from that body's own receipt log (never
+the bot's `discord-live-receipts.jsonl`):
+
+```bash
+pnpm --filter @clankie/discord-user-session watch-live-proof
+pnpm --filter @clankie/discord-user-session watch-live-proof -- --wait=120
+pnpm --filter @clankie/discord-user-session publish-live-proof
+pnpm --filter @clankie/discord-user-session publish-live-proof -- --wait=120
+```
+
+Both read `$XDG_STATE_HOME/clankie/discord-user-session-receipts.jsonl`,
+defaulting to `~/.local/state/clankie/discord-user-session-receipts.jsonl`.
+Add `--json` after `--` for machine-readable output.
+
+Evaluate one production play journal with lifecycle and receipt joins:
+
+```bash
+pnpm --filter @clankie/gba-emulator gameplay:evaluate-journal -- \
+  ~/.local/state/clankie/gba-play/<run>.jsonl
+```
+
+`pnpm discord:voice-readiness` checks the selected TTS credential but skips
+paid ElevenLabs synthesis; its engaged probe settles on model text. A READY
+report can therefore coexist with a broken mouth.

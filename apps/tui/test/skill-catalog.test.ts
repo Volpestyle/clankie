@@ -66,4 +66,24 @@ describe("skill catalog", () => {
       { name: "project-skill", description: "Project version" },
     ]);
   });
+
+  it("discovers checkout-only skills from .agents/dev-skills without hiding product skills", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-dev-skills-"));
+    temporaryDirectories.push(root);
+    const repo = join(root, "repo");
+    const home = join(root, "home");
+    await skill(
+      join(repo, ".agents", "skills", "this-machine"),
+      "name: this-machine\ndescription: Product install map",
+    );
+    await skill(
+      join(repo, ".agents", "dev-skills", "verify-clankie"),
+      "name: verify-clankie\ndescription: Checkout proof ladder",
+    );
+
+    await expect(discoverClankieSkills(repo, { HOME: home })).resolves.toEqual([
+      { name: "this-machine", description: "Product install map" },
+      { name: "verify-clankie", description: "Checkout proof ladder" },
+    ]);
+  });
 });

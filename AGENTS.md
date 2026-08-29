@@ -25,6 +25,11 @@ service (`apps/clankie`) plus the surfaces that reach it.
   process instantiates its own body/runtime.
 - `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
   actions); all other herdr integration is vanilla CLI/socket (ADR 0139).
+  Optional, linked per checkout or from an installed release (`clankie doctor`
+  names the path): setup and troubleshooting in its README, status in
+  `pnpm doctor` (checkout) or `clankie doctor` (any install).
+- `.agents/skills` — product skills shipped with every install (`this-machine`,
+  `trace-clankie`). Checkout-only skills live in `.agents/dev-skills`.
 - `packages/` — shared contracts and adapters; `protocol` depends on nothing.
   `vox-client` is the Apache process boundary for the AGPL Vox executable;
   `play-voice` connects only Clankie's own play to his active Discord body.

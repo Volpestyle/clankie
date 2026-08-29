@@ -53,8 +53,10 @@ clankie              # start the service and open the TUI
 ```
 
 The release includes its Node runtime, services, assets, and native Vox media
-process. See [`docs/distribution.md`](docs/distribution.md) for the installed
-layout, version pinning, and release process.
+process. `clankie doctor` reports whether this is a release or a checkout,
+which models and credentials are configured, and whether optional tools such
+as herdr are on PATH. See [`docs/distribution.md`](docs/distribution.md) for
+the installed layout, version pinning, and release process.
 
 For development from a checkout, install Node 24+, pnpm 11+, Git, Rust 1.88+,
 and CMake:
@@ -110,6 +112,21 @@ pnpm check           # required final check: fmt, lint, docs links, typecheck, t
 pnpm gba:free-play   # drive the GBA body from a CLI
 pnpm discord:readiness
 ```
+
+If you drive agent panes with [herdr](https://herdr.dev), link Clankie's
+plugin once to get his fleet board, operator console, and status popup as
+first-class herdr panes — `pnpm doctor` (checkout) or `clankie doctor`
+(any install) reports whether it is linked:
+
+```bash
+herdr plugin link "$PWD/integrations/herdr-plugin"
+```
+
+An installed release ships the same plugin; `clankie doctor` reports
+`herdrPlugin.bundlePath`.
+
+Requirements, keybindings, and troubleshooting live in
+[`integrations/herdr-plugin/README.md`](integrations/herdr-plugin/README.md).
 
 See [`docs/architecture.md`](docs/architecture.md) for the system shape,
 [`docs/distribution.md`](docs/distribution.md) for binary installation,

@@ -3,6 +3,8 @@
 Status: accepted (James, 2026-08-16). Gives the workspace scope of
 [ADR 0032](0032-conversation-scoped-operator-lanes.md) a producer and a meaning;
 the transport, durability, and revision fencing that ADR decided are unchanged.
+Which of Clankie's own skills a service root contributes — product vs
+checkout-only — is [ADR 0142](0142-the-install-tells-him-the-truth.md).
 
 ## Context
 
@@ -65,7 +67,9 @@ machine, because that path becomes the cwd of an unsandboxed shell.
 - Concurrent consoles in the same project have independent conversations and
   Pi contexts. `--chat` is the explicit way to share or resume one.
 - The captain reads the project's own `AGENTS.md` and repository skills, so his
-  instructions are the ones that repository publishes.
+  instructions are the ones that repository publishes. Clankie's own skills stay
+  on the service root: product skills in `.agents/skills` (shipped with a
+  release) and checkout-only skills in `.agents/dev-skills`.
 - Conversations created before this ADR carry a global scope and keep working in
   the service repo, unchanged.
 - Discord text and voice lanes are unaffected: they have no workspace and

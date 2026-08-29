@@ -40,8 +40,9 @@ browser-downloaded package.
 └── releases/v0.2.0/
     ├── bin/clankie
     ├── libexec/node
+    ├── .agents/skills/        # product skills (this-machine, trace-clankie)
     ├── apps/                  # bundled services, assets, and clankvox
-    ├── integrations/          # bundled game runtime assets
+    ├── integrations/          # game runtime assets and the optional herdr plugin
     ├── SBOM.cdx.json
     └── THIRD_PARTY_LICENSES.md
 ```
@@ -55,7 +56,12 @@ installed release root.
 
 Optional machine integrations such as Herdr, cloudflared, and external browser
 tools remain external executables. The release does not copy their code or
-licenses.
+licenses. Clankie's own herdr plugin declaration ships under
+`integrations/herdr-plugin` so it can be linked without a git checkout.
+`clankie doctor` reports whether this tree is a release or a checkout, which
+models and credentials are configured, and whether those optional commands
+are on PATH. Checkout-only skills under `.agents/dev-skills` stay out of the
+archive.
 
 ## Build and release
 

@@ -161,7 +161,12 @@ async function copyRuntimeAssets(targetRoot) {
     await mkdir(dirname(target), { recursive: true });
     await copyFile(join(repoRoot, source), target);
   }
-  for (const directory of [".agents/skills", "integrations/gba-emulator/fixtures", "scenarios/emulator"]) {
+  for (const directory of [
+    ".agents/skills",
+    "integrations/gba-emulator/fixtures",
+    "integrations/herdr-plugin",
+    "scenarios/emulator",
+  ]) {
     await cp(join(repoRoot, directory), join(targetRoot, directory), {
       recursive: true,
       filter: (source) => basename(source) !== ".DS_Store",

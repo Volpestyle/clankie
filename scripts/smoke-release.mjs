@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -23,6 +24,16 @@ try {
   const sbom = JSON.parse(await readFile(join(extracted, "SBOM.cdx.json"), "utf8"));
   if (manifest.version !== version || !Array.isArray(sbom.components) || sbom.components.length === 0) {
     throw new Error("release metadata is incomplete");
+  }
+  for (const path of [
+    join(extracted, ".agents", "skills", "this-machine", "SKILL.md"),
+    join(extracted, ".agents", "skills", "trace-clankie", "SKILL.md"),
+    join(extracted, "integrations", "herdr-plugin", "herdr-plugin.toml"),
+  ]) {
+    if (!existsSync(path)) throw new Error(`release is missing ${path.slice(extracted.length + 1)}`);
+  }
+  if (existsSync(join(extracted, ".agents", "dev-skills"))) {
+    throw new Error("checkout-only skills must not ship in the release");
   }
 
   const binary = join(extracted, "bin", "clankie");

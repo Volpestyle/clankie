@@ -143,12 +143,9 @@ without storing message bodies or media.
   The external-voice adapter adds a conversation marker for this incomplete
   speech so the next response knows the suffix was not audible and that the
   exact cutoff is unknown.
-- **Voice readiness does not prove an external mouth.**
-  `pnpm discord:voice-readiness` checks the selected TTS credential but
-  deliberately skips paid ElevenLabs synthesis; its engaged probe settles on
-  model text. A `READY` report can therefore coexist with a broken ElevenLabs
-  context lifecycle. Probe the TTS boundary directly when receipts show the
-  mute-mouth signature.
+- **A readiness probe that skipped paid synthesis can coexist with a mute
+  mouth.** Probe the TTS boundary directly when receipts show the mute-mouth
+  signature; do not treat a READY-shaped credential check as audible speech.
 - **Vox process readiness is not Discord media readiness.** `process_ready`
   must carry the exact `VOX_IPC_PROTOCOL_VERSION` before the client accepts any
   command, but it still proves only that the one child accepts IPC. Primary
@@ -276,24 +273,6 @@ Where did one voice/music turn stop:
 jq -c --arg id '<delivery-or-call-id>' 'select(.data.deliveryId == $id or .data.callId == $id) | {type, at: .occurredAt, data: .data}' ~/.local/state/clankie/discord-live-receipts.jsonl
 ```
 
-Prove a personal-lab screen watch or Go Live publish from its own receipt log:
-
-```bash
-pnpm --filter @clankie/discord-user-session watch-live-proof
-pnpm --filter @clankie/discord-user-session watch-live-proof -- --wait=120
-pnpm --filter @clankie/discord-user-session publish-live-proof
-pnpm --filter @clankie/discord-user-session publish-live-proof -- --wait=120
-```
-
-Both commands read
-`$XDG_STATE_HOME/clankie/discord-user-session-receipts.jsonl`, defaulting to
-`~/.local/state/clankie/discord-user-session-receipts.jsonl`. Add `--json` after
-`--` for machine-readable output. Never point these proofs at the bot's
-`discord-live-receipts.jsonl`.
-
-Evaluate one production play journal with lifecycle and receipt joins:
-
-```bash
-pnpm --filter @clankie/gba-emulator gameplay:evaluate-journal -- \
-  ~/.local/state/clankie/gba-play/<run>.jsonl
-```
+Checkout-only live proofs (`watch-live-proof`, `publish-live-proof`,
+`gameplay:evaluate-journal`, `pnpm discord:voice-readiness`) live in
+`verify-clankie`, which is present only in a source checkout.

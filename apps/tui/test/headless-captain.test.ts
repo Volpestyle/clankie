@@ -257,6 +257,35 @@ describe("headless clankie commands", () => {
     ]);
   });
 
+  it("prints a secret-free install card without probing the live PATH", async () => {
+    const stdout = outputBuffer();
+    const root = await mkdtemp(join(tmpdir(), "clankie-doctor-cmd-"));
+    tempDirs.push(root);
+    await writeFile(join(root, "package.json"), `${JSON.stringify({ version: "0.2.0" })}\n`);
+
+    const exitCode = await runHeadlessCaptainCommand(["doctor"], {
+      repoRoot: root,
+      env: {
+        HOME: join(root, "home"),
+        XDG_CONFIG_HOME: join(root, "config"),
+        CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
+      },
+      execFileImpl: async () => {
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+      stdout: stdout.stream,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.text())).toMatchObject({
+      ok: true,
+      kind: "checkout",
+      version: "0.2.0",
+      repoRoot: root,
+      model: null,
+    });
+  });
+
   it("rejects an unknown restart target without signalling anything", async () => {
     const stdout = outputBuffer();
     const stderr = outputBuffer();

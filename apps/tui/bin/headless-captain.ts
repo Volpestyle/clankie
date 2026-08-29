@@ -37,6 +37,7 @@ import {
   revokeDevice,
   type DeviceListItem,
 } from "./devices.ts";
+import { inspectInstall, type ExecFileImpl } from "../src/install-doctor.ts";
 
 const RESTART_TURN_POLL_MS = 100;
 const RESTART_AFTER_TURN_FLAG = "--after-operator-turn";
@@ -64,6 +65,8 @@ export interface HeadlessCaptainCommandOptions {
   readonly readProcessCommandImpl?: ServiceRegistryOptions["readProcessCommandImpl"];
   /** Test seam for the executable a deferred self-restart launches. */
   readonly cliEntryPath?: string;
+  /** Test seam so `clankie doctor` does not probe the real PATH. */
+  readonly execFileImpl?: ExecFileImpl;
   readonly stderr?: Writable;
   readonly stdout?: Writable;
 }
@@ -78,6 +81,7 @@ function commandHelp(): string {
     "",
     "Headless Clankie commands:",
     "  health | status          Probe the clankie service and every local service",
+    "  doctor                   Report this install: checkout vs release, models, credentials, optional herdr",
     "  restart [service]        Restart launcher-owned services in dependency order",
     "  down [service]           Stop launcher-owned services in reverse order",
     "  pair [--json] [--timeout SEC]",
@@ -101,6 +105,7 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
   return (
     command === "health" ||
     command === "status" ||
+    command === "doctor" ||
     command === "restart" ||
     command === "down" ||
     command === "pair" ||
@@ -612,6 +617,17 @@ async function runPlay(args: readonly string[], options: HeadlessCaptainCommandO
   return 0;
 }
 
+async function runDoctor(options: HeadlessCaptainCommandOptions): Promise<number> {
+  const env = options.env ?? process.env;
+  const report = await inspectInstall({
+    repoRoot: options.repoRoot,
+    env,
+    ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
+  });
+  outputJson(options.stdout ?? process.stdout, report);
+  return 0;
+}
+
 export async function runHeadlessCaptainCommand(
   args: readonly string[],
   options: HeadlessCaptainCommandOptions,
@@ -619,6 +635,7 @@ export async function runHeadlessCaptainCommand(
   const command = args[0];
   try {
     if (command === "health" || command === "status") return await runInspection(options);
+    if (command === "doctor") return await runDoctor(options);
     if (command === "restart") return await runRestart(args.slice(1), options);
     if (command === "down") return await runDown(args.slice(1), options);
     if (command === "pair") return await runPair(args.slice(1), options);
