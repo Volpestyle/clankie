@@ -13,13 +13,11 @@ import {
  * wear a human account right now", which is a single yes/no, not a set.
  */
 
-const DISCORD_USER_SESSION_OPT_IN_STREAM_ID = "discord-user-session" as const;
 export const DISCORD_USER_SESSION_OPT_IN_RECORDED = "discord.user_session.opt_in.recorded" as const;
 export const DISCORD_USER_SESSION_OPT_IN_REVOKED = "discord.user_session.opt_in.revoked" as const;
 
 /** Stable stream id; the opt-in is a singleton, so it needs no per-record scope. */
-export const DISCORD_USER_SESSION_OPT_IN_MISSION_ID =
-  `${DISCORD_USER_SESSION_OPT_IN_STREAM_ID}:opt-in` as const;
+export const DISCORD_USER_SESSION_OPT_IN_STREAM_ID = "discord-user-session:opt-in" as const;
 
 export class DiscordUserSessionOptInProjection {
   private current: DiscordUserSessionOptIn | undefined;
@@ -29,7 +27,7 @@ export class DiscordUserSessionOptInProjection {
   }
 
   public apply(event: DomainEvent): void {
-    if (event.missionId !== DISCORD_USER_SESSION_OPT_IN_MISSION_ID) return;
+    if (event.missionId !== DISCORD_USER_SESSION_OPT_IN_STREAM_ID) return;
     if (event.type === DISCORD_USER_SESSION_OPT_IN_RECORDED) {
       // The record is nested under `optIn` so audit fields (who accepted it)
       // can travel on the same event without a strict-schema parse rejecting
@@ -54,7 +52,7 @@ export class DiscordUserSessionOptInProjection {
   /**
    * The record only if it currently permits the transport under `profileHash`.
    * Callers gating execution should use this rather than `resolve()`, so a
-   * revoked or stale-doctrine record can never read as permission.
+   * revoked or stale-profile record can never read as permission.
    */
   public resolveActive(profileHash: string): DiscordUserSessionOptIn | undefined {
     const optIn = this.resolve();

@@ -41,7 +41,7 @@ describe("user-session admission (ADR 0048)", () => {
     ).rejects.toMatchObject({ code: "discord_user_session_opt_in_revoked" });
   });
 
-  it("refuses an opt-in recorded under different doctrine or a different character", async () => {
+  it("refuses an opt-in recorded under a different profile hash or a different character", async () => {
     await expect(
       assertUserSessionAdmissible(input({ optIn: { ...optIn(), profileHash: "other-profile" } })),
     ).rejects.toMatchObject({ code: "discord_user_session_opt_in_profile_mismatch" });

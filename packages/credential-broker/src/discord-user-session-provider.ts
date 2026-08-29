@@ -40,7 +40,7 @@ export interface DiscordUserSessionCredentialProviderOptions {
   store: CredentialStore;
   allowedGuildIds: readonly string[];
   allowedChannelIds: readonly string[];
-  /** Resolves the durable opt-in for the doctrine in force; `undefined` means none exists. */
+  /** Resolves the durable opt-in for the current profile hash; `undefined` means none exists. */
   resolveOptIn: (profileHash: string) => Promise<DiscordUserSessionOptInProof | undefined>;
   issuer?: CapabilityTokenIssuer;
   now?: () => number;
@@ -71,9 +71,9 @@ export class DiscordUserSessionDenied extends Error {
  *
  * Mirrors {@link import("./discord-bot-provider.ts").DiscordBotCredentialProvider}
  * so both planes are governed the same way, and adds one gate the bot plane does
- * not need: a durable owner opt-in bound to the doctrine profile hash. Discord
- * forbids automating normal accounts, so possession of the token is deliberately
- * not sufficient to use it.
+ * not need: a durable owner opt-in bound to the profile hash in force when the
+ * risk was accepted. Discord forbids automating normal accounts, so holding
+ * the token is deliberately not sufficient to use it.
  */
 export class DiscordUserSessionCredentialProvider {
   private readonly store: CredentialStore;
@@ -161,7 +161,7 @@ export class DiscordUserSessionCredentialProvider {
     if (optIn.profileHash !== profileHash) {
       throw new DiscordUserSessionDenied(
         "discord_user_session_opt_in_profile_mismatch",
-        "The user-session opt-in was recorded under a different doctrine profile",
+        "The user-session opt-in was recorded under a different profile hash",
       );
     }
   }

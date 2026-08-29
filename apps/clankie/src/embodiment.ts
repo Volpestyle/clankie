@@ -112,7 +112,7 @@ export interface EmbodimentLifecycleUpdate {
 export interface EmbodimentManagerOptions {
   readonly clock: () => Date;
   /**
-   * The doctrine verdict for one intent (`environment.play.start` /
+   * Policy for one intent (`environment.play.start` /
    * `environment.play.stop`). Anything but "allow" refuses `policy`: ambient
    * surfaces cannot carry an approval ceremony, so approval-shaped means no.
    */

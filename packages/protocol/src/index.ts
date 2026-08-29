@@ -1,7 +1,10 @@
 import { z } from "zod";
 
+/** Frozen event-log partition key. Still serialized as `missionId`. */
 export const MissionIdSchema = z.string().min(1);
+/** Frozen optional attribution on the event envelope. */
 export const TaskIdSchema = z.string().min(1);
+/** Frozen optional attribution on the event envelope. */
 export const WorkerRunIdSchema = z.string().min(1);
 export const EnvironmentSessionIdSchema = z.string().min(1);
 export const WorldIdSchema = z.string().min(1);
@@ -1037,9 +1040,9 @@ export type InteractiveEnvironmentBinding = z.infer<typeof InteractiveEnvironmen
 //
 // `missionId` is the append-only log's partition key — it is what
 // `ProjectionEventStore.readStream` reads and what optimistic concurrency
-// counts. Subsystems that have no mission (presence sessions, embodiment
-// sessions, devices, triggers) still need their own partition, so they mint a
-// namespaced stream id. `streamKind` is what that partition *is*, so a reader
+// counts. The field name is frozen from the mission-era envelope; writers
+// mint a namespaced stream id into that slot (presence, embodiment, devices,
+// triggers, episodes). `streamKind` is what that partition *is*, so a reader
 // never has to infer meaning from the shape of an id.
 // ---------------------------------------------------------------------------
 
@@ -1467,7 +1470,7 @@ export type CaptainChannelTurnResult = z.infer<typeof CaptainChannelTurnResultSc
  *
  * This is the *only* place bot-versus-user is named. Action schemas stay
  * transport-agnostic so one catalog, one character, and one memory projection
- * serve both planes; the runtime binding plus doctrine decide availability.
+ * serve both planes; the runtime binding decides availability.
  */
 export const DiscordTransportKindSchema = z.enum(["bot", "user_session"]);
 export type DiscordTransportKind = z.infer<typeof DiscordTransportKindSchema>;
@@ -2114,8 +2117,8 @@ export type DiscordPresenceWriteResult = z.infer<typeof DiscordPresenceWriteResu
  *
  * Discord forbids automating normal user accounts, so the capability cannot be
  * reached by configuration alone: an operator-authenticated record must exist,
- * bound to the doctrine profile that was in force when the risk was accepted.
- * Re-compiling doctrine therefore invalidates the opt-in rather than silently
+ * bound to the profile hash that was in force when the risk was accepted.
+ * Changing that hash therefore invalidates the opt-in rather than silently
  * carrying an acceptance across a policy change.
  */
 export const DiscordUserSessionOptInSchema = z
@@ -2861,10 +2864,10 @@ export type DiscordPersonMemoryEdit = z.infer<typeof DiscordPersonMemoryEditSche
 // ---------------------------------------------------------------------------
 // Clankie's browser (ADR 0082).
 //
-// The captain drives an in-process `agent-browser` MCP server. Descriptors
-// are projected through doctrine before they reach him, so `requiresApproval`
-// is a decided fact carried on the wire rather than something the captain or
-// the model re-derives.
+// The captain drives an in-process `agent-browser` MCP server. The host stamps
+// risk and whether an operator must approve the call onto each descriptor, so
+// `requiresApproval` is a decided fact on the wire rather than something the
+// captain or the model re-derives.
 // ---------------------------------------------------------------------------
 
 export const BrowserToolNameSchema = z
@@ -2879,7 +2882,7 @@ export const BrowserToolDescriptorSchema = z.object({
   /** JSON Schema for the tool's arguments, verbatim from the MCP server. */
   inputSchema: z.record(z.string(), z.unknown()),
   riskClass: z.enum(["read", "reversible-write", "irreversible-write", "publish-external", "destructive"]),
-  /** Doctrine returned `require_approval`; the call needs an approval envelope. */
+  /** The host marked this call as needing an operator approval. */
   requiresApproval: z.boolean(),
 });
 export type BrowserToolDescriptor = z.infer<typeof BrowserToolDescriptorSchema>;
@@ -2900,11 +2903,6 @@ export const CallBrowserToolRequestSchema = z.object({
 });
 export type CallBrowserToolRequest = z.infer<typeof CallBrowserToolRequestSchema>;
 
-/**
- * A refusal is a normal outcome, not an exception: doctrine may deny the tool
- * and an approval may be outstanding. Both come back as results the captain
- * can relay in words rather than errors he has to interpret.
- */
 /**
  * A non-text result the browser produced, parked as service-private bytes.
  *
@@ -2937,6 +2935,7 @@ export const CallBrowserToolResultSchema = z.discriminatedUnion("outcome", [
   z.object({
     outcome: z.literal("refused"),
     tool: BrowserToolNameSchema,
+    // `doctrine_denied` is a frozen unused code from the retired policy engine.
     reason: z.enum(["doctrine_denied", "approval_required", "unknown_tool", "browser_unavailable"]),
     detail: z.string().max(500).optional(),
   }),
@@ -3065,6 +3064,7 @@ export const MEDIA_IMAGE_GENERATION_PATH = "/v1/media/images";
  * Why a request produced nothing. Every one of these is a sentence he can say
  * out loud, which is the point: "I have no image model set up" is an answer,
  * where a 500 is something he would have to invent an explanation for.
+ * `doctrine_denied` is a frozen unused code from the retired policy engine.
  */
 export const MediaRefusalReasonSchema = z.enum([
   "doctrine_denied",
@@ -3104,7 +3104,7 @@ export type GenerateImageRequest = z.infer<typeof GenerateImageRequestSchema>;
 
 /**
  * A refusal is a normal outcome he says out loud, not an exception: no image
- * model configured, no credential stored, doctrine denied. Only `ok` carries a
+ * model configured, no credential stored. Only `ok` carries a
  * reference, so there is no shape in which a failed generation yields something
  * attachable.
  */

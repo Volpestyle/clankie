@@ -86,6 +86,7 @@ OpenAI/Anthropic fallbacks; it does not load `.env.local` or print secret values
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | [`apps/clankie`](apps/clankie)                                     | The service: captain, tools, bodies, API (:4310). [HTTP catalog](apps/clankie/openapi.yaml) |
 | [`apps/tui`](apps/tui/README.md)                                   | Operator console and the `clankie` launcher                                                 |
+| [`apps/menu-bar`](apps/menu-bar/README.md)                         | Native macOS menu bar: private local voice and operator conversation tails                  |
 | [`apps/discord-bridge`](apps/discord-bridge/README.md)             | Official bot: text, voice, attachments                                                      |
 | [`apps/discord-user-session`](apps/discord-user-session/README.md) | Personal-lab voice, screen-watch, and Go Live body (off by default)                         |
 | [`apps/discord-activity`](apps/discord-activity/README.md)         | The watch-me-play surface                                                                   |

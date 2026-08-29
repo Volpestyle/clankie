@@ -62,7 +62,7 @@ export interface GbaEmulatorSnapshot {
  *
  * `frozen` (default) is the receipt model: a run that exceeds its evidence
  * budget is invalid evidence, so the state goes uncertain and the body stops.
- * `rolling` is for open-ended play (free play, possession): the full window is
+ * `rolling` is for open-ended play (free play): the full window is
  * sealed and a fresh one starts, the trace counts what rolled, and the body
  * keeps playing — a marathon must never die at a receipt-sized cap.
  */

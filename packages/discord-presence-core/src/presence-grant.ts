@@ -2,8 +2,8 @@ import type { DiscordPresenceWrite } from "@clankie/protocol";
 
 /**
  * Capability grant request both Discord bodies issue before resolving a token.
- * The missionId slot is a leftover wire field; presence grants stay isolated
- * under the presence session id when no mission is supplied.
+ * The `missionId` slot is the frozen grant partition; presence grants mint a
+ * namespaced stream id into it when the write carries no explicit one.
  */
 export function presenceActGrantRequest(write: DiscordPresenceWrite): {
   principalId: string;

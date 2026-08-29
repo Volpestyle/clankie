@@ -175,6 +175,7 @@ export const EnvironmentLeaseV1Schema = z
     leaseId: z.string().min(1),
     sessionId: EnvironmentSessionIdSchema,
     holderId: z.string().min(1),
+    /** Frozen optional isolation slot; current writers leave it unset. */
     missionId: MissionIdSchema.optional(),
     taskId: TaskIdSchema.optional(),
     issuedAt: z.string().datetime(),

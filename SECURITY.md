@@ -13,8 +13,11 @@ Clankie's current security boundaries are:
   internal credentials. Compatibility model/media provider keys may come from
   the process environment; logs and public protocol results remain secret-free.
 - Discord, attachments, generated media responses, browser content, and model
-  output are untrusted input. Only configured `systemActorUserIds` may expose
-  the operator's machine tools to a Discord text turn; voice never gets them.
+  output are untrusted input. Machine tools reach Discord only through owner
+  grants (`systemActorUserIds`, and optionally trusted guilds/channels). An
+  individually granted actor in a shared room gets a one-shot tool-bearing
+  turn; official-bot DMs and trusted guilds own a durable tool-bearing lane.
+  Voice is as capable as the room it is in.
 - Bot and personal-lab Discord credentials live in separate processes. The
   user-session body is off by default and requires explicit owner opt-in.
 - Vox is a separate native process behind validated, bounded IPC.

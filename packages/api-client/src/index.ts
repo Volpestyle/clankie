@@ -125,7 +125,7 @@ export class ClankieApiClient {
 
   public async getHealth(): Promise<ControlPlaneHealth> {
     const body = await this.request<{ ok: true; service: "clankie"; profileHash?: string }>("/health");
-    // The service runs a single unversioned doctrine profile; older callers
+    // The service runs a single unversioned profile hash; older callers
     // still stamp this constant into presence writes.
     return { ...body, profileHash: body.profileHash ?? "unversioned" };
   }
@@ -195,7 +195,7 @@ export class ClankieApiClient {
    *
    * The user-session bridge calls this *before* connecting, so a missing or
    * revoked record keeps the process from ever opening a gateway with a normal
-   * user credential. `undefined` means no opt-in exists for this doctrine.
+   * user credential. `undefined` means no opt-in exists for this profile hash.
    */
   public async inspectDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined> {
     const result = await this.request<{ optIn: unknown | null }>("/v1/discord/user-session/opt-in", {

@@ -38,7 +38,7 @@ describe("DiscordUserSessionCredentialProvider", () => {
     });
   });
 
-  it("refuses an opt-in recorded under a different doctrine profile", async () => {
+  it("refuses an opt-in recorded under a different profile hash", async () => {
     const provider = build({ optIn: { optInId: "opt-1", profileHash: "other-profile", revoked: false } });
     await expect(provider.issueGrant(grantRequest())).rejects.toMatchObject({
       code: "discord_user_session_opt_in_profile_mismatch",

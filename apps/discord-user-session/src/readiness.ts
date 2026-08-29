@@ -87,11 +87,12 @@ export async function assertUserSessionAdmissible(input: {
     );
   }
   if (optIn.profileHash !== profileHash) {
-    // Doctrine changed since the risk was accepted. Re-accepting is deliberate:
-    // an opt-in must not survive a policy change it was never weighed against.
+    // Profile hash changed since the risk was accepted. Re-accepting is
+    // deliberate: an opt-in must not survive a policy change it was never
+    // weighed against.
     throw new DiscordUserSessionRefused(
       "discord_user_session_opt_in_profile_mismatch",
-      "The opt-in was recorded under a different doctrine profile; record it again",
+      "The opt-in was recorded under a different profile hash; record it again",
     );
   }
   if (optIn.characterId !== input.characterId) {

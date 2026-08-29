@@ -309,7 +309,7 @@ export type DiscordPresencePhaseEvent = z.infer<typeof DiscordPresencePhaseEvent
 
 /**
  * Runtime transport binding. Action schemas never mention bot vs user; only this
- * binding (plus doctrine) selects which credential-broker provider executes.
+ * binding selects which credential-broker provider executes.
  * Token material is forbidden here.
  */
 export const DiscordPresenceTransportBindingSchema = z
@@ -329,7 +329,7 @@ export const DiscordPresenceTransportBindingSchema = z
   .strict();
 export type DiscordPresenceTransportBinding = z.infer<typeof DiscordPresenceTransportBindingSchema>;
 
-/** Catalog entry: transport-agnostic action + frozen doctrine risk class. */
+/** Catalog entry: transport-agnostic action + frozen risk class. */
 export const DiscordPresenceCatalogEntrySchema = z
   .object({
     action: DiscordPresenceActionSchema,

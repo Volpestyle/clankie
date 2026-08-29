@@ -165,7 +165,7 @@ describe("EmbodimentManager", () => {
     expect(during.outcome === "refused" && during.sessionId).toBeTruthy();
   });
 
-  it("refuses when doctrine does not allow, and approval-shaped means no", async () => {
+  it("refuses when policy does not allow, and approval-shaped means no", async () => {
     for (const verdict of ["deny", "require_approval"] as const) {
       const test = harness({ decide: () => verdict });
       const result = await test.manager.submit(startIntent());

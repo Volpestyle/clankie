@@ -8,7 +8,7 @@ import {
   type DomainEvent,
 } from "@clankie/protocol";
 
-const CAPTAIN_PRESENCE_MISSION_ID = "captain-presence";
+const CAPTAIN_PRESENCE_STREAM_ID = "captain-presence";
 
 export interface CaptainPresenceLease {
   readonly captainId: string;
@@ -228,7 +228,7 @@ export class CaptainPresenceManager {
     return CaptainPresenceEventSchema.parse({
       id: reportEventId(report),
       occurredAt: report.occurredAt,
-      missionId: CAPTAIN_PRESENCE_MISSION_ID,
+      missionId: CAPTAIN_PRESENCE_STREAM_ID,
       streamKind: "captain_presence",
       correlationId: report.generationId,
       causationId: report.turnId,
@@ -270,7 +270,7 @@ export class CaptainPresenceManager {
     return CaptainPresenceEventSchema.parse({
       id: eventId(key),
       occurredAt: now.toISOString(),
-      missionId: CAPTAIN_PRESENCE_MISSION_ID,
+      missionId: CAPTAIN_PRESENCE_STREAM_ID,
       streamKind: "captain_presence",
       correlationId: lease.generationId,
       profileHash: this.profileHash,

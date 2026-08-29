@@ -1,9 +1,7 @@
 /**
- * The merged Clankie service's HTTP surface: the surviving control-plane
- * routes, with local capabilities wired in-process instead of over loopback.
- * Missions, doctrine, workers, approvals, trackers, shell, and
- * terminals are gone; what remains is Discord presence, the captain seam,
- * memory, embodiment (play), browser, media, and device pairing.
+ * The Clankie service's HTTP surface. Local capabilities are wired in-process.
+ * Discord presence, the captain seam, memory, embodiment (play), browser,
+ * media, and device pairing live here.
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
@@ -104,7 +102,7 @@ import {
   discordPresenceDomainEvent,
 } from "./discord-presence-session.ts";
 import {
-  DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
+  DISCORD_USER_SESSION_OPT_IN_STREAM_ID,
   DISCORD_USER_SESSION_OPT_IN_RECORDED,
   DISCORD_USER_SESSION_OPT_IN_REVOKED,
   DiscordUserSessionOptInProjection,
@@ -127,8 +125,10 @@ import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 
 /**
- * Doctrine is gone, but several wire schemas still carry a profile hash slot.
- * One constant fills them all; nothing compares against it anymore.
+ * Several wire schemas still carry a profile-hash slot from the retired policy
+ * engine. One constant fills them all. User-session opt-in still compares
+ * against it, so changing the constant re-asks for that consent; nothing else
+ * branches on the value.
  */
 const PROFILE_HASH = "unversioned";
 
@@ -365,7 +365,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   const recordEvent = (
     type: string,
-    missionId: string,
+    streamId: string,
     occurredAt: string,
     data: Record<string, unknown>,
     envelope: { correlationId?: string } = {},
@@ -373,9 +373,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const event: DomainEvent = {
       id: idFactory(),
       occurredAt,
-      missionId,
-      streamKind: eventStreamKindForId(missionId),
-      correlationId: envelope.correlationId ?? missionId,
+      missionId: streamId,
+      streamKind: eventStreamKindForId(streamId),
+      correlationId: envelope.correlationId ?? streamId,
       profileHash: PROFILE_HASH,
       type,
       data,
@@ -779,7 +779,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
     const event = recordEvent(
       DISCORD_USER_SESSION_OPT_IN_RECORDED,
-      DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
+      DISCORD_USER_SESSION_OPT_IN_STREAM_ID,
       recordedAt,
       {
         optIn,
@@ -803,7 +803,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const revokedAt = clock().toISOString();
     const event = recordEvent(
       DISCORD_USER_SESSION_OPT_IN_REVOKED,
-      DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
+      DISCORD_USER_SESSION_OPT_IN_STREAM_ID,
       revokedAt,
       {
         optInId: existing.optInId,
@@ -1043,7 +1043,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const fact = dependencies.memory.storeDiscordPersonFact(parsed.data.fact);
     recordEvent(
       "discord.person-memory.committed",
-      discordPersonMemoryEventMissionId(fact.subject),
+      discordPersonMemoryEventStreamId(fact.subject),
       clock().toISOString(),
       { proposalId: parsed.data.proposalId, factId: fact.factId },
       { correlationId: fact.provenance.correlationId },
@@ -1066,7 +1066,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const exported = dependencies.memory.exportDiscordPerson(identity.data, clock());
     recordEvent(
       "discord.person-memory.exported",
-      discordPersonMemoryEventMissionId(identity.data),
+      discordPersonMemoryEventStreamId(identity.data),
       clock().toISOString(),
       { factCount: exported.facts.length, operatorId: operator.operatorId },
     );
@@ -1088,7 +1088,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const deletedFactIds = dependencies.memory.deleteDiscordPerson(identity.data);
     recordEvent(
       "discord.person-memory.deleted",
-      discordPersonMemoryEventMissionId(identity.data),
+      discordPersonMemoryEventStreamId(identity.data),
       clock().toISOString(),
       { deletedFactIds, operatorId: operator.operatorId },
     );
@@ -1120,7 +1120,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (fact === undefined) return context.json({ error: "discord_person_memory_fact_not_found" }, 404);
     recordEvent(
       "discord.person-memory.edited",
-      discordPersonMemoryEventMissionId(identity.data),
+      discordPersonMemoryEventStreamId(identity.data),
       clock().toISOString(),
       { factId: fact.factId, operatorId: operator.operatorId },
     );
@@ -1147,7 +1147,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     recordEvent(
       "discord.person-memory.fact-deleted",
-      discordPersonMemoryEventMissionId(identity.data),
+      discordPersonMemoryEventStreamId(identity.data),
       clock().toISOString(),
       { factId: factId.data, operatorId: operator.operatorId },
     );
@@ -1186,7 +1186,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           });
     recordEvent(
       "discord.person-memory.recalled",
-      discordPersonMemoryEventMissionId(identity.data),
+      discordPersonMemoryEventStreamId(identity.data),
       clock().toISOString(),
       { factCount: facts.length, querySupplied: query.data.query !== undefined },
       { correlationId: `discord-person-memory:recall:${idFactory()}` },
@@ -1211,7 +1211,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const recorded = dependencies.memory.recordEpisode(episode.data);
     recordEvent(
       "captain.episode.recorded",
-      CAPTAIN_EPISODE_MISSION_ID,
+      CAPTAIN_EPISODE_STREAM_ID,
       clock().toISOString(),
       {
         lane: recorded.lane,
@@ -1265,7 +1265,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     const episode = dependencies.memory.updateEpisode(lane.data, episodeId.data, edit.data);
     if (episode === undefined) return context.json({ error: "captain_episode_not_found" }, 404);
-    recordEvent("captain.episode.edited", CAPTAIN_EPISODE_MISSION_ID, clock().toISOString(), {
+    recordEvent("captain.episode.edited", CAPTAIN_EPISODE_STREAM_ID, clock().toISOString(), {
       episodeId: episode.episodeId,
       lane: episode.lane,
       operatorId: operator.operatorId,
@@ -1290,7 +1290,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!dependencies.memory.deleteEpisode(lane.data, episodeId.data)) {
       return context.json({ error: "captain_episode_not_found" }, 404);
     }
-    recordEvent("captain.episode.deleted", CAPTAIN_EPISODE_MISSION_ID, clock().toISOString(), {
+    recordEvent("captain.episode.deleted", CAPTAIN_EPISODE_STREAM_ID, clock().toISOString(), {
       episodeId: episodeId.data,
       lane: lane.data,
       operatorId: operator.operatorId,
@@ -2138,10 +2138,10 @@ function renderVoiceBriefingPersonMemory(
   return lines.join("\n");
 }
 
-/** Episodes are the captain's own, not any one mission's, so they share one stream. */
-const CAPTAIN_EPISODE_MISSION_ID = "captain:episodes";
+/** Episodes are the captain's own, so they share one stream. */
+const CAPTAIN_EPISODE_STREAM_ID = "captain:episodes";
 
-function discordPersonMemoryEventMissionId(identity: DiscordPersonIdentity): string {
+function discordPersonMemoryEventStreamId(identity: DiscordPersonIdentity): string {
   const subject = DiscordPersonIdentitySchema.parse(identity);
   return `discord-person:${subject.guildId}:${subject.userId}`;
 }
