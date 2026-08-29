@@ -25,6 +25,7 @@ import {
 import { createLogger } from "@clankie/observability";
 import {
   applyDiscordSettingsToEnvironment,
+  applyRelaySettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
   discordAttachmentRoot,
   parsePositiveInt,
@@ -83,6 +84,7 @@ const startupSettings = await settingsStore.load();
 const settingsFilledNames = [
   ...applyDiscordSettingsToEnvironment(startupSettings.discord),
   ...applyVoiceSettingsToEnvironment(startupSettings.voice),
+  ...applyRelaySettingsToEnvironment(startupSettings.relay),
 ];
 
 const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");

@@ -24,11 +24,12 @@ import { setTimeout as sleep } from "node:timers/promises";
  * - a health probe gate, so "restarted" means "answered healthy", not "spawned".
  */
 
-export type ServiceId = "clankie" | "discord-bridge" | "discord-user-session" | "activity" | "tunnel";
+export type ServiceId = "clankie" | "relay" | "discord-bridge" | "discord-user-session" | "activity" | "tunnel";
 
 /** Stable operator-facing service order. */
 export const SERVICE_ORDER: readonly ServiceId[] = [
   "clankie",
+  "relay",
   "discord-bridge",
   "discord-user-session",
   "activity",

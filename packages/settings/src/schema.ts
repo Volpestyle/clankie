@@ -233,6 +233,20 @@ export const VoiceSettingsSchema = z
   });
 export type VoiceSettings = z.infer<typeof VoiceSettingsSchema>;
 
+/** The relay origin advertised to paired remote devices (ADR 0135/0138). */
+export const RelaySettingsSchema = z
+  .object({
+    /**
+     * Public origin remote devices reach the relay on — typically the
+     * machine's tailnet hostname in front of the launcher-supervised relay,
+     * e.g. `http://my-mac.tailnet.ts.net:4321`. Unset advertises nothing and
+     * paired devices keep whatever origin they already hold.
+     */
+    url: z.string().min(1).max(512).optional(),
+  })
+  .strict();
+export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
+
 /** Which PokeAgent bodies the captain may offer. One live session spans both. */
 export const GameplaySettingsSchema = z
   .object({
@@ -371,6 +385,7 @@ export const ClankieSettingsSchema = z
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
+    relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
     mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),

@@ -6,6 +6,7 @@ export {
   McpServerSchema,
   McpSettingsSchema,
   PersonaSettingsSchema,
+  RelaySettingsSchema,
   SETTINGS_SCHEMA_VERSION,
   VoiceSettingsSchema,
   assertNoSecretShapedValue,
@@ -18,6 +19,7 @@ export {
   type McpServerSettings,
   type McpSettings,
   type PersonaSettings,
+  type RelaySettings,
   type VoiceSettings,
 } from "./schema.ts";
 export { discordAttachmentRoot } from "./attachments.ts";
@@ -33,6 +35,7 @@ export {
   type DiscordActiveBody,
   type ResolvedDiscordSettings,
 } from "./discord-resolve.ts";
+export { applyRelaySettingsToEnvironment, resolveRelaySettings } from "./relay-resolve.ts";
 export {
   applyVoiceSettingsToEnvironment,
   resolveVoiceSettings,

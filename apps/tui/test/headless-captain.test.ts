@@ -97,6 +97,7 @@ describe("headless clankie commands", () => {
     };
     expect(services.map((service) => [service.id, service.state, service.owned])).toEqual([
       ["clankie", "healthy", false],
+      ["relay", "healthy", false],
       ["discord-bridge", "unreachable", false],
       ["discord-user-session", "healthy", false],
       // The surfaces an audience actually reaches are reported too — health
@@ -167,15 +168,21 @@ describe("headless clankie commands", () => {
     const stdout = outputBuffer();
     const stderr = outputBuffer();
     const spawned: string[][] = [];
-    // The service reports down until it is spawned, then healthy; the bridge
-    // probe is record-backed, so it turns healthy once its own spawn lands.
+    // Each HTTP-probed service reports down until its own spawn lands; the
+    // bridge probe is record-backed, so it turns healthy once its spawn lands.
     let clankieUp = false;
+    let relayUp = false;
 
     const exitCode = await runHeadlessCaptainCommand(["restart", "captain"], {
       repoRoot: "/repo",
       env: await stateEnv(),
       fetchImpl: (async (input: string | URL | Request) => {
-        if (String(input).includes("/health")) {
+        const url = String(input);
+        if (url.includes(":4321/health")) {
+          if (!relayUp) throw new Error("connection refused");
+          return Response.json({ ok: true });
+        }
+        if (url.includes("/health")) {
           if (!clankieUp) throw new Error("connection refused");
           return Response.json({ ok: true });
         }
@@ -186,6 +193,7 @@ describe("headless clankie commands", () => {
       spawnImpl: ((_command: string, args: string[]) => {
         spawned.push(args);
         if (args.includes("@clankie/clankie")) clankieUp = true;
+        if (args.includes("@clankie/relay")) relayUp = true;
         return runningChild(9_000 + spawned.length);
       }) as unknown as typeof spawn,
       stdout: stdout.stream,
@@ -193,9 +201,13 @@ describe("headless clankie commands", () => {
     });
 
     expect(exitCode).toBe(0);
-    // The captain restart fans out to the bridge, whose live presence claim the
-    // restarted service no longer honors.
-    expect(spawned.map((args) => args[1])).toEqual(["@clankie/clankie", "@clankie/discord-bridge"]);
+    // The captain restart fans out to the relay holding its bearer and the
+    // bridge, whose live presence claim the restarted service no longer honors.
+    expect(spawned.map((args) => args[1])).toEqual([
+      "@clankie/clankie",
+      "@clankie/relay",
+      "@clankie/discord-bridge",
+    ]);
     expect(JSON.parse(stdout.text())).toMatchObject({
       ok: true,
       status: "ready",
@@ -203,6 +215,7 @@ describe("headless clankie commands", () => {
       target: "clankie",
       services: [
         { id: "clankie", ok: true },
+        { id: "relay", ok: true },
         { id: "discord-bridge", ok: true },
       ],
     });

@@ -44,6 +44,9 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
   "control-plane": "clankie",
   controlplane: "clankie",
   cp: "clankie",
+  relay: "relay",
+  "app-relay": "relay",
+  phone: "relay",
   discord: "discord-bridge",
   activity: "activity",
   watch: "activity",
@@ -99,7 +102,7 @@ export function parseServiceTarget(raw: string | undefined): ServiceTarget {
   const target = TARGET_ALIASES[raw.toLowerCase()];
   if (target === undefined) {
     throw new Error(
-      `Unknown service "${raw}". Expected one of: all, clankie, discord, user-session, activity, tunnel (aliases: captain, eve, cp, control-plane, bridge, lab, watch, viewer, cloudflared).`,
+      `Unknown service "${raw}". Expected one of: all, clankie, relay, discord, user-session, activity, tunnel (aliases: captain, eve, cp, control-plane, app-relay, phone, bridge, lab, watch, viewer, cloudflared).`,
     );
   }
   return target;
@@ -211,6 +214,45 @@ const CLANKIE: ManagedService = {
         signal: AbortSignal.timeout(750),
       });
       return response.ok ? { state: "healthy" } : { state: "unhealthy" };
+    } catch {
+      return { state: "unreachable" };
+    }
+  },
+};
+
+/** 4320 belongs to the activity surface; the relay's canonical port is 4321. */
+function relayPort(env: NodeJS.ProcessEnv): string {
+  return env["CLANKIE_RELAY_PORT"]?.trim() || "4321";
+}
+
+/**
+ * The HTTP boundary remote Apple clients speak (ADR 0135/0138). In the
+ * registry because it was the last hand-run member of the stack: a phone
+ * would pair against a healthy control plane and then find nobody listening
+ * on the relay side. It authorizes each device request against the clankie
+ * service and uses the brokered captain bearer for the upstream hop, so it
+ * restarts with the service.
+ */
+const RELAY: ManagedService = {
+  id: "relay",
+  label: "App relay",
+  ...workspaceStart("@clankie/relay", "apps/relay/src/index.js"),
+  restartsWith: ["clankie"],
+  serviceEnv: ({ env, captainToken }) => ({
+    ...env,
+    CLANKIE_RELAY_PORT: relayPort(env),
+    ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
+  }),
+  probe: async ({ env, fetchImpl }) => {
+    const port = relayPort(env);
+    try {
+      const response = await fetchImpl(`http://127.0.0.1:${port}/health`, {
+        redirect: "error",
+        signal: AbortSignal.timeout(750),
+      });
+      return response.ok
+        ? { state: "healthy", detail: `devices on 127.0.0.1:${port}` }
+        : { state: "unhealthy" };
     } catch {
       return { state: "unreachable" };
     }
@@ -399,6 +441,7 @@ const TUNNEL: ManagedService = {
 
 const SERVICES: Readonly<Record<ServiceId, ManagedService>> = {
   clankie: CLANKIE,
+  relay: RELAY,
   "discord-bridge": DISCORD_BRIDGE,
   "discord-user-session": DISCORD_USER_SESSION,
   activity: ACTIVITY,

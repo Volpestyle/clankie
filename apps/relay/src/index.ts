@@ -6,7 +6,8 @@ import {
   type RelayConversationLogger,
 } from "./operator-conversations.ts";
 
-const port = Number(process.env.PORT ?? 4320);
+// 4320 belongs to the activity surface; the relay's canonical port is 4321.
+const port = Number(process.env.CLANKIE_RELAY_PORT ?? process.env.PORT ?? 4321);
 const host = process.env.CLANKIE_RELAY_HOST ?? "127.0.0.1";
 
 const captainToken = process.env.CLANKIE_CAPTAIN_TOKEN;

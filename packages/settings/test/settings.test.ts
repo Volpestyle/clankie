@@ -427,3 +427,30 @@ describe("mcp and email settings", () => {
     expect(loaded.email.username).toBeUndefined();
   });
 });
+
+describe("relay settings", () => {
+  it("projects the stored relay origin into an unset environment only", async () => {
+    const { applyRelaySettingsToEnvironment, RelaySettingsSchema } = await import("../src/index.ts");
+    const stored = RelaySettingsSchema.parse({ url: "http://my-mac.tailnet.ts.net:4321" });
+    const env: NodeJS.ProcessEnv = {};
+    expect(applyRelaySettingsToEnvironment(stored, env)).toEqual(["CLANKIE_RELAY_URL"]);
+    expect(env.CLANKIE_RELAY_URL).toBe("http://my-mac.tailnet.ts.net:4321");
+    const deliberate: NodeJS.ProcessEnv = { CLANKIE_RELAY_URL: "http://elsewhere:9" };
+    expect(applyRelaySettingsToEnvironment(stored, deliberate)).toEqual([]);
+    expect(deliberate.CLANKIE_RELAY_URL).toBe("http://elsewhere:9");
+  });
+
+  it("environment wins on read and is reported as an override", async () => {
+    const { resolveRelaySettings } = await import("../src/index.ts");
+    const resolved = resolveRelaySettings({}, { CLANKIE_RELAY_URL: "http://env-origin:4321" });
+    expect(resolved.settings.url).toBe("http://env-origin:4321");
+    expect(resolved.overriddenByEnvironment).toEqual(["CLANKIE_RELAY_URL"]);
+  });
+
+  it("advertises nothing when unset", async () => {
+    const { applyRelaySettingsToEnvironment } = await import("../src/index.ts");
+    const env: NodeJS.ProcessEnv = {};
+    expect(applyRelaySettingsToEnvironment({}, env)).toEqual([]);
+    expect(env.CLANKIE_RELAY_URL).toBeUndefined();
+  });
+});

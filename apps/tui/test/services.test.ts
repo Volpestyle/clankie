@@ -444,6 +444,9 @@ describe("service targets", () => {
     expect(parseServiceTarget("captain-eve")).toBe("clankie");
     expect(parseServiceTarget("lab")).toBe("discord-user-session");
     expect(parseServiceTarget("user-session")).toBe("discord-user-session");
+    expect(parseServiceTarget("relay")).toBe("relay");
+    expect(parseServiceTarget("app-relay")).toBe("relay");
+    expect(parseServiceTarget("phone")).toBe("relay");
   });
 
   it("starts only the active Discord body", () => {
@@ -610,6 +613,7 @@ describe("service targets", () => {
   it("restarts forwards and stops backwards along the dependency chain", () => {
     expect(resolveTargets("all")).toEqual([
       "clankie",
+      "relay",
       "discord-bridge",
       "discord-user-session",
       "activity",
@@ -622,6 +626,7 @@ describe("service targets", () => {
       "activity",
       "discord-user-session",
       "discord-bridge",
+      "relay",
       "clankie",
     ]);
   });
@@ -739,6 +744,7 @@ describe("service targets", () => {
       "activity",
       "discord-user-session",
       "discord-bridge",
+      "relay",
       "clankie",
     ]);
     expect(outcomes.every((outcome) => outcome.ok)).toBe(true);
@@ -763,6 +769,7 @@ describe("service targets", () => {
       ["activity", true],
       ["discord-user-session", true],
       ["discord-bridge", true],
+      ["relay", true],
       ["clankie", false],
     ]);
     expect(outcomes.find((outcome) => outcome.id === "clankie")?.error).toMatch(
@@ -927,11 +934,57 @@ describe("restart carries dependents", () => {
     // The failure this prevents: the service rebuilds presence from its event
     // store, the still-running bridge keeps a claim for the old revision, and
     // every reply it posts is rejected `discord_presence_live_claim_stale`.
-    expect(resolveRestartTargets("clankie")).toEqual(["clankie", "discord-bridge", "discord-user-session"]);
+    expect(resolveRestartTargets("clankie")).toEqual(["clankie", "relay", "discord-bridge", "discord-user-session"]);
   });
 
   it("leaves a leaf service on its own", () => {
     expect(resolveRestartTargets("activity")).toEqual(["activity"]);
+  });
+
+  it("restarts the relay with the service whose bearer it holds", () => {
+    expect(resolveRestartTargets("relay")).toEqual(["relay"]);
+    expect(resolveRestartTargets("clankie")).toContain("relay");
+  });
+
+  it("gives the relay its canonical port and the brokered captain bearer", () => {
+    const env = managedService("relay").serviceEnv?.({
+      env: {},
+      repoRoot: "/repo",
+      captainToken: "captain-secret",
+    });
+    expect(env?.CLANKIE_RELAY_PORT).toBe("4321");
+    expect(env?.CLANKIE_CAPTAIN_TOKEN).toBe("captain-secret");
+    const overridden = managedService("relay").serviceEnv?.({
+      env: { CLANKIE_RELAY_PORT: "5555" },
+      repoRoot: "/repo",
+      captainToken: undefined,
+    });
+    expect(overridden?.CLANKIE_RELAY_PORT).toBe("5555");
+    expect(overridden !== undefined && "CLANKIE_CAPTAIN_TOKEN" in overridden).toBe(false);
+  });
+
+  it("probes the relay health endpoint on its canonical port", async () => {
+    const healthy = await managedService("relay").probe({
+      env: {},
+      fetchImpl: (async (input: unknown) => {
+        expect(String(input)).toBe("http://127.0.0.1:4321/health");
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }) as typeof fetch,
+      operatorToken: undefined,
+      record: undefined,
+      matchingPids: [],
+    });
+    expect(healthy).toMatchObject({ state: "healthy" });
+    const down = await managedService("relay").probe({
+      env: {},
+      fetchImpl: (async () => {
+        throw new Error("refused");
+      }) as typeof fetch,
+      operatorToken: undefined,
+      record: undefined,
+      matchingPids: [],
+    });
+    expect(down).toMatchObject({ state: "unreachable" });
   });
 
   it("treats both Discord processes as one mutually-exclusive restart slot", () => {

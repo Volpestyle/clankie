@@ -1614,6 +1614,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   // Mint a one-time pairing offer. The offer secret appears once in the
   // response and is never logged; events carry only the non-secret offer id.
+  // The relay origin a paired device should speak to, when the operator has
+  // published one (typically the machine's tailnet hostname in front of the
+  // launcher-supervised relay). The app stores it from pairing and refresh
+  // responses; an omitted field keeps whatever the device already holds, so
+  // hosts that publish nothing keep their build-time override behavior.
+  const advertisedRelayUrl = (): { relayUrl: string } | Record<never, never> => {
+    const raw = process.env.CLANKIE_RELAY_URL?.trim();
+    return raw === undefined || raw.length === 0 ? {} : { relayUrl: raw };
+  };
+
   app.post("/v1/pairing/offer", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
@@ -1742,7 +1752,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         deviceToken,
         grants: accepted,
         sessionExpiresAt,
-      } satisfies PairingCompleteResponse);
+        ...advertisedRelayUrl(),
+      } satisfies PairingCompleteResponse & { relayUrl?: string });
     });
   });
 
@@ -1786,7 +1797,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         deviceToken,
         grants: record.grants,
         sessionExpiresAt,
-      } satisfies DeviceSessionRefreshResponse);
+        ...advertisedRelayUrl(),
+      } satisfies DeviceSessionRefreshResponse & { relayUrl?: string });
     });
   });
 

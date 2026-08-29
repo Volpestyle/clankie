@@ -1,5 +1,15 @@
 # Remote relay
 
+The launcher supervises the relay like every other member of the stack:
+`clankie start relay` / `clankie restart` own it, `clankie status` reports it,
+and it restarts with the clankie service whose brokered captain bearer it
+holds. It listens on `CLANKIE_RELAY_PORT` (default 4321 — 4320 belongs to the
+activity surface). The origin remote devices should reach it on is
+owner-authored settings (`relay.url` in `~/.config/clankie/settings.json`, or
+the `CLANKIE_RELAY_URL` override): when set, the control plane advertises it
+in pairing and session-refresh responses, so paired devices follow a moved
+relay without a rebuild.
+
 The relay is the HTTP-only operator-conversation boundary for remote Apple
 clients. Tailscale may carry the connection, but network identity is not
 authorization: every request carries a device-session bearer.
