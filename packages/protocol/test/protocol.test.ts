@@ -331,7 +331,19 @@ describe("protocol", () => {
         command: { action: "set_goal", objective: "Ship it", tokenBudget: 0 },
       }),
     ).toThrow();
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(8);
+    expect(
+      OperatorConversationServiceRequestSchema.parse({ op: "roster", schemaVersion: 1 }),
+    ).toMatchObject({ op: "roster" });
+    expect(
+      OperatorConversationServiceResultSchema.parse({
+        op: "roster",
+        schemaVersion: 1,
+        seats: [
+          { seatId: "term_65a2015731452d", harness: "codex", status: "idle", title: "clankie" },
+        ],
+      }),
+    ).toMatchObject({ op: "roster", seats: [{ seatId: "term_65a2015731452d" }] });
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(9);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 
