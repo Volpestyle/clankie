@@ -3,6 +3,7 @@
  * connected to the single clankie service on port 4310.
  */
 import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { ClankieApiClient } from "@clankie/api-client";
 import {
   resolveOperatorCredential,
@@ -39,12 +40,16 @@ import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/l
 import { HerdrRoster } from "./observation/herdr-roster.ts";
 import { herdrPaneIdFromEnv, reportHerdrAgent, reportHerdrMetadata } from "./session/herdr-report.ts";
 import { PresencePoller } from "./observation/presence.ts";
-import { formatCaptainContextStatus, formatCaptainPresenceStatus } from "./shell/status-bar.ts";
+import { formatCaptainPresenceStatus } from "./shell/footer.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
+const stateHome = process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
+const tuiStateRoot = process.env.CLANKIE_INSTALL_ROOT
+  ? join(stateHome, "clankie", "tui")
+  : join(repoRoot, ".data", "tui");
 const skillCatalog = await discoverClankieSkills(repoRoot);
-// The launcher is a symlink into this repo, so the process always starts here.
+// The launcher resolves either the checkout or installed release as repoRoot.
 // Where the operator typed `clankie` is what decides the room they land in.
 const launchedWorkspace = launchWorkspace(process.cwd(), repoRoot);
 
@@ -95,7 +100,7 @@ let currentContextUsage: OperatorConversationContextUsage | undefined;
 const conversationPrompt = new OperatorConversationPromptSession({
   client: conversationClient,
   selection: conversationSelection,
-  tails: new OperatorConversationTailStore(join(repoRoot, ".data", "tui", "operator-conversation-tail.json")),
+  tails: new OperatorConversationTailStore(join(tuiStateRoot, "operator-conversation-tail.json")),
   herdrPaneId: () => herdrPaneIdFromEnv(),
 });
 await conversationPrompt.initialize();
@@ -141,10 +146,10 @@ const conversationsContext = {
     currentConversationTitle = conversation.title;
     currentContextUsage = conversation.contextUsage;
     currentWorkspace = conversationWorkspace(conversation) ?? repoRoot;
-    // The console's own shell escape, path completion, and banner follow the
+    // The console's own shell escape, path completion, and footer follow the
     // captain into the directory his session now works in.
     shell.setCwd(currentWorkspace);
-    refreshBanner();
+    shell.refreshStatusView();
     return conversation;
   },
   create: async (title?: string) => {
@@ -210,24 +215,20 @@ const commands = [
   ...buildGameSaveCommands(),
 ];
 
-function bannerFieldsFor(cwd: string) {
-  return {
-    title: "Clankie",
-    tagline: "chat · tools",
-    cwd: cwd.replace(process.env.HOME ?? " ", "~"),
-  };
-}
 const shell = new ClankieFaceShell({
   commands,
   cwd: currentWorkspace,
   autocomplete: { listSkills: () => skillCatalog },
   skills: skillCatalog,
-  bannerFields: bannerFieldsFor(currentWorkspace),
-  historyPath: join(repoRoot, ".data", "tui", "prompt-history.jsonl"),
-  statusExtras: () => [
-    formatCaptainContextStatus(currentContextUsage),
-    formatCaptainPresenceStatus(presence.snapshot),
-  ],
+  bannerFields: { title: "Clankie" },
+  historyPath: join(tuiStateRoot, "prompt-history.jsonl"),
+  // The pi-style footer: cwd · conversation, context %, model, presence.
+  footerData: () => ({
+    contextUsage: currentContextUsage,
+    model: currentModelDisplay,
+    title: currentConversationTitle,
+  }),
+  statusExtras: () => [formatCaptainPresenceStatus(presence.snapshot)],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal) => {
     await reportHerdrAgent("working", { source: "clankie", agent: "clankie", message: "turn" });
@@ -254,22 +255,14 @@ const shell = new ClankieFaceShell({
   },
 });
 
-/** The banner carries both the model and the workspace; either can move alone. */
-function refreshBanner(): void {
-  shell.setBannerFields({
-    ...bannerFieldsFor(currentWorkspace),
-    ...(currentModelDisplay === undefined ? {} : { model: currentModelDisplay }),
-  });
-  shell.refreshStatusView();
-}
-
 async function applyModelDisplay(config: ClankieConfig): Promise<void> {
   try {
     currentModelDisplay = await formatModelBanner(config, services.captainModels);
   } catch {
     currentModelDisplay = undefined;
   }
-  refreshBanner();
+  // The footer reads the model lazily; a repaint is all a change needs.
+  shell.refreshStatusView();
 }
 
 // Crash-safety envelope: Node >=24 terminates on an unhandled rejection with no

@@ -1,13 +1,10 @@
 /**
  * Inline `!` shell escape for the Clankie face: run a host shell command and
- * render its outcome as a transcript block. The face owns the bash-mode state,
- * Ctrl-C wiring, and status indicator; this module owns the two reusable,
- * testable pieces — the command runner and the result renderer.
+ * stream its output into the shell's bash transcript block. The face owns the
+ * bash-mode state, Ctrl-C wiring, and rendering; this module owns the
+ * reusable, testable command runner.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
-import type { ClankieFaceAnsiTheme } from "./clankie-face-theme.ts";
-import { ClankieRenderCache } from "./clankie-render-cache.ts";
 
 export interface FaceBashResult {
   stdout: string;
@@ -27,6 +24,8 @@ export interface RunFaceBashOptions {
   maxOutput?: number;
   /** Called once the child spawns so the caller can wire Ctrl-C cancellation. */
   onSpawn?: (child: ChildProcess) => void;
+  /** Streams captured output (stdout and stderr interleaved) as it arrives. */
+  onOutput?: (chunk: string) => void;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -64,6 +63,7 @@ export function runFaceBashCommand(command: string, options: RunFaceBashOptions)
       if (text.length < full.length) truncated = true;
       if (channel === "out") stdout += text;
       else stderr += text;
+      if (text.length > 0) options.onOutput?.(text);
     };
     child.stdout?.on("data", (chunk: Buffer) => append(chunk, "out"));
     child.stderr?.on("data", (chunk: Buffer) => append(chunk, "err"));
@@ -78,7 +78,9 @@ export function runFaceBashCommand(command: string, options: RunFaceBashOptions)
       resolve({ stdout, stderr, code, timedOut, truncated, durationMs: Date.now() - startedAt });
     };
     child.on("error", (error: Error) => {
-      stderr += `${stderr.length > 0 ? "\n" : ""}${error.message}`;
+      const message = `${stderr.length > 0 ? "\n" : ""}${error.message}`;
+      stderr += message;
+      options.onOutput?.(message);
       finish(127);
     });
     // A signal-killed process reports code=null; map it to the conventional
@@ -91,66 +93,4 @@ export function runFaceBashCommand(command: string, options: RunFaceBashOptions)
       else finish(137);
     });
   });
-}
-
-/** Render the `$ command` header, output, and exit/duration footer for a bash result. */
-export function formatFaceBashResultLines(
-  command: string,
-  result: FaceBashResult,
-  ansi: ClankieFaceAnsiTheme,
-  width: number,
-): string[] {
-  const bodyWidth = Math.max(1, width - 2);
-  const lines = [`${ansi.accent("$")} ${ansi.bold(command)}`];
-  const pushBlock = (text: string, paint?: (line: string) => string): void => {
-    for (const raw of text.replace(/\n+$/u, "").split(/\r?\n/u)) {
-      if (raw.length === 0) {
-        lines.push("");
-        continue;
-      }
-      for (const wrapped of wrapTextWithAnsi(paint === undefined ? raw : paint(raw), bodyWidth)) {
-        lines.push(`  ${truncateToWidth(wrapped, bodyWidth, "", true)}`);
-      }
-    }
-  };
-  const hasStdout = result.stdout.trim().length > 0;
-  const hasStderr = result.stderr.trim().length > 0;
-  if (hasStdout) pushBlock(result.stdout);
-  if (hasStderr) pushBlock(result.stderr, ansi.danger);
-  if (!hasStdout && !hasStderr) lines.push(`  ${ansi.dim("(no output)")}`);
-  const ok = result.code === 0 && !result.timedOut;
-  const duration =
-    result.durationMs < 1000 ? `${result.durationMs}ms` : `${(result.durationMs / 1000).toFixed(1)}s`;
-  const footer = [
-    ok ? ansi.green("exit 0") : ansi.red(`exit ${result.code}`),
-    ansi.dim(duration),
-    ...(result.timedOut ? [ansi.yellow("timed out")] : []),
-    ...(result.truncated ? [ansi.dim("output truncated")] : []),
-  ].join(ansi.dim("  ·  "));
-  lines.push(`  ${footer}`);
-  return lines;
-}
-
-/** Transcript block for one inline `!` shell command and its captured output. */
-export class ClankieBashResultComponent implements Component {
-  private readonly command: string;
-  private readonly result: FaceBashResult;
-  private readonly ansi: ClankieFaceAnsiTheme;
-  private readonly cache = new ClankieRenderCache();
-
-  constructor(command: string, result: FaceBashResult, ansi: ClankieFaceAnsiTheme) {
-    this.command = command;
-    this.result = result;
-    this.ansi = ansi;
-  }
-
-  invalidate(): void {
-    this.cache.clear();
-  }
-
-  render(width: number): string[] {
-    return this.cache.get(width, () =>
-      formatFaceBashResultLines(this.command, this.result, this.ansi, width),
-    );
-  }
 }

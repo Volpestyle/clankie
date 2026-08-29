@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { buildConsoleCommands } from "../src/commands.ts";
-import { ClankieFaceShell } from "../src/shell/shell.ts";
+import { ClankieFaceShell, clickedTranscriptBlock } from "../src/shell/shell.ts";
 
 describe("shell assembly", () => {
   it("wires the face shell without starting it", () => {
@@ -14,10 +14,52 @@ describe("shell assembly", () => {
       commands,
       cwd: process.cwd(),
       env: {},
-      bannerFields: { title: "Clankie", tagline: "test" },
+      bannerFields: { title: "Clankie" },
     });
     expect(shell.setupFlow.isWaitingForInput()).toBe(false);
-    expect(shell.layoutSettings.inputPlacement).toBe("bottom");
+    expect(shell.headerVisible).toBe(true);
+  });
+
+  it("renders conversation content through pi's chat components", () => {
+    const shell = new ClankieFaceShell({
+      commands: buildConsoleCommands({}),
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+    });
+    shell.insertUserMessage("hello there");
+    shell.insertAssistantMarkdown("a **bold** reply");
+    shell.insertReasoning("thinking out loud");
+    shell.beginToolCall("call-1", "get_self_state", '{"includePresence":true}');
+    shell.completeToolCall("call-1", "get_self_state", { failed: false, detail: "status: idle" });
+    shell.insertMarkdown("**Notice**\n\na markdown notice");
+
+    const chat = (shell as unknown as { chat: { render(width: number): string[] } }).chat;
+    // oxlint-disable-next-line no-control-regex -- intentionally strips ANSI escape sequences
+    const ansiPattern = /\x1b\[[0-9;]*m/gu;
+    const text = chat.render(80).join("\n").replace(ansiPattern, "");
+    expect(text).toContain("hello there");
+    expect(text).toContain("bold");
+    expect(text).toContain("thinking out loud");
+    expect(text).toContain("get_self_state");
+    expect(text).toContain("a markdown notice");
+  });
+
+  it("maps a transcript click row to the block under it", () => {
+    const block = (rows: number) => ({
+      invalidate(): void {},
+      render: () => Array.from({ length: rows }, () => "x"),
+    });
+    const first = block(3);
+    const second = block(2);
+    const third = block(5);
+    const blocks = [first, second, third];
+    expect(clickedTranscriptBlock(blocks, 80, 0)).toBe(first);
+    expect(clickedTranscriptBlock(blocks, 80, 2)).toBe(first);
+    expect(clickedTranscriptBlock(blocks, 80, 3)).toBe(second);
+    expect(clickedTranscriptBlock(blocks, 80, 4)).toBe(second);
+    expect(clickedTranscriptBlock(blocks, 80, 9)).toBe(third);
+    expect(clickedTranscriptBlock(blocks, 80, 10)).toBeUndefined();
   });
 
   it("opens a readable conversation picker", async () => {
@@ -210,7 +252,7 @@ describe("shell assembly", () => {
       commands: buildConsoleCommands({}),
       cwd: process.cwd(),
       env: {},
-      bannerFields: { title: "Clankie", tagline: "test" },
+      bannerFields: { title: "Clankie" },
     });
     vi.spyOn(shell.setupFlow, "isWaitingForInput").mockReturnValue(true);
     vi.spyOn(shell.setupFlow, "hasActivePrompt").mockReturnValue(true);
@@ -229,7 +271,7 @@ describe("shell assembly", () => {
       commands: buildConsoleCommands({}),
       cwd: process.cwd(),
       env: {},
-      bannerFields: { title: "Clankie", tagline: "test" },
+      bannerFields: { title: "Clankie" },
     });
     const controller = new AbortController();
     const internals = shell as unknown as {

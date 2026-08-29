@@ -1,5 +1,3 @@
-import type { MarkdownTheme } from "@earendil-works/pi-tui";
-
 export type ClankieFaceThemeCapabilities = {
   readonly color: boolean;
   readonly trueColor: boolean;
@@ -38,29 +36,33 @@ export type ClankieFaceAnsiTheme = {
 
 type Rgb = readonly [number, number, number];
 
-// Shared Clankie face palette: warm accent, dusty neutrals, muted semantic colors.
+// Shared Clankie face palette, unified with pi's dark theme so the chrome
+// (banner, typeahead, workbench, footer) matches the pi-rendered chat surface:
+// accent #8abeb7, error #cc6666, dim #666666, muted #808080, mdLink #81a2be,
+// text #d4d4d4, success #b5bd68, and pi's heading gold #f0c674 for warnings
+// (pi's literal warning #ffff00 is too harsh for chrome text).
 const PALETTE: Record<ClankieFaceColor, Rgb> = {
-  accent: [255, 196, 112],
-  code: [206, 166, 118],
-  danger: [220, 116, 108],
-  dim: [128, 116, 112],
-  label: [150, 132, 126],
-  link: [126, 170, 190],
-  selectedDescription: [198, 190, 186],
-  success: [128, 168, 128],
-  warning: [255, 196, 112],
+  accent: [138, 190, 183],
+  code: [138, 190, 183],
+  danger: [204, 102, 102],
+  dim: [102, 102, 102],
+  label: [128, 128, 128],
+  link: [129, 162, 190],
+  selectedDescription: [212, 212, 212],
+  success: [181, 189, 104],
+  warning: [240, 198, 116],
 };
 
 const PALETTE_256: Record<ClankieFaceColor, number> = {
-  accent: 215,
-  code: 180,
-  danger: 174,
-  dim: 244,
-  label: 245,
-  link: 109,
-  selectedDescription: 251,
-  success: 108,
-  warning: 215,
+  accent: 109,
+  code: 109,
+  danger: 167,
+  dim: 241,
+  label: 244,
+  link: 110,
+  selectedDescription: 252,
+  success: 143,
+  warning: 222,
 };
 
 export function createClankieFaceAnsiTheme(caps: ClankieFaceThemeCapabilities): ClankieFaceAnsiTheme {
@@ -93,26 +95,6 @@ export function createClankieFaceAnsiTheme(caps: ClankieFaceThemeCapabilities): 
     underline: attribute("4", "24"),
     warning,
     yellow: warning,
-  };
-}
-
-/** Shared markdown palette for the face transcript and the read-only session mirror. */
-export function createClankieFaceMarkdownTheme(ansi: ClankieFaceAnsiTheme): MarkdownTheme {
-  return {
-    bold: ansi.bold,
-    code: ansi.yellow,
-    codeBlock: ansi.green,
-    codeBlockBorder: ansi.dim,
-    heading: ansi.cyan,
-    hr: ansi.dim,
-    italic: ansi.italic,
-    link: ansi.blue,
-    linkUrl: ansi.dim,
-    listBullet: ansi.cyan,
-    quote: ansi.italic,
-    quoteBorder: ansi.dim,
-    strikethrough: ansi.dim,
-    underline: ansi.underline,
   };
 }
 

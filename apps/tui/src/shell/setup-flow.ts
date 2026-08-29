@@ -24,6 +24,17 @@ import {
 
 type FlowLineTone = "error" | "info" | "success" | "warning";
 
+/** Shared overlay contract for every Clankie modal (setup, workbench, selectors). */
+function clankieModalOverlayOptions(): OverlayOptions {
+  return {
+    anchor: "center",
+    margin: { bottom: 2, left: 2, right: 2, top: 2 },
+    maxHeight: "70%",
+    minWidth: 48,
+    width: "88%",
+  };
+}
+
 export interface MenuOption {
   readonly value: string;
   readonly label: string;
@@ -79,17 +90,7 @@ export interface SetupFlowContext {
   setStatus(message: string): void;
   refreshStatusView(): void;
   refreshCommandSurface(text: string): void;
-  showSelectableOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
-}
-
-function setupOverlayOptions(): OverlayOptions {
-  return {
-    anchor: "center",
-    margin: { bottom: 3, left: 2, right: 2, top: 2 },
-    maxHeight: "70%",
-    minWidth: 48,
-    width: "88%",
-  };
+  showModalOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
 }
 
 function toInteractivePromptOption(option: MenuOption): InteractivePromptOption {
@@ -134,10 +135,8 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
     return true;
   }
 
-  async function readTextOverlay(
-    options: Parameters<SetupFlow["readText"]>[0] & { readonly sensitive?: boolean },
-    error: string | undefined,
-    defaultValue: string | undefined,
+  async function runOverlayPrompt(
+    createPrompt: (finish: (value: string | undefined) => void, cancel: () => void) => Component,
   ): Promise<string | undefined> {
     return await new Promise<string | undefined>((resolve) => {
       let settled = false;
@@ -157,69 +156,61 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
       cancelActivePrompt = cancel;
       context.refreshStatusView();
       context.refreshCommandSurface(context.editor.getText());
-      const prompt = new InteractiveTextPrompt({
-        allowBack: options.allowBack,
-        defaultValue,
-        error,
-        message: options.message,
-        editor: options.multiline === true ? new Editor(context.tui, context.editorTheme) : undefined,
-        onCancel: cancel,
-        onRender: () => context.tui.requestRender(),
-        onSubmit: (value) => finish(value),
-        placeholder: options.placeholder,
-        sensitive: options.sensitive,
-      });
-      handle = context.showSelectableOverlay(prompt, setupOverlayOptions());
+      const prompt = createPrompt(finish, cancel);
+      handle = context.showModalOverlay(prompt, clankieModalOverlayOptions());
       handle.focus();
       context.tui.requestRender();
     });
   }
 
+  async function readTextOverlay(
+    options: Parameters<SetupFlow["readText"]>[0] & { readonly sensitive?: boolean },
+    error: string | undefined,
+    defaultValue: string | undefined,
+  ): Promise<string | undefined> {
+    return await runOverlayPrompt(
+      (finish, cancel) =>
+        new InteractiveTextPrompt({
+          allowBack: options.allowBack,
+          defaultValue,
+          error,
+          message: options.message,
+          editor: options.multiline === true ? new Editor(context.tui, context.editorTheme) : undefined,
+          onCancel: cancel,
+          onRender: () => context.tui.requestRender(),
+          onSubmit: (value) => finish(value),
+          placeholder: options.placeholder,
+          sensitive: options.sensitive,
+        }),
+    );
+  }
+
   async function readSelectOverlay(
     options: Parameters<SetupFlow["readSelect"]>[0],
   ): Promise<string | undefined> {
-    return await new Promise<string | undefined>((resolve) => {
-      let settled = false;
-      let handle: OverlayHandle | undefined;
-      const finish = (value: string | undefined): void => {
-        if (settled) return;
-        settled = true;
-        if (cancelActivePrompt === cancel) cancelActivePrompt = undefined;
-        handle?.hide();
-        context.tui.setFocus(context.editor);
-        context.refreshStatusView();
-        context.refreshCommandSurface(context.editor.getText());
-        context.tui.requestRender();
-        resolve(value);
-      };
-      const cancel = (): void => finish(undefined);
-      cancelActivePrompt = cancel;
-      context.refreshStatusView();
-      context.refreshCommandSurface(context.editor.getText());
-      const prompt = new InteractiveSelectPrompt({
-        allowBack: options.allowBack,
-        currentValue: options.currentValue,
-        initialValue: options.initialValue,
-        message: options.message,
-        onCancel: cancel,
-        ...(options.onClose === undefined
-          ? {}
-          : {
-              onClose: (value: string) => {
-                options.onClose?.(value);
-                finish(undefined);
-              },
-            }),
-        onRender: () => context.tui.requestRender(),
-        onSubmit: finish,
-        options: options.options.map(toInteractivePromptOption),
-        statusActions: options.statusActions?.map(toInteractivePromptOption),
-        theme: context.selectListTheme,
-      });
-      handle = context.showSelectableOverlay(prompt, setupOverlayOptions());
-      handle.focus();
-      context.tui.requestRender();
-    });
+    return await runOverlayPrompt(
+      (finish, cancel) =>
+        new InteractiveSelectPrompt({
+          allowBack: options.allowBack,
+          currentValue: options.currentValue,
+          initialValue: options.initialValue,
+          message: options.message,
+          onCancel: cancel,
+          ...(options.onClose === undefined
+            ? {}
+            : {
+                onClose: (value: string) => {
+                  options.onClose?.(value);
+                  finish(undefined);
+                },
+              }),
+          onRender: () => context.tui.requestRender(),
+          onSubmit: finish,
+          options: options.options.map(toInteractivePromptOption),
+          statusActions: options.statusActions?.map(toInteractivePromptOption),
+          theme: context.selectListTheme,
+        }),
+    );
   }
 
   return {

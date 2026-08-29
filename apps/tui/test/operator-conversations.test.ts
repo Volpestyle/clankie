@@ -26,11 +26,55 @@ import {
 } from "../src/session/operator-conversations.ts";
 import {
   createOperatorConversationShellSink,
-  operatorConversationBlockOptions,
-  renderOperatorConversationEvent,
+  renderOperatorConversationNotice,
   renderOperatorConversationRecovery,
-  type OperatorConversationBlockOptions,
+  type OperatorConversationRenderTarget,
 } from "../src/session/operator-conversation-renderer.ts";
+
+/** Records every typed transcript insertion the sink routes to the face. */
+function recordingTarget(): {
+  target: OperatorConversationRenderTarget;
+  userMessages: string[];
+  assistantMessages: string[];
+  reasoning: string[];
+  toolCalls: string[];
+  markdown: string[];
+  statuses: string[];
+  loaders: string[];
+} {
+  const userMessages: string[] = [];
+  const assistantMessages: string[] = [];
+  const reasoning: string[] = [];
+  const toolCalls: string[] = [];
+  const markdown: string[] = [];
+  const statuses: string[] = [];
+  const loaders: string[] = [];
+  return {
+    assistantMessages,
+    loaders,
+    markdown,
+    reasoning,
+    statuses,
+    target: {
+      beginToolCall: (toolCallId, name, argumentsDetail) =>
+        toolCalls.push(
+          `start ${toolCallId} ${name}${argumentsDetail === undefined ? "" : ` ${argumentsDetail}`}`,
+        ),
+      completeToolCall: (toolCallId, name, outcome) =>
+        toolCalls.push(
+          `${outcome.failed ? "fail" : "done"} ${toolCallId} ${name}${outcome.detail === undefined ? "" : ` ${outcome.detail}`}`,
+        ),
+      insertAssistantMarkdown: (text) => assistantMessages.push(text),
+      insertMarkdown: (text) => markdown.push(text),
+      insertReasoning: (text) => reasoning.push(text),
+      insertUserMessage: (text) => userMessages.push(text),
+      refreshStatus: (label) => statuses.push(label),
+      setTurnLoaderMessage: (message) => loaders.push(message),
+    },
+    toolCalls,
+    userMessages,
+  };
+}
 
 const DEFAULT: OperatorConversation = {
   schemaVersion: 1,
@@ -603,7 +647,7 @@ describe("TUI selected-conversation prompt path", () => {
     expect(renderOperatorConversationRecovery(recovery)).not.toContain(recovery.message);
   });
 
-  it("renders conversation content and failures; healthy lifecycle events stay off the transcript", () => {
+  it("renders notices and failures; conversation content and healthy lifecycle stay off the notice path", () => {
     const base = {
       schemaVersion: 1 as const,
       conversationId: "global-default",
@@ -611,11 +655,7 @@ describe("TUI selected-conversation prompt path", () => {
       revision: 1,
       occurredAt: "2026-07-12T00:00:00.000Z",
     };
-    const events: OperatorConversationStreamEvent[] = [
-      { ...base, type: "message", role: "captain", text: "hello", streaming: false },
-      { ...base, type: "message", role: "operator", text: "typed elsewhere", streaming: false },
-      { ...base, type: "reasoning", text: "bounded thought", streaming: false },
-      { ...base, type: "tool", toolCallId: "call", name: "tracker", phase: "started" },
+    const notices: OperatorConversationStreamEvent[] = [
       {
         ...base,
         type: "input_requested",
@@ -629,27 +669,70 @@ describe("TUI selected-conversation prompt path", () => {
       { ...base, type: "worker_transcript", workerRunId: "worker", phase: "tail", summary: "done" },
       { ...base, type: "unsupported", kind: "future", summary: "Update required" },
     ];
-    const rendered = events.map(renderOperatorConversationEvent).join("\n");
-    expect(rendered).toContain("Clankie");
-    expect(rendered).toContain("**You**\n\ntyped elsewhere");
-    expect(rendered).toContain("Reasoning");
+    const rendered = notices.map(renderOperatorConversationNotice).join("\n");
+    expect(rendered).toContain("Input requested");
+    expect(rendered).toContain("Authorization required");
     expect(rendered).toContain("Worker tail");
-    expect(rendered).not.toContain("privatePayload");
     expect(rendered).not.toContain("undefined");
+
+    // Conversation content maps onto typed blocks, never the notice path.
+    expect(
+      renderOperatorConversationNotice({
+        ...base,
+        type: "message",
+        role: "captain",
+        text: "hello",
+        streaming: false,
+      }),
+    ).toBeUndefined();
+    expect(
+      renderOperatorConversationNotice({
+        ...base,
+        type: "reasoning",
+        text: "bounded thought",
+        streaming: false,
+      }),
+    ).toBeUndefined();
+    expect(
+      renderOperatorConversationNotice({
+        ...base,
+        type: "tool",
+        toolCallId: "call",
+        name: "tracker",
+        phase: "started",
+      }),
+    ).toBeUndefined();
+
+    // Skill loads render as compact notices once resolved.
+    const skillTool = {
+      ...base,
+      type: "tool" as const,
+      toolCallId: "call",
+      name: "read",
+      phase: "completed" as const,
+      skillName: "herdr-lead",
+    };
+    expect(renderOperatorConversationNotice({ ...skillTool, phase: "started" })).toBeUndefined();
+    expect(renderOperatorConversationNotice(skillTool)).toBe("**Skill: herdr-lead - loaded**");
+    expect(renderOperatorConversationNotice({ ...skillTool, phase: "failed" })).toBe(
+      "**Skill: herdr-lead - failed to load**",
+    );
 
     // Healthy lifecycle plumbing belongs on the status line, not the transcript.
     for (const phase of ["started", "waiting", "completed"] as const) {
-      expect(renderOperatorConversationEvent({ ...base, type: "session", phase })).toBeUndefined();
+      expect(renderOperatorConversationNotice({ ...base, type: "session", phase })).toBeUndefined();
     }
     for (const phase of ["accepted", "completed"] as const) {
-      expect(renderOperatorConversationEvent({ ...base, type: "turn", runId: "run", phase })).toBeUndefined();
+      expect(
+        renderOperatorConversationNotice({ ...base, type: "turn", runId: "run", phase }),
+      ).toBeUndefined();
     }
     // Failures carry information the operator must see.
-    expect(renderOperatorConversationEvent({ ...base, type: "session", phase: "failed" })).toContain(
+    expect(renderOperatorConversationNotice({ ...base, type: "session", phase: "failed" })).toContain(
       "failed",
     );
     expect(
-      renderOperatorConversationEvent({
+      renderOperatorConversationNotice({
         ...base,
         type: "turn",
         runId: "run",
@@ -667,18 +750,8 @@ describe("TUI selected-conversation prompt path", () => {
       revision: 1,
       occurredAt: "2026-07-12T00:00:00.000Z",
     };
-    const inserted: string[] = [];
-    const statuses: string[] = [];
-    const sink = createOperatorConversationShellSink(
-      {
-        insertMarkdown: (markdown: string) => {
-          inserted.push(markdown);
-          return { setMarkdown: () => undefined };
-        },
-        refreshStatus: (label: string) => statuses.push(label),
-      },
-      { localEchoText: "  hi  " },
-    );
+    const recorded = recordingTarget();
+    const sink = createOperatorConversationShellSink(recorded.target, { localEchoText: "  hi  " });
     const operatorMessage = (text: string): OperatorConversationStreamEvent => ({
       ...base,
       type: "message",
@@ -694,24 +767,18 @@ describe("TUI selected-conversation prompt path", () => {
     sink.event(operatorMessage("hi"));
     sink.event({ ...base, type: "turn", runId: "run", phase: "accepted" });
     sink.event({ ...base, type: "message", role: "captain", text: "hello", streaming: false });
-    expect(inserted).toEqual(["**You**\n\nfrom the phone", "**You**\n\nhi", "**Clankie**\n\nhello"]);
+    expect(recorded.userMessages).toEqual(["from the phone", "hi"]);
+    expect(recorded.assistantMessages).toEqual(["hello"]);
     // Turn lifecycle still drives the status line even when not rendered.
-    expect(statuses).toEqual(["conversation turn accepted"]);
+    expect(recorded.statuses).toEqual(["conversation turn accepted"]);
   });
 
   it("routes context snapshots to the status surface without transcript noise", () => {
-    const inserted: string[] = [];
+    const recorded = recordingTarget();
     const usages: { tokens: number | null; contextWindow: number }[] = [];
-    const sink = createOperatorConversationShellSink(
-      {
-        insertMarkdown: (markdown: string) => {
-          inserted.push(markdown);
-          return { setMarkdown: () => undefined };
-        },
-        refreshStatus: () => undefined,
-      },
-      { onContextUsage: (usage) => usages.push(usage) },
-    );
+    const sink = createOperatorConversationShellSink(recorded.target, {
+      onContextUsage: (usage) => usages.push(usage),
+    });
 
     sink.event({
       schemaVersion: 1,
@@ -723,19 +790,13 @@ describe("TUI selected-conversation prompt path", () => {
       usage: { tokens: 72_400, contextWindow: 200_000 },
     });
 
-    expect(inserted).toEqual([]);
+    expect(recorded.markdown).toEqual([]);
     expect(usages).toEqual([{ tokens: 72_400, contextWindow: 200_000 }]);
   });
 
-  it("renders operator history as You when no local echo is pending (restore path)", () => {
-    const inserted: string[] = [];
-    const sink = createOperatorConversationShellSink({
-      insertMarkdown: (markdown: string) => {
-        inserted.push(markdown);
-        return { setMarkdown: () => undefined };
-      },
-      refreshStatus: () => undefined,
-    });
+  it("renders operator history as a user message when no local echo is pending (restore path)", () => {
+    const recorded = recordingTarget();
+    const sink = createOperatorConversationShellSink(recorded.target);
     sink.event({
       schemaVersion: 1,
       conversationId: "global-default",
@@ -747,10 +808,10 @@ describe("TUI selected-conversation prompt path", () => {
       text: "hi",
       streaming: false,
     });
-    expect(inserted).toEqual(["**You**\n\nhi"]);
+    expect(recorded.userMessages).toEqual(["hi"]);
   });
 
-  it("marks detail blocks click-toggleable, collapsing only bodies with hidden detail", () => {
+  it("routes conversation content onto typed transcript blocks", () => {
     const base = {
       schemaVersion: 1 as const,
       conversationId: "global-default",
@@ -758,120 +819,53 @@ describe("TUI selected-conversation prompt path", () => {
       revision: 1,
       occurredAt: "2026-07-12T00:00:00.000Z",
     };
-    const optionsFor = (
-      event: OperatorConversationStreamEvent,
-    ): OperatorConversationBlockOptions | undefined => {
-      const markdown = renderOperatorConversationEvent(event);
-      expect(markdown).toBeDefined();
-      return operatorConversationBlockOptions(event, markdown ?? "");
-    };
-    const shortTool: OperatorConversationStreamEvent = {
+    const recorded = recordingTarget();
+    const sink = createOperatorConversationShellSink(recorded.target);
+
+    sink.event({ ...base, type: "reasoning", text: "bounded thought", streaming: false });
+    sink.event({
       ...base,
       type: "tool",
       toolCallId: "call-1",
-      name: "read_file",
-      phase: "completed",
-      summary: "docs/16-operator-conversations.md",
-    };
-    // A short body fits in place; collapsing it would hide the whole payload.
-    expect(optionsFor(shortTool)).toEqual({ clickToggle: true, collapsed: false });
-    expect(optionsFor({ ...shortTool, summary: `exit 0\n${"stdout line\n".repeat(6)}` })).toEqual({
-      clickToggle: true,
-      collapsed: true,
+      name: "get_self_state",
+      phase: "started",
+      detail: '{"includePresence":true}',
     });
-    expect(optionsFor({ ...shortTool, summary: "x".repeat(400) })).toEqual({
-      clickToggle: true,
-      collapsed: true,
-    });
-    const detailedTool = { ...shortTool, phase: "started" as const, detail: '{\n  "path": "README.md"\n}' };
-    expect(renderOperatorConversationEvent(detailedTool)).toContain("Arguments:\n\n```json");
-    expect(optionsFor(detailedTool)).toEqual({ clickToggle: true, collapsed: true });
-    expect(renderOperatorConversationEvent({ ...shortTool, detail: "line one\nline two" })).toContain(
-      "Result:\n\n```\nline one\nline two\n```",
-    );
-    const skillTool: OperatorConversationStreamEvent = {
-      ...shortTool,
-      name: "read",
-      skillName: "herdr-lead",
-    };
-    expect(renderOperatorConversationEvent({ ...skillTool, phase: "started" })).toBeUndefined();
-    expect(renderOperatorConversationEvent(skillTool)).toBe("**Skill: herdr-lead - loaded**");
-    expect(renderOperatorConversationEvent({ ...skillTool, phase: "failed" })).toBe(
-      "**Skill: herdr-lead - failed to load**",
-    );
-    expect(optionsFor(skillTool)).toBeUndefined();
-    expect(
-      optionsFor({
-        ...base,
-        type: "worker_transcript",
-        workerRunId: "worker-1",
-        phase: "tail",
-        summary: "line one\nline two\nline three",
-      }),
-    ).toEqual({ clickToggle: true, collapsed: true });
-    // Conversation content always renders expanded and inert.
-    expect(
-      optionsFor({ ...base, type: "message", role: "captain", text: "hello", streaming: false }),
-    ).toBeUndefined();
-
-    // The sink forwards the options so the face can arm click-to-toggle.
-    const inserted: [string, OperatorConversationBlockOptions | undefined][] = [];
-    const sink = createOperatorConversationShellSink({
-      insertMarkdown: (markdown: string, options?: OperatorConversationBlockOptions) => {
-        inserted.push([markdown, options]);
-        return { setMarkdown: () => undefined };
-      },
-      refreshStatus: () => undefined,
-    });
-    sink.event({ ...shortTool, summary: "a\nb" });
-    expect(inserted).toEqual([
-      ["**Tool: read_file - completed**\n\na\nb", { clickToggle: true, collapsed: true }],
-    ]);
-  });
-
-  it("replaces a started tool block with one completed block containing arguments and result", () => {
-    const base = {
-      schemaVersion: 1 as const,
-      conversationId: "global-default",
-      cursor: "global-default:event",
-      revision: 1,
-      occurredAt: "2026-07-12T00:00:00.000Z",
-      type: "tool" as const,
+    sink.event({
+      ...base,
+      type: "tool",
       toolCallId: "call-1",
       name: "get_self_state",
-    };
-    const inserted: string[] = [];
-    const updated: string[] = [];
-    const sink = createOperatorConversationShellSink({
-      insertMarkdown: (markdown: string) => {
-        inserted.push(markdown);
-        return { setMarkdown: (next) => updated.push(next) };
-      },
-      refreshStatus: () => undefined,
+      phase: "completed",
+      detail: '{"status":"idle"}',
+    });
+    sink.event({ ...base, type: "tool", toolCallId: "call-2", name: "bash", phase: "started" });
+    sink.event({
+      ...base,
+      type: "tool",
+      toolCallId: "call-2",
+      name: "bash",
+      phase: "failed",
+      summary: "exit 1",
+    });
+    // Skill loads bypass the tool blocks and land as compact notices.
+    sink.event({
+      ...base,
+      type: "tool",
+      toolCallId: "call-3",
+      name: "read",
+      phase: "completed",
+      skillName: "herdr-lead",
     });
 
-    sink.event({ ...base, phase: "started", detail: '{\n  "includePresence": true\n}' });
-    sink.event({ ...base, phase: "completed", detail: '{\n  "status": "idle"\n}' });
-
-    expect(inserted).toHaveLength(1);
-    expect(inserted[0]).toContain("**Tool: get_self_state - started**");
-    expect(updated).toEqual([
-      [
-        "**Tool: get_self_state - completed**",
-        "",
-        "Arguments:",
-        "",
-        "```json",
-        '{\n  "includePresence": true\n}',
-        "```",
-        "",
-        "Result:",
-        "",
-        "```",
-        '{\n  "status": "idle"\n}',
-        "```",
-      ].join("\n"),
+    expect(recorded.reasoning).toEqual(["bounded thought"]);
+    expect(recorded.toolCalls).toEqual([
+      'start call-1 get_self_state {"includePresence":true}',
+      'done call-1 get_self_state {"status":"idle"}',
+      "start call-2 bash",
+      "fail call-2 bash exit 1",
     ]);
+    expect(recorded.markdown).toEqual(["**Skill: herdr-lead - loaded**"]);
   });
 
   it("updates the turn loader as activity and parallel tools change", () => {
@@ -882,12 +876,8 @@ describe("TUI selected-conversation prompt path", () => {
       revision: 1,
       occurredAt: "2026-07-12T00:00:00.000Z",
     };
-    const loaders: string[] = [];
-    const sink = createOperatorConversationShellSink({
-      insertMarkdown: () => ({ setMarkdown: () => undefined }),
-      refreshStatus: () => undefined,
-      setTurnLoaderMessage: (message) => loaders.push(message),
-    });
+    const { target, loaders } = recordingTarget();
+    const sink = createOperatorConversationShellSink(target);
 
     sink.event({ ...base, type: "turn", runId: "run", phase: "accepted" });
     sink.event({ ...base, type: "activity", phase: "thinking" });

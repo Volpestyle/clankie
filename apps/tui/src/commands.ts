@@ -4,7 +4,6 @@
  * shell API and the clankie service. Results land as compact command transcript
  * blocks; configurators run as guided SetupFlow wizards.
  */
-import { parseInputPlacement, parseStatusPlacement } from "./shell/face-settings.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import type { GameplaySettings, SettingsStore } from "@clankie/settings";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
@@ -31,7 +30,7 @@ import {
   formatHerdLeadCompanionResult,
   type HerdLeadCompanionResult,
 } from "./observation/herd-lead-companion.ts";
-import { formatCaptainContextUsage } from "./shell/status-bar.ts";
+import { formatCaptainContextUsage } from "./shell/footer.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
@@ -436,8 +435,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "layout",
       aliases: ["header", "banner"],
-      description: "Configure header, chat input, and status bar",
-      argumentHint: "[status|input top|input bottom|status above|status below|header on|header off]",
+      description: "Show or hide the Clankie header banner",
+      argumentHint: "[status|header on|header off|header toggle]",
       takesArgument: true,
       run(argument, shell): void {
         runLayoutCommand(shell, argument);
@@ -685,43 +684,13 @@ function runLayoutCommand(shell: ClankieFaceShell, argument: string): void {
   const words = normalized.split(/\s+/u).filter((word) => word.length > 0);
 
   if (normalized.length === 0 || normalized === "status") {
-    const statusPlacement =
-      shell.layoutSettings.statusPlacement === "above-input" ? "above input" : "below input";
     shell.insertCommandResult(
       "/layout",
       [
         `${ansi.bold(ansi.cyan("Layout"))}`,
-        `${ansi.dim("input:")} ${ansi.bold(ansi.cyan(shell.layoutSettings.inputPlacement))}`,
-        `${ansi.dim("status:")} ${ansi.bold(ansi.cyan(statusPlacement))}`,
         `${ansi.dim("header:")} ${shell.headerVisible ? ansi.green("on") : ansi.dim("off")}`,
-        ansi.dim("Usage: /layout [status|input top|bottom|status above|below|header on|off|toggle]"),
+        ansi.dim("Usage: /layout [status|header on|off|toggle]"),
       ].join("\n"),
-      "success",
-    );
-    return;
-  }
-
-  if (words[0] === "input") {
-    const placement = parseInputPlacement(words[1]);
-    if (placement === undefined) {
-      shell.insertCommandResult("/layout", "Usage: /layout input top|bottom", "error");
-      return;
-    }
-    shell.setLayoutSettings({ inputPlacement: placement });
-    shell.insertCommandResult("/layout", `Input placement: ${placement}.`, "success");
-    return;
-  }
-
-  if (words[0] === "status" && words.length > 1) {
-    const placement = parseStatusPlacement(words[1]);
-    if (placement === undefined) {
-      shell.insertCommandResult("/layout", "Usage: /layout status above|below", "error");
-      return;
-    }
-    shell.setLayoutSettings({ statusPlacement: placement });
-    shell.insertCommandResult(
-      "/layout",
-      `Status placement: ${placement === "above-input" ? "above input" : "below input"}.`,
       "success",
     );
     return;
@@ -740,9 +709,5 @@ function runLayoutCommand(shell: ClankieFaceShell, argument: string): void {
     return;
   }
 
-  shell.insertCommandResult(
-    "/layout",
-    "Usage: /layout [status|input top|bottom|status above|below|header on|off|toggle]",
-    "error",
-  );
+  shell.insertCommandResult("/layout", "Usage: /layout [status|header on|off|toggle]", "error");
 }

@@ -1,47 +1,47 @@
 /**
- * The Clankie face shell: assembles the ported v1 face components (banner,
- * transcript viewport, status bar, slash-command typeahead, editor) into the
- * fullscreen differential-render layout, and owns the central input router,
- * overlay/selection plumbing, guided-flow engine, turn loader, and inline `!`
- * shell escape. Extracted from v1's `scripts/clankie.ts` monolith (clankie
- * snapshot 04734df9): dynamic data flows in through `FaceShellOptions`
- * (commands, onPrompt, statusExtras) so the clankie service stays behind
+ * The Clankie face shell: pi's interactive chat surface wearing Clankie's
+ * chrome. The renderer is pi's fullscreen mode — a TuiAltScreen whose
+ * transcript lives in a ScrollView (mouse wheel, scrollbar, drag text
+ * selection, Ctrl+Shift+F search) above a dock that pins the working
+ * indicator, editor, typeahead, and footer to the bottom of the terminal.
+ * Messages render with pi's own components (user boxes, assistant markdown,
+ * bordered tool executions), and clicking a tool or bash block toggles its
+ * output between preview and full. Clankie's banner, slash-command typeahead,
+ * Ctrl+/ workbench, guided-flow modals, and inline `!` shell escape stay
+ * intact. Dynamic data flows in through `FaceShellOptions` (commands,
+ * onPrompt, footerData) so the clankie service stays behind
  * `@clankie/api-client`.
  */
-import type { ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
+  Container,
   Editor,
   Key,
   Loader,
+  Markdown,
   matchesKey,
   ProcessTerminal,
-  TuiMainScreen,
-  type TUI,
+  ScrollView,
+  Spacer,
+  TuiAltScreen,
+  VStack,
   type Component,
   type OverlayHandle,
   type OverlayOptions,
+  type Terminal,
 } from "@earendil-works/pi-tui";
+import {
+  AssistantMessageComponent,
+  BashExecutionComponent,
+  copyToClipboard,
+  getMarkdownTheme,
+  initTheme,
+  ToolExecutionComponent,
+  UserMessageComponent,
+} from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { ClankieBannerComponent, type BannerFields } from "../face/clankie-banner.ts";
-import {
-  resolveClankieChromeMouseTargetFromBands,
-  resolveClankieCommandRows,
-  resolveClankieOverlayFrame,
-  resolveClankieOverlayMouseTarget,
-  resolveClankieTranscriptMouseTargetFromBands,
-  resolveClankieTranscriptRows,
-  type ClankieFaceBandRows,
-  type ClankieOverlayMouseTarget,
-} from "../face/clankie-face-layout.ts";
-import {
-  ClankieChromeSelectableComponent,
-  ClankieChromeSelection,
-} from "../face/clankie-chrome-selection.ts";
-import {
-  isClankieLeftMouseButton,
-  parseClankieSgrMouse,
-  type ClankieSgrMouseEvent,
-} from "../face/clankie-sgr-mouse.ts";
-import { writeClankieClipboard } from "../face/clankie-clipboard.ts";
+import { isClankieLeftMouseButton, parseClankieSgrMouse } from "../face/clankie-sgr-mouse.ts";
 import {
   clankieCommandCompletion,
   createClankieAutocompleteProvider,
@@ -62,34 +62,13 @@ import {
   typeaheadSelectionDelta,
   type ClankieCommandTypeaheadState,
 } from "../face/clankie-command-ui.ts";
-
-import {
-  ClankieTranscriptViewport,
-  type ClankieTranscriptBlockHandle,
-  type ClankieTranscriptBlockOptions,
-  type TranscriptUnderfilledAlignment,
-} from "../face/clankie-transcript-viewport.ts";
-import { shouldRouteClankieTranscriptGlobalInput } from "../face/clankie-transcript-key-routing.ts";
-import { ClankieTranscriptMarkdownBlock } from "../face/clankie-transcript-block.ts";
-import { ClankieBashResultComponent, runFaceBashCommand } from "../face/clankie-face-bash.ts";
+import { runFaceBashCommand } from "../face/clankie-face-bash.ts";
 import { ClankieCommandTextResultComponent, type CommandLogTone } from "./command-log.ts";
-import { layoutSettingsFromEnv, type LayoutSettings } from "./face-settings.ts";
 import { createFaceThemeBundle, type FaceThemeBundle } from "./theme.ts";
-import { ClankieStatusBarComponent } from "./status-bar.ts";
+import { ClankieFooterComponent, displayHomePath, type ClankieFooterData } from "./footer.ts";
 import { createSetupFlow, type SetupFlowController } from "./setup-flow.ts";
 import { appendPromptHistory, readPromptHistory } from "./prompt-history.ts";
 import { clankieSlashSkillSuffix, resolveClankieSlashSkill } from "../skill-catalog.ts";
-
-// Mode 1002 reports drag motion while a button is held (1000 only reports
-// press/release), which the transcript needs to track a selection gesture.
-const CLANKIE_MOUSE_TRACKING_ENABLE = "\x1b[?1002h\x1b[?1006h";
-const CLANKIE_MOUSE_TRACKING_DISABLE = "\x1b[?1002l\x1b[?1006l";
-const MIN_TRANSCRIPT_ROWS = 4;
-const UNICODE_AGENT_SPINNER = {
-  frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-  intervalMs: 80,
-} as const;
-const ASCII_AGENT_SPINNER = { frames: ["/", "-", "\\", "|"], intervalMs: 80 } as const;
 
 export type FaceBlockHandle = {
   setMarkdown(markdown: string): void;
@@ -115,7 +94,9 @@ export interface FaceShellOptions {
   readonly skills?: readonly ClankieAutocompleteSkill[];
   /** File that persists editor prompt history across sessions. */
   readonly historyPath?: string;
-  /** Extra status bar segments (model, activity, …) appended after shell state. */
+  /** Model, conversation title, and context usage for the pi-style footer. */
+  readonly footerData?: () => ClankieFooterData;
+  /** Extra footer status segments (presence, activity, …) on the last footer line. */
   readonly statusExtras?: () => readonly string[];
   /** Handles a plain prompt (not a slash command, not `!`). */
   readonly onPrompt?: (prompt: string, shell: ClankieFaceShell, signal: AbortSignal) => Promise<void>;
@@ -127,10 +108,13 @@ type ActivePromptTurn = {
   loader?: Loader | undefined;
 };
 
-type SelectableOverlayEntry = {
-  hidden: boolean;
-  readonly component: ClankieChromeSelectableComponent;
-  readonly options?: OverlayOptions;
+/** pi's IdleStatus: hold the loader's two rows so the editor doesn't jump. */
+const IDLE_STATUS: Component = {
+  invalidate(): void {},
+  render(width: number): string[] {
+    const emptyLine = " ".repeat(Math.max(1, width));
+    return [emptyLine, emptyLine];
+  },
 };
 
 function formatError(error: unknown): string {
@@ -138,44 +122,97 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-function displayHomePath(path: string): string {
-  const home = process.env.HOME;
-  if (home !== undefined && home.length > 0 && path.startsWith(home)) return `~${path.slice(home.length)}`;
-  return path;
+/**
+ * pi's message components only read `content` (plus stopReason/errorMessage),
+ * so a minimal fabricated envelope is enough to reuse them for Clankie's
+ * conversation events.
+ */
+function assistantEnvelope(content: AssistantMessage["content"]): AssistantMessage {
+  return { content, role: "assistant", stopReason: "stop" } as unknown as AssistantMessage;
+}
+
+function parseToolArguments(detail: string | undefined): unknown {
+  if (detail === undefined) return undefined;
+  try {
+    return JSON.parse(detail);
+  } catch {
+    return detail;
+  }
+}
+
+/**
+ * Tees every stdin event to an observer before the TUI's own input pipeline.
+ * The alt screen's viewport handler consumes mouse sequences, so click
+ * detection must watch the terminal itself; the observer never consumes.
+ */
+function observeTerminalInput(terminal: Terminal, observe: (data: string) => void): Terminal {
+  return {
+    start: (onInput, onResize) =>
+      terminal.start((data) => {
+        observe(data);
+        onInput(data);
+      }, onResize),
+    stop: () => terminal.stop(),
+    drainInput: (maxMs?: number, idleMs?: number) => terminal.drainInput(maxMs, idleMs),
+    write: (data) => terminal.write(data),
+    get columns() {
+      return terminal.columns;
+    },
+    get rows() {
+      return terminal.rows;
+    },
+    get kittyProtocolActive() {
+      return terminal.kittyProtocolActive;
+    },
+    moveBy: (lines) => terminal.moveBy(lines),
+    hideCursor: () => terminal.hideCursor(),
+    showCursor: () => terminal.showCursor(),
+    clearLine: () => terminal.clearLine(),
+    clearFromCursor: () => terminal.clearFromCursor(),
+    clearScreen: () => terminal.clearScreen(),
+    setTitle: (title) => terminal.setTitle(title),
+    setProgress: (active) => terminal.setProgress(active),
+  };
+}
+
+/** Walks the transcript's flat rows to the block a click landed on. */
+export function clickedTranscriptBlock(
+  blocks: readonly Component[],
+  width: number,
+  flatRow: number,
+): Component | undefined {
+  let row = flatRow;
+  for (const block of blocks) {
+    const rows = block.render(width).length;
+    if (row < rows) return block;
+    row -= rows;
+  }
+  return undefined;
 }
 
 export class ClankieFaceShell {
-  readonly tui: TUI;
+  readonly tui: TuiAltScreen;
   readonly theme: FaceThemeBundle;
   readonly setupFlow: SetupFlowController;
 
   private readonly options: FaceShellOptions;
   private readonly env: NodeJS.ProcessEnv;
   private readonly banner: ClankieBannerComponent;
-  private readonly status = new ClankieStatusBarComponent();
+  private readonly document = new Container();
+  private readonly chat = new Container();
+  private readonly transcriptScrollView: ScrollView;
+  private readonly statusContainer = new Container();
   private readonly editor: Editor;
   private readonly commandTypeaheadPanel: ClankieCommandTypeaheadPanel;
-  private readonly transcriptViewport: ClankieTranscriptViewport;
-  private readonly chromeSelection = new ClankieChromeSelection();
-  private readonly selectableBanner: ClankieChromeSelectableComponent;
-  private readonly selectableStatus: ClankieChromeSelectableComponent;
-  private readonly selectableTypeahead: ClankieChromeSelectableComponent;
-  private readonly selectableOverlays: SelectableOverlayEntry[] = [];
+  private readonly footer: ClankieFooterComponent;
 
-  private layoutSettingsState: LayoutSettings;
   private headerVisibleState: boolean;
-  private readonly agentSpinner: typeof UNICODE_AGENT_SPINNER | typeof ASCII_AGENT_SPINNER;
 
   private uiReady = false;
   private shutdownStarted = false;
   private currentStatusLabel = "ready";
   private commandTypeaheadState: ClankieCommandTypeaheadState | undefined;
   private commandPaletteOverlay: OverlayHandle | undefined;
-  private chromeSelectionActive = false;
-  private transcriptSelectionActive = false;
-  private transcriptSelectionDragged = false;
-  private transcriptScrollbarDragActive = false;
-  private transcriptClickTarget: { readonly col: number; readonly row: number } | undefined;
 
   /** Follows the selected conversation's workspace, so `!` lands where he works. */
   private cwdValue: string;
@@ -186,27 +223,75 @@ export class ClankieFaceShell {
   private respondingState = false;
   private activeTurn: ActivePromptTurn | undefined;
   private activeLoader: Loader | undefined;
-  private activeLoaderBlock: ClankieTranscriptBlockHandle | undefined;
   private runningTurn: Promise<void> | undefined;
+
+  /** Live tool executions keyed by toolCallId until their result lands. */
+  private readonly activeToolBlocks = new Map<string, ToolExecutionComponent>();
+  /** Blocks a click or Ctrl+O toggles between preview and full output. */
+  private readonly expandableBlocks = new Map<
+    Component,
+    { expanded: boolean; setExpanded(expanded: boolean): void }
+  >();
+  private outputExpanded = false;
+  private clickPress: { readonly col: number; readonly row: number } | undefined;
+  private clickDragged = false;
 
   constructor(options: FaceShellOptions) {
     this.options = options;
     this.cwdValue = options.cwd;
     this.env = options.env ?? process.env;
     this.theme = createFaceThemeBundle(process.stdout);
-    const { ansi } = this.theme;
+    // pi's components read the pi theme singleton; Clankie always wears dark.
+    initTheme("dark");
 
-    this.layoutSettingsState = layoutSettingsFromEnv(this.env);
     this.headerVisibleState = this.env.CLANKIE_HEADER !== "0" && this.env.CLANKIE_HEADER !== "off";
-    this.agentSpinner = this.theme.capabilities.unicode ? UNICODE_AGENT_SPINNER : ASCII_AGENT_SPINNER;
 
-    this.tui = new TuiMainScreen(new ProcessTerminal());
+    const caps = this.theme.capabilities;
+    // pi dark's selectedBg (#3a3a4a) for scrollbar thumb and search matches.
+    const selectionBg = (text: string): string =>
+      caps.color
+        ? caps.trueColor
+          ? `\x1b[48;2;58;58;74m${text}\x1b[0m`
+          : `\x1b[48;5;237m${text}\x1b[0m`
+        : text;
+    const inverse = (text: string): string => (caps.color ? `\x1b[7m${text}\x1b[27m` : text);
+    const searchMatch = (text: string): string => selectionBg(this.theme.ansi.selectedDescription(text));
+    this.tui = new TuiAltScreen(
+      observeTerminalInput(new ProcessTerminal(), (data) => this.observeTerminalData(data)),
+      undefined,
+      undefined,
+      {
+        copySelection: async (text) => {
+          try {
+            await copyToClipboard(text);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        openUrl: (url) => {
+          spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], {
+            detached: true,
+            stdio: "ignore",
+          }).unref();
+        },
+        searchCurrentMatchStyle: (text) => this.theme.ansi.bold(inverse(searchMatch(text))),
+        searchMatchStyle: (text) => this.theme.ansi.underline(searchMatch(text)),
+      },
+    );
     this.tui.setClearOnShrink(true);
     this.banner = new ClankieBannerComponent(
       options.bannerFields,
       this.theme.capabilities,
       this.headerVisibleState,
     );
+    this.transcriptScrollView = new ScrollView(this.document, {
+      follow: "end",
+      overscroll: "chain",
+      primary: true,
+      scrollbar: "auto",
+      scrollbarStyle: selectionBg,
+    });
     this.editor = new Editor(this.tui, this.theme.editorTheme, { autocompleteMaxVisible: 12 });
     this.commandTypeaheadPanel = new ClankieCommandTypeaheadPanel(
       options.commands,
@@ -215,28 +300,11 @@ export class ClankieFaceShell {
         maxVisibleRows: () => this.maxCommandTypeaheadRows(),
       },
     );
-    this.selectableBanner = new ClankieChromeSelectableComponent(this.banner, "banner", this.chromeSelection);
-    this.selectableStatus = new ClankieChromeSelectableComponent(this.status, "status", this.chromeSelection);
-    this.selectableTypeahead = new ClankieChromeSelectableComponent(
-      this.commandTypeaheadPanel,
-      "typeahead",
-      this.chromeSelection,
-    );
-    this.transcriptViewport = new ClankieTranscriptViewport(
-      (width) => this.maxTranscriptRows(width),
-      {
-        dim: ansi.dim,
-        scrollbarThumb: ansi.selectedDescription,
-        scrollbarTrack: ansi.dim,
-        selected: ansi.cyan,
-      },
-      {
-        blockSpacing: 1,
-        scrollbar: true,
-        underfilledAlignment: this.transcriptUnderfilledAlignment(),
-        unicode: this.theme.capabilities.unicode,
-      },
-    );
+    this.footer = new ClankieFooterComponent(this.theme.ansi, () => ({
+      cwd: this.cwdValue,
+      extras: this.footerExtras(),
+      ...this.options.footerData?.(),
+    }));
 
     this.setupFlow = createSetupFlow({
       tui: this.tui,
@@ -246,8 +314,7 @@ export class ClankieFaceShell {
       setStatus: (message) => this.refreshStatus(message),
       refreshStatusView: () => this.refreshStatusView(),
       refreshCommandSurface: (text) => this.refreshCommandSurface(text),
-      showSelectableOverlay: (component, overlayOptions) =>
-        this.showSelectableOverlay(component, overlayOptions),
+      showModalOverlay: (component, overlayOptions) => this.showModalOverlay(component, overlayOptions),
     });
 
     this.applyAutocompleteProvider();
@@ -275,12 +342,36 @@ export class ClankieFaceShell {
   // --- lifecycle ---
 
   start(): void {
-    this.applyFaceLayout();
+    // pi's fullscreen layout: the transcript ScrollView takes every spare row,
+    // and the dock (working status, editor, Clankie's typeahead, footer) stays
+    // pinned to the bottom of the terminal.
+    this.document.addChild(this.banner);
+    this.document.addChild(this.chat);
+    for (const component of [
+      this.document,
+      this.statusContainer,
+      this.editor,
+      this.commandTypeaheadPanel,
+      this.footer,
+    ]) {
+      this.tui.addChild(component);
+    }
+    const dock = new VStack([
+      { component: this.statusContainer, shrink: 1, minSize: 0 },
+      { component: this.editor, shrink: 1, minSize: 3 },
+      { component: this.commandTypeaheadPanel, shrink: 1, minSize: 0 },
+      { component: this.footer, shrink: 1, minSize: 1 },
+    ]);
+    this.tui.setLayoutRoot(
+      new VStack([
+        { component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+        { component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+      ]),
+    );
     this.tui.setFocus(this.editor);
     this.tui.addInputListener((data) => this.routeInput(data));
     this.tui.onDebug = () => this.insertDebugSnapshot();
     this.tui.start();
-    this.tui.terminal.write(CLANKIE_MOUSE_TRACKING_ENABLE);
     this.uiReady = true;
     this.refreshStatusView();
     void readPromptHistory(this.historyPath() ?? "").then((entries) => {
@@ -293,7 +384,15 @@ export class ClankieFaceShell {
     this.shutdownStarted = true;
     if (options?.abortTurn === true) this.activeTurn?.controller.abort();
     this.stopTurnLoader();
+    // pi's fullscreen exit default: leave the transcript in the terminal's
+    // scrollback after the alternate screen closes.
+    const transcript = this.renderTranscriptForScrollback();
     this.restoreTerminal();
+    try {
+      if (transcript.length > 0) process.stdout.write(`${transcript}\n`);
+    } catch {
+      // Best-effort.
+    }
     try {
       await this.options.onExit?.();
     } catch {
@@ -302,13 +401,22 @@ export class ClankieFaceShell {
     return process.exit(code);
   }
 
+  private renderTranscriptForScrollback(): string {
+    if (!this.uiReady) return "";
+    try {
+      const width = Math.max(20, this.tui.terminal.columns);
+      return this.document
+        .render(width)
+        .map((line) => line.trimEnd())
+        .join("\n")
+        .trimEnd();
+    } catch {
+      return "";
+    }
+  }
+
   /** Best-effort terminal restore for the crash-safety envelope. */
   restoreTerminal(): void {
-    try {
-      this.tui.terminal.write(CLANKIE_MOUSE_TRACKING_DISABLE);
-    } catch {
-      // Best-effort.
-    }
     try {
       if (this.uiReady) this.tui.stop();
     } catch {
@@ -322,46 +430,170 @@ export class ClankieFaceShell {
 
   // --- transcript ---
 
-  insertTranscript(
-    component: Component,
-    options?: ClankieTranscriptBlockOptions,
-  ): ClankieTranscriptBlockHandle {
-    return this.transcriptViewport.addChild(component, options);
+  /** Appends a chat block, separated from the previous one like pi's chat flow. */
+  private appendChatBlock(component: Component, options?: { readonly spacer?: boolean }): void {
+    if (options?.spacer !== false && this.chat.children.length > 0) this.chat.addChild(new Spacer(1));
+    this.chat.addChild(component);
+    this.tui.requestRender();
   }
 
-  insertMarkdown(text: string, options?: ClankieTranscriptBlockOptions): FaceBlockHandle {
-    const { ansi, markdownTheme } = this.theme;
-    const component = new ClankieTranscriptMarkdownBlock(text, {
-      bold: ansi.bold,
-      cyan: ansi.cyan,
-      dim: ansi.dim,
-      green: ansi.green,
-      loadingGlyph: () => this.currentAgentSpinnerFrame(),
-      markdown: markdownTheme,
-      red: ansi.red,
-      yellow: ansi.yellow,
+  insertUserMessage(text: string): void {
+    this.appendChatBlock(new UserMessageComponent(text, getMarkdownTheme()));
+  }
+
+  insertAssistantMarkdown(text: string): void {
+    // AssistantMessageComponent carries its own leading spacer.
+    this.appendChatBlock(new AssistantMessageComponent(assistantEnvelope([{ text, type: "text" }])), {
+      spacer: false,
     });
-    this.insertTranscript(component, options);
+  }
+
+  insertReasoning(text: string): void {
+    this.appendChatBlock(
+      new AssistantMessageComponent(assistantEnvelope([{ thinking: text, type: "thinking" }])),
+      { spacer: false },
+    );
+  }
+
+  /** Arms a block for click / Ctrl+O expansion and applies the current default. */
+  private registerExpandable(component: Component & { setExpanded(expanded: boolean): void }): void {
+    component.setExpanded(this.outputExpanded);
+    this.expandableBlocks.set(component, {
+      expanded: this.outputExpanded,
+      setExpanded: (expanded) => component.setExpanded(expanded),
+    });
+  }
+
+  beginToolCall(toolCallId: string, name: string, argumentsDetail?: string): void {
+    let component = this.activeToolBlocks.get(toolCallId);
+    if (component === undefined) {
+      component = new ToolExecutionComponent(
+        name,
+        toolCallId,
+        parseToolArguments(argumentsDetail),
+        {},
+        undefined,
+        this.tui,
+        this.cwdValue,
+      );
+      this.registerExpandable(component);
+      this.activeToolBlocks.set(toolCallId, component);
+      this.chat.addChild(component);
+    }
+    component.markExecutionStarted();
     this.tui.requestRender();
+  }
+
+  completeToolCall(
+    toolCallId: string,
+    name: string,
+    outcome: { readonly failed: boolean; readonly detail?: string | undefined },
+  ): void {
+    let component = this.activeToolBlocks.get(toolCallId);
+    if (component === undefined) {
+      // Restore path: a replayed completion without its started half.
+      component = new ToolExecutionComponent(
+        name,
+        toolCallId,
+        undefined,
+        {},
+        undefined,
+        this.tui,
+        this.cwdValue,
+      );
+      this.registerExpandable(component);
+      this.chat.addChild(component);
+      component.markExecutionStarted();
+    }
+    this.activeToolBlocks.delete(toolCallId);
+    component.setArgsComplete();
+    component.updateResult({
+      content: [{ text: outcome.detail ?? "", type: "text" }],
+      isError: outcome.failed,
+    });
+    this.tui.requestRender();
+  }
+
+  insertMarkdown(text: string): FaceBlockHandle {
+    const block = new Container();
+    block.addChild(new Markdown(text, 1, 0, getMarkdownTheme()));
+    this.appendChatBlock(block);
     return {
       setMarkdown: (markdown: string): void => {
-        component.setMarkdown(markdown);
+        block.clear();
+        block.addChild(new Markdown(markdown, 1, 0, getMarkdownTheme()));
         this.tui.requestRender();
       },
     };
   }
 
   insertCommandResult(prompt: string, message: string, tone: CommandLogTone): void {
-    this.insertTranscript(new ClankieCommandTextResultComponent(prompt, message, tone, this.theme.ansi));
-    this.tui.requestRender();
+    this.appendChatBlock(new ClankieCommandTextResultComponent(prompt, message, tone, this.theme.ansi));
   }
 
   clearTranscript(): void {
-    this.transcriptViewport.clear();
+    this.chat.clear();
+    this.activeToolBlocks.clear();
+    this.expandableBlocks.clear();
     this.tui.requestRender();
   }
 
-  // --- status / banner ---
+  /** pi's Ctrl+O: swap every tool/bash block between preview and full output. */
+  private toggleOutputExpansion(): void {
+    this.outputExpanded = !this.outputExpanded;
+    for (const entry of this.expandableBlocks.values()) {
+      entry.expanded = this.outputExpanded;
+      entry.setExpanded(this.outputExpanded);
+    }
+    this.tui.requestRender();
+  }
+
+  // --- transcript clicks ---
+
+  /**
+   * Watches raw terminal input for a left click (press then release with no
+   * drag) and toggles the tool/bash block under it. Runs beside the alt
+   * screen's own mouse handling — a plain click carries no selection, so the
+   * two never fight.
+   */
+  private observeTerminalData(data: string): void {
+    const mouse = parseClankieSgrMouse(data);
+    if (mouse === undefined || mouse.kind === "wheel" || !isClankieLeftMouseButton(mouse)) return;
+    if (mouse.kind === "press") {
+      this.clickPress = { col: mouse.col, row: mouse.row };
+      this.clickDragged = false;
+      return;
+    }
+    if (mouse.kind === "drag") {
+      this.clickDragged = true;
+      return;
+    }
+    const press = this.clickPress;
+    this.clickPress = undefined;
+    if (press === undefined || this.clickDragged) return;
+    this.handleTranscriptClick(mouse.col - 1, mouse.row - 1);
+  }
+
+  private handleTranscriptClick(x: number, y: number): void {
+    if (this.tui.hasOverlayEntries || this.setupFlow.isWaitingForInput()) return;
+    const viewportHeight = this.transcriptScrollView.viewportHeight;
+    if (x < 0 || y < 0 || viewportHeight <= 0 || y >= viewportHeight) return;
+    const width = this.transcriptScrollView.getContentWidth(this.tui.terminal.columns);
+    if (x >= width) return;
+    const target = clickedTranscriptBlock(
+      [this.banner, ...this.chat.children],
+      width,
+      this.transcriptScrollView.scrollTop + y,
+    );
+    if (target === undefined) return;
+    const entry = this.expandableBlocks.get(target);
+    if (entry === undefined) return;
+    entry.expanded = !entry.expanded;
+    entry.setExpanded(entry.expanded);
+    this.tui.requestRender();
+  }
+
+  // --- status / footer ---
 
   refreshStatus(label: string): void {
     this.currentStatusLabel = label;
@@ -370,13 +602,22 @@ export class ClankieFaceShell {
 
   refreshStatusView(): void {
     if (!this.uiReady) return;
-    this.status.setText(this.formatStatusText(this.currentStatusLabel));
     this.tui.requestRender();
   }
 
-  setBannerFields(fields: BannerFields): void {
-    this.banner.setFields(fields);
-    this.tui.requestRender();
+  private footerExtras(): readonly string[] {
+    const { ansi } = this.theme;
+    const label =
+      this.currentStatusLabel === "ready" || this.currentStatusLabel === "streaming"
+        ? ""
+        : this.currentStatusLabel;
+    const setupState = this.setupFlow.isWaitingForInput() ? "setup input" : "";
+    const bashState = this.bashMode
+      ? `${ansi.success("shell")}${
+          this.bashRunning > 0 ? ansi.dim(" running") : ansi.dim(` · ${displayHomePath(this.cwdValue)}`)
+        }`
+      : "";
+    return [label, setupState, bashState, ...(this.options.statusExtras?.() ?? [])];
   }
 
   get cwd(): string {
@@ -408,216 +649,63 @@ export class ClankieFaceShell {
   setHeaderVisible(visible: boolean): void {
     this.headerVisibleState = visible;
     this.banner.setVisible(visible);
-    this.refreshStatusView();
     this.tui.requestRender();
   }
 
-  // --- layout ---
-
-  get layoutSettings(): LayoutSettings {
-    return this.layoutSettingsState;
-  }
-
-  setLayoutSettings(settings: Partial<LayoutSettings>): void {
-    this.layoutSettingsState = {
-      inputPlacement: settings.inputPlacement ?? this.layoutSettingsState.inputPlacement,
-      statusPlacement: settings.statusPlacement ?? this.layoutSettingsState.statusPlacement,
-    };
-    this.applyFaceLayout();
-    this.refreshStatusView();
-  }
-
-  applyFaceLayout(): void {
-    this.transcriptViewport.setUnderfilledAlignment(this.transcriptUnderfilledAlignment());
-    this.syncBannerChromePadding();
-    for (const component of this.rootFaceComponents()) this.tui.removeChild(component);
-    for (const component of this.orderedFaceComponents()) this.tui.addChild(component);
-    this.tui.setFocus(this.editor);
-    if (this.uiReady) this.tui.requestRender();
-  }
-
-  private orderedFaceComponents(): Component[] {
-    const statusAboveInput = this.layoutSettingsState.statusPlacement === "above-input";
-    if (this.layoutSettingsState.inputPlacement === "top") {
-      const topControls = statusAboveInput
-        ? [this.selectableStatus, this.editor, this.selectableTypeahead]
-        : [this.editor, this.selectableStatus, this.selectableTypeahead];
-      return [this.selectableBanner, ...topControls, this.transcriptViewport];
-    }
-    const bottomControls = statusAboveInput
-      ? [this.selectableTypeahead, this.selectableStatus, this.editor]
-      : [this.selectableTypeahead, this.editor, this.selectableStatus];
-    return [this.selectableBanner, this.transcriptViewport, ...bottomControls];
-  }
-
-  private rootFaceComponents(): Component[] {
-    return [
-      this.selectableBanner,
-      this.transcriptViewport,
-      this.selectableStatus,
-      this.selectableTypeahead,
-      this.editor,
-    ];
-  }
-
-  private transcriptUnderfilledAlignment(): TranscriptUnderfilledAlignment {
-    return this.layoutSettingsState.inputPlacement === "top" ? "top" : "bottom";
-  }
-
-  private syncBannerChromePadding(): void {
-    const compactBelowHeader =
-      this.layoutSettingsState.inputPlacement === "top" &&
-      this.layoutSettingsState.statusPlacement === "above-input";
-    this.banner.setVerticalPadding({ bottom: compactBelowHeader ? 0 : 1, top: 1 });
-  }
-
-  private layoutBandRows(width: number): ClankieFaceBandRows[] {
-    return this.orderedFaceComponents().map((component) => {
-      if (component === this.selectableBanner)
-        return { band: "banner", rows: this.banner.render(width).length };
-      if (component === this.transcriptViewport)
-        return { band: "transcript", rows: this.maxTranscriptRows(width) };
-      if (component === this.selectableStatus)
-        return { band: "status", rows: this.status.render(width).length };
-      if (component === this.selectableTypeahead)
-        return { band: "typeahead", rows: this.commandTypeaheadPanel.render(width).length };
-      return { band: "editor", rows: this.editor.render(width).length };
-    });
-  }
-
-  private maxTranscriptRows(width: number): number {
-    const reservedRows =
-      this.banner.render(width).length +
-      this.status.render(width).length +
-      this.commandTypeaheadPanel.render(width).length +
-      this.editor.render(width).length;
-    return resolveClankieTranscriptRows({
-      minRows: MIN_TRANSCRIPT_ROWS,
-      reservedRows,
-      terminalRows: this.tui.terminal.rows,
-    });
-  }
-
-  private maxCommandTypeaheadRows(width = this.tui.terminal.columns): number {
-    const reservedRows =
-      this.banner.render(width).length +
-      this.status.render(width).length +
-      this.editor.render(width).length +
-      MIN_TRANSCRIPT_ROWS;
-    return resolveClankieCommandRows({
-      maxRows: 10,
-      reservedRows,
-      terminalRows: this.tui.terminal.rows,
-    });
-  }
-
-  private currentAgentSpinnerFrame(): string {
-    const index = Math.floor(Date.now() / this.agentSpinner.intervalMs) % this.agentSpinner.frames.length;
-    return this.agentSpinner.frames[index] ?? "";
-  }
-
-  private loaderIndicator(): { frames: string[]; intervalMs: number } {
-    return {
-      frames: this.agentSpinner.frames.map((frame) => this.theme.ansi.cyan(frame)),
-      intervalMs: this.agentSpinner.intervalMs,
-    };
+  private maxCommandTypeaheadRows(): number {
+    // Leave room for the banner, editor, status rows, and footer.
+    return Math.max(0, Math.min(10, this.tui.terminal.rows - 12));
   }
 
   // --- turn loader ---
 
-  startTurnLoader(message = "Waiting for response..."): void {
+  startTurnLoader(message = "Working..."): void {
     this.respondingState = true;
-    const loader = new Loader(
-      this.tui,
-      this.theme.ansi.cyan,
-      this.theme.ansi.dim,
-      message,
-      this.loaderIndicator(),
-    );
+    const { ansi } = this.theme;
+    const loader = new Loader(this.tui, ansi.accent, ansi.dim, this.loaderText(message));
     this.activeLoader = loader;
-    const loaderBlock = this.insertTranscript(loader, { collapsible: false, pin: "bottom" });
-    this.activeLoaderBlock = loaderBlock;
     if (this.activeTurn !== undefined) {
       this.activeTurn.loader = loader;
     }
+    this.statusContainer.clear();
+    this.statusContainer.addChild(loader);
     loader.start();
     this.refreshStatus("streaming");
   }
 
   setTurnLoaderMessage(message: string): void {
-    this.activeLoader?.setMessage(message);
+    this.activeLoader?.setMessage(this.loaderText(message));
   }
 
   stopTurnLoader(): void {
     const loader = this.activeLoader;
     this.activeLoader = undefined;
-    const block = this.activeLoaderBlock;
-    this.activeLoaderBlock = undefined;
-    loader?.stop();
     if (this.activeTurn !== undefined) {
       this.activeTurn.loader = undefined;
     }
-    block?.remove();
+    if (loader !== undefined) {
+      loader.stop();
+      this.statusContainer.clear();
+      this.statusContainer.addChild(IDLE_STATUS);
+    }
     this.respondingState = false;
+    this.tui.requestRender();
+  }
+
+  private loaderText(message: string): string {
+    return `${message} (esc to detach)`;
   }
 
   // --- input routing ---
 
   private routeInput(data: string): { consume?: boolean; data?: string } | undefined {
-    if (
-      (matchesKey(data, Key.ctrl("t")) || data === "\x14") &&
-      !this.setupFlow.isWaitingForInput() &&
-      this.commandPaletteOverlay?.isFocused() !== true
-    ) {
-      this.toggleTranscriptFocus();
-      return { consume: true };
-    }
-    // Drag selection and selection copy/clear work regardless of which pane holds
-    // key focus, so they run before the focus-specific branches below.
-    const mouse = parseClankieSgrMouse(data);
-    if (mouse !== undefined && mouse.kind !== "wheel") {
-      this.handleSelectionMouse(mouse);
-      return { consume: true };
-    }
-    if (
-      matchesKey(data, Key.ctrl("c")) &&
-      (this.transcriptViewport.hasSelection() || this.chromeSelection.hasSelection())
-    ) {
-      if (this.transcriptViewport.hasSelection()) {
-        void this.copyTranscriptSelection();
-        this.transcriptViewport.clearSelection();
-      } else {
-        void this.copyChromeSelection();
-        this.chromeSelection.clear();
-      }
-      this.tui.requestRender();
-      return { consume: true };
-    }
-    if (
-      matchesKey(data, Key.escape) &&
-      (this.transcriptViewport.hasSelection() || this.chromeSelection.hasSelection())
-    ) {
-      this.transcriptViewport.clearSelection();
-      this.chromeSelection.clear();
-      this.tui.requestRender();
-      return { consume: true };
-    }
-    if (this.transcriptViewport.focused) {
-      if (matchesKey(data, Key.escape)) {
-        this.tui.setFocus(this.editor);
-        this.refreshStatusView();
-        return { consume: true };
-      }
-      if (isTranscriptNavigationInput(data)) {
-        this.transcriptViewport.handleInput(data);
-        this.tui.requestRender();
-        return { consume: true };
-      }
-      return { consume: true };
-    }
     if (matchesKey(data, Key.ctrl("/")) || data === "\x1f") {
       if (this.setupFlow.isWaitingForInput()) return undefined;
       this.openCommandPalette();
+      return { consume: true };
+    }
+    if (matchesKey(data, Key.ctrl("o")) && !this.setupFlow.isWaitingForInput()) {
+      this.toggleOutputExpansion();
       return { consume: true };
     }
     // A running `!` shell command owns Ctrl-C: kill it instead of quitting the face.
@@ -647,34 +735,7 @@ export class ClankieFaceShell {
     if (bashInput !== undefined) return bashInput;
     const commandInput = this.handleCommandTypeaheadInput(data);
     if (commandInput !== undefined) return commandInput;
-    const transcriptInput = this.handleTranscriptViewportGlobalInput(data);
-    if (transcriptInput !== undefined) return transcriptInput;
-    if (mouse !== undefined) return { consume: true };
     return undefined;
-  }
-
-  private toggleTranscriptFocus(): void {
-    if (this.transcriptViewport.focused) this.tui.setFocus(this.editor);
-    else this.tui.setFocus(this.transcriptViewport);
-    this.refreshStatusView();
-    this.tui.requestRender();
-  }
-
-  private handleTranscriptViewportGlobalInput(data: string): { consume: true } | undefined {
-    if (
-      !shouldRouteClankieTranscriptGlobalInput(data, {
-        commandPaletteFocused: this.commandPaletteOverlay?.isFocused() === true,
-        editorAutocompleteOpen: this.editor.isShowingAutocomplete(),
-        editorText: this.editor.getText(),
-        setupWaiting: this.setupFlow.isWaitingForInput(),
-        transcriptFocused: this.transcriptViewport.focused,
-      })
-    ) {
-      return undefined;
-    }
-    if (!this.transcriptViewport.handleGlobalInput(data)) return undefined;
-    this.tui.requestRender();
-    return { consume: true };
   }
 
   // --- command typeahead + palette ---
@@ -754,7 +815,7 @@ export class ClankieFaceShell {
       this.theme.commandUiTheme,
       clankieCommandFilterFromText(this.editor.getText()),
     );
-    this.commandPaletteOverlay = this.showSelectableOverlay(workbench, {
+    this.commandPaletteOverlay = this.showModalOverlay(workbench, {
       anchor: "bottom-center",
       maxHeight: "70%",
       margin: { bottom: 3, left: 2, right: 2 },
@@ -772,228 +833,10 @@ export class ClankieFaceShell {
     this.tui.requestRender();
   }
 
-  // --- overlays / selection ---
+  // --- overlays ---
 
-  showSelectableOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
-    const selectable = new ClankieChromeSelectableComponent(component, "modal", this.chromeSelection);
-    const entry: SelectableOverlayEntry = {
-      component: selectable,
-      hidden: false,
-      ...(options === undefined ? {} : { options }),
-    };
-    this.selectableOverlays.push(entry);
-    const handle = this.tui.showOverlay(selectable, options);
-    let registered = true;
-    const unregister = (): void => {
-      if (!registered) return;
-      registered = false;
-      const index = this.selectableOverlays.indexOf(entry);
-      if (index >= 0) this.selectableOverlays.splice(index, 1);
-      this.chromeSelection.clearBand("modal");
-      this.chromeSelectionActive = false;
-    };
-    return {
-      hide: (): void => {
-        unregister();
-        handle.hide();
-      },
-      setHidden: (hidden: boolean): void => {
-        entry.hidden = hidden;
-        if (hidden) {
-          this.chromeSelection.clearBand("modal");
-          this.chromeSelectionActive = false;
-        }
-        handle.setHidden(hidden);
-      },
-      isHidden: (): boolean => handle.isHidden(),
-      focus: (): void => {
-        handle.focus();
-      },
-      unfocus: (options_): void => {
-        handle.unfocus(options_);
-      },
-      isFocused: (): boolean => handle.isFocused(),
-    };
-  }
-
-  private handleSelectionMouse(mouse: ClankieSgrMouseEvent): void {
-    if (!isClankieLeftMouseButton(mouse)) return;
-    if (mouse.kind === "press") {
-      const modal = this.modalMouseTarget(mouse);
-      if (modal !== null) {
-        this.transcriptViewport.clearSelection();
-        this.transcriptSelectionActive = false;
-        this.transcriptSelectionDragged = false;
-        this.transcriptClickTarget = undefined;
-        this.chromeSelection.press("modal", modal.row, modal.col);
-        this.chromeSelectionActive = true;
-      } else {
-        const transcript = this.transcriptMouseTarget(mouse);
-        if (transcript.inside && transcript.col === this.transcriptViewport.scrollbarHitColumn()) {
-          this.chromeSelection.clear();
-          this.chromeSelectionActive = false;
-          this.transcriptViewport.clearSelection();
-          this.transcriptSelectionActive = false;
-          this.transcriptScrollbarDragActive = true;
-          this.transcriptViewport.scrollToTrackRow(transcript.row);
-        } else if (transcript.inside) {
-          this.chromeSelection.clear();
-          this.chromeSelectionActive = false;
-          this.transcriptViewport.selectionPress(transcript.row, transcript.col);
-          this.transcriptSelectionActive = true;
-          this.transcriptSelectionDragged = false;
-          this.transcriptClickTarget = { col: transcript.col, row: transcript.row };
-        } else {
-          this.transcriptViewport.clearSelection();
-          this.transcriptSelectionActive = false;
-          this.transcriptSelectionDragged = false;
-          this.transcriptClickTarget = undefined;
-          const chrome = this.chromeMouseTarget(mouse);
-          if (chrome !== null) {
-            this.chromeSelection.press(chrome.band, chrome.row, chrome.col);
-            this.chromeSelectionActive = true;
-          } else {
-            this.chromeSelection.clear();
-            this.chromeSelectionActive = false;
-          }
-        }
-      }
-      this.tui.requestRender();
-      return;
-    }
-    if (mouse.kind === "drag") {
-      if (this.transcriptScrollbarDragActive) {
-        this.transcriptViewport.scrollToTrackRow(this.transcriptMouseTarget(mouse).row);
-        this.tui.requestRender();
-        return;
-      }
-      if (this.transcriptSelectionActive) {
-        this.transcriptSelectionDragged = true;
-        const transcript = this.transcriptMouseTarget(mouse);
-        this.transcriptViewport.selectionDrag(transcript.row, transcript.col);
-        this.tui.requestRender();
-        return;
-      }
-      if (this.chromeSelectionActive) {
-        const modal = this.modalMouseTarget(mouse);
-        if (modal !== null) {
-          this.chromeSelection.drag("modal", modal.row, modal.col);
-        } else {
-          const chrome = this.chromeMouseTarget(mouse);
-          if (chrome !== null) this.chromeSelection.drag(chrome.band, chrome.row, chrome.col);
-        }
-        this.tui.requestRender();
-      }
-      return;
-    }
-    // release
-    if (this.transcriptScrollbarDragActive) {
-      this.transcriptScrollbarDragActive = false;
-      return;
-    }
-    if (this.transcriptSelectionActive) {
-      this.transcriptSelectionActive = false;
-      if (this.transcriptViewport.hasSelection()) {
-        void this.copyTranscriptSelection();
-      } else if (!this.transcriptSelectionDragged && this.transcriptClickTarget !== undefined) {
-        const release = this.transcriptMouseTarget(mouse);
-        if (
-          !release.inside ||
-          release.row !== this.transcriptClickTarget.row ||
-          !this.transcriptViewport.toggleCollapsedAt(this.transcriptClickTarget.row)
-        ) {
-          this.transcriptViewport.clearSelection();
-        }
-      } else {
-        this.transcriptViewport.clearSelection();
-      }
-      this.transcriptSelectionDragged = false;
-      this.transcriptClickTarget = undefined;
-      this.tui.requestRender();
-      return;
-    }
-    if (this.chromeSelectionActive) {
-      this.chromeSelectionActive = false;
-      if (this.chromeSelection.hasSelection()) void this.copyChromeSelection();
-      else this.chromeSelection.clear();
-      this.tui.requestRender();
-    }
-  }
-
-  private modalMouseTarget(mouse: ClankieSgrMouseEvent): ClankieOverlayMouseTarget | null {
-    const terminalColumns = this.tui.terminal.columns;
-    const terminalRows = this.tui.terminal.rows;
-    for (let index = this.selectableOverlays.length - 1; index >= 0; index--) {
-      const overlay = this.selectableOverlays[index];
-      if (
-        overlay === undefined ||
-        overlay.hidden ||
-        overlay.options?.visible?.(terminalColumns, terminalRows) === false
-      )
-        continue;
-      const overlayOptions = overlay.options === undefined ? {} : { options: overlay.options };
-      const frame = resolveClankieOverlayFrame({
-        ...overlayOptions,
-        overlayRows: 0,
-        terminalColumns,
-        terminalRows,
-      });
-      const overlayRows = overlay.component.render(frame.width).length;
-      const target = resolveClankieOverlayMouseTarget({
-        mouseCol: mouse.col,
-        mouseRow: mouse.row,
-        ...overlayOptions,
-        overlayRows,
-        terminalColumns,
-        terminalRows,
-      });
-      if (target !== null) return target;
-    }
-    return null;
-  }
-
-  private chromeMouseTarget(
-    mouse: ClankieSgrMouseEvent,
-  ): ReturnType<typeof resolveClankieChromeMouseTargetFromBands> {
-    const width = this.tui.terminal.columns;
-    return resolveClankieChromeMouseTargetFromBands({
-      bands: this.layoutBandRows(width),
-      mouseCol: mouse.col,
-      mouseRow: mouse.row,
-      terminalRows: this.tui.terminal.rows,
-    });
-  }
-
-  private transcriptMouseTarget(
-    mouse: ClankieSgrMouseEvent,
-  ): ReturnType<typeof resolveClankieTranscriptMouseTargetFromBands> {
-    const width = this.tui.terminal.columns;
-    return resolveClankieTranscriptMouseTargetFromBands({
-      bands: this.layoutBandRows(width),
-      mouseCol: mouse.col,
-      mouseRow: mouse.row,
-      terminalRows: this.tui.terminal.rows,
-    });
-  }
-
-  private async copyTranscriptSelection(): Promise<void> {
-    const text = this.transcriptViewport.getSelectedText();
-    if (text.length === 0) return;
-    try {
-      await writeClankieClipboard(text, (chunk) => this.tui.terminal.write(chunk));
-    } catch {
-      return;
-    }
-  }
-
-  private async copyChromeSelection(): Promise<void> {
-    const text = this.chromeSelection.getSelectedText();
-    if (text.length === 0) return;
-    try {
-      await writeClankieClipboard(text, (chunk) => this.tui.terminal.write(chunk));
-    } catch {
-      return;
-    }
+  showModalOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
+    return this.tui.showOverlay(component, options);
   }
 
   // --- prompt submission ---
@@ -1064,7 +907,7 @@ export class ClankieFaceShell {
       return;
     }
     const controller = new AbortController();
-    this.insertMarkdown(`**You**\n\n${prompt}`);
+    this.insertUserMessage(prompt);
     const turn: ActivePromptTurn = { controller };
     this.activeTurn = turn;
     this.startTurnLoader();
@@ -1111,7 +954,8 @@ export class ClankieFaceShell {
   private setBashMode(on: boolean): void {
     if (this.bashMode === on) return;
     this.bashMode = on;
-    this.editor.borderColor = on ? this.theme.ansi.accent : this.theme.ansi.dim;
+    // pi's bash-mode color is the success green.
+    this.editor.borderColor = on ? this.theme.ansi.success : this.theme.ansi.dim;
     this.refreshCommandSurface(this.editor.getText());
     this.refreshStatusView();
     this.tui.requestRender();
@@ -1135,101 +979,41 @@ export class ClankieFaceShell {
   }
 
   private async handleBashPrompt(command: string): Promise<void> {
-    const { ansi } = this.theme;
-    const loader = new Loader(this.tui, ansi.accent, ansi.dim, `Running ${command}`, this.loaderIndicator());
-    const loaderBlock = this.insertTranscript(loader, { collapsible: false, pin: "bottom" });
-    loader.start();
+    // pi's bash execution block: `$ command` header, streaming preview, loader.
+    const block = new BashExecutionComponent(command, this.tui);
+    this.registerExpandable(block);
+    this.appendChatBlock(block);
     this.bashRunning += 1;
     this.refreshStatusView();
-    this.tui.requestRender();
     try {
       const result = await runFaceBashCommand(command, {
         cwd: this.cwdValue,
         env: this.env,
+        onOutput: (chunk) => {
+          block.appendOutput(chunk);
+        },
         onSpawn: (child) => {
           this.activeBashChild = child;
         },
       });
-      this.insertTranscript(new ClankieBashResultComponent(command, result, ansi));
+      if (result.timedOut) block.appendOutput("\n[timed out]");
+      block.setComplete(result.code, result.code === 130);
     } finally {
       this.activeBashChild = undefined;
       this.bashRunning = Math.max(0, this.bashRunning - 1);
-      loader.stop();
-      loaderBlock.remove();
       this.refreshStatusView();
       this.tui.requestRender();
     }
   }
 
-  // --- status text ---
-
-  private formatStatusText(label: string): string {
-    const { ansi } = this.theme;
-    const primary = ansi.dim(label);
-    const responseState =
-      this.respondingState && label !== "ready" && label !== "streaming" ? "responding" : "";
-    const setupState = this.setupFlow.isWaitingForInput() ? "setup input" : "";
-    const focusState = this.transcriptViewport.focused ? "transcript nav" : "";
-    const bashState = this.bashMode
-      ? `${ansi.accent("shell")}${
-          this.bashRunning > 0 ? ansi.dim(" running") : ansi.dim(` · ${displayHomePath(this.cwdValue)}`)
-        }`
-      : "";
-    const extras = this.options.statusExtras?.() ?? [];
-    const parts = [
-      primary,
-      ...(responseState.length === 0 ? [] : [ansi.dim(responseState)]),
-      setupState,
-      focusState,
-      bashState,
-      ...extras,
-    ]
-      .filter((part) => part.length > 0)
-      .map((part) => (part.includes("\x1b[") ? part : ansi.dim(part)));
-    if (!this.headerVisibleState) parts.unshift(ansi.bold(ansi.accent("clankie")));
-    const statusLine = parts.join(" · ");
-    if (
-      this.layoutSettingsState.inputPlacement === "bottom" &&
-      this.layoutSettingsState.statusPlacement === "above-input"
-    )
-      return `\n${statusLine}`;
-    if (
-      this.layoutSettingsState.inputPlacement === "top" &&
-      this.layoutSettingsState.statusPlacement === "below-input"
-    )
-      return `${statusLine}\n`;
-    return statusLine;
-  }
-
   private insertDebugSnapshot(): void {
-    const width = this.tui.terminal.columns;
-    const bands = this.layoutBandRows(width)
-      .map((band) => `${band.band}=${band.rows}`)
-      .join(" ");
     this.insertMarkdown(
       [
         "**Notice**",
         "",
-        `terminal ${width}x${this.tui.terminal.rows} · bands ${bands}`,
-        `layout input=${this.layoutSettingsState.inputPlacement} status=${this.layoutSettingsState.statusPlacement} header=${this.headerVisibleState ? "on" : "off"}`,
+        `terminal ${this.tui.terminal.columns}x${this.tui.terminal.rows} · chat blocks ${this.chat.children.length}`,
+        `header=${this.headerVisibleState ? "on" : "off"} · status=${this.currentStatusLabel}`,
       ].join("\n"),
     );
   }
 }
-
-function isTranscriptNavigationInput(data: string): boolean {
-  return (
-    matchesKey(data, Key.up) ||
-    matchesKey(data, Key.down) ||
-    matchesKey(data, Key.pageUp) ||
-    matchesKey(data, Key.pageDown) ||
-    matchesKey(data, Key.home) ||
-    matchesKey(data, Key.end) ||
-    matchesKey(data, Key.enter) ||
-    matchesKey(data, Key.space) ||
-    data === "\r" ||
-    data === " "
-  );
-}
-
-export type { LayoutSettings };

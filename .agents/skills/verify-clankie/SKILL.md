@@ -65,6 +65,29 @@ where a list of asserted maybes proves nothing.
 - Preserve odd baseline behavior in characterization tests. Correct it later
   as a separately reviewed behavior change.
 
+## Operator console (TUI) proof
+
+The face exits without a TTY on stdin and stdout, but `script` allocates a pty
+and still forwards a piped stdin — so keystrokes can be scripted against the
+real console:
+
+```bash
+(sleep 7; printf '/mo'; sleep 2; printf '\x03'; sleep 1) | \
+  CLANKIE_CONTROL_PLANE_URL=http://127.0.0.1:59999 \
+  script -q /tmp/tui-frames.txt npx tsx apps/tui/src/index.ts
+```
+
+Point `CLANKIE_CONTROL_PLANE_URL` at a dead port to keep the probe off the
+live service; the face boots on its unavailable path and still renders banner,
+chat, editor, typeahead, and footer. The face runs on the alternate screen
+with absolute cursor addressing, so naive CSI/OSC stripping interleaves
+frames into mush — feed the capture through a real VT emulator instead:
+`python3 -m venv v && v/bin/pip install pyte`, then `pyte.Screen(80, 24)` +
+`pyte.Stream.feed()` over the raw bytes and read `screen.display` at
+checkpoints. Mouse input can be scripted too: SGR sequences like
+`printf '\x1b[<0;5;15M\x1b[<0;5;15m'` are a left press/release at col 5,
+row 15.
+
 ## Test discovery gotcha
 
 Read the repo's root `vitest.config.ts` before deciding where a test belongs.

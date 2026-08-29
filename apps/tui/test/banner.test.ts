@@ -11,9 +11,6 @@ import { createClankieFaceAnsiTheme } from "../src/face/clankie-face-theme.ts";
 
 const FIELDS: BannerFields = {
   title: "Clankie",
-  tagline: "eve conductor · herdr stage",
-  model: "claude-opus-4-8 (high effort)",
-  cwd: "~/dev/clankie",
 };
 
 // oxlint-disable-next-line no-control-regex -- intentionally strips ANSI escape sequences
@@ -34,23 +31,20 @@ describe("truecolor unicode banner", () => {
   it("renders the inline robot mascot beside the name", () => {
     expect(fullText).toContain("[◉‿◉]");
     expect(fullText).toContain("clankie");
-    expect(fullText).not.toContain("C L A N K Y");
     expect(/\[◉‿◉\]\s+clankie/u.test(fullText)).toBe(true);
   });
 
-  it("keeps model and cwd together on one context line", () => {
-    expect(fullText).toContain("claude-opus-4-8 (high effort)");
-    expect(fullText).toContain("~/dev/clankie");
-    expect(full).toHaveLength(3);
+  it("keeps to the identity line and the rule", () => {
+    expect(full).toHaveLength(2);
   });
 
   it("emits 24-bit color codes", () => {
     expect(full.join("\n")).toContain("\x1b[38;2;");
   });
 
-  it("shares the truecolor accent with the face theme", () => {
+  it("shares pi dark's truecolor accent with the face theme", () => {
     const fullTheme = createClankieFaceAnsiTheme(wide({}));
-    expect(fullTheme.cyan("system")).toContain("\x1b[38;2;255;196;112m");
+    expect(fullTheme.cyan("system")).toContain("\x1b[38;2;138;190;183m");
   });
 
   it("keeps a one-column left gutter on non-empty rows", () => {
@@ -88,7 +82,6 @@ describe("condensed banner", () => {
     const condensed = renderClankieBanner(FIELDS, wide({ columns: 36 }));
     expect(condensed).toHaveLength(2);
     expect(stripAnsi(condensed[0] ?? "")).toContain("clankie");
-    expect(stripAnsi(condensed.join("\n"))).not.toContain("claude-opus");
     for (const line of condensed) {
       expect(stripAnsi(line).length).toBeLessThanOrEqual(64);
     }
@@ -106,10 +99,10 @@ describe("banner component", () => {
     expect(stripAnsi(narrowComponent.join("\n"))).toContain("clankie");
   });
 
-  it("refreshes fields without recreating the component", () => {
+  it("renders nothing when hidden", () => {
     const component = new ClankieBannerComponent(FIELDS, wide({ columns: 100 }));
-    component.setFields({ ...FIELDS, model: "qwen3.6:27b-mlx-bf16 (high effort)" });
-    expect(stripAnsi(component.render(100).join("\n"))).toContain("qwen3.6:27b-mlx-bf16");
+    component.setVisible(false);
+    expect(component.render(100)).toHaveLength(0);
   });
 
   it("supports removing bottom padding for compact top chrome", () => {

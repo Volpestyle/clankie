@@ -23,14 +23,11 @@ export type BannerCapabilities = {
 
 export type BannerFields = {
   title: string;
-  tagline: string;
-  model?: string;
-  cwd?: string;
 };
 
 export class ClankieBannerComponent implements Component {
   private readonly caps: BannerCapabilities;
-  private fields: BannerFields;
+  private readonly fields: BannerFields;
   private visible: boolean;
   private topPaddingRows = 1;
   private bottomPaddingRows = 1;
@@ -39,10 +36,6 @@ export class ClankieBannerComponent implements Component {
     this.fields = fields;
     this.caps = caps;
     this.visible = visible;
-  }
-
-  setFields(fields: BannerFields): void {
-    this.fields = fields;
   }
 
   setVisible(visible: boolean): void {
@@ -79,12 +72,7 @@ export function renderClankieBanner(fields: BannerFields, caps: BannerCapabiliti
 
   const mascot = paint(clankieMascot(caps), { fg: "accent", bold: true }, caps);
   const name = paint(fields.title.toLowerCase(), { fg: "accent", bold: true }, caps);
-  const context = [fields.model, fields.cwd].filter((value) => value !== undefined && value.length > 0);
-  return [
-    ` ${mascot}  ${name} ${paint(`· ${fields.tagline}`, { fg: "dim" }, caps)}`,
-    ...(context.length === 0 ? [] : [` ${paint(context.join(" · "), { fg: "dim" }, caps)}`]),
-    renderRule(caps),
-  ];
+  return [` ${mascot}  ${name}`, renderRule(caps)];
 }
 
 /** A full-width colored rule that underlines the header block. */
