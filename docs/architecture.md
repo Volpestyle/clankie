@@ -292,6 +292,7 @@ artifact and installer.
 | --------------------------------- | ----------------------------------------------------------------------------------------- |
 | HTTP API                          | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                               |
 | Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                             |
+| Herdr plugin (board, console)     | [`integrations/herdr-plugin/README.md`](../integrations/herdr-plugin/README.md)           |
 | Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                 |
 | macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                   |
 | Official Discord bot operation    | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                       |

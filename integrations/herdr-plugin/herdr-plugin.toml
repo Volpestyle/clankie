@@ -1,0 +1,42 @@
+id = "clankie"
+name = "Clankie"
+version = "0.1.0"
+min_herdr_version = "0.7.3"
+description = "Clankie's fleet surfaces: the herdr-lead board, the operator console, and service status."
+platforms = ["macos"]
+
+# Keybindable entry points (herdr qualifies these as clankie.board / clankie.focus-board).
+[[actions]]
+id = "board"
+title = "Open the herdr-lead board"
+contexts = ["workspace"]
+command = ["herdr-lead", "split"]
+
+[[actions]]
+id = "focus-board"
+title = "Jump to or from the herdr-lead board"
+contexts = ["workspace"]
+command = ["herdr-lead", "focus"]
+
+# The board as a first-class plugin pane: `herdr plugin pane open --plugin clankie --entrypoint board`.
+[[panes]]
+id = "board"
+title = "herdr-lead board"
+placement = "split"
+command = ["herdr-lead"]
+
+# The operator console, openable from any herdr workspace.
+[[panes]]
+id = "console"
+title = "Clankie console"
+placement = "split"
+command = ["clankie"]
+
+# Transient service-status check over the current pane.
+[[panes]]
+id = "status"
+title = "Clankie status"
+placement = "popup"
+width = "70%"
+height = "60%"
+command = ["bash", "status.sh"]

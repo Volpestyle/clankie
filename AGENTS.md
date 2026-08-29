@@ -23,6 +23,8 @@ service (`apps/clankie`) plus the surfaces that reach it.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
 - `integrations/gba-emulator` — the local GBA implementation; each owning
   process instantiates its own body/runtime.
+- `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
+  actions); all other herdr integration is vanilla CLI/socket (ADR 0139).
 - `packages/` — shared contracts and adapters; `protocol` depends on nothing.
   `vox-client` is the Apache process boundary for the AGPL Vox executable;
   `play-voice` connects only Clankie's own play to his active Discord body.
