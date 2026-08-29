@@ -61,3 +61,15 @@ export function sanitizeForSupportBundle(value: unknown): unknown {
   }
   return output;
 }
+
+/** Redacts credential-shaped values before free-form text crosses a public or durable boundary. */
+export function redactSensitiveText(value: string): string {
+  return value
+    .replace(/\bauthorization\s*:\s*(?:bearer|basic)\s+[^\s,;]+/giu, "authorization: [REDACTED]")
+    .replace(/\bbearer\s+[A-Za-z0-9._~+/-]{8,}/giu, "Bearer [REDACTED]")
+    .replace(/\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[_A-Za-z0-9-]{8,}/gu, "[REDACTED]")
+    .replace(
+      /\b(?:(?:eve[_ -]?)?session(?:[_ -]?(?:id|token))?|(?:access|refresh|continuation)[_ -]?token|api[_ -]?key|provider[_ -]?credential|password|passwd|secret|credential)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
+      "[REDACTED]",
+    );
+}

@@ -2,7 +2,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { OPERATOR_CONVERSATION_TEXT_MAX } from "@clankie/protocol";
 import {
+  distillHerdrSeatReply,
   HerdrWatchStore,
   parseHerdrAgentResult,
   type HerdrAgentSnapshot,
@@ -132,6 +134,9 @@ describe("HerdrWatchStore", () => {
     const changed = deferred<HerdrAgentSnapshot>();
     const sendText = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const read = vi.fn((_target: string, _harness: string, source: string) =>
+      Promise.resolve(source === "recent-unwrapped" ? "※ recap: Tests are green." : ""),
+    );
     const runner: HerdrWatchRunner = {
       get: () => Promise.resolve(current),
       resolveTerminal: () => Promise.resolve(current),
@@ -142,6 +147,7 @@ describe("HerdrWatchStore", () => {
           : new Promise((_resolve, reject) =>
               signal.addEventListener("abort", () => reject(new Error("aborted"))),
             ),
+      read,
       sendText,
       pressEnter,
     };
@@ -176,7 +182,100 @@ describe("HerdrWatchStore", () => {
     await vi.waitFor(() =>
       expect(project).toHaveBeenCalledWith("term-potato", { kind: "status", status: "done" }),
     );
+    expect(project).toHaveBeenCalledWith("term-potato", {
+      kind: "reply",
+      text: "Tests are green.",
+    });
+    expect(read).toHaveBeenCalledWith("w18:p1", "claude", "recent-unwrapped");
     store.close();
+  });
+
+  it("keeps status observation alive when settled reply capture fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-seat-reply-failure-"));
+    roots.push(root);
+    let current = working;
+    const changed = deferred<HerdrAgentSnapshot>();
+    const project = vi.fn();
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: {
+        get: () => Promise.resolve(current),
+        resolveTerminal: () => Promise.resolve(current),
+        wait: () => Promise.resolve(done),
+        waitForChange: (_target, status, signal) =>
+          status === "working"
+            ? changed.promise
+            : new Promise((_resolve, reject) =>
+                signal.addEventListener("abort", () => reject(new Error("aborted"))),
+              ),
+        read: () => Promise.reject(new Error("pane read unavailable")),
+      },
+    });
+    store.start(() => Promise.resolve(), project);
+    store.trackSeat("term-potato");
+
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenCalledWith("term-potato", { kind: "status", status: "working" }),
+    );
+    current = done;
+    changed.resolve(done);
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenCalledWith("term-potato", { kind: "status", status: "done" }),
+    );
+    expect(project.mock.calls.some(([, projection]) => projection.kind === "reply")).toBe(false);
+    store.close();
+  });
+});
+
+describe("seat reply distillation", () => {
+  it("uses only Claude's latest recap line and redacts it", () => {
+    expect(
+      distillHerdrSeatReply(
+        "claude",
+        "※ recap: Old reply\nraw tool scrollback\n※ recap: Shipped it with api_key=sk-not-for-chat",
+      ),
+    ).toBe("Shipped it with [REDACTED]");
+  });
+
+  it("extracts Codex's final answer between its response and timing boundaries", () => {
+    expect(
+      distillHerdrSeatReply(
+        "codex",
+        [
+          "• Earlier progress update",
+          "────────────────────────────────",
+          "• Tests are green.",
+          "  - Added the settled reply projection",
+          "  - Kept raw scrollback out",
+          "",
+          "─ Worked for 2m 4s ───────────────",
+          "",
+          "› Ask Codex to do anything",
+        ].join("\n"),
+      ),
+    ).toBe("Tests are green.\n- Added the settled reply projection\n- Kept raw scrollback out");
+  });
+
+  it("extracts Pi's last OSC 133 message zone without its terminal footer", () => {
+    const start = "\u001B]133;A\u0007";
+    const end = "\u001B]133;B\u0007\u001B]133;C\u0007";
+    expect(
+      distillHerdrSeatReply(
+        "pi",
+        `${end}${start}operator prompt\n${start} Reply line one\n${end} Reply line two\n~/dev/clankie\n12% context`,
+      ),
+    ).toBe("Reply line one\nReply line two");
+  });
+
+  it("fails soft for unknown or unframed harness output", () => {
+    expect(distillHerdrSeatReply("gemini", "a complete-looking reply")).toBeUndefined();
+    expect(distillHerdrSeatReply("codex", "raw scrollback without a final boundary")).toBeUndefined();
+    expect(distillHerdrSeatReply("claude", "⏺ raw Claude scrollback")).toBeUndefined();
+  });
+
+  it("bounds a recognized reply to the public conversation limit", () => {
+    const reply = distillHerdrSeatReply("claude", `※ recap: ${"x".repeat(20_000)}`);
+    expect(reply).toHaveLength(OPERATOR_CONVERSATION_TEXT_MAX);
+    expect(reply?.endsWith("…")).toBe(true);
   });
 });
 

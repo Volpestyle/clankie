@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
-import { createLogger, sanitizeForSupportBundle } from "../src/index.ts";
+import { createLogger, redactSensitiveText, sanitizeForSupportBundle } from "../src/index.ts";
 
 describe("support bundle redaction", () => {
   it("redacts nested secrets", () => {
@@ -23,5 +23,15 @@ describe("support bundle redaction", () => {
     logger.info(credential, "broker credential fixture");
     expect(output).not.toContain(marker);
     expect(output).toContain("[REDACTED]");
+  });
+});
+
+describe("free-form text redaction", () => {
+  it("redacts bearer and credential-shaped values without changing ordinary prose", () => {
+    expect(
+      redactSensitiveText(
+        "Tests pass. Authorization: Bearer abcdefghijklmnop; api_key='sk-also-secret'; path=README.md",
+      ),
+    ).toBe("Tests pass. authorization: [REDACTED]; [REDACTED]; path=README.md");
   });
 });

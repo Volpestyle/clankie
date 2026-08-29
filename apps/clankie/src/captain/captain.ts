@@ -711,9 +711,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     (seatId, projection) => {
       conversations.publishSeatEvent(
         seatId,
-        projection.kind === "summary"
-          ? { type: "message", role: "agent", text: projection.text, streaming: false }
-          : { type: "activity", phase: projection.status === "working" ? "responding" : "waiting" },
+        projection.kind === "status"
+          ? { type: "activity", phase: projection.status === "working" ? "responding" : "waiting" }
+          : { type: "message", role: "agent", text: projection.text, streaming: false },
       );
     },
   );

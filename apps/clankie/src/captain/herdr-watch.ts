@@ -11,7 +11,8 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { OPERATOR_CONVERSATION_SUMMARY_MAX } from "@clankie/protocol";
+import { redactSensitiveText } from "@clankie/observability";
+import { OPERATOR_CONVERSATION_SUMMARY_MAX, OPERATOR_CONVERSATION_TEXT_MAX } from "@clankie/protocol";
 import { z } from "zod";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 
@@ -49,6 +50,7 @@ export interface HerdrWatchRunner {
   resolveTerminal(terminalId: string): Promise<HerdrAgentSnapshot | undefined>;
   wait(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   waitForChange?(target: string, currentStatus: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
+  read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
   sendText?(target: string, text: string): Promise<void>;
   pressEnter?(target: string): Promise<void>;
 }
@@ -78,13 +80,18 @@ export interface HerdrWatchPort {
 type InternalWake = (conversationId: string, prompt: string) => Promise<void>;
 type HerdrSeatProjection =
   | { readonly kind: "status"; readonly status: string }
-  | { readonly kind: "summary"; readonly text: string };
+  | { readonly kind: "summary"; readonly text: string }
+  | { readonly kind: "reply"; readonly text: string };
 type ProjectSeat = (seatId: string, projection: HerdrSeatProjection) => void;
 
 const SETTLED_STATUSES = new Set(["idle", "done", "blocked"]);
+const REPLY_STATUSES = new Set(["idle", "done"]);
 const AGENT_STATUSES = ["idle", "working", "blocked", "done", "unknown"] as const;
 const RETRY_ADMISSION_MS = 5_000;
 const HERDR_COMMAND_TIMEOUT_MS = 5_000;
+const SEAT_REPLY_READ_LINES = 240;
+const PI_ZONE_START = "\u001B]133;A\u0007";
+const PI_ZONE_END = "\u001B]133;B\u0007\u001B]133;C\u0007";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -170,6 +177,16 @@ function defaultRunner(): HerdrWatchRunner {
           signal,
         ),
       ),
+    read: (target, harness, source) =>
+      runHerdr([
+        "agent",
+        "read",
+        target,
+        "--source",
+        source,
+        ...(source === "visible" ? [] : ["--lines", String(SEAT_REPLY_READ_LINES)]),
+        ...(harness === "pi" ? ["--format", "ansi"] : []),
+      ]),
     sendText: (target, text) => runHerdr(["pane", "send-text", target, text]).then(() => undefined),
     pressEnter: (target) => runHerdr(["pane", "send-keys", target, "Enter"]).then(() => undefined),
   };
@@ -334,12 +351,37 @@ export class HerdrWatchStore implements HerdrWatchPort {
         this.publishSeatStatus(seatId, current.status);
         this.publishSeatSummary(seatId, current.paneId, readHerdrSummariesFile(this.summariesPath).agents);
         if (this.runner.waitForChange === undefined) return;
-        await this.runner.waitForChange(current.paneId, current.status, signal);
+        const piBaseline =
+          current.status === "working" && current.agent === "pi"
+            ? await this.readSeatReply(current, "visible")
+            : undefined;
+        const changed = await this.runner.waitForChange(current.paneId, current.status, signal);
+        if (current.status === "working" && REPLY_STATUSES.has(changed.status)) {
+          const reply = await this.readSeatReply(changed, "recent-unwrapped");
+          if (
+            reply !== undefined &&
+            (changed.agent !== "pi" || (piBaseline !== undefined && reply !== piBaseline))
+          ) {
+            this.projectSeat?.(seatId, { kind: "reply", text: reply });
+          }
+        }
       } catch {
         if (signal.aborted) return;
         this.publishSeatStatus(seatId, "offline");
         await delay(RETRY_ADMISSION_MS);
       }
+    }
+  }
+
+  private async readSeatReply(
+    agent: HerdrAgentSnapshot,
+    source: "visible" | "recent-unwrapped",
+  ): Promise<string | undefined> {
+    if (this.runner.read === undefined) return undefined;
+    try {
+      return distillHerdrSeatReply(agent.agent, await this.runner.read(agent.paneId, agent.agent, source));
+    } catch {
+      return undefined;
     }
   }
 
@@ -358,7 +400,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const text =
       raw === undefined
         ? undefined
-        : bounded(stripVTControlCharacters(raw).trim(), OPERATOR_CONVERSATION_SUMMARY_MAX);
+        : bounded(
+            redactSensitiveText(stripVTControlCharacters(raw).trim()),
+            OPERATOR_CONVERSATION_SUMMARY_MAX,
+          );
     if (text === undefined) {
       this.seatSummaries.delete(seatId);
       return;
@@ -480,6 +525,68 @@ function watchPrompt(record: HerdrWatchRecord, agent?: HerdrAgentSnapshot, failu
 
 function bounded(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/** Returns only a harness-recognized final reply; unrecognized scrollback is never projected. */
+export function distillHerdrSeatReply(harness: string, transcript: string): string | undefined {
+  const candidate =
+    harness === "claude"
+      ? claudeReply(transcript)
+      : harness === "codex"
+        ? codexReply(transcript)
+        : harness === "pi"
+          ? piReply(transcript)
+          : undefined;
+  if (candidate === undefined) return undefined;
+  const text = stripVTControlCharacters(candidate.replace(/\r\n?/gu, "\n"))
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+  if (text.length === 0) return undefined;
+  return bounded(redactSensitiveText(text), OPERATOR_CONVERSATION_TEXT_MAX);
+}
+
+function claudeReply(transcript: string): string | undefined {
+  const lines = stripVTControlCharacters(transcript).replace(/\r\n?/gu, "\n").split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const match = /^\s*※\s*recap:\s*(.+?)\s*$/iu.exec(lines[index] ?? "");
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
+}
+
+function codexReply(transcript: string): string | undefined {
+  const lines = stripVTControlCharacters(transcript).replace(/\r\n?/gu, "\n").split("\n");
+  const footer = lines.findLastIndex((line) => /^\s*─+\s*Worked for\b/u.test(line));
+  if (footer < 0) return undefined;
+  let separator = footer - 1;
+  while (separator >= 0 && !/^\s*─{8,}\s*$/u.test(lines[separator] ?? "")) separator -= 1;
+  if (separator < 0) return undefined;
+  const reply = lines.slice(separator + 1, footer);
+  while (reply[0]?.trim().length === 0) reply.shift();
+  while (reply.at(-1)?.trim().length === 0) reply.pop();
+  if (!/^\s*•(?:\s|$)/u.test(reply[0] ?? "")) return undefined;
+  reply[0] = (reply[0] ?? "").replace(/^\s*•\s?/u, "");
+  for (let index = 1; index < reply.length; index += 1) {
+    if (reply[index]?.startsWith("  ")) reply[index] = reply[index]!.slice(2);
+  }
+  return reply.join("\n");
+}
+
+function piReply(transcript: string): string | undefined {
+  const start = transcript.lastIndexOf(PI_ZONE_START);
+  if (start < 0) return undefined;
+  const lineStart = transcript.lastIndexOf("\n", start) + 1;
+  const end = transcript.indexOf(PI_ZONE_END, start + PI_ZONE_START.length);
+  if (end < 0 && !transcript.slice(lineStart, start).endsWith(PI_ZONE_END)) return undefined;
+  const lineEnd = transcript.indexOf("\n", end < 0 ? start : end);
+  const candidate = transcript.slice(start + PI_ZONE_START.length, lineEnd < 0 ? transcript.length : lineEnd);
+  return candidate
+    .replaceAll(PI_ZONE_END, "")
+    .split("\n")
+    .map((line) => (line.startsWith(" ") ? line.slice(1) : line))
+    .join("\n");
 }
 
 function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
