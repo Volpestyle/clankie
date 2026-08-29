@@ -1,8 +1,7 @@
 # ADR 0138: Terminal truth rides the operator relay
 
-Status: proposed. Extends the seat identity and terminal deep-link decision in
-[ADR 0135](0135-a-herdr-seat-is-a-conversation.md). James ratifies architecture
-decisions.
+Status: accepted (James, 2026-08-29). Extends the seat identity and terminal
+deep-link decision in [ADR 0135](0135-a-herdr-seat-is-a-conversation.md).
 
 ## Context
 
