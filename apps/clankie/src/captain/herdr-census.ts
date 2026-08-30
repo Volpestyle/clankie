@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { OperatorTerminalSession } from "@clankie/protocol";
 import { readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 
 const execFileAsync = promisify(execFile);
@@ -102,6 +103,76 @@ const SEAT_SUMMARY_MAX = 512;
 
 function bounded(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function recordMap(values: unknown, idKey: string): Map<string, Record<string, unknown>> {
+  if (!Array.isArray(values)) return new Map();
+  return new Map(
+    values.flatMap((value) => {
+      if (value === null || typeof value !== "object") return [];
+      const record = value as Record<string, unknown>;
+      const id = record[idKey];
+      return typeof id === "string" ? [[id, record] as const] : [];
+    }),
+  );
+}
+
+/** Projects one Herdr API snapshot without flattening its workspace hierarchy. */
+export function parseHerdrTerminalCatalog(stdout: string): OperatorTerminalSession[] {
+  const parsed = JSON.parse(stdout) as { result?: { snapshot?: Record<string, unknown> } };
+  const snapshot = parsed.result?.snapshot;
+  if (!snapshot) return [];
+  const workspaces = recordMap(snapshot.workspaces, "workspace_id");
+  const tabs = recordMap(snapshot.tabs, "tab_id");
+  const agents = Array.isArray(snapshot.agents) ? snapshot.agents : [];
+
+  return agents.flatMap((value): OperatorTerminalSession[] => {
+    if (value === null || typeof value !== "object") return [];
+    const agent = value as Record<string, unknown>;
+    if (agent.agent === "shell") return [];
+    const terminalId = agent.terminal_id;
+    const workspaceId = agent.workspace_id;
+    const tabId = agent.tab_id;
+    const paneId = agent.pane_id;
+    if (
+      typeof terminalId !== "string" ||
+      typeof workspaceId !== "string" ||
+      typeof tabId !== "string" ||
+      typeof paneId !== "string"
+    )
+      return [];
+    const workspace = workspaces.get(workspaceId);
+    const tab = tabs.get(tabId);
+    if (
+      typeof workspace?.label !== "string" ||
+      typeof workspace.number !== "number" ||
+      typeof tab?.label !== "string" ||
+      typeof tab.number !== "number"
+    )
+      return [];
+    return [
+      {
+        terminalId,
+        label: bounded(titleOf(agent), 200),
+        workspace: { id: workspaceId, label: bounded(workspace.label, 200), number: workspace.number },
+        tab: { id: tabId, label: bounded(tab.label, 200), number: tab.number },
+        pane: { id: paneId },
+      },
+    ];
+  });
+}
+
+/** Bounded observable terminal catalog, in Herdr's native workspace/tab/pane order. */
+export async function readTerminalCatalog(
+  options: { readonly runCommand?: HerdrCensusRunner } = {},
+): Promise<OperatorTerminalSession[]> {
+  const run = options.runCommand ?? defaultRunner;
+  try {
+    const { stdout } = await run("herdr", ["api", "snapshot"]);
+    return parseHerdrTerminalCatalog(stdout).slice(0, MAX_AGENTS);
+  } catch {
+    return [];
+  }
 }
 
 /**

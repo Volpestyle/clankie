@@ -40,7 +40,9 @@ Paired devices already carry a distinct `terminalObserve` grant. The
 ## Decision
 
 Terminal observation extends the existing callable operator service envelope
-with one `terminal_tail` operation and uses a dedicated relay streaming path,
+with a bounded `terminal_catalog` operation and a `terminal_tail` operation.
+The catalog preserves Herdr's workspace, tab, and pane coordinates beside each
+stable terminal id. Tail bytes use the dedicated relay streaming path
 `POST /operator/v1/terminal-tail`.
 
 The callable envelope already owns the captain-authenticated service hop,
@@ -115,6 +117,8 @@ Observation neither accepts input nor implies control authority.
 ## Consequences
 
 - A seat thread's terminal link attaches to pane truth by stable terminal id.
+- The terminal browser mirrors Herdr's workspace → tab → pane organization
+  without deriving mutable hierarchy from stable terminal ids or display labels.
 - The native app can write decoded bytes directly into SwiftTerm or another
   native renderer without routing them through React state.
 - Reconnect is deterministic: resume a live observer by cursor or reset to a

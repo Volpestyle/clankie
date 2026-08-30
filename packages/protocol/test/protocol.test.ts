@@ -355,6 +355,21 @@ describe("protocol", () => {
       }),
     ).toMatchObject({ op: "roster", seats: [{ seatId: "term_65a2015731452d" }] });
     expect(
+      OperatorConversationServiceResultSchema.parse({
+        op: "terminal_catalog",
+        schemaVersion: 1,
+        sessions: [
+          {
+            terminalId: "term_65a2015731452d",
+            label: "clankie",
+            workspace: { id: "w1", label: "clankie", number: 1 },
+            tab: { id: "w1:t1", label: "main", number: 1 },
+            pane: { id: "w1:p1" },
+          },
+        ],
+      }),
+    ).toMatchObject({ op: "terminal_catalog", sessions: [{ pane: { id: "w1:p1" } }] });
+    expect(
       OperatorConversationServiceRequestSchema.parse({
         op: "close_seat",
         schemaVersion: 1,
@@ -398,8 +413,8 @@ describe("protocol", () => {
         cancelled: true,
       }),
     ).toMatchObject({ op: "cancel", cancelled: true });
-    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(13);
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(13);
+    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(14);
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(14);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 
@@ -675,6 +690,29 @@ describe("protocol", () => {
 
     await expect(client.roster()).resolves.toEqual([
       { seatId: "term-potato", harness: "codex", status: "idle", title: "worker" },
+    ]);
+  });
+
+  it("reads Herdr's terminal hierarchy through the canonical service client", async () => {
+    const client = createOperatorConversationServiceClient(async (request) => {
+      expect(request).toEqual({ op: "terminal_catalog", schemaVersion: 1 });
+      return {
+        op: "terminal_catalog",
+        schemaVersion: 1,
+        sessions: [
+          {
+            terminalId: "term-potato",
+            label: "worker",
+            workspace: { id: "w1", label: "clankie", number: 1 },
+            tab: { id: "w1:t1", label: "main", number: 1 },
+            pane: { id: "w1:p1" },
+          },
+        ],
+      };
+    });
+
+    await expect(client.terminalCatalog!()).resolves.toMatchObject([
+      { terminalId: "term-potato", workspace: { label: "clankie" }, tab: { label: "main" } },
     ]);
   });
 

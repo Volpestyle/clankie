@@ -33,7 +33,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ConversationStore } from "./conversations.ts";
 import { AutonomyStore } from "./autonomy.ts";
-import { readFleetSeats, readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.ts";
+import {
+  readFleetSeats,
+  readHerdrSessionCensus,
+  readTerminalCatalog,
+  type HerdrSessionCensus,
+} from "./herdr-census.ts";
 import { HerdrTerminalStore } from "./herdr-terminal.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
@@ -1077,6 +1082,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const conversationId = conversations.conversationIdForSeat(seat.seatId);
             return { ...seat, ...(conversationId === undefined ? {} : { conversationId }) };
           }),
+        };
+      }
+      if (request.op === "terminal_catalog") {
+        return {
+          op: "terminal_catalog",
+          schemaVersion: 1,
+          sessions: await readTerminalCatalog(),
         };
       }
       if (request.op === "close_seat") {

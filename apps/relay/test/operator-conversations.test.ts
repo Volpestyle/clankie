@@ -83,6 +83,21 @@ describe("authenticated operator conversation relay", () => {
             ],
           };
         }
+        if (request.op === "terminal_catalog") {
+          return {
+            op: "terminal_catalog",
+            schemaVersion: 1,
+            sessions: [
+              {
+                terminalId: "term-worker",
+                label: "Worker",
+                workspace: { id: "w1", label: "clankie", number: 1 },
+                tab: { id: "w1:t1", label: "main", number: 1 },
+                pane: { id: "w1:p1" },
+              },
+            ],
+          };
+        }
         if (request.op === "close_seat") {
           return { op: "close_seat", schemaVersion: 1, seatId: request.seatId, closed: true };
         }
@@ -112,6 +127,7 @@ describe("authenticated operator conversation relay", () => {
         title: "Worker",
       },
       { op: "roster", schemaVersion: 1 },
+      { op: "terminal_catalog", schemaVersion: 1 },
       { op: "close_seat", schemaVersion: 1, seatId: "term-worker" },
       { op: "close", schemaVersion: 1, conversationId: "conversation-2" },
     ] as const) {
@@ -124,6 +140,7 @@ describe("authenticated operator conversation relay", () => {
       "get",
       "create",
       "roster",
+      "terminal_catalog",
       "close_seat",
       "close",
     ]);

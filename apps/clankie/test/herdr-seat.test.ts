@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   formatHerdrSessionCensus,
   parseHerdrAgentList,
+  parseHerdrTerminalCatalog,
   readFleetSeats,
   readHerdrSessionCensus,
+  readTerminalCatalog,
 } from "../src/captain/herdr-census.ts";
 import { operatorPromptWithHerdrSeat } from "../src/captain/herdr-seat.ts";
 
@@ -86,6 +88,52 @@ describe("herdr session census", () => {
         runCommand: () => Promise.resolve({ stdout: JSON.stringify(roster), stderr: "" }),
       }),
     ).resolves.toEqual([{ seatId: "term-worker", harness: "codex", status: "idle", title: "" }]);
+  });
+
+  it("keeps the workspace, tab, and pane hierarchy in the terminal catalog", async () => {
+    const snapshot = {
+      result: {
+        snapshot: {
+          workspaces: [{ workspace_id: "w15", label: "clankie", number: 2 }],
+          tabs: [{ workspace_id: "w15", tab_id: "w15:t3", label: "app", number: 3 }],
+          agents: [
+            {
+              workspace_id: "w15",
+              tab_id: "w15:t3",
+              pane_id: "w15:p8",
+              terminal_id: "term-worker",
+              agent: "codex",
+              terminal_title_stripped: "Build terminal hierarchy",
+            },
+            {
+              workspace_id: "w15",
+              tab_id: "w15:t3",
+              pane_id: "w15:p9",
+              terminal_id: "term-shell",
+              agent: "shell",
+            },
+          ],
+        },
+      },
+    };
+    expect(parseHerdrTerminalCatalog(JSON.stringify(snapshot))).toEqual([
+      {
+        terminalId: "term-worker",
+        label: "Build terminal hierarchy",
+        workspace: { id: "w15", label: "clankie", number: 2 },
+        tab: { id: "w15:t3", label: "app", number: 3 },
+        pane: { id: "w15:p8" },
+      },
+    ]);
+    await expect(
+      readTerminalCatalog({
+        runCommand: (command, args) => {
+          expect(command).toBe("herdr");
+          expect(args).toEqual(["api", "snapshot"]);
+          return Promise.resolve({ stdout: JSON.stringify(snapshot), stderr: "" });
+        },
+      }),
+    ).resolves.toHaveLength(1);
   });
 });
 

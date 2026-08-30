@@ -75,7 +75,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       return true;
     }
     const grant =
-      serviceRequest.op === "terminal_tail"
+      serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
         : serviceRequest.op === "close_seat"
           ? "steer"
@@ -421,7 +421,10 @@ function logFields(
           : undefined;
   return {
     service: "clankie-relay",
-    route: request.op === "terminal_tail" ? "operator_terminal" : "operator_conversation",
+    route:
+      request.op === "terminal_tail" || request.op === "terminal_catalog"
+        ? "operator_terminal"
+        : "operator_conversation",
     op: request.op,
     deviceId: redactSensitiveString(authorization.device.deviceId),
     statusCode,

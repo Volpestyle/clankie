@@ -159,6 +159,34 @@ export const OperatorFleetSeatSchema = z
   .strict();
 export type OperatorFleetSeat = z.infer<typeof OperatorFleetSeatSchema>;
 
+/** Herdr's native workspace → tab → pane location for one observable terminal. */
+export const OperatorTerminalSessionSchema = z
+  .object({
+    terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    label: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+    workspace: z
+      .object({
+        id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+        label: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+        number: z.number().int().positive(),
+      })
+      .strict(),
+    tab: z
+      .object({
+        id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+        label: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+        number: z.number().int().positive(),
+      })
+      .strict(),
+    pane: z
+      .object({
+        id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+      })
+      .strict(),
+  })
+  .strict();
+export type OperatorTerminalSession = z.infer<typeof OperatorTerminalSessionSchema>;
+
 export const OperatorConversationSessionStateSchema = z.enum([
   "unbound",
   "active",
@@ -832,6 +860,12 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
+      op: z.literal("terminal_catalog"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("close_seat"),
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
@@ -930,6 +964,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("terminal_catalog"),
+      schemaVersion: z.literal(1),
+      sessions: z.array(OperatorTerminalSessionSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("close_seat"),
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
@@ -986,6 +1027,8 @@ export type OperatorConversationTailItem =
 export interface OperatorConversationServiceClient {
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
+  /** Observable terminals in Herdr's native hierarchy; absent on older injected clients. */
+  terminalCatalog?(): Promise<readonly OperatorTerminalSession[]>;
   /** Close the Herdr pane currently occupying a durable fleet seat. */
   closeSeat(seatId: string): Promise<boolean>;
   get(conversationId: string): Promise<OperatorConversation | undefined>;
@@ -1037,6 +1080,13 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "roster", schemaVersion: 1 });
       if (result.op !== "roster") throw new Error(`Unexpected ${result.op} result for roster`);
       return result.seats;
+    },
+    async terminalCatalog() {
+      const result = await dispatch({ op: "terminal_catalog", schemaVersion: 1 });
+      if (result.op !== "terminal_catalog") {
+        throw new Error(`Unexpected ${result.op} result for terminal_catalog`);
+      }
+      return result.sessions;
     },
     async closeSeat(seatId) {
       const result = await dispatch({ op: "close_seat", schemaVersion: 1, seatId });
