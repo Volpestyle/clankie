@@ -61,6 +61,44 @@ function healthyFetch(calls: string[] = []): typeof fetch {
 }
 
 describe("headless clankie commands", () => {
+  it("prints a self-contained command index on help", async () => {
+    const stdout = outputBuffer();
+    const stderr = outputBuffer();
+    const exitCode = await runHeadlessCaptainCommand(["help"], {
+      repoRoot: "/unused",
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+    expect(exitCode).toBe(0);
+    expect(stderr.text()).toBe("");
+    const help = stdout.text();
+    for (const token of [
+      "health",
+      "status",
+      "doctor",
+      "restart",
+      "down",
+      "pair",
+      "--json",
+      "--timeout",
+      "devices",
+      "revoke",
+      "operator-credential",
+      "play status",
+      "play stop",
+      "model add-local",
+      "--set",
+      "--models",
+      "/v1",
+      "model set",
+      "relay",
+      "docs/cli.md",
+      "/auth",
+    ]) {
+      expect(help).toContain(token);
+    }
+  });
+
   it("probes the single service health route without starting anything", async () => {
     const calls: string[] = [];
     const stdout = outputBuffer();

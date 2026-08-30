@@ -24,20 +24,39 @@ you are helping.
 After-the-fact trails (what you said, receipts, play journals) live under the
 user's Clankie homes — load `trace-clankie`. Those paths exist on every install.
 
-## Operator setup is console slash commands
+## Setup: CLI for agents, slash commands for the person
 
-The person runs these in the operator TUI. Do not write Keychain entries or
-settings files yourself.
+Do not write Keychain entries or `~/.config/clankie/clankie.json` yourself.
+The full flag/JSON/exit-code contract is `{repoRoot}/docs/cli.md` (every
+install) and `clankie help` (same index). Configure through the headless CLI:
 
-- `/auth` — provider keys and OAuth
-- `/model`, `/image-model` — captain and generation models
-- `/discord` — which body, ingress, machine grants
-- `/connect` — Linear, email
-- `/persona` — who you are
-- `/voice` — realtime mouth
+| Job                                   | Command                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------------------- |
+| This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                     |
+| Are processes up                      | `clankie status` (JSON)                                                               |
+| Captain + local providers             | `clankie model status`                                                                |
+| Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`             |
+| Switch captain                        | `clankie model set provider/model`                                                    |
+| Pick up model/provider config         | `clankie restart captain`                                                             |
+| Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json` |
+| Rotate operator credential            | `clankie operator-credential rotate --json`                                           |
+| Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                 |
+| Play session                          | `clankie play status` / `clankie play stop`                                           |
+
+JSON is on stdout; progress is on stderr. `pair`, `devices`, and
+`operator-credential rotate` default to human text — pass `--json`.
+`play stop` prints `Nothing is playing.` (not JSON) when idle. A bare
+`--base-url` origin is rewritten to `/v1`. `--set` selects the first listed
+model. If the probe fails, pass `--models id,id`. Local LLM servers (ds4,
+Ollama, LM Studio) are not launcher-owned; start them yourself.
+
+The person at the console can still use slash commands (`/auth`, `/provider`,
+`/model`, `/discord`, `/connect`, `/persona`, `/voice`). Those write the same
+stores. Secrets still go through `/auth` or the credential broker — never flags.
 
 `credential_unavailable` or `not_configured` means nobody connected it yet. Say
-that, and point at `/connect` or `/auth`, rather than implying you refused.
+that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying
+you refused.
 
 ## Authority
 

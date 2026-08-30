@@ -54,7 +54,8 @@ The compatibility aliases `captain`, `captain-eve`, `eve`, `control-plane`, and
 
 ## Consequences
 
-- `clankie restart` and `clankie status` cover the full local stack.
+- `clankie restart` and `clankie status` cover the full local stack. The
+  headless command contract is [`docs/cli.md`](../cli.md).
 - A self-restart finishes the conversation turn before replacing its backend;
   a dropped tail reconnects without repeating the turn.
 - A process started outside the launcher is reported but never adopted or

@@ -19,9 +19,12 @@ import {
   ANTHROPIC_PROVIDER_ID,
   CODEX_PROVIDER_ID,
   XAI_PROVIDER_ID,
+  declareLocalProvider,
   formatModelRef,
   loadConfig,
+  LOCAL_CONTEXT_FALLBACK,
   parseModelRef,
+  probeLocalModels,
   resolvePiModelSelection,
   registerConfiguredPiProviders,
   runAnthropicBrowserLogin,
@@ -30,8 +33,11 @@ import {
   runXaiDeviceLogin,
   subscriptionRefFor,
   updateGlobalConfig,
+  validateLocalBaseUrl,
+  validateLocalProviderId,
   type ClankieConfig,
   type PiModelSelection,
+  type ProbedLocalModel,
 } from "@clankie/model-provider";
 import type { MenuOption, SetupFlow } from "./shell/setup-flow.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
@@ -985,52 +991,6 @@ async function runProviderWizard(
 
 const LOCAL_PROVIDER_ID = "ollama";
 const LOCAL_BASE_URL = "http://localhost:11434/v1";
-const LOCAL_CONTEXT_FALLBACK = 32_768;
-
-interface ProbedLocalModel {
-  readonly id: string;
-  readonly context?: number;
-}
-
-/**
- * Lists an OpenAI-compatible endpoint's models (`GET {baseURL}/models`). Local
- * runtimes are unknown to models.dev, so the endpoint itself is the catalog.
- */
-async function probeLocalEndpoint(
-  baseURL: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<readonly ProbedLocalModel[]> {
-  const response = await fetchImpl(`${baseURL.replace(/\/+$/u, "")}/models`, {
-    signal: AbortSignal.timeout(3_000),
-  });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const body = (await response.json()) as { data?: unknown };
-  const entries = Array.isArray(body.data) ? body.data : [];
-  return entries.flatMap((entry: unknown) => {
-    if (typeof entry !== "object" || entry === null) return [];
-    const record = entry as Record<string, unknown>;
-    if (typeof record.id !== "string" || record.id.length === 0) return [];
-    // LM Studio reports a context length per model here; Ollama does not.
-    const context = record.max_context_length ?? record.context_length;
-    return [{ id: record.id, ...(typeof context === "number" && context > 0 ? { context } : {}) }];
-  });
-}
-
-function localModelEntry(context: number): Record<string, unknown> {
-  return { tool_call: true, limit: { context, output: Math.min(8_192, Math.floor(context / 4)) } };
-}
-
-function validateBaseUrl(value: string): string | undefined {
-  let url: URL;
-  try {
-    url = new URL(value.trim());
-  } catch {
-    return "Enter a full URL, e.g. http://localhost:11434/v1";
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:")
-    return "Only http:// and https:// endpoints work.";
-  return undefined;
-}
 
 function validateContextWindow(value: string): string | undefined {
   const parsed = Number(value.trim());
@@ -1051,10 +1011,7 @@ async function addLocalProviderFlow(
   const typedId = await flow.readText({
     message: "Provider id (becomes the providerId/modelId prefix)",
     defaultValue: LOCAL_PROVIDER_ID,
-    validate: (value) =>
-      /^[a-z0-9][a-z0-9._-]*$/u.test(value.trim().toLowerCase())
-        ? undefined
-        : "Use letters, digits, dot, dash, or underscore — no slashes.",
+    validate: validateLocalProviderId,
     allowBack: true,
   });
   if (typedId === undefined) return undefined;
@@ -1064,7 +1021,7 @@ async function addLocalProviderFlow(
     message: `Base URL for ${providerId} (OpenAI-compatible)`,
     defaultValue: LOCAL_BASE_URL,
     placeholder: LOCAL_BASE_URL,
-    validate: validateBaseUrl,
+    validate: validateLocalBaseUrl,
     allowBack: true,
   });
   if (typedUrl === undefined) return undefined;
@@ -1073,7 +1030,7 @@ async function addLocalProviderFlow(
   flow.setStatus(`listing models at ${baseURL}…`);
   let models: readonly ProbedLocalModel[] = [];
   try {
-    models = await probeLocalEndpoint(baseURL, services.fetchImpl ?? fetch);
+    models = await probeLocalModels(baseURL, services.fetchImpl ?? fetch);
   } catch (error) {
     flow.renderLine(`Could not reach ${baseURL} (${String(error)}).`, "warning");
   }
@@ -1112,22 +1069,13 @@ async function addLocalProviderFlow(
   if (typedContext === undefined) return undefined;
   const fallbackContext = Number(typedContext.trim());
 
-  const updated = await updateGlobalConfig(
-    (current) => {
-      current.provider = {
-        ...current.provider,
-        [providerId]: {
-          name: `${providerId} (local)`,
-          npm: "@ai-sdk/openai-compatible",
-          options: { baseURL },
-          models: Object.fromEntries(
-            models.map((model) => [model.id, localModelEntry(model.context ?? fallbackContext)]),
-          ),
-        },
-      };
-    },
-    { env: services.env },
-  );
+  const updated = await declareLocalProvider({
+    providerId,
+    baseURL,
+    models,
+    fallbackContext,
+    env: services.env,
+  });
   services.onConfigChanged(updated);
   await services.captainModels.register(updated);
   flow.renderLine(`Added ${providerId} (${models.length} models).`, "success");

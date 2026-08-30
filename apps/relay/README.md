@@ -1,9 +1,11 @@
 # Remote relay
 
 The launcher supervises the relay like every other member of the stack:
-`clankie start relay` / `clankie restart` own it, `clankie status` reports it,
-and it restarts with the clankie service whose brokered captain bearer it
-holds. It listens on `CLANKIE_RELAY_PORT` (default 4321 — 4320 belongs to the
+`clankie restart relay` owns it, `clankie status` reports it, and it restarts
+with the clankie service whose brokered captain bearer it holds. The headless
+command contract is [`docs/cli.md`](../../docs/cli.md).
+
+It listens on `CLANKIE_RELAY_PORT` (default 4321 — 4320 belongs to the
 activity surface). The origin remote devices should reach it on is
 owner-authored settings (`relay.url` in `~/.config/clankie/settings.json`, or
 the `CLANKIE_RELAY_URL` override): when set, the control plane advertises it

@@ -150,6 +150,7 @@ async function copyRuntimeAssets(targetRoot) {
     ["apps/discord-activity/src/client.html", "apps/discord-activity/src/client.html"],
     ["LICENSE", "LICENSE"],
     ["README.md", "README.md"],
+    ["docs/cli.md", "docs/cli.md"],
     ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
     ["apps/vox/LICENSE", "apps/vox/LICENSE"],
     ["apps/vox/PROVENANCE.md", "apps/vox/PROVENANCE.md"],

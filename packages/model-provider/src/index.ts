@@ -1,4 +1,5 @@
 export * from "./config.ts";
+export * from "./local-endpoint.ts";
 export * from "./resolve.ts";
 export * from "./variants.ts";
 export * from "./instantiate.ts";

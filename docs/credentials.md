@@ -3,7 +3,9 @@
 Clankie keeps account secrets in the credential broker (macOS Keychain by
 default). Non-secret application, guild, channel, role, and allowlist settings
 live in `~/.config/clankie/settings.json`. Do not put Discord tokens in that
-file, `.env.local`, shell profiles, commands, logs, or issue text.
+file, `.env.local`, shell profiles, commands, logs, or issue text. The
+headless CLI never takes secrets as flags; its contract is
+[`docs/cli.md`](cli.md).
 
 ## Discord bot token versus user token
 

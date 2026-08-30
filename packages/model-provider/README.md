@@ -31,6 +31,11 @@ credential broker.
 
 `updateGlobalConfig(mutate)` loads the global file only, applies the mutator (in-place edits or a returned replacement both work), validates, and writes atomically (temp file + rename, pretty JSON). Concurrent in-process updates are serialized through a promise queue. A corrupt global file is a hard error, never silently overwritten.
 
+Local OpenAI-compatible runtimes (ds4, Ollama, LM Studio, vLLM) are declared
+through `clankie model add-local` — the same writer as the TUI `/provider`
+local-endpoint flow. The command contract is
+[`docs/cli.md`](../../docs/cli.md).
+
 Model refs are `"providerId/modelId"` strings; `parseModelRef` splits on the **first** slash because model ids may contain slashes (fireworks `accounts/x/models/y`), and `formatModelRef` is its inverse.
 
 ## resolve.ts — catalog and roles

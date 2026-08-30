@@ -37,6 +37,13 @@ it writes the `baseURL` provider entry and seeds its models from the
 endpoint's own `GET {baseURL}/models`, since models.dev has no catalog for a
 machine-local runtime.
 
+Agents and scripts use the same writers through the headless launcher:
+`clankie model status`, `clankie model add-local`, and `clankie model set`.
+Those commands print JSON, never store secrets, and do not edit
+`clankie.json` through a second code path. The TUI remains the human
+wizard; the CLI is the agent-ergonomic surface. The full headless contract
+(every verb, flags, JSON stdout, exit codes) is [`docs/cli.md`](../cli.md).
+
 Session/context management follows the [architecture](../architecture.md): Pi
 owns the captain's language-model runtime, durable conversation history,
 compaction, and step usage; the TUI stores a private conversation cursor and
@@ -55,5 +62,6 @@ displays Pi's context limits
 ## Constraints
 
 Only the Clankie service and privileged connectors resolve provider credentials.
-Coding-agent harnesses use their provider-native authentication. The TUI owns the local setup
-flow and writes non-secret provider/model references to the settings store.
+Coding-agent harnesses use their provider-native authentication. The TUI
+and the headless `clankie model` commands share the local setup writers
+and write non-secret provider/model references to the config store.

@@ -46,8 +46,13 @@ flowchart LR
   facts, not failures. `clankie status` stays the process-liveness card.
 - **`this-machine`** is the product skill. Load it when asked how he works, how
   to set him up, or why a body or credential is missing. It tells him to run
-  doctor and believe it, that setup is TUI slash commands, and that the
-  conversation workspace is not his body.
+  doctor and believe it, that agents set up through the headless CLI
+  (`docs/cli.md` at `repoRoot`; `clankie help` is the same index) while the
+  person at the console uses TUI slash commands, and that the conversation
+  workspace is not his body.
+- **CLI contract.** `docs/cli.md` ships in the release so a `curl | sh`
+  install can read the same flag/JSON/exit-code contract as a checkout. The
+  rest of `docs/` does not.
 - **Skill split.** `.agents/skills` ships with every install (`this-machine`,
   `trace-clankie`). `.agents/dev-skills` is checkout-only (`verify-clankie`,
   `release-clankie`). The captain and TUI catalog load both directories; a
@@ -66,7 +71,9 @@ install.
   would carry it, and the register already says not to mention internals unless
   asked.
 - **Ship the whole `docs/` tree.** Rejected: the operator needs the map of
-  _this_ install, not 140 decision records.
+  _this_ install, not 140 decision records. The one exception is
+  `docs/cli.md`, the headless command contract both agents and humans need
+  without a git tree.
 - **`disable-model-invocation` on developer skills.** Rejected: James's
   checkout still needs to invoke them; the directory split encodes the
   audience without a runtime checkout detector.

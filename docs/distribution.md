@@ -41,6 +41,7 @@ browser-downloaded package.
     ├── bin/clankie
     ├── libexec/node
     ├── .agents/skills/        # product skills (this-machine, trace-clankie)
+    ├── docs/cli.md            # headless command contract
     ├── apps/                  # bundled services, assets, and clankvox
     ├── integrations/          # game runtime assets and the optional herdr plugin
     ├── SBOM.cdx.json
@@ -60,8 +61,10 @@ licenses. Clankie's own herdr plugin declaration ships under
 `integrations/herdr-plugin` so it can be linked without a git checkout.
 `clankie doctor` reports whether this tree is a release or a checkout, which
 models and credentials are configured, and whether those optional commands
-are on PATH. Checkout-only skills under `.agents/dev-skills` stay out of the
-archive.
+are on PATH. The headless command contract is
+[`docs/cli.md`](cli.md) (`clankie help` prints the same index). Checkout-only
+skills under `.agents/dev-skills` stay out of the archive. The rest of
+`docs/` does not ship.
 
 ## Build and release
 

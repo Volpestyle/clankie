@@ -50,9 +50,10 @@ and the files being changed before editing. The active implementation lives in:
   `realpath`, never by raw `import.meta.url` and `argv[1]` strings.
 - A bundled import may resolve assets relative to its flattened output file.
   The captain instructions, Activity HTML, GBA fixtures/scenarios, mGBA glue
-  and Wasm, product skills under `.agents/skills`, the herdr plugin, and Vox
-  binary are runtime inputs, not development files. Checkout-only skills under
-  `.agents/dev-skills` stay out of the archive.
+  and Wasm, product skills under `.agents/skills`, `docs/cli.md`, the herdr
+  plugin, and Vox binary are runtime inputs, not development files.
+  Checkout-only skills under `.agents/dev-skills` stay out of the archive. The
+  rest of `docs/` does not ship.
 - The Node version and its official checksum source are owned by
   `scripts/build-release.mjs`. Update the pin deliberately and prove the new
   runtime with a rebuilt archive.

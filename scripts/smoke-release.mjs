@@ -28,6 +28,7 @@ try {
   for (const path of [
     join(extracted, ".agents", "skills", "this-machine", "SKILL.md"),
     join(extracted, ".agents", "skills", "trace-clankie", "SKILL.md"),
+    join(extracted, "docs", "cli.md"),
     join(extracted, "integrations", "herdr-plugin", "herdr-plugin.toml"),
   ]) {
     if (!existsSync(path)) throw new Error(`release is missing ${path.slice(extracted.length + 1)}`);
