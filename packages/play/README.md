@@ -38,8 +38,9 @@ roll counted in the trace. Open-ended play never dies at a receipt-sized cap.
 
 ## Running it
 
-Play is composed by the service's play host, which joins the world and hands
-this package the seat. To watch a playthrough without a Discord ask, start
+The captain is the parent of a sitting; this package is the driver. The
+service's play host joins the world and hands the seat to the loop here. To
+watch a playthrough without a Discord ask, start
 [`@clankie/discord-activity`](../../apps/discord-activity/README.md), point
 `WORLD_ADDRESS` at a running world, and run:
 

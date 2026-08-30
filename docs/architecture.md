@@ -15,9 +15,9 @@ flowchart LR
   Body --> Client["@clankie/vox-client<br/>Apache-2.0 IPC boundary"]
   Client --> Vox["one clankvox child<br/>AGPL-3.0-or-later"]
   Vox --> Media["Discord media<br/>voice + user-body stream roles"]
-  Service --> Mind["@clankie/play<br/>mind, journal, voice"] --> Contract["pinned @pokeagents/world-protocol"] --> Seat["Clankie's hosted seat<br/>separate player identity"]
+  Service --> CaptainParent["captain is parent"] --> PlayDriver["@clankie/play is driver"] --> Contract["pinned @pokeagents/world-protocol"] --> Seat["Clankie's hosted seat<br/>separate player identity"]
   Seat --> Activity["Discord Activity<br/>rendered game media"]
-  Harness["every other harness"] --> Doors["@pokeagents/world-mcp<br/>world-cli · pokeagent-mmo skill"] --> OtherSeat["its own seat"]
+  Harness["every other harness"] --> OtherParent["parent conversation"] --> OtherDriver["driver: MCP Task · subagent · CLI"] --> Doors["@pokeagents/world-mcp<br/>world-cli · pokeagent-mmo skill"] --> OtherSeat["its own seat"]
   Service --> State["Keychain + bounded local state"]
   Service --> External["models, browser, Linear, email, Herdr"]
 ```
@@ -196,7 +196,9 @@ the full picture — what each store holds, who may read it, and what bounds it.
   defaulting to the world's own socket under `WORLD_STATE_DIR`) and entered
   with the `pokeagent_join_mmo` tool
   ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md),
-  [ADR 0145](adr/0145-the-world-is-the-only-body.md)). That seam consumes
+  [ADR 0145](adr/0145-the-world-is-the-only-body.md)). The captain is the
+  parent of that sitting; `@clankie/play` is the driver — the same split other
+  harnesses get from an MCP Task, a subagent, or a CLI loop. That seam consumes
   verified FireRed adapter-v2 and Emerald adapter-v2 payloads, selected by the
   observation's `(gameId, adapterVersion)` pair; unknown pairs and
   game-specific extras the selected schema does not verify fail closed. A
@@ -214,8 +216,10 @@ the full picture — what each store holds, who may read it, and what bounds it.
   still reads both values because journals written before ADR 0145 are on disk.
   Other harnesses reach the same world through PokeAgents' own front doors —
   `@pokeagents/world-mcp`, its CLI, or the `pokeagent-mmo` skill — each on its
-  own credentialed seat, with no control over Clankie, Activity publication,
-  play voice, or room input. `EnvironmentRuntime` leases remain internal
+  own credentialed seat, as the same parent-plus-driver sitting (MCP Task,
+  host subagent, or CLI loop; PokeAgents ADR 0023), with no control over
+  Clankie, Activity publication, play voice, or room input.
+  `EnvironmentRuntime` leases remain internal
   action/session fences within the owning runtime; they are not cross-process
   possession.
 - **PokeAgents boundary.** The sibling PokeAgents repository owns the

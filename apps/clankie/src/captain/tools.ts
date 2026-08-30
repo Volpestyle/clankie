@@ -153,8 +153,9 @@ export function captainTools(
       name: "pokeagent_join_mmo",
       label: "PokeAgent: join MMO",
       description:
-        "Join the hosted PokeAgent MMO and play Pokemon (FireRed or Emerald), live on the activity watch surface. " +
-        "This is how you play at all — the world holds the cartridge and other players are already in it. " +
+        "Join the hosted PokeAgent MMO and start the play driver (FireRed or Emerald), live on the activity watch surface. " +
+        "This is how you play at all — you are the parent of the sitting, not the button-presser; the world holds the cartridge " +
+        "and other players are already in it. " +
         "Not for songs or YouTube — those are youtube_search / music_play. " +
         "You can see who else is here. 'joined' means you are in the world; 'join_refused' names a reason you " +
         "can say out loud (play_session_active means a play session is already active or winding down, " +
@@ -244,7 +245,7 @@ export function captainTools(
       name: "pokeagent_stop",
       label: "PokeAgent: stop",
       description:
-        "Stop the live PokeAgent session, solo or MMO. The result is what actually happened; a session that was " +
+        "Stop the live PokeAgent sitting and its play driver. The result is what actually happened; a session that was " +
         "already stopped is not an error worth apologising for.",
       parameters: Type.Object({}),
       execute: async () =>

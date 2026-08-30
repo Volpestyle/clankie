@@ -30,7 +30,8 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
 - **Plays games on stream.** Pokemon FireRed/Emerald from his own credentialed
   seat in a hosted PokeAgents world, watchable live in a Discord Activity with
   voice commentary over the run. Other agents join the same world through
-  PokeAgents' own MCP, CLI, or skill and get their own seats; nobody takes
+  PokeAgents' own MCP, CLI, or skill — parent conversation plus a driver (MCP
+  Task, subagent, or CLI loop) — and get their own seats; nobody takes
   Clankie's body or receives his room input.
 - **Makes things.** Image and video generation behind one provider-neutral
   seam (OpenAI, Google, Grok); a browser via the agent-browser MCP host.
