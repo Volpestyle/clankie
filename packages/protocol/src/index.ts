@@ -832,6 +832,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
+      op: z.literal("close_seat"),
+      schemaVersion: z.literal(1),
+      seatId: OperatorConversationEventRefSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("terminal_tail"),
       schemaVersion: z.literal(1),
       observation: OperatorTerminalObservationRequestSchema,
@@ -923,6 +930,14 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("close_seat"),
+      schemaVersion: z.literal(1),
+      seatId: OperatorConversationEventRefSchema,
+      closed: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("terminal_tail"),
       schemaVersion: z.literal(1),
       result: OperatorTerminalObservationResultSchema,
@@ -971,6 +986,8 @@ export type OperatorConversationTailItem =
 export interface OperatorConversationServiceClient {
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
+  /** Close the Herdr pane currently occupying a durable fleet seat. */
+  closeSeat(seatId: string): Promise<boolean>;
   get(conversationId: string): Promise<OperatorConversation | undefined>;
   create(input: {
     readonly scope: OperatorConversationScope;
@@ -1020,6 +1037,11 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "roster", schemaVersion: 1 });
       if (result.op !== "roster") throw new Error(`Unexpected ${result.op} result for roster`);
       return result.seats;
+    },
+    async closeSeat(seatId) {
+      const result = await dispatch({ op: "close_seat", schemaVersion: 1, seatId });
+      if (result.op !== "close_seat") throw new Error(`Unexpected ${result.op} result for close_seat`);
+      return result.closed;
     },
     async get(conversationId) {
       const result = await dispatch({ op: "get", schemaVersion: 1, conversationId });

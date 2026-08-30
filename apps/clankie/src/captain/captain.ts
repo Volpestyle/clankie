@@ -1079,6 +1079,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           }),
         };
       }
+      if (request.op === "close_seat") {
+        return {
+          op: "close_seat",
+          schemaVersion: 1,
+          seatId: request.seatId,
+          closed: await herdrWatches.closeSeat(request.seatId),
+        };
+      }
       const result = await conversations.serve(request);
       if (request.op === "create" && request.scope.kind === "seat") {
         herdrWatches.trackSeat(request.scope.seatId);

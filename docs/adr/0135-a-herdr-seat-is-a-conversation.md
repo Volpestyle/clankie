@@ -76,6 +76,9 @@ OperatorConversationScope =
 
 // 3. Attribution: the message event's role union gains the seat's voice.
 role: "operator" | "captain" | "agent"
+
+// 4. Closing a seat ends its current pane without deleting its durable thread.
+{ op: "close_seat", seatId: string } → { seatId: string; closed: boolean }
 ```
 
 `create` with a seat scope is idempotent per seat, like the default global
@@ -111,9 +114,9 @@ just no longer a mandatory relay hop for steering them.
 
 ```mermaid
 flowchart LR
-  App["App: messages home"] -->|"dispatch (roster, send) / tail"| Relay
+  App["App: messages home"] -->|"dispatch (roster, send, close seat) / tail"| Relay
   Relay -->|captain credential| Registry["Operator-conversation registry"]
-  Registry -->|"seat send"| Pane["herdr pane (any harness)"]
+  Registry -->|"seat send / close"| Pane["herdr pane (any harness)"]
   Pane -->|"agent-status, summaries, watches"| Proj["Seat projection"]
   Proj -->|"bounded events"| Registry
   Registry -.->|"list / replay"| Captain["Clankie (head of staff)"]
@@ -159,6 +162,9 @@ roster machinery.
   surface: configuring live captain chat configures the fleet lane.
 - Any harness gets a DM for free — the pane pty is the universal contract;
   harness differences are contact-card metadata.
+- Closing an agent is a seat operation guarded by the device's `steer` grant:
+  it closes the current Herdr pane and removes the live roster entry while the
+  durable thread remains available if that stable seat returns.
 - ADR 0097's "no general herdr tool suite" holds for captain _tools_; the
   service's herdr machinery nonetheless grows a standing projection loop
   (roster cache, seat watchers, summary tailing) that must fail soft the way

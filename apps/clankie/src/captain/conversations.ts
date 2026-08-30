@@ -28,11 +28,11 @@ import {
 
 type ConversationServiceRequest = Exclude<
   OperatorConversationServiceRequest,
-  { op: "autonomy" } | { op: "roster" } | { op: "terminal_tail" }
+  { op: "autonomy" } | { op: "roster" } | { op: "close_seat" } | { op: "terminal_tail" }
 >;
 type ConversationServiceResult = Exclude<
   OperatorConversationServiceResult,
-  { op: "autonomy" } | { op: "roster" } | { op: "terminal_tail" }
+  { op: "autonomy" } | { op: "roster" } | { op: "close_seat" } | { op: "terminal_tail" }
 >;
 
 const CURSOR_WIDTH = 12;

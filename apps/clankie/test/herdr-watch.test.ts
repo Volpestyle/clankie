@@ -134,6 +134,7 @@ describe("HerdrWatchStore", () => {
     const changed = deferred<HerdrAgentSnapshot>();
     const sendText = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const closePane = vi.fn(() => Promise.resolve());
     const read = vi.fn((_target: string, _harness: string, source: string) =>
       Promise.resolve(source === "recent-unwrapped" ? "※ recap: Tests are green." : ""),
     );
@@ -150,6 +151,7 @@ describe("HerdrWatchStore", () => {
       read,
       sendText,
       pressEnter,
+      closePane,
     };
     const project = vi.fn();
     const store = new HerdrWatchStore(join(root, "watches.json"), {
@@ -169,6 +171,8 @@ describe("HerdrWatchStore", () => {
     await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(true);
     expect(sendText).toHaveBeenCalledWith("w18:p1", "hello");
     expect(pressEnter).toHaveBeenCalledWith("w18:p1");
+    await expect(store.closeSeat("term-potato")).resolves.toBe(true);
+    expect(closePane).toHaveBeenCalledWith("w18:p1");
 
     await writeFile(
       summariesPath,

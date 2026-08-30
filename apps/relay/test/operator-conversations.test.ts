@@ -83,6 +83,9 @@ describe("authenticated operator conversation relay", () => {
             ],
           };
         }
+        if (request.op === "close_seat") {
+          return { op: "close_seat", schemaVersion: 1, seatId: request.seatId, closed: true };
+        }
         if (request.op === "create") {
           return {
             op: "create",
@@ -109,13 +112,21 @@ describe("authenticated operator conversation relay", () => {
         title: "Worker",
       },
       { op: "roster", schemaVersion: 1 },
+      { op: "close_seat", schemaVersion: 1, seatId: "term-worker" },
       { op: "close", schemaVersion: 1, conversationId: "conversation-2" },
     ] as const) {
       const response = await post(relay.url, "/operator/v1/dispatch", request);
       expect(response.status).toBe(200);
       OperatorConversationServiceResultSchema.parse(await response.json());
     }
-    expect(seen.map((request) => request.op)).toEqual(["list", "get", "create", "roster", "close"]);
+    expect(seen.map((request) => request.op)).toEqual([
+      "list",
+      "get",
+      "create",
+      "roster",
+      "close_seat",
+      "close",
+    ]);
   });
 
   it("requires application auth independent of Tailscale and observes immediate revocation", async () => {
@@ -161,6 +172,25 @@ describe("authenticated operator conversation relay", () => {
     const response = await post(relay.url, "/operator/v1/dispatch", { op: "list", schemaVersion: 1 });
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: "chat_grant_required" });
+  });
+
+  it("requires the steer grant to close a seat", async () => {
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, steer: false } },
+        }),
+      },
+      dispatch: async () => ({ op: "close_seat", schemaVersion: 1, seatId: "term-worker", closed: true }),
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "close_seat",
+      schemaVersion: 1,
+      seatId: "term-worker",
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "steer_grant_required" });
   });
 
   it("deduplicates identical turn delivery and preserves typed stale-revision conflicts", async () => {

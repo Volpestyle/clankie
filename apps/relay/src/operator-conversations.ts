@@ -74,7 +74,12 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeJson(response, 400, { error: "invalid_conversation_request" });
       return true;
     }
-    const grant = serviceRequest.op === "terminal_tail" ? "terminalObserve" : "chat";
+    const grant =
+      serviceRequest.op === "terminal_tail"
+        ? "terminalObserve"
+        : serviceRequest.op === "close_seat"
+          ? "steer"
+          : "chat";
     if (!authorization.device.grants[grant]) {
       writeGrantDenial(response, grant);
       return true;
@@ -395,7 +400,7 @@ function logFields(
   result?: OperatorConversationServiceResult,
 ): Record<string, unknown> {
   const subject =
-    request.op === "get" || request.op === "close"
+    request.op === "get" || request.op === "close" || request.op === "close_seat"
       ? request
       : request.op === "replay"
         ? request.replay
@@ -429,11 +434,15 @@ function logFields(
     ...(subject === undefined || !("terminalId" in subject)
       ? {}
       : { terminalId: redactSensitiveString(subject.terminalId) }),
+    ...(subject === undefined || !("seatId" in subject)
+      ? {}
+      : { seatId: redactSensitiveString(subject.seatId) }),
     ...(resultStatus === undefined ? {} : { resultStatus }),
   };
 }
 
-type StreamGrant = "chat" | "terminalObserve";
+type DispatchGrant = "chat" | "steer" | "terminalObserve";
+type StreamGrant = Exclude<DispatchGrant, "steer">;
 
 function tailAuthorizationDenial(
   authorization: RelayDeviceAuthorization,
@@ -514,9 +523,14 @@ function writeAuthDenial(response: ServerResponse, denial: RelayDeviceAuthDenial
   writeJson(response, status, { error });
 }
 
-function writeGrantDenial(response: ServerResponse, grant: StreamGrant): void {
+function writeGrantDenial(response: ServerResponse, grant: DispatchGrant): void {
   writeJson(response, 403, {
-    error: grant === "chat" ? "chat_grant_required" : "terminal_observe_grant_required",
+    error:
+      grant === "chat"
+        ? "chat_grant_required"
+        : grant === "steer"
+          ? "steer_grant_required"
+          : "terminal_observe_grant_required",
   });
 }
 

@@ -53,6 +53,7 @@ export interface HerdrWatchRunner {
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
   sendText?(target: string, text: string): Promise<void>;
   pressEnter?(target: string): Promise<void>;
+  closePane?(target: string): Promise<void>;
 }
 
 export type HerdrWatchArmResult =
@@ -189,6 +190,7 @@ function defaultRunner(): HerdrWatchRunner {
       ]),
     sendText: (target, text) => runHerdr(["pane", "send-text", target, text]).then(() => undefined),
     pressEnter: (target) => runHerdr(["pane", "send-keys", target, "Enter"]).then(() => undefined),
+    closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
   };
 }
 
@@ -241,6 +243,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const submitted = await this.runner.resolveTerminal(seatId);
       if (!isMessageableSeat(submitted)) return false;
       await this.runner.pressEnter(submitted.paneId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public async closeSeat(seatId: string): Promise<boolean> {
+    if (this.closed || this.runner.closePane === undefined) return false;
+    try {
+      const current = await this.runner.resolveTerminal(seatId);
+      if (current === undefined) return false;
+      await this.runner.closePane(current.paneId);
       return true;
     } catch {
       return false;

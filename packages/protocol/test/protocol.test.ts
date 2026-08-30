@@ -354,6 +354,21 @@ describe("protocol", () => {
         seats: [{ seatId: "term_65a2015731452d", harness: "codex", status: "idle", title: "clankie" }],
       }),
     ).toMatchObject({ op: "roster", seats: [{ seatId: "term_65a2015731452d" }] });
+    expect(
+      OperatorConversationServiceRequestSchema.parse({
+        op: "close_seat",
+        schemaVersion: 1,
+        seatId: "term_65a2015731452d",
+      }),
+    ).toMatchObject({ op: "close_seat", seatId: "term_65a2015731452d" });
+    expect(
+      OperatorConversationServiceResultSchema.parse({
+        op: "close_seat",
+        schemaVersion: 1,
+        seatId: "term_65a2015731452d",
+        closed: true,
+      }),
+    ).toMatchObject({ op: "close_seat", closed: true });
     const terminalRequest = OperatorConversationServiceRequestSchema.parse({
       op: "terminal_tail",
       schemaVersion: 1,
@@ -383,8 +398,8 @@ describe("protocol", () => {
         cancelled: true,
       }),
     ).toMatchObject({ op: "cancel", cancelled: true });
-    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(12);
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(12);
+    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(13);
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(13);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 
@@ -661,6 +676,16 @@ describe("protocol", () => {
     await expect(client.roster()).resolves.toEqual([
       { seatId: "term-potato", harness: "codex", status: "idle", title: "worker" },
     ]);
+  });
+
+  it("closes a fleet seat through the canonical service client", async () => {
+    const client = createOperatorConversationServiceClient(async (request) => {
+      if (request.op !== "close_seat") throw new Error(`unexpected ${request.op}`);
+      expect(request).toEqual({ op: "close_seat", schemaVersion: 1, seatId: "term-potato" });
+      return { op: "close_seat", schemaVersion: 1, seatId: request.seatId, closed: true };
+    });
+
+    await expect(client.closeSeat("term-potato")).resolves.toBe(true);
   });
 
   it("yields the live draft, once per change, and takes it down when it settles", async () => {

@@ -105,6 +105,7 @@ function client(extra: OperatorConversation[] = []): OperatorConversationClient 
   return {
     list: async () => conversations,
     roster: async () => [],
+    closeSeat: async () => false,
     get: async (id) => conversations.find((conversation) => conversation.conversationId === id),
     create: async (input) => ({ ...DEFAULT, ...input, conversationId: "created", isDefault: false }),
     fork: async (parentConversationId) => ({
