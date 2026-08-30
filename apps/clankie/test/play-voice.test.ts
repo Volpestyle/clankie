@@ -10,9 +10,10 @@ import {
   type PlayVoiceListenerEvidence,
 } from "@clankie/play-voice";
 import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
-import { parseFreePlayJournal } from "@clankie/gba-emulator";
+import { parseFreePlayJournal } from "@clankie/play";
 import { describe, expect, it, vi } from "vitest";
-import { createGbaPlayExecution } from "../src/play-execution.ts";
+import { createWorldPlayExecution } from "../src/play-execution-world.ts";
+import { fakeWorldBody } from "./world-body-fake.ts";
 import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
 
 /**
@@ -127,7 +128,6 @@ async function playEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-play-voice-"));
   return {
     XDG_STATE_HOME: join(root, "state"),
-    CLANKIE_GBA_CHECKPOINT_DIR: join(root, "checkpoints"),
     // Without this override the execution journals into the operator's real
     // ~/.local/state/clankie/gba-play (ADR 0068) — test runs must not.
     CLANKIE_GBA_PLAY_JOURNAL_DIR: join(root, "gba-play"),
@@ -170,9 +170,10 @@ async function play(options: {
   const host = new PlayHost({
     client,
     environmentIds: ["pokemon-firered"],
-    execute: createGbaPlayExecution({
+    execute: createWorldPlayExecution({
       logger: silentLogger,
       env,
+      joinWorld: () => Promise.resolve({ outcome: "joined", body: fakeWorldBody() }),
       createMind: options.mind as () => Promise<never>,
       createVoice: () => Promise.resolve(options.voice),
       ...(options.voiceAgent === undefined
@@ -297,7 +298,11 @@ describe("asked play voice", () => {
 
       expect(deliveredAfterRunning).toBe(true);
       expect(mind.heard[0]).toBe("james: check the path above you");
-      expect(narrated.length).toBeGreaterThan(0);
+      // Narration is fire-and-forget across the socket, so it can still be in
+      // flight when a fake body finishes the playthrough this fast.
+      await vi.waitFor(() => {
+        expect(narrated.length).toBeGreaterThan(0);
+      });
       expect(evidence).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -376,16 +381,18 @@ describe("asked play voice", () => {
     expect(client.reports[1]?.receipt).toMatchObject({ turnsTaken: 2 });
   });
 
-  it("closes the activity sink and emulator session when voice client creation throws", async () => {
+  it("closes the activity sink and world seat when voice client creation throws", async () => {
     const client = fakeClient({ kind: "start", session: session(1) });
     const env = await playEnv();
     const closeSink = vi.fn();
+    const closeSeat = vi.fn(() => Promise.resolve());
     const host = new PlayHost({
       client,
       environmentIds: ["pokemon-firered"],
-      execute: createGbaPlayExecution({
+      execute: createWorldPlayExecution({
         logger: silentLogger,
         env,
+        joinWorld: () => Promise.resolve({ outcome: "joined", body: fakeWorldBody({ close: closeSeat }) }),
         createMind: talkingMind(null).create,
         createActivitySink: () => Promise.resolve(fakeActivitySink(closeSink)),
         createVoice: () => Promise.reject(new Error("play voice broker failed")),
@@ -398,7 +405,8 @@ describe("asked play voice", () => {
 
     expect(client.reports).toEqual([expect.objectContaining({ state: "failed" })]);
     expect(closeSink).toHaveBeenCalledOnce();
-    expect(readdirSync(join(env.XDG_STATE_HOME as string, "clankie", "gba-runtime"))).toEqual([]);
+    // The seat goes back to the world; a failed playthrough must not hold it.
+    expect(closeSeat).toHaveBeenCalled();
   });
 
   it("lets go of the room when the playthrough ends", async () => {

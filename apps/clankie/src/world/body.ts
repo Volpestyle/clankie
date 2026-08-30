@@ -31,7 +31,7 @@ import {
   type FreePlayProvenance,
   type GbaDriverIo,
   type PlayJourneyId,
-} from "@clankie/gba-emulator";
+} from "@clankie/play";
 import {
   GbaEmulatorObservationSchema,
   INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,

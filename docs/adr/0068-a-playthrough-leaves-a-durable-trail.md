@@ -96,6 +96,7 @@ flowchart LR
 - The journal directory grows one JSONL file and up to 64 native-resolution
   screenshots per run and is deliberately not pruned by code — deleting play
   history is an owner's call, never an agent's.
-- The [GBA MCP guide](../../apps/gba-mcp/README.md) documents its private
-  runtime, checkpoints, and observation tools; this ADR remains the stable
-  record for Clankie journal ownership and retention.
+- This ADR remains the stable record for Clankie journal ownership and
+  retention. The journal outlived the local body it was written for: since
+  [ADR 0145](0145-the-world-is-the-only-body.md) every new run records a hosted
+  seat, while older local runs on disk keep parsing unchanged.

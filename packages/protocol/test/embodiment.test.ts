@@ -5,7 +5,6 @@ import {
   EmbodimentIntentSchema,
   EmbodimentPlayNoteSchema,
   EmbodimentSessionSchema,
-  embodimentVenue,
   WorldJoinRefusalReasonSchema,
   type EmbodimentSessionState,
 } from "../src/index.ts";
@@ -76,29 +75,17 @@ describe("Embodiment intents (ADR 0063)", () => {
     ).toBe(false);
   });
 
-  it("defaults venue to local so existing start intents stay solo", () => {
+  it("carries no venue: one body means a start intent never picks one", () => {
     const parsed = EmbodimentIntentSchema.parse(startIntent);
     expect(parsed.kind).toBe("start");
-    if (parsed.kind !== "start") return;
-    expect(parsed.venue).toBeUndefined();
-    expect(embodimentVenue(parsed)).toBe("local");
-    expect(EmbodimentIntentSchema.parse({ ...startIntent, venue: "world" })).toMatchObject({
-      venue: "world",
-    });
-    expect(EmbodimentIntentSchema.safeParse({ ...startIntent, venue: "mmo" }).success).toBe(false);
+    expect(EmbodimentIntentSchema.safeParse({ ...startIntent, venue: "world" }).success).toBe(false);
   });
 });
 
 describe("Embodiment session record", () => {
   it("parses the requested and running shapes", () => {
     expect(EmbodimentSessionSchema.parse({ ...baseSession, state: "requested" }).state).toBe("requested");
-    expect(
-      EmbodimentSessionSchema.parse({
-        ...baseSession,
-        state: "running",
-        resumedFromCheckpointId: "checkpoint-8",
-      }).state,
-    ).toBe("running");
+    expect(EmbodimentSessionSchema.parse({ ...baseSession, state: "running" }).state).toBe("running");
   });
 
   it("requires a refusal reason exactly when refused", () => {
@@ -148,16 +135,9 @@ describe("Embodiment session record", () => {
 describe("Embodiment play note", () => {
   it("parses every outcome a captain reply can render", () => {
     const notes = [
-      {
-        action: "started",
-        sessionId: "session-1",
-        environmentId: "pokemon-firered",
-        resumedFromCheckpointId: "checkpoint-8",
-      },
-      { action: "start_refused", environmentId: "pokemon-firered", reason: "play_session_active" },
       { action: "joined", sessionId: "session-1", environmentId: "pokemon-firered" },
       { action: "join_refused", environmentId: "pokemon-firered", reason: "no_credential" },
-      { action: "stopped", sessionId: "session-1", checkpointId: "checkpoint-9" },
+      { action: "stopped", sessionId: "session-1" },
       { action: "stop_refused", reason: "not_playing" },
       { action: "pending", intentId: "intent-1" },
     ];

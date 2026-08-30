@@ -1,6 +1,8 @@
 # ADR 0129: Each player owns a body
 
-Status: accepted (James, 2026-08-19). Supersedes
+Status: accepted (James, 2026-08-19); the local-body half superseded
+(2026-08-30) by [ADR 0145](0145-the-world-is-the-only-body.md), which leaves one
+body and keeps this record's identity boundary intact. Supersedes
 [ADR 0053](0053-mcp-possession-of-clankies-body.md) and the possession-specific
 parts of [ADR 0059](0059-lease-expiry-pauses-the-body.md). The
 `EnvironmentRuntime` session/capability lease and its expiry recovery remain in
@@ -112,6 +114,5 @@ There is no migration and no automatic deletion.
 - Hosted interaction uses the world's native player identity and capability
   model; transports project that contract rather than redefining it.
 - Current operating details live in the
-  [GBA MCP guide](../../apps/gba-mcp/README.md),
-  [emulator guide](../../integrations/gba-emulator/README.md), and
+  [play guide](../../packages/play/README.md) and
   [play-voice guide](../../packages/play-voice/README.md).

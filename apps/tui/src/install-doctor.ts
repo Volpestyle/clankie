@@ -65,7 +65,6 @@ export interface InstallDoctorReport {
     readonly ttsProvider: ClankieSettings["voice"]["ttsProvider"];
   };
   readonly gameplay: {
-    readonly pokemonEmulatorEnabled: boolean;
     readonly pokeagentMmoEnabled: boolean;
   };
   readonly emailConfigured: boolean;
@@ -157,7 +156,6 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       ttsProvider: settings.voice.ttsProvider,
     },
     gameplay: {
-      pokemonEmulatorEnabled: settings.gameplay.pokemonEmulatorEnabled,
       pokeagentMmoEnabled: settings.gameplay.pokeagentMmoEnabled,
     },
     emailConfigured:

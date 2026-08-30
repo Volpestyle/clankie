@@ -14,6 +14,7 @@ import {
   assertNoSecretShapedValue,
   defaultSettingsPath,
   discordSettingsToEnvironment,
+  dropRetiredSettings,
   emptySettings,
   resolveDiscordSettings,
   resolveVoiceSettings,
@@ -26,14 +27,17 @@ async function tempStore(): Promise<SettingsStore> {
 }
 
 describe("settings store", () => {
-  it("configures solo Pokemon and PokeAgent MMO independently", () => {
-    expect(GameplaySettingsSchema.parse({})).toEqual({
-      pokemonEmulatorEnabled: true,
-      pokeagentMmoEnabled: true,
+  it("enables PokeAgent play by default and lets the owner turn it off", () => {
+    expect(GameplaySettingsSchema.parse({})).toEqual({ pokeagentMmoEnabled: true });
+    expect(GameplaySettingsSchema.parse({ pokeagentMmoEnabled: false })).toEqual({
+      pokeagentMmoEnabled: false,
     });
-    expect(GameplaySettingsSchema.parse({ pokemonEmulatorEnabled: false })).toEqual({
-      pokemonEmulatorEnabled: false,
-      pokeagentMmoEnabled: true,
+  });
+
+  it("drops the retired local-emulator toggle from an older settings file", () => {
+    // A file written before ADR 0145 still loads; the key is gone, not fatal.
+    expect(dropRetiredSettings({ gameplay: { pokemonEmulatorEnabled: false } })).toEqual({
+      gameplay: {},
     });
   });
 

@@ -92,7 +92,7 @@ function commandHelp(): string {
     "  operator-credential rotate [--json]",
     "                           Rotate the local operator credential",
     "  play status              Show the live embodiment (asked play) session",
-    "  play stop                Stop the live playthrough cleanly (mints its checkpoint)",
+    "  play stop                Stop the live playthrough cleanly",
     "",
     "Services for restart/down: all (default), clankie, discord, user-session, activity, tunnel",
     "Aliases: captain, eve, cp, control-plane, bridge, lab, watch, viewer, cloudflared",
@@ -573,7 +573,7 @@ function formatDevicesTable(devices: readonly DeviceListItem[]): string {
  * Operator controls for the live playthrough (asked play, ADR 0063).
  * `status` reads the live embodiment session; `stop` submits the operator
  * stop intent — the kill-switch that never needs Discord, and never a kill:
- * the local play host winds down at the next turn boundary and mints its checkpoint.
+ * the play host winds down at the next turn boundary and leaves the world.
  */
 async function runPlay(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
   const action = args[0];

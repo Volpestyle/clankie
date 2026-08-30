@@ -2844,18 +2844,12 @@ export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered", "pokemon
 export type EmbodimentEnvironmentId = z.infer<typeof EmbodimentEnvironmentIdSchema>;
 
 /**
- * Whose body, and where. Orthogonal to `environmentId` (which game).
- * Absent means local — every existing caller keeps meaning "my own body".
+ * Which body a recorded playthrough ran on. He has one body now — a seat in a
+ * hosted world — but play journals on disk predate that, so the reader keeps
+ * both values ([ADR 0145](../../../docs/adr/0145-the-world-is-the-only-body.md)).
  */
 export const EmbodimentVenueSchema = z.enum(["local", "world"]);
 export type EmbodimentVenue = z.infer<typeof EmbodimentVenueSchema>;
-
-export function embodimentVenue(
-  value: EmbodimentVenue | { readonly venue?: EmbodimentVenue | undefined } | undefined,
-): EmbodimentVenue {
-  if (value === undefined || typeof value === "string") return value ?? "local";
-  return value.venue ?? "local";
-}
 
 /**
  * Why a world join did not happen, said out loud. `play_session_active` is the
@@ -2873,9 +2867,6 @@ export type WorldJoinRefusalReason = z.infer<typeof WorldJoinRefusalReasonSchema
 
 export const EmbodimentIntentIdSchema = z.string().min(1).max(200);
 export type EmbodimentIntentId = z.infer<typeof EmbodimentIntentIdSchema>;
-
-export const EmbodimentCheckpointIdSchema = z.string().min(1).max(200);
-export type EmbodimentCheckpointId = z.infer<typeof EmbodimentCheckpointIdSchema>;
 
 /**
  * An absent field is "no cap" — the owner's chosen default (2026-07-26): he
@@ -2917,7 +2908,6 @@ export const EmbodimentIntentSchema = z.discriminatedUnion("kind", [
        * environmentId, because FireRed alone and FireRed in the world are
        * both valid.
        */
-      venue: EmbodimentVenueSchema.optional(),
     })
     .strict(),
   z
@@ -2982,7 +2972,6 @@ export const EmbodimentSessionSchema = z
     schemaVersion: z.literal(1),
     sessionId: EnvironmentSessionIdSchema,
     environmentId: EmbodimentEnvironmentIdSchema,
-    venue: EmbodimentVenueSchema.optional(),
     state: EmbodimentSessionStateSchema,
     intentId: EmbodimentIntentIdSchema,
     originLane: CaptainSessionLaneV2Schema,
@@ -2991,10 +2980,6 @@ export const EmbodimentSessionSchema = z
     requestedAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
     refusalReason: EmbodimentRefusalReasonSchema.optional(),
-    /** ADR 0060 lineage; absent on a cold start. */
-    resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
-    /** Minted on graceful stop. */
-    checkpointId: EmbodimentCheckpointIdSchema.optional(),
   })
   .strict()
   .superRefine((session, context) => {
@@ -3053,8 +3038,6 @@ export const EmbodimentSessionReceiptSchema = z
     framesPublished: z.number().int().nonnegative(),
     /** Sink-degraded frames; play continues without a producer, counted not hidden. */
     framesDropped: z.number().int().nonnegative(),
-    resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
-    checkpointId: EmbodimentCheckpointIdSchema.optional(),
   })
   .strict();
 export type EmbodimentSessionReceipt = z.infer<typeof EmbodimentSessionReceiptSchema>;
@@ -3068,24 +3051,9 @@ export type EmbodimentSessionReceipt = z.infer<typeof EmbodimentSessionReceiptSc
 export const EmbodimentPlayNoteSchema = z.discriminatedUnion("action", [
   z
     .object({
-      action: z.literal("started"),
-      sessionId: EnvironmentSessionIdSchema,
-      environmentId: EmbodimentEnvironmentIdSchema,
-      resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
       action: z.literal("joined"),
       sessionId: EnvironmentSessionIdSchema,
       environmentId: EmbodimentEnvironmentIdSchema,
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal("start_refused"),
-      environmentId: EmbodimentEnvironmentIdSchema,
-      reason: EmbodimentRefusalReasonSchema,
     })
     .strict(),
   z
@@ -3099,7 +3067,6 @@ export const EmbodimentPlayNoteSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("stopped"),
       sessionId: EnvironmentSessionIdSchema,
-      checkpointId: EmbodimentCheckpointIdSchema.optional(),
     })
     .strict(),
   z

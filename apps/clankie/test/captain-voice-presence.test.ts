@@ -12,33 +12,21 @@ describe("captain voice presence tools", () => {
         getLiveSession: () => Promise.resolve(undefined),
       },
     } as unknown as CaptainDeps;
-    const names = (gameplay?: { pokemonEmulatorEnabled: boolean; pokeagentMmoEnabled: boolean }) =>
+    const names = (gameplay?: { pokeagentMmoEnabled: boolean }) =>
       captainTools(deps, {}, {} as LaneLog, "operator", gameplay)
         .map((tool) => tool.name)
         .filter((name) => name.startsWith("pokeagent_"));
 
-    expect(names()).toEqual([
-      "pokeagent_start_solo",
+    const family = [
       "pokeagent_join_mmo",
       "pokeagent_world",
       "pokeagent_stop",
       "pokeagent_observe",
       "pokeagent_recall",
-    ]);
-    expect(names({ pokemonEmulatorEnabled: true, pokeagentMmoEnabled: false })).toEqual([
-      "pokeagent_start_solo",
-      "pokeagent_stop",
-      "pokeagent_observe",
-      "pokeagent_recall",
-    ]);
-    expect(names({ pokemonEmulatorEnabled: false, pokeagentMmoEnabled: true })).toEqual([
-      "pokeagent_join_mmo",
-      "pokeagent_world",
-      "pokeagent_stop",
-      "pokeagent_observe",
-      "pokeagent_recall",
-    ]);
-    expect(names({ pokemonEmulatorEnabled: false, pokeagentMmoEnabled: false })).toEqual([]);
+    ];
+    expect(names()).toEqual(family);
+    expect(names({ pokeagentMmoEnabled: true })).toEqual(family);
+    expect(names({ pokeagentMmoEnabled: false })).toEqual([]);
   });
 
   // He read the old description into a group chat word for word: "your audio is
@@ -125,32 +113,20 @@ describe("captain voice presence tools", () => {
         getLiveSession: () => Promise.resolve(undefined),
       },
     } as unknown as CaptainDeps;
-    const start = captainTools(deps, { actorId: "user-1" }, {} as LaneLog, "discord_presence").find(
-      (tool) => tool.name === "pokeagent_start_solo",
-    );
-    if (start === undefined) throw new Error("pokeagent_start_solo is missing");
-
-    await start.execute("call-1", { environmentId: "pokemon-firered" }, undefined, undefined, {} as never);
-
-    expect(start.parameters).toMatchObject({ properties: { environmentId: expect.any(Object) } });
-    expect(JSON.stringify(start.parameters)).not.toContain("requestedBy");
-    expect(calls).toEqual([
-      expect.objectContaining({ originLane: "discord_presence", requestedBy: "user-1" }),
-    ]);
-    expect(calls[0]).not.toHaveProperty("venue");
-
     const join = captainTools(deps, { actorId: "user-1" }, {} as LaneLog, "discord_presence").find(
       (tool) => tool.name === "pokeagent_join_mmo",
     );
     if (join === undefined) throw new Error("pokeagent_join_mmo is missing");
-    await join.execute("call-2", { environmentId: "pokemon-firered" }, undefined, undefined, {} as never);
-    expect(calls[1]).toEqual(
-      expect.objectContaining({
-        originLane: "discord_presence",
-        requestedBy: "user-1",
-        venue: "world",
-      }),
-    );
+
+    await join.execute("call-1", { environmentId: "pokemon-firered" }, undefined, undefined, {} as never);
+
+    expect(join.parameters).toMatchObject({ properties: { environmentId: expect.any(Object) } });
+    // The asker is stamped by the host, never chosen by the model.
+    expect(JSON.stringify(join.parameters)).not.toContain("requestedBy");
+    expect(calls).toEqual([
+      expect.objectContaining({ originLane: "discord_presence", requestedBy: "user-1" }),
+    ]);
+    expect(calls[0]).not.toHaveProperty("venue");
   });
 
   it("lists granted world operations and refuses travel when ungranted", async () => {

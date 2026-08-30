@@ -4,7 +4,7 @@
  *
  * The play host registers a live capture and the current journal path while
  * the body is running. HTTP and captain tools read this; they never reach
- * into the emulator themselves.
+ * into the world themselves.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -13,7 +13,7 @@ import {
   parseFreePlayJournal,
   projectPlayStory,
   type PlayJourneyId,
-} from "@clankie/gba-emulator";
+} from "@clankie/play";
 import {
   PlayStillReadSchema,
   PlayStoryReadSchema,

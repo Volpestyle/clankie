@@ -1,7 +1,7 @@
 /**
  * Asked embodiment (ADR 0063): the authority half of the seam. It holds
  * intent, authority, and the durable lifecycle record; it never touches the
- * emulator. The in-process play host takes work from here and applies transitions;
+ * body. The in-process play host takes work from here and applies transitions;
  * the captain tool submits intents and polls the session it was handed.
  *
  * Every state change is an emitted event applied back through `applyEvent`,
@@ -14,8 +14,6 @@ import {
   EmbodimentEnvironmentIdSchema,
   EmbodimentRefusalReasonSchema,
   EmbodimentSessionSchema,
-  EmbodimentVenueSchema,
-  embodimentVenue,
   type EmbodimentEnvironmentId,
   type EmbodimentIntent,
   type EmbodimentRefusalReason,
@@ -61,15 +59,11 @@ const SubmittedDataSchema = z.object({
   originLane: z.string().min(1),
   requestedBy: z.string().min(1),
   budget: EmbodimentBudgetSchema,
-  venue: EmbodimentVenueSchema.optional(),
 });
 
 const SessionRefStreamSchema = z.object({ sessionId: z.string().min(1) });
 const ClaimedDataSchema = z.object({ sessionId: z.string().min(1) });
-const RunningDataSchema = z.object({
-  sessionId: z.string().min(1),
-  resumedFromCheckpointId: z.string().min(1).optional(),
-});
+const RunningDataSchema = z.object({ sessionId: z.string().min(1) });
 const RefusedDataSchema = z.object({
   sessionId: z.string().min(1),
   reason: z.union([EmbodimentRefusalReasonSchema, z.enum(["body_held", "no_runner"])]),
@@ -85,8 +79,6 @@ const TerminalDataSchema = z.object({
   durationMs: z.number().int().nonnegative().optional(),
   framesPublished: z.number().int().nonnegative().optional(),
   framesDropped: z.number().int().nonnegative().optional(),
-  checkpointId: z.string().min(1).optional(),
-  resumedFromCheckpointId: z.string().min(1).optional(),
 });
 
 export type EmbodimentReportResult =
@@ -104,7 +96,6 @@ export type EmbodimentAssignment =
 export interface EmbodimentLifecycleUpdate {
   readonly sessionId: string;
   readonly state: "running" | "stopping" | "refused" | "stopped" | "failed";
-  readonly resumedFromCheckpointId?: string;
   readonly refusalReason?: EmbodimentRefusalReason;
   readonly receipt?: EmbodimentSessionReceipt;
 }
@@ -141,7 +132,6 @@ function submittedEventData(
     originLane: intent.originLane,
     requestedBy: intent.requestedBy,
     budget: intent.budget,
-    ...(intent.venue === undefined ? {} : { venue: intent.venue }),
   };
 }
 
@@ -176,7 +166,6 @@ export class EmbodimentManager {
           budget: data.data.budget,
           requestedAt: event.occurredAt,
           updatedAt: event.occurredAt,
-          ...(data.data.venue === undefined ? {} : { venue: data.data.venue }),
         });
         if (session.success) this.sessions.set(data.data.sessionId, session.data);
         return;
@@ -190,14 +179,7 @@ export class EmbodimentManager {
       case "embodiment.session.running": {
         const data = RunningDataSchema.safeParse(event.data);
         if (!data.success) return;
-        this.transition(
-          data.data.sessionId,
-          "running",
-          event.occurredAt,
-          data.data.resumedFromCheckpointId === undefined
-            ? {}
-            : { resumedFromCheckpointId: data.data.resumedFromCheckpointId },
-        );
+        this.transition(data.data.sessionId, "running", event.occurredAt, {});
         return;
       }
       case "embodiment.session.stop_requested": {
@@ -240,7 +222,7 @@ export class EmbodimentManager {
           data.data.sessionId,
           event.type === "embodiment.session.stopped" ? "stopped" : "failed",
           event.occurredAt,
-          data.data.checkpointId === undefined ? {} : { checkpointId: data.data.checkpointId },
+          {},
         );
         this.stopRequests.delete(data.data.sessionId);
         return;
@@ -288,11 +270,7 @@ export class EmbodimentManager {
         // environment is satisfied, not blocked — the embodiment mirror of
         // ADR 0062's never-rejoin. A different environment, or a session
         // already winding down, stays an honest play_session_active.
-        if (
-          live.environmentId === intent.environmentId &&
-          embodimentVenue(live) === embodimentVenue(intent) &&
-          live.state !== "stopping"
-        ) {
+        if (live.environmentId === intent.environmentId && live.state !== "stopping") {
           return { outcome: "accepted" as const, session: this.mustGet(live.sessionId) };
         }
         return this.refuseStart(intent, "play_session_active");
@@ -336,9 +314,6 @@ export class EmbodimentManager {
         case "running":
           await this.record("embodiment.session.running", session.sessionId, {
             sessionId: session.sessionId,
-            ...(report.resumedFromCheckpointId === undefined
-              ? {}
-              : { resumedFromCheckpointId: report.resumedFromCheckpointId }),
           });
           break;
         case "stopping":
@@ -367,12 +342,6 @@ export class EmbodimentManager {
                     durationMs: report.receipt.durationMs,
                     framesPublished: report.receipt.framesPublished,
                     framesDropped: report.receipt.framesDropped,
-                    ...(report.receipt.checkpointId === undefined
-                      ? {}
-                      : { checkpointId: report.receipt.checkpointId }),
-                    ...(report.receipt.resumedFromCheckpointId === undefined
-                      ? {}
-                      : { resumedFromCheckpointId: report.receipt.resumedFromCheckpointId }),
                   }),
             },
           );

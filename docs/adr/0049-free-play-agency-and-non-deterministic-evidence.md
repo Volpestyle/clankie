@@ -90,7 +90,9 @@ button over adapting to the game.
 - Model text shown on an activity overlay is bounded and remains untrusted.
 - Cost scales with decisions, so longer play depends on bounded context and
   self-authored summaries rather than an ever-growing prompt.
-- Current local-play controls and checkpoints stay in the
-  [emulator guide](../../integrations/gba-emulator/README.md); the isolated MCP
-  tools stay in the [GBA MCP guide](../../apps/gba-mcp/README.md), and live
-  rendering stays in the [activity guide](../../apps/discord-activity/README.md).
+- Current play controls stay in the [play guide](../../packages/play/README.md)
+  and live rendering in the
+  [activity guide](../../apps/discord-activity/README.md). The local-play
+  controls and checkpoints this ADR assumed are retired by
+  [ADR 0145](0145-the-world-is-the-only-body.md); other harnesses reach the
+  world through PokeAgents' own MCP, CLI, and skill.

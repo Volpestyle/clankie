@@ -70,13 +70,8 @@ describe("EmbodimentManager", () => {
       session: { state: "claimed" },
     });
 
-    const running = await test.manager.report(
-      report({ state: "running", resumedFromCheckpointId: "checkpoint-8" }),
-    );
-    expect(running).toMatchObject({
-      outcome: "applied",
-      session: { state: "running", resumedFromCheckpointId: "checkpoint-8" },
-    });
+    const running = await test.manager.report(report({ state: "running" }));
+    expect(running).toMatchObject({ outcome: "applied", session: { state: "running" } });
 
     const stop = await test.manager.submit({
       kind: "stop",
@@ -104,14 +99,10 @@ describe("EmbodimentManager", () => {
           durationMs: 240_000,
           framesPublished: 7_200,
           framesDropped: 0,
-          checkpointId: "checkpoint-9",
         },
       }),
     );
-    expect(stopped).toMatchObject({
-      outcome: "applied",
-      session: { state: "stopped", checkpointId: "checkpoint-9" },
-    });
+    expect(stopped).toMatchObject({ outcome: "applied", session: { state: "stopped" } });
     expect(test.manager.liveSession()).toBeUndefined();
   });
 
@@ -126,22 +117,6 @@ describe("EmbodimentManager", () => {
     expect(test.manager.liveSession()?.intentId).toBe("intent-1");
     // No second session was minted for the repeat ask.
     expect(second.outcome === "accepted" && second.session.sessionId).toBe("session-1");
-  });
-
-  it("does not treat a world join as the same ask as a local start", async () => {
-    const test = harness();
-    await test.manager.submit(startIntent());
-    const world = await test.manager.submit(startIntent("intent-world", { venue: "world" }));
-    expect(world).toMatchObject({ outcome: "refused", reason: "play_session_active" });
-  });
-
-  it("records a world venue on the session so the local host can dispatch", async () => {
-    const test = harness();
-    const submitted = await test.manager.submit(startIntent("intent-1", { venue: "world" }));
-    expect(submitted).toMatchObject({
-      outcome: "accepted",
-      session: { venue: "world" },
-    });
   });
 
   it("still refuses a start while the live session is winding down", async () => {

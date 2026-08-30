@@ -13,7 +13,7 @@ import {
   createVoiceRealtimePorts,
   parseVoiceRealtimeEnv,
 } from "@clankie/discord-presence-core";
-import { defaultGbaPlayJournalDir } from "@clankie/gba-emulator";
+import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
   ensureDiscordBridgeCredential,
@@ -49,7 +49,7 @@ import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { createFileMemory, defaultMemoryDir } from "./memory.ts";
-import { createGbaPlayExecution } from "./play-execution.ts";
+import { createWorldPlayExecution } from "./play-execution-world.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
@@ -475,7 +475,7 @@ process.on("SIGINT", () => requestShutdown("SIGINT"));
 process.on("SIGTERM", () => requestShutdown("SIGTERM"));
 
 function createConfiguredPlayExecution(): PlayExecution {
-  return createGbaPlayExecution({
+  return createWorldPlayExecution({
     logger,
     repoRoot,
     activityObservations,

@@ -22,7 +22,7 @@ import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
 import type { HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
-import { joinWorld, startPlay, stopPlay } from "./play.ts";
+import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 
 /**
@@ -82,7 +82,7 @@ export function captainTools(
   turn: TurnContext,
   laneLog: LaneLog,
   lane: CaptainSessionLaneV2,
-  gameplay: GameplaySettings = { pokemonEmulatorEnabled: true, pokeagentMmoEnabled: true },
+  gameplay: GameplaySettings = { pokeagentMmoEnabled: true },
   autonomy?: AutonomyStore,
   herdrWatches?: HerdrWatchPort,
 ): ToolDefinition[] {
@@ -91,13 +91,11 @@ export function captainTools(
     getEmbodimentSession: deps.embodiment.getSession,
     getLiveEmbodimentSession: deps.embodiment.getLiveSession,
   };
-  const enabled = new Set([
-    ...(gameplay.pokemonEmulatorEnabled ? ["pokeagent_start_solo"] : []),
-    ...(gameplay.pokeagentMmoEnabled ? ["pokeagent_join_mmo", "pokeagent_world"] : []),
-    ...(gameplay.pokemonEmulatorEnabled || gameplay.pokeagentMmoEnabled
-      ? ["pokeagent_stop", "pokeagent_observe", "pokeagent_recall"]
-      : []),
-  ]);
+  const enabled = new Set(
+    gameplay.pokeagentMmoEnabled
+      ? ["pokeagent_join_mmo", "pokeagent_world", "pokeagent_stop", "pokeagent_observe", "pokeagent_recall"]
+      : [],
+  );
   return [
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     ...(lane === "operator" && herdrWatches !== undefined ? herdrWatchTools(herdrWatches, turn) : []),
@@ -152,38 +150,14 @@ export function captainTools(
     }),
     ...diagramTools(deps, turn),
     defineTool({
-      name: "pokeagent_start_solo",
-      label: "PokeAgent: start solo",
-      description:
-        "Start a solo PokeAgent session on your own GBA body (Pokemon FireRed or Emerald), live on the activity watch surface. " +
-        "Not for songs or YouTube — those are youtube_search / music_play. Not a hosted world with other players — " +
-        "that is pokeagent_join_mmo. The session resumes from your latest " +
-        "checkpoint and keeps going until someone asks you to stop; people can watch. 'started' means you are " +
-        "playing; 'start_refused' names a reason you can say out loud (play_session_active means another local or hosted " +
-        "play session is active or winding down); 'pending' means it is still spinning up — say so, never claim " +
-        "to be playing yet.",
-      parameters: Type.Object({
-        environmentId: StringEnum(["pokemon-firered", "pokemon-emerald"], {
-          default: "pokemon-firered",
-        }),
-      }),
-      execute: async (_id, params) =>
-        json(
-          await startPlay(playPorts, {
-            environmentId: params.environmentId as "pokemon-firered" | "pokemon-emerald",
-            originLane: lane,
-            requestedBy: turnActor(turn, lane),
-          }),
-        ),
-    }),
-    defineTool({
       name: "pokeagent_join_mmo",
       label: "PokeAgent: join MMO",
       description:
-        "Join the hosted PokeAgent MMO where other Pokemon players already exist, live on the activity watch surface. " +
-        "Not your own private cartridge — that is pokeagent_start_solo. You land in a session someone else is hosting; " +
-        "you can see who else is here. 'joined' means you are in the world; 'join_refused' names a reason you " +
-        "can say out loud (play_session_active means another local or hosted play session is active or winding down, " +
+        "Join the hosted PokeAgent MMO and play Pokemon (FireRed or Emerald), live on the activity watch surface. " +
+        "This is how you play at all — the world holds the cartridge and other players are already in it. " +
+        "Not for songs or YouTube — those are youtube_search / music_play. " +
+        "You can see who else is here. 'joined' means you are in the world; 'join_refused' names a reason you " +
+        "can say out loud (play_session_active means a play session is already active or winding down, " +
         "no_credential means nobody provisioned you a seat, world_unreachable means the host " +
         "is down, world_full means there is no room, region_not_hosted means that game is not up, world_refused " +
         "means the world said no); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
@@ -841,7 +815,7 @@ function discordMusicTools(
       description:
         "Search YouTube for a song or video to play in Discord voice. Returns numbered results. " +
         "Read them to the room and ask which one, then music_play or music_queue with that url or index. " +
-        "Use this when someone wants a song, a track, or YouTube — not pokeagent_start_solo (that is Pokemon).",
+        "Use this when someone wants a song, a track, or YouTube — not pokeagent_join_mmo (that is Pokemon).",
       parameters: Type.Object({
         query: Type.String({ minLength: 1, maxLength: 200 }),
         next: Type.Optional(Type.Boolean({ description: "True if they asked to play it next / queue it." })),

@@ -1,7 +1,7 @@
 /**
- * Shared play-execution composition used by local GBA play and hosted-world
- * play. Venue-specific boot, checkpoints, idle ticks, and PCM stay in the
- * callers; this owns the loop both already run.
+ * The play-execution composition: journal, activity frames, voice, and the
+ * free-play loop, over whatever body the caller joined. Joining and leaving
+ * the world stay in the caller; this owns the playthrough itself.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -14,14 +14,13 @@ import {
   openFreePlayJournal,
   runFreePlay,
   type ClankieVoice,
-  type FreePlayCheckpointPort,
   type FreePlayJournal,
   type FreePlayMind,
   type FreePlayProvenance,
   type FreePlayTurn,
   type GbaDriverIo,
   type PlayJourneyId,
-} from "@clankie/gba-emulator";
+} from "@clankie/play";
 import {
   GbaActivityObservationSnapshotSchema,
   RenderedSurfaceAudioSchema,
@@ -67,12 +66,9 @@ interface PlaySurfaceAudioPacket {
   readonly capturedAt: string;
 }
 
-/**
- * The body the shared loop drives. Local play wraps the emulator session;
- * hosted play wraps the world seat. The loop never learns which.
- */
+/** The body the loop drives: Clankie's seat in a hosted world. */
 interface PlaySurface {
-  readonly venue: "local" | "world";
+  readonly venue: "world";
   readonly journeyId: PlayJourneyId;
   readonly scenarioId: string;
   readonly environmentSessionId: string;
@@ -98,7 +94,7 @@ export function resolvePlayRuntimeRoots(repoRoot: string | undefined): {
   const require = createRequire(import.meta.url);
   const emulatorPackage =
     repoRoot === undefined
-      ? path.dirname(require.resolve("@clankie/gba-emulator/package.json"))
+      ? path.dirname(require.resolve("@clankie/play/package.json"))
       : path.join(repoRoot, "integrations", "gba-emulator");
   return { emulatorPackage, repoRoot: repoRoot ?? path.resolve(emulatorPackage, "../..") };
 }
@@ -175,17 +171,10 @@ export interface EmbodiedPlayInput {
   mind: FreePlayMind;
   voiceAgent?: ClankieVoice;
   surface: PlaySurface;
-  resumedFromCheckpointId?: string;
   resumedContinuity: { notes: string | null; objective: string | null } | null;
-  checkpoints?: FreePlayCheckpointPort;
   captureSight: () => { png: Buffer; width: number; height: number } | undefined;
   /** After `onRunning`, before play-sight attach (hosted-world operations). */
   attach?: () => void;
-  /** After frame observation is wired (local idle ticks). */
-  afterObserve?: () => void;
-  /** Per-turn venue work (local autosave). */
-  onTurnExtra?: (turn: FreePlayTurn) => void;
-  afterPlay?: (result: Awaited<ReturnType<typeof runFreePlay>>) => { checkpointId?: string };
   extraCleanup?: () => void;
   createVoice?: () => Promise<PlayVoiceClient | undefined>;
   createActivitySink?: () => Promise<ActivityFrameSink | undefined>;
@@ -199,7 +188,6 @@ export interface EmbodiedPlayInput {
 
 export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<PlayExecution> {
   const { session, control, onRunning, logger, env, clock, mind, surface, resumedContinuity } = input;
-  const resumedFromCheckpointId = input.resumedFromCheckpointId;
   const sink =
     input.createActivitySink === undefined
       ? await createBrokeredActivityFrameSink({
@@ -321,7 +309,6 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
       venue: surface.venue,
       environmentSessionId: surface.environmentSessionId,
       scenarioId: surface.scenarioId,
-      ...(resumedFromCheckpointId === undefined ? {} : { resumedFromCheckpointId }),
       clock,
       onError: (error) => {
         if (journalFailureLogged) return;
@@ -344,7 +331,7 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
 
   const startedAt = clock().getTime();
   try {
-    await onRunning(resumedFromCheckpointId);
+    await onRunning();
     input.attach?.();
     input.playSight?.attach({
       sessionId: session.sessionId,
@@ -360,7 +347,6 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
       publishFrame(frameSequence);
     };
     surface.observeFrames(observer);
-    input.afterObserve?.();
 
     const result = await runFreePlay({
       io: surface.io,
@@ -373,7 +359,6 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
           : "people in the voice channel, watching him play"),
       ...(input.voiceAgent === undefined ? {} : { voice: input.voiceAgent }),
       ...(voice === undefined ? {} : { roomAuthors: () => voice.roomListening }),
-      ...(input.checkpoints === undefined ? {} : { checkpoints: input.checkpoints }),
       ...(resumedContinuity === null
         ? {}
         : {
@@ -431,7 +416,6 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
             ? {}
             : { speechDeliveryId, narrationEvent: event }),
         });
-        input.onTurnExtra?.(turn);
         input.onTurn?.(turn);
       },
       onSettledTurn: (event) => {
@@ -467,7 +451,6 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
     });
 
     surface.observeFrames(null);
-    const checkpointId = input.afterPlay?.(result)?.checkpointId;
     const outcome = control.stopRequested() || surface.ended() ? "stopped" : "budget_exhausted";
     const durationMs = clock().getTime() - startedAt;
     const framesDropped =
@@ -482,7 +465,6 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
       durationMs,
       framesPublished,
       framesDropped,
-      ...(checkpointId === undefined ? {} : { checkpointId }),
       framePng: () => surface.streamPng(),
     });
     logger.info(
@@ -499,19 +481,13 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
         longestUnchangedRun: result.longestUnchangedRun,
         longestRecurringRun: result.longestRecurringRun,
         objectivesRetired: result.objectivesRetired,
-        ...(surface.venue === "world"
-          ? {
-              venue: "world",
-              framesPublished,
-              framesDropped,
-              audioPacketsPublished,
-              audioPacketsDropped,
-            }
-          : {
-              volitionTaken: result.volition.taken,
-              volitionOffered: result.volition.offered,
-            }),
-        ...(checkpointId === undefined ? {} : { checkpointId }),
+        venue: surface.venue,
+        framesPublished,
+        framesDropped,
+        audioPacketsPublished,
+        audioPacketsDropped,
+        volitionTaken: result.volition.taken,
+        volitionOffered: result.volition.offered,
         ...(journal === undefined ? {} : { journalPath: journal.path }),
       },
       input.finishedLog,
@@ -524,8 +500,6 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
         durationMs,
         framesPublished,
         framesDropped,
-        ...(checkpointId === undefined ? {} : { checkpointId }),
-        ...(resumedFromCheckpointId === undefined ? {} : { resumedFromCheckpointId }),
       },
     };
   } finally {

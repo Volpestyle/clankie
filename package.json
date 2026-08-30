@@ -20,8 +20,7 @@
     "release:build": "node scripts/build-release.mjs",
     "release:smoke": "node scripts/smoke-release.mjs",
     "clean": "turbo run clean --filter=@clankie/menu-bar --filter=@clankie/vox && rm -rf .turbo .data",
-    "gba:free-play": "pnpm --filter @clankie/gba-emulator free-play",
-    "gba:free-play-live": "pnpm --filter @clankie/clankie free-play-live",
+    "play:live": "pnpm --filter @clankie/clankie free-play-live",
     "discord:readiness": "pnpm --filter @clankie/discord-bridge readiness",
     "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness"
   },

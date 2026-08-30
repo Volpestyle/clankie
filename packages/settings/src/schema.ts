@@ -247,12 +247,10 @@ export const RelaySettingsSchema = z
   .strict();
 export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
 
-/** Which PokeAgent bodies the captain may offer. One live session spans both. */
+/** Whether the captain may offer play at all. */
 export const GameplaySettingsSchema = z
   .object({
-    /** Solo FireRed/Emerald in the local GBA emulator. */
-    pokemonEmulatorEnabled: z.boolean().default(true),
-    /** FireRed/Emerald in the hosted PokeAgent MMO. */
+    /** FireRed/Emerald in the hosted PokeAgent MMO — his only body. */
     pokeagentMmoEnabled: z.boolean().default(true),
   })
   .strict();
@@ -405,6 +403,7 @@ export function emptySettings(): ClankieSettings {
  */
 const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear"];
 const RETIRED_DISCORD_SETTINGS_KEYS: readonly string[] = ["possessorVoiceEnabled"];
+const RETIRED_GAMEPLAY_SETTINGS_KEYS: readonly string[] = ["pokemonEmulatorEnabled"];
 
 /**
  * Drops sections this version has retired, so an owner whose file predates the
@@ -425,6 +424,14 @@ export function dropRetiredSettings(parsed: unknown): unknown {
     settings["discord"] = Object.fromEntries(
       Object.entries(discord as Record<string, unknown>).filter(
         ([key]) => !RETIRED_DISCORD_SETTINGS_KEYS.includes(key),
+      ),
+    );
+  }
+  const gameplay = settings["gameplay"];
+  if (gameplay !== null && typeof gameplay === "object" && !Array.isArray(gameplay)) {
+    settings["gameplay"] = Object.fromEntries(
+      Object.entries(gameplay as Record<string, unknown>).filter(
+        ([key]) => !RETIRED_GAMEPLAY_SETTINGS_KEYS.includes(key),
       ),
     );
   }

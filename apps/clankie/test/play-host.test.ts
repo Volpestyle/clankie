@@ -65,10 +65,10 @@ function host(client: ReturnType<typeof fakeClient>, execute: PlayExecution) {
 }
 
 describe("PlayHost", () => {
-  it("claims a start, reports running with lineage, then stopped with the receipt", async () => {
+  it("claims a start, reports running, then stopped with the receipt", async () => {
     const client = fakeClient({ assignments: [{ kind: "start", session: session() }] });
     const subject = host(client, async (_session, _control, onRunning) => {
-      await onRunning("checkpoint-8");
+      await onRunning();
       return {
         kind: "ran",
         result: {
@@ -77,18 +77,14 @@ describe("PlayHost", () => {
           durationMs: 1_000,
           framesPublished: 40,
           framesDropped: 0,
-          checkpointId: "checkpoint-9",
-          resumedFromCheckpointId: "checkpoint-8",
         },
       };
     });
     expect(await subject.poll()).toBe(true);
     await subject.settled();
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
-    expect(client.reports[0]).toMatchObject({ resumedFromCheckpointId: "checkpoint-8" });
     expect(client.reports[1]?.receipt).toMatchObject({
       outcome: "budget_exhausted",
-      checkpointId: "checkpoint-9",
       framesPublished: 40,
     });
   });
@@ -109,7 +105,7 @@ describe("PlayHost", () => {
       client,
       environmentIds: ["pokemon-firered"],
       execute: async (_session, _control, onRunning) => {
-        await onRunning("checkpoint-8");
+        await onRunning();
         return {
           kind: "ran",
           result: {
@@ -233,7 +229,6 @@ describe("PlayHost", () => {
           durationMs: 30,
           framesPublished: 3,
           framesDropped: 0,
-          checkpointId: "late-checkpoint",
         },
       };
     });

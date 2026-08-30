@@ -92,7 +92,7 @@ ADR 0074 makes the realtime room session the sole author of what the room hears.
   with a specific reason; play itself may continue silently.
 - Possession remains operator-auditable without granting the harness Discord
   credentials or raw audio.
-- Setup, commands, lock locations, tool semantics, and live operation belong in
-  the [GBA MCP operating guide](../../apps/gba-mcp/README.md). The bridge-side
-  media seam belongs in the
+- The isolated GBA MCP harness this record describes is itself retired by
+  [ADR 0145](0145-the-world-is-the-only-body.md); a harness now takes its own
+  seat in a PokeAgents world. The bridge-side media seam belongs in the
   [Discord bridge operating guide](../../apps/discord-bridge/README.md).

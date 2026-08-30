@@ -8,8 +8,7 @@
     "apps/discord-user-session": {
       "entry": ["src/presence-runtime-module.ts"]
     },
-    "integrations/gba-emulator": {
-      "entry": ["scripts/bootstrap-savestate.ts"],
+    "packages/play": {
       "ignoreExportsUsedInFile": true
     }
   }

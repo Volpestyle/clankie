@@ -498,8 +498,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "games",
       aliases: ["gameplay"],
-      description: "Configure Clankie's PokeAgent game bodies",
-      argumentHint: "[solo|mmo] [on|off]",
+      description: "Configure Clankie's PokeAgent play",
+      argumentHint: "[on|off]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (settings === undefined) {
@@ -519,17 +519,12 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           );
           return;
         }
-        const [mode, state] = words;
-        if (
-          (mode !== "solo" && mode !== "mmo") ||
-          (state !== "on" && state !== "off") ||
-          words.length !== 2
-        ) {
-          shell.insertCommandResult("/games", "Usage: /games [solo|mmo] [on|off]", "error");
+        const [state] = words;
+        if ((state !== "on" && state !== "off") || words.length !== 1) {
+          shell.insertCommandResult("/games", "Usage: /games [on|off]", "error");
           return;
         }
-        const enabled = state === "on";
-        const next = await setGameplayEnabled(settings, mode, enabled);
+        const next = await setGameplayEnabled(settings, state === "on");
         shell.insertCommandResult(
           "/games",
           `${formatGameplaySettings(next.gameplay)}\n\nRestart Clankie to apply this change.`,
@@ -696,40 +691,25 @@ function formatAutonomyStatus(status: OperatorAutonomyStatus): string {
 }
 
 function formatGameplaySettings(settings: GameplaySettings): string {
-  return [
-    `Pokémon emulator (solo): ${settings.pokemonEmulatorEnabled ? "enabled" : "disabled"}`,
-    `PokeAgent MMO: ${settings.pokeagentMmoEnabled ? "enabled" : "disabled"}`,
-    "Live session: one across both modes",
-  ].join("\n");
+  return `PokeAgent MMO: ${settings.pokeagentMmoEnabled ? "enabled" : "disabled"}`;
 }
 
-async function setGameplayEnabled(settings: SettingsStore, mode: "solo" | "mmo", enabled: boolean) {
+async function setGameplayEnabled(settings: SettingsStore, enabled: boolean) {
   return await settings.update((current) => ({
     ...current,
-    gameplay:
-      mode === "solo"
-        ? { ...current.gameplay, pokemonEmulatorEnabled: enabled }
-        : { ...current.gameplay, pokeagentMmoEnabled: enabled },
+    gameplay: { ...current.gameplay, pokeagentMmoEnabled: enabled },
   }));
 }
 
 async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStore): Promise<void> {
   const flow = shell.setupFlow;
-  let initialValue = "solo";
   flow.begin("games");
   try {
     for (;;) {
       const gameplay = (await settings.load()).gameplay;
       const selected = await flow.readSelect({
-        message:
-          "Toggle a PokeAgent game\nEnter toggles availability. Both may be enabled; one live session runs across them.",
+        message: "Toggle PokeAgent play\nEnter toggles availability.",
         options: [
-          {
-            value: "solo",
-            label: `${gameplay.pokemonEmulatorEnabled ? "✓" : "○"} Pokémon emulator (solo)`,
-            hint: gameplay.pokemonEmulatorEnabled ? "enabled" : "disabled",
-            description: "FireRed or Emerald on Clankie's local GBA emulator.",
-          },
           {
             value: "mmo",
             label: `${gameplay.pokeagentMmoEnabled ? "✓" : "○"} PokeAgent MMO`,
@@ -738,17 +718,12 @@ async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStor
           },
         ],
         statusActions: [{ value: "done", label: "Done", hint: "restart Clankie to apply changes" }],
-        initialValue,
+        initialValue: "mmo",
       });
-      const mode = selected;
-      if (mode !== "solo" && mode !== "mmo") break;
-      const enabled = mode === "solo" ? !gameplay.pokemonEmulatorEnabled : !gameplay.pokeagentMmoEnabled;
-      await setGameplayEnabled(settings, mode, enabled);
-      flow.renderLine(
-        `${mode === "solo" ? "Pokémon emulator" : "PokeAgent MMO"} ${enabled ? "enabled" : "disabled"}.`,
-        "success",
-      );
-      initialValue = mode;
+      if (selected !== "mmo") break;
+      const enabled = !gameplay.pokeagentMmoEnabled;
+      await setGameplayEnabled(settings, enabled);
+      flow.renderLine(`PokeAgent MMO ${enabled ? "enabled" : "disabled"}.`, "success");
     }
   } finally {
     flow.end();

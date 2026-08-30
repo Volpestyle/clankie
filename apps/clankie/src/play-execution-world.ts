@@ -15,8 +15,9 @@ import {
   type ClankieVoice,
   type FreePlayMind,
   type FreePlayTurn,
-} from "@clankie/gba-emulator";
+} from "@clankie/play";
 import type { PlayVoiceClient } from "@clankie/play-voice";
+import type { GameplaySettings } from "@clankie/settings";
 import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import type { ActivityObservationWritePort } from "./activity-observation.ts";
 import type { PlayExecution } from "./play-host.ts";
@@ -36,6 +37,8 @@ export interface WorldPlayExecutionOptions {
   logger: PlayExecutionLogger;
   /** Runtime root: the source checkout in development, the release directory when installed. */
   repoRoot?: string;
+  /** Owner-enabled play venue; omitted by tests and dev callers to enable it. */
+  gameplay?: GameplaySettings;
   env?: NodeJS.ProcessEnv;
   clock?: () => Date;
   interjections?: InterjectionQueue;
@@ -57,6 +60,9 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
   const join = options.joinWorld ?? joinWorld;
 
   return async (session, control, onRunning) => {
+    if (options.gameplay?.pokeagentMmoEnabled === false) {
+      return { kind: "refused", reason: "environment_unavailable" };
+    }
     let joined: WorldJoinResult;
     try {
       joined = await join({

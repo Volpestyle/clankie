@@ -27,11 +27,11 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
   also stay silent — silence is a real answer. Each media-enabled active Discord
   body owns one native Vox child for voice capture, TTS, and audible music; a
   text-only official-bot process does not spawn Vox.
-- **Plays games on stream.** Pokemon FireRed/Emerald on his own GBA body,
-  or a separately credentialed seat in a hosted PokeAgents world, watchable live
-  in a Discord Activity with voice commentary over the run. External agents get
-  an isolated private emulator through [`apps/gba-mcp`](apps/gba-mcp/README.md);
-  they never take Clankie's body or receive his room input.
+- **Plays games on stream.** Pokemon FireRed/Emerald from his own credentialed
+  seat in a hosted PokeAgents world, watchable live in a Discord Activity with
+  voice commentary over the run. Other agents join the same world through
+  PokeAgents' own MCP, CLI, or skill and get their own seats; nobody takes
+  Clankie's body or receives his room input.
 - **Makes things.** Image and video generation behind one provider-neutral
   seam (OpenAI, Google, Grok); a browser via the agent-browser MCP host.
 - **Codes and leads.** The same pi coding tools every agent has, plus the
@@ -92,15 +92,14 @@ OpenAI/Anthropic fallbacks; it does not load `.env.local` or print secret values
 | [`apps/discord-bridge`](apps/discord-bridge/README.md)             | Official bot: text, voice, attachments                                                      |
 | [`apps/discord-user-session`](apps/discord-user-session/README.md) | Personal-lab voice, screen-watch, and Go Live body (off by default)                         |
 | [`apps/discord-activity`](apps/discord-activity/README.md)         | The watch-me-play surface                                                                   |
-| [`apps/gba-mcp`](apps/gba-mcp/README.md)                           | Isolated private GBA emulator contract sandbox                                              |
 | [`apps/relay`](apps/relay/README.md)                               | Remote access for the phone/desktop app                                                     |
 | [`apps/vox`](apps/vox/README.md)                                   | Sole native Discord media owner behind an AGPL process boundary                             |
 
-[`integrations/gba-emulator`](integrations/gba-emulator/README.md) implements
-the local GBA body each owning process instantiates; `packages/` holds the
-shared contracts. Hosted co-play uses separately credentialed PokeAgents seats
-([ADR 0129](docs/adr/0129-each-player-owns-a-body.md)). The graphical garden app
-is a separate private repo (`clankie-app`).
+[`packages/play`](packages/play/README.md) is the play mind above the body
+seam; `packages/` holds the shared contracts. The body itself is his seat in a
+PokeAgents world ([ADR 0145](docs/adr/0145-the-world-is-the-only-body.md), and
+[ADR 0129](docs/adr/0129-each-player-owns-a-body.md) for the identity boundary).
+The graphical garden app is a separate private repo (`clankie-app`).
 
 ## Development
 

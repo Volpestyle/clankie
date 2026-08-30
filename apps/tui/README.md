@@ -122,14 +122,10 @@ credential holder.
 - Type `/skill-name` for direct skill invocation or `$` at a token boundary for
   the skill picker. The transcript records a compact `skill loaded` receipt.
 - `/activity` shows the current goal, commentary, intent, observed outcome, and
-  the loopback watch URL without controlling the emulator.
-- `/games` opens a toggle dialog for both PokeAgent modes; move to a game and
-  press Enter to enable or disable it. `/games solo on|off` and `/games mmo
-on|off` remain available for direct use. Restart Clankie to apply a change.
-  Both may be enabled, with one live session across them.
-- `/saves` browses Clankie's receipt-validated local Pokémon checkpoints. Selecting a
-  save shows its game, capture time, position, and id; deletion requires a
-  separate confirmation. Hosted-world saves remain on their world server.
+  the loopback watch URL without controlling the body.
+- `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
+  disable it. `/games on|off` remains available for direct use. Restart Clankie
+  to apply a change. Saves live with the world server, not here.
 - `/memory` browses and edits episodes and permitted Discord person facts through
   operator-only APIs.
 - `/vt` (aliases `/voice-log`, `/voice-transcripts`) opens a live overlay of

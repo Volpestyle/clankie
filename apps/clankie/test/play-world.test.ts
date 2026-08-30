@@ -2,16 +2,14 @@ import { readFileSync, readdirSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { GbaDriverIo } from "@clankie/gba-emulator";
 import type { EmbodimentPlayNote, EmbodimentSession, WorldJoinRefusalReason } from "@clankie/protocol";
-import { embodimentVenue } from "@clankie/protocol";
 import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { describe, expect, it } from "vitest";
-import { joinWorld as askJoinWorld, startPlay } from "../src/captain/play.ts";
-import { createGbaPlayExecution } from "../src/play-execution.ts";
+import { joinWorld as askJoinWorld } from "../src/captain/play.ts";
+import { createWorldPlayExecution } from "../src/play-execution-world.ts";
 import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
-import { parseFreePlayJournal } from "@clankie/gba-emulator";
-import type { WorldBody } from "../src/world/body.ts";
+import { parseFreePlayJournal } from "@clankie/play";
+import { fakeIo, fakeWorldBody } from "./world-body-fake.ts";
 
 const silentLogger = {
   info: () => undefined,
@@ -29,55 +27,6 @@ const buttonMasher = () =>
       }),
   });
 
-const fakeIo: GbaDriverIo = {
-  observe: () => {
-    throw new Error("no observation");
-  },
-  act: () =>
-    Promise.resolve({
-      schemaVersion: 1,
-      actionId: "act-1",
-      sessionId: "env-1",
-      updatedAt: "2026-07-26T12:00:00.000Z",
-      status: "completed",
-      acceptedGoalVersion: 1,
-      outcome: {},
-    }),
-  pause: () => Promise.resolve(),
-  resume: () => Promise.resolve(),
-};
-
-function fakeWorldBody(overrides: Partial<WorldBody> = {}): WorldBody {
-  const frame = new Uint8Array([137, 80, 78, 71]);
-  return {
-    journeyId: "world:kanto:player:player-1",
-    io: fakeIo,
-    framePng: () => frame,
-    observeFrames: () => undefined,
-    droppedFrameCount: () => 0,
-    drainAudio: () => [],
-    droppedAudioPacketCount: () => 0,
-    traceProvenance: () => ({
-      body: "world",
-      sessionId: "world-session-1",
-      worldId: "kanto",
-      bodyGeneration: 1,
-      adapterVersion: 2,
-    }),
-    close: () => Promise.resolve(),
-    sessionSnapshot: () => ({
-      worldId: "kanto",
-      playerId: "player-1",
-      sessionId: "world-session-1",
-      gameId: "firered",
-    }),
-    grantedOperationNames: () => ["play.observe", "play.act", "play.frame"],
-    callWorld: () => Promise.resolve({ ok: false, code: "not_supported", message: "fake" }),
-    ended: () => false,
-    ...overrides,
-  };
-}
-
 function fakeActivitySink(
   close: () => void,
   sequences?: { frames: number[]; overlays: number[] },
@@ -94,12 +43,11 @@ function fakeActivitySink(
   };
 }
 
-function session(venue?: "local" | "world"): EmbodimentSession {
+function session(): EmbodimentSession {
   return {
     schemaVersion: 1,
     sessionId: "world-play-1",
     environmentId: "pokemon-firered",
-    ...(venue === undefined ? {} : { venue }),
     state: "claimed",
     intentId: "intent-1",
     originLane: "discord_presence",
@@ -132,35 +80,29 @@ async function playEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-play-world-"));
   return {
     XDG_STATE_HOME: join(root, "state"),
-    CLANKIE_GBA_CHECKPOINT_DIR: join(root, "checkpoints"),
     CLANKIE_GBA_PLAY_JOURNAL_DIR: join(root, "gba-play"),
     CLANKIE_ACTIVITY_PRODUCER_URL: "ws://127.0.0.1:1/producer",
   };
 }
 
 describe("world play execution", () => {
-  it("refuses each disabled play venue before touching its body", async () => {
-    for (const venue of [undefined, "world"] as const) {
-      const client = fakeClient({ kind: "start", session: session(venue) });
-      const host = new PlayHost({
-        client,
-        environmentIds: ["pokemon-firered"],
-        execute: createGbaPlayExecution({
-          logger: silentLogger,
-          gameplay: {
-            pokemonEmulatorEnabled: venue === "world",
-            pokeagentMmoEnabled: venue !== "world",
-          },
-        }),
+  it("refuses before touching the world when the owner has disabled play", async () => {
+    const client = fakeClient({ kind: "start", session: session() });
+    const host = new PlayHost({
+      client,
+      environmentIds: ["pokemon-firered"],
+      execute: createWorldPlayExecution({
         logger: silentLogger,
-      });
+        gameplay: { pokeagentMmoEnabled: false },
+      }),
+      logger: silentLogger,
+    });
 
-      expect(await host.poll()).toBe(true);
-      await host.settled();
-      expect(client.reports).toEqual([
-        expect.objectContaining({ state: "refused", refusalReason: "environment_unavailable" }),
-      ]);
-    }
+    expect(await host.poll()).toBe(true);
+    await host.settled();
+    expect(client.reports).toEqual([
+      expect.objectContaining({ state: "refused", refusalReason: "environment_unavailable" }),
+    ]);
   });
 
   it("runs a world session against a fake body and never takes the local lock", async () => {
@@ -173,13 +115,13 @@ describe("world play execution", () => {
         return Promise.resolve();
       },
     });
-    const client = fakeClient({ kind: "start", session: session("world") });
+    const client = fakeClient({ kind: "start", session: session() });
     const env = await playEnv();
     const sequences = { frames: [] as number[], overlays: [] as number[] };
     const host = new PlayHost({
       client,
       environmentIds: ["pokemon-firered"],
-      execute: createGbaPlayExecution({
+      execute: createWorldPlayExecution({
         logger: silentLogger,
         env,
         createMind: buttonMasher,
@@ -243,13 +185,13 @@ describe("world play execution", () => {
     });
     const client = fakeClient({
       kind: "start",
-      session: { ...session("world"), budget: { maxTurns: 2, maxDurationMs: 60_000 } },
+      session: { ...session(), budget: { maxTurns: 2, maxDurationMs: 60_000 } },
     });
     const env = await playEnv();
     const host = new PlayHost({
       client,
       environmentIds: ["pokemon-firered"],
-      execute: createGbaPlayExecution({
+      execute: createWorldPlayExecution({
         logger: silentLogger,
         env,
         createMind: buttonMasher,
@@ -268,12 +210,12 @@ describe("world play execution", () => {
     const env = await playEnv();
     const first = fakeClient({
       kind: "start",
-      session: { ...session("world"), budget: { maxTurns: 1 } },
+      session: { ...session(), budget: { maxTurns: 1 } },
     });
     const firstHost = new PlayHost({
       client: first,
       environmentIds: ["pokemon-firered"],
-      execute: createGbaPlayExecution({
+      execute: createWorldPlayExecution({
         logger: silentLogger,
         env,
         createMind: () =>
@@ -296,7 +238,7 @@ describe("world play execution", () => {
 
     const seen: { notes: string | null; objective: string | null }[] = [];
     const secondSession = {
-      ...session("world"),
+      ...session(),
       sessionId: "world-play-2",
       intentId: "intent-2",
       budget: { maxTurns: 1 },
@@ -305,7 +247,7 @@ describe("world play execution", () => {
     const secondHost = new PlayHost({
       client: second,
       environmentIds: ["pokemon-firered"],
-      execute: createGbaPlayExecution({
+      execute: createWorldPlayExecution({
         logger: silentLogger,
         env,
         createMind: () =>
@@ -343,11 +285,11 @@ describe("world play execution", () => {
         return Promise.resolve();
       },
     });
-    const client = fakeClient({ kind: "start", session: session("world") });
+    const client = fakeClient({ kind: "start", session: session() });
     const host = new PlayHost({
       client,
       environmentIds: ["pokemon-firered"],
-      execute: createGbaPlayExecution({
+      execute: createWorldPlayExecution({
         logger: silentLogger,
         env: await playEnv(),
         createMind: buttonMasher,
@@ -377,11 +319,11 @@ describe("world play execution", () => {
       "world_full",
     ];
     for (const reason of reasons) {
-      const client = fakeClient({ kind: "start", session: session("world") });
+      const client = fakeClient({ kind: "start", session: session() });
       const host = new PlayHost({
         client,
         environmentIds: ["pokemon-firered"],
-        execute: createGbaPlayExecution({
+        execute: createWorldPlayExecution({
           logger: silentLogger,
           env: await playEnv(),
           createMind: buttonMasher,
@@ -393,11 +335,6 @@ describe("world play execution", () => {
       await host.settled();
       expect(client.reports).toEqual([expect.objectContaining({ state: "refused", refusalReason: reason })]);
     }
-  });
-
-  it("treats an omitted venue as local — the existing pokeagent_start_solo path", () => {
-    expect(embodimentVenue(session())).toBe("local");
-    expect(embodimentVenue(session("world"))).toBe("world");
   });
 });
 
@@ -428,61 +365,40 @@ describe("joinWorld captain ask", () => {
     }
   });
 
-  it("polls accepted local and world starts through the same lifecycle without changing their notes", async () => {
-    for (const candidate of [
-      { ask: startPlay, venue: undefined, action: "started" },
-      { ask: askJoinWorld, venue: "world", action: "joined" },
-    ] as const) {
-      const intents: unknown[] = [];
-      const accepted = session(candidate.venue);
-      const running: EmbodimentSession = {
-        ...accepted,
-        state: "running",
-        resumedFromCheckpointId: "checkpoint-8",
-      };
-      const note = await candidate.ask(
-        {
-          submitEmbodimentIntent: (intent) => {
-            intents.push(intent);
-            return Promise.resolve({ outcome: "accepted", session: accepted });
-          },
-          getEmbodimentSession: () => Promise.resolve(running),
-          getLiveEmbodimentSession: () => Promise.resolve(running),
-        },
-        { environmentId: "pokemon-firered", originLane: "discord_presence", requestedBy: "user-1" },
-      );
-      if (candidate.venue === undefined) expect(intents[0]).not.toHaveProperty("venue");
-      else expect(intents[0]).toMatchObject({ venue: candidate.venue });
-      expect(note).toEqual(
-        candidate.action === "joined"
-          ? { action: "joined", sessionId: running.sessionId, environmentId: running.environmentId }
-          : {
-              action: "started",
-              sessionId: running.sessionId,
-              environmentId: running.environmentId,
-              resumedFromCheckpointId: "checkpoint-8",
-            },
-      );
-    }
-  });
-
-  it("leaves pokeagent_start_solo's intent local and reports an active local session", async () => {
+  it("polls an accepted start through the lifecycle without changing its note", async () => {
     const intents: unknown[] = [];
-    const note = await startPlay(
+    const accepted = session();
+    const running: EmbodimentSession = { ...accepted, state: "running" };
+    const note = await askJoinWorld(
       {
         submitEmbodimentIntent: (intent) => {
           intents.push(intent);
-          return Promise.resolve({ outcome: "refused", reason: "play_session_active" });
+          return Promise.resolve({ outcome: "accepted", session: accepted });
         },
+        getEmbodimentSession: () => Promise.resolve(running),
+        getLiveEmbodimentSession: () => Promise.resolve(running),
+      },
+      { environmentId: "pokemon-firered", originLane: "discord_presence", requestedBy: "user-1" },
+    );
+    expect(intents[0]).not.toHaveProperty("venue");
+    expect(note).toEqual({
+      action: "joined",
+      sessionId: running.sessionId,
+      environmentId: running.environmentId,
+    });
+  });
+
+  it("reports an already-active session as join_refused", async () => {
+    const note = await askJoinWorld(
+      {
+        submitEmbodimentIntent: () => Promise.resolve({ outcome: "refused", reason: "play_session_active" }),
         getEmbodimentSession: () => Promise.resolve(undefined),
         getLiveEmbodimentSession: () => Promise.resolve(undefined),
       },
       { environmentId: "pokemon-firered", originLane: "discord_presence", requestedBy: "user-1" },
     );
-    expect(intents).toEqual([expect.objectContaining({ kind: "start", environmentId: "pokemon-firered" })]);
-    expect(intents[0]).not.toHaveProperty("venue");
     expect(note).toEqual({
-      action: "start_refused",
+      action: "join_refused",
       environmentId: "pokemon-firered",
       reason: "play_session_active",
     });

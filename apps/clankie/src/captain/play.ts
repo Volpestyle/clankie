@@ -54,22 +54,9 @@ function defaultPlayBudget(env: NodeJS.ProcessEnv = process.env): EmbodimentBudg
   };
 }
 
-export async function startPlay(ports: PlayPorts, input: StartPlayInput): Promise<EmbodimentPlayNote> {
-  return submitStart(ports, input);
-}
-
-/** Ask to join a hosted world; the venue selects the body behind the same lifecycle. */
-export function joinWorld(ports: PlayPorts, input: StartPlayInput): Promise<EmbodimentPlayNote> {
-  return submitStart(ports, input, "world");
-}
-
-async function submitStart(
-  ports: PlayPorts,
-  input: StartPlayInput,
-  venue?: "world",
-): Promise<EmbodimentPlayNote> {
-  const joining = venue === "world";
-  const intentId = `${joining ? "world" : "play"}-${randomUUID()}`;
+/** Ask to join the hosted world — the only body he has. */
+export async function joinWorld(ports: PlayPorts, input: StartPlayInput): Promise<EmbodimentPlayNote> {
+  const intentId = `world-${randomUUID()}`;
   const submitted = await ports.submitEmbodimentIntent({
     kind: "start",
     schemaVersion: 1,
@@ -79,11 +66,10 @@ async function submitStart(
     requestedAt: new Date().toISOString(),
     environmentId: input.environmentId,
     budget: input.budget ?? defaultPlayBudget(),
-    ...(venue === undefined ? {} : { venue }),
   });
   if (submitted.outcome === "refused") {
     return {
-      action: joining ? "join_refused" : "start_refused",
+      action: "join_refused",
       environmentId: input.environmentId,
       reason: submitted.reason,
     };
@@ -95,29 +81,20 @@ async function submitStart(
   const sessionId = submitted.session.sessionId;
   const outcome = await waitForSession(ports, sessionId, input.waitMs, input.pollMs, (session) => {
     if (session.state === "running") {
-      return joining
-        ? { action: "joined" as const, sessionId, environmentId: session.environmentId }
-        : {
-            action: "started" as const,
-            sessionId,
-            environmentId: session.environmentId,
-            ...(session.resumedFromCheckpointId === undefined
-              ? {}
-              : { resumedFromCheckpointId: session.resumedFromCheckpointId }),
-          };
+      return { action: "joined" as const, sessionId, environmentId: session.environmentId };
     }
     if (session.state === "refused") {
       return {
-        action: joining ? ("join_refused" as const) : ("start_refused" as const),
+        action: "join_refused" as const,
         environmentId: session.environmentId,
-        reason: session.refusalReason ?? (joining ? "world_unreachable" : "environment_unavailable"),
+        reason: session.refusalReason ?? "world_unreachable",
       };
     }
     if (session.state === "failed") {
       return {
-        action: joining ? ("join_refused" as const) : ("start_refused" as const),
+        action: "join_refused" as const,
         environmentId: session.environmentId,
-        reason: joining ? ("world_unreachable" as const) : ("environment_unavailable" as const),
+        reason: "world_unreachable" as const,
       };
     }
     return undefined;
@@ -156,14 +133,9 @@ export async function stopPlay(ports: PlayPorts, input: StopPlayInput): Promise<
   const sessionId = live.sessionId;
   const outcome = await waitForSession(ports, sessionId, input.waitMs, input.pollMs, (session) => {
     if (session.state === "stopped") {
-      return {
-        action: "stopped" as const,
-        sessionId,
-        ...(session.checkpointId === undefined ? {} : { checkpointId: session.checkpointId }),
-      };
+      return { action: "stopped" as const, sessionId };
     }
-    // Failed after a stop ask still means the playthrough ended; the note stays
-    // honest by carrying no checkpoint.
+    // Failed after a stop ask still means the playthrough ended.
     if (session.state === "failed" || session.state === "refused") {
       return { action: "stopped" as const, sessionId };
     }

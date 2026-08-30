@@ -11,9 +11,9 @@
  * Start `@clankie/discord-activity` first; without it the sink drops frames
  * and the receipt says so rather than failing the playthrough.
  */
-import { InterjectionQueue } from "@clankie/gba-emulator";
+import { InterjectionQueue } from "@clankie/play";
 import type { EmbodimentSession } from "@clankie/protocol";
-import { createGbaPlayExecution } from "../src/play-execution.ts";
+import { createWorldPlayExecution } from "../src/play-execution-world.ts";
 
 const turns = Number.parseInt(process.env["CLANKIE_FREE_PLAY_TURNS"] ?? "20", 10);
 if (!Number.isSafeInteger(turns) || turns <= 0) {
@@ -35,7 +35,7 @@ process.once("SIGINT", () => {
   console.log("\nstopping at the next turn boundary…");
 });
 
-const execution = createGbaPlayExecution({
+const execution = createWorldPlayExecution({
   logger: {
     info: (context, message) => console.log(message, context),
     warn: (context, message) => console.warn(message, context),
@@ -57,12 +57,8 @@ const session: EmbodimentSession = {
   updatedAt: new Date().toISOString(),
 };
 
-const outcome = await execution(session, { stopRequested: () => stopped }, (resumedFrom) => {
-  console.log(
-    resumedFrom === undefined
-      ? "clankie is playing, live on the activity surface\n"
-      : `clankie is playing, resumed from ${resumedFrom}, live on the activity surface\n`,
-  );
+const outcome = await execution(session, { stopRequested: () => stopped }, () => {
+  console.log("clankie is playing, live on the activity surface\n");
   return Promise.resolve();
 });
 
@@ -73,7 +69,6 @@ if (outcome.kind === "refused") {
 const result = outcome.result;
 console.log(
   `\n${result.outcome}: ${String(result.turnsTaken)} turns, ` +
-    `${String(result.framesPublished)} frames published, ${String(result.framesDropped)} dropped` +
-    (result.checkpointId === undefined ? "" : `, checkpoint ${result.checkpointId}`),
+    `${String(result.framesPublished)} frames published, ${String(result.framesDropped)} dropped`,
 );
 process.exit(0);

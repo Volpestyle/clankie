@@ -17,12 +17,8 @@ service (`apps/clankie`) plus the surfaces that reach it.
 - `apps/discord-bridge`, `apps/discord-user-session` — his Discord bodies
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
-- `apps/gba-mcp` — an isolated private GBA emulator contract sandbox for
-  external harnesses; it never controls Clankie's body or receives room input.
 - `apps/relay` — remote access for the phone/desktop app.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
-- `integrations/gba-emulator` — the local GBA implementation; each owning
-  process instantiates its own body/runtime.
 - `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
   actions); all other herdr integration is vanilla CLI/socket (ADR 0139).
   Optional, linked per checkout or from an installed release (`clankie doctor`
@@ -30,6 +26,8 @@ service (`apps/clankie`) plus the surfaces that reach it.
   `pnpm doctor` (checkout) or `clankie doctor` (any install).
 - `.agents/skills` — product skills shipped with every install (`this-machine`,
   `trace-clankie`). Checkout-only skills live in `.agents/dev-skills`.
+- `packages/play` — his play mind above one body seam; the body itself is his
+  seat in a hosted PokeAgents world (ADR 0145). No emulator lives in this repo.
 - `packages/` — shared contracts and adapters; `protocol` depends on nothing.
   `vox-client` is the Apache process boundary for the AGPL Vox executable;
   `play-voice` connects only Clankie's own play to his active Discord body.
@@ -55,9 +53,9 @@ service (`apps/clankie`) plus the surfaces that reach it.
   holds a shell. Official-bot DMs and trusted guilds own a durable
   tool-bearing lane under a separate session key. Voice is as capable as the
   room it is in.
-- No harness possesses Clankie. Local processes own independent game runtimes;
-  hosted co-play uses separately credentialed PokeAgents player seats. MCP is a
-  transport projection, not authority or gameplay semantics.
+- No harness possesses Clankie. He plays from his own credentialed PokeAgents
+  seat, and every other harness takes its own through PokeAgents' MCP, CLI, or
+  skill. MCP is a transport projection, not authority or gameplay semantics.
 - Always give Clankie maximum agency. Hand him context and tools and let him
   decide; don't gate behavior per trigger, script his words, or add a rule
   where volition would do. The only limits are the trust and safety

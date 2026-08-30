@@ -21,7 +21,7 @@ import type { EmbodimentAssignment, EmbodimentLifecycleUpdate } from "./embodime
 export type { EmbodimentAssignment, EmbodimentLifecycleUpdate } from "./embodiment.ts";
 
 type EmbodimentLifecycleTransition =
-  | { state: "running"; resumedFromCheckpointId?: string }
+  | { state: "running" }
   | { state: "stopping" }
   | { state: "refused"; refusalReason: EmbodimentRefusalReason }
   | { state: "stopped" | "failed"; receipt: EmbodimentSessionReceipt };
@@ -46,8 +46,6 @@ export interface PlayRunResult {
   durationMs: number;
   framesPublished: number;
   framesDropped: number;
-  checkpointId?: string;
-  resumedFromCheckpointId?: string;
 }
 
 type PlayExecutionResult =
@@ -55,14 +53,14 @@ type PlayExecutionResult =
   | { kind: "ran"; result: PlayRunResult };
 
 /**
- * One playthrough. Must call `onRunning` exactly once, after boot succeeds and
- * before the first turn — that is the moment "he is playing" becomes true, and
- * the lineage names the checkpoint he resumed from.
+ * One playthrough. Must call `onRunning` exactly once, after the world join
+ * succeeds and before the first turn — that is the moment "he is playing"
+ * becomes true.
  */
 export type PlayExecution = (
   session: EmbodimentSession,
   control: PlayControl,
-  onRunning: (resumedFromCheckpointId?: string) => Promise<void>,
+  onRunning: () => Promise<void>,
 ) => Promise<PlayExecutionResult>;
 
 interface PlayHostLogger {
@@ -313,25 +311,12 @@ export class PlayHost {
 
   private async runSession(active: ActivePlay, session: EmbodimentSession): Promise<void> {
     try {
-      const result = await this.options.execute(
-        session,
-        { stopRequested: () => active.stop },
-        async (resumedFromCheckpointId) => {
-          this.options.logger.info(
-            {
-              sessionId: session.sessionId,
-              ...(resumedFromCheckpointId === undefined ? {} : { resumedFromCheckpointId }),
-            },
-            "embodiment session running",
-          );
-          await this.report(session.sessionId, {
-            state: "running",
-            ...(resumedFromCheckpointId === undefined ? {} : { resumedFromCheckpointId }),
-          });
-          active.runningReported = true;
-          if (active.stop) await this.reportStopping(active);
-        },
-      );
+      const result = await this.options.execute(session, { stopRequested: () => active.stop }, async () => {
+        this.options.logger.info({ sessionId: session.sessionId }, "embodiment session running");
+        await this.report(session.sessionId, { state: "running" });
+        active.runningReported = true;
+        if (active.stop) await this.reportStopping(active);
+      });
       if (active.deadlineExpired) {
         this.options.logger.warn(
           { sessionId: session.sessionId },
@@ -355,7 +340,6 @@ export class PlayHost {
           durationMs: result.result.durationMs,
           framesPublished: result.result.framesPublished,
           framesDropped: result.result.framesDropped,
-          ...(result.result.checkpointId === undefined ? {} : { checkpointId: result.result.checkpointId }),
         },
         "embodiment session settled",
       );
@@ -403,10 +387,6 @@ export class PlayHost {
       durationMs: result.durationMs,
       framesPublished: result.framesPublished,
       framesDropped: result.framesDropped,
-      ...(result.checkpointId === undefined ? {} : { checkpointId: result.checkpointId }),
-      ...(result.resumedFromCheckpointId === undefined
-        ? {}
-        : { resumedFromCheckpointId: result.resumedFromCheckpointId }),
     };
   }
 

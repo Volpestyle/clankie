@@ -78,7 +78,8 @@ body ownership, or stop controls.
   the shared execution boundary.
 - Presence, activity rendering, narration, and play lifecycle remain separate
   capabilities that compose around the body.
-- Current Clankie play and checkpoint behavior belongs in the
-  [emulator guide](../../integrations/gba-emulator/README.md); the independent
-  harness tool surface belongs in the
-  [GBA MCP guide](../../apps/gba-mcp/README.md).
+- Current Clankie play behavior belongs in the
+  [play guide](../../packages/play/README.md). The local body and its
+  checkpoints are retired by
+  [ADR 0145](0145-the-world-is-the-only-body.md), which also moves the
+  independent harness surface to PokeAgents' own front doors.

@@ -11,17 +11,16 @@ flowchart LR
   Body --> Client["@clankie/vox-client<br/>Apache-2.0 IPC boundary"]
   Client --> Vox["one clankvox child<br/>AGPL-3.0-or-later"]
   Vox --> Media["Discord media<br/>voice + user-body stream roles"]
-  Service --> Local["Clankie's local emulator<br/>process-owned runtime"]
-  Service --> Contract["pinned @pokeagents/world-protocol"] --> Seat["Clankie's hosted seat<br/>separate player identity"]
-  Local --> Activity["Discord Activity<br/>rendered game media"]
-  Seat --> Activity
-  Harness["external harness"] --> GbaMcp["GBA MCP<br/>private emulator + runtime"]
+  Service --> Mind["@clankie/play<br/>mind, journal, voice"] --> Contract["pinned @pokeagents/world-protocol"] --> Seat["Clankie's hosted seat<br/>separate player identity"]
+  Seat --> Activity["Discord Activity<br/>rendered game media"]
+  Harness["every other harness"] --> Doors["@pokeagents/world-mcp<br/>world-cli · pokeagent-mmo skill"] --> OtherSeat["its own seat"]
   Service --> State["Keychain + bounded local state"]
   Service --> External["models, browser, Linear, email, Herdr"]
 ```
 
 This Mermaid diagram, [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md),
-and [ADR 0129](adr/0129-each-player-owns-a-body.md) are the canonical current
+[ADR 0129](adr/0129-each-player-owns-a-body.md), and
+[ADR 0145](adr/0145-the-world-is-the-only-body.md) are the canonical current
 architecture diagrams. The JPG/tldraw exports under `docs/diagrams/` are
 historical snapshots.
 
@@ -182,36 +181,37 @@ the full picture — what each store holds, who may read it, and what bounds it.
   herdr-lead board is the companion dashboard
   ([ADR 0097](adr/0097-herdr-lead-is-the-companion-dashboard.md)). Agents
   coordinate through herdr and plain files.
-- **Game bodies.** `runFreePlay` drives one seam, `GbaDriverIo`; its mind,
-  voice, progress, learned transitions, and behavior loop do not branch on
-  where the body is. The shared journal format does preserve body-aware
-  provenance at each causal stage, so evaluation can distinguish local state
-  from a hosted body generation without creating a second play loop.
-  Every sitting also carries a stable journey identity separate from its run
-  and checkpoint ids. The bounded story spans that journey, and the next local
-  or hosted sitting receives the last self-authored notes and objective while
-  exact world state remains owned by the checkpoint or hosted cartridge save
+- **His body.** `runFreePlay` drives one seam, `GbaDriverIo`
+  ([`packages/play`](../packages/play/README.md)); its mind, voice, progress,
+  learned transitions, and behavior loop hold no emulator and never learn what
+  implements the seam. One body implements it: Clankie's separately
+  credentialed seat in a PokeAgents world, reached through `WorldPlayerClient`
+  on `@pokeagents/world-protocol/ipc` (`WORLD_ADDRESS` unix, tcp, or tls —
+  defaulting to the world's own socket under `WORLD_STATE_DIR`) and entered
+  with the `pokeagent_join_mmo` tool
+  ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md),
+  [ADR 0145](adr/0145-the-world-is-the-only-body.md)). That seam consumes
+  verified FireRed adapter-v2 and Emerald adapter-v2 payloads, selected by the
+  observation's `(gameId, adapterVersion)` pair; unknown pairs and
+  game-specific extras the selected schema does not verify fail closed. A
+  hosted world cannot be paused, changes without him acting, and can replace
+  his body under him, so the loop offers no save, load, or restart action —
+  the world persists its own cartridge. `pokeagentMmoEnabled` is the owner
+  setting; with it off, or with no world reachable, the ask refuses out loud
+  rather than falling back. Frames flow to the Discord activity surface.
+  Every sitting carries a stable journey identity separate from its run id, the
+  bounded story spans that journey, and the next sitting receives the last
+  self-authored notes and objective while exact world state stays with the
+  cartridge save
   ([ADR 0126](adr/0126-game-state-history-and-memory-have-separate-owners.md)).
-  Two Clankie-owned bodies implement that seam. The local one is
-  [`integrations/gba-emulator`](../integrations/gba-emulator/README.md), booted
-  by the local play host in the service process. The hosted one is Clankie's
-  separately credentialed seat in a PokeAgents world, reached through
-  `WorldPlayerClient` on `@pokeagents/world-protocol/ipc` (`WORLD_ADDRESS` unix,
-  tcp, or tls) and entered with the `pokeagent_join_mmo` tool
-  ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). The hosted
-  `GbaDriverIo` seam consumes verified FireRed adapter-v2 and Emerald
-  adapter-v2 payloads, selected by the observation's `(gameId, adapterVersion)`
-  pair; unknown pairs and game-specific extras the selected schema does not
-  verify fail closed. A hosted world cannot be paused, changes without him
-  acting, and can replace his body under him. Owner settings independently
-  enable the local emulator and hosted MMO; both may be available while the
-  shared play host allows one live session across them. Frames from either
-  flow to the Discord activity surface.
-  [`apps/gba-mcp`](../apps/gba-mcp/README.md) is outside this path: each MCP
-  process owns a private emulator/runtime and grants its caller no control over
-  Clankie, Activity publication, play voice, or room input.
-  `EnvironmentRuntime` leases remain internal action/session fences within the
-  owning runtime; they are not cross-process possession.
+  The journal records body provenance at each causal stage, and its `venue`
+  still reads both values because journals written before ADR 0145 are on disk.
+  Other harnesses reach the same world through PokeAgents' own front doors —
+  `@pokeagents/world-mcp`, its CLI, or the `pokeagent-mmo` skill — each on its
+  own credentialed seat, with no control over Clankie, Activity publication,
+  play voice, or room input. `EnvironmentRuntime` leases remain internal
+  action/session fences within the owning runtime; they are not cross-process
+  possession.
 - **PokeAgents boundary.** The sibling PokeAgents repository owns the
   `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and
   the MCP projection derived from that catalog. MCP carries calls; the world

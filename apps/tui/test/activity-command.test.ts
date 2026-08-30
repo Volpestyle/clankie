@@ -79,14 +79,18 @@ describe("activity console command", () => {
 });
 
 describe("games console command", () => {
-  it("opens a toggle dialog where Enter changes each game", async () => {
-    const settings = new SettingsStore(
-      join(await mkdtemp(join(tmpdir(), "clankie-games-")), "settings.json"),
-    );
-    const selections = ["solo", "mmo", "done"];
-    const menus: Array<{ options: readonly { label: string }[] }> = [];
+  const store = async () =>
+    new SettingsStore(join(await mkdtemp(join(tmpdir(), "clankie-games-")), "settings.json"));
+  const gamesCommand = (settings: SettingsStore) => {
     const command = buildConsoleCommands({ settings }).find((candidate) => candidate.name === "games");
     if (command === undefined) throw new Error("games command not found");
+    return command;
+  };
+
+  it("opens a toggle dialog where Enter changes play", async () => {
+    const settings = await store();
+    const selections = ["mmo", "done"];
+    const menus: Array<{ options: readonly { label: string }[] }> = [];
     const shell = {
       setupFlow: {
         begin() {},
@@ -99,43 +103,29 @@ describe("games console command", () => {
       },
     } as unknown as ClankieFaceShell;
 
-    await command.run("", shell);
+    await gamesCommand(settings).run("", shell);
 
-    expect((await settings.load()).gameplay).toEqual({
-      pokemonEmulatorEnabled: false,
-      pokeagentMmoEnabled: false,
-    });
-    expect(menus[0]?.options.map((option) => option.label)).toEqual([
-      "✓ Pokémon emulator (solo)",
-      "✓ PokeAgent MMO",
-    ]);
-    expect(menus[1]?.options[0]?.label).toBe("○ Pokémon emulator (solo)");
+    expect((await settings.load()).gameplay).toEqual({ pokeagentMmoEnabled: false });
+    expect(menus[0]?.options.map((option) => option.label)).toEqual(["✓ PokeAgent MMO"]);
+    expect(menus[1]?.options[0]?.label).toBe("○ PokeAgent MMO");
   });
 
-  it("configures solo emulator and PokeAgent MMO independently", async () => {
-    const settings = new SettingsStore(
-      join(await mkdtemp(join(tmpdir(), "clankie-games-")), "settings.json"),
-    );
+  it("turns PokeAgent play off and on from an argument", async () => {
+    const settings = await store();
     const results: string[] = [];
-    const command = buildConsoleCommands({ settings }).find((candidate) => candidate.name === "games");
-    if (command === undefined) throw new Error("games command not found");
     const shell = {
       insertCommandResult(_invocation: string, text: string, _tone: string) {
         results.push(text);
       },
     } as ClankieFaceShell;
+    const command = gamesCommand(settings);
 
-    await command.run("solo off", shell);
-    expect((await settings.load()).gameplay).toEqual({
-      pokemonEmulatorEnabled: false,
-      pokeagentMmoEnabled: true,
-    });
-    await command.run("mmo off", shell);
-    expect((await settings.load()).gameplay).toEqual({
-      pokemonEmulatorEnabled: false,
-      pokeagentMmoEnabled: false,
-    });
-    expect(results[0]).toContain("Pokémon emulator (solo): disabled\nPokeAgent MMO: enabled");
-    expect(results[1]).toContain("Restart Clankie to apply this change.");
+    await command.run("off", shell);
+    expect((await settings.load()).gameplay).toEqual({ pokeagentMmoEnabled: false });
+    await command.run("on", shell);
+    expect((await settings.load()).gameplay).toEqual({ pokeagentMmoEnabled: true });
+
+    expect(results[0]).toContain("PokeAgent MMO: disabled");
+    expect(results[0]).toContain("Restart Clankie to apply this change.");
   });
 });

@@ -51,9 +51,6 @@ importers:
       '@clankie/environment-runtime':
         specifier: workspace:*
         version: link:../../packages/environment-runtime
-      '@clankie/gba-emulator':
-        specifier: workspace:*
-        version: link:../../integrations/gba-emulator
       '@clankie/interactive-environment':
         specifier: workspace:*
         version: link:../../packages/interactive-environment
@@ -69,6 +66,9 @@ importers:
       '@clankie/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@clankie/play':
+        specifier: workspace:*
+        version: link:../../packages/play
       '@clankie/play-voice':
         specifier: workspace:*
         version: link:../../packages/play-voice
@@ -251,34 +251,6 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
 
-  apps/gba-mcp:
-    dependencies:
-      '@clankie/gba-emulator':
-        specifier: workspace:*
-        version: link:../../integrations/gba-emulator
-      '@clankie/interactive-environment':
-        specifier: workspace:*
-        version: link:../../packages/interactive-environment
-      '@modelcontextprotocol/sdk':
-        specifier: 1.29.0
-        version: 1.29.0(zod@4.4.3)
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: 24.12.4
-        version: 24.12.4
-      tsx:
-        specifier: 4.23.0
-        version: 4.23.0
-      typescript:
-        specifier: 5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: 4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
-
   apps/menu-bar: {}
 
   apps/relay:
@@ -304,9 +276,6 @@ importers:
       '@clankie/credential-broker':
         specifier: workspace:*
         version: link:../../packages/credential-broker
-      '@clankie/gba-emulator':
-        specifier: workspace:*
-        version: link:../../integrations/gba-emulator
       '@clankie/model-provider':
         specifier: workspace:*
         version: link:../../packages/model-provider
@@ -352,46 +321,6 @@ importers:
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
 
   apps/vox: {}
-
-  integrations/gba-emulator:
-    dependencies:
-      '@clankie/environment-runtime':
-        specifier: workspace:*
-        version: link:../../packages/environment-runtime
-      '@clankie/interactive-environment':
-        specifier: workspace:*
-        version: link:../../packages/interactive-environment
-      '@clankie/model-provider':
-        specifier: workspace:*
-        version: link:../../packages/model-provider
-      '@clankie/protocol':
-        specifier: workspace:*
-        version: link:../../packages/protocol
-      '@clankie/settings':
-        specifier: workspace:*
-        version: link:../../packages/settings
-      ai:
-        specifier: ^7.0.19
-        version: 7.0.19(zod@4.4.3)
-      romdev-platform-gba:
-        specifier: 0.11.0
-        version: 0.11.0
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: 24.12.4
-        version: 24.12.4
-      tsx:
-        specifier: 4.23.0
-        version: 4.23.0
-      typescript:
-        specifier: 5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: 4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
 
   packages/api-client:
     dependencies:
@@ -578,6 +507,37 @@ importers:
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  packages/play:
+    dependencies:
+      '@clankie/environment-runtime':
+        specifier: workspace:*
+        version: link:../environment-runtime
+      '@clankie/interactive-environment':
+        specifier: workspace:*
+        version: link:../interactive-environment
+      '@clankie/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      ai:
+        specifier: ^7.0.19
+        version: 7.0.19(zod@4.4.3)
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.4
+        version: 24.12.4
+      tsx:
+        specifier: 4.23.0
+        version: 4.23.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -2798,10 +2758,6 @@ packages:
     resolution: {integrity: sha512-t9z29cJjXf/vxQ8dyhCSpt6H6aSwHTk8cT5I3iy6SMXuFpk5mB6PL6XfC8PCwrPTx93udwKUm9HRteAlTGBLiA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
-
-  romdev-platform-gba@0.11.0:
-    resolution: {integrity: sha512-3dkFlQdYV2stLnAxqnTGc7Ph7KCFmN+XL7OAxqy7nlSRJdtlIXp1IEJd7JKYI+HdQLxaJspFDSDPI6Myzsdt6Q==}
-    engines: {node: '>=24'}
 
   router@2.2.0:
     resolution: {integrity: sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ==}
@@ -5175,8 +5131,6 @@ snapshots:
       '@rolldown/binding-wasm32-wasi': 1.1.5
       '@rolldown/binding-win32-arm64-msvc': 1.1.5
       '@rolldown/binding-win32-x64-msvc': 1.1.5
-
-  romdev-platform-gba@0.11.0: {}
 
   router@2.2.0:
     dependencies:
