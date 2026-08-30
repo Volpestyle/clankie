@@ -43,8 +43,10 @@ const DESIGN_SYSTEM_FILES = [
   "config.js",
   "tpPanel.js",
   "tpPanelTool.js",
+  "tpNode.js",
   "tpTable.js",
   "tpSequence.js",
+  "tpConnect.js",
 ] as const;
 
 /**
@@ -401,183 +403,140 @@ export default function (ctx) {
  */
 const DIAGRAM_BUILDERS = `import { createShapeId, toRichText } from 'tldraw'
 import { measureSequence } from './tpSequence.js'
+import { connectShapes } from './tpConnect.js'
+import { fitTable, measureTable } from './tpTable.js'
 
 const TABLE_W = 560
 const COL_GAP = 240
 const ROW_GAP = 96
-const HEADER_H = 30
-const COLHDR_H = 27
-const ROW_H = 34
 const PER_COLUMN = 3
 
-const rowsOf = (columns) => columns.trim().split('\\n').filter((line) => line.trim())
-
-function estimateHeight(table) {
-\tconst footerLines = table.footer
-\t\t? table.footer.split('\\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / 74)), 0)
-\t\t: 0
-\treturn HEADER_H + COLHDR_H + rowsOf(table.columns).length * ROW_H + (footerLines ? 20 + footerLines * 18 : 0)
-}
-
-/** Normalized anchor on the edge of the row that owns \`field\`. */
-function rowAnchor(table, height, field, side) {
-\tconst rows = rowsOf(table.columns)
-\tconst index = rows.findIndex((line) => line.split('|')[1]?.trim() === field)
-\tconst y = HEADER_H + COLHDR_H + (index < 0 ? 0 : index) * ROW_H + ROW_H / 2
-\tif (side === 'top') return { x: 0.5, y: 0 }
-\tif (side === 'bottom') return { x: 0.5, y: 1 }
-\treturn { x: side === 'left' ? 0 : 1, y: y / height }
-}
-
 async function painted() {
-\tawait new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+	await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
 }
 
 /** Grow each table to the height its own DOM needs, then restack its column. */
 function fitTables(editor, columns, placed) {
-\tcolumns.forEach((column, ci) => {
-\t\tlet y = 0
-\t\tfor (const name of column) {
-\t\t\tconst id = placed[name]
-\t\t\tconst shape = editor.getShape(id)
-\t\t\tif (!shape) continue
-\t\t\tconst el = document.querySelector(\`[data-shape-id="\${id}"]\`)
-\t\t\tconst stack = el && [...el.querySelectorAll('div')].find((d) => d.style.flexDirection === 'column')
-\t\t\tconst needed = stack
-\t\t\t\t? Math.ceil([...stack.children].reduce((n, kid) => n + kid.scrollHeight, 0)) + 2
-\t\t\t\t: shape.props.h
-\t\t\tconst next = {}
-\t\t\tif (Math.abs(needed - shape.props.h) > 1) next.props = { h: needed }
-\t\t\tif (Math.abs(shape.y - y) > 1) next.y = y
-\t\t\tif (Object.keys(next).length) editor.updateShape({ id, type: shape.type, ...next })
-\t\t\ty += (next.props?.h ?? shape.props.h) + ROW_GAP
-\t\t}
-\t})
+	columns.forEach((column) => {
+		let y = 0
+		for (const name of column) {
+			const id = placed[name]
+			const shape = editor.getShape(id)
+			if (!shape) continue
+			const h = fitTable(editor, id) ?? shape.props.h
+			if (Math.abs(shape.y - y) > 1) editor.updateShape({ id, type: shape.type, y })
+			y += h + ROW_GAP
+		}
+	})
 }
 
 async function exportPage(editor, scale) {
-\tawait painted()
-\tconst ids = editor.getCurrentPageShapes().map((shape) => shape.id)
-\tif (ids.length === 0) throw new Error('nothing to export')
-\tconst image = await editor.toImageDataUrl(ids, { format: 'png', scale, background: true, padding: 48 })
-\treturn { url: image.url, width: image.width, height: image.height }
+	await painted()
+	const ids = editor.getCurrentPageShapes().map((shape) => shape.id)
+	if (ids.length === 0) throw new Error('nothing to export')
+	const image = await editor.toImageDataUrl(ids, { format: 'png', scale, background: true, padding: 48 })
+	return { url: image.url, width: image.width, height: image.height }
 }
 
 function clear(editor) {
-\teditor.deleteShapes(editor.getCurrentPageShapes().map((shape) => shape.id))
+	editor.deleteShapes(editor.getCurrentPageShapes().map((shape) => shape.id))
 }
 
 export async function buildEr(editor, helpers, data, scale) {
-\tclear(editor)
-\t// Balanced rather than three-then-remainder: four entities read better as
-\t// two columns of two than as a stack of three with an orphan beside it.
-\tconst columnCount = Math.max(1, Math.ceil(data.tables.length / PER_COLUMN))
-\tconst base = Math.floor(data.tables.length / columnCount)
-\tconst wide = data.tables.length % columnCount
-\tconst columns = []
-\tfor (let i = 0, taken = 0; i < columnCount; i += 1) {
-\t\tconst size = base + (i < wide ? 1 : 0)
-\t\tcolumns.push(data.tables.slice(taken, taken + size).map((table) => table.name))
-\t\ttaken += size
-\t}
-\tconst byName = new Map(data.tables.map((table) => [table.name, table]))
-\tconst columnOf = new Map()
-\tconst placed = {}
-\tconst heights = {}
+	clear(editor)
+	// Balanced rather than three-then-remainder: four entities read better as
+	// two columns of two than as a stack of three with an orphan beside it.
+	const columnCount = Math.max(1, Math.ceil(data.tables.length / PER_COLUMN))
+	const base = Math.floor(data.tables.length / columnCount)
+	const wide = data.tables.length % columnCount
+	const columns = []
+	for (let i = 0, taken = 0; i < columnCount; i += 1) {
+		const size = base + (i < wide ? 1 : 0)
+		columns.push(data.tables.slice(taken, taken + size).map((table) => table.name))
+		taken += size
+	}
+	const byName = new Map(data.tables.map((table) => [table.name, table]))
+	const columnOf = new Map()
+	const placed = {}
 
-\teditor.createShape({
-\t\tid: createShapeId('diagram-title'),
-\t\ttype: 'text',
-\t\tx: 0,
-\t\ty: -210,
-\t\tprops: { richText: toRichText(data.title), size: 'xl', font: 'mono', color: 'black', textAlign: 'start' },
-\t})
-\tif (data.subtitle) {
-\t\teditor.createShape({
-\t\t\tid: createShapeId('diagram-subtitle'),
-\t\t\ttype: 'text',
-\t\t\tx: 0,
-\t\t\ty: -112,
-\t\t\tprops: { richText: toRichText(data.subtitle), size: 'm', font: 'mono', color: 'black', textAlign: 'start' },
-\t\t})
-\t}
+	editor.createShape({
+		id: createShapeId('diagram-title'),
+		type: 'text',
+		x: 0,
+		y: -210,
+		props: { richText: toRichText(data.title), size: 'xl', font: 'mono', color: 'black', textAlign: 'start' },
+	})
+	if (data.subtitle) {
+		editor.createShape({
+			id: createShapeId('diagram-subtitle'),
+			type: 'text',
+			x: 0,
+			y: -112,
+			props: { richText: toRichText(data.subtitle), size: 'm', font: 'mono', color: 'black', textAlign: 'start' },
+		})
+	}
 
-\tcolumns.forEach((column, ci) => {
-\t\tlet y = 0
-\t\tfor (const name of column) {
-\t\t\tconst table = byName.get(name)
-\t\t\tconst h = estimateHeight(table)
-\t\t\tconst id = createShapeId(\`erd-\${ci}-\${name}\`)
-\t\t\teditor.createShape({
-\t\t\t\tid,
-\t\t\t\ttype: 'tp-table',
-\t\t\t\tx: ci * (TABLE_W + COL_GAP),
-\t\t\t\ty,
-\t\t\t\tprops: {
-\t\t\t\t\tw: TABLE_W,
-\t\t\t\t\th,
-\t\t\t\t\tname: table.name,
-\t\t\t\t\tengine: table.engine,
-\t\t\t\t\ttone: table.tone,
-\t\t\t\t\tcolumns: table.columns,
-\t\t\t\t\tfooter: table.footer,
-\t\t\t\t},
-\t\t\t})
-\t\t\tplaced[name] = id
-\t\t\theights[name] = h
-\t\t\tcolumnOf.set(name, ci)
-\t\t\ty += h + ROW_GAP
-\t\t}
-\t})
+	columns.forEach((column, ci) => {
+		let y = 0
+		for (const name of column) {
+			const table = byName.get(name)
+			const h = measureTable({ ...table, w: TABLE_W }).h
+			const id = createShapeId(\`erd-\${ci}-\${name}\`)
+			editor.createShape({
+				id,
+				type: 'tp-table',
+				x: ci * (TABLE_W + COL_GAP),
+				y,
+				props: {
+					w: TABLE_W,
+					h,
+					name: table.name,
+					engine: table.engine,
+					tone: table.tone,
+					columns: table.columns,
+					footer: table.footer,
+				},
+			})
+			placed[name] = id
+			columnOf.set(name, ci)
+			y += h + ROW_GAP
+		}
+	})
 
-\tfor (const edge of data.edges ?? []) {
-\t\tconst fromId = placed[edge.from]
-\t\tconst toId = placed[edge.to]
-\t\tif (!fromId || !toId) continue
-\t\tconst sameColumn = columnOf.get(edge.from) === columnOf.get(edge.to)
-\t\tconst rightwards = (columnOf.get(edge.to) ?? 0) > (columnOf.get(edge.from) ?? 0)
-\t\tconst fromSide = sameColumn ? 'bottom' : rightwards ? 'right' : 'left'
-\t\tconst toSide = sameColumn ? 'top' : rightwards ? 'left' : 'right'
-\t\tconst arrow = helpers.createArrowBetweenShapes(fromId, toId, {
-\t\t\t...(edge.label ? { richText: toRichText(edge.label) } : {}),
-\t\t})
-\t\teditor.updateShape({ id: arrow, type: 'arrow', props: { kind: 'elbow', color: 'grey', size: 's' } })
-\t\tfor (const binding of editor.getBindingsFromShape(arrow, 'arrow')) {
-\t\t\tconst isStart = binding.props.terminal === 'start'
-\t\t\tconst name = isStart ? edge.from : edge.to
-\t\t\teditor.updateBinding({
-\t\t\t\tid: binding.id,
-\t\t\t\ttype: 'arrow',
-\t\t\t\tprops: {
-\t\t\t\t\t...binding.props,
-\t\t\t\t\tnormalizedAnchor: rowAnchor(
-\t\t\t\t\t\tbyName.get(name),
-\t\t\t\t\t\theights[name],
-\t\t\t\t\t\tisStart ? edge.fromField : edge.toField,
-\t\t\t\t\t\tisStart ? fromSide : toSide,
-\t\t\t\t\t),
-\t\t\t\t\tisPrecise: true,
-\t\t\t\t\tisExact: false,
-\t\t\t\t},
-\t\t\t})
-\t\t}
-\t}
+	await painted()
+	editor.run(() => fitTables(editor, columns, placed), { history: 'ignore' })
 
-\tawait painted()
-\teditor.run(() => fitTables(editor, columns, placed), { history: 'ignore' })
-\treturn exportPage(editor, scale)
+	for (const edge of data.edges ?? []) {
+		const fromId = placed[edge.from]
+		const toId = placed[edge.to]
+		if (!fromId || !toId) continue
+		const sameColumn = columnOf.get(edge.from) === columnOf.get(edge.to)
+		const rightwards = (columnOf.get(edge.to) ?? 0) > (columnOf.get(edge.from) ?? 0)
+		const fromSide = sameColumn ? 'bottom' : rightwards ? 'right' : 'left'
+		const toSide = sameColumn ? 'top' : rightwards ? 'left' : 'right'
+		connectShapes(editor, helpers, fromId, toId, {
+			meaning: 'fk',
+			label: edge.label,
+			from: fromSide,
+			to: toSide,
+			fromField: edge.fromField,
+			toField: edge.toField,
+		})
+	}
+
+	return exportPage(editor, scale)
 }
 
 export async function buildSequence(editor, _helpers, data, scale) {
-\tclear(editor)
-\tconst size = measureSequence(data)
-\teditor.createShape({
-\t\tid: createShapeId('sequence'),
-\t\ttype: 'tp-sequence',
-\t\tx: 0,
-\t\ty: 0,
-\t\tprops: { title: data.title, lanes: data.lanes, steps: data.steps, tone: 'black', ...size },
-\t})
-\treturn exportPage(editor, scale)
+	clear(editor)
+	const size = measureSequence(data)
+	editor.createShape({
+		id: createShapeId('sequence'),
+		type: 'tp-sequence',
+		x: 0,
+		y: 0,
+		props: { title: data.title, lanes: data.lanes, steps: data.steps, tone: 'black', ...size },
+	})
+	return exportPage(editor, scale)
 }
 `;

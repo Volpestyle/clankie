@@ -65,15 +65,17 @@ function fakeCanvas(scriptDir: string): FakeCanvas {
   return canvas;
 }
 
-/** The three files the host actually reads out of the design system. */
+/** The design-system files the host copies into a board. */
 async function fakeDesignSystem(directory: string): Promise<void> {
   await mkdir(directory, { recursive: true });
   for (const file of [
     "config.js",
     "tpPanel.js",
     "tpPanelTool.js",
+    "tpNode.js",
     "tpTable.js",
     "tpSequence.js",
+    "tpConnect.js",
     "main.js",
   ]) {
     await writeFile(join(directory, file), `// ${file}\n`);
