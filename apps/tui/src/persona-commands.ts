@@ -1,5 +1,5 @@
 import { SettingsStore, type PersonaSettings } from "@clankie/settings";
-import { personaStatus, personaUpdate } from "./command/persona.ts";
+import { formatPersonaLines, personaStatus, personaUpdate } from "./command/persona.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface PersonaCommandServices {
@@ -44,28 +44,11 @@ function resolvePersonaText(typed: string, existing: string): string {
   return typed.trim().length > 0 ? typed.trim() : existing;
 }
 
-function describePersona(persona: PersonaSettings): string[] {
-  const notes = persona.characterNotes.trim();
-  return [
-    `name: ${persona.displayName}`,
-    `also answers to: ${persona.aliases.length === 0 ? "—" : persona.aliases.join(", ")}`,
-    `chattiness: ${persona.chattiness}`,
-    `reads text channels: ${persona.replyPolicy === "all" ? "every admitted message" : "when addressed"}`,
-    "",
-    "character:",
-    ...(notes.length === 0 ? ["  (none set — he will sound like a default assistant)"] : indent(notes)),
-  ];
-}
-
-function indent(value: string): string[] {
-  return value.split("\n").map((line) => `  ${line}`);
-}
-
 async function showPersonaStatus(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
   const result = await personaStatus({ settings: services.settings });
   shell.insertCommandResult(
     "/persona status",
-    [`settings file: ${result.settingsFile}`, "", ...describePersona(result.persona)].join("\n"),
+    [`settings file: ${result.settingsFile}`, "", ...formatPersonaLines(result.persona)].join("\n"),
     "success",
   );
 }

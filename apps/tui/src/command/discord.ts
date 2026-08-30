@@ -48,6 +48,55 @@ async function result(
   };
 }
 
+export function formatDiscordSettings(settings: DiscordSettings): string[] {
+  const show = (label: string, value: string | undefined): string =>
+    `${label}: ${value === undefined || value.length === 0 ? "—" : value}`;
+  const showList = (label: string, values: readonly string[]): string =>
+    `${label}: ${values.length === 0 ? "—" : values.join(", ")}`;
+  return [
+    show("application id", settings.applicationId),
+    `command server: ${settings.guildId ?? "— (commands register globally)"}`,
+    showList("ambient roles", settings.ambientRoleIds),
+    showList("ambient users", settings.ambientUserIds),
+    showList("approval roles", settings.approvalRoleIds),
+    show("owner user id", settings.ownerUserId),
+    showList("system actors", settings.systemActorUserIds),
+    showList("system guilds", settings.systemActorGuildIds),
+    showList("system channels", settings.systemActorChannelIds),
+    "",
+    `text ingress: ${settings.textIngressEnabled ? "enabled" : "disabled"}`,
+    showList("  ingress guilds", settings.ingressGuildIds),
+    showList("  ingress channels", settings.ingressChannelIds),
+    `  dm policy: ${settings.ingressDmPolicy}`,
+    `  context messages: ${String(settings.ingressContextMessages)}`,
+    showList("  tool progress channels", settings.toolProgressChannelIds),
+    "",
+    showList("presence guilds", settings.presenceGuildIds),
+    showList("presence channels", settings.presenceChannelIds),
+    "",
+    `active body: ${settings.activeBody === "user_session" ? "lab user" : "official bot"}`,
+    `lab user body: ${settings.userSessionEnabled ? "enabled" : "disabled"}`,
+    showList("  lab guilds", settings.userSessionGuildIds),
+    showList("  lab channels", settings.userSessionChannelIds),
+    showList("  lab voice channels", settings.userSessionVoiceChannelIds),
+    `  lab voice: ${settings.userSessionVoiceEnabled ? "enabled" : "disabled"}`,
+    `  lab DMs: ${settings.userSessionDmPolicy}`,
+    "",
+    `voice: ${settings.voiceEnabled ? "enabled" : "disabled"}`,
+    showList("  voice guilds", settings.voiceGuildIds),
+    showList("  voice channels", settings.voiceChannelIds),
+    `  who may summon: ${settings.voiceJoinPolicy === "guild_members" ? "any member of those servers" : "ambient tier only"}`,
+    `  who he hears: ${
+      settings.voiceConsentPolicy === "presence"
+        ? "anyone in his active voice channel (one-time owner switch)"
+        : "only people who opt in each call"
+    }`,
+    `  full transcript log: ${settings.voiceTranscriptLoggingEnabled ? "enabled" : "disabled"}`,
+    "",
+    show("activity application id (gba)", settings.activityApplicationIdGba),
+  ];
+}
+
 export async function discordStatus(options: DiscordCommandOptions = {}): Promise<DiscordCommandResult> {
   const settings = store(options);
   return await result(settings, (await settings.load()).discord, options);

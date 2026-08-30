@@ -13,6 +13,7 @@ import {
 import { SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
+import { HEADLESS_NOUNS } from "../src/command/registry.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const tempDirs: string[] = [];
@@ -102,32 +103,19 @@ describe("headless clankie commands", () => {
     expect(exitCode).toBe(0);
     expect(stderr.text()).toBe("");
     const help = stdout.text();
+    for (const noun of HEADLESS_NOUNS) {
+      expect(help).toContain(noun);
+    }
     for (const token of [
-      "health",
-      "status",
-      "doctor",
-      "restart",
-      "down",
-      "pair",
       "--json",
       "--timeout",
-      "devices",
       "revoke",
-      "operator-credential",
       "play status",
       "play stop",
       "model add-local",
       "--set",
       "--models",
       "/v1",
-      "model set",
-      "effort set",
-      "image-model",
-      "video-model",
-      "persona set",
-      "games status",
-      "discord set",
-      "relay",
       "docs/cli.md",
       "/auth",
     ]) {

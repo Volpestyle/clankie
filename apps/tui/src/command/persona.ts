@@ -23,6 +23,21 @@ function store(options: PersonaCommandOptions): SettingsStore {
   return options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
 }
 
+export function formatPersonaLines(persona: PersonaSettings): string[] {
+  const notes = persona.characterNotes.trim();
+  return [
+    `name: ${persona.displayName}`,
+    `also answers to: ${persona.aliases.length === 0 ? "—" : persona.aliases.join(", ")}`,
+    `chattiness: ${persona.chattiness}`,
+    `reads text channels: ${persona.replyPolicy === "all" ? "every admitted message" : "when addressed"}`,
+    "",
+    "character:",
+    ...(notes.length === 0
+      ? ["  (none set — he will sound like a default assistant)"]
+      : notes.split("\n").map((line) => `  ${line}`)),
+  ];
+}
+
 export async function personaStatus(options: PersonaCommandOptions = {}): Promise<PersonaCommandResult> {
   const settings = store(options);
   return {
