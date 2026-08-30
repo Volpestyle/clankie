@@ -73,6 +73,7 @@ describe("canonical owner command layer", () => {
       credentials: [],
       commands: {},
       herdrPlugin: { bundled: false },
+      selectedModel: null,
       remediations: [],
     } as const;
     const results: Array<{ command: string; text: string }> = [];

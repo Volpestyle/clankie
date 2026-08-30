@@ -81,6 +81,112 @@ describe("install doctor", () => {
     expect(JSON.stringify(report)).not.toContain(secret);
   });
 
+  describe("the selected model", () => {
+    async function doctorWith(
+      provider: Record<string, unknown>,
+      model: string,
+      fetchImpl: typeof fetch,
+      credentials?: FileCredentialStore,
+    ) {
+      const root = await installRoot();
+      const configHome = join(root, "config");
+      await mkdir(join(configHome, "clankie"), { recursive: true });
+      await writeFile(
+        join(configHome, "clankie", "clankie.json"),
+        `${JSON.stringify({ model, provider })}\n`,
+      );
+      return await inspectInstall({
+        repoRoot: root,
+        env: { HOME: join(root, "home"), XDG_CONFIG_HOME: configHome },
+        ...(credentials === undefined ? {} : { credentialStore: credentials }),
+        execFileImpl: missing,
+        fetchImpl,
+      });
+    }
+
+    const localProvider = {
+      ds4: {
+        npm: "@ai-sdk/openai-compatible",
+        options: { baseURL: "http://127.0.0.1:8000/v1" },
+        models: { "DeepSeek-V4-Flash": {} },
+      },
+    };
+
+    it("says the runtime is down rather than reporting a healthy install", async () => {
+      const empty = new FileCredentialStore(join(await installRoot(), "credentials.json"));
+      const report = await doctorWith(
+        localProvider,
+        "ds4/DeepSeek-V4-Flash",
+        () => Promise.reject(new Error("fetch failed")),
+        empty,
+      );
+      expect(report.selectedModel?.endpoint).toMatchObject({ reachable: false });
+      expect(report.remediations).toContain(
+        "Start the runtime behind http://127.0.0.1:8000/v1; every captain turn on ds4/DeepSeek-V4-Flash fails until it answers.",
+      );
+    });
+
+    it("names the credential an endpoint asks for, on the evidence of its own 401", async () => {
+      // An explicit empty store: the default one is the OS keychain on darwin,
+      // which ignores HOME and would answer with the developer's real keys.
+      const empty = new FileCredentialStore(join(await installRoot(), "credentials.json"));
+      const report = await doctorWith(
+        localProvider,
+        "ds4/DeepSeek-V4-Flash",
+        () => Promise.resolve(new Response("", { status: 401 })),
+        empty,
+      );
+      expect(report.selectedModel?.endpoint).toMatchObject({ reachable: true, authRequired: true });
+      expect(report.remediations).toContain(
+        "http://127.0.0.1:8000/v1 requires a key and none is stored for ds4; add it with `/auth ds4`.",
+      );
+    });
+
+    it("catches a ref naming a model the provider does not declare", async () => {
+      const empty = new FileCredentialStore(join(await installRoot(), "credentials.json"));
+      const report = await doctorWith(
+        localProvider,
+        "ds4/deepseek-v4-flash",
+        () => Promise.resolve(new Response("{}", { status: 200 })),
+        empty,
+      );
+      expect(report.selectedModel?.endpoint).toMatchObject({ declaresModel: false });
+      expect(report.remediations).toContain(
+        "Provider ds4 declares no model deepseek-v4-flash; re-probe with `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000/v1`.",
+      );
+    });
+
+    it("stays quiet for a healthy local endpoint, and never probes a builtin provider", async () => {
+      const store = new FileCredentialStore(join(await installRoot(), "credentials.json"));
+      await store.set("ds4", { type: "api", key: "k" });
+      const healthy = await doctorWith(
+        localProvider,
+        "ds4/DeepSeek-V4-Flash",
+        () => Promise.resolve(new Response("{}", { status: 401 })),
+        store,
+      );
+      expect(healthy.remediations).toEqual([]);
+
+      let probed = false;
+      const builtin = await doctorWith(
+        {},
+        "xai/grok-4.6",
+        () => {
+          probed = true;
+          return Promise.resolve(new Response("{}", { status: 200 }));
+        },
+        new FileCredentialStore(join(await installRoot(), "credentials.json")),
+      );
+      expect(probed).toBe(false);
+      expect(builtin.selectedModel).toEqual({
+        ref: "xai/grok-4.6",
+        providerId: "xai",
+        modelId: "grok-4.6",
+      });
+      expect(builtin.remediations).toEqual([]);
+    });
+  });
+
   it("asks to link a bundled herdr plugin when herdr is present and the plugin is not linked", async () => {
     const root = await installRoot();
     await mkdir(join(root, "libexec"), { recursive: true });

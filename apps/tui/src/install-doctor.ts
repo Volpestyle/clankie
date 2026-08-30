@@ -8,7 +8,12 @@ import {
   type CredentialStore,
   type RedactedCredential,
 } from "@clankie/credential-broker";
-import { loadConfig, type LoadConfigResult } from "@clankie/model-provider";
+import {
+  loadConfig,
+  parseModelRef,
+  type ClankieConfig,
+  type LoadConfigResult,
+} from "@clankie/model-provider";
 import { SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
 
 const execFileAsync = promisify(execFileCallback);
@@ -72,7 +77,30 @@ export interface InstallDoctorReport {
   readonly credentials: readonly InstallDoctorCredential[];
   readonly commands: { readonly [name: string]: CommandPresence };
   readonly herdrPlugin: HerdrPluginReport;
+  readonly selectedModel: SelectedModelReport | null;
   readonly remediations: readonly string[];
+}
+
+/**
+ * What the captain's selected model actually resolves to. `doctor` reporting a
+ * healthy install while every turn fails is the failure this closes: a ref can
+ * name a provider that is unreachable, a model the endpoint does not serve, or
+ * an endpoint that wants a key nothing has stored.
+ */
+export interface SelectedModelReport {
+  readonly ref: string;
+  readonly providerId: string;
+  readonly modelId: string;
+  /** Present only for a provider declared in clankie.json with its own baseURL. */
+  readonly endpoint?: {
+    readonly baseURL: string;
+    readonly reachable: boolean;
+    /** The endpoint answered an unauthenticated probe with 401/403. */
+    readonly authRequired: boolean;
+    readonly credentialStored: boolean;
+    /** The ref's model id is one this provider declares. */
+    readonly declaresModel: boolean;
+  };
 }
 
 export type ExecFileImpl = (
@@ -87,6 +115,7 @@ export interface InspectInstallOptions {
   readonly credentialStore?: CredentialStore;
   readonly loadConfigImpl?: (input: { cwd: string; env: NodeJS.ProcessEnv }) => Promise<LoadConfigResult>;
   readonly execFileImpl?: ExecFileImpl;
+  readonly fetchImpl?: typeof fetch;
 }
 
 /** A release ships `libexec/node` and `release.json`; a checkout does not. */
@@ -126,12 +155,20 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     pluginBundle,
   );
   const model = unsetToNull(config.config.model);
+  const credentialIds = new Set(credentials.map((entry) => entry.id));
+  const selectedModel = await inspectSelectedModel(
+    model,
+    config.config,
+    credentialIds,
+    options.fetchImpl ?? fetch,
+  );
   const remediations = collectRemediations({
     model,
     discord: settings.discord,
-    credentialIds: new Set(credentials.map((entry) => entry.id)),
+    credentialIds,
     commands,
     herdrPlugin,
+    selectedModel,
   });
 
   return {
@@ -166,7 +203,53 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     credentials,
     commands,
     herdrPlugin,
+    selectedModel,
     remediations,
+  };
+}
+
+/**
+ * Probes the selected ref's endpoint when it is one clankie.json declares. The
+ * probe is deliberately unauthenticated: a 401 is the positive signal that the
+ * endpoint wants a key, which is what makes the credential check evidence-based
+ * rather than a guess about how the provider resolves auth.
+ */
+async function inspectSelectedModel(
+  model: string | null,
+  config: ClankieConfig,
+  credentialIds: ReadonlySet<string>,
+  fetchImpl: typeof fetch,
+): Promise<SelectedModelReport | null> {
+  if (model === null) return null;
+  const parsed = parseModelRef(model);
+  if (parsed === undefined) return null;
+  const { providerId, modelId } = parsed;
+  const declared = config.provider?.[providerId];
+  const baseURL = typeof declared?.options?.baseURL === "string" ? declared.options.baseURL : undefined;
+  if (declared === undefined || baseURL === undefined) return { ref: model, providerId, modelId };
+
+  let reachable = false;
+  let authRequired = false;
+  try {
+    const response = await fetchImpl(`${baseURL.replace(/\/+$/u, "")}/models`, {
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    reachable = true;
+    authRequired = response.status === 401 || response.status === 403;
+  } catch {
+    reachable = false;
+  }
+  return {
+    ref: model,
+    providerId,
+    modelId,
+    endpoint: {
+      baseURL,
+      reachable,
+      authRequired,
+      credentialStored: credentialIds.has(providerId),
+      declaresModel: Object.hasOwn(declared.models ?? {}, modelId),
+    },
   };
 }
 
@@ -275,10 +358,30 @@ function collectRemediations(input: {
   readonly credentialIds: ReadonlySet<string>;
   readonly commands: { readonly [name: string]: CommandPresence };
   readonly herdrPlugin: HerdrPluginReport;
+  readonly selectedModel: SelectedModelReport | null;
 }): string[] {
   const remediations: string[] = [];
   if (input.model === null) {
     remediations.push("Pick a captain model with `clankie model set provider/model` or `/model`.");
+  }
+  const endpoint = input.selectedModel?.endpoint;
+  const selectedProvider = input.selectedModel?.providerId;
+  if (endpoint !== undefined && selectedProvider !== undefined) {
+    if (!endpoint.reachable) {
+      remediations.push(
+        `Start the runtime behind ${endpoint.baseURL}; every captain turn on ${input.selectedModel?.ref} fails until it answers.`,
+      );
+    }
+    if (endpoint.authRequired && !endpoint.credentialStored) {
+      remediations.push(
+        `${endpoint.baseURL} requires a key and none is stored for ${selectedProvider}; add it with \`/auth ${selectedProvider}\`.`,
+      );
+    }
+    if (!endpoint.declaresModel) {
+      remediations.push(
+        `Provider ${selectedProvider} declares no model ${input.selectedModel?.modelId}; re-probe with \`clankie model add-local --id ${selectedProvider} --base-url ${endpoint.baseURL}\`.`,
+      );
+    }
   }
   const discordInUse =
     input.discord.textIngressEnabled || input.discord.voiceEnabled || input.discord.userSessionEnabled;

@@ -385,10 +385,10 @@ Unknown names fail closed without signalling any process.
 | `XDG_CONFIG_HOME`           | Config root. Model/provider config is `$XDG_CONFIG_HOME/clankie/clankie.json` (default `~/.config/clankie/clankie.json`). |
 | `XDG_STATE_HOME`            | Process records and logs (`$XDG_STATE_HOME/clankie/`).                                                                    |
 
-## Not on this CLI
+## Console-only, not missing
 
-These stay interactive because they carry secrets, external consent, or live
-session chrome:
+These carry secrets, external consent, or live session chrome, so entry stays
+interactive in the console. The capability exists — only the flag does not:
 
 - `/auth` and `/connect` secret entry — provider keys, OAuth, Linear, and email
 - `/discord` secret entry and lab-user ToS opt-in — Discord tokens never become flags
@@ -397,6 +397,55 @@ session chrome:
 
 There is no `clankie start`, `clankie up`, or `clankie auth`. Local model
 servers are not supervised.
+
+### Where a provider key lives
+
+One credential store backs both surfaces: `/auth <providerId>` writes it, and
+every service this CLI starts reads it. Provider config in `clankie.json` never
+holds a secret — the schema rejects secret-shaped keys — so an endpoint that
+wants a bearer gets it from the store, keyed by the same provider id as the
+model ref.
+
+A local endpoint that checks a key therefore needs two things, not one:
+
+```sh
+clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --models <id>
+# then, in the console: /auth ds4
+```
+
+`--models` is required there because the add-local probe is unauthenticated: a
+keyed endpoint answers its `GET {baseURL}/models` with 401 and the probe
+reports `Could not list models`. A genuinely keyless local runtime needs no
+`/auth` step — it is served a placeholder bearer it ignores.
+
+### Pointing the captain at a local model
+
+Start to finish, with the runtime already serving:
+
+```sh
+curl -s -H "authorization: Bearer $KEY" http://127.0.0.1:8000/v1/models   # the real ids
+clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --models <id>
+# console: /auth ds4              (only if the endpoint checks a key)
+clankie model set ds4/<id>
+clankie restart captain
+```
+
+Model ids come from the endpoint, never from a guess: a runtime that serves
+from a directory names the model after that directory, so `ds4/deepseek-v4-flash`
+is a 404 where the served id is `DeepSeek-V4-Flash-0731-2.4bit-mixed`.
+
+Two things decide whether a local captain is usable, and neither shows up in
+`clankie doctor`:
+
+- **Decode speed.** A large model whose weights get paged out runs one or two
+  tokens a second regardless of the hardware's rating. Check `sysctl
+  vm.swapusage` on the host before blaming the captain.
+- **Prefill.** Every turn re-sends the system prompt and the tool schemas, so
+  time-to-first-token at 8k-32k context is paid on each one, not once. A model
+  that chats acceptably can still be unusable in a tool loop.
+
+Revert with `clankie model set <provider>/<model>` and another
+`clankie restart captain`; nothing about the switch is one-way.
 
 ## Related
 
