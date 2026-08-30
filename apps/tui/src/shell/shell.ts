@@ -5,8 +5,9 @@
  * selection, Ctrl+Shift+F search) above a dock that pins the working
  * indicator, editor, typeahead, and footer to the bottom of the terminal.
  * Messages render with pi's own components (user boxes, assistant markdown,
- * bordered tool executions), and clicking a tool or bash block toggles its
- * output between preview and full. Clankie's banner, slash-command typeahead,
+ * bordered tool executions), clicking a tool or bash block toggles its
+ * output between preview and full, and clicking a herdr pane id he wrote
+ * jumps the session to that pane. Clankie's banner, slash-command typeahead,
  * Ctrl+/ workbench, guided-flow modals, and inline `!` shell escape stay
  * intact. Dynamic data flows in through `FaceShellOptions` (commands,
  * onPrompt, footerData) so the clankie service stays behind
@@ -42,6 +43,7 @@ import {
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { ClankieBannerComponent, type BannerFields } from "../face/clankie-banner.ts";
 import { isClankieLeftMouseButton, parseClankieSgrMouse } from "../face/clankie-sgr-mouse.ts";
+import { formatHerdrJumpResult, herdrPaneRefAtColumn, jumpToHerdrAgent } from "../session/herdr-report.ts";
 import {
   clankieCommandCompletion,
   createClankieAutocompleteProvider,
@@ -190,16 +192,16 @@ function observeTerminalInput(terminal: Terminal, observe: (data: string) => voi
   };
 }
 
-/** Walks the transcript's flat rows to the block a click landed on. */
+/** Walks the transcript's flat rows to the block a click landed on, and where in it. */
 export function clickedTranscriptBlock(
   blocks: readonly Component[],
   width: number,
   flatRow: number,
-): Component | undefined {
+): { readonly block: Component; readonly row: number } | undefined {
   let row = flatRow;
   for (const block of blocks) {
     const rows = block.render(width).length;
-    if (row < rows) return block;
+    if (row < rows) return { block, row };
     row -= rows;
   }
   return undefined;
@@ -694,11 +696,28 @@ export class ClankieFaceShell {
       this.transcriptScrollView.scrollTop + y,
     );
     if (target === undefined) return;
-    const entry = this.expandableBlocks.get(target);
+    const paneRef = herdrPaneRefAtColumn(target.block.render(width)[target.row] ?? "", x);
+    if (paneRef !== undefined) {
+      this.jumpToHerdrPane(paneRef);
+      return;
+    }
+    const entry = this.expandableBlocks.get(target.block);
     if (entry === undefined) return;
     entry.expanded = !entry.expanded;
     entry.setExpanded(entry.expanded);
     this.tui.requestRender();
+  }
+
+  /**
+   * Follow a pane id Clankie wrote. A working jump speaks for itself — the
+   * session moves — so only a refusal reaches the transcript.
+   */
+  private jumpToHerdrPane(target: string): void {
+    void jumpToHerdrAgent(target, { env: this.env }).then((result) => {
+      if (result.outcome === "ok") return;
+      const formatted = formatHerdrJumpResult(result);
+      this.insertCommandResult(`/jump ${target}`, formatted.text, formatted.tone);
+    });
   }
 
   // --- status / footer ---

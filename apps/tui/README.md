@@ -5,8 +5,9 @@ in pi's fullscreen mode: messages, tool executions, the working indicator, and
 the footer render with pi's own interactive components in a scrollable
 transcript (mouse wheel, scrollbar, drag text selection, `Ctrl+Shift+F`
 search) above an editor docked to the bottom of the terminal. Clicking a tool
-or bash block toggles its full output (`Ctrl+O` toggles them all), and the
-transcript is left in scrollback on exit. Around it sits Clankie's chrome —
+or bash block toggles its full output (`Ctrl+O` toggles them all), clicking a
+herdr pane id jumps the session to that pane, and the transcript is left in
+scrollback on exit. Around it sits Clankie's chrome —
 the banner, slash-command typeahead, guided setup flows, and the `Ctrl+/`
 command workbench — dressed in pi's dark palette
 ([ADR 0137](../../docs/adr/0137-the-face-wears-pis-chat-surface.md)).
@@ -164,6 +165,11 @@ on|off` remain available for direct use. Restart Clankie to apply a change.
   `GET {baseURL}/models`, and needs no credential. The service picks the new
   provider up on `clankie restart captain`.
 - `/layout` shows or hides the header banner.
+- `/jump <pane|agent>` focuses a herdr agent (`herdr agent focus`), and any
+  pane id in the transcript — `w18:p1J`, wherever Clankie or a tool wrote it —
+  is clickable for the same jump. Only a refusal reaches the transcript; a
+  working jump moves the session, which says it better. `/status` lists the
+  pane ids to aim at.
 - `!` on empty input opens the inline shell. `Ctrl+O` toggles tool and bash
   output between preview and full; clicking a block toggles just that one.
   Esc interrupts an in-flight turn: the service aborts Clankie's live model

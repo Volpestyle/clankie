@@ -178,11 +178,11 @@ describe("shell assembly", () => {
     const second = block(2);
     const third = block(5);
     const blocks = [first, second, third];
-    expect(clickedTranscriptBlock(blocks, 80, 0)).toBe(first);
-    expect(clickedTranscriptBlock(blocks, 80, 2)).toBe(first);
-    expect(clickedTranscriptBlock(blocks, 80, 3)).toBe(second);
-    expect(clickedTranscriptBlock(blocks, 80, 4)).toBe(second);
-    expect(clickedTranscriptBlock(blocks, 80, 9)).toBe(third);
+    expect(clickedTranscriptBlock(blocks, 80, 0)).toEqual({ block: first, row: 0 });
+    expect(clickedTranscriptBlock(blocks, 80, 2)).toEqual({ block: first, row: 2 });
+    expect(clickedTranscriptBlock(blocks, 80, 3)).toEqual({ block: second, row: 0 });
+    expect(clickedTranscriptBlock(blocks, 80, 4)).toEqual({ block: second, row: 1 });
+    expect(clickedTranscriptBlock(blocks, 80, 9)).toEqual({ block: third, row: 4 });
     expect(clickedTranscriptBlock(blocks, 80, 10)).toBeUndefined();
   });
 

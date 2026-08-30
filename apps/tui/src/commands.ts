@@ -31,6 +31,7 @@ import {
   type HerdLeadCompanionResult,
 } from "./observation/herd-lead-companion.ts";
 import { formatCaptainContextUsage } from "./shell/footer.ts";
+import { formatHerdrJumpResult, jumpToHerdrAgent } from "./session/herdr-report.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
@@ -594,6 +595,28 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           verb === "focus" ? await focusBoard() : verb === "close" ? await closeBoard() : await openBoard();
         const formatted = formatHerdLeadCompanionResult(result, verb);
         shell.insertCommandResult("/board", formatted.text, formatted.tone);
+      },
+    },
+    {
+      name: "jump",
+      aliases: ["go"],
+      description: "Focus a herdr agent by pane id or name (or click one he wrote)",
+      argumentHint: "<pane|agent>",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const target = argument.trim();
+        if (target.length === 0) {
+          const roster = herdrRoster?.();
+          const known = (roster?.agents ?? []).map((agent) => `${agent.paneId} ${agent.agent}`).join(" · ");
+          shell.insertCommandResult(
+            "/jump",
+            known.length === 0 ? "Name a pane id or agent, such as `/jump w18:p1`." : `Pick one: ${known}`,
+            "error",
+          );
+          return;
+        }
+        const formatted = formatHerdrJumpResult(await jumpToHerdrAgent(target));
+        shell.insertCommandResult(`/jump ${target}`, formatted.text, formatted.tone);
       },
     },
     {

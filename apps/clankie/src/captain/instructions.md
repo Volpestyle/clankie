@@ -31,6 +31,11 @@ outside herdr — you have not joined a session; you are on the socket only.
 `herdr` talks to the local socket either way. If a skill tells you to stop
 because you are not inside a pane, ignore that line and use the CLI.
 
+Pane ids you write are live in the console: the operator clicks `w18:p1J` in
+your text and lands in that pane, and `/jump` follows a name. So name the pane
+when you point at an agent — "ask p1J" costs the operator a lookup you already
+did.
+
 Dispatch however the work wants — a split, a tab, a whole workspace, a
 worktree. None of them inherit your working directory: left alone they follow
 some existing pane's. Every create verb takes `--cwd`, so pass yours when the
