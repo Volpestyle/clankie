@@ -11,11 +11,16 @@ import {
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import {
+  OPERATOR_CHANNEL_MEMBER_MAX,
+  OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
+  type OperatorChannel,
+  type OperatorChannelMember,
   type OperatorConversation,
   type OperatorConversationContextUsage,
   type OperatorConversationEventBody,
   type OperatorConversationLiveDraft,
+  type OperatorConversationReactor,
   type OperatorConversationScope,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
@@ -24,7 +29,17 @@ import {
   type ReplayOperatorConversationResult,
   type SubmitOperatorConversationTurn,
   type SubmitOperatorConversationTurnResult,
+  type UpsertOperatorChannel,
 } from "@clankie/protocol";
+import { parseDiscordWebhookUrl } from "@clankie/discord-presence-core";
+import {
+  isChannelTurnPass,
+  nextChannelTurn,
+  renderChannelTurnPrompt,
+  type ChannelTranscriptEntry,
+  type ChannelTurnRecord,
+} from "./channel-turns.ts";
+import type { HerdrSeatTranscript, HerdrTranscriptMessage } from "./herdr-transcript.ts";
 
 type ConversationServiceRequest = Exclude<
   OperatorConversationServiceRequest,
@@ -32,6 +47,7 @@ type ConversationServiceRequest = Exclude<
   | { op: "roster" }
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
+  | { op: "spawn_seat" }
   | { op: "terminal_tail" }
   | { op: "terminal_control" }
   | { op: "terminal_input" }
@@ -42,6 +58,7 @@ type ConversationServiceResult = Exclude<
   | { op: "roster" }
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
+  | { op: "spawn_seat" }
   | { op: "terminal_tail" }
   | { op: "terminal_control" }
   | { op: "terminal_input" }
@@ -56,11 +73,24 @@ export const OPERATOR_CONVERSATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const OPERATOR_CONVERSATION_RETAINED_BYTES_MAX = 256 * 1024 * 1024;
 export const OPERATOR_CONVERSATION_RETAINED_EVENTS_MAX = 500;
 const OPERATOR_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM = 400;
+const SEAT_CONVERSATION_RETAINED_EVENTS_MAX = 10_000;
+const SEAT_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM = 9_000;
+/**
+ * How long one member's turn may hold up the round before it counts as a pass.
+ * A member that never answers must not wedge the room: the operator is waiting
+ * on the whole round, not on any one seat.
+ */
+const CHANNEL_TURN_TIMEOUT_MS = 5 * 60 * 1_000;
+
+interface SeatTranscriptCheckpoint {
+  readonly sessionKey: string;
+  readonly messageIds: readonly string[];
+}
 
 interface ConversationMeta {
   readonly conversationId: string;
   readonly scope: OperatorConversationScope;
-  readonly title: string;
+  title: string;
   isDefault: boolean;
   readonly createdAt: string;
   updatedAt: string;
@@ -70,6 +100,26 @@ interface ConversationMeta {
   readonly parentConversationId?: string;
   /** Exclusive replay boundary immediately before the oldest retained event. */
   retainedFromCursor?: string;
+  /** Harness-native messages already folded into this durable seat thread. */
+  seatTranscript?: SeatTranscriptCheckpoint;
+  /**
+   * The channel roster, in turn order. Present exactly on a `channel` scope
+   * (ADR 0146); it lives on the meta so pruning the conversation takes the
+   * membership with it and the two can never disagree.
+   */
+  channelMembers?: readonly OperatorChannelMember[];
+  /**
+   * Where this channel is projected, and the credential to post there. The
+   * token lives here and nowhere else: `publicChannel` carries the webhook id
+   * so a surface can tell a projected channel from an unprojected one, and
+   * never the half that can post.
+   */
+  channelDiscord?: {
+    readonly guildId: string;
+    readonly channelId: string;
+    readonly webhookId: string;
+    readonly webhookToken: string;
+  };
 }
 
 /** Optional seat for a turn that arrived from a herdr-hosted console. */
@@ -110,6 +160,37 @@ export type ConversationRunner = (
 ) => Promise<void>;
 
 type SeatSender = (seatId: string, message: string) => Promise<boolean>;
+/**
+ * Posts one agent's words into the guild a channel is projected onto
+ * (ADR 0146). Discord renders and participates; it owns nothing. A post that
+ * fails must therefore never cost the conversation its own record of what was
+ * said, so the round treats this as best-effort.
+ */
+export interface ChannelProjection {
+  post: (post: {
+    readonly guildId: string;
+    readonly channelId: string;
+    readonly webhookId: string;
+    readonly webhookToken: string;
+    readonly username: string;
+    readonly content: string;
+  }) => Promise<void>;
+  /** Which room a webhook points at, so the operator supplies only its URL. */
+  resolve: (credential: { readonly webhookId: string; readonly webhookToken: string }) => Promise<{
+    readonly guildId: string;
+    readonly channelId: string;
+  }>;
+  /**
+   * Make the room rather than being handed one. Absent where the host has no
+   * Discord runtime to make it with, which leaves the pasted-webhook path.
+   */
+  provision?: (input: { readonly name: string }) => Promise<{
+    readonly guildId: string;
+    readonly channelId: string;
+    readonly webhookId: string;
+    readonly webhookToken: string;
+  }>;
+}
 type ConversationForker = (input: {
   readonly parentConversationId: string;
   readonly conversationId: string;
@@ -131,6 +212,10 @@ function workspaceOf(scope: OperatorConversationScope): string | undefined {
   return workspace;
 }
 
+function messageKey(role: "operator" | "agent", text: string): string {
+  return `${role}\u0000${text}`;
+}
+
 /**
  * File-backed conversation registry: `meta.json` + append-only `events.jsonl`
  * per conversation. The wire contract (list/get/create/close/replay/tail/send with
@@ -148,6 +233,12 @@ export class ConversationStore {
   >();
   private readonly cancelRequests = new Set<string>();
   private readonly seatSends = new Map<string, Promise<void>>();
+  /**
+   * Rounds parked on what a seat says next (ADR 0146). A seat may sit in more
+   * than one channel, and every round waiting on it hears the same reply rather
+   * than one round queueing behind another and stalling the room.
+   */
+  private readonly seatReplyWaiters = new Map<string, Set<(reply: string | undefined) => void>>();
   private readonly runCounts = new Map<string, number>();
   /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
   private readonly internalRuns = new Map<string, number>();
@@ -157,6 +248,7 @@ export class ConversationStore {
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
   private readonly sendToSeat: SeatSender | undefined;
   private readonly forkConversation: ConversationForker | undefined;
+  private readonly projection: ChannelProjection | undefined;
   /** Longest a parked tail may wait here, whatever a caller asks for. */
   private readonly tailWaitMs: number;
   /** Per-conversation parked tails, woken by `append` and by a live draft. */
@@ -172,6 +264,7 @@ export class ConversationStore {
     sendToSeat?: SeatSender,
     tailWaitMs = DEFAULT_TAIL_WAIT_MS,
     forkConversation?: ConversationForker,
+    projection?: ChannelProjection,
   ) {
     this.root = root;
     this.runner = runner;
@@ -179,6 +272,7 @@ export class ConversationStore {
     this.sendToSeat = sendToSeat;
     this.tailWaitMs = tailWaitMs;
     this.forkConversation = forkConversation;
+    this.projection = projection;
     mkdirSync(root, { recursive: true });
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -269,7 +363,52 @@ export class ConversationStore {
         };
       }
       case "create":
-        return { op: "create", schemaVersion: 1, conversation: this.create(request.scope, request.title) };
+        // A channel is created with its membership or not at all — an empty
+        // room nobody is in is a conversation with no counterpart. Selecting a
+        // channel that already exists is just selecting it.
+        if (
+          request.scope.kind === "channel" &&
+          this.channelMeta(request.scope.channelId) === undefined
+        ) {
+          throw new Error("Create a channel with the channel op, which carries its membership");
+        }
+        return {
+          op: "create",
+          schemaVersion: 1,
+          conversation: publicConversation(this.create(request.scope, request.title)),
+        };
+      case "channel": {
+        const meta = await this.upsertChannel(request.channel);
+        return {
+          op: "channel",
+          schemaVersion: 1,
+          channel: publicChannel(meta),
+          conversation: publicConversation(meta),
+        };
+      }
+      case "channels":
+        return {
+          op: "channels",
+          schemaVersion: 1,
+          channels: [...this.metas.values()]
+            .filter((meta) => meta.scope.kind === "channel")
+            .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+            .map((meta) => publicChannel(meta)),
+        };
+      case "react":
+        return {
+          op: "react",
+          schemaVersion: 1,
+          conversationId: request.conversationId,
+          entryRef: request.entryRef,
+          reacted: this.react(
+            request.conversationId,
+            request.entryRef,
+            request.emoji,
+            { kind: "operator" },
+            request.remove,
+          ),
+        };
       case "fork":
         return {
           op: "fork",
@@ -344,8 +483,15 @@ export class ConversationStore {
     return this.metas.has(conversationId);
   }
 
-  public isSeatConversation(conversationId: string): boolean {
-    return this.metas.get(conversationId)?.scope.kind === "seat";
+  /**
+   * Whether Clankie himself answers here. He does in his own global and
+   * workspace rooms; he does not in a seat thread, where the counterpart is
+   * that agent, nor in a channel, where the members answer (ADR 0146). Every
+   * caller that would hand him a turn asks this first.
+   */
+  public runsCaptainTurns(conversationId: string): boolean {
+    const kind = this.metas.get(conversationId)?.scope.kind;
+    return kind === "global" || kind === "workspace";
   }
 
   public conversationIdForSeat(seatId: string): string | undefined {
@@ -360,6 +506,9 @@ export class ConversationStore {
   }
 
   public publishSeatEvent(seatId: string, body: OperatorConversationEventBody): void {
+    // Before the seat's own thread, and regardless of whether it has one: a
+    // channel round offered this seat a turn and is waiting on exactly this.
+    if (body.type === "message" && body.role === "agent") this.resolveSeatReply(seatId, body.text);
     const conversationId = this.conversationIdForSeat(seatId);
     const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
     if (meta === undefined) return;
@@ -377,11 +526,54 @@ export class ConversationStore {
     this.saveMeta(meta);
   }
 
+  /** Fold one harness session's complete active chat branch into its durable seat thread. */
+  public syncSeatTranscript(seatId: string, transcript: HerdrSeatTranscript): void {
+    const conversationId = this.conversationIdForSeat(seatId);
+    const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
+    if (meta === undefined || transcript.messages.length === 0) return;
+    const checkpoint = meta.seatTranscript;
+    if (checkpoint === undefined && this.retainedEventCount(meta.conversationId) > 0) {
+      this.replaceSeatMessages(meta, transcript.messages);
+      meta.seatTranscript = {
+        sessionKey: transcript.sessionKey,
+        messageIds: transcript.messages.map(({ id }) => id),
+      };
+      this.saveMeta(meta);
+      return;
+    }
+
+    const seen = new Set(checkpoint?.sessionKey === transcript.sessionKey ? checkpoint.messageIds : []);
+    let latestAgentReply: string | undefined;
+    for (const message of transcript.messages) {
+      if (seen.has(message.id)) continue;
+      if (message.role === "agent") latestAgentReply = message.text;
+      if (message.role !== "operator" || !this.matchesRecentSeatSend(meta, message)) {
+        this.append(
+          meta,
+          {
+            type: "message",
+            role: message.role,
+            text: message.text,
+            streaming: false,
+          },
+          message.occurredAt,
+        );
+      }
+      seen.add(message.id);
+    }
+    meta.seatTranscript = { sessionKey: transcript.sessionKey, messageIds: [...seen] };
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+    if (latestAgentReply !== undefined) this.resolveSeatReply(seatId, latestAgentReply);
+  }
+
   /** Queue a host-authored continuation without forging an operator message. */
   public submitInternal(conversationId: string, message: string): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new Error(`Unknown conversation ${conversationId}`);
-    if (meta.scope.kind === "seat") throw new Error("Seat conversations do not run captain turns");
+    if (!this.runsCaptainTurns(conversationId)) {
+      throw new Error(`Conversation ${conversationId} does not run captain turns`);
+    }
     return this.enqueue(meta, message, undefined, false);
   }
 
@@ -389,10 +581,14 @@ export class ConversationStore {
     await Promise.allSettled([...this.runs.values(), ...this.seatSends.values()]);
   }
 
-  private create(scope: OperatorConversationScope, title: string): OperatorConversation {
+  private create(scope: OperatorConversationScope, title: string): ConversationMeta {
     if (scope.kind === "seat") {
       const existing = this.conversationIdForSeat(scope.seatId);
-      if (existing !== undefined) return publicConversation(this.metas.get(existing)!);
+      if (existing !== undefined) return this.metas.get(existing)!;
+    }
+    if (scope.kind === "channel") {
+      const existing = this.channelMeta(scope.channelId);
+      if (existing !== undefined) return existing;
     }
     const workspace = workspaceOf(scope);
     if (workspace !== undefined && !statSync(workspace, { throwIfNoEntry: false })?.isDirectory()) {
@@ -414,13 +610,85 @@ export class ConversationStore {
     this.metas.set(meta.conversationId, meta);
     this.saveMeta(meta);
     this.prune(meta.conversationId);
-    return publicConversation(meta);
+    return meta;
+  }
+
+  /**
+   * Create a channel, or restate an existing one's title and roster (ADR 0146).
+   * Membership arrives as the whole list the operator wants, in turn order, so
+   * a join, a leave, and a reorder are the same write; a member already in the
+   * room keeps the `joinedAt` it had.
+   */
+  private async upsertChannel(request: UpsertOperatorChannel): Promise<ConversationMeta> {
+    const seatIds = [...new Set(request.members)];
+    if (seatIds.length > OPERATOR_CHANNEL_MEMBER_MAX) {
+      throw new Error(`A channel holds at most ${OPERATOR_CHANNEL_MEMBER_MAX} members`);
+    }
+    const channelId = request.channelId ?? `channel-${randomUUID()}`;
+    const meta = this.create({ kind: "channel", channelId }, request.title);
+    const previous = new Map((meta.channelMembers ?? []).map((member) => [member.seatId, member]));
+    const now = new Date().toISOString();
+    meta.title = request.title;
+    meta.channelMembers = seatIds.map((seatId, position) => ({
+      seatId,
+      position,
+      joinedAt: previous.get(seatId)?.joinedAt ?? now,
+    }));
+    if (request.discord !== undefined) {
+      if (this.projection === undefined) throw new Error("Discord projection is unavailable here");
+      if (request.discord.kind === "provision") {
+        if (this.projection.provision === undefined) {
+          throw new Error("Clankie cannot make Discord channels here; paste a webhook instead");
+        }
+        meta.channelDiscord = await this.projection.provision({ name: request.title });
+      } else {
+        const credential = parseDiscordWebhookUrl(request.discord.webhookUrl);
+        // Resolved before anything is saved: a webhook that cannot be reached
+        // is a projection that would silently never post.
+        meta.channelDiscord = { ...(await this.projection.resolve(credential)), ...credential };
+      }
+    }
+    meta.updatedAt = now;
+    this.saveMeta(meta);
+    // A member is someone the operator can also reach on their own, and the
+    // seat thread is where this seat's replies are already being watched for.
+    for (const seatId of seatIds) this.create({ kind: "seat", seatId }, seatId);
+    return meta;
+  }
+
+  private channelMeta(channelId: string): ConversationMeta | undefined {
+    return [...this.metas.values()].find(
+      (meta) => meta.scope.kind === "channel" && meta.scope.channelId === channelId,
+    );
+  }
+
+  /**
+   * Put a reaction on one entry, or take it back off (ADR 0146). The entry is
+   * never rewritten: the reaction is its own append-only event, and the set
+   * standing on an entry is the fold of those.
+   */
+  private react(
+    conversationId: string,
+    entryRef: string,
+    emoji: string,
+    reactor: OperatorConversationReactor,
+    remove: boolean,
+  ): boolean {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined) return false;
+    if (!this.readEvents(conversationId).some((event) => event.cursor === entryRef)) return false;
+    this.append(meta, { type: "reaction", entryRef, emoji, reactor, removed: remove });
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+    return true;
   }
 
   private async fork(parentConversationId: string): Promise<OperatorConversation> {
     const parent = this.metas.get(parentConversationId);
     if (parent === undefined) throw new Error(`Unknown conversation ${parentConversationId}`);
-    if (parent.scope.kind === "seat") throw new Error("Seat conversations cannot be forked");
+    if (!this.runsCaptainTurns(parentConversationId)) {
+      throw new Error("Only Clankie's own conversations can be forked");
+    }
     if (parent.parentConversationId !== undefined) throw new Error("A side conversation is already open");
     if ([...this.metas.values()].some((meta) => meta.parentConversationId === parentConversationId)) {
       throw new Error("A side conversation is already open");
@@ -546,7 +814,162 @@ export class ConversationStore {
         safeCursor,
       };
     }
-    return this.enqueue(meta, turn.message, turn.herdrPaneId, true);
+    // In a channel the members answer, not Clankie. The run is the sequenced
+    // round; everything else about an accepted turn — revision, cancellation,
+    // settlement, retention — is the same as any other.
+    return this.enqueue(
+      meta,
+      turn.message,
+      turn.herdrPaneId,
+      true,
+      meta.scope.kind === "channel" ? this.channelRound(true) : this.runner,
+    );
+  }
+
+  /**
+   * A message typed in the guild a channel is projected onto (ADR 0146). It is
+   * the same conversation, so it lands in the shared transcript and runs a round
+   * exactly as one sent from the app does — Discord participates, it does not
+   * keep a second conversation of its own.
+   *
+   * Nothing is fenced against a revision here: a surface writing into the one
+   * conversation is not a second writer racing the first, and there is no
+   * client-held revision on the far side of the gateway to fence with.
+   *
+   * Who is allowed to speak here is settled before this is called. Discord
+   * identity policy lives on the bridge, which is the seat that knows who sent
+   * a message; a channel fans one message out to every seat in it, so that
+   * decision is never taken on this side.
+   */
+  public submitProjectedMessage(
+    guildId: string,
+    channelId: string,
+    message: string,
+  ): { readonly conversationId: string; readonly runId: string } | undefined {
+    const meta = [...this.metas.values()].find(
+      (candidate) =>
+        candidate.channelDiscord?.guildId === guildId &&
+        candidate.channelDiscord.channelId === channelId,
+    );
+    if (meta === undefined) return undefined;
+    // Already on screen in the room it was typed in, so it is not echoed back.
+    const result = this.enqueue(meta, message, undefined, true, this.channelRound(false));
+    return result.status === "accepted"
+      ? { conversationId: meta.conversationId, runId: result.runId }
+      : undefined;
+  }
+
+  /**
+   * One round of turn-taking (ADR 0146). Members are offered a turn in position
+   * order, each prompted with the transcript as it stands at that moment —
+   * including a reply that landed a second earlier, which is what lets a member
+   * see its point already made and stay quiet.
+   *
+   * Every member gets at most one turn per operator message. Without that bound
+   * two members that each found the other worth replying to would trade
+   * messages until something ran out of money; a member with more to say waits
+   * for the operator, exactly as a person in a group chat does.
+   */
+  private channelRound(echoOperator: boolean): ConversationRunner {
+    return async (conversationId, message, publish, context) => {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined) return;
+    // A room that showed only the answers would be answering invisible
+    // questions, so a message sent from the app is shown in the guild too.
+    if (echoOperator) await this.projectChannelMessage(meta, "operator", message);
+    const members = meta.channelMembers ?? [];
+    const taken: ChannelTurnRecord[] = [];
+    for (;;) {
+      if (context.signal.aborted) return;
+      const member = nextChannelTurn({ members, taken });
+      if (member === undefined) return;
+      const prompt = renderChannelTurnPrompt({
+        title: meta.title,
+        member,
+        members,
+        entries: this.channelEntries(conversationId),
+      });
+      // An offline seat passes: the room carries on without it rather than
+      // stalling on a pane that is not there to answer.
+      const reply = (await this.sendToSeat?.(member.seatId, prompt))
+        ? await this.awaitSeatReply(member.seatId, context.signal)
+        : undefined;
+      if (reply === undefined || reply.trim().length === 0 || isChannelTurnPass(reply)) {
+        taken.push({ seatId: member.seatId, outcome: "passed" });
+        continue;
+      }
+      publish({ type: "message", role: "agent", text: reply, streaming: false, seatId: member.seatId });
+      taken.push({ seatId: member.seatId, outcome: "spoke" });
+      await this.projectChannelMessage(meta, member.seatId, reply);
+    }
+    };
+  }
+
+  /**
+   * Show one member's words in the guild, as that member. A webhook renders
+   * each agent under its own name from one per-channel credential, which is why
+   * no seat needs a bot application and certainly not a user account
+   * (ADR 0048). Discord is a second surface, so a projection that fails is
+   * logged by its absence there and changes nothing here.
+   */
+  private async projectChannelMessage(meta: ConversationMeta, seatId: string, content: string): Promise<void> {
+    const target = meta.channelDiscord;
+    if (target === undefined || this.projection === undefined) return;
+    try {
+      await this.projection.post({ ...target, username: seatId, content });
+    } catch {
+      // The transcript is the record; the room in Discord is a view of it.
+    }
+  }
+
+  /** The shared transcript as a member sees it: who said what, oldest first. */
+  private channelEntries(conversationId: string): readonly ChannelTranscriptEntry[] {
+    return this.readEvents(conversationId).flatMap((event) =>
+      event.type === "message" && event.text.trim().length > 0
+        ? [{ ...(event.seatId === undefined ? {} : { seatId: event.seatId }), text: event.text }]
+        : [],
+    );
+  }
+
+  /**
+   * Park until this seat says its next thing, or until the turn times out and
+   * counts as a pass. The reply arrives through the same herdr projection that
+   * feeds the seat's own thread, so a channel adds no second way of listening
+   * to an agent.
+   */
+  private awaitSeatReply(seatId: string, signal: AbortSignal): Promise<string | undefined> {
+    return new Promise((resolve) => {
+      let waiters = this.seatReplyWaiters.get(seatId);
+      if (waiters === undefined) {
+        waiters = new Set();
+        this.seatReplyWaiters.set(seatId, waiters);
+      }
+      const registered = waiters;
+      const settle = (reply: string | undefined): void => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        registered.delete(settle);
+        if (registered.size === 0) this.seatReplyWaiters.delete(seatId);
+        resolve(reply);
+      };
+      const onAbort = (): void => {
+        settle(undefined);
+      };
+      const timer = setTimeout(() => {
+        settle(undefined);
+      }, CHANNEL_TURN_TIMEOUT_MS);
+      timer.unref?.();
+      signal.addEventListener("abort", onAbort, { once: true });
+      registered.add(settle);
+    });
+  }
+
+  private resolveSeatReply(seatId: string, text: string): void {
+    const waiters = this.seatReplyWaiters.get(seatId);
+    if (waiters === undefined) return;
+    // Each waiter removes only itself as it settles, and a set never revisits
+    // an element it has already yielded, so this walks the live set.
+    for (const waiter of waiters) waiter(text);
   }
 
   private queueSeatSend(
@@ -616,6 +1039,7 @@ export class ConversationStore {
     message: string,
     herdrPaneId: string | undefined,
     publishOperatorMessage: boolean,
+    runner: ConversationRunner = this.runner,
   ): SubmitOperatorConversationTurnResult {
     const workspace = workspaceOf(meta.scope);
     const safeCursor = this.lastCursor(meta);
@@ -647,7 +1071,7 @@ export class ConversationStore {
       }
       meta.sessionState = "active";
       this.saveMeta(meta);
-      return this.runner(
+      return runner(
         conversationId,
         message,
         (event) => {
@@ -690,11 +1114,16 @@ export class ConversationStore {
           if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "waiting";
           return false;
         }
+        // A bare class name ("Error") tells the operator nothing. The message is
+        // the only thing that names the actual failure, so it rides along; the
+        // stack goes to the service log for anything the summary truncates.
+        console.error(`operator turn ${runId} failed`, error);
         this.append(meta, {
           type: "turn",
           runId,
           phase: "failed",
           reasonCode: error instanceof Error ? error.constructor.name : "run_failed",
+          summary: turnFailureSummary(error),
         });
         if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "failed";
         return false;
@@ -736,7 +1165,7 @@ export class ConversationStore {
     };
   }
 
-  private append(meta: ConversationMeta, body: OperatorConversationEventBody): void {
+  private append(meta: ConversationMeta, body: OperatorConversationEventBody, occurredAt?: string): void {
     const retainedCount = this.retainedEventCount(meta.conversationId);
     const sequence = this.eventSequence(meta) + 1;
     const cursor = String(sequence).padStart(CURSOR_WIDTH, "0");
@@ -745,7 +1174,7 @@ export class ConversationStore {
       conversationId: meta.conversationId,
       cursor,
       revision: meta.revision,
-      occurredAt: new Date().toISOString(),
+      occurredAt: occurredAt ?? new Date().toISOString(),
       ...body,
     } as OperatorConversationStreamEvent;
     appendFileSync(this.eventsPath(meta.conversationId), `${JSON.stringify(event)}\n`, "utf8");
@@ -836,12 +1265,19 @@ export class ConversationStore {
   }
 
   private trimEventLog(meta: ConversationMeta): void {
-    if (this.retainedEventCount(meta.conversationId) <= OPERATOR_CONVERSATION_RETAINED_EVENTS_MAX) {
+    // A seat thread and a channel are both durable rooms an agent keeps talking
+    // in; Clankie's own conversations turn over with his sessions.
+    const room = meta.scope.kind === "seat" || meta.scope.kind === "channel";
+    const maximum = room ? SEAT_CONVERSATION_RETAINED_EVENTS_MAX : OPERATOR_CONVERSATION_RETAINED_EVENTS_MAX;
+    const retainedCount = room
+      ? SEAT_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM
+      : OPERATOR_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM;
+    if (this.retainedEventCount(meta.conversationId) <= maximum) {
       return;
     }
     const events = this.readEvents(meta.conversationId);
-    const dropped = events.slice(0, -OPERATOR_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM);
-    const retained = events.slice(-OPERATOR_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM);
+    const dropped = events.slice(0, -retainedCount);
+    const retained = events.slice(-retainedCount);
     meta.retainedFromCursor = dropped[dropped.length - 1]?.cursor ?? meta.retainedFromCursor ?? ZERO_CURSOR;
     const path = this.eventsPath(meta.conversationId);
     const temporary = `${path}.${process.pid}.tmp`;
@@ -849,6 +1285,63 @@ export class ConversationStore {
     renameSync(temporary, path);
     this.counts.set(meta.conversationId, retained.length);
     this.saveMeta(meta);
+  }
+
+  private matchesRecentSeatSend(meta: ConversationMeta, message: HerdrTranscriptMessage): boolean {
+    const previous = this.readEvents(meta.conversationId).findLast(
+      (event) => event.type === "message" && event.role === "operator",
+    );
+    if (previous?.type !== "message" || previous.role !== "operator" || previous.text !== message.text) {
+      return false;
+    }
+    const nativeAt = Date.parse(message.occurredAt ?? "");
+    return !Number.isFinite(nativeAt) || Math.abs(Date.parse(previous.occurredAt) - nativeAt) < 60_000;
+  }
+
+  /** One-time migration from the old last-answer projection to the native ordered transcript. */
+  private replaceSeatMessages(meta: ConversationMeta, transcript: readonly HerdrTranscriptMessage[]): void {
+    const events = this.readEvents(meta.conversationId);
+    const covered = new Map<string, number>();
+    for (const message of transcript) {
+      const key = messageKey(message.role, message.text);
+      covered.set(key, (covered.get(key) ?? 0) + 1);
+    }
+    const preserved = events.flatMap((event) => {
+      if (event.type !== "message") return [];
+      const role = event.role === "agent" ? "agent" : event.role === "operator" ? "operator" : undefined;
+      if (role === undefined) return [];
+      const key = messageKey(role, event.text);
+      const remaining = covered.get(key) ?? 0;
+      if (remaining > 0) {
+        covered.set(key, remaining - 1);
+        return [];
+      }
+      return [{ role, text: event.text, occurredAt: event.occurredAt }];
+    });
+    const previousSequence = this.eventSequence(meta);
+    let sequence = previousSequence + 1;
+    meta.retainedFromCursor = String(sequence).padStart(CURSOR_WIDTH, "0");
+    const rebuilt = [...preserved, ...transcript].map((message) => {
+      sequence += 1;
+      return {
+        schemaVersion: 1 as const,
+        conversationId: meta.conversationId,
+        cursor: String(sequence).padStart(CURSOR_WIDTH, "0"),
+        revision: meta.revision,
+        occurredAt: message.occurredAt ?? new Date().toISOString(),
+        type: "message" as const,
+        role: message.role,
+        text: message.text,
+        streaming: false,
+      };
+    });
+    const path = this.eventsPath(meta.conversationId);
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${rebuilt.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+    renameSync(temporary, path);
+    this.counts.set(meta.conversationId, rebuilt.length);
+    this.sequences.set(meta.conversationId, sequence);
+    this.wakeTails(meta.conversationId);
   }
 
   private readEvents(conversationId: string): OperatorConversationStreamEvent[] {
@@ -965,6 +1458,25 @@ export class ConversationStore {
   }
 }
 
+/**
+ * The failure in words, cause chain included — an API rejection routinely puts
+ * the only useful detail on `cause`, not on the outer error's own message.
+ */
+function turnFailureSummary(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== undefined && current !== null; depth += 1) {
+    const text = current instanceof Error ? current.message.trim() : String(current).trim();
+    if (text.length > 0 && parts[parts.length - 1] !== text) parts.push(text);
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  const summary = parts.join(": ");
+  if (summary.length === 0) return "Turn failed with no error message.";
+  return summary.length > OPERATOR_CONVERSATION_SUMMARY_MAX
+    ? `${summary.slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX - 1)}\u2026`
+    : summary;
+}
+
 function directoryBytes(path: string): number {
   const stat = statSync(path, { throwIfNoEntry: false });
   if (stat === undefined) return 0;
@@ -979,7 +1491,32 @@ function sameScope(a: OperatorConversationScope, b: OperatorConversationScope): 
   if (a.kind !== b.kind) return false;
   if (a.kind === "workspace" && b.kind === "workspace") return a.workspaceId === b.workspaceId;
   if (a.kind === "seat" && b.kind === "seat") return a.seatId === b.seatId;
+  if (a.kind === "channel" && b.kind === "channel") return a.channelId === b.channelId;
   return true;
+}
+
+function publicChannel(meta: ConversationMeta): OperatorChannel {
+  if (meta.scope.kind !== "channel") {
+    throw new Error(`Conversation ${meta.conversationId} is not a channel`);
+  }
+  return {
+    schemaVersion: 1,
+    channelId: meta.scope.channelId,
+    conversationId: meta.conversationId,
+    title: meta.title,
+    members: [...(meta.channelMembers ?? [])],
+    createdAt: meta.createdAt,
+    updatedAt: meta.updatedAt,
+    ...(meta.channelDiscord === undefined
+      ? {}
+      : {
+          discord: {
+            guildId: meta.channelDiscord.guildId,
+            channelId: meta.channelDiscord.channelId,
+            webhookId: meta.channelDiscord.webhookId,
+          },
+        }),
+  };
 }
 
 function publicConversation(meta: ConversationMeta): OperatorConversation {

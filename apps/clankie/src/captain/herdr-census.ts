@@ -17,6 +17,8 @@ export interface HerdrCensusAgent {
   readonly title: string;
   /** Stable across pane-id compaction; the seat identity for ADR 0135. */
   readonly terminalId?: string;
+  /** Absolute path the agent runs in; the commons district key (ADR 0022). */
+  readonly cwd?: string;
 }
 
 export type HerdrSessionCensus =
@@ -24,6 +26,7 @@ export type HerdrSessionCensus =
   | { readonly outcome: "unavailable"; readonly error: string };
 
 const CENSUS_TIMEOUT_MS = 5_000;
+const SEAT_DIRECTORY_MAX = 1_024;
 const MAX_AGENTS = 48;
 
 function defaultRunner(
@@ -61,6 +64,7 @@ export function parseHerdrAgentList(stdout: string): HerdrCensusAgent[] {
       ...(typeof pane.terminal_id === "string" && pane.terminal_id.length > 0
         ? { terminalId: pane.terminal_id }
         : {}),
+      ...(typeof pane.cwd === "string" && pane.cwd.length > 0 ? { cwd: pane.cwd } : {}),
     });
   }
   return agents;
@@ -190,6 +194,7 @@ export async function readFleetSeats(options: { readonly runCommand?: HerdrCensu
     title: string;
     summary?: string;
     next?: string;
+    workingDirectory?: string;
   }[]
 > {
   const run = options.runCommand ?? defaultRunner;
@@ -211,6 +216,7 @@ export async function readFleetSeats(options: { readonly runCommand?: HerdrCensu
           title: bounded(entry.title, 200),
           ...(written === undefined ? {} : { summary: bounded(written.summary, SEAT_SUMMARY_MAX) }),
           ...(written?.next === undefined ? {} : { next: bounded(written.next, SEAT_SUMMARY_MAX) }),
+          ...(entry.cwd === undefined ? {} : { workingDirectory: bounded(entry.cwd, SEAT_DIRECTORY_MAX) }),
         };
       });
   } catch {

@@ -79,7 +79,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         ? "terminalObserve"
         : serviceRequest.op === "terminal_control" || serviceRequest.op === "terminal_input"
           ? "terminalControl"
-          : serviceRequest.op === "close_seat"
+          : serviceRequest.op === "close_seat" ||
+              serviceRequest.op === "spawn_seat" ||
+              serviceRequest.op === "channel"
+            // Hiring is at least as consequential as closing: it starts a
+            // process on the operator's machine.
             ? "steer"
             : "chat";
     if (!authorization.device.grants[grant]) {
@@ -402,7 +406,7 @@ function logFields(
   result?: OperatorConversationServiceResult,
 ): Record<string, unknown> {
   const subject =
-    request.op === "get" || request.op === "close" || request.op === "close_seat"
+    request.op === "get" || request.op === "close" || request.op === "close_seat" || request.op === "react"
       ? request
       : request.op === "replay"
         ? request.replay

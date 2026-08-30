@@ -417,8 +417,8 @@ describe("protocol", () => {
         cancelled: true,
       }),
     ).toMatchObject({ op: "cancel", cancelled: true });
-    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(16);
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(16);
+    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(20);
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(20);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 

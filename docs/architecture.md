@@ -71,8 +71,10 @@ and long-polled tails. A tail carries two things: the durable events, and the
 message the captain is typing right now — a volatile draft held in memory,
 never in the event log, that the settled `message` event replaces in the block
 it streamed into ([ADR 0141](adr/0141-the-console-watches-him-type.md)). Herdr
-seat conversations are direct send and readable projection lanes with no Pi
-session ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)).
+seat conversations are direct-send lanes with no Pi session. Their readable
+history folds the complete active user/assistant branch from Herdr's native
+Claude Code, Codex, Pi, or Grok session identity; raw terminal bytes stay on the
+terminal lane ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)).
 A TUI process creates a fresh captain conversation unless `--chat` explicitly
 resumes one. A captain conversation and its Pi session are one lifetime: bounded
 retention removes their shared directory, while public event logs rotate with

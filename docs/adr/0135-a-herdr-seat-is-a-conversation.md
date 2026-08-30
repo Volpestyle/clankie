@@ -71,6 +71,7 @@ OperatorConversationScope =
     summary?: string;       // herd-lead distilled summary, when written
     next?: string;
     conversationId?: string; // present once the seat thread exists
+    workingDirectory?: string; // herdr's cwd; the district key for app ADR 0022
   }>;                        // capped like the census (48)
 }
 
@@ -79,7 +80,27 @@ role: "operator" | "captain" | "agent"
 
 // 4. Closing a seat ends its current pane without deleting its durable thread.
 { op: "close_seat", seatId: string } → { seatId: string; closed: boolean }
+
+// 5. Hiring is its symmetric twin: a tab in a working directory, a harness
+//    started in it, and the seat it became. Both need the `steer` grant.
+{ op: "spawn_seat", seat: { harness, title, workingDirectory } }
+  → { result:
+      | { outcome: "spawned"; seat: FleetSeat }
+      | { outcome: "failed";
+          reason: "unknown_directory" | "harness_unavailable"
+                | "not_ready" | "herdr_unreachable";
+          detail?: string } }
 ```
+
+`spawn_seat` runs `herdr tab create --cwd` then `herdr agent start --kind`,
+which returns only once herdr has detected the harness and considers it ready
+for input — so a `spawned` result means the seat can actually be messaged. The
+harness is an enum, not a string, because it reaches an exec. Failure is
+typed rather than thrown: a surface renders it and keeps the operator's draft,
+and a start that fails closes the pane it opened so retries do not accumulate
+empty tabs. The new seat is tracked the moment it exists, the way a `create`
+with a seat scope tracks one, or its first reply lands in a thread nothing is
+listening to.
 
 `create` with a seat scope is idempotent per seat, like the default global
 conversation. `send` to a seat conversation pipes the text to the seat's
@@ -94,17 +115,27 @@ projection_, built from signals the service already has:
 
 - `activity` events from agent-status transitions — `working` is literally a
   typing indicator; `done`/`blocked`/`idle` are delivery states.
-- `message` events (role `agent`) from distilled output: the herd-lead
-  summaries where written, harness-native turn boundaries where a lane learns
-  to read them. Producer owns redaction and bounding, as everywhere else.
-- A seed at track time: a seat already settled when its projection starts
-  contributes its current distilled answer, so a freshly opened thread begins
-  with what the agent last said rather than empty. The registry dedups an
-  identical re-projection, which makes re-tracking after a restart safe.
-- The operator's own sends.
+- `message` events from the harness-native session tree. Herdr's resume
+  identity selects Claude Code, Codex, and Pi sessions. Grok's exact foreground
+  PID selects the matching entry in its native active-session registry, so two
+  panes in the same working directory cannot cross-wire. Each active branch is
+  folded in full, in order, with user text attributed to `operator` and
+  assistant text attributed to `agent`. Injected instructions, reasoning, tool
+  calls, and tool results never enter the public stream.
+- Stable native message ids checkpoint each session. Re-reading on status
+  changes is idempotent, a new harness session appends to the durable seat, and
+  the first native import replaces the old one-answer seed behind a typed
+  cursor-recovery boundary.
+- A harness without a native transcript normalizer retains the bounded
+  summary/final-answer projection. Adding its normalizer upgrades the same
+  conversation without changing the relay or app.
+- The operator's own sends publish immediately and reconcile with the same
+  prompt when it appears in the native session tree.
 
-Raw scrollback never enters the message lane. The terminal destination remains
-the raw-truth path over its existing transport, one tap from the thread.
+Raw scrollback never enters the message lane. Full-screen alternate buffers and
+primary-screen scrollback therefore behave the same: session history supplies
+chat, while the terminal destination remains the raw-truth path over its
+existing transport, one tap from the thread.
 
 ### Transparency
 
@@ -117,7 +148,7 @@ flowchart LR
   App["App: messages home"] -->|"dispatch (roster, send, close seat) / tail"| Relay
   Relay -->|captain credential| Registry["Operator-conversation registry"]
   Registry -->|"seat send / close"| Pane["herdr pane (any harness)"]
-  Pane -->|"agent-status, summaries, watches"| Proj["Seat projection"]
+  Pane -->|"agent-status + native session identity"| Proj["Seat projection"]
   Proj -->|"bounded events"| Registry
   Registry -.->|"list / replay"| Captain["Clankie (head of staff)"]
 ```
@@ -160,14 +191,15 @@ roster machinery.
 
 - The app's per-agent send gap (its ADR 0012) closes with no new backend
   surface: configuring live captain chat configures the fleet lane.
-- Any harness gets a DM for free — the pane pty is the universal contract;
-  harness differences are contact-card metadata.
+- Any harness gets a messageable DM from the pane contract. Claude Code,
+  Codex, Pi, and Grok also supply complete native history; other harnesses retain
+  their safe summary projection until they gain a transcript normalizer.
 - Closing an agent is a seat operation guarded by the device's `steer` grant:
   it closes the current Herdr pane and removes the live roster entry while the
   durable thread remains available if that stable seat returns.
 - ADR 0097's "no general herdr tool suite" holds for captain _tools_; the
   service's herdr machinery nonetheless grows a standing projection loop
-  (roster cache, seat watchers, summary tailing) that must fail soft the way
+  (roster cache, seat watchers, native transcript folding) that must fail soft the way
   the census does — a down herdr socket renders seats offline, never a failed
   conversation surface.
 - Message role gains a third variant, so older app builds render seat messages

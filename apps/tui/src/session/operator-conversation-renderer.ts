@@ -44,6 +44,10 @@ export function renderOperatorConversationNotice(event: OperatorConversationStre
     case "message":
     case "reasoning":
     case "context":
+    // A reaction is an acknowledgement, not a turn. It belongs beside the entry
+    // it points at, which this transcript has no way to draw, and a notice per
+    // toggle would be noisier than the thing it reports.
+    case "reaction":
       return undefined;
     case "tool": {
       if (event.skillName === undefined || event.phase === "started") return undefined;
@@ -63,9 +67,11 @@ export function renderOperatorConversationNotice(event: OperatorConversationStre
       return event.phase === "failed" ? `**Clankie session**\n\n${event.phase}` : undefined;
     case "turn":
       // accepted/completed drive the status line; failures carry a reasonCode
-      // the operator needs to see.
+      // and the message the operator needs to see.
       return event.phase === "failed" || event.phase === "cancelled"
-        ? `**Clankie turn**\n\n${event.phase}${event.reasonCode === undefined ? "" : ` · ${event.reasonCode}`}`
+        ? `**Clankie turn**\n\n${event.phase}${event.reasonCode === undefined ? "" : ` · ${event.reasonCode}`}${
+            event.summary === undefined ? "" : `\n\n${event.summary}`
+          }`
         : undefined;
     case "worker_transcript":
       return `**Worker ${event.phase}**\n\n${event.summary}`;

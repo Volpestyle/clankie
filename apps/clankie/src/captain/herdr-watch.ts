@@ -12,9 +12,19 @@ import {
 import { dirname } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
-import { OPERATOR_CONVERSATION_SUMMARY_MAX, OPERATOR_CONVERSATION_TEXT_MAX } from "@clankie/protocol";
+import {
+  OPERATOR_CONVERSATION_SUMMARY_MAX,
+  OPERATOR_CONVERSATION_TEXT_MAX,
+  type OperatorSeatSpawnResult,
+  type SpawnOperatorSeat,
+} from "@clankie/protocol";
 import { z } from "zod";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
+import {
+  readHerdrSeatTranscript,
+  type HerdrAgentSession,
+  type HerdrSeatTranscript,
+} from "./herdr-transcript.ts";
 
 const HerdrWatchRecordSchema = z
   .object({
@@ -43,6 +53,7 @@ export interface HerdrAgentSnapshot {
   readonly agent: string;
   readonly status: string;
   readonly title: string;
+  readonly session?: HerdrAgentSession;
 }
 
 export interface HerdrWatchRunner {
@@ -50,10 +61,19 @@ export interface HerdrWatchRunner {
   resolveTerminal(terminalId: string): Promise<HerdrAgentSnapshot | undefined>;
   wait(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   waitForChange?(target: string, currentStatus: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
+  transcript?(agent: HerdrAgentSnapshot): Promise<HerdrSeatTranscript | undefined>;
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
   sendText?(target: string, text: string): Promise<void>;
   pressEnter?(target: string): Promise<void>;
   closePane?(target: string): Promise<void>;
+  /** Open a tab in a working directory; resolves with its root pane id. */
+  createTab?(options: { readonly cwd: string; readonly label: string }): Promise<string>;
+  /** Start a harness in a pane already sitting at its shell prompt. */
+  startAgent?(options: {
+    readonly name: string;
+    readonly kind: string;
+    readonly paneId: string;
+  }): Promise<void>;
 }
 
 export type HerdrWatchArmResult =
@@ -82,7 +102,8 @@ type InternalWake = (conversationId: string, prompt: string) => Promise<void>;
 type HerdrSeatProjection =
   | { readonly kind: "status"; readonly status: string }
   | { readonly kind: "summary"; readonly text: string }
-  | { readonly kind: "reply"; readonly text: string };
+  | { readonly kind: "reply"; readonly text: string }
+  | { readonly kind: "transcript"; readonly transcript: HerdrSeatTranscript };
 type ProjectSeat = (seatId: string, projection: HerdrSeatProjection) => void;
 
 const SETTLED_STATUSES = new Set(["idle", "done", "blocked"]);
@@ -113,18 +134,38 @@ function snapshotOf(value: unknown): HerdrAgentSnapshot {
   if (typeof paneId !== "string" || typeof terminalId !== "string") {
     throw new Error("Herdr response did not identify the agent pane");
   }
+  const rawSession = isRecord(value.agent_session) ? value.agent_session : undefined;
+  const session: HerdrAgentSession | undefined =
+    typeof rawSession?.source === "string" &&
+    (rawSession.kind === "id" || rawSession.kind === "path") &&
+    typeof rawSession.value === "string"
+      ? { source: rawSession.source, kind: rawSession.kind, value: rawSession.value }
+      : undefined;
   return {
     paneId,
     terminalId,
     agent: typeof value.agent === "string" ? value.agent : "unknown",
     status: typeof value.agent_status === "string" ? value.agent_status : "unknown",
     title: titleOf(value),
+    ...(session === undefined ? {} : { session }),
   };
 }
 
 export function parseHerdrAgentResult(stdout: string): HerdrAgentSnapshot {
   const parsed = JSON.parse(stdout) as { result?: { agent?: unknown } };
   return snapshotOf(parsed.result?.agent);
+}
+
+export function parseHerdrForegroundProcessId(stdout: string): number | undefined {
+  const parsed: unknown = JSON.parse(stdout);
+  const result = isRecord(parsed) ? parsed.result : undefined;
+  const processInfo = isRecord(result) ? result.process_info : undefined;
+  const processes =
+    isRecord(processInfo) && Array.isArray(processInfo.foreground_processes)
+      ? processInfo.foreground_processes
+      : [];
+  const process = processes.find(isRecord);
+  return process !== undefined && typeof process.pid === "number" ? process.pid : undefined;
 }
 
 function parseHerdrPaneList(stdout: string): HerdrAgentSnapshot[] {
@@ -178,6 +219,13 @@ function defaultRunner(): HerdrWatchRunner {
           signal,
         ),
       ),
+    transcript: async (agent) => {
+      const processId =
+        agent.agent === "grok" && agent.session === undefined
+          ? parseHerdrForegroundProcessId(await runHerdr(["pane", "process-info", "--pane", agent.paneId]))
+          : undefined;
+      return readHerdrSeatTranscript(agent.agent, agent.session, processId);
+    },
     read: (target, harness, source) =>
       runHerdr([
         "agent",
@@ -191,7 +239,57 @@ function defaultRunner(): HerdrWatchRunner {
     sendText: (target, text) => runHerdr(["pane", "send-text", target, text]).then(() => undefined),
     pressEnter: (target) => runHerdr(["pane", "send-keys", target, "Enter"]).then(() => undefined),
     closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
+    createTab: async ({ cwd, label }) =>
+      parseHerdrRootPaneId(
+        await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus"]),
+      ),
+    startAgent: ({ name, kind, paneId }) =>
+      // Returns only once herdr has detected the harness and considers it ready
+      // for input, so a resolved call means the seat can actually be messaged.
+      runHerdr(["agent", "start", name, "--kind", kind, "--pane", paneId]).then(() => undefined),
   };
+}
+
+function reasonDetail(caught: unknown): string {
+  return caught instanceof Error ? caught.message.slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX) : "";
+}
+
+/**
+ * Herdr reports startup trouble in its stderr text, so the outcome is read off
+ * it. Anything unrecognised is `not_ready`: the pane was opened and the harness
+ * did not come up, which is what the operator needs to know either way.
+ */
+function spawnFailureReason(detail: string): "harness_unavailable" | "not_ready" {
+  return /not found|no such file|unsupported|not installed|unknown kind/iu.test(detail)
+    ? "harness_unavailable"
+    : "not_ready";
+}
+
+function parseHerdrRootPaneId(stdout: string): string {
+  const parsed = JSON.parse(stdout) as { result?: { root_pane?: unknown } };
+  const rootPane = parsed.result?.root_pane;
+  const paneId = isRecord(rootPane) ? rootPane.pane_id : undefined;
+  if (typeof paneId !== "string" || paneId.length === 0) {
+    throw new Error("Herdr created a tab without a pane");
+  }
+  return paneId;
+}
+
+/**
+ * Herdr agent names are `[a-z][a-z0-9_-]{0,31}` and must be unique among live
+ * agents, so the operator's free-text title has to become one. `agent list`
+ * does not surface names, so uniqueness cannot be checked — it is made, with a
+ * short suffix. The operator never types this; it is the roster title that
+ * carries their words.
+ */
+export function herdrAgentName(title: string, suffix: string = randomUUID().slice(0, 4)): string {
+  const slug = title
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/gu, "-")
+    .replace(/^[^a-z]+/u, "")
+    .replace(/-+$/u, "");
+  const base = (slug.length === 0 ? "agent" : slug).slice(0, 32 - suffix.length - 1);
+  return `${base}-${suffix}`;
 }
 
 /** Persisted, event-driven one-shot watches that wake an operator conversation when an agent settles. */
@@ -202,6 +300,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly seatControllers = new Map<string, AbortController>();
   private readonly seatStatuses = new Map<string, string>();
   private readonly seatSummaries = new Map<string, string>();
+  private readonly transcriptSeats = new Set<string>();
   private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
   private readonly summariesPath: string;
   private readonly summaryWatchIntervalMs: number;
@@ -249,6 +348,51 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
   }
 
+  /**
+   * Hire an agent (ADR 0013): a tab in the chosen directory, a harness started
+   * in it, and the seat it became. Every failure is an outcome rather than a
+   * throw — the surface renders "couldn't hire" and keeps the operator's draft.
+   *
+   * A start that fails leaves no stray tab behind: the pane opened for it is
+   * closed on the way out, so a retry does not accumulate empty shells.
+   */
+  public async spawnSeat(input: SpawnOperatorSeat): Promise<OperatorSeatSpawnResult> {
+    const { createTab, startAgent } = this.runner;
+    if (this.closed || createTab === undefined || startAgent === undefined) {
+      return { outcome: "failed", reason: "herdr_unreachable" };
+    }
+    // The captain runs on the machine herdr does, so this is the real check —
+    // and a missing path is the one failure worth naming precisely, because it
+    // is the one the operator can fix from the compose page.
+    if (!existsSync(input.workingDirectory)) {
+      return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
+    }
+    let paneId: string;
+    try {
+      paneId = await createTab({ cwd: input.workingDirectory, label: input.title });
+    } catch (caught) {
+      return { outcome: "failed", reason: "herdr_unreachable", detail: reasonDetail(caught) };
+    }
+    try {
+      await startAgent({ name: herdrAgentName(input.title), kind: input.harness, paneId });
+      const agent = await this.runner.get(paneId);
+      return {
+        outcome: "spawned",
+        seat: {
+          seatId: agent.terminalId,
+          harness: agent.agent,
+          status: agent.status,
+          title: agent.title || input.title,
+          workingDirectory: input.workingDirectory,
+        },
+      };
+    } catch (caught) {
+      await this.runner.closePane?.(paneId).catch(() => undefined);
+      const detail = reasonDetail(caught);
+      return { outcome: "failed", reason: spawnFailureReason(detail), detail };
+    }
+  }
+
   public async closeSeat(seatId: string): Promise<boolean> {
     if (this.closed || this.runner.closePane === undefined) return false;
     try {
@@ -277,6 +421,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.seatControllers.delete(seatId);
     this.seatStatuses.delete(seatId);
     this.seatSummaries.delete(seatId);
+    this.transcriptSeats.delete(seatId);
     if (this.seatControllers.size === 0) this.stopSummaryWatch();
   }
 
@@ -348,6 +493,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.controllers.clear();
     for (const controller of this.seatControllers.values()) controller.abort();
     this.seatControllers.clear();
+    this.transcriptSeats.clear();
     this.stopSummaryWatch();
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
@@ -363,12 +509,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
           await delay(RETRY_ADMISSION_MS);
           continue;
         }
+        const hasTranscript = await this.publishSeatTranscript(seatId, current);
+        // Publish status after the one-time transcript migration so the current
+        // typing/delivery state remains the newest durable event.
         this.publishSeatStatus(seatId, current.status);
-        this.publishSeatSummary(seatId, current.paneId, readHerdrSummariesFile(this.summariesPath).agents);
+        if (!hasTranscript) {
+          this.publishSeatSummary(seatId, current.paneId, readHerdrSummariesFile(this.summariesPath).agents);
+        }
         // Seed the thread with the pane's last settled answer so a freshly
         // opened seat conversation starts with what the agent already said.
         // The registry dedups an identical re-projection (restart, re-track).
-        if (!seeded && REPLY_STATUSES.has(current.status)) {
+        if (!hasTranscript && !seeded && REPLY_STATUSES.has(current.status)) {
           const reply = await this.readSeatReply(current, "recent-unwrapped");
           if (reply !== undefined) this.projectSeat?.(seatId, { kind: "reply", text: reply });
         }
@@ -380,7 +531,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
             : undefined;
         const changed = await this.runner.waitForChange(current.paneId, current.status, signal);
         if (current.status === "working" && REPLY_STATUSES.has(changed.status)) {
-          const reply = await this.readSeatReply(changed, "recent-unwrapped");
+          const changedHasTranscript = await this.publishSeatTranscript(seatId, changed);
+          const reply = changedHasTranscript
+            ? undefined
+            : await this.readSeatReply(changed, "recent-unwrapped");
           if (
             reply !== undefined &&
             (changed.agent !== "pi" || (piBaseline !== undefined && reply !== piBaseline))
@@ -393,6 +547,23 @@ export class HerdrWatchStore implements HerdrWatchPort {
         this.publishSeatStatus(seatId, "offline");
         await delay(RETRY_ADMISSION_MS);
       }
+    }
+  }
+
+  private async publishSeatTranscript(seatId: string, agent: HerdrAgentSnapshot): Promise<boolean> {
+    if (this.runner.transcript === undefined) return false;
+    try {
+      const transcript = await this.runner.transcript(agent);
+      if (transcript === undefined) {
+        this.transcriptSeats.delete(seatId);
+        return false;
+      }
+      this.transcriptSeats.add(seatId);
+      this.projectSeat?.(seatId, { kind: "transcript", transcript });
+      return true;
+    } catch {
+      this.transcriptSeats.delete(seatId);
+      return false;
     }
   }
 
@@ -455,6 +626,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly onSummariesChanged = (): void => {
     const summaries = readHerdrSummariesFile(this.summariesPath).agents;
     for (const seatId of this.seatControllers.keys()) {
+      if (this.transcriptSeats.has(seatId)) continue;
       void this.runner
         .resolveTerminal(seatId)
         .then((current) => {

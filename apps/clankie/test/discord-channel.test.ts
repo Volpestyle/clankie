@@ -158,6 +158,93 @@ function voiceTurnRequest(): DiscordPresenceChannelTurnRequest {
   };
 }
 
+describe("Discord channel projection route (ADR 0146)", () => {
+  const message = {
+    schemaVersion: 1 as const,
+    deliveryId: "message-9",
+    guildId: "guild-1",
+    channelId: "discord-channel-1",
+    body: "why is the atlas slow?",
+  };
+  const projectionApp = async (
+    submit: (input: unknown) => Promise<{ state: "not_projected" } | { state: "accepted" }>,
+  ) =>
+    (await createClankieApp({
+      captain: createStubCaptain({
+        submitChannelProjectionMessage: async (request) => {
+          const result = await submit(request);
+          return result.state === "accepted"
+            ? { schemaVersion: 1, state: "accepted", conversationId: "conv-1", runId: "run-1" }
+            : { schemaVersion: 1, state: "not_projected" };
+        },
+      }),
+      authenticateCaptain: (request) =>
+        Promise.resolve(
+          request.headers.get("authorization") === "Bearer discord-captain"
+            ? { captainId: "discord-bridge", steerSourceLane: "discord_text" }
+            : request.headers.get("authorization") === "Bearer voice"
+              ? { captainId: "discord-voice", steerSourceLane: "discord_voice" }
+              : undefined,
+        ),
+    })).app;
+
+  const send = (app: Awaited<ReturnType<typeof createClankieApp>>["app"], authorization?: string) =>
+    app.request("/v1/captain/channel-projection-messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(authorization === undefined ? {} : { authorization }),
+      },
+      body: JSON.stringify(message),
+    });
+
+  it("runs a projected channel's round once, however often the gateway redelivers", async () => {
+    let submissions = 0;
+    const app = await projectionApp(async () => {
+      submissions += 1;
+      return { state: "accepted" };
+    });
+
+    const first = await send(app, "Bearer discord-captain");
+    const redelivered = await send(app, "Bearer discord-captain");
+
+    expect(first.status).toBe(200);
+    await expect(first.json()).resolves.toEqual({
+      schemaVersion: 1,
+      state: "accepted",
+      conversationId: "conv-1",
+      runId: "run-1",
+    });
+    await expect(redelivered.json()).resolves.toMatchObject({ state: "accepted" });
+    // A round costs a model call per member, so a redelivery must never run one.
+    expect(submissions).toBe(1);
+  });
+
+  it("hands a message back when nothing is projected there, leaving ordinary ingress alone", async () => {
+    const app = await projectionApp(async () => ({ state: "not_projected" }));
+    const response = await send(app, "Bearer discord-captain");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ schemaVersion: 1, state: "not_projected" });
+  });
+
+  it("admits only the authenticated text bridge", async () => {
+    const app = await projectionApp(async () => ({ state: "accepted" }));
+    expect((await send(app)).status).toBe(401);
+    // Voice authority is not text authority, the same boundary channel turns hold.
+    expect((await send(app, "Bearer voice")).status).toBe(403);
+  });
+
+  it("refuses a message with nothing in it", async () => {
+    const app = await projectionApp(async () => ({ state: "accepted" }));
+    const response = await app.request("/v1/captain/channel-projection-messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer discord-captain" },
+      body: JSON.stringify({ ...message, body: "   " }),
+    });
+    expect(response.status).toBe(400);
+  });
+});
+
 async function post(
   app: Awaited<ReturnType<typeof createClankieApp>>["app"],
   body: unknown,

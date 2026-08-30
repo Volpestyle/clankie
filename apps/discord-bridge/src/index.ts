@@ -640,11 +640,56 @@ client.on("voiceStateUpdate", (previous, current) => {
   }
 });
 
+/**
+ * Offer one message to a Clankie channel projected onto this guild (ADR 0146).
+ * True means the channel took it and the round its members take is the reply.
+ *
+ * Only the operator drives a round: a channel fans one message out to every
+ * seat in it, and this is the seat that knows who sent the message, so the
+ * decision is taken here and never downstream. Anyone else falls through to
+ * ordinary ingress, exactly as this channel behaved before it was projected.
+ */
+async function takenByProjectedChannel(
+  message: Message,
+  authorIsBot: boolean,
+): Promise<boolean> {
+  const body = message.content.trim();
+  if (
+    authorIsBot ||
+    message.guildId === null ||
+    ownerUserId === undefined ||
+    message.author.id !== ownerUserId ||
+    body.length === 0
+  ) {
+    return false;
+  }
+  const projected = await api.submitDiscordChannelProjectionMessage({
+    schemaVersion: 1,
+    deliveryId: message.id,
+    guildId: message.guildId,
+    channelId: message.channelId,
+    body,
+  });
+  if (projected.state !== "accepted") return false;
+  await recordReceipt("discord.channel.projection", {
+    deliveryId: message.id,
+    guildId: message.guildId,
+    channelId: message.channelId,
+    conversationId: projected.conversationId,
+    runId: projected.runId,
+  });
+  return true;
+}
+
 client.on("messageCreate", async (message) => {
-  if (shuttingDown || !textIngress) return;
+  if (shuttingDown) return;
   try {
-    const selection = selectDiscordMessageImages(message);
     const authorIsBot = message.author.bot || message.author.id === client.user?.id;
+    // A channel the operator projected is a room they made on purpose, so it
+    // answers whether or not Clankie is also listening ambiently in this guild.
+    if (await takenByProjectedChannel(message, authorIsBot)) return;
+    if (!textIngress) return;
+    const selection = selectDiscordMessageImages(message);
     const inbound = {
       id: message.id,
       ...(message.guildId === null ? {} : { guildId: message.guildId }),

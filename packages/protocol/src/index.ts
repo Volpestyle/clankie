@@ -103,6 +103,8 @@ export const OPERATOR_CONVERSATION_TOOL_DETAIL_MAX = OPERATOR_CONVERSATION_TEXT_
 export const OPERATOR_CONVERSATION_MESSAGE_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
 export const OPERATOR_CONVERSATION_CODE_MAX = 128;
 export const OPERATOR_CONVERSATION_REF_MAX = 512;
+/** A filesystem path, bounded well under PATH_MAX so it never truncates a real one. */
+export const OPERATOR_SEAT_DIRECTORY_MAX = 1024;
 export const OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX = 32;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX = 500;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_DEFAULT = 200;
@@ -133,13 +135,180 @@ export const OperatorConversationRunIdSchema = z.string().trim().min(1).max(OPER
 export type OperatorConversationRunId = z.infer<typeof OperatorConversationRunIdSchema>;
 const OperatorConversationEventRefSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
 
+export const OperatorConversationChannelIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(OPERATOR_CONVERSATION_REF_MAX);
+export type OperatorConversationChannelId = z.infer<typeof OperatorConversationChannelIdSchema>;
+
 export const OperatorConversationScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("global") }).strict(),
   z.object({ kind: z.literal("workspace"), workspaceId: z.string().trim().min(1).max(512) }).strict(),
   /** One DM thread per fleet seat (ADR 0135). `seatId` is herdr's stable terminal identity. */
   z.object({ kind: z.literal("seat"), seatId: z.string().trim().min(1).max(512) }).strict(),
+  /**
+   * One conversation several seats share (ADR 0146). Membership lives on the
+   * channel record, not here, so seats can join and leave without the
+   * conversation changing identity.
+   */
+  z.object({ kind: z.literal("channel"), channelId: OperatorConversationChannelIdSchema }).strict(),
 ]);
 export type OperatorConversationScope = z.infer<typeof OperatorConversationScopeSchema>;
+
+/**
+ * A channel costs one model call per member per message under sequential
+ * turn-taking, so membership is bounded well below the roster ceiling. Wanting
+ * more than this in one room is a sign the room should be split.
+ */
+export const OPERATOR_CHANNEL_MEMBER_MAX = 12;
+
+/** A seat in a channel. The operator is implicit and always present. */
+export const OperatorChannelMemberSchema = z
+  .object({
+    seatId: z.string().trim().min(1).max(512),
+    /** Order the member is offered a turn in. Stable across restarts. */
+    position: z.number().int().nonnegative(),
+    joinedAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorChannelMember = z.infer<typeof OperatorChannelMemberSchema>;
+
+/**
+ * The membership record behind a `channel` scope (ADR 0146). A channel is a
+ * fan-out amplifier for anything an agent can do, so who is in it is an
+ * operator decision and never an agent one — no op here lets a member add
+ * itself or another seat.
+ */
+export const OperatorChannelSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    channelId: OperatorConversationChannelIdSchema,
+    conversationId: OperatorConversationIdSchema,
+    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    members: z.array(OperatorChannelMemberSchema).max(OPERATOR_CHANNEL_MEMBER_MAX),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    /** Present once the channel is projected onto a guild (ADR 0146). */
+    discord: z
+      .object({
+        guildId: z.string().trim().min(1).max(128),
+        channelId: z.string().trim().min(1).max(128),
+        /** Webhook id only. The token is a secret and never leaves the host. */
+        webhookId: z.string().trim().min(1).max(128),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type OperatorChannel = z.infer<typeof OperatorChannelSchema>;
+
+/**
+ * The whole roster, restated. Membership arrives as the list the operator
+ * wants, in the order turns are offered, and the host reconciles it — so
+ * joining, leaving, and reordering are one op rather than three, and a member's
+ * `joinedAt` survives a reorder. `channelId` absent creates a channel.
+ */
+export const UpsertOperatorChannelSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    channelId: OperatorConversationChannelIdSchema.optional(),
+    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    members: z.array(z.string().trim().min(1).max(512)).max(OPERATOR_CHANNEL_MEMBER_MAX),
+    /**
+     * Project the channel onto Discord (ADR 0146). Absent leaves an existing
+     * projection exactly as it is.
+     *
+     * `provision` is the ordinary path and the one that makes rooms cheap to
+     * create: Clankie makes the channel and its webhook inside the guild the
+     * owner already approved. `webhook` binds to a channel that already exists,
+     * for a room the owner made themselves or a guild where Clankie has no
+     * permission to create one.
+     *
+     * Either way the host keeps the token and only `webhookId` comes back out,
+     * so this field is the one direction the secret ever moves.
+     */
+    discord: z
+      .discriminatedUnion("kind", [
+        z.object({ kind: z.literal("provision") }).strict(),
+        z
+          .object({ kind: z.literal("webhook"), webhookUrl: z.string().trim().min(1).max(512) })
+          .strict(),
+      ])
+      .optional(),
+  })
+  .strict();
+export type UpsertOperatorChannel = z.infer<typeof UpsertOperatorChannelSchema>;
+
+/**
+ * The bridge handing the service one message typed in a guild channel a
+ * Clankie channel is projected onto (ADR 0146).
+ *
+ * The projection map lives on the conversation, so the bridge does not carry a
+ * copy of it that can go stale the moment a channel is projected. It asks about
+ * each message instead, and the answer says whether the service took it.
+ *
+ * Discord identity policy stays on the bridge, which already owns it for
+ * ingress: only messages the bridge is willing to attribute to the operator
+ * reach here. A channel fans one message out to every seat in it, so the seat
+ * that decides who may do that is the one that knows who is speaking.
+ */
+export const DiscordChannelProjectionMessagePath = "/v1/captain/channel-projection-messages";
+
+export const DiscordChannelProjectionMessageSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    /** Discord's message id; a redelivery of it must not run the round twice. */
+    deliveryId: z.string().trim().min(1).max(128),
+    guildId: z.string().trim().min(1).max(128),
+    channelId: z.string().trim().min(1).max(128),
+    body: z.string().trim().min(1).max(OPERATOR_CONVERSATION_MESSAGE_MAX),
+  })
+  .strict();
+export type DiscordChannelProjectionMessage = z.infer<typeof DiscordChannelProjectionMessageSchema>;
+
+export const DiscordChannelProjectionMessageResultSchema = z.discriminatedUnion("state", [
+  /** No channel is projected here; the bridge carries on with ordinary ingress. */
+  z.object({ schemaVersion: z.literal(1), state: z.literal("not_projected") }).strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      state: z.literal("accepted"),
+      conversationId: OperatorConversationIdSchema,
+      runId: OperatorConversationRunIdSchema,
+    })
+    .strict(),
+]);
+export type DiscordChannelProjectionMessageResult = z.infer<
+  typeof DiscordChannelProjectionMessageResultSchema
+>;
+
+/**
+ * A reaction on one transcript entry (ADR 0146). Deliberately a side-record
+ * keyed by entry rather than a field on the entry itself: entries are
+ * append-only and durable, reactions are mutable, and a reaction arriving must
+ * not rewrite something already written.
+ *
+ * `reactor` is a seat id, or `operator` for the person. Agents react because
+ * acknowledgement — seen, working on it, agreed — is worth saying and not worth
+ * a transcript turn.
+ */
+export const OperatorConversationReactorSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("operator") }).strict(),
+  z.object({ kind: z.literal("seat"), seatId: z.string().trim().min(1).max(512) }).strict(),
+]);
+export type OperatorConversationReactor = z.infer<typeof OperatorConversationReactorSchema>;
+
+export const OperatorConversationReactionSchema = z
+  .object({
+    conversationId: OperatorConversationIdSchema,
+    entryRef: OperatorConversationEventRefSchema,
+    emoji: z.string().trim().min(1).max(64),
+    reactor: OperatorConversationReactorSchema,
+    reactedAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorConversationReaction = z.infer<typeof OperatorConversationReactionSchema>;
 
 /** Bounded fleet roster entry: one herdr seat as a messageable contact (ADR 0135). */
 export const OPERATOR_FLEET_ROSTER_MAX = 48;
@@ -155,9 +324,87 @@ export const OperatorFleetSeatSchema = z
     next: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
     /** Present once the seat's DM thread exists in the registry. */
     conversationId: OperatorConversationIdSchema.optional(),
+    /**
+     * Absolute path the agent is working in. The commons keys its districts off
+     * this (ADR 0022), and hiring offers it back as the places a new agent can
+     * join. Absent when the shell cannot resolve one.
+     */
+    workingDirectory: z.string().trim().max(OPERATOR_SEAT_DIRECTORY_MAX).optional(),
   })
   .strict();
 export type OperatorFleetSeat = z.infer<typeof OperatorFleetSeatSchema>;
+
+/**
+ * Herdr's `agent start --kind` allowlist. A harness value reaches an exec
+ * boundary, so it is checked against this list rather than passed through as
+ * free text — the same reason membership is an enum and not a string.
+ */
+export const OPERATOR_SEAT_HARNESSES = [
+  "claude",
+  "codex",
+  "pi",
+  "gemini",
+  "grok",
+  "opencode",
+  "copilot",
+  "amp",
+  "cursor",
+  "devin",
+  "agy",
+  "cline",
+  "omp",
+  "mastracode",
+  "kimi",
+  "kiro",
+  "droid",
+  "hermes",
+  "kilo",
+  "qodercli",
+  "qwen",
+  "maki",
+] as const;
+export type OperatorSeatHarness = (typeof OPERATOR_SEAT_HARNESSES)[number];
+
+/**
+ * Hire an agent (ADR 0013, "compose is hiring"): herdr opens a tab in the
+ * chosen working directory and starts the harness there. The seat that comes
+ * back is the durable thread identity, so the DM opens on the reply rather
+ * than after a roster poll notices a stranger.
+ */
+export const SpawnOperatorSeatSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    harness: z.enum(OPERATOR_SEAT_HARNESSES),
+    /** What the roster calls it; herdr's own agent name is derived from this. */
+    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    /** Absolute path it starts in — the district it joins (ADR 0022). */
+    workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX),
+  })
+  .strict();
+export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;
+
+/**
+ * Spawning crosses a process boundary that fails in ordinary ways: a path that
+ * is not there, a harness that is not installed, a startup that never becomes
+ * ready. Those are outcomes to render, not exceptions to crash a surface on —
+ * the same call the send lane makes with `undelivered`.
+ */
+export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("spawned"), seat: OperatorFleetSeatSchema }).strict(),
+  z
+    .object({
+      outcome: z.literal("failed"),
+      reason: z.enum([
+        "unknown_directory",
+        "harness_unavailable",
+        "not_ready",
+        "herdr_unreachable",
+      ]),
+      detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+    })
+    .strict(),
+]);
+export type OperatorSeatSpawnResult = z.infer<typeof OperatorSeatSpawnResultSchema>;
 
 /** Herdr's native workspace → tab → pane location for one observable terminal. */
 export const OperatorTerminalSessionSchema = z
@@ -312,6 +559,12 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     role: z.enum(["operator", "captain", "agent"]),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
+    /**
+     * Which seat spoke. Absent in a seat thread, where the counterpart is the
+     * conversation's own scope; present in a channel, where several agents
+     * share one transcript and the surface must attribute each line (ADR 0146).
+     */
+    seatId: z.string().trim().min(1).max(512).optional(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("reasoning"),
@@ -362,12 +615,29 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     runId: OperatorConversationRunIdSchema,
     phase: z.enum(["accepted", "completed", "failed", "cancelled"]),
     reasonCode: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
+    /** What actually went wrong, in words. A code alone never tells the operator. */
+    summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("worker_transcript"),
     workerRunId: OperatorConversationWorkerRunIdSchema,
     phase: z.enum(["snapshot", "tail"]),
     summary: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
+  }).strict(),
+  /**
+   * A reaction landing on, or coming off, one earlier entry (ADR 0146).
+   * Deliberately its own append-only event rather than a field on the entry it
+   * points at: entries are durable and never rewritten, reactions are mutable,
+   * and the current set is the fold of these in cursor order.
+   */
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("reaction"),
+    /** Cursor of the entry being reacted to. */
+    entryRef: OperatorConversationEventRefSchema,
+    emoji: z.string().trim().min(1).max(64),
+    reactor: OperatorConversationReactorSchema,
+    /** True takes the reactor's reaction back off; the add remains in the log. */
+    removed: z.boolean(),
   }).strict(),
   /**
    * Bounded forward-compatibility variant. A newer captain may name a semantic
@@ -382,6 +652,36 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
 ]);
 export type OperatorConversationStreamEvent = z.infer<typeof OperatorConversationStreamEventSchema>;
 export type OperatorConversationStreamEventType = OperatorConversationStreamEvent["type"];
+
+/**
+ * The reactions standing on a conversation right now, folded from its event log
+ * in cursor order (ADR 0146). One reactor holds at most one of a given emoji on
+ * a given entry, and a removal takes that one back off. Surfaces and the
+ * captain both read the set this way rather than keeping a second copy of it
+ * that can drift from the log.
+ */
+export function foldOperatorConversationReactions(
+  events: readonly OperatorConversationStreamEvent[],
+): readonly OperatorConversationReaction[] {
+  const standing = new Map<string, OperatorConversationReaction>();
+  for (const event of events) {
+    if (event.type !== "reaction") continue;
+    const reactorKey = event.reactor.kind === "seat" ? `seat:${event.reactor.seatId}` : "operator";
+    const key = `${event.entryRef}\u0000${event.emoji}\u0000${reactorKey}`;
+    if (event.removed) {
+      standing.delete(key);
+      continue;
+    }
+    standing.set(key, {
+      conversationId: event.conversationId,
+      entryRef: event.entryRef,
+      emoji: event.emoji,
+      reactor: event.reactor,
+      reactedAt: event.occurredAt,
+    });
+  }
+  return [...standing.values()];
+}
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -984,6 +1284,37 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       runId: OperatorConversationRunIdSchema,
     })
     .strict(),
+  /**
+   * Create a channel, or restate an existing one's title and membership
+   * (ADR 0146). A channel is a fan-out amplifier for anything an agent can do,
+   * so this operator-only op is the only way a roster changes: nothing on the
+   * agent side reaches it, and no member can add itself or another seat.
+   */
+  z
+    .object({
+      op: z.literal("channel"),
+      schemaVersion: z.literal(1),
+      channel: UpsertOperatorChannelSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("channels"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
+  // `react` is the operator's own reaction only. An agent reacts through the
+  // captain, which is the boundary that can vouch for which seat it is.
+  z
+    .object({
+      op: z.literal("react"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      entryRef: OperatorConversationEventRefSchema,
+      emoji: z.string().trim().min(1).max(64),
+      remove: z.boolean(),
+    })
+    .strict(),
   z
     .object({
       op: z.literal("autonomy"),
@@ -1009,6 +1340,18 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("close_seat"),
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
+    })
+    .strict(),
+  /**
+   * Staff the fleet by starting a conversation (ADR 0013). Operator-only for
+   * the same reason `channel` is: an agent that can hire is an agent that can
+   * multiply itself.
+   */
+  z
+    .object({
+      op: z.literal("spawn_seat"),
+      schemaVersion: z.literal(1),
+      seat: SpawnOperatorSeatSchema,
     })
     .strict(),
   z
@@ -1104,6 +1447,32 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("channel"),
+      schemaVersion: z.literal(1),
+      channel: OperatorChannelSchema,
+      /** The shared conversation, so a freshly created channel opens without a second call. */
+      conversation: OperatorConversationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("channels"),
+      schemaVersion: z.literal(1),
+      channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("react"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      entryRef: OperatorConversationEventRefSchema,
+      /** False when the entry is not in this conversation's retained log. */
+      reacted: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("autonomy"),
       schemaVersion: z.literal(1),
       status: OperatorAutonomyStatusSchema,
@@ -1129,6 +1498,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
       closed: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("spawn_seat"),
+      schemaVersion: z.literal(1),
+      result: OperatorSeatSpawnResultSchema,
     })
     .strict(),
   z
@@ -1203,6 +1579,12 @@ export interface OperatorConversationServiceClient {
   terminalInput?(request: OperatorTerminalInputRequest): Promise<OperatorTerminalInputResult>;
   /** Close the Herdr pane currently occupying a durable fleet seat. */
   closeSeat(seatId: string): Promise<boolean>;
+  /**
+   * Open a pane in a working directory and start a harness in it, returning the
+   * seat to open a thread on. Absent on older injected clients; failures come
+   * back typed rather than thrown.
+   */
+  spawnSeat?(input: SpawnOperatorSeat): Promise<OperatorSeatSpawnResult>;
   get(conversationId: string): Promise<OperatorConversation | undefined>;
   create(input: {
     readonly scope: OperatorConversationScope;
@@ -1210,6 +1592,27 @@ export interface OperatorConversationServiceClient {
   }): Promise<OperatorConversation>;
   /** Clone the current Pi branch into an ephemeral child conversation. */
   fork(parentConversationId: string): Promise<OperatorConversation>;
+  /**
+   * Create a channel, or restate its title, roster, and projection (ADR 0146).
+   * Absent on older injected clients. Membership is an operator decision, so
+   * this is the only way a roster changes.
+   */
+  channel?(input: UpsertOperatorChannel): Promise<{
+    readonly channel: OperatorChannel;
+    readonly conversation: OperatorConversation;
+  }>;
+  /** Every channel that exists here; absent on older injected clients. */
+  channels?(): Promise<readonly OperatorChannel[]>;
+  /**
+   * Put the operator's reaction on one transcript entry, or take it back off.
+   * False when the entry is not in the conversation's retained log.
+   */
+  react?(input: {
+    readonly conversationId: string;
+    readonly entryRef: string;
+    readonly emoji: string;
+    readonly remove: boolean;
+  }): Promise<boolean>;
   close(conversationId: string): Promise<boolean>;
   replay(request: ReplayOperatorConversationRequest): Promise<ReplayOperatorConversationResult>;
   /**
@@ -1278,6 +1681,26 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "close_seat", schemaVersion: 1, seatId });
       if (result.op !== "close_seat") throw new Error(`Unexpected ${result.op} result for close_seat`);
       return result.closed;
+    },
+    async spawnSeat(input) {
+      const result = await dispatch({ op: "spawn_seat", schemaVersion: 1, seat: input });
+      if (result.op !== "spawn_seat") throw new Error(`Unexpected ${result.op} result for spawn_seat`);
+      return result.result;
+    },
+    async channel(input) {
+      const result = await dispatch({ op: "channel", schemaVersion: 1, channel: input });
+      if (result.op !== "channel") throw new Error(`Unexpected ${result.op} result for channel`);
+      return { channel: result.channel, conversation: result.conversation };
+    },
+    async channels() {
+      const result = await dispatch({ op: "channels", schemaVersion: 1 });
+      if (result.op !== "channels") throw new Error(`Unexpected ${result.op} result for channels`);
+      return result.channels;
+    },
+    async react(input) {
+      const result = await dispatch({ op: "react", schemaVersion: 1, ...input });
+      if (result.op !== "react") throw new Error(`Unexpected ${result.op} result for react`);
+      return result.reacted;
     },
     async get(conversationId) {
       const result = await dispatch({ op: "get", schemaVersion: 1, conversationId });

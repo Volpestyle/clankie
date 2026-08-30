@@ -238,6 +238,15 @@ export {
   planDiscordRestAction,
   resolveDiscordRestActionResult,
   type DiscordRestActionPlan,
+  discordChannelName,
+  parseDiscordWebhookUrl,
+  planDiscordChannelCreate,
+  planDiscordWebhookCreate,
+  planDiscordWebhookPost,
+  type DiscordProvisionPlan,
+  type DiscordWebhookCredential,
+  type DiscordWebhookPersonaPost,
+  type DiscordWebhookPostPlan,
 } from "./discord-rest.ts";
 export {
   DEFAULT_VOICE_IDLE_LEAVE_MS,

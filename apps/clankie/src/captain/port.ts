@@ -1,6 +1,8 @@
 import type {
   CaptainChannelTurnResult,
   CaptainLaneObservationEntry,
+  DiscordChannelProjectionMessage,
+  DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
   ObservableCaptainLane,
   OperatorConversationServiceRequest,
@@ -14,6 +16,14 @@ import type {
 export interface CaptainPort {
   /** One Discord text/voice message becomes one captain turn. */
   submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult>;
+  /**
+   * One message from a guild channel a Clankie channel is projected onto
+   * (ADR 0146). Answers whether this service took it: a channel projected here
+   * runs its round, and anything else is left for ordinary Discord ingress.
+   */
+  submitChannelProjectionMessage(
+    request: DiscordChannelProjectionMessage,
+  ): Promise<DiscordChannelProjectionMessageResult>;
   /** Callable operator service for conversations and read-only terminal tails. */
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
@@ -44,6 +54,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       turnId: "stub-turn",
       response: "stub response",
     }),
+    submitChannelProjectionMessage: async () => ({ schemaVersion: 1, state: "not_projected" }),
     serveOperatorConversation: async () => {
       throw new Error("stub captain: serveOperatorConversation not overridden");
     },

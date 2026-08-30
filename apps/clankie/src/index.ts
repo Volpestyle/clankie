@@ -358,6 +358,9 @@ const captain = createCaptain(
     stateDir: join(stateRoot, "captain"),
     settings: settingsStore,
     discordEnvironment: captainDiscordEnvironment,
+    // The same trusted module that owns the bot token owns making a channel's
+    // room with it; the captain only asks (ADR 0024, ADR 0146).
+    ...(discordPresenceRuntime === undefined ? {} : { discordChannels: discordPresenceRuntime }),
   },
 );
 

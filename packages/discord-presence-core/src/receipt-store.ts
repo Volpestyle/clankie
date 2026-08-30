@@ -16,6 +16,8 @@ const currentReceiptTypes = [
   "discord.stream.publish_stopped",
   "discord.text.ingress",
   "discord.text.reply",
+  /** A guild message taken by a projected Clankie channel instead of by Clankie (ADR 0146). */
+  "discord.channel.projection",
   "discord.person-memory.proposed",
   "discord.person-memory.recalled",
   "discord.voice.joined",

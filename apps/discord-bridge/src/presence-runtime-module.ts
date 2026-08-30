@@ -1,5 +1,11 @@
 import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@clankie/credential-broker";
-import { parseDiscordIdSet, presenceActGrantRequest } from "@clankie/discord-presence-core";
+import {
+  parseDiscordIdSet,
+  planDiscordChannelCreate,
+  planDiscordWebhookCreate,
+  presenceActGrantRequest,
+} from "@clankie/discord-presence-core";
+import { REST as DiscordREST } from "discord.js";
 import type { DiscordActivitySurface, DiscordPresenceWrite } from "@clankie/protocol";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import { discordAttachmentRoot } from "@clankie/settings";
@@ -16,6 +22,12 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
   ): ReturnType<DiscordBotPresenceRuntime["execute"]>;
+  provisionChannel(input: { readonly name: string; readonly topic?: string }): Promise<{
+    readonly guildId: string;
+    readonly channelId: string;
+    readonly webhookId: string;
+    readonly webhookToken: string;
+  }>;
 } {
   if (process.env.DISCORD_USER_TOKEN) {
     throw new Error(
@@ -33,6 +45,47 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
     allowedChannelIds: [...parseDiscordIdSet(process.env.DISCORD_PRESENCE_CHANNEL_IDS)],
   });
   return {
+    /**
+     * Two calls behind one guild-scoped grant: make the channel, then its
+     * webhook. The guild allowlist is the fence — nothing here can reach a
+     * server the owner has not approved, and no channel id is required up
+     * front because the channel is what this creates.
+     */
+    async provisionChannel(input) {
+      const guildId = provisionGuildId();
+      // Synthetic but stable identity: `resolveBotToken` only checks that the
+      // grant it verifies matches the request it is handed, and the real fence
+      // is the guild allowlist that `assertAllowed` applies to both.
+      const scope = {
+        principalId: "clankie-channels",
+        missionId: "discord-channel-provision",
+        profileHash: "unversioned",
+        capability: "discord.presence.act" as const,
+        guildIds: [guildId],
+        channelIds: [],
+      };
+      const grant = await provider.issueGrant(scope);
+      const botToken = await provider.resolveBotToken({ grant, ...scope });
+      const rest = options.rest ?? new DiscordREST({ version: "10" }).setToken(botToken);
+      const channelPlan = planDiscordChannelCreate({ guildId, name: input.name, ...(input.topic === undefined ? {} : { topic: input.topic }) });
+      const channel = (await rest.post(channelPlan.path as `/${string}`, {
+        body: channelPlan.body,
+      })) as { id?: unknown };
+      if (typeof channel.id !== "string") throw new Error("discord_channel_provision_failed");
+      const webhookPlan = planDiscordWebhookCreate({ channelId: channel.id, name: input.name });
+      const webhook = (await rest.post(webhookPlan.path as `/${string}`, {
+        body: webhookPlan.body,
+      })) as { id?: unknown; token?: unknown };
+      if (typeof webhook.id !== "string" || typeof webhook.token !== "string") {
+        throw new Error("discord_webhook_provision_failed");
+      }
+      return {
+        guildId,
+        channelId: channel.id,
+        webhookId: webhook.id,
+        webhookToken: webhook.token,
+      };
+    },
     async execute(write, session) {
       const request = presenceActGrantRequest(write);
       const grant = await provider.issueGrant(request);
@@ -45,6 +98,24 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       }).execute(write, session);
     },
   };
+}
+
+/**
+ * The one guild Clankie makes rooms in. An explicit home guild wins; otherwise
+ * a single approved presence guild is unambiguous enough to use. More than one
+ * and there is no right answer, so it asks rather than guessing which of the
+ * owner's servers to put a room in.
+ */
+function provisionGuildId(): string {
+  const home = process.env.DISCORD_GUILD_ID?.trim();
+  if (home) return home;
+  const approved = [...parseDiscordIdSet(process.env.DISCORD_PRESENCE_GUILD_IDS)];
+  if (approved.length === 1) return approved[0]!;
+  throw new Error(
+    approved.length === 0
+      ? "discord_provision_guild_unset"
+      : "discord_provision_guild_ambiguous",
+  );
 }
 
 /**

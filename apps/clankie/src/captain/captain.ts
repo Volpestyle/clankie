@@ -43,6 +43,8 @@ import { HerdrTerminalStore } from "./herdr-terminal.ts";
 import { HerdrTerminalControlStore } from "./herdr-terminal-control.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
+import { createChannelProjection } from "./channel-projection.ts";
+import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import { discordTurnSessionKey, normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
 import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
@@ -261,6 +263,12 @@ export interface CaptainOptions {
   readonly settings?: SettingsStore;
   /** Real process-level overrides captured before stored settings are projected into child env. */
   readonly discordEnvironment?: NodeJS.ProcessEnv;
+  /**
+   * Trusted Discord runtime, used to make a channel's room and webhook
+   * (ADR 0146). Absent leaves only the pasted-webhook path, which is what a
+   * deployment with no Discord bot has anyway.
+   */
+  readonly discordChannels?: Pick<DiscordPresenceRuntimePort, "provisionChannel">;
 }
 
 interface LaneSession {
@@ -803,10 +811,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       created.catch(() => sessions.delete(`operator:${conversationId}`));
       await created;
     },
+    createChannelProjection(
+      options.discordChannels?.provisionChannel === undefined
+        ? {}
+        : { provision: (input) => options.discordChannels!.provisionChannel!(input) },
+    ),
   );
 
   autonomy.start(async (conversationId, prompt) => {
-    if (!conversations.has(conversationId) || conversations.isSeatConversation(conversationId)) {
+    if (!conversations.runsCaptainTurns(conversationId)) {
       autonomy.clearConversation(conversationId);
       return;
     }
@@ -819,7 +832,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   herdrWatches.start(
     (conversationId, prompt) => {
-      if (!conversations.has(conversationId) || conversations.isSeatConversation(conversationId)) {
+      if (!conversations.runsCaptainTurns(conversationId)) {
         herdrWatches.cancelConversation(conversationId);
         return Promise.resolve();
       }
@@ -828,6 +841,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return Promise.resolve();
     },
     (seatId, projection) => {
+      if (projection.kind === "transcript") {
+        conversations.syncSeatTranscript(seatId, projection.transcript);
+        return;
+      }
       conversations.publishSeatEvent(
         seatId,
         projection.kind === "status"
@@ -985,6 +1002,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   return {
+    submitChannelProjectionMessage(request) {
+      const accepted = conversations.submitProjectedMessage(
+        request.guildId,
+        request.channelId,
+        request.body,
+      );
+      return Promise.resolve(
+        accepted === undefined
+          ? { schemaVersion: 1 as const, state: "not_projected" as const }
+          : { schemaVersion: 1 as const, state: "accepted" as const, ...accepted },
+      );
+    },
     async submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult> {
       const { settings: discord } = resolveDiscordSettings(
         (await settings()).discord,
@@ -1080,8 +1109,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (!conversations.has(request.conversationId)) {
           throw new Error(`Unknown conversation ${request.conversationId}`);
         }
-        if (conversations.isSeatConversation(request.conversationId)) {
-          throw new Error("Seat conversations do not have captain autonomy");
+        if (!conversations.runsCaptainTurns(request.conversationId)) {
+          throw new Error("Only Clankie's own conversations have captain autonomy");
         }
         return Promise.resolve({
           op: "autonomy",
@@ -1115,9 +1144,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           closed: await herdrWatches.closeSeat(request.seatId),
         };
       }
+      if (request.op === "spawn_seat") {
+        const result = await herdrWatches.spawnSeat(request.seat);
+        // A hired agent is watched the moment it exists, the way a seat thread
+        // created through `create` is — otherwise its first reply lands in a
+        // thread nothing is listening to.
+        if (result.outcome === "spawned") herdrWatches.trackSeat(result.seat.seatId);
+        return { op: "spawn_seat", schemaVersion: 1, result };
+      }
       const result = await conversations.serve(request);
       if (request.op === "create" && request.scope.kind === "seat") {
         herdrWatches.trackSeat(request.scope.seatId);
+      }
+      // A round hears a member answer through the same seat watch that feeds
+      // that agent's own thread, so joining a channel starts one (ADR 0146).
+      if (result.op === "channel") {
+        for (const member of result.channel.members) herdrWatches.trackSeat(member.seatId);
       }
       return result;
     },

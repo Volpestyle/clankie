@@ -180,12 +180,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                 options: rows.map((item) => ({
                   value: item.conversationId,
                   label: item.title,
-                  hint:
-                    item.scope.kind === "workspace"
-                      ? "workspace"
-                      : item.isDefault
-                        ? "global · default"
-                        : "global",
+                  hint: conversationHint(item),
                   ...(item.scope.kind === "workspace" ? { description: item.scope.workspaceId } : {}),
                 })),
                 ...(currentConversationId === undefined
@@ -714,6 +709,23 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   );
 
   return commands;
+}
+
+/** What kind of room a row is, so a seat thread and a channel do not read as global. */
+function conversationHint(conversation: {
+  readonly scope: OperatorConversationScope;
+  readonly isDefault: boolean;
+}): string {
+  switch (conversation.scope.kind) {
+    case "workspace":
+      return "workspace";
+    case "seat":
+      return "seat";
+    case "channel":
+      return "channel";
+    case "global":
+      return conversation.isDefault ? "global · default" : "global";
+  }
 }
 
 function formatAutonomyStatus(status: OperatorAutonomyStatus): string {

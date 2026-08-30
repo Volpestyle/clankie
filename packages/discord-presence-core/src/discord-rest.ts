@@ -175,3 +175,154 @@ export function resolveDiscordRestActionResult(
     ...(messageId === undefined ? {} : { messageId }),
   };
 }
+
+/**
+ * One agent posting into a Clankie channel projected onto a guild
+ * (ADR 0146). A webhook renders each agent as itself — its own name and its
+ * own pixel face — from a single per-channel credential, so no seat needs a bot
+ * application or, worse, a user account: ADR 0048 already treats one automated
+ * user account as an accepted ToS risk, and a fleet's worth is a fleet's worth
+ * of violations.
+ */
+export interface DiscordWebhookPersonaPost {
+  readonly webhookId: string;
+  readonly webhookToken: string;
+  readonly username: string;
+  readonly content: string;
+  readonly avatarUrl?: string;
+  /** Post into a thread on the webhook's channel rather than the channel. */
+  readonly threadId?: string;
+}
+
+export interface DiscordWebhookPostPlan {
+  readonly method: "post";
+  readonly path: string;
+  readonly body: Record<string, unknown>;
+}
+
+/** Discord rejects a webhook username containing either of these, in any case. */
+const FORBIDDEN_WEBHOOK_NAME = /discord|clyde/iu;
+const WEBHOOK_USERNAME_MAX = 80;
+const WEBHOOK_CONTENT_MAX = 2000;
+
+/**
+ * Plan the REST call for one persona post. Pure, like
+ * {@link planDiscordRestAction} — the transport stays in the caller.
+ *
+ * `wait=true` is not optional: the response carries the message id, and without
+ * it a later reaction has nothing to attach to.
+ */
+export function planDiscordWebhookPost(post: DiscordWebhookPersonaPost): DiscordWebhookPostPlan {
+  const username = post.username.trim();
+  if (username.length === 0 || username.length > WEBHOOK_USERNAME_MAX) {
+    throw new Error("discord_webhook_invalid_username");
+  }
+  if (FORBIDDEN_WEBHOOK_NAME.test(username)) throw new Error("discord_webhook_reserved_username");
+  const content = post.content.trim();
+  if (content.length === 0 || content.length > WEBHOOK_CONTENT_MAX) {
+    throw new Error("discord_webhook_invalid_content");
+  }
+  const query = post.threadId === undefined
+    ? "?wait=true"
+    : `?wait=true&thread_id=${encodeURIComponent(post.threadId)}`;
+  return {
+    method: "post",
+    path: `/webhooks/${post.webhookId}/${post.webhookToken}${query}`,
+    body: {
+      username,
+      content,
+      ...(post.avatarUrl === undefined ? {} : { avatar_url: post.avatarUrl }),
+      // An agent's words must never be able to ping a room. Same rule the bot
+      // send path already holds.
+      allowed_mentions: { parse: [] },
+    },
+  };
+}
+
+export interface DiscordWebhookCredential {
+  readonly webhookId: string;
+  readonly webhookToken: string;
+}
+
+/**
+ * Read the id and token out of a webhook URL the guild owner created
+ * (ADR 0146). Taking the credential the owner already made is what keeps a
+ * projection free of any per-agent registration: one webhook renders every
+ * member as itself, and the bot's own grant — which is scoped to channels that
+ * already exist (ADR 0133) — is not involved at all.
+ *
+ * The token half is a bearer credential in a URL. It stays on the host: the
+ * operator boundary carries `webhookId` and never this.
+ */
+export function parseDiscordWebhookUrl(url: string): DiscordWebhookCredential {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    throw new Error("discord_webhook_invalid_url");
+  }
+  if (parsed.protocol !== "https:" || !/^(?:\w+\.)*discord(?:app)?\.com$/u.test(parsed.hostname)) {
+    throw new Error("discord_webhook_invalid_url");
+  }
+  const match = /\/webhooks\/(\d{1,32})\/([\w-]{1,120})\/?$/u.exec(parsed.pathname);
+  if (match === null) throw new Error("discord_webhook_invalid_url");
+  return { webhookId: match[1]!, webhookToken: match[2]! };
+}
+
+/**
+ * Discord channel names are lowercased and space-free, so a room title becomes
+ * a slug rather than being rejected. Anything that survives is what a person
+ * would recognise as the same room.
+ */
+export function discordChannelName(title: string): string {
+  const slug = title
+    .normalize("NFKD")
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9-]+/gu, "-")
+    .replaceAll(/-{2,}/gu, "-")
+    .replace(/^-|-$/gu, "")
+    .slice(0, 100);
+  // A title of nothing but punctuation still has to name a channel.
+  return slug.length === 0 ? "clankie-channel" : slug;
+}
+
+export interface DiscordProvisionPlan {
+  readonly method: "post";
+  readonly path: string;
+  readonly body: Record<string, unknown>;
+}
+
+/**
+ * Make the guild channel a Clankie channel is projected into (ADR 0146). This
+ * is provisioning inside a guild the owner already has, which is the whole of
+ * what Clankie does to a server — never guild creation.
+ */
+export function planDiscordChannelCreate(input: {
+  readonly guildId: string;
+  readonly name: string;
+  readonly topic?: string;
+}): DiscordProvisionPlan {
+  return {
+    method: "post",
+    path: `/guilds/${input.guildId}/channels`,
+    body: {
+      name: discordChannelName(input.name),
+      // 0 is a guild text channel; the room is for reading and typing in.
+      type: 0,
+      ...(input.topic === undefined ? {} : { topic: input.topic.slice(0, 1024) }),
+    },
+  };
+}
+
+/** The one per-channel credential every member of the room posts through. */
+export function planDiscordWebhookCreate(input: {
+  readonly channelId: string;
+  readonly name: string;
+}): DiscordProvisionPlan {
+  return {
+    method: "post",
+    path: `/channels/${input.channelId}/webhooks`,
+    // Webhook names carry the same reserved-word rule as the per-post username.
+    body: { name: FORBIDDEN_WEBHOOK_NAME.test(input.name) ? "Clankie channel" : input.name.slice(0, 80) },
+  };
+}

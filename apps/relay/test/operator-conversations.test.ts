@@ -210,6 +210,60 @@ describe("authenticated operator conversation relay", () => {
     expect(await response.json()).toEqual({ error: "steer_grant_required" });
   });
 
+  it("requires the steer grant to change a channel roster, but not to read or react", async () => {
+    // Membership is a fan-out decision (ADR 0146): a chat-only device may talk
+    // in a room and react in it, and may not decide who else is in it.
+    const channel = {
+      schemaVersion: 1 as const,
+      channelId: "channel-1",
+      conversationId: "conv-channel-1",
+      title: "atlas slowness",
+      members: [{ seatId: "atlas", position: 0, joinedAt: "2026-08-30T00:00:00.000Z" }],
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
+    };
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, steer: false } },
+        }),
+      },
+      dispatch: async (request) =>
+        request.op === "channels"
+          ? { op: "channels", schemaVersion: 1, channels: [channel] }
+          : {
+              op: "react",
+              schemaVersion: 1,
+              conversationId: "conv-channel-1",
+              entryRef: "000000000003",
+              reacted: true,
+            },
+    });
+    const denied = await post(relay.url, "/operator/v1/dispatch", {
+      op: "channel",
+      schemaVersion: 1,
+      channel: { schemaVersion: 1, title: "atlas slowness", members: ["atlas", "dev"] },
+    });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: "steer_grant_required" });
+
+    const listed = await post(relay.url, "/operator/v1/dispatch", { op: "channels", schemaVersion: 1 });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({ op: "channels", channels: [{ channelId: "channel-1" }] });
+
+    const reacted = await post(relay.url, "/operator/v1/dispatch", {
+      op: "react",
+      schemaVersion: 1,
+      conversationId: "conv-channel-1",
+      entryRef: "000000000003",
+      emoji: "\u{1F440}",
+      remove: false,
+    });
+    expect(reacted.status).toBe(200);
+    expect(await reacted.json()).toMatchObject({ op: "react", reacted: true });
+  });
+
   it("deduplicates identical turn delivery and preserves typed stale-revision conflicts", async () => {
     let sends = 0;
     let offline = true;

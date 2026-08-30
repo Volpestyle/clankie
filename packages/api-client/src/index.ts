@@ -1,5 +1,8 @@
 import {
   CaptainChannelTurnResultSchema,
+  DiscordChannelProjectionMessagePath,
+  DiscordChannelProjectionMessageResultSchema,
+  DiscordChannelProjectionMessageSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteResultSchema,
   DiscordPresenceWriteSchema,
@@ -8,6 +11,8 @@ import {
   DiscordUserSessionOptInSchema,
   DISCORD_STREAM_WATCH_PATH,
   type CaptainChannelTurnResult,
+  type DiscordChannelProjectionMessage,
+  type DiscordChannelProjectionMessageResult,
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
   type DiscordPresenceChannelTurnRequest,
@@ -141,6 +146,23 @@ export class ClankieApiClient {
       body: JSON.stringify(request),
     });
     return CaptainChannelTurnResultSchema.parse(result);
+  }
+
+  /**
+   * Offers one guild message to a Clankie channel projected onto that guild
+   * (ADR 0146). `not_projected` means the service took nothing and the caller
+   * carries on with ordinary ingress.
+   */
+  public async submitDiscordChannelProjectionMessage(
+    input: DiscordChannelProjectionMessage,
+  ): Promise<DiscordChannelProjectionMessageResult> {
+    const request = DiscordChannelProjectionMessageSchema.parse(input);
+    const result = await this.request<unknown>(DiscordChannelProjectionMessagePath, {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(request),
+    });
+    return DiscordChannelProjectionMessageResultSchema.parse(result);
   }
 
   /**

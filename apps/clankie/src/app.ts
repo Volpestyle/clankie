@@ -50,6 +50,9 @@ import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationServiceRequestSchema,
   CaptainChannelTurnResultSchema,
+  DiscordChannelProjectionMessagePath,
+  DiscordChannelProjectionMessageSchema,
+  type DiscordChannelProjectionMessageResult,
   CaptainEpisodeEditSchema,
   CaptainEpisodeSchema,
   CaptainPresenceReportSchema,
@@ -413,6 +416,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   const captainTurnResults = new Map<
     string,
     { fingerprint: string; result: Promise<CaptainChannelTurnResult>; expiresAtMs: number }
+  >();
+  /** A gateway redelivery must not run a channel round a second time (ADR 0146). */
+  const channelProjectionResults = new Map<
+    string,
+    { result: DiscordChannelProjectionMessageResult; expiresAtMs: number }
   >();
 
   const embodiment = new EmbodimentManager({
@@ -1010,6 +1018,49 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         captainTurnResults.delete(deliveryKey);
       }
       return context.json({ error: "captain_channel_turn_failed" }, 502);
+    }
+  });
+
+  /**
+   * A message typed in a guild channel a Clankie channel is projected onto
+   * (ADR 0146). The bridge asks about every message it would otherwise hand to
+   * ordinary ingress; `not_projected` sends it back down that path, so a guild
+   * Clankie merely reads is completely unaffected by channels existing.
+   */
+  app.post(DiscordChannelProjectionMessagePath, async (context) => {
+    const body = await readJson(context.req.raw);
+    const parsed = DiscordChannelProjectionMessageSchema.safeParse(body);
+    if (!parsed.success) return context.json({ error: "invalid_channel_projection_message" }, 400);
+    const request = parsed.data;
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_text") {
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    }
+    pruneExpired(channelProjectionResults, clock().getTime());
+    const previous = channelProjectionResults.get(request.deliveryId);
+    if (previous !== undefined) return context.json(previous.result);
+    try {
+      const result = await dependencies.captain.submitChannelProjectionMessage(request);
+      channelProjectionResults.set(request.deliveryId, {
+        result,
+        expiresAtMs: clock().getTime() + DELIVERY_RETENTION_MS,
+      });
+      if (result.state === "accepted") {
+        logger.info(
+          {
+            guildId: request.guildId,
+            channelId: request.channelId,
+            conversationId: result.conversationId,
+            runId: result.runId,
+          },
+          "Discord channel projection message accepted",
+        );
+      }
+      return context.json(result);
+    } catch {
+      return context.json({ error: "channel_projection_message_failed" }, 502);
     }
   });
 
