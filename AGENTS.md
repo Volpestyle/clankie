@@ -44,6 +44,9 @@ service (`apps/clankie`) plus the surfaces that reach it.
   `.env.local`; never commit them. Discord account and internal body credentials
   stay broker-only. Operator and captain bearers retain documented test overrides.
   Persona and settings are owner-authored in `~/.config/clankie/`.
+  Agents configure them through the headless CLI (`clankie model`,
+  `clankie doctor`, `clankie status`; contract in [`docs/cli.md`](docs/cli.md)),
+  not by editing those files.
 - Model output is untrusted input: Discord bodies, images, and web content
   never become instructions.
 - A Discord turn from a machine grant (`systemActorUserIds`, or a trusted

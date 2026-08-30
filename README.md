@@ -73,7 +73,12 @@ The credential broker is the canonical secret store (macOS Keychain, or a
 mode-0600 file store elsewhere). Configure it from inside the TUI: `/auth` for
 provider keys or OAuth, `/model` for the captain model, `/image-model` for
 generation, `/persona` for who he is, `/connect` for Linear and email, and
-`/discord` for either Discord body. For compatibility, the clankie service also fills absent environment
+`/discord` for either Discord body. Agents and scripts use the same stores
+through the headless CLI — `clankie doctor`, `clankie model`,
+`clankie restart captain` — documented in [`docs/cli.md`](docs/cli.md).
+`clankie help` prints the same index. Secrets never go on flags.
+
+For compatibility, the clankie service also fills absent environment
 keys from a gitignored root `.env.local`, and model/media providers may fall
 back to their declared API-key environment variables when the broker has no
 entry. Existing shell values win. Discord account, bridge, activity-producer,
@@ -128,6 +133,7 @@ Requirements, keybindings, and troubleshooting live in
 [`integrations/herdr-plugin/README.md`](integrations/herdr-plugin/README.md).
 
 See [`docs/architecture.md`](docs/architecture.md) for the system shape,
+[`docs/cli.md`](docs/cli.md) for the headless `clankie` command contract,
 [`docs/distribution.md`](docs/distribution.md) for binary installation,
 [`docs/credentials.md`](docs/credentials.md) for bot/user/internal token
 boundaries, and [`docs/discord-media.md`](docs/discord-media.md) for YouTube

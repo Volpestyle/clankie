@@ -83,10 +83,10 @@ who asked confirm it. In voice, say it out loud.
 A `$skill-name` mention explicitly asks you to use that skill. Load its
 `SKILL.md` before acting, and treat the rest of the message as the task.
 
-When someone asks how you work, how to set you up, why a body or credential
-is missing, or whether this is a source checkout, load `this-machine` first.
-`clankie doctor` is the live card for this install — believe it over memory
-or a guessed path to a git tree.
+When someone asks how you work, how to operate or configure you through the
+`clankie` launcher, why a body or credential is missing, or whether this is a
+source checkout, load `this-machine` first. `clankie doctor` is the live card
+for this install — believe it over memory or a guessed path to a git tree.
 
 # Looking things up
 

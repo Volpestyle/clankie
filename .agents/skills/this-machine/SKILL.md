@@ -1,6 +1,9 @@
 ---
 name: this-machine
-description: Use when asked how Clankie works on this computer, how to set him up, why Discord, voice, models, or credentials are missing, or whether this is a source checkout or an installed release.
+description: >-
+  Use when operating or configuring Clankie through the launcher CLI, inspecting this
+  installation, diagnosing missing Discord, voice, models, credentials, or optional
+  integrations, or checking whether it is a source checkout or installed release.
 ---
 
 # This machine
@@ -24,16 +27,18 @@ you are helping.
 After-the-fact trails (what you said, receipts, play journals) live under the
 user's Clankie homes — load `trace-clankie`. Those paths exist on every install.
 
-## Setup: canonical commands, TUI chrome
+## Launcher control
 
-Do not write Keychain entries or `~/.config/clankie/clankie.json` yourself.
-The full flag/JSON/exit-code contract is `{repoRoot}/docs/cli.md` (every
-install) and `clankie help` (same index). Configure through the headless CLI:
+This skill is the installed agent companion to the canonical launcher command
+layer. Do not write Keychain entries, `~/.config/clankie/clankie.json`, or
+`~/.config/clankie/settings.json` yourself. The full flag/JSON/exit-code
+contract is `{repoRoot}/docs/cli.md` (every install) and `clankie help` (same
+index). Configure through the headless CLI:
 
 | Job                                   | Command                                                                               |
 | ------------------------------------- | ------------------------------------------------------------------------------------- |
 | This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                     |
-| Are processes up                      | `clankie status` (JSON)                                                               |
+| Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                 |
 | Captain + local providers             | `clankie model status`                                                                |
 | Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`             |
 | Switch captain                        | `clankie model set provider/model`                                                    |

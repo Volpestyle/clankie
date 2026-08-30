@@ -44,12 +44,14 @@ flowchart LR
   (never secrets), optional binaries, and whether the herdr plugin is bundled
   or linked. `ok` means the card was produced. Missing optional tools are
   facts, not failures. `clankie status` stays the process-liveness card.
-- **`this-machine`** is the product skill. Load it when asked how he works, how
-  to set him up, or why a body or credential is missing. It tells him to run
-  doctor and believe it, that agents set up through the headless CLI
-  (`docs/cli.md` at `repoRoot`; `clankie help` is the same index) while the
-  person at the console uses TUI slash commands, and that the conversation
-  workspace is not his body.
+- **`this-machine`** is the product skill and the installed companion to the
+  launcher command layer. Load it when asked how he works, how to operate or
+  configure him through `clankie`, or why a body or credential is missing. It
+  tells him to run doctor and believe it, that `clankie <noun> <verb>` is the
+  canonical non-secret control path, and that TUI slash commands and modals are
+  chrome over those same functions ([ADR 0012](0012-provider-auth-model-registry.md)).
+  The full contract is `docs/cli.md` at `repoRoot`; `clankie help` is the same
+  index. The conversation workspace is not his body.
 - **CLI contract.** `docs/cli.md` ships in the release so a `curl | sh`
   install can read the same flag/JSON/exit-code contract as a checkout. The
   rest of `docs/` does not.
