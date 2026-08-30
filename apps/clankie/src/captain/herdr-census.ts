@@ -124,16 +124,19 @@ export function parseHerdrTerminalCatalog(stdout: string): OperatorTerminalSessi
   if (!snapshot) return [];
   const workspaces = recordMap(snapshot.workspaces, "workspace_id");
   const tabs = recordMap(snapshot.tabs, "tab_id");
-  const agents = Array.isArray(snapshot.agents) ? snapshot.agents : [];
+  const panes = Array.isArray(snapshot.panes)
+    ? snapshot.panes
+    : Array.isArray(snapshot.agents)
+      ? snapshot.agents
+      : [];
 
-  return agents.flatMap((value): OperatorTerminalSession[] => {
+  return panes.flatMap((value): OperatorTerminalSession[] => {
     if (value === null || typeof value !== "object") return [];
-    const agent = value as Record<string, unknown>;
-    if (agent.agent === "shell") return [];
-    const terminalId = agent.terminal_id;
-    const workspaceId = agent.workspace_id;
-    const tabId = agent.tab_id;
-    const paneId = agent.pane_id;
+    const pane = value as Record<string, unknown>;
+    const terminalId = pane.terminal_id;
+    const workspaceId = pane.workspace_id;
+    const tabId = pane.tab_id;
+    const paneId = pane.pane_id;
     if (
       typeof terminalId !== "string" ||
       typeof workspaceId !== "string" ||
@@ -153,7 +156,7 @@ export function parseHerdrTerminalCatalog(stdout: string): OperatorTerminalSessi
     return [
       {
         terminalId,
-        label: bounded(titleOf(agent), 200),
+        label: bounded(titleOf(pane), 200),
         workspace: { id: workspaceId, label: bounded(workspace.label, 200), number: workspace.number },
         tab: { id: tabId, label: bounded(tab.label, 200), number: tab.number },
         pane: { id: paneId },

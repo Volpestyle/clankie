@@ -96,7 +96,7 @@ describe("herdr session census", () => {
         snapshot: {
           workspaces: [{ workspace_id: "w15", label: "clankie", number: 2 }],
           tabs: [{ workspace_id: "w15", tab_id: "w15:t3", label: "app", number: 3 }],
-          agents: [
+          panes: [
             {
               workspace_id: "w15",
               tab_id: "w15:t3",
@@ -124,6 +124,13 @@ describe("herdr session census", () => {
         tab: { id: "w15:t3", label: "app", number: 3 },
         pane: { id: "w15:p8" },
       },
+      {
+        terminalId: "term-shell",
+        label: "",
+        workspace: { id: "w15", label: "clankie", number: 2 },
+        tab: { id: "w15:t3", label: "app", number: 3 },
+        pane: { id: "w15:p9" },
+      },
     ]);
     await expect(
       readTerminalCatalog({
@@ -133,7 +140,36 @@ describe("herdr session census", () => {
           return Promise.resolve({ stdout: JSON.stringify(snapshot), stderr: "" });
         },
       }),
-    ).resolves.toHaveLength(1);
+    ).resolves.toHaveLength(2);
+  });
+
+  it("accepts legacy snapshots that only expose agent panes", () => {
+    const snapshot = {
+      result: {
+        snapshot: {
+          workspaces: [{ workspace_id: "w15", label: "clankie", number: 2 }],
+          tabs: [{ workspace_id: "w15", tab_id: "w15:t3", label: "app", number: 3 }],
+          agents: [
+            {
+              workspace_id: "w15",
+              tab_id: "w15:t3",
+              pane_id: "w15:p8",
+              terminal_id: "term-worker",
+              terminal_title_stripped: "Build terminal hierarchy",
+            },
+          ],
+        },
+      },
+    };
+    expect(parseHerdrTerminalCatalog(JSON.stringify(snapshot))).toEqual([
+      {
+        terminalId: "term-worker",
+        label: "Build terminal hierarchy",
+        workspace: { id: "w15", label: "clankie", number: 2 },
+        tab: { id: "w15:t3", label: "app", number: 3 },
+        pane: { id: "w15:p8" },
+      },
+    ]);
   });
 });
 
