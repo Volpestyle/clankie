@@ -23,8 +23,10 @@ compatibility alias.
 
 ## Run
 
-The fullscreen console requires a TTY. Install the launcher with
-`pnpm cli:install`, then use:
+The fullscreen console requires a TTY. Headless commands do not. Install the
+launcher with `pnpm cli:install`. Flags, JSON stdout, exit codes, and the
+`/v1` rewrite live in [`docs/cli.md`](../../docs/cli.md); `clankie help`
+prints the same index.
 
 ```bash
 clankie                         # start the core service and open the console
@@ -33,11 +35,20 @@ clankie status                  # probe every launcher-owned service
 clankie doctor                  # this install: checkout vs release, models, credentials, optional herdr
 clankie restart [service]       # restart in dependency order
 clankie down [service]          # stop in reverse dependency order
-clankie pair                    # show a one-time device pairing QR and code
-clankie devices                 # list paired devices
-clankie devices revoke <id>
-clankie operator-credential rotate
+clankie pair --json             # one-time device pairing offer
+clankie devices --json          # list paired devices
+clankie devices revoke <id> --json
+clankie operator-credential rotate --json
 clankie play status|stop
+clankie model status            # captain model + local providers (JSON)
+clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set
+clankie model set provider/model
+clankie effort set high
+clankie image-model set openai/gpt-image-2
+clankie video-model set xai/grok-imagine-video-1.5
+clankie persona set --display-name Clankie --chattiness balanced
+clankie games set on
+clankie discord set --application-id 12345 --active-body bot
 ```
 
 From the repository, `pnpm --filter @clankie/tui dev` opens only the console and
@@ -134,8 +145,9 @@ credential holder.
   `discord.voiceTranscriptLoggingEnabled` is on ([ADR 0121](../../docs/adr/0121-development-voice-transcripts-are-explicit.md));
   otherwise the overlay points at `/discord`. This is not `/trace`: voice lanes
   there are captain handoffs, not the Discord conversation.
-- `/status` shows presence, conversation, workspace, model context, activity
-  availability, and the Herdr pane roster when seated inside Herdr.
+- `/status` renders `clankie status`, then adds console presence, conversation,
+  workspace, model context, activity availability, and the Herdr pane roster.
+  `/doctor` renders the same install report as `clankie doctor`.
 - `/board`, `/board focus`, and `/board close` manage the herdr-lead companion
   board. A seated turn receives the current agent census.
 - `/connect` configures Linear and email and can open Discord setup; use direct
@@ -151,15 +163,19 @@ credential holder.
 - YouTube music is an ordinary prompt, not a slash command. Audible playback is
   on the active Discord body's Vox primary-voice role; see the
   [Discord media guide](../../docs/discord-media.md).
-- `/provider`, `/model`, and `/effort` select the captain. The header carries
+- `/provider`, `/model`, and `/effort` select the captain through the launcher
+  command modules. The header carries
   the effective Pi model and effort after subscription routing, effective-ref
   variant precedence, and model-supported clamping. `/image-model` and
   `/video-model` select generation models. Non-secret model configuration lives
   in `~/.config/clankie/clankie.json`.
 - `/provider` → "add a local endpoint…" declares an OpenAI-compatible local
-  runtime (Ollama, LM Studio, vLLM) by base URL, reads its model list from
+  runtime (ds4, Ollama, LM Studio, vLLM) by base URL, reads its model list from
   `GET {baseURL}/models`, and needs no credential. The service picks the new
-  provider up on `clankie restart captain`.
+  provider up on `clankie restart captain`. Agents and scripts use the same
+  write path through `clankie model add-local` / `clankie model set` (JSON on
+  stdout); do not edit `clankie.json` by hand. Full contract:
+  [`docs/cli.md`](../../docs/cli.md).
 - `/layout` shows or hides the header banner.
 - `/jump <pane|agent>` focuses a herdr agent (`herdr agent focus`), and any
   pane id in the transcript — `w18:p1J`, wherever Clankie or a tool wrote it —

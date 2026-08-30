@@ -3,16 +3,13 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
-  ensureCaptainCredential,
-  inspectOperatorCredential,
   resolveOperatorCredential,
   rotateOperatorCredential,
   type CredentialStore,
-  type OperatorCredentialStatus,
 } from "@clankie/credential-broker";
 import QRCode from "qrcode";
 import {
-  inspectServices,
+  createServiceOptions,
   parseServiceTarget,
   restartTarget,
   stopTarget,
@@ -20,7 +17,6 @@ import {
   type ServiceRegistryOptions,
   type ServiceTarget,
 } from "./services.ts";
-import { SERVICE_ORDER } from "./service-supervisor.ts";
 import {
   DEFAULT_CONTROL_PLANE_URL,
   pairingFailureMessage,
@@ -37,8 +33,15 @@ import {
   revokeDevice,
   type DeviceListItem,
 } from "./devices.ts";
-import { inspectInstall, type ExecFileImpl } from "../src/install-doctor.ts";
-import { runModelCommand } from "./model.ts";
+import { doctorCommand, type ExecFileImpl } from "../src/command/doctor.ts";
+import { statusCommand } from "../src/command/status.ts";
+import { runModelCommand } from "../src/command/model.ts";
+import { runPersonaCommand } from "../src/command/persona.ts";
+import { runGamesCommand } from "../src/command/games.ts";
+import { runEffortCommand } from "../src/command/effort.ts";
+import { runImageModelCommand } from "../src/command/image-model.ts";
+import { runVideoModelCommand } from "../src/command/video-model.ts";
+import { runDiscordCommand } from "../src/command/discord.ts";
 
 const RESTART_TURN_POLL_MS = 100;
 const RESTART_AFTER_TURN_FLAG = "--after-operator-turn";
@@ -103,6 +106,15 @@ function commandHelp(): string {
     "  model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]",
     "                           Declare an OpenAI-compatible local runtime (ds4, Ollama, LM Studio)",
     "  model set provider/model Select the captain model",
+    "  effort [status]          Read reasoning effort for the captain model",
+    "  effort set LEVEL [--model provider/model] | clear [--model provider/model]",
+    "  image-model [status] | set provider/model | clear",
+    "  video-model [status] | set provider/model | clear",
+    "  persona [status]         Read owner-authored character configuration",
+    "  persona set --display-name NAME [--aliases name,name] [--character-notes TEXT] …",
+    "  games status|set on|off  Read or set PokeAgent gameplay availability",
+    "  discord [status]         Read non-secret Discord identifiers and body selection",
+    "  discord set --field value […] | clear --field […]",
     "  help | --help | -h       This text",
     "",
     "Services for restart/down: all (default), clankie, relay, discord, user-session, activity, tunnel",
@@ -116,7 +128,7 @@ function commandHelp(): string {
     "",
     "pair / devices / operator-credential rotate default to human text; pass --json.",
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",
-    "Not on this CLI: /auth, /discord, /connect, /persona, /voice. Local LLM servers are",
+    "Not on this CLI: secret entry for /auth, /discord, or /connect; /voice. Local LLM servers are",
     "not launcher-owned; start them yourself.",
     "",
     "Full reference: docs/cli.md (at `clankie doctor`'s repoRoot on every install).",
@@ -135,6 +147,12 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "operator-credential" ||
     command === "play" ||
     command === "model" ||
+    command === "effort" ||
+    command === "image-model" ||
+    command === "video-model" ||
+    command === "persona" ||
+    command === "games" ||
+    command === "discord" ||
     command === "help" ||
     command === "--help" ||
     command === "-h"
@@ -146,100 +164,6 @@ function commandHost(options: HeadlessCaptainCommandOptions): string {
   return (
     options.host ?? env.CLANKIE_CONTROL_PLANE_URL ?? env.CLANKIE_CAPTAIN_URL ?? DEFAULT_CONTROL_PLANE_URL
   );
-}
-
-async function runInspection(options: HeadlessCaptainCommandOptions): Promise<number> {
-  const env = options.env ?? process.env;
-  let operatorCredential:
-    | OperatorCredentialStatus
-    | { readonly present: false; readonly source: "none"; readonly consistency: "invalid" };
-  try {
-    operatorCredential = await inspectOperatorCredential({
-      env,
-      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-    });
-  } catch {
-    operatorCredential = { present: false, source: "none", consistency: "invalid" };
-  }
-  const operatorCredentialHealthy =
-    operatorCredential.present && operatorCredential.consistency !== "mismatch";
-  // Every local service: the clankie service itself, the bridge, and the
-  // surfaces an audience actually reaches — the activity and the tunnel
-  // publishing it. Health used to stop earlier, which is how a tunnel stayed
-  // dead for six days while health said ready.
-  const services = await inspectServices(SERVICE_ORDER, await serviceOptions(options));
-  const clankie = services.find((service) => service.id === "clankie");
-  const serviceHealthy = clankie?.state === "healthy";
-  outputJson(options.stdout ?? process.stdout, {
-    ok: serviceHealthy && operatorCredentialHealthy,
-    status: !serviceHealthy
-      ? (clankie?.state ?? "unreachable")
-      : operatorCredentialHealthy
-        ? "ready"
-        : `operator_credential_${operatorCredential.consistency}`,
-    host: commandHost(options),
-    ...(clankie === undefined ? {} : { owned: clankie.owned }),
-    ...(clankie?.pid === undefined ? {} : { pid: clankie.pid }),
-    operatorCredential,
-    services,
-  });
-  return serviceHealthy && operatorCredentialHealthy ? 0 : 1;
-}
-
-/**
- * Shared plumbing for the service commands. The operator credential is optional
- * and only enriches the bridge's presence detail, so a missing one degrades the
- * report rather than failing the restart.
- *
- * The captain credential is different in kind: it is one shared secret the
- * dispatch route authenticates, so it is minted on first run rather than merely
- * read. It is handed to each service through `serviceEnv` because the Discord
- * bridge refuses to start when it can see that variable.
- */
-async function serviceOptions(options: HeadlessCaptainCommandOptions): Promise<ServiceRegistryOptions> {
-  const env = options.env ?? process.env;
-  let operatorToken: string | undefined;
-  try {
-    const credential = await resolveOperatorCredential({
-      env,
-      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-    });
-    operatorToken = credential?.token;
-  } catch {
-    operatorToken = undefined;
-  }
-  let captainToken: string | undefined;
-  try {
-    const credential = await ensureCaptainCredential({
-      env,
-      ...(options.captainCredentialStore === undefined ? {} : { store: options.captainCredentialStore }),
-    });
-    captainToken = credential.token;
-  } catch {
-    // A stack whose captain cannot authenticate is degraded, not dead: presence,
-    // health, and every operator-authenticated surface still work. Failing the
-    // restart outright would be a worse trade than starting without it.
-    captainToken = undefined;
-  }
-  const stderr = options.stderr ?? process.stderr;
-  return {
-    repoRoot: options.repoRoot,
-    env,
-    fetchImpl: options.fetchImpl ?? fetch,
-    operatorToken,
-    captainToken,
-    ...(options.listProcessCommandsImpl === undefined
-      ? {}
-      : { listProcessCommandsImpl: options.listProcessCommandsImpl }),
-    ...(options.spawnImpl === undefined ? {} : { spawnImpl: options.spawnImpl }),
-    ...(options.killImpl === undefined ? {} : { killImpl: options.killImpl }),
-    ...(options.processIsAliveImpl === undefined ? {} : { processIsAliveImpl: options.processIsAliveImpl }),
-    ...(options.readProcessCommandImpl === undefined
-      ? {}
-      : { readProcessCommandImpl: options.readProcessCommandImpl }),
-    // Progress narration goes to stderr so stdout stays a clean JSON document.
-    onStatus: (status: string) => stderr.write(`${status}\n`),
-  };
 }
 
 function describeOutcomes(outcomes: readonly ServiceOutcome[]): string {
@@ -355,7 +279,7 @@ async function runRestart(args: readonly string[], options: HeadlessCaptainComma
       return 0;
     }
   }
-  const registryOptions = await serviceOptions(options);
+  const registryOptions = await createServiceOptions(options);
   const outcomes = await restartTarget(target, registryOptions);
   const clankie = outcomes.find((outcome) => outcome.id === "clankie");
   const ok = outcomes.length > 0 && outcomes.every((outcome) => outcome.ok);
@@ -373,7 +297,7 @@ async function runRestart(args: readonly string[], options: HeadlessCaptainComma
 
 async function runDown(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
   const target = parseServiceTarget(args[0]);
-  const outcomes = await stopTarget(target, await serviceOptions(options));
+  const outcomes = await stopTarget(target, await createServiceOptions(options));
   const ok = outcomes.every((outcome) => outcome.ok);
   (options.stderr ?? process.stderr).write(`${describeOutcomes(outcomes)}\n`);
   outputJson(options.stdout ?? process.stdout, {
@@ -640,25 +564,26 @@ async function runPlay(args: readonly string[], options: HeadlessCaptainCommandO
   return 0;
 }
 
-async function runDoctor(options: HeadlessCaptainCommandOptions): Promise<number> {
-  const env = options.env ?? process.env;
-  const report = await inspectInstall({
-    repoRoot: options.repoRoot,
-    env,
-    ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
-  });
-  outputJson(options.stdout ?? process.stdout, report);
-  return 0;
-}
-
 export async function runHeadlessCaptainCommand(
   args: readonly string[],
   options: HeadlessCaptainCommandOptions,
 ): Promise<number> {
   const command = args[0];
   try {
-    if (command === "health" || command === "status") return await runInspection(options);
-    if (command === "doctor") return await runDoctor(options);
+    if (command === "health" || command === "status") {
+      const result = await statusCommand(options);
+      outputJson(options.stdout ?? process.stdout, result);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "doctor") {
+      const result = await doctorCommand({
+        repoRoot: options.repoRoot,
+        env: options.env ?? process.env,
+        ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
+      });
+      outputJson(options.stdout ?? process.stdout, result);
+      return 0;
+    }
     if (command === "restart") return await runRestart(args.slice(1), options);
     if (command === "down") return await runDown(args.slice(1), options);
     if (command === "pair") return await runPair(args.slice(1), options);
@@ -667,7 +592,41 @@ export async function runHeadlessCaptainCommand(
       return await runOperatorCredential(args.slice(1), options);
     }
     if (command === "play") return await runPlay(args.slice(1), options);
-    if (command === "model") return await runModelCommand(args.slice(1), options);
+    if (command === "model") {
+      const result = await runModelCommand(args.slice(1), options);
+      outputJson(options.stdout ?? process.stdout, result);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "effort") {
+      const result = await runEffortCommand(args.slice(1), options);
+      outputJson(options.stdout ?? process.stdout, result);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "image-model") {
+      const result = await runImageModelCommand(args.slice(1), options);
+      outputJson(options.stdout ?? process.stdout, result);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "video-model") {
+      const result = await runVideoModelCommand(args.slice(1), options);
+      outputJson(options.stdout ?? process.stdout, result);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "persona") {
+      const result = await runPersonaCommand(args.slice(1), options);
+      outputJson(options.stdout ?? process.stdout, result);
+      return 0;
+    }
+    if (command === "games") {
+      const result = await runGamesCommand(args.slice(1), options);
+      outputJson(options.stdout ?? process.stdout, result);
+      return 0;
+    }
+    if (command === "discord") {
+      const result = await runDiscordCommand(args.slice(1), options);
+      outputJson(options.stdout ?? process.stdout, result);
+      return 0;
+    }
     if (command === "help" || command === "--help" || command === "-h") {
       (options.stdout ?? process.stdout).write(`${commandHelp()}\n`);
       return 0;

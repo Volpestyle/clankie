@@ -75,7 +75,7 @@ describe("install doctor", () => {
       bundlePath: join(root, "integrations", "herdr-plugin"),
     });
     expect(report.remediations).toEqual([
-      "Pick a captain model in the operator console with /model.",
+      "Pick a captain model with `clankie model set provider/model` or `/model`.",
       "Store a Discord bot token with /discord.",
     ]);
     expect(JSON.stringify(report)).not.toContain(secret);

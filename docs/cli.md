@@ -1,13 +1,16 @@
 # CLI
 
-The `clankie` launcher is both the fullscreen operator console and the
-headless control surface. This page is the contract for agents, scripts, and
-anyone driving Clankie without a TTY.
-
-Slash commands in the console (`/auth`, `/provider`, `/model`, `/discord`,
-`/connect`, `/persona`, `/voice`) write the same stores. The TUI remains the
-human wizard; the CLI is the agent-ergonomic surface
+The `clankie <noun> <verb>` command layer is the canonical local control
+product. Its noun modules return JSON-shaped results. The argv face prints
+those results; the fullscreen TUI is chrome over the same functions, with
+modals that collect flags, render the result, and navigate. Neither face shells
+out to the other or owns a second config writer
 ([ADR 0012](adr/0012-provider-auth-model-registry.md)).
+
+Live operator work stays on the service HTTP catalog already shared by the TUI,
+phone, relay, and menu bar: chat, play, memory, pairing, and conversations are
+not launcher configuration commands. This page is the contract for agents,
+scripts, and anyone driving Clankie without a TTY.
 
 `clankie help` prints the same command index. On every install the file lives
 at `{repoRoot}/docs/cli.md` — `clankie doctor` names `repoRoot`.
@@ -38,17 +41,19 @@ starts the clankie service if needed and attaches the fullscreen face.
 `--json` is required only where the default is human-readable (pairing QR,
 device table, credential-rotate sentence). Everything else is already JSON.
 
-| Command                                         | stdout                                                                                       |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down` | JSON                                                                                         |
-| `model …`                                       | JSON                                                                                         |
-| `play status`                                   | JSON                                                                                         |
-| `play stop`                                     | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
-| `pair`, `devices`, `operator-credential rotate` | Human text; pass `--json`                                                                    |
-| `help`                                          | This index (plain text)                                                                      |
-| `--version`                                     | `clankie <version>`                                                                          |
+| Command                                                 | stdout                                                                                       |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `health`, `status`, `doctor`, `restart`, `down`         | JSON                                                                                         |
+| `model …`, `effort …`, `image-model …`, `video-model …` | JSON                                                                                         |
+| `persona …`, `games …`, `discord …`                     | JSON                                                                                         |
+| `play status`                                           | JSON                                                                                         |
+| `play stop`                                             | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
+| `pair`, `devices`, `operator-credential rotate`         | Human text; pass `--json`                                                                    |
+| `help`                                                  | This index (plain text)                                                                      |
+| `--version`                                             | `clankie <version>`                                                                          |
 
-Do not edit `~/.config/clankie/clankie.json` or Keychain entries by hand.
+Do not edit `~/.config/clankie/clankie.json`,
+`~/.config/clankie/settings.json`, or Keychain entries by hand.
 
 ## Commands
 
@@ -206,6 +211,7 @@ Captain model and every config-declared provider. JSON:
 {
   "ok": true,
   "model": "ds4/deepseek-v4-flash",
+  "effort": "high",
   "providers": {
     "ds4": { "baseURL": "http://127.0.0.1:8000/v1", "models": ["deepseek-v4-flash"] }
   },
@@ -214,8 +220,8 @@ Captain model and every config-declared provider. JSON:
 ```
 
 `ok` is false and exit 1 when `clankie.json` has load issues (`issues` is then
-present). `model` is `null` when none is selected. The running service does not
-pick up a write until `clankie restart captain`.
+present). `model` and `effort` are `null` when unset. The running service does
+not pick up a write until `clankie restart captain`.
 
 ### `model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]`
 
@@ -261,7 +267,98 @@ LM Studio yourself; `clankie restart captain` only reloads Clankie's config.
 Select the captain. The ref splits on the **first** slash (model ids may
 contain slashes). JSON: `{ "ok": true, "model": "xai/grok-4.6", "restart": "clankie restart captain" }`.
 
-`clankie model help` prints only the model usage, not the global index.
+### `effort [status]`
+
+Read the current captain model's stored effort override. JSON:
+`{ "ok": true, "model": "xai/grok-4.6", "effort": "high", "restart": "clankie restart captain" }`.
+`effort` is `null` when Pi uses its model-supported default.
+
+### `effort set LEVEL [--model provider/model]` / `effort clear [--model provider/model]`
+
+Set or remove the variant for the named model. Without `--model`, the currently
+configured captain model is the target. The TUI `/effort` modal obtains the
+supported levels from Pi and calls this writer.
+
+### `image-model [status]` / `image-model set provider/model` / `image-model clear`
+
+Read, set, or clear the image generation model. JSON is
+`{ "ok": true, "imageModel": "openai/gpt-image-2" }`; the value is `null`
+when unset. Media generation loads this config per request, so no restart is
+needed. The TUI `/image-model` command calls the same functions.
+
+### `video-model [status]` / `video-model set provider/model` / `video-model clear`
+
+The same contract for video generation, with a `videoModel` result field. The
+TUI `/video-model` command calls the same functions.
+
+### `persona [status]`
+
+Return the complete owner-authored persona plus `settingsFile` and the restart
+command. Character configuration grants no authority.
+
+### `persona set [flags]`
+
+Update one or more persona fields atomically:
+
+| Flag                    | Value                                |
+| ----------------------- | ------------------------------------ |
+| `--display-name`        | 1–64 characters                      |
+| `--aliases`             | Comma-separated names; `none` clears |
+| `--character-notes`     | Up to 4,000 characters               |
+| `--chattiness`          | `quiet`, `balanced`, or `chatty`     |
+| `--reply-policy`        | `addressed` or `all`                 |
+| `--live-message-window` | Whole number from 0 through 100      |
+
+JSON contains `{ "ok": true, "persona": { … }, "settingsFile": "…", "restart": "clankie restart captain" }`.
+The TUI `/persona` modal calls this same writer.
+
+### `games [status]` / `games set on|off`
+
+Read or set whether the PokeAgent MMO body is available. JSON contains the
+`games.pokeagentMmoEnabled` boolean, `settingsFile`, and
+`"restart": "clankie restart captain"`. The TUI `/games` command calls this
+same writer.
+
+### `discord [status]`
+
+Return stored and effective non-secret Discord configuration:
+
+```json
+{
+  "ok": true,
+  "discord": { "activeBody": "bot", "systemActorUserIds": ["12345"] },
+  "effectiveDiscord": { "activeBody": "bot", "systemActorUserIds": ["12345"] },
+  "overriddenByEnvironment": [],
+  "settingsFile": "/Users/me/.config/clankie/settings.json",
+  "restart": "clankie restart"
+}
+```
+
+`discord` is the stored value. `effectiveDiscord` includes environment
+overrides, whose variable names appear in `overriddenByEnvironment`.
+
+### `discord set --field value […]` / `discord clear --field […]`
+
+Set several fields atomically, or reset fields to their schema defaults.
+Field flags are the `settings.json` camel-case names in kebab-case. Lists are
+comma-separated (`none` clears); booleans accept `on|off`, `true|false`, or
+`enabled|disabled`; integer fields require whole numbers. Zod validates the
+completed settings document and the settings writer rejects token-shaped
+values.
+
+| Group                  | Fields                                                                                                                                                                                                                |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application and roles  | `application-id`, `guild-id`, `ambient-role-ids`, `ambient-user-ids`, `approval-role-ids`, `owner-user-id`                                                                                                            |
+| Machine grants         | `system-actor-user-ids`, `system-actor-guild-ids`, `system-actor-channel-ids`                                                                                                                                         |
+| Text and presence      | `text-ingress-enabled`, `ingress-guild-ids`, `ingress-channel-ids`, `ingress-dm-policy`, `ingress-dm-user-ids`, `ingress-context-messages`, `tool-progress-channel-ids`, `presence-guild-ids`, `presence-channel-ids` |
+| Voice                  | `voice-enabled`, `voice-guild-ids`, `voice-channel-ids`, `voice-channel-id`, `voice-join-policy`, `voice-consent-policy`, `voice-transcript-logging-enabled`                                                          |
+| Body selection and lab | `active-body`, `user-session-enabled`, `user-session-guild-ids`, `user-session-channel-ids`, `user-session-voice-enabled`, `user-session-voice-channel-ids`, `user-session-dm-policy`, `user-session-dm-user-ids`     |
+| Activity               | `activity-application-id-gba`, `activity-tunnel-name`, `activity-tunnel-hostname`                                                                                                                                     |
+
+`active-body` is `bot` or `user_session`. These commands never accept Discord
+tokens and do not perform the lab-user ToS opt-in. The TUI `/discord` modal uses
+this writer for non-secret fields; its existing secret and opt-in flows stay on
+the credential broker and service HTTP catalog.
 
 ## Services
 
@@ -290,15 +387,13 @@ Unknown names fail closed without signalling any process.
 
 ## Not on this CLI
 
-These stay console slash commands (or the credential broker):
+These stay interactive because they carry secrets, external consent, or live
+session chrome:
 
-- `/auth` — provider keys and OAuth
-- `/discord` — Discord body, tokens, machine grants
-- `/connect` — Linear and email
-- `/persona` — who he is
-- `/voice` — realtime/TTS provider
-- `/image-model`, `/video-model` — generation models
-- `/effort` — reasoning effort
+- `/auth` and `/connect` secret entry — provider keys, OAuth, Linear, and email
+- `/discord` secret entry and lab-user ToS opt-in — Discord tokens never become flags
+- `/voice` — realtime/TTS provider and brokered credentials
+- `/btw`, `/board`, `/jump`, `/conversation`, `/goal`, `/layout` — live console state
 
 There is no `clankie start`, `clankie up`, or `clankie auth`. Local model
 servers are not supervised.

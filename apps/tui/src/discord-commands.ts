@@ -1,13 +1,8 @@
-import {
-  SettingsStore,
-  discordSettingsToEnvironment,
-  resolveDiscordSettings,
-  type ClankieSettings,
-  type DiscordSettings,
-} from "@clankie/settings";
+import { SettingsStore, discordSettingsToEnvironment, type DiscordSettings } from "@clankie/settings";
 import type { RedactedCredential } from "@clankie/credential-broker";
 import type { DiscordUserSessionOptIn } from "@clankie/protocol";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
+import { discordStatus, discordTransform } from "./command/discord.ts";
 
 interface DiscordUserSessionOptInClient {
   inspectDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined>;
@@ -215,12 +210,11 @@ export function describeEmptyAllowlist(
 }
 
 async function showDiscordStatus(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
-  const stored = await services.settings.load();
-  const resolved = resolveDiscordSettings(stored.discord);
+  const result = await discordStatus({ settings: services.settings });
   const credentials = await services.listCredentials();
   const lines: string[] = [];
 
-  lines.push(`settings file: ${services.settings.path}`);
+  lines.push(`settings file: ${result.settingsFile}`);
   lines.push("");
   lines.push("credentials (credential broker):");
   for (const credential of DISCORD_CREDENTIALS) {
@@ -234,12 +228,12 @@ async function showDiscordStatus(shell: ClankieFaceShell, services: DiscordComma
     lines.push(`  ${credential.id}: ${state}`);
   }
   lines.push("");
-  lines.push(...describeSettings(resolved.settings));
+  lines.push(...describeSettings(result.effectiveDiscord));
 
-  if (resolved.overriddenByEnvironment.length > 0) {
+  if (result.overriddenByEnvironment.length > 0) {
     lines.push("");
     lines.push("environment overrides in effect (these win over stored values):");
-    for (const name of resolved.overriddenByEnvironment) lines.push(`  ${name}`);
+    for (const name of result.overriddenByEnvironment) lines.push(`  ${name}`);
   }
 
   shell.insertCommandResult("/discord status", lines.join("\n"), "success");
@@ -403,11 +397,8 @@ export async function runDiscordWizard(
 
 type Patch = (current: DiscordSettings) => DiscordSettings;
 
-async function apply(services: DiscordCommandServices, patch: Patch): Promise<ClankieSettings> {
-  return services.settings.update((current) => ({
-    ...current,
-    discord: patch(current.discord),
-  }));
+async function apply(services: DiscordCommandServices, patch: Patch): Promise<void> {
+  await discordTransform(patch, { settings: services.settings });
 }
 
 async function editCredentials(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {

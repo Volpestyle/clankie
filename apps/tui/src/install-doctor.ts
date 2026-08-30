@@ -277,7 +277,9 @@ function collectRemediations(input: {
   readonly herdrPlugin: HerdrPluginReport;
 }): string[] {
   const remediations: string[] = [];
-  if (input.model === null) remediations.push("Pick a captain model in the operator console with /model.");
+  if (input.model === null) {
+    remediations.push("Pick a captain model with `clankie model set provider/model` or `/model`.");
+  }
   const discordInUse =
     input.discord.textIngressEnabled || input.discord.voiceEnabled || input.discord.userSessionEnabled;
   if (discordInUse && input.discord.activeBody === "bot" && !input.credentialIds.has("discord_bot")) {

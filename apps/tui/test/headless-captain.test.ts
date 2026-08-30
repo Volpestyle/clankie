@@ -10,6 +10,7 @@ import {
   mintOperatorToken,
   OPERATOR_CREDENTIAL_PROVIDER_ID,
 } from "@clankie/credential-broker";
+import { SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
 
@@ -61,6 +62,35 @@ function healthyFetch(calls: string[] = []): typeof fetch {
 }
 
 describe("headless clankie commands", () => {
+  it("does not project stored Discord settings back as environment overrides for config commands", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-discord-command-"));
+    tempDirs.push(root);
+    const settings = new SettingsStore(join(root, "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      discord: { ...current.discord, activeBody: "user_session", userSessionEnabled: true },
+    }));
+
+    const result = await execFileAsync(
+      process.execPath,
+      [resolve(import.meta.dirname, "../bin/clankie.ts"), "discord", "status"],
+      {
+        env: {
+          ...process.env,
+          CLANKIE_SETTINGS_FILE: settings.path,
+          DISCORD_ACTIVE_BODY: "",
+          DISCORD_USER_SESSION_ENABLED: "",
+        },
+      },
+    );
+
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      discord: { activeBody: "user_session", userSessionEnabled: true },
+      effectiveDiscord: { activeBody: "user_session", userSessionEnabled: true },
+      overriddenByEnvironment: [],
+    });
+  });
+
   it("prints a self-contained command index on help", async () => {
     const stdout = outputBuffer();
     const stderr = outputBuffer();
@@ -91,6 +121,12 @@ describe("headless clankie commands", () => {
       "--models",
       "/v1",
       "model set",
+      "effort set",
+      "image-model",
+      "video-model",
+      "persona set",
+      "games status",
+      "discord set",
       "relay",
       "docs/cli.md",
       "/auth",

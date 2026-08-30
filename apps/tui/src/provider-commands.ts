@@ -19,7 +19,6 @@ import {
   ANTHROPIC_PROVIDER_ID,
   CODEX_PROVIDER_ID,
   XAI_PROVIDER_ID,
-  declareLocalProvider,
   formatModelRef,
   loadConfig,
   LOCAL_CONTEXT_FALLBACK,
@@ -32,13 +31,16 @@ import {
   runCodexDeviceLogin,
   runXaiDeviceLogin,
   subscriptionRefFor,
-  updateGlobalConfig,
   validateLocalBaseUrl,
   validateLocalProviderId,
   type ClankieConfig,
   type PiModelSelection,
   type ProbedLocalModel,
 } from "@clankie/model-provider";
+import { modelDeclareLocal, modelSet, modelStatus } from "./command/model.ts";
+import { effortSet, effortStatus } from "./command/effort.ts";
+import { imageModelSet, imageModelStatus } from "./command/image-model.ts";
+import { videoModelSet, videoModelStatus } from "./command/video-model.ts";
 import type { MenuOption, SetupFlow } from "./shell/setup-flow.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
@@ -248,8 +250,18 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
       name: "effort",
       aliases: ["reasoning"],
       description: "Configure reasoning effort for Clankie's current model",
-      takesArgument: false,
-      async run(_argument, shell): Promise<void> {
+      argumentHint: "[status]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (argument.trim().toLowerCase() === "status") {
+          const result = await effortStatus({ env: services.env, cwd: services.cwd });
+          shell.insertCommandResult(
+            "/effort status",
+            `model: ${result.model ?? "unset"}\neffort: ${result.effort ?? "default"}`,
+            result.ok ? "success" : "error",
+          );
+          return;
+        }
         await runEffortWizard(shell, services);
       },
     },
@@ -294,10 +306,12 @@ function mediaModelCommand(
       const usage = `Usage: /${name} [${providers.join("|")}] [model] · /${name} status · /${name} unset`;
 
       if (providerId === undefined || providerId === "status") {
-        const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
-        const configured = config[role];
+        const configured =
+          role === "image_model"
+            ? (await imageModelStatus({ env: services.env, cwd: services.cwd })).imageModel
+            : (await videoModelStatus({ env: services.env, cwd: services.cwd })).videoModel;
         const credentialIds = Object.keys(await services.store.list());
-        const parsed = configured === undefined ? undefined : parseModelRef(configured);
+        const parsed = configured === null ? undefined : parseModelRef(configured);
         const connected =
           parsed !== undefined &&
           (credentialIds.includes(parsed.providerId) ||
@@ -322,13 +336,9 @@ function mediaModelCommand(
       }
 
       if (providerId === "unset") {
-        const updated = await updateGlobalConfig(
-          (current) => {
-            delete current[role];
-          },
-          { env: services.env },
-        );
-        services.onConfigChanged(updated);
+        if (role === "image_model") await imageModelSet(null, { env: services.env });
+        else await videoModelSet(null, { env: services.env });
+        await notifyModelSelectionChanged(services);
         shell.insertCommandResult(`/${name} unset`, `${role} cleared.`, "success");
         return;
       }
@@ -342,10 +352,9 @@ function mediaModelCommand(
       // without waiting on a catalog refresh; the default is what this
       // repository's adapters are known to speak.
       const ref = `${providerId}/${modelId ?? fallback}`;
-      const updated = await updateGlobalConfig((current) => void (current[role] = ref), {
-        env: services.env,
-      });
-      services.onConfigChanged(updated);
+      if (role === "image_model") await imageModelSet(ref, { env: services.env });
+      else await videoModelSet(ref, { env: services.env });
+      await notifyModelSelectionChanged(services);
       const credentialIds = Object.keys(await services.store.list());
       const needsAuth =
         !credentialIds.includes(providerId) && !providerEnvConnected(providerId, services.env);
@@ -876,9 +885,9 @@ async function servedBySubscription(
 }
 
 async function showModelStatus(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
-  const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
-  const ref = config.model;
-  if (ref === undefined) {
+  const status = await modelStatus({ env: services.env, cwd: services.cwd });
+  const ref = status.model;
+  if (ref === null) {
     shell.insertCommandResult("/model status", "model: unset", "success");
     return;
   }
@@ -887,9 +896,10 @@ async function showModelStatus(shell: ClankieFaceShell, services: ProviderServic
     shell.insertCommandResult("/model status", "model: unset", "success");
     return;
   }
+  const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
   const served = await servedBySubscription(resolved, config, services);
-  const variantId = config.variant?.[ref];
-  const variant = variantId === undefined ? "" : ` (${variantId})`;
+  const variantId = status.effort;
+  const variant = variantId === null ? "" : ` (${variantId})`;
   shell.insertCommandResult(
     "/model status",
     `model: ${formatModelRef(resolved)}${variant}${
@@ -904,9 +914,9 @@ async function showProviderStatus(
   services: ProviderServices,
   selectedProvider: string | undefined,
 ): Promise<void> {
-  const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
+  const status = await modelStatus({ env: services.env, cwd: services.cwd });
   const listed = await services.store.list();
-  const configured = config.model === undefined ? undefined : parseModelRef(config.model);
+  const configured = status.model === null ? undefined : parseModelRef(status.model);
   const selected = selectedProvider ?? configured?.providerId;
   const pending =
     selected !== undefined && selected !== configured?.providerId
@@ -1069,20 +1079,23 @@ async function addLocalProviderFlow(
   if (typedContext === undefined) return undefined;
   const fallbackContext = Number(typedContext.trim());
 
-  const updated = await declareLocalProvider({
-    providerId,
-    baseURL,
-    models,
-    fallbackContext,
-    env: services.env,
-  });
+  const added = await modelDeclareLocal(
+    {
+      providerId,
+      baseURL,
+      models,
+      fallbackContext,
+    },
+    { env: services.env, cwd: services.cwd },
+  );
+  const { config: updated } = await loadConfig({ env: services.env, cwd: services.cwd });
   services.onConfigChanged(updated);
   await services.captainModels.register(updated);
   flow.renderLine(`Added ${providerId} (${models.length} models).`, "success");
   shell.insertCommandResult(
     "/provider",
     [
-      `${providerId} → ${baseURL} (${models.length} models) written to clankie.json.`,
+      `${added.providerId} → ${added.baseURL} (${added.models.length} models) written to clankie.json.`,
       "No credential needed. Restart the service (`clankie restart captain`) before Clankie himself uses it.",
     ].join("\n"),
     "success",
@@ -1158,13 +1171,8 @@ async function runModelWizard(
       }
       const ref = formatModelRef({ providerId, modelId });
       const served = await servedBySubscription({ providerId, modelId }, config, services);
-      const updated = await updateGlobalConfig(
-        (current) => {
-          current.model = ref;
-        },
-        { env: services.env },
-      );
-      services.onConfigChanged(updated);
+      await modelSet(ref, { env: services.env, cwd: services.cwd });
+      await notifyModelSelectionChanged(services);
       flow.end();
       shell.insertCommandResult(
         "/model",
@@ -1247,16 +1255,11 @@ async function chooseEffort(
     shell.insertCommandResult("/effort", "Effort selection cancelled.", "error");
     return;
   }
-  const updated = await updateGlobalConfig(
-    (current) => {
-      const variantMap = { ...current.variant };
-      if (choice === "__clear__") delete variantMap[ref];
-      else variantMap[ref] = choice;
-      current.variant = variantMap;
-    },
-    { env: services.env },
-  );
-  services.onConfigChanged(updated);
+  await effortSet(choice === "__clear__" ? null : choice, ref, {
+    env: services.env,
+    cwd: services.cwd,
+  });
+  await notifyModelSelectionChanged(services);
   shell.insertCommandResult(
     "/effort",
     choice === "__clear__" ? `Effort override cleared for ${ref}.` : `Effort set to ${choice} for ${ref}.`,

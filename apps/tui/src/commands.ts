@@ -32,11 +32,16 @@ import {
 } from "./observation/herd-lead-companion.ts";
 import { formatCaptainContextUsage } from "./shell/footer.ts";
 import { formatHerdrJumpResult, jumpToHerdrAgent } from "./session/herdr-report.ts";
+import { gamesSet, gamesStatus } from "./command/games.ts";
+import type { StatusCommandResult } from "./command/status.ts";
+import type { InstallDoctorReport } from "./command/doctor.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
   readonly settings?: SettingsStore;
+  readonly commandStatus?: () => Promise<StatusCommandResult>;
+  readonly commandDoctor?: () => Promise<InstallDoctorReport>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -512,11 +517,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         if (words.length === 1 && words[0] === "status") {
-          shell.insertCommandResult(
-            "/games",
-            formatGameplaySettings((await settings.load()).gameplay),
-            "success",
-          );
+          const result = await gamesStatus({ settings });
+          shell.insertCommandResult("/games", formatGameplaySettings(result.games), "success");
           return;
         }
         const [state] = words;
@@ -524,10 +526,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           shell.insertCommandResult("/games", "Usage: /games [on|off]", "error");
           return;
         }
-        const next = await setGameplayEnabled(settings, state === "on");
+        const next = await gamesSet(state === "on", { settings });
         shell.insertCommandResult(
           "/games",
-          `${formatGameplaySettings(next.gameplay)}\n\nRestart Clankie to apply this change.`,
+          `${formatGameplaySettings(next.games)}\n\nRestart Clankie to apply this change.`,
           "success",
         );
       },
@@ -620,14 +622,37 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       description: "Show console and clankie service status",
       takesArgument: false,
       availableInSideConversation: true,
-      run(_argument, shell): void {
+      async run(_argument, shell): Promise<void> {
         const s = statusHelpers(shell);
         const snapshot = presence?.();
         const currentContextUsage = contextUsage?.();
         const roster = herdrRoster?.();
+        const launcher = await context.commandStatus?.();
         shell.insertCommandResult(
           "/status",
           [
+            ...(launcher === undefined
+              ? []
+              : [
+                  s.title("Launcher"),
+                  s.line("status", launcher.status, launcher.ok ? "ok" : "bad"),
+                  s.line(
+                    "operator credential",
+                    `${launcher.operatorCredential.source} · ${launcher.operatorCredential.consistency}`,
+                    launcher.operatorCredential.present &&
+                      launcher.operatorCredential.consistency !== "mismatch"
+                      ? "ok"
+                      : "bad",
+                  ),
+                  ...launcher.services.map((service) =>
+                    s.line(
+                      service.id,
+                      `${service.state}${service.detail === undefined ? "" : ` · ${service.detail}`}`,
+                      service.state === "healthy" ? "ok" : "warn",
+                    ),
+                  ),
+                  "",
+                ]),
             s.title("Console"),
             s.line("discord", snapshot?.phase ?? "unavailable", snapshot === undefined ? "warn" : "ok"),
             s.line("conversation", conversations?.title ?? "none selected", "active"),
@@ -663,6 +688,21 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "doctor",
+      aliases: [],
+      description: "Show this install's canonical doctor report",
+      takesArgument: false,
+      availableInSideConversation: true,
+      async run(_argument, shell): Promise<void> {
+        if (context.commandDoctor === undefined) {
+          shell.insertCommandResult("/doctor", "Install doctor is unavailable.", "error");
+          return;
+        }
+        const report = await context.commandDoctor();
+        shell.insertCommandResult("/doctor", JSON.stringify(report, null, 2), "success");
+      },
+    },
+    {
       name: "exit",
       aliases: ["quit"],
       description: "Quit the console",
@@ -694,13 +734,6 @@ function formatGameplaySettings(settings: GameplaySettings): string {
   return `PokeAgent MMO: ${settings.pokeagentMmoEnabled ? "enabled" : "disabled"}`;
 }
 
-async function setGameplayEnabled(settings: SettingsStore, enabled: boolean) {
-  return await settings.update((current) => ({
-    ...current,
-    gameplay: { ...current.gameplay, pokeagentMmoEnabled: enabled },
-  }));
-}
-
 async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStore): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin("games");
@@ -722,7 +755,7 @@ async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStor
       });
       if (selected !== "mmo") break;
       const enabled = !gameplay.pokeagentMmoEnabled;
-      await setGameplayEnabled(settings, enabled);
+      await gamesSet(enabled, { settings });
       flow.renderLine(`PokeAgent MMO ${enabled ? "enabled" : "disabled"}.`, "success");
     }
   } finally {

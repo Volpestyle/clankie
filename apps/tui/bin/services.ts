@@ -2,6 +2,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parsePositiveInt, resolveDiscordActiveBody } from "@clankie/settings";
 import {
+  ensureCaptainCredential,
+  resolveOperatorCredential,
+  type CredentialStore,
+} from "@clankie/credential-broker";
+import {
   pickPresenceSession,
   PRESENCE_STATUS_PATH,
   PresenceStatusSchema,
@@ -453,6 +458,67 @@ export function managedService(id: ServiceId): ManagedService {
 }
 
 export type ServiceRegistryOptions = ServiceCommandOptions;
+
+type Writable = { write(chunk: string): unknown };
+
+export interface CreateServiceOptionsInput {
+  readonly repoRoot: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly fetchImpl?: typeof fetch;
+  readonly operatorCredentialStore?: CredentialStore;
+  readonly captainCredentialStore?: CredentialStore;
+  readonly listProcessCommandsImpl?: ServiceRegistryOptions["listProcessCommandsImpl"];
+  readonly spawnImpl?: ServiceRegistryOptions["spawnImpl"];
+  readonly killImpl?: ServiceRegistryOptions["killImpl"];
+  readonly processIsAliveImpl?: ServiceRegistryOptions["processIsAliveImpl"];
+  readonly readProcessCommandImpl?: ServiceRegistryOptions["readProcessCommandImpl"];
+  readonly stderr?: Writable;
+}
+
+/** Shared credential and process seams for every launcher service command. */
+export async function createServiceOptions(
+  input: CreateServiceOptionsInput,
+): Promise<ServiceRegistryOptions> {
+  const env = input.env ?? process.env;
+  let operatorToken: string | undefined;
+  try {
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(input.operatorCredentialStore === undefined ? {} : { store: input.operatorCredentialStore }),
+    });
+    operatorToken = credential?.token;
+  } catch {
+    operatorToken = undefined;
+  }
+  let captainToken: string | undefined;
+  try {
+    const credential = await ensureCaptainCredential({
+      env,
+      ...(input.captainCredentialStore === undefined ? {} : { store: input.captainCredentialStore }),
+    });
+    captainToken = credential.token;
+  } catch {
+    captainToken = undefined;
+  }
+  const stderr = input.stderr ?? process.stderr;
+  return {
+    repoRoot: input.repoRoot,
+    env,
+    fetchImpl: input.fetchImpl ?? fetch,
+    operatorToken,
+    captainToken,
+    ...(input.listProcessCommandsImpl === undefined
+      ? {}
+      : { listProcessCommandsImpl: input.listProcessCommandsImpl }),
+    ...(input.spawnImpl === undefined ? {} : { spawnImpl: input.spawnImpl }),
+    ...(input.killImpl === undefined ? {} : { killImpl: input.killImpl }),
+    ...(input.processIsAliveImpl === undefined ? {} : { processIsAliveImpl: input.processIsAliveImpl }),
+    ...(input.readProcessCommandImpl === undefined
+      ? {}
+      : { readProcessCommandImpl: input.readProcessCommandImpl }),
+    onStatus: (status: string) => stderr.write(`${status}\n`),
+  };
+}
 
 export async function startOne(id: ServiceId, options: ServiceRegistryOptions): Promise<ServiceStatus> {
   return await startService(managedService(id), options);

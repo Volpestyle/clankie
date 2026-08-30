@@ -24,7 +24,7 @@ you are helping.
 After-the-fact trails (what you said, receipts, play journals) live under the
 user's Clankie homes — load `trace-clankie`. Those paths exist on every install.
 
-## Setup: CLI for agents, slash commands for the person
+## Setup: canonical commands, TUI chrome
 
 Do not write Keychain entries or `~/.config/clankie/clankie.json` yourself.
 The full flag/JSON/exit-code contract is `{repoRoot}/docs/cli.md` (every
@@ -37,6 +37,11 @@ install) and `clankie help` (same index). Configure through the headless CLI:
 | Captain + local providers             | `clankie model status`                                                                |
 | Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`             |
 | Switch captain                        | `clankie model set provider/model`                                                    |
+| Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`            |
+| Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`    |
+| Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`              |
+| Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`               |
+| Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                   |
 | Pick up model/provider config         | `clankie restart captain`                                                             |
 | Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json` |
 | Rotate operator credential            | `clankie operator-credential rotate --json`                                           |
@@ -51,8 +56,10 @@ model. If the probe fails, pass `--models id,id`. Local LLM servers (ds4,
 Ollama, LM Studio) are not launcher-owned; start them yourself.
 
 The person at the console can still use slash commands (`/auth`, `/provider`,
-`/model`, `/discord`, `/connect`, `/persona`, `/voice`). Those write the same
-stores. Secrets still go through `/auth` or the credential broker — never flags.
+`/model`, `/effort`, `/image-model`, `/video-model`, `/games`, `/discord`,
+`/connect`, `/persona`, `/voice`). Their modals are chrome over the commands
+above for non-secret configuration. Secrets still go through `/auth`, the
+existing wizards, or the credential broker — never flags.
 
 `credential_unavailable` or `not_configured` means nobody connected it yet. Say
 that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying

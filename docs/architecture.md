@@ -6,7 +6,11 @@ his game bodies, and the HTTP API every surface speaks.
 
 ```mermaid
 flowchart LR
-  TUI["TUI / menu bar / relay"] --> Service["apps/clankie<br/>captain, tools, HTTP authority"]
+  Argv["clankie argv"] --> Commands["launcher noun commands<br/>durable non-secret control"]
+  TUI["operator TUI"] --> Commands --> Config["clankie.json + settings.json"]
+  TUI --> Service["apps/clankie<br/>captain, tools, HTTP authority"]
+  TUI -. "secret wizards" .-> State
+  Remote["phone / menu bar / relay"] --> Service
   Body["one active Discord body<br/>official bot or lab user"] --> Service
   Body --> Client["@clankie/vox-client<br/>Apache-2.0 IPC boundary"]
   Client --> Vox["one clankvox child<br/>AGPL-3.0-or-later"]
@@ -302,6 +306,7 @@ release so he can describe and set up this machine without a git tree
 | Concern                           | Canonical reference                                                                               |
 | --------------------------------- | ------------------------------------------------------------------------------------------------- |
 | HTTP API                          | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                                       |
+| Launcher command layer            | [`docs/cli.md`](cli.md)                                                                           |
 | Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                                     |
 | Herdr plugin (board, console)     | [`integrations/herdr-plugin/README.md`](../integrations/herdr-plugin/README.md)                   |
 | Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                         |

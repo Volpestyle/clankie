@@ -42,6 +42,8 @@ import { herdrPaneIdFromEnv, reportHerdrAgent, reportHerdrMetadata } from "./ses
 import { PresencePoller } from "./observation/presence.ts";
 import { formatCaptainPresenceStatus } from "./shell/footer.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
+import { statusCommand } from "./command/status.ts";
+import { doctorCommand } from "./command/doctor.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 const stateHome = process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
@@ -220,6 +222,13 @@ const brokeredCommands = {
 const commands = [
   ...buildConsoleCommands({
     settings: settingsStore,
+    commandStatus: () =>
+      statusCommand({
+        repoRoot,
+        env: process.env,
+        stderr: { write: () => undefined },
+      }),
+    commandDoctor: () => doctorCommand({ repoRoot, env: process.env }),
     conversations: conversationsContext,
     laneTrace,
     presence: () => presence.snapshot,

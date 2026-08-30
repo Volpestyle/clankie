@@ -1,4 +1,5 @@
 import { SettingsStore, type PersonaSettings } from "@clankie/settings";
+import { personaStatus, personaUpdate } from "./command/persona.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface PersonaCommandServices {
@@ -61,10 +62,10 @@ function indent(value: string): string[] {
 }
 
 async function showPersonaStatus(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
-  const stored = await services.settings.load();
+  const result = await personaStatus({ settings: services.settings });
   shell.insertCommandResult(
     "/persona status",
-    [`settings file: ${services.settings.path}`, "", ...describePersona(stored.persona)].join("\n"),
+    [`settings file: ${result.settingsFile}`, "", ...describePersona(result.persona)].join("\n"),
     "success",
   );
 }
@@ -113,16 +114,6 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
   }
 }
 
-async function apply(
-  services: PersonaCommandServices,
-  patch: (current: PersonaSettings) => PersonaSettings,
-): Promise<void> {
-  await services.settings.update((current) => ({
-    ...current,
-    persona: patch(current.persona),
-  }));
-}
-
 async function editCharacter(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
   const flow = shell.setupFlow;
   const current = (await services.settings.load()).persona;
@@ -135,10 +126,10 @@ async function editCharacter(shell: ClankieFaceShell, services: PersonaCommandSe
     validate: (value: string) => (value.length > 4_000 ? "Keep it under 4000 characters." : undefined),
   });
   if (notes === undefined) return;
-  await apply(services, (persona) => ({
-    ...persona,
-    characterNotes: resolvePersonaText(notes, persona.characterNotes),
-  }));
+  await personaUpdate(
+    { characterNotes: resolvePersonaText(notes, current.characterNotes) },
+    { settings: services.settings },
+  );
   flow.renderLine("Saved character. New Discord and voice turns pick it up.", "success");
 }
 
@@ -168,11 +159,13 @@ async function editNames(shell: ClankieFaceShell, services: PersonaCommandServic
     });
     if (aliases === undefined) continue;
 
-    await apply(services, (persona) => ({
-      ...persona,
-      displayName: resolvePersonaText(displayName, persona.displayName),
-      ...(aliases.trim() ? { aliases: splitList(aliases) } : {}),
-    }));
+    await personaUpdate(
+      {
+        displayName: resolvePersonaText(displayName, current.displayName),
+        ...(aliases.trim() ? { aliases: splitList(aliases) } : {}),
+      },
+      { settings: services.settings },
+    );
     flow.renderLine("Saved names.", "success");
     return;
   }
@@ -215,11 +208,13 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
     const replyChoice = replyPolicy;
     if (replyChoice === undefined) continue;
 
-    await apply(services, (persona) => ({
-      ...persona,
-      chattiness: chattinessChoice as PersonaSettings["chattiness"],
-      replyPolicy: replyChoice as PersonaSettings["replyPolicy"],
-    }));
+    await personaUpdate(
+      {
+        chattiness: chattinessChoice as PersonaSettings["chattiness"],
+        replyPolicy: replyChoice as PersonaSettings["replyPolicy"],
+      },
+      { settings: services.settings },
+    );
     flow.renderLine(
       replyChoice === "all"
         ? "Saved. He will read every admitted message and choose when to speak — restart the bridge to apply."

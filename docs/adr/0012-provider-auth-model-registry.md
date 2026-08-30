@@ -30,19 +30,26 @@ verified Codex-backend model catalog with zero subscription cost and forces the 
 Responses request contract (`instructions`, `store:false`, OAuth headers).
 There is no implicit credential fallback between the identities.
 
-The operator UX is the TUI's guided setup (`/auth`, `/provider`, `/model`,
-`/effort`, and `/voice`). Voice configuration uses the same credential store.
-Local endpoints are declared in the same `/provider` modal:
-it writes the `baseURL` provider entry and seeds its models from the
-endpoint's own `GET {baseURL}/models`, since models.dev has no catalog for a
-machine-local runtime.
+The launcher command layer is the canonical owner-control product. Each noun
+has one module whose functions return JSON-shaped results. The argv parser
+serializes those results; TUI slash commands and modals import the same
+functions, collect their flags, render their results, and navigate. Neither
+face shells out to `clankie`, and neither face writes `clankie.json`,
+`settings.json`, or Keychain through a private path.
 
-Agents and scripts use the same writers through the headless launcher:
-`clankie model status`, `clankie model add-local`, and `clankie model set`.
-Those commands print JSON, never store secrets, and do not edit
-`clankie.json` through a second code path. The TUI remains the human
-wizard; the CLI is the agent-ergonomic surface. The full headless contract
-(every verb, flags, JSON stdout, exit codes) is [`docs/cli.md`](../cli.md).
+This command layer owns durable local configuration such as providers, models,
+reasoning effort, persona, gameplay availability, and non-secret Discord body
+settings. Local endpoints are declared through the `model` noun: it writes the
+`baseURL` provider entry and seeds its models from the endpoint's own
+`GET {baseURL}/models`, since models.dev has no catalog for a machine-local
+runtime. Secret entry remains an interactive credential-broker concern; secrets
+never become argv flags.
+
+Live operator work remains the service HTTP catalog shared by the TUI, phone,
+relay, and menu bar: chat, play, memory, pairing, and conversations do not move
+onto launcher argv. The two encodings are one product rather than two writers.
+The full command contract (every noun, verb, flags, JSON result, and exit code)
+is [`docs/cli.md`](../cli.md).
 
 Session/context management follows the [architecture](../architecture.md): Pi
 owns the captain's language-model runtime, durable conversation history,
@@ -58,10 +65,13 @@ displays Pi's context limits
 - **Plaintext auth file (opencode's model)** — rejected for secrets at rest; Keychain is already committed (VUH-689). File fallback exists only for non-darwin/CI.
 - **Hand-maintained model list (v1's hardcoded menus)** — rejected; models.dev gives cost/limits/modalities/reasoning metadata across 158 providers and refreshes programmatically.
 - **Config in saved env vars (v1's `CLANKIE_*` env store)** — rejected in favor of typed, diffable JSON with global + repo override.
+- **Independent TUI and argv writers** — rejected because two mutation paths can
+  drift in validation, defaults, and result reporting. The TUI is chrome over
+  command functions, not another control product.
 
 ## Constraints
 
 Only the Clankie service and privileged connectors resolve provider credentials.
-Coding-agent harnesses use their provider-native authentication. The TUI
-and the headless `clankie model` commands share the local setup writers
-and write non-secret provider/model references to the config store.
+Coding-agent harnesses use their provider-native authentication. Command modules
+are the sole writers for non-secret owner configuration; argv and TUI are
+consumers of their typed, JSON-shaped results.

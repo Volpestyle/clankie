@@ -16,20 +16,6 @@ if (process.argv[2] === "--version" || process.argv[2] === "-V") {
   process.exit(0);
 }
 
-// Every child fills its own env from settings. The launcher consumes only the
-// active-body switches and activity tunnel, so project just those; copying the
-// whole settings tree into child env would turn stored per-turn authorization
-// into an immutable environment override until restart.
-const launcherDiscordEnvironment = discordSettingsToEnvironment((await new SettingsStore().load()).discord);
-for (const name of [
-  "DISCORD_ACTIVE_BODY",
-  "DISCORD_USER_SESSION_ENABLED",
-  "CLANKIE_ACTIVITY_TUNNEL_NAME",
-  "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME",
-] as const) {
-  const configured = launcherDiscordEnvironment[name];
-  if ((process.env[name]?.length ?? 0) === 0 && configured !== undefined) process.env[name] = configured;
-}
 let direct;
 try {
   direct = parseDirectConversation(process.argv.slice(2));
@@ -42,10 +28,37 @@ try {
 // resume against the server, so no process-global env couples the lane.
 const args = direct.remaining;
 
+if (
+  args[0] === undefined ||
+  args[0] === "health" ||
+  args[0] === "status" ||
+  args[0] === "restart" ||
+  args[0] === "down"
+) {
+  await applyLauncherDiscordEnvironment();
+}
+
 if (isHeadlessCaptainCommand(args[0])) {
   process.exitCode = await runHeadlessCaptainCommand(args, { repoRoot });
 } else {
   await runOperatorConsole();
+}
+
+async function applyLauncherDiscordEnvironment(): Promise<void> {
+  // Every child fills its own env from settings. The launcher consumes only the
+  // active-body switches and activity tunnel, so project just those for commands
+  // that inspect or change the process graph. Config commands read the store
+  // directly; projecting first would falsely report stored values as env overrides.
+  const configured = discordSettingsToEnvironment((await new SettingsStore().load()).discord);
+  for (const name of [
+    "DISCORD_ACTIVE_BODY",
+    "DISCORD_USER_SESSION_ENABLED",
+    "CLANKIE_ACTIVITY_TUNNEL_NAME",
+    "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME",
+  ] as const) {
+    const value = configured[name];
+    if ((process.env[name]?.length ?? 0) === 0 && value !== undefined) process.env[name] = value;
+  }
 }
 
 async function runOperatorConsole(): Promise<void> {
