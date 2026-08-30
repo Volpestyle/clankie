@@ -94,8 +94,8 @@ importers:
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
       '@pokeagents/world-protocol':
-        specifier: github:Volpestyle/pokeagents#f8eeb3ab5f8d1de1a2a2681c61a3e6b37786e4d0&path:/packages/world-protocol
-        version: git+ssh://git@github.com/Volpestyle/pokeagents.git#f8eeb3ab5f8d1de1a2a2681c61a3e6b37786e4d0&path:/packages/world-protocol
+        specifier: 0.3.1
+        version: 0.3.1
       hono:
         specifier: 4.12.28
         version: 4.12.28
@@ -1637,9 +1637,8 @@ packages:
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
 
-  '@pokeagents/world-protocol@git+ssh://git@github.com/Volpestyle/pokeagents.git#f8eeb3ab5f8d1de1a2a2681c61a3e6b37786e4d0&path:/packages/world-protocol':
-    resolution: {commit: f8eeb3ab5f8d1de1a2a2681c61a3e6b37786e4d0, path: /packages/world-protocol, repo: git@github.com:Volpestyle/pokeagents.git, type: git}
-    version: 0.3.0
+  '@pokeagents/world-protocol@0.3.1':
+    resolution: {integrity: sha512-N20ThX5zwECvecWyS4kg0Y1TLNsen99jxnZSdlej0Dnek0U3ar1/tOXvQh3TdFE96dhFEP2XurT21ELM6reiOw==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -3999,7 +3998,7 @@ snapshots:
 
   '@pinojs/redact@0.4.0': {}
 
-  '@pokeagents/world-protocol@git+ssh://git@github.com/Volpestyle/pokeagents.git#f8eeb3ab5f8d1de1a2a2681c61a3e6b37786e4d0&path:/packages/world-protocol':
+  '@pokeagents/world-protocol@0.3.1':
     dependencies:
       zod: 4.4.3
 
