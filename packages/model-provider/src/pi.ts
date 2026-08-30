@@ -3,6 +3,7 @@ import { clampThinkingLevel, type Api, type Model, type ModelThinkingLevel } fro
 import type { ModelRuntime, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
 import { providerFamilyFor } from "./instantiate.ts";
+import { LOCAL_PLACEHOLDER_API_KEY } from "./local-endpoint.ts";
 import { mergedCatalog, subscriptionRefFor } from "./resolve.ts";
 import { thinkingLevelForVariant } from "./variants.ts";
 
@@ -78,10 +79,16 @@ export function registerConfiguredPiProviders(
             contextWindow: model.limit.context,
             maxTokens: model.limit.output,
           }));
+    // A declared endpoint with no builtin and no env var naming its key is a
+    // credential-less local runtime (ADR: `clankie model add-local`). Pi will
+    // not start a turn for a provider it sees no auth for at all, so give it a
+    // placeholder bearer the runtime ignores; a stored credential still wins.
+    const placeholderAuth = !hasBuiltin && baseUrl !== undefined && (declared.env ?? []).length === 0;
     const provider: ProviderConfig = {
       ...(declared.name === undefined ? {} : { name: declared.name }),
       ...(baseUrl === undefined ? {} : { baseUrl }),
       ...(!hasBuiltin ? { api: piApi(providerId, declared.npm, baseUrl) } : {}),
+      ...(placeholderAuth ? { apiKey: LOCAL_PLACEHOLDER_API_KEY } : {}),
       ...(models === undefined ? {} : { models }),
     };
     runtime.registerProvider(providerId, provider);

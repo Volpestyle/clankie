@@ -2,6 +2,14 @@ import { parseModelRef, updateGlobalConfig, type ClankieConfig } from "./config.
 
 export const LOCAL_CONTEXT_FALLBACK = 32_768;
 export const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible";
+/**
+ * Bearer sent to a locally declared endpoint that asks for none. A local
+ * runtime (llama.cpp, vLLM, Ollama, LM Studio) ignores the value, but Pi
+ * refuses to start a turn for a provider with no configured auth at all, so a
+ * credential-less provider needs a placeholder to be usable. A real stored
+ * credential for the same provider still wins over this.
+ */
+export const LOCAL_PLACEHOLDER_API_KEY = "local";
 
 export interface ProbedLocalModel {
   readonly id: string;

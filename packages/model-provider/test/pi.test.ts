@@ -48,9 +48,38 @@ describe("Pi provider projection", () => {
         config: expect.objectContaining({
           api: "openai-completions",
           baseUrl: "http://localhost:11434/v1",
+          // Pi refuses to start a turn for a provider with no auth at all, so a
+          // credential-less local endpoint carries a placeholder it ignores.
+          apiKey: "local",
           models: [expect.objectContaining({ id: "qwen", contextWindow: 32_000 })],
         }),
       },
     ]);
+  });
+
+  it("leaves auth alone when the endpoint names an env var for its key", () => {
+    const registrations: Array<{ id: string; config: ProviderConfig }> = [];
+    const runtime = {
+      getProviders: () => [],
+      registerProvider(id: string, config: ProviderConfig) {
+        registrations.push({ id, config });
+      },
+    } as unknown as ModelRuntime;
+
+    registerConfiguredPiProviders(
+      runtime,
+      {
+        provider: {
+          vendor: {
+            npm: "@ai-sdk/openai-compatible",
+            env: ["VENDOR_API_KEY"],
+            options: { baseURL: "https://vendor.example/v1" },
+          },
+        },
+      },
+      CatalogSchema.parse({}),
+    );
+
+    expect(registrations[0]?.config.apiKey).toBeUndefined();
   });
 });
