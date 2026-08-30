@@ -56,6 +56,9 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
   return [
     show("application id", settings.applicationId),
     `command server: ${settings.guildId ?? "— (commands register globally)"}`,
+    // Separate from the command server on purpose: this is the one server he
+    // controls, and the only one his agents can be given rooms in.
+    `swarm home: ${settings.swarmGuildId ?? "— (no server he may make rooms in)"}`,
     showList("ambient roles", settings.ambientRoleIds),
     showList("ambient users", settings.ambientUserIds),
     showList("approval roles", settings.approvalRoleIds),

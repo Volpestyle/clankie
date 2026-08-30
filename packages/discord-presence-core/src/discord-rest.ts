@@ -222,9 +222,8 @@ export function planDiscordWebhookPost(post: DiscordWebhookPersonaPost): Discord
   if (content.length === 0 || content.length > WEBHOOK_CONTENT_MAX) {
     throw new Error("discord_webhook_invalid_content");
   }
-  const query = post.threadId === undefined
-    ? "?wait=true"
-    : `?wait=true&thread_id=${encodeURIComponent(post.threadId)}`;
+  const query =
+    post.threadId === undefined ? "?wait=true" : `?wait=true&thread_id=${encodeURIComponent(post.threadId)}`;
   return {
     method: "post",
     path: `/webhooks/${post.webhookId}/${post.webhookToken}${query}`,
@@ -325,4 +324,41 @@ export function planDiscordWebhookCreate(input: {
     // Webhook names carry the same reserved-word rule as the per-post username.
     body: { name: FORBIDDEN_WEBHOOK_NAME.test(input.name) ? "Clankie channel" : input.name.slice(0, 80) },
   };
+}
+
+/**
+ * Channel types a webhook can post into: a guild text channel and an
+ * announcement channel. Everything else in a guild list — categories, voice,
+ * forums, stage — is not a room a fleet can be put in, so it never reaches
+ * the picker.
+ */
+const WEBHOOKABLE_CHANNEL_TYPES = new Set([0, 5]);
+
+/**
+ * The rooms in a guild a channel could be projected onto (ADR 0146). Projection
+ * is not limited to rooms Clankie made: he makes the webhook on any channel in
+ * the home guild, which is what saves the owner a trip through Server Settings
+ * to copy a URL out.
+ */
+export function planDiscordGuildChannels(guildId: string): { readonly method: "get"; readonly path: string } {
+  return { method: "get", path: `/guilds/${guildId}/channels` };
+}
+
+/** Guild channels narrowed to the ones a webhook can post into, named for a picker. */
+export function readDiscordGuildRooms(
+  raw: unknown,
+): readonly { readonly channelId: string; readonly name: string }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((channel): channel is { id: string; name: string; type: number } => {
+      const record = channel as { id?: unknown; name?: unknown; type?: unknown };
+      return (
+        typeof record.id === "string" &&
+        typeof record.name === "string" &&
+        typeof record.type === "number" &&
+        WEBHOOKABLE_CHANNEL_TYPES.has(record.type)
+      );
+    })
+    .map((channel) => ({ channelId: channel.id, name: channel.name.slice(0, 100) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
 }

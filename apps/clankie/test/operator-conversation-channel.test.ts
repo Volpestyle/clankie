@@ -143,6 +143,7 @@ describe("channel conversations", () => {
         // Discord answers which room the webhook points at, so the operator
         // never types a guild or channel id.
         resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
+        swarmGuildId: () => "guild-1",
       },
     );
 
@@ -250,7 +251,7 @@ describe("channel conversations", () => {
       vi.fn(() => Promise.resolve(false)),
       undefined,
       undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision },
+      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision, swarmGuildId: () => "guild-1" },
     );
 
     const created = await store.serve({
@@ -274,6 +275,76 @@ describe("channel conversations", () => {
     expect(JSON.stringify(created)).not.toContain("provisioned-secret");
   });
 
+  it("puts a room in a channel the server already has, without a pasted webhook", async () => {
+    const root = await makeRoot("clankie-channel-existing-");
+    const provision = vi.fn((input: { name: string; channelId?: string }) =>
+      Promise.resolve({
+        guildId: "guild-1",
+        channelId: input.channelId ?? "made-up",
+        webhookId: "101",
+        webhookToken: "provisioned-secret",
+      }),
+    );
+    const rooms = vi.fn(() =>
+      Promise.resolve([
+        { channelId: "42", name: "general" },
+        { channelId: "43", name: "fleet" },
+      ]),
+    );
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      {
+        post: vi.fn(() => Promise.resolve()),
+        resolve: vi.fn(),
+        provision,
+        rooms,
+        swarmGuildId: () => "guild-1",
+      },
+    );
+
+    // The picker reads the guild's own rooms, so choosing one is a pick rather
+    // than a snowflake typed from memory.
+    const listed = await store.serve({ op: "discord_rooms", schemaVersion: 1 });
+    if (listed.op !== "discord_rooms") throw new Error("discord_rooms expected");
+    expect(listed.rooms.map((room) => room.name)).toEqual(["general", "fleet"]);
+
+    const created = await store.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: {
+        schemaVersion: 1,
+        title: "Atlas slowness",
+        members: ["atlas"],
+        discord: { kind: "provision", channelId: "43" },
+      },
+    });
+    if (created.op !== "channel") throw new Error("channel expected");
+    expect(provision).toHaveBeenCalledWith({ name: "Atlas slowness", channelId: "43" });
+    expect(created.channel.discord?.channelId).toBe("43");
+    expect(JSON.stringify(created)).not.toContain("provisioned-secret");
+  });
+
+  it("lists no rooms rather than failing where nothing can read the guild", async () => {
+    const root = await makeRoot("clankie-channel-norooms-");
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), swarmGuildId: () => "guild-1" },
+    );
+    const listed = await store.serve({ op: "discord_rooms", schemaVersion: 1 });
+    if (listed.op !== "discord_rooms") throw new Error("discord_rooms expected");
+    expect(listed.rooms).toEqual([]);
+  });
+
   it("says so plainly when it cannot make the room, rather than half-projecting", async () => {
     const root = await makeRoot("clankie-channel-noprovision-");
     const store = new ConversationStore(
@@ -283,7 +354,7 @@ describe("channel conversations", () => {
       vi.fn(() => Promise.resolve(false)),
       undefined,
       undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn() },
+      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), swarmGuildId: () => "guild-1" },
     );
     await expect(
       store.serve({
@@ -296,7 +367,291 @@ describe("channel conversations", () => {
           discord: { kind: "provision" },
         },
       }),
-    ).rejects.toThrow("paste a webhook instead");
+    ).rejects.toThrow("paste one from your swarm server instead");
+  });
+
+  it("leaves no room behind when the projection it was asked for fails", async () => {
+    const root = await makeRoot("clankie-channel-rollback-");
+    const provision = vi.fn(() => Promise.reject(new Error("Missing Permissions")));
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision, swarmGuildId: () => "guild-1" },
+    );
+
+    await expect(
+      store.serve({
+        op: "channel",
+        schemaVersion: 1,
+        channel: {
+          schemaVersion: 1,
+          title: "should not exist",
+          members: ["atlas"],
+          discord: { kind: "provision" },
+        },
+      }),
+    ).rejects.toThrow("Missing Permissions");
+    // A create that could not be projected is not a room. Anything else leaves
+    // the operator a channel they never got, in a list they have to clean up.
+    const listed = await store.serve({ op: "channels", schemaVersion: 1 });
+    if (listed.op !== "channels") throw new Error("channels expected");
+    expect(listed.channels).toHaveLength(0);
+  });
+
+  it("leaves a room's title and roster untouched when an edit's projection fails", async () => {
+    const root = await makeRoot("clankie-channel-editrollback-");
+    const provision = vi.fn(() => Promise.reject(new Error("Missing Permissions")));
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision, swarmGuildId: () => "guild-1" },
+    );
+    const created = await store.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: { schemaVersion: 1, title: "Atlas slowness", members: ["atlas"] },
+    });
+    if (created.op !== "channel") throw new Error("channel expected");
+
+    await expect(
+      store.serve({
+        op: "channel",
+        schemaVersion: 1,
+        channel: {
+          schemaVersion: 1,
+          channelId: created.channel.channelId,
+          title: "renamed",
+          members: ["atlas", "dev"],
+          discord: { kind: "provision" },
+        },
+      }),
+    ).rejects.toThrow("Missing Permissions");
+
+    const listed = await store.serve({ op: "channels", schemaVersion: 1 });
+    if (listed.op !== "channels") throw new Error("channels expected");
+    expect(listed.channels).toHaveLength(1);
+    expect(listed.channels[0]?.title).toBe("Atlas slowness");
+    expect(listed.channels[0]?.members.map((member) => member.seatId)).toEqual(["atlas"]);
+    expect(listed.channels[0]?.discord).toBeUndefined();
+  });
+
+  it("keeps one room per guild channel, so inbound guild text has one place to go", async () => {
+    const root = await makeRoot("clankie-channel-oneroom-");
+    const provision = vi.fn((input: { name: string; channelId?: string }) =>
+      Promise.resolve({
+        guildId: "guild-1",
+        channelId: input.channelId ?? "made-up",
+        webhookId: "77",
+        webhookToken: "secret",
+      }),
+    );
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision, swarmGuildId: () => "guild-1" },
+    );
+    const first = await store.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: {
+        schemaVersion: 1,
+        title: "Atlas slowness",
+        members: ["atlas"],
+        discord: { kind: "provision", channelId: "42" },
+      },
+    });
+    if (first.op !== "channel") throw new Error("channel expected");
+
+    await expect(
+      store.serve({
+        op: "channel",
+        schemaVersion: 1,
+        channel: {
+          schemaVersion: 1,
+          title: "Second room",
+          members: ["dev"],
+          discord: { kind: "provision", channelId: "42" },
+        },
+      }),
+    ).rejects.toThrow("already holds");
+    // Refused before Discord was touched a second time, so no orphan webhook.
+    expect(provision).toHaveBeenCalledTimes(1);
+
+    // Restating the same room onto the room it already has is not a conflict.
+    await expect(
+      store.serve({
+        op: "channel",
+        schemaVersion: 1,
+        channel: {
+          schemaVersion: 1,
+          channelId: first.channel.channelId,
+          title: "Atlas slowness",
+          members: ["atlas", "dev"],
+          discord: { kind: "provision", channelId: "42" },
+        },
+      }),
+    ).resolves.toBeDefined();
+
+    // One claimant means inbound guild text has exactly one place to land.
+    expect(store.submitProjectedMessage("guild-1", "42", "why is the atlas slow?")?.conversationId).toBe(
+      first.channel.conversationId,
+    );
+    const listed = await store.serve({ op: "channels", schemaVersion: 1 });
+    if (listed.op !== "channels") throw new Error("channels expected");
+    expect(listed.channels).toHaveLength(1);
+  });
+
+  it("refuses a pasted webhook from a guild Clankie only inhabits", async () => {
+    const root = await makeRoot("clankie-channel-inhabitant-");
+    // Resolves into blinker city, a server on the ingress and presence lists
+    // that Clankie does not control. The swarm home is oathkeeper.
+    const resolve = vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" }));
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      {
+        post: vi.fn(() => Promise.resolve()),
+        resolve,
+        provision: vi.fn(),
+        swarmGuildId: () => "oathkeeper",
+      },
+    );
+
+    await expect(
+      store.serve({
+        op: "channel",
+        schemaVersion: 1,
+        channel: {
+          schemaVersion: 1,
+          title: "back door",
+          members: ["atlas"],
+          discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
+        },
+      }),
+    ).rejects.toThrow(/swarm server/);
+    // A guild he is merely in cannot acquire a room by any path, so the refusal
+    // leaves no channel behind either.
+    const listed = await store.serve({ op: "channels", schemaVersion: 1 });
+    if (listed.op !== "channels") throw new Error("channels expected");
+    expect(listed.channels).toHaveLength(0);
+  });
+
+  it("projects nothing at all when no swarm home is set", async () => {
+    const root = await makeRoot("clankie-channel-noswarm-");
+    const resolve = vi.fn(() => Promise.resolve({ guildId: "anywhere", channelId: "77" }));
+    const provision = vi.fn();
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      { post: vi.fn(() => Promise.resolve()), resolve, provision, swarmGuildId: () => undefined },
+    );
+    for (const discord of [
+      { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" } as const,
+      { kind: "provision" } as const,
+    ]) {
+      await expect(
+        store.serve({
+          op: "channel",
+          schemaVersion: 1,
+          channel: { schemaVersion: 1, title: "nowhere", members: ["atlas"], discord },
+        }),
+      ).rejects.toThrow(/no swarm server set/);
+    }
+    // Unset is not "no opinion". Neither path is even attempted, so a paste
+    // cannot stand in for a server Clankie was never given.
+    expect(resolve).not.toHaveBeenCalled();
+    expect(provision).not.toHaveBeenCalled();
+  });
+
+  it("stops routing and posting for a room left outside the swarm home", async () => {
+    const root = await makeRoot("clankie-channel-legacy-");
+    const post = vi.fn(() => Promise.resolve());
+    // Projected while blinker city was admitted; the swarm home is oathkeeper now.
+    const projection = {
+      post,
+      resolve: vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" })),
+      swarmGuildId: (): string | undefined => "blinker-city",
+    };
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      projection,
+    );
+    const created = await store.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: {
+        schemaVersion: 1,
+        title: "Atlas slowness",
+        members: ["atlas"],
+        discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
+      },
+    });
+    if (created.op !== "channel") throw new Error("channel expected");
+    expect(store.submitProjectedMessage("blinker-city", "77", "still listening?")).toBeDefined();
+
+    // The record outlives the setting that admitted it, so the invariant has to
+    // hold at use: the moment that guild stops being the swarm home, the room
+    // stops taking guild text and stops posting into it.
+    projection.swarmGuildId = () => "oathkeeper";
+    expect(store.submitProjectedMessage("blinker-city", "77", "still listening?")).toBeUndefined();
+    post.mockClear();
+    projection.swarmGuildId = () => undefined;
+    expect(store.submitProjectedMessage("blinker-city", "77", "still listening?")).toBeUndefined();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("takes a pasted webhook that resolves inside the swarm home", async () => {
+    const root = await makeRoot("clankie-channel-swarmwebhook-");
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      {
+        post: vi.fn(() => Promise.resolve()),
+        resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "77" })),
+        swarmGuildId: () => "oathkeeper",
+      },
+    );
+    const created = await store.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: {
+        schemaVersion: 1,
+        title: "Atlas slowness",
+        members: ["atlas"],
+        discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
+      },
+    });
+    if (created.op !== "channel") throw new Error("channel expected");
+    expect(created.channel.discord?.guildId).toBe("oathkeeper");
   });
 
   it("keeps membership an operator decision, scoped listing exact, and reactions off the entries", async () => {
@@ -334,7 +689,12 @@ describe("channel conversations", () => {
     const restated = await store.serve({
       op: "channel",
       schemaVersion: 1,
-      channel: { schemaVersion: 1, channelId, title: "atlas slowness (deep)", members: ["dev", "atlas", "gh"] },
+      channel: {
+        schemaVersion: 1,
+        channelId,
+        title: "atlas slowness (deep)",
+        members: ["dev", "atlas", "gh"],
+      },
     });
     if (restated.op !== "channel") throw new Error("channel expected");
     expect(restated.channel.conversationId).toBe(conversationId);

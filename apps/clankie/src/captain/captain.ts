@@ -265,10 +265,16 @@ export interface CaptainOptions {
   readonly discordEnvironment?: NodeJS.ProcessEnv;
   /**
    * Trusted Discord runtime, used to make a channel's room and webhook
-   * (ADR 0146). Absent leaves only the pasted-webhook path, which is what a
-   * deployment with no Discord bot has anyway.
+   * (ADR 0146). It is also what answers which guild the swarm home is, so an
+   * absent runtime is no Discord projection at all rather than a fallback to
+   * pasting — a deployment with no Discord bot has nothing to paste into.
+   * Only a runtime that is present but lacks `Manage Webhooks` leaves the
+   * manual path, and that webhook still has to be in the swarm home.
    */
-  readonly discordChannels?: Pick<DiscordPresenceRuntimePort, "provisionChannel">;
+  readonly discordChannels?: Pick<
+    DiscordPresenceRuntimePort,
+    "provisionChannel" | "listRooms" | "swarmGuildId"
+  >;
 }
 
 interface LaneSession {
@@ -811,11 +817,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       created.catch(() => sessions.delete(`operator:${conversationId}`));
       await created;
     },
-    createChannelProjection(
-      options.discordChannels?.provisionChannel === undefined
+    createChannelProjection({
+      ...(options.discordChannels?.provisionChannel === undefined
         ? {}
-        : { provision: (input) => options.discordChannels!.provisionChannel!(input) },
-    ),
+        : { provision: (input) => options.discordChannels!.provisionChannel!(input) }),
+      ...(options.discordChannels?.listRooms === undefined
+        ? {}
+        : { rooms: () => options.discordChannels!.listRooms!() }),
+      ...(options.discordChannels?.swarmGuildId === undefined
+        ? {}
+        : { swarmGuildId: () => options.discordChannels!.swarmGuildId!() }),
+    }),
   );
 
   autonomy.start(async (conversationId, prompt) => {
@@ -1003,11 +1015,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   return {
     submitChannelProjectionMessage(request) {
-      const accepted = conversations.submitProjectedMessage(
-        request.guildId,
-        request.channelId,
-        request.body,
-      );
+      const accepted = conversations.submitProjectedMessage(request.guildId, request.channelId, request.body);
       return Promise.resolve(
         accepted === undefined
           ? { schemaVersion: 1 as const, state: "not_projected" as const }

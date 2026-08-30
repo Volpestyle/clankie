@@ -348,7 +348,7 @@ values.
 
 | Group                  | Fields                                                                                                                                                                                                                |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Application and roles  | `application-id`, `guild-id`, `ambient-role-ids`, `ambient-user-ids`, `approval-role-ids`, `owner-user-id`                                                                                                            |
+| Application and roles  | `application-id`, `guild-id`, `swarm-guild-id`, `ambient-role-ids`, `ambient-user-ids`, `approval-role-ids`, `owner-user-id`                                                                                          |
 | Machine grants         | `system-actor-user-ids`, `system-actor-guild-ids`, `system-actor-channel-ids`                                                                                                                                         |
 | Text and presence      | `text-ingress-enabled`, `ingress-guild-ids`, `ingress-channel-ids`, `ingress-dm-policy`, `ingress-dm-user-ids`, `ingress-context-messages`, `tool-progress-channel-ids`, `presence-guild-ids`, `presence-channel-ids` |
 | Voice                  | `voice-enabled`, `voice-guild-ids`, `voice-channel-ids`, `voice-channel-id`, `voice-join-policy`, `voice-consent-policy`, `voice-transcript-logging-enabled`                                                          |
@@ -439,7 +439,7 @@ Two things decide whether a local captain is usable, and neither shows up in
 
 - **Decode speed.** A large model whose weights get paged out runs one or two
   tokens a second regardless of the hardware's rating. Check `sysctl
-  vm.swapusage` on the host before blaming the captain.
+vm.swapusage` on the host before blaming the captain.
 - **Prefill.** Every turn re-sends the system prompt and the tool schemas, so
   time-to-first-token at 8k-32k context is paid on each one, not once. A model
   that chats acceptably can still be unusable in a tool loop.

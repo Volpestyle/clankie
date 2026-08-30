@@ -2,8 +2,10 @@ import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@cla
 import {
   parseDiscordIdSet,
   planDiscordChannelCreate,
+  planDiscordGuildChannels,
   planDiscordWebhookCreate,
   presenceActGrantRequest,
+  readDiscordGuildRooms,
 } from "@clankie/discord-presence-core";
 import { REST as DiscordREST } from "discord.js";
 import type { DiscordActivitySurface, DiscordPresenceWrite } from "@clankie/protocol";
@@ -22,12 +24,18 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
   ): ReturnType<DiscordBotPresenceRuntime["execute"]>;
-  provisionChannel(input: { readonly name: string; readonly topic?: string }): Promise<{
+  provisionChannel(input: {
+    readonly name: string;
+    readonly topic?: string;
+    readonly channelId?: string;
+  }): Promise<{
     readonly guildId: string;
     readonly channelId: string;
     readonly webhookId: string;
     readonly webhookToken: string;
   }>;
+  listRooms(): Promise<readonly { readonly channelId: string; readonly name: string }[]>;
+  swarmGuildId(): string | undefined;
 } {
   if (process.env.DISCORD_USER_TOKEN) {
     throw new Error(
@@ -39,40 +47,91 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       "DISCORD_BOT_TOKEN must not be set for the presence runtime. Store discord_bot in the credential broker.",
     );
   }
+  const store = createDefaultCredentialStore();
   const provider = new DiscordBotCredentialProvider({
-    store: createDefaultCredentialStore(),
+    store,
     allowedGuildIds: [...parseDiscordIdSet(process.env.DISCORD_PRESENCE_GUILD_IDS)],
     allowedChannelIds: [...parseDiscordIdSet(process.env.DISCORD_PRESENCE_CHANNEL_IDS)],
   });
+  /**
+   * A REST client under one guild-scoped grant. Synthetic but stable identity:
+   * `resolveBotToken` only checks that the grant it verifies matches the
+   * request it is handed, and the real fence is the guild allowlist that
+   * `assertAllowed` applies to both.
+   *
+   * Fenced to the swarm home alone, and independently of the presence
+   * allowlist. Presence governs where Clankie talks; the swarm home governs
+   * where his agents get rooms. Reading the grant off the presence list would
+   * quietly make the two one field again — the swarm home would only work if
+   * it were also a guild he was configured to talk in.
+   */
+  const guildRest = async (guildId: string): Promise<REST> => {
+    const provisionProvider = new DiscordBotCredentialProvider({
+      store,
+      allowedGuildIds: [guildId],
+      allowedChannelIds: [],
+    });
+    const scope = {
+      principalId: "clankie-channels",
+      missionId: "discord-channel-provision",
+      profileHash: "unversioned",
+      capability: "discord.presence.act" as const,
+      guildIds: [guildId],
+      channelIds: [],
+    };
+    const grant = await provisionProvider.issueGrant(scope);
+    const botToken = await provisionProvider.resolveBotToken({ grant, ...scope });
+    return options.rest ?? new DiscordREST({ version: "10" }).setToken(botToken);
+  };
   return {
     /**
-     * Two calls behind one guild-scoped grant: make the channel, then its
-     * webhook. The guild allowlist is the fence — nothing here can reach a
-     * server the owner has not approved, and no channel id is required up
-     * front because the channel is what this creates.
+     * Which server is the swarm home, so a pasted webhook can be held to it.
+     * Not a secret — a guild id names a place, it does not open one — but it is
+     * answered here because this module is what decides the question.
+     */
+    swarmGuildId: () => process.env.DISCORD_SWARM_GUILD_ID?.trim() || undefined,
+    /**
+     * The swarm home's rooms, so the operator picks one instead of copying a
+     * webhook URL out of Server Settings. Same guild-scoped grant as
+     * provisioning, and the same fence: nothing here can name a room outside
+     * the one server Clankie controls.
+     */
+    async listRooms() {
+      const guildId = provisionGuildId();
+      const rest = await guildRest(guildId);
+      return readDiscordGuildRooms(await rest.get(planDiscordGuildChannels(guildId).path as `/${string}`));
+    },
+    /**
+     * Behind one guild-scoped grant: make the channel when there is none to
+     * use, then its webhook. The guild allowlist is the fence — nothing here
+     * can reach a server the owner has not approved, and a `channelId` handed
+     * in is checked against that guild's own rooms rather than trusted, so a
+     * room in a merely-inhabited guild cannot be reached through the swarm one.
      */
     async provisionChannel(input) {
       const guildId = provisionGuildId();
-      // Synthetic but stable identity: `resolveBotToken` only checks that the
-      // grant it verifies matches the request it is handed, and the real fence
-      // is the guild allowlist that `assertAllowed` applies to both.
-      const scope = {
-        principalId: "clankie-channels",
-        missionId: "discord-channel-provision",
-        profileHash: "unversioned",
-        capability: "discord.presence.act" as const,
-        guildIds: [guildId],
-        channelIds: [],
-      };
-      const grant = await provider.issueGrant(scope);
-      const botToken = await provider.resolveBotToken({ grant, ...scope });
-      const rest = options.rest ?? new DiscordREST({ version: "10" }).setToken(botToken);
-      const channelPlan = planDiscordChannelCreate({ guildId, name: input.name, ...(input.topic === undefined ? {} : { topic: input.topic }) });
-      const channel = (await rest.post(channelPlan.path as `/${string}`, {
-        body: channelPlan.body,
-      })) as { id?: unknown };
-      if (typeof channel.id !== "string") throw new Error("discord_channel_provision_failed");
-      const webhookPlan = planDiscordWebhookCreate({ channelId: channel.id, name: input.name });
+      const rest = await guildRest(guildId);
+      let channelId = input.channelId;
+      if (channelId === undefined) {
+        const channelPlan = planDiscordChannelCreate({
+          guildId,
+          name: input.name,
+          ...(input.topic === undefined ? {} : { topic: input.topic }),
+        });
+        const channel = (await rest.post(channelPlan.path as `/${string}`, {
+          body: channelPlan.body,
+        })) as { id?: unknown };
+        if (typeof channel.id !== "string") throw new Error("discord_channel_provision_failed");
+        channelId = channel.id;
+      } else {
+        const rooms = readDiscordGuildRooms(
+          await rest.get(planDiscordGuildChannels(guildId).path as `/${string}`),
+        );
+        if (!rooms.some((room) => room.channelId === channelId)) {
+          throw new Error("discord_channel_not_in_swarm_guild");
+        }
+      }
+      const webhookPlan = planDiscordWebhookCreate({ channelId, name: input.name });
       const webhook = (await rest.post(webhookPlan.path as `/${string}`, {
         body: webhookPlan.body,
       })) as { id?: unknown; token?: unknown };
@@ -81,7 +140,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       }
       return {
         guildId,
-        channelId: channel.id,
+        channelId,
         webhookId: webhook.id,
         webhookToken: webhook.token,
       };
@@ -101,21 +160,17 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
 }
 
 /**
- * The one guild Clankie makes rooms in. An explicit home guild wins; otherwise
- * a single approved presence guild is unambiguous enough to use. More than one
- * and there is no right answer, so it asks rather than guessing which of the
- * owner's servers to put a room in.
+ * The one guild Clankie makes rooms in: the swarm home (ADR 0146). Named
+ * explicitly and never inferred. `DISCORD_GUILD_ID` is the command and
+ * live-proof server and deliberately does not answer here, and neither does the
+ * presence allowlist: a server Clankie merely inhabits belongs on every ingress,
+ * presence, and voice list without ever becoming somewhere his agents can be
+ * given a channel. Unset means no room is provisioned at all.
  */
 function provisionGuildId(): string {
-  const home = process.env.DISCORD_GUILD_ID?.trim();
-  if (home) return home;
-  const approved = [...parseDiscordIdSet(process.env.DISCORD_PRESENCE_GUILD_IDS)];
-  if (approved.length === 1) return approved[0]!;
-  throw new Error(
-    approved.length === 0
-      ? "discord_provision_guild_unset"
-      : "discord_provision_guild_ambiguous",
-  );
+  const swarm = process.env.DISCORD_SWARM_GUILD_ID?.trim();
+  if (!swarm) throw new Error("discord_swarm_guild_unset");
+  return swarm;
 }
 
 /**

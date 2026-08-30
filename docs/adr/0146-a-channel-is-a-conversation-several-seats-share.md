@@ -50,7 +50,7 @@ for itself whether to answer, add something, or stay quiet — the same judgemen
 person makes in a group DM. An agent that sees its point already made says
 nothing.
 
-That behaviour is only *possible* if replies are sequenced. Members prompted
+That behaviour is only _possible_ if replies are sequenced. Members prompted
 simultaneously cannot see each other, so they would all answer at once, every
 time, and the transcript would fill with three answers to every question. The
 engineering problem here is turn-taking, not routing.
@@ -97,7 +97,7 @@ not a correctness one.
 Reactions move out of the Discord lane onto conversation entries, with ops to
 add and remove and stream events to carry them. Both the operator and agents may
 react. An agent reaction is the cheap acknowledgement a transcript turn is too
-expensive for — *seen*, *working on it*, *agreed* — and costs no model output.
+expensive for — _seen_, _working on it_, _agreed_ — and costs no model output.
 
 A reaction is a side-record keyed by the entry's cursor, never a field on the
 entry: entries are durable and append-only, reactions are mutable, and a
@@ -108,7 +108,7 @@ carry reactions for free, and no surface keeps a second copy that can drift.
 
 ### Discord is a second surface, not a second feature
 
-A Clankie channel may be projected into a guild. It is the *same* conversation:
+A Clankie channel may be projected into a guild. It is the _same_ conversation:
 the same transcript, the same members, the same turn-taking. Discord renders and
 participates; it does not own anything.
 
@@ -138,7 +138,7 @@ so an agent wears the same face in Discord that it wears in the commons.
 ### Identity is webhooks, and this is not negotiable
 
 Each agent appearing as its own Discord user must not mean a real user account
-per agent. ADR 0048 already treats *one* automated user account as an accepted
+per agent. ADR 0048 already treats _one_ automated user account as an accepted
 ToS risk that is off by default; N of them is N violations, and the risk is the
 account owner's. It must also not mean a bot application per agent — legitimate,
 but a registration, a token, and an invite for every seat is exactly the
@@ -147,10 +147,20 @@ un-ergonomic setup this feature exists to avoid.
 Webhooks give N apparent participants from one per-channel credential, entirely
 within ToS, with nothing to register per agent.
 
-Clankie makes the channel and its webhook himself, inside a guild the owner has
-already approved. Anything less would put a trip through Discord's settings in
-front of every room, and a feature whose point is that rooms are cheap to make
-cannot cost that each time.
+Clankie makes the webhook himself, inside a guild the owner has already
+approved — on a channel he creates for the room, or on one the server already
+has. Anything less would put a trip through Discord's settings in front of every
+room, and a feature whose point is that rooms are cheap to make cannot cost that
+each time.
+
+Which room a channel lands in is therefore a pick, not a paste: the swarm home's
+own channel list is offered, with a new channel as the default. Text and
+announcement channels are what that list holds, because those are what a webhook
+posts into; forums and threads are not modelled here, and hosting a room inside
+one would be its own decision. The list is read only when the operator opens the
+choice, so a room that never goes to Discord never costs a call to it, and a
+guild Clankie cannot read is an empty picker rather than an error — the
+new-channel path still works.
 
 The grant this needs already exists. ADR 0133's fence is the **guild**
 allowlist: an empty channel allowlist admits any channel inside an approved
@@ -159,14 +169,60 @@ provider with no guilds still grants nothing. Bot credentials stay in the
 trusted runtime module — the service asks for a provisioned room and is handed
 one, rather than holding the token that could make it (ADR 0024).
 
-Pasting a webhook URL stays as the second path, for a channel the owner already
-made or a guild where Clankie has no permission to create one. Either way the
-host keeps the token half and the operator boundary carries only the webhook id,
-so the credential that can post never leaves the machine.
+### A server he controls is not a server he is in
+
+Clankie is a member of servers he does not own, and a member of one he does.
+Those are different relationships and they get different fields.
+
+`swarmGuildId` names the **swarm home**: the one guild his agents may be given
+rooms in. Every other guild he is in is one he **inhabits** — he reads it,
+talks in it, joins its voice — and no path puts a herdr seat in it. The ingress,
+presence, and voice allowlists are about inhabiting, and say nothing about
+where rooms may go; `guildId` is the command and live-proof server, a third
+thing again. None of them answer for the swarm home, and the swarm home is
+never inferred from them: a single approved presence guild is not evidence that
+the owner meant the fleet to live there. Unset means no room is provisioned.
+
+That fence has to hold on every path into a projection, not just the
+provisioning one. A pasted webhook resolves to the guild it belongs to before
+anything is saved, and one outside the swarm home is refused — otherwise the
+paste is a back door that puts the fleet in a server Clankie merely visits,
+with no grant involved at all.
+
+Pasting a webhook URL stays as the second path, for when Clankie lacks
+`Manage Webhooks` in the swarm home and the owner makes one there by hand. It is
+a fallback within that server, never a way out of it: a URL resolving to any
+other guild is refused, and with no swarm home set neither path projects at all.
+Either way the host keeps the token half and the operator boundary carries only
+the webhook id, so the credential that can post never leaves the machine.
+
+A channel id handed to provisioning is checked against the swarm home's own
+rooms rather than trusted. The grant is guild-scoped, so an id from a guild he
+only inhabits would otherwise reach a room the swarm fence was supposed to be
+the whole of.
+
+One Clankie channel per guild room, and the claim is checked before Discord is
+touched. Inbound guild text finds its channel by looking up the room it arrived
+in, so a second channel bound to the same room would take delivery from the
+first — arbitrarily, and silently. Threads would be the way to put two rooms in
+one channel; until there are threads, the second binding is refused.
+
+Nothing local moves until the projection is settled. Resolving a webhook, or
+provisioning one, is the part that can fail, and a room half-created by a
+failure is a room the operator has to go clean up — so the guild side is
+resolved first and the conversation record is written only once it holds.
+
+The fence is checked where a projection is _used_, not only where it is written.
+A record outlives the setting that admitted it: a guild dropped as the swarm
+home, or a room projected before this boundary existed, would otherwise keep
+routing guild text and keep posting agent replies into a server Clankie no
+longer controls. So inbound routing and outbound posting both read the
+projection through the same swarm check, and a room outside it is simply not
+projected any more.
 
 The limitation is accepted deliberately: webhook posts carry a BOT tag, cannot
 be DM'd, and have no presence. Inside a channel none of that is visible. Wanting
-to DM an individual agent *in Discord* would need a real bot identity, and that
+to DM an individual agent _in Discord_ would need a real bot identity, and that
 is a separate decision.
 
 ## Consequences
@@ -180,9 +236,10 @@ is a separate decision.
 - Discord setup is provisioning inside a guild the owner already has — channels
   and webhooks created by Clankie — not guild creation, which bots may only do
   under narrow conditions. It needs `Manage Channels` and `Manage Webhooks` on
-  the bot, and one designated home guild; more than one approved guild and no
-  home guild set is refused rather than guessed at, because there is no right
-  answer to which of the owner's servers a room belongs in.
+  the bot in the swarm home, which is named outright: an unset swarm home is
+  refused rather than guessed at, because there is no right answer to which of
+  the owner's servers a room belongs in, and guessing one puts the fleet in a
+  server he was only visiting.
 - A channel is a fan-out amplifier for anything an agent can do. Membership is
   therefore an operator decision, never an agent one.
 - The app renders channels natively; nothing about the app's rendering is

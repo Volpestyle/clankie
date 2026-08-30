@@ -4,8 +4,10 @@ import {
   encodeReactionEmoji,
   parseDiscordWebhookUrl,
   planDiscordChannelCreate,
+  planDiscordGuildChannels,
   planDiscordWebhookCreate,
   planDiscordWebhookPost,
+  readDiscordGuildRooms,
 } from "../src/discord-rest.ts";
 
 describe("encodeReactionEmoji", () => {
@@ -67,9 +69,7 @@ describe("planDiscordWebhookPost", () => {
     expect(() => planDiscordWebhookPost({ ...base, username: "a".repeat(81) })).toThrow(
       "discord_webhook_invalid_username",
     );
-    expect(() => planDiscordWebhookPost({ ...base, content: "" })).toThrow(
-      "discord_webhook_invalid_content",
-    );
+    expect(() => planDiscordWebhookPost({ ...base, content: "" })).toThrow("discord_webhook_invalid_content");
     expect(() => planDiscordWebhookPost({ ...base, content: "x".repeat(2001) })).toThrow(
       "discord_webhook_invalid_content",
     );
@@ -140,5 +140,26 @@ describe("provisioning plans", () => {
     expect(planDiscordWebhookCreate({ channelId: "c", name: "discord ops" }).body).toEqual({
       name: "Clankie channel",
     });
+  });
+
+  it("offers only the guild rooms a webhook can actually post into, by name", () => {
+    expect(planDiscordGuildChannels("guild-1")).toEqual({
+      method: "get",
+      path: "/guilds/guild-1/channels",
+    });
+    expect(
+      readDiscordGuildRooms([
+        { id: "3", name: "general", type: 0 },
+        { id: "4", name: "Category", type: 4 },
+        { id: "5", name: "Voice", type: 2 },
+        { id: "6", name: "announcements", type: 5 },
+        { id: "7", type: 0 },
+      ]),
+    ).toEqual([
+      { channelId: "6", name: "announcements" },
+      { channelId: "3", name: "general" },
+    ]);
+    // A guild he cannot read is an empty picker, not a thrown listing.
+    expect(readDiscordGuildRooms({ message: "Missing Access" })).toEqual([]);
   });
 });

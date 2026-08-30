@@ -14,6 +14,7 @@ import {
   OPERATOR_CHANNEL_MEMBER_MAX,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
+  type DiscordGuildRoom,
   type OperatorChannel,
   type OperatorChannelMember,
   type OperatorConversation,
@@ -181,15 +182,22 @@ export interface ChannelProjection {
     readonly channelId: string;
   }>;
   /**
-   * Make the room rather than being handed one. Absent where the host has no
-   * Discord runtime to make it with, which leaves the pasted-webhook path.
+   * Make the webhook rather than being handed one — on a fresh room, or on an
+   * existing one named by `channelId`. Absent where the bot lacks
+   * `Manage Webhooks` in the swarm home, which is the one case the manual
+   * pasted webhook is for; a host with no Discord runtime at all has no swarm
+   * home either, and projects nothing by any path.
    */
-  provision?: (input: { readonly name: string }) => Promise<{
+  provision?: (input: { readonly name: string; readonly channelId?: string }) => Promise<{
     readonly guildId: string;
     readonly channelId: string;
     readonly webhookId: string;
     readonly webhookToken: string;
   }>;
+  /** The swarm home's rooms, so an existing one can be picked to project onto. */
+  rooms?: () => Promise<readonly DiscordGuildRoom[]>;
+  /** The one guild rooms may live in, which a pasted webhook is held to. */
+  swarmGuildId?: () => string | undefined;
 }
 type ConversationForker = (input: {
   readonly parentConversationId: string;
@@ -366,10 +374,7 @@ export class ConversationStore {
         // A channel is created with its membership or not at all — an empty
         // room nobody is in is a conversation with no counterpart. Selecting a
         // channel that already exists is just selecting it.
-        if (
-          request.scope.kind === "channel" &&
-          this.channelMeta(request.scope.channelId) === undefined
-        ) {
+        if (request.scope.kind === "channel" && this.channelMeta(request.scope.channelId) === undefined) {
           throw new Error("Create a channel with the channel op, which carries its membership");
         }
         return {
@@ -394,6 +399,15 @@ export class ConversationStore {
             .filter((meta) => meta.scope.kind === "channel")
             .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
             .map((meta) => publicChannel(meta)),
+        };
+      case "discord_rooms":
+        return {
+          op: "discord_rooms",
+          schemaVersion: 1,
+          // Empty rather than an error where no Discord runtime can list them,
+          // or where no swarm home is set: the compose screen still opens, and
+          // says what it can offer rather than failing to draw.
+          rooms: [...((await this.projection?.rooms?.()) ?? [])],
         };
       case "react":
         return {
@@ -625,6 +639,13 @@ export class ConversationStore {
       throw new Error(`A channel holds at most ${OPERATOR_CHANNEL_MEMBER_MAX} members`);
     }
     const channelId = request.channelId ?? `channel-${randomUUID()}`;
+    // Everything that can fail happens before a single byte of local state
+    // moves. A projection that cannot be reached must not leave behind a room
+    // the operator never got, nor a half-applied roster on one they already had.
+    const discord =
+      request.discord === undefined
+        ? undefined
+        : await this.resolveProjection(request.discord, channelId, request.title);
     const meta = this.create({ kind: "channel", channelId }, request.title);
     const previous = new Map((meta.channelMembers ?? []).map((member) => [member.seatId, member]));
     const now = new Date().toISOString();
@@ -634,26 +655,99 @@ export class ConversationStore {
       position,
       joinedAt: previous.get(seatId)?.joinedAt ?? now,
     }));
-    if (request.discord !== undefined) {
-      if (this.projection === undefined) throw new Error("Discord projection is unavailable here");
-      if (request.discord.kind === "provision") {
-        if (this.projection.provision === undefined) {
-          throw new Error("Clankie cannot make Discord channels here; paste a webhook instead");
-        }
-        meta.channelDiscord = await this.projection.provision({ name: request.title });
-      } else {
-        const credential = parseDiscordWebhookUrl(request.discord.webhookUrl);
-        // Resolved before anything is saved: a webhook that cannot be reached
-        // is a projection that would silently never post.
-        meta.channelDiscord = { ...(await this.projection.resolve(credential)), ...credential };
-      }
-    }
+    if (discord !== undefined) meta.channelDiscord = discord;
     meta.updatedAt = now;
     this.saveMeta(meta);
     // A member is someone the operator can also reach on their own, and the
     // seat thread is where this seat's replies are already being watched for.
     for (const seatId of seatIds) this.create({ kind: "seat", seatId }, seatId);
     return meta;
+  }
+
+  /**
+   * Settle where a room is going in Discord without touching anything local
+   * (ADR 0146), so a refusal here costs the operator nothing but the message.
+   *
+   * One Clankie room per guild channel is an invariant, not a preference:
+   * inbound guild text is routed by looking a channel up by its guild room, so
+   * a second room bound to the same one would silently steal or split delivery.
+   * The claim is therefore checked against the id being asked for *before*
+   * provisioning creates anything, and again against what came back.
+   */
+  private async resolveProjection(
+    choice: NonNullable<UpsertOperatorChannel["discord"]>,
+    channelId: string,
+    title: string,
+  ): Promise<NonNullable<ConversationMeta["channelDiscord"]>> {
+    if (this.projection === undefined) throw new Error("Discord projection is unavailable here");
+    // Required before either path resolves, never merely compared against when
+    // it happens to be set: an unset swarm home is not "no opinion", it is no
+    // server Clankie controls, and the fleet may not be put anywhere at all.
+    const swarmGuildId = this.projection.swarmGuildId?.();
+    if (swarmGuildId === undefined) {
+      throw new Error("Clankie has no swarm server set, so a room cannot go to Discord.");
+    }
+    if (choice.kind === "webhook") {
+      const credential = parseDiscordWebhookUrl(choice.webhookUrl);
+      // Resolved before anything is saved: a webhook that cannot be reached is
+      // a projection that would silently never post.
+      const resolved = { ...(await this.projection.resolve(credential)), ...credential };
+      // A pasted URL is otherwise the back door around the swarm fence: a
+      // webhook from a guild Clankie merely inhabits would put his agents in a
+      // server he does not control, without any grant being involved.
+      if (resolved.guildId !== swarmGuildId) {
+        throw new Error("That webhook is not in Clankie’s swarm server.");
+      }
+      this.assertRoomUnclaimed(resolved.channelId, channelId);
+      return resolved;
+    }
+    if (this.projection.provision === undefined) {
+      throw new Error("Clankie cannot make Discord channels here; paste one from your swarm server instead");
+    }
+    // Checked first for a named room: provisioning makes a webhook in Discord,
+    // and a refusal afterwards would leave one behind that nothing posts to.
+    if (choice.channelId !== undefined) this.assertRoomUnclaimed(choice.channelId, channelId);
+    const provisioned = await this.projection.provision({
+      name: title,
+      ...(choice.channelId === undefined ? {} : { channelId: choice.channelId }),
+    });
+    // Held to the same fence as a paste. The trusted module answers for the
+    // swarm home, but a room is only a room here if it landed in the guild this
+    // side was told about — a disagreement is a refusal, not a projection.
+    if (provisioned.guildId !== swarmGuildId) {
+      throw new Error("That Discord room is not in Clankie’s swarm server.");
+    }
+    this.assertRoomUnclaimed(provisioned.channelId, channelId);
+    return provisioned;
+  }
+
+  /** Refuses a guild room another channel is already projected onto. */
+  private assertRoomUnclaimed(guildChannelId: string, exceptChannelId: string): void {
+    const claimed = [...this.metas.values()].find(
+      (meta) =>
+        meta.channelDiscord?.channelId === guildChannelId &&
+        !(meta.scope.kind === "channel" && meta.scope.channelId === exceptChannelId),
+    );
+    if (claimed !== undefined) {
+      // Ends in a full stop deliberately: the operator surface shows a host
+      // message verbatim only when it reads as a finished sentence, and the
+      // generic fallback here would blame permissions for a naming conflict.
+      throw new Error(`That Discord channel already holds “${claimed.title}”.`);
+    }
+  }
+
+  /**
+   * A room's projection, but only while it still points inside the swarm home.
+   * Records outlive the setting that admitted them: a guild dropped as the
+   * swarm home, or one projected before this fence existed, must stop routing
+   * and stop posting immediately rather than at the next edit. No swarm home
+   * set means no projection is live at all.
+   */
+  private liveProjection(meta: ConversationMeta): ConversationMeta["channelDiscord"] {
+    const swarmGuildId = this.projection?.swarmGuildId?.();
+    return swarmGuildId !== undefined && meta.channelDiscord?.guildId === swarmGuildId
+      ? meta.channelDiscord
+      : undefined;
   }
 
   private channelMeta(channelId: string): ConversationMeta | undefined {
@@ -846,11 +940,10 @@ export class ConversationStore {
     channelId: string,
     message: string,
   ): { readonly conversationId: string; readonly runId: string } | undefined {
-    const meta = [...this.metas.values()].find(
-      (candidate) =>
-        candidate.channelDiscord?.guildId === guildId &&
-        candidate.channelDiscord.channelId === channelId,
-    );
+    const meta = [...this.metas.values()].find((candidate) => {
+      const live = this.liveProjection(candidate);
+      return live?.guildId === guildId && live.channelId === channelId;
+    });
     if (meta === undefined) return undefined;
     // Already on screen in the room it was typed in, so it is not echoed back.
     const result = this.enqueue(meta, message, undefined, true, this.channelRound(false));
@@ -872,36 +965,36 @@ export class ConversationStore {
    */
   private channelRound(echoOperator: boolean): ConversationRunner {
     return async (conversationId, message, publish, context) => {
-    const meta = this.metas.get(conversationId);
-    if (meta === undefined) return;
-    // A room that showed only the answers would be answering invisible
-    // questions, so a message sent from the app is shown in the guild too.
-    if (echoOperator) await this.projectChannelMessage(meta, "operator", message);
-    const members = meta.channelMembers ?? [];
-    const taken: ChannelTurnRecord[] = [];
-    for (;;) {
-      if (context.signal.aborted) return;
-      const member = nextChannelTurn({ members, taken });
-      if (member === undefined) return;
-      const prompt = renderChannelTurnPrompt({
-        title: meta.title,
-        member,
-        members,
-        entries: this.channelEntries(conversationId),
-      });
-      // An offline seat passes: the room carries on without it rather than
-      // stalling on a pane that is not there to answer.
-      const reply = (await this.sendToSeat?.(member.seatId, prompt))
-        ? await this.awaitSeatReply(member.seatId, context.signal)
-        : undefined;
-      if (reply === undefined || reply.trim().length === 0 || isChannelTurnPass(reply)) {
-        taken.push({ seatId: member.seatId, outcome: "passed" });
-        continue;
+      const meta = this.metas.get(conversationId);
+      if (meta === undefined) return;
+      // A room that showed only the answers would be answering invisible
+      // questions, so a message sent from the app is shown in the guild too.
+      if (echoOperator) await this.projectChannelMessage(meta, "operator", message);
+      const members = meta.channelMembers ?? [];
+      const taken: ChannelTurnRecord[] = [];
+      for (;;) {
+        if (context.signal.aborted) return;
+        const member = nextChannelTurn({ members, taken });
+        if (member === undefined) return;
+        const prompt = renderChannelTurnPrompt({
+          title: meta.title,
+          member,
+          members,
+          entries: this.channelEntries(conversationId),
+        });
+        // An offline seat passes: the room carries on without it rather than
+        // stalling on a pane that is not there to answer.
+        const reply = (await this.sendToSeat?.(member.seatId, prompt))
+          ? await this.awaitSeatReply(member.seatId, context.signal)
+          : undefined;
+        if (reply === undefined || reply.trim().length === 0 || isChannelTurnPass(reply)) {
+          taken.push({ seatId: member.seatId, outcome: "passed" });
+          continue;
+        }
+        publish({ type: "message", role: "agent", text: reply, streaming: false, seatId: member.seatId });
+        taken.push({ seatId: member.seatId, outcome: "spoke" });
+        await this.projectChannelMessage(meta, member.seatId, reply);
       }
-      publish({ type: "message", role: "agent", text: reply, streaming: false, seatId: member.seatId });
-      taken.push({ seatId: member.seatId, outcome: "spoke" });
-      await this.projectChannelMessage(meta, member.seatId, reply);
-    }
     };
   }
 
@@ -912,8 +1005,12 @@ export class ConversationStore {
    * (ADR 0048). Discord is a second surface, so a projection that fails is
    * logged by its absence there and changes nothing here.
    */
-  private async projectChannelMessage(meta: ConversationMeta, seatId: string, content: string): Promise<void> {
-    const target = meta.channelDiscord;
+  private async projectChannelMessage(
+    meta: ConversationMeta,
+    seatId: string,
+    content: string,
+  ): Promise<void> {
+    const target = this.liveProjection(meta);
     if (target === undefined || this.projection === undefined) return;
     try {
       await this.projection.post({ ...target, username: seatId, content });

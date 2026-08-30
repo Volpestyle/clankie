@@ -18,8 +18,12 @@ const USERNAME_MAX = 80;
 export function createChannelProjection(
   options: {
     readonly fetch?: typeof fetch;
-    /** Trusted runtime that holds the bot token; absent leaves only pasted webhooks. */
+    /** Trusted runtime that holds the bot token; absent leaves the manual webhook. */
     readonly provision?: ChannelProjection["provision"];
+    /** Same runtime, listing the swarm home's rooms so one can be picked. */
+    readonly rooms?: ChannelProjection["rooms"];
+    /** Which guild the swarm home is, so a pasted webhook can be held to it. */
+    readonly swarmGuildId?: ChannelProjection["swarmGuildId"];
   } = {},
 ): ChannelProjection {
   const fetchImpl = options.fetch ?? fetch;
@@ -27,6 +31,8 @@ export function createChannelProjection(
     post: post(fetchImpl),
     resolve: resolve(fetchImpl),
     ...(options.provision === undefined ? {} : { provision: options.provision }),
+    ...(options.rooms === undefined ? {} : { rooms: options.rooms }),
+    ...(options.swarmGuildId === undefined ? {} : { swarmGuildId: options.swarmGuildId }),
   };
 }
 

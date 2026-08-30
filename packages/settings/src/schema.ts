@@ -21,7 +21,17 @@ const SnowflakeListSchema = z.array(SnowflakeSchema).max(64).default([]);
 export const DiscordSettingsSchema = z
   .object({
     applicationId: SnowflakeSchema.optional(),
+    /** The command and live-proof server. Not where the fleet gets rooms. */
     guildId: SnowflakeSchema.optional(),
+    /**
+     * The one server Clankie controls and may make rooms in (ADR 0146): the
+     * swarm home. Deliberately not `guildId` — a server he merely inhabits can
+     * be on every ingress, presence, and voice allowlist without ever becoming
+     * a place his agents can be given a channel in. Unset means no Discord
+     * projection at all — not even a pasted webhook, which would otherwise be
+     * the way into a server nobody named.
+     */
+    swarmGuildId: SnowflakeSchema.optional(),
     ambientRoleIds: SnowflakeListSchema,
     /** Individual operators holding the ambient tier without a mapped role. */
     ambientUserIds: SnowflakeListSchema,

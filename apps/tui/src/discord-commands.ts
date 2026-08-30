@@ -101,10 +101,14 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
 /**
  * Bot invite permissions: View Channel, Send Messages, Embed Links, Attach
  * Files, Read Message History, Add Reactions, Connect, Speak, Use VAD, Use
- * Application Commands. Message Content is a privileged *intent*, not a bit
- * here — the primer tells the owner to flip it in the portal.
+ * Application Commands, Manage Channels, Manage Webhooks. The last two are what
+ * let him make a channel's room and its webhook himself (ADR 0146), and they
+ * are needed in the configured swarm home specifically — without them the only
+ * projection left is a webhook made by hand in that same server and pasted per
+ * room. Message Content is a privileged *intent*, not a bit here — the primer
+ * tells the owner to flip it in the portal.
  */
-export const DISCORD_BOT_INVITE_PERMISSIONS = 2_184_301_632;
+export const DISCORD_BOT_INVITE_PERMISSIONS = 2_721_172_560;
 
 export function discordBotInviteUrl(applicationId: string): string {
   return (

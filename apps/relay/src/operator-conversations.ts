@@ -81,10 +81,13 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           ? "terminalControl"
           : serviceRequest.op === "close_seat" ||
               serviceRequest.op === "spawn_seat" ||
-              serviceRequest.op === "channel"
-            // Hiring is at least as consequential as closing: it starts a
-            // process on the operator's machine.
-            ? "steer"
+              serviceRequest.op === "channel" ||
+              serviceRequest.op === "discord_rooms"
+            ? // Hiring is at least as consequential as closing: it starts a
+              // process on the operator's machine. Listing the home guild's rooms
+              // rides the same grant as the projection it is picked for, so a
+              // chat-only device never enumerates the owner's server.
+              "steer"
             : "chat";
     if (!authorization.device.grants[grant]) {
       writeGrantDenial(response, grant);

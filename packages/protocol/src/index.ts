@@ -163,6 +163,20 @@ export type OperatorConversationScope = z.infer<typeof OperatorConversationScope
  */
 export const OPERATOR_CHANNEL_MEMBER_MAX = 12;
 
+/**
+ * One room in the swarm home a channel can be projected onto (ADR 0146).
+ * Projection is not limited to rooms Clankie made: he owns Manage Webhooks in
+ * the one server he controls, so any text or announcement channel there is a
+ * place the fleet can be put without the owner copying a URL out of Server
+ * Settings. Servers he merely inhabits never appear here.
+ */
+export const DiscordGuildRoomIdSchema = z.string().trim().min(1).max(128);
+export const DISCORD_GUILD_ROOM_MAX = 500;
+export const DiscordGuildRoomSchema = z
+  .object({ channelId: DiscordGuildRoomIdSchema, name: z.string().trim().min(1).max(100) })
+  .strict();
+export type DiscordGuildRoom = z.infer<typeof DiscordGuildRoomSchema>;
+
 /** A seat in a channel. The operator is implicit and always present. */
 export const OperatorChannelMemberSchema = z
   .object({
@@ -220,20 +234,26 @@ export const UpsertOperatorChannelSchema = z
      * projection exactly as it is.
      *
      * `provision` is the ordinary path and the one that makes rooms cheap to
-     * create: Clankie makes the channel and its webhook inside the guild the
-     * owner already approved. `webhook` binds to a channel that already exists,
-     * for a room the owner made themselves or a guild where Clankie has no
-     * permission to create one.
+     * create: Clankie makes the webhook himself inside the swarm home — a fresh
+     * channel when no `channelId` is given, or an existing one when there is.
+     * `webhook` is the manual fallback for a webhook the owner made by hand in
+     * that same server, for when Clankie lacks the permission to make one. It
+     * is not a way into another guild: a URL resolving outside the swarm home
+     * is refused, and with no swarm home set neither path projects anything.
      *
      * Either way the host keeps the token and only `webhookId` comes back out,
      * so this field is the one direction the secret ever moves.
      */
     discord: z
       .discriminatedUnion("kind", [
-        z.object({ kind: z.literal("provision") }).strict(),
         z
-          .object({ kind: z.literal("webhook"), webhookUrl: z.string().trim().min(1).max(512) })
+          .object({
+            kind: z.literal("provision"),
+            /** An existing room in the home guild; absent makes a new one. */
+            channelId: DiscordGuildRoomIdSchema.optional(),
+          })
           .strict(),
+        z.object({ kind: z.literal("webhook"), webhookUrl: z.string().trim().min(1).max(512) }).strict(),
       ])
       .optional(),
   })
@@ -394,12 +414,7 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("failed"),
-      reason: z.enum([
-        "unknown_directory",
-        "harness_unavailable",
-        "not_ready",
-        "herdr_unreachable",
-      ]),
+      reason: z.enum(["unknown_directory", "harness_unavailable", "not_ready", "herdr_unreachable"]),
       detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
     })
     .strict(),
@@ -1303,6 +1318,17 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
     })
     .strict(),
+  /**
+   * The swarm home's rooms, so choosing where a channel is projected is a pick
+   * rather than a snowflake typed from memory. Empty where no Discord runtime
+   * can list them, and empty when no swarm home is set.
+   */
+  z
+    .object({
+      op: z.literal("discord_rooms"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
   // `react` is the operator's own reaction only. An agent reacts through the
   // captain, which is the boundary that can vouch for which seat it is.
   z
@@ -1463,6 +1489,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("discord_rooms"),
+      schemaVersion: z.literal(1),
+      rooms: z.array(DiscordGuildRoomSchema).max(DISCORD_GUILD_ROOM_MAX),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("react"),
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
@@ -1603,6 +1636,8 @@ export interface OperatorConversationServiceClient {
   }>;
   /** Every channel that exists here; absent on older injected clients. */
   channels?(): Promise<readonly OperatorChannel[]>;
+  /** The swarm home's rooms, to pick which one a channel is projected onto. */
+  discordRooms?(): Promise<readonly DiscordGuildRoom[]>;
   /**
    * Put the operator's reaction on one transcript entry, or take it back off.
    * False when the entry is not in the conversation's retained log.
@@ -1696,6 +1731,13 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "channels", schemaVersion: 1 });
       if (result.op !== "channels") throw new Error(`Unexpected ${result.op} result for channels`);
       return result.channels;
+    },
+    async discordRooms() {
+      const result = await dispatch({ op: "discord_rooms", schemaVersion: 1 });
+      if (result.op !== "discord_rooms") {
+        throw new Error(`Unexpected ${result.op} result for discord_rooms`);
+      }
+      return result.rooms;
     },
     async react(input) {
       const result = await dispatch({ op: "react", schemaVersion: 1, ...input });
