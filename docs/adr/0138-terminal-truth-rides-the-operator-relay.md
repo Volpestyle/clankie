@@ -2,6 +2,8 @@
 
 Status: accepted (James, 2026-08-29). Extends the seat identity and terminal
 deep-link decision in [ADR 0135](0135-a-herdr-seat-is-a-conversation.md).
+Amended by [ADR 0144](0144-the-phone-reaches-into-the-pane.md), which decides
+the terminal input this record deferred.
 
 ## Context
 
@@ -42,7 +44,8 @@ Paired devices already carry a distinct `terminalObserve` grant. The
 Terminal observation extends the existing callable operator service envelope
 with a bounded `terminal_catalog` operation and a `terminal_tail` operation.
 The catalog preserves Herdr's workspace, tab, and pane coordinates beside each
-stable terminal id. Tail bytes use the dedicated relay streaming path
+stable terminal id. It projects Herdr's full pane list, including ordinary
+shell panes that are absent from the agent roster. Tail bytes use the dedicated relay streaming path
 `POST /operator/v1/terminal-tail`.
 
 The callable envelope already owns the captain-authenticated service hop,

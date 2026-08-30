@@ -66,7 +66,7 @@ import {
   EmbodimentIntentSchema,
   PairingCompleteRequestSchema,
   PairingRedeemRequestSchema,
-  SUPERVISE_GRANTS,
+  TAKE_CONTROL_GRANTS,
   eventStreamKindForId,
   type BrowserToolCatalog,
   type CallBrowserToolRequest,
@@ -1672,7 +1672,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       offerId: taken.offer.offerId,
       name: parsed.data.device.name,
       platform: parsed.data.device.platform,
-      offeredGrants: SUPERVISE_GRANTS,
+      offeredGrants: TAKE_CONTROL_GRANTS,
       mintedBy: taken.offer.mintedBy,
       pendingExpiresAt,
     });
@@ -1680,7 +1680,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const completionToken = randomBytes(32).toString("base64url");
     completionTokens.set(hashCompletionToken(completionToken), {
       deviceId,
-      offeredGrants: SUPERVISE_GRANTS,
+      offeredGrants: TAKE_CONTROL_GRANTS,
       expiresAtMs: now.getTime() + COMPLETION_TOKEN_TTL_MS,
       consumed: false,
     });
@@ -1688,14 +1688,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({
       deviceId,
       host: { name: hostDisplayName },
-      offeredGrants: SUPERVISE_GRANTS,
+      offeredGrants: TAKE_CONTROL_GRANTS,
       completionToken,
       expiresAt: pendingExpiresAt,
     } satisfies PairingRedeemResponse);
   });
 
   // Activate a pending device with the grants it accepts and issue its session
-  // token. Accepting terminalControl is denied WITHOUT consuming the token.
+  // token. Acceptance can only narrow the offered set, never widen it.
   app.post("/v1/pairing/complete", async (context) => {
     if (deviceSessionSigner === undefined)
       return context.json({ error: "device_authentication_unavailable" }, 503);
@@ -1709,20 +1709,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "expired" }, 410);
     if (pending.consumed) return context.json({ error: "consumed" }, 409);
     const accepted = parsed.data.acceptedGrants;
-    if (accepted.terminalControl) {
-      const denied = recordEvent("device.grant.denied", `device:${pending.deviceId}`, now.toISOString(), {
-        schemaVersion: 1,
-        deviceId: pending.deviceId,
-        requestedGrant: "terminalControl",
-        reason: "terminal_control_not_grantable",
-        stage: "complete",
-      });
-      applyDeviceEvent(devices, denied);
-      return context.json(
-        { error: "terminal_control_not_grantable", offeredGrants: pending.offeredGrants },
-        403,
-      );
-    }
     if (!isSubsetGrants(accepted, pending.offeredGrants)) return context.json({ error: "malformed" }, 400);
     return withSerializedLock(deviceLocks, pending.deviceId, async () => {
       const record = devices.get(pending.deviceId);

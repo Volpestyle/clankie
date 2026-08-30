@@ -30,8 +30,13 @@ device credentials never cross it.
 
 Terminal tails apply the same checks with the distinct `terminalObserve` grant.
 They address Herdr panes by stable terminal id and end with a typed reset when a
-native surface must reconnect for a fresh full redraw. Terminal input is not
-exposed.
+native surface must reconnect for a fresh full redraw.
+
+Terminal input rides the plain dispatch path under the distinct
+`terminalControl` grant: `terminal_control` manages one exclusive renewable
+input lease per terminal and `terminal_input` writes bounded raw VT bytes under
+it. The relay only maps the ops to the grant; lease arbitration lives with the
+captain.
 
 Responses pass the strict public schema and value redaction before emission.
 Captain session IDs, continuation tokens, provider credentials, and arbitrary

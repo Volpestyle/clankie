@@ -26,9 +26,13 @@ import {
   OperatorConversationServiceRequestSchema,
   OperatorConversationServiceResultSchema,
   OperatorConversationStreamEventSchema,
+  OPERATOR_TERMINAL_INPUT_BASE64_MAX,
+  OperatorTerminalControlResultSchema,
   OperatorTerminalFrameSchema,
+  OperatorTerminalInputRequestSchema,
   OperatorTerminalObservationResultSchema,
   OperatorTerminalTailItemSchema,
+  TAKE_CONTROL_GRANTS,
   ReplayOperatorConversationResultSchema,
   SubmitOperatorConversationTurnResultSchema,
   SubmitOperatorConversationTurnSchema,
@@ -413,8 +417,8 @@ describe("protocol", () => {
         cancelled: true,
       }),
     ).toMatchObject({ op: "cancel", cancelled: true });
-    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(14);
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(14);
+    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(16);
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(16);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 
@@ -457,6 +461,50 @@ describe("protocol", () => {
         hasMore: false,
       }),
     ).toThrow();
+  });
+
+  it("models the terminal input lease and bounded raw-byte writes (ADR 0144)", () => {
+    expect(
+      OperatorTerminalControlResultSchema.parse({
+        schemaVersion: 1,
+        status: "granted",
+        grant: {
+          schemaVersion: 1,
+          terminalId: "term_65a2015731452d",
+          leaseToken: "lease-1",
+          owner: { principalId: "command-center-mobile" },
+          expiresAt: "2026-08-30T12:00:00.000Z",
+        },
+      }),
+    ).toMatchObject({ status: "granted", grant: { leaseToken: "lease-1" } });
+    expect(
+      OperatorTerminalInputRequestSchema.parse({
+        schemaVersion: 1,
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "command-center-mobile",
+        leaseToken: "lease-1",
+        dataBase64: "G1tB",
+      }),
+    ).toMatchObject({ dataBase64: "G1tB" });
+    expect(() =>
+      OperatorTerminalInputRequestSchema.parse({
+        schemaVersion: 1,
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "command-center-mobile",
+        leaseToken: "lease-1",
+        dataBase64: "not base64",
+      }),
+    ).toThrow();
+    expect(() =>
+      OperatorTerminalInputRequestSchema.parse({
+        schemaVersion: 1,
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "command-center-mobile",
+        leaseToken: "lease-1",
+        dataBase64: "QUFB".repeat(OPERATOR_TERMINAL_INPUT_BASE64_MAX / 4 + 1),
+      }),
+    ).toThrow();
+    expect(TAKE_CONTROL_GRANTS.terminalControl).toBe(true);
   });
 
   it("dual-reads discord_presence while freezing it out of v1 and freezes presence write bot transport", () => {

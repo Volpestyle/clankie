@@ -638,6 +638,95 @@ describe("native terminal NDJSON tail", () => {
     ]);
     expect(authCalls).toBe(2);
   });
+
+  it("gates terminal_control and terminal_input on the terminalControl grant (ADR 0144)", async () => {
+    const controlRequest = {
+      op: "terminal_control",
+      schemaVersion: 1,
+      control: {
+        schemaVersion: 1,
+        action: "request",
+        terminalId: "term-worker",
+        surfaceClientId: "native-ios",
+      },
+    };
+    const inputRequest = {
+      op: "terminal_input",
+      schemaVersion: 1,
+      input: {
+        schemaVersion: 1,
+        terminalId: "term-worker",
+        surfaceClientId: "native-ios",
+        leaseToken: "lease-1",
+        dataBase64: "aGVsbG8=",
+      },
+    };
+    const denied = await startRelay({
+      dispatch: async () => {
+        throw new Error("must not dispatch");
+      },
+    });
+    for (const body of [controlRequest, inputRequest]) {
+      const response = await post(denied.url, "/operator/v1/dispatch", body);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "terminal_control_grant_required" });
+    }
+
+    const seen: OperatorConversationServiceRequest[] = [];
+    const granted = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: {
+            ...activeDevice,
+            // terminalControl alone suffices: neither chat nor observe is consulted.
+            grants: { chat: false, steer: false, terminalObserve: false, terminalControl: true },
+          },
+        }),
+      },
+      dispatch: async (request) => {
+        seen.push(request);
+        if (request.op === "terminal_control") {
+          return {
+            op: "terminal_control",
+            schemaVersion: 1,
+            result: {
+              schemaVersion: 1,
+              status: "granted",
+              grant: {
+                schemaVersion: 1,
+                terminalId: "term-worker",
+                leaseToken: "lease-1",
+                owner: { principalId: "native-ios" },
+                expiresAt: "2026-07-21T12:00:00.000Z",
+              },
+            },
+          };
+        }
+        if (request.op === "terminal_input") {
+          return {
+            op: "terminal_input",
+            schemaVersion: 1,
+            result: { schemaVersion: 1, status: "delivered", terminalId: "term-worker" },
+          };
+        }
+        throw new Error("terminal control ops expected");
+      },
+    });
+    const grantedControl = await post(granted.url, "/operator/v1/dispatch", controlRequest);
+    expect(grantedControl.status).toBe(200);
+    expect(await grantedControl.json()).toMatchObject({
+      op: "terminal_control",
+      result: { status: "granted", grant: { leaseToken: "lease-1" } },
+    });
+    const deliveredInput = await post(granted.url, "/operator/v1/dispatch", inputRequest);
+    expect(deliveredInput.status).toBe(200);
+    expect(await deliveredInput.json()).toMatchObject({
+      op: "terminal_input",
+      result: { status: "delivered" },
+    });
+    expect(seen.map((request) => request.op)).toEqual(["terminal_control", "terminal_input"]);
+  });
 });
 
 describe("relay auth hops", () => {

@@ -40,6 +40,7 @@ import {
   type HerdrSessionCensus,
 } from "./herdr-census.ts";
 import { HerdrTerminalStore } from "./herdr-terminal.ts";
+import { HerdrTerminalControlStore } from "./herdr-terminal-control.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
@@ -413,6 +414,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
   const autonomy = new AutonomyStore(join(options.stateDir, "autonomy.json"));
   const herdrTerminals = new HerdrTerminalStore();
+  const herdrTerminalControls = new HerdrTerminalControlStore();
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"));
   const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
@@ -1060,6 +1062,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           result: await herdrTerminals.tail(request.observation),
         };
       }
+      if (request.op === "terminal_control") {
+        return {
+          op: "terminal_control",
+          schemaVersion: 1,
+          result: herdrTerminalControls.control(request.control),
+        };
+      }
+      if (request.op === "terminal_input") {
+        return {
+          op: "terminal_input",
+          schemaVersion: 1,
+          result: herdrTerminalControls.input(request.input),
+        };
+      }
       if (request.op === "autonomy") {
         if (!conversations.has(request.conversationId)) {
           throw new Error(`Unknown conversation ${request.conversationId}`);
@@ -1120,6 +1136,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async close(): Promise<void> {
       herdrTerminals.close();
+      herdrTerminalControls.close();
       herdrWatches.close();
       autonomy.close();
       await conversations.close();

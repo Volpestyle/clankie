@@ -77,9 +77,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const grant =
       serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
-        : serviceRequest.op === "close_seat"
-          ? "steer"
-          : "chat";
+        : serviceRequest.op === "terminal_control" || serviceRequest.op === "terminal_input"
+          ? "terminalControl"
+          : serviceRequest.op === "close_seat"
+            ? "steer"
+            : "chat";
     if (!authorization.device.grants[grant]) {
       writeGrantDenial(response, grant);
       return true;
@@ -444,8 +446,8 @@ function logFields(
   };
 }
 
-type DispatchGrant = "chat" | "steer" | "terminalObserve";
-type StreamGrant = Exclude<DispatchGrant, "steer">;
+type DispatchGrant = "chat" | "steer" | "terminalObserve" | "terminalControl";
+type StreamGrant = "chat" | "terminalObserve";
 
 function tailAuthorizationDenial(
   authorization: RelayDeviceAuthorization,
@@ -533,7 +535,9 @@ function writeGrantDenial(response: ServerResponse, grant: DispatchGrant): void 
         ? "chat_grant_required"
         : grant === "steer"
           ? "steer_grant_required"
-          : "terminal_observe_grant_required",
+          : grant === "terminalControl"
+            ? "terminal_control_grant_required"
+            : "terminal_observe_grant_required",
   });
 }
 

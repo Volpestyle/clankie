@@ -726,6 +726,146 @@ export const OperatorTerminalTailItemSchema = z.discriminatedUnion("kind", [
 export type OperatorTerminalTailItem = z.infer<typeof OperatorTerminalTailItemSchema>;
 
 // ---------------------------------------------------------------------------
+// Pane terminal control (ADR 0144) — the write side of ADR 0138's observation.
+//
+// A device surface holds one renewable exclusive lease per terminal and rides
+// raw VT bytes on it. Herdr's separate terminal control session applies those
+// bytes; this boundary never interprets them. Requires the terminalControl
+// grant end to end.
+// ---------------------------------------------------------------------------
+
+/** One write is keystrokes or a composer draft, never a bulk transfer. */
+export const OPERATOR_TERMINAL_INPUT_BASE64_MAX = 32 * 1024;
+
+export const OperatorTerminalLeaseTokenSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
+export type OperatorTerminalLeaseToken = z.infer<typeof OperatorTerminalLeaseTokenSchema>;
+
+export const OperatorTerminalControlOwnerSchema = z
+  .object({
+    principalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    displayName: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
+  })
+  .strict();
+export type OperatorTerminalControlOwner = z.infer<typeof OperatorTerminalControlOwnerSchema>;
+
+export const OperatorTerminalControlGrantSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    terminalId: OperatorTerminalIdSchema,
+    leaseToken: OperatorTerminalLeaseTokenSchema,
+    owner: OperatorTerminalControlOwnerSchema,
+    expiresAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorTerminalControlGrant = z.infer<typeof OperatorTerminalControlGrantSchema>;
+
+export const OperatorTerminalControlRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    action: z.enum(["request", "renew", "release"]),
+    terminalId: OperatorTerminalIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    /** Required for renew and release; ignored for request. */
+    leaseToken: OperatorTerminalLeaseTokenSchema.optional(),
+  })
+  .strict();
+export type OperatorTerminalControlRequest = z.infer<typeof OperatorTerminalControlRequestSchema>;
+
+export const OperatorTerminalControlResultSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("granted"),
+      grant: OperatorTerminalControlGrantSchema,
+    })
+    .strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("released"),
+      terminalId: OperatorTerminalIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("contended"),
+      terminalId: OperatorTerminalIdSchema,
+      owner: OperatorTerminalControlOwnerSchema,
+      expiresAt: z.string().datetime(),
+    })
+    .strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("denied"),
+      terminalId: OperatorTerminalIdSchema,
+      reason: z.enum(["lease_required", "lease_expired"]),
+    })
+    .strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("unavailable"),
+      terminalId: OperatorTerminalIdSchema,
+      reason: z.enum(["herdr_unavailable", "terminal_unavailable", "controller_closed"]),
+    })
+    .strict(),
+]);
+export type OperatorTerminalControlResult = z.infer<typeof OperatorTerminalControlResultSchema>;
+
+export const OperatorTerminalInputRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    terminalId: OperatorTerminalIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    leaseToken: OperatorTerminalLeaseTokenSchema,
+    /** Raw VT bytes exactly as the device keyboard produced them. */
+    dataBase64: z
+      .string()
+      .max(OPERATOR_TERMINAL_INPUT_BASE64_MAX)
+      .refine(isCanonicalBase64, { message: "expected non-empty canonical base64" }),
+  })
+  .strict();
+export type OperatorTerminalInputRequest = z.infer<typeof OperatorTerminalInputRequestSchema>;
+
+export const OperatorTerminalInputResultSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("delivered"),
+      terminalId: OperatorTerminalIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("denied"),
+      terminalId: OperatorTerminalIdSchema,
+      reason: z.enum(["lease_required", "lease_expired"]),
+    })
+    .strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("contended"),
+      terminalId: OperatorTerminalIdSchema,
+      owner: OperatorTerminalControlOwnerSchema,
+      expiresAt: z.string().datetime(),
+    })
+    .strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("unavailable"),
+      terminalId: OperatorTerminalIdSchema,
+      reason: z.enum(["herdr_unavailable", "terminal_unavailable", "controller_closed"]),
+    })
+    .strict(),
+]);
+export type OperatorTerminalInputResult = z.infer<typeof OperatorTerminalInputResultSchema>;
+
+// ---------------------------------------------------------------------------
 // Callable service contract (VUH-769). A transport-neutral request/result
 // envelope any authenticated boundary (the service, the relay) mounts and
 // any RN/macOS/TUI client calls. This is the callable contract; VUH-864 owns the
@@ -878,6 +1018,20 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       observation: OperatorTerminalObservationRequestSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("terminal_control"),
+      schemaVersion: z.literal(1),
+      control: OperatorTerminalControlRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("terminal_input"),
+      schemaVersion: z.literal(1),
+      input: OperatorTerminalInputRequestSchema,
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
 
@@ -984,6 +1138,20 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       result: OperatorTerminalObservationResultSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("terminal_control"),
+      schemaVersion: z.literal(1),
+      result: OperatorTerminalControlResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("terminal_input"),
+      schemaVersion: z.literal(1),
+      result: OperatorTerminalInputResultSchema,
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceResult = z.infer<typeof OperatorConversationServiceResultSchema>;
 
@@ -1029,6 +1197,10 @@ export interface OperatorConversationServiceClient {
   roster(): Promise<readonly OperatorFleetSeat[]>;
   /** Observable terminals in Herdr's native hierarchy; absent on older injected clients. */
   terminalCatalog?(): Promise<readonly OperatorTerminalSession[]>;
+  /** Acquire, renew, or release the exclusive input lease on one terminal; absent on older injected clients. */
+  terminalControl?(request: OperatorTerminalControlRequest): Promise<OperatorTerminalControlResult>;
+  /** Write raw VT bytes under a live input lease; absent on older injected clients. */
+  terminalInput?(request: OperatorTerminalInputRequest): Promise<OperatorTerminalInputResult>;
   /** Close the Herdr pane currently occupying a durable fleet seat. */
   closeSeat(seatId: string): Promise<boolean>;
   get(conversationId: string): Promise<OperatorConversation | undefined>;
@@ -1087,6 +1259,20 @@ export function createOperatorConversationServiceClient(
         throw new Error(`Unexpected ${result.op} result for terminal_catalog`);
       }
       return result.sessions;
+    },
+    async terminalControl(request) {
+      const result = await dispatch({ op: "terminal_control", schemaVersion: 1, control: request });
+      if (result.op !== "terminal_control") {
+        throw new Error(`Unexpected ${result.op} result for terminal_control`);
+      }
+      return result.result;
+    },
+    async terminalInput(request) {
+      const result = await dispatch({ op: "terminal_input", schemaVersion: 1, input: request });
+      if (result.op !== "terminal_input") {
+        throw new Error(`Unexpected ${result.op} result for terminal_input`);
+      }
+      return result.result;
     },
     async closeSeat(seatId) {
       const result = await dispatch({ op: "close_seat", schemaVersion: 1, seatId });
@@ -2431,9 +2617,9 @@ export type DevicePlatform = z.infer<typeof DevicePlatformSchema>;
 
 /**
  * Per-device capability grants — field-for-field the app's `PairingGrantSet`.
- * `terminalObserve` authorizes the relay's read-only pane stream (ADR 0138).
- * `terminalControl` is never granted in this slice, so
- * {@link DeviceRecordSchema} rejects any record that carries it.
+ * `terminalObserve` authorizes the relay's read-only pane stream (ADR 0138);
+ * `terminalControl` additionally authorizes the input lease and raw-byte
+ * writes (ADR 0144).
  */
 export const DeviceGrantSetSchema = z.object({
   chat: z.boolean(),
@@ -2443,12 +2629,20 @@ export const DeviceGrantSetSchema = z.object({
 });
 export type DeviceGrantSet = z.infer<typeof DeviceGrantSetSchema>;
 
-/** The Supervise preset offered at pairing: chat + steer + observe, never control. */
+/** The Supervise preset: chat + steer + observe, without terminal input. */
 export const SUPERVISE_GRANTS: DeviceGrantSet = {
   chat: true,
   steer: true,
   terminalObserve: true,
   terminalControl: false,
+};
+
+/** The Take Control preset offered at pairing: Supervise plus typing into panes. */
+export const TAKE_CONTROL_GRANTS: DeviceGrantSet = {
+  chat: true,
+  steer: true,
+  terminalObserve: true,
+  terminalControl: true,
 };
 
 export const DeviceStatusSchema = z.enum(["pending", "active", "revoked"]);
@@ -2477,13 +2671,6 @@ export const DeviceRecordSchema = z
     revokedBy: z.string().min(1).optional(),
   })
   .superRefine((record, context) => {
-    if (record.grants.terminalControl) {
-      context.addIssue({
-        code: "custom",
-        message: "terminalControl is not grantable in this slice",
-        path: ["grants", "terminalControl"],
-      });
-    }
     if (record.status === "active" && record.activatedAt === undefined) {
       context.addIssue({ code: "custom", message: "Active devices require activatedAt", path: ["status"] });
     }

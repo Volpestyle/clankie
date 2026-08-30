@@ -33,6 +33,8 @@ type ConversationServiceRequest = Exclude<
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "terminal_tail" }
+  | { op: "terminal_control" }
+  | { op: "terminal_input" }
 >;
 type ConversationServiceResult = Exclude<
   OperatorConversationServiceResult,
@@ -41,6 +43,8 @@ type ConversationServiceResult = Exclude<
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "terminal_tail" }
+  | { op: "terminal_control" }
+  | { op: "terminal_input" }
 >;
 
 const CURSOR_WIDTH = 12;

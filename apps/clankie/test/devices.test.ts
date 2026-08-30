@@ -2,7 +2,12 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SUPERVISE_GRANTS, type DeviceGrantSet, type DomainEvent } from "@clankie/protocol";
+import {
+  SUPERVISE_GRANTS,
+  TAKE_CONTROL_GRANTS,
+  type DeviceGrantSet,
+  type DomainEvent,
+} from "@clankie/protocol";
 import type { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";
@@ -145,7 +150,7 @@ describe("control-plane device pairing surface", () => {
       completionToken: string;
     };
     expect(redeemed.host.name).toBe("Test Mac");
-    expect(redeemed.offeredGrants).toEqual(SUPERVISE_GRANTS);
+    expect(redeemed.offeredGrants).toEqual(TAKE_CONTROL_GRANTS);
 
     const completeRes = await complete(app, {
       completionToken: redeemed.completionToken,
@@ -272,28 +277,16 @@ describe("control-plane device pairing surface", () => {
       expect((await res.json()).error).toBe("revoked");
     });
 
-    it("denies terminalControl without consuming the token, then completes with Supervise", async () => {
-      const store = await makeStore();
-      const { app } = await makeApp(store);
+    it("grants terminalControl when the device accepts the full offer (ADR 0144)", async () => {
+      const { app } = await makeApp(await makeStore());
       const { offerSecret } = await mintOffer(app);
-      const { deviceId, completionToken } = (await redeem(app, { offerSecret, device: IOS }).then((r) =>
-        r.json(),
-      )) as { deviceId: string; completionToken: string };
+      const { completionToken } = (await redeem(app, { offerSecret, device: IOS }).then((r) => r.json())) as {
+        completionToken: string;
+      };
 
-      const denied = await complete(app, {
-        completionToken,
-        acceptedGrants: { ...SUPERVISE_GRANTS, terminalControl: true },
-      });
-      expect(denied.status).toBe(403);
-      expect((await denied.json()).error).toBe("terminal_control_not_grantable");
-
-      const ok = await complete(app, { completionToken, acceptedGrants: SUPERVISE_GRANTS });
+      const ok = await complete(app, { completionToken, acceptedGrants: TAKE_CONTROL_GRANTS });
       expect(ok.status).toBe(200);
-
-      const denials = store
-        .readAll()
-        .filter((event) => event.type === "device.grant.denied" && event.missionId === `device:${deviceId}`);
-      expect(denials).toHaveLength(1);
+      expect(((await ok.json()) as { grants: DeviceGrantSet }).grants).toEqual(TAKE_CONTROL_GRANTS);
     });
   });
 
