@@ -1370,13 +1370,50 @@ export type OperatorTerminalControlGrant = z.infer<typeof OperatorTerminalContro
 export const OperatorTerminalControlRequestSchema = z
   .object({
     schemaVersion: z.literal(1),
-    action: z.enum(["request", "renew", "release"]),
+    action: z.enum(["request", "renew", "release", "resize", "scroll"]),
     terminalId: OperatorTerminalIdSchema,
     surfaceClientId: OperatorSurfaceClientIdSchema,
-    /** Required for renew and release; ignored for request. */
+    /** Required for renew, release, resize, and scroll; ignored for request. */
     leaseToken: OperatorTerminalLeaseTokenSchema.optional(),
+    columns: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX).optional(),
+    rows: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX).optional(),
+    /**
+     * A scroll the surface could not absorb from its own history. Herdr routes
+     * it by the pane's modes (wheel report, cursor keys, or pane scrollback);
+     * `column`/`row` name the viewport cell a wheel report is stamped with.
+     */
+    direction: z.enum(["up", "down"]).optional(),
+    lines: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX).optional(),
+    column: z.number().int().nonnegative().max(OPERATOR_TERMINAL_DIMENSION_MAX).optional(),
+    row: z.number().int().nonnegative().max(OPERATOR_TERMINAL_DIMENSION_MAX).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((request, context) => {
+    const hasGeometry = request.columns !== undefined || request.rows !== undefined;
+    if (request.action === "resize" && (request.columns === undefined || request.rows === undefined)) {
+      context.addIssue({ code: "custom", path: ["columns"], message: "resize requires columns and rows" });
+    } else if (request.action !== "resize" && hasGeometry) {
+      context.addIssue({ code: "custom", path: ["columns"], message: "geometry is only valid for resize" });
+    }
+    const hasScroll =
+      request.direction !== undefined ||
+      request.lines !== undefined ||
+      request.column !== undefined ||
+      request.row !== undefined;
+    if (request.action === "scroll" && (request.direction === undefined || request.lines === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["direction"],
+        message: "scroll requires direction and lines",
+      });
+    } else if (request.action !== "scroll" && hasScroll) {
+      context.addIssue({
+        code: "custom",
+        path: ["direction"],
+        message: "scroll fields are only valid for scroll",
+      });
+    }
+  });
 export type OperatorTerminalControlRequest = z.infer<typeof OperatorTerminalControlRequestSchema>;
 
 export const OperatorTerminalControlResultSchema = z.discriminatedUnion("status", [

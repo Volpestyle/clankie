@@ -30,6 +30,7 @@ import {
   OperatorConversationServiceResultSchema,
   OperatorConversationStreamEventSchema,
   OPERATOR_TERMINAL_INPUT_BASE64_MAX,
+  OperatorTerminalControlRequestSchema,
   OperatorTerminalControlResultSchema,
   OperatorTerminalFrameSchema,
   OperatorTerminalInputRequestSchema,
@@ -560,6 +561,60 @@ describe("protocol", () => {
         surfaceClientId: "command-center-mobile",
         leaseToken: "lease-1",
         dataBase64: "QUFB".repeat(OPERATOR_TERMINAL_INPUT_BASE64_MAX / 4 + 1),
+      }),
+    ).toThrow();
+    expect(
+      OperatorTerminalControlRequestSchema.parse({
+        schemaVersion: 1,
+        action: "resize",
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "command-center-mobile",
+        leaseToken: "lease-1",
+        columns: 48,
+        rows: 24,
+      }),
+    ).toMatchObject({ action: "resize", columns: 48, rows: 24 });
+    expect(() =>
+      OperatorTerminalControlRequestSchema.parse({
+        schemaVersion: 1,
+        action: "resize",
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "command-center-mobile",
+        leaseToken: "lease-1",
+        columns: 48,
+      }),
+    ).toThrow();
+    expect(
+      OperatorTerminalControlRequestSchema.parse({
+        schemaVersion: 1,
+        action: "scroll",
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "command-center-mobile",
+        leaseToken: "lease-1",
+        direction: "up",
+        lines: 3,
+        column: 10,
+        row: 4,
+      }),
+    ).toMatchObject({ action: "scroll", direction: "up", lines: 3, column: 10, row: 4 });
+    expect(() =>
+      OperatorTerminalControlRequestSchema.parse({
+        schemaVersion: 1,
+        action: "scroll",
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "command-center-mobile",
+        leaseToken: "lease-1",
+        direction: "up",
+      }),
+    ).toThrow();
+    expect(() =>
+      OperatorTerminalControlRequestSchema.parse({
+        schemaVersion: 1,
+        action: "renew",
+        terminalId: "term_65a2015731452d",
+        surfaceClientId: "command-center-mobile",
+        leaseToken: "lease-1",
+        lines: 3,
       }),
     ).toThrow();
     expect(TAKE_CONTROL_GRANTS.terminalControl).toBe(true);

@@ -57,6 +57,10 @@ export type StartHerdrTerminalObserver = (
 ) => HerdrTerminalObserver;
 
 export type ReadHerdrTerminalGrid = (terminalId: string) => Promise<HerdrPaneGrid | undefined>;
+export type ReadControlledTerminalGrid = (
+  terminalId: string,
+  surfaceClientId: string,
+) => HerdrPaneGrid | undefined;
 export type ReadHerdrTerminalHistory = (paneId: string) => Promise<string | undefined>;
 
 /**
@@ -67,6 +71,7 @@ export class HerdrTerminalStore {
   private readonly sessions = new Map<string, TerminalSession>();
   private readonly startObserver: StartHerdrTerminalObserver;
   private readonly readGrid: ReadHerdrTerminalGrid;
+  private readonly readControlledGrid: ReadControlledTerminalGrid;
   private readonly readHistory: ReadHerdrTerminalHistory;
   private readonly scrollbackQuietMs: number;
   private readonly scrollbackMaxLatencyMs: number;
@@ -79,6 +84,7 @@ export class HerdrTerminalStore {
     options: {
       readonly startObserver?: StartHerdrTerminalObserver;
       readonly readGrid?: ReadHerdrTerminalGrid;
+      readonly readControlledGrid?: ReadControlledTerminalGrid;
       readonly readHistory?: ReadHerdrTerminalHistory;
       readonly scrollbackQuietMs?: number;
       readonly scrollbackMaxLatencyMs?: number;
@@ -90,6 +96,7 @@ export class HerdrTerminalStore {
   ) {
     this.startObserver = options.startObserver ?? startHerdrTerminalObserver;
     this.readGrid = options.readGrid ?? ((terminalId) => readTerminalGrid(terminalId));
+    this.readControlledGrid = options.readControlledGrid ?? (() => undefined);
     this.readHistory = options.readHistory ?? readHerdrTerminalHistory;
     this.scrollbackQuietMs = options.scrollbackQuietMs ?? SCROLLBACK_QUIET_MS;
     this.scrollbackMaxLatencyMs = options.scrollbackMaxLatencyMs ?? SCROLLBACK_MAX_LATENCY_MS;
@@ -110,7 +117,9 @@ export class HerdrTerminalStore {
       // The surface fits the frame it is handed instead (see the frame's own
       // columns/rows). Falls back to the surface's request when Herdr cannot
       // report the grid.
-      const grid = await this.readGrid(request.terminalId);
+      const grid =
+        this.readControlledGrid(request.terminalId, request.surfaceClientId) ??
+        (await this.readGrid(request.terminalId));
       const columns = grid?.columns ?? request.columns ?? DEFAULT_COLUMNS;
       const rows = grid?.rows ?? request.rows ?? DEFAULT_ROWS;
       const history = grid?.paneId === undefined ? undefined : await this.readHistory(grid.paneId);

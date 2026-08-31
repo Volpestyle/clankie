@@ -28,7 +28,7 @@ is stock upstream CLI, so ADR 0139's vanilla-herdr rule holds.
 Terminal input rides the operator relay as two new dispatch ops gated on a
 now-grantable `terminalControl`:
 
-- **`terminal_control`** (`request` / `renew` / `release`) manages one
+- **`terminal_control`** (`request` / `renew` / `release` / `resize` / `scroll`) manages one
   exclusive, renewable lease per terminal, owned by a `surfaceClientId`.
   The captain's `HerdrTerminalControlStore` mints an opaque lease token,
   spawns `herdr terminal session control <terminalId>` for the lease's
@@ -36,11 +36,17 @@ now-grantable `terminalControl`:
   death, or shutdown. A second surface gets `contended` with the owner; the
   holder reclaims its own terminal with a plain `request` (fresh token). The
   echoed frame stream is drained and discarded — observation stays on
-  ADR 0138's tail.
+  ADR 0138's tail. A lease holder may request a bounded grid resize; the
+  control session applies it and the holder's observer follows that grid so a
+  device-width redraw wraps at readable zoom levels. A holder may also hand
+  the pane a `scroll` its own history could not absorb (direction, lines,
+  viewport cell); the captain writes it as Herdr's `terminal.scroll`, and the
+  pane's terminal routes it by its real modes — wheel report, cursor keys, or
+  pane scrollback — which no observer can see.
 - **`terminal_input`** writes bounded canonical-base64 VT bytes (32 KiB max
   per write) under a live lease as one `terminal.input` NDJSON line on the
-  control session's stdin. No byte interpretation anywhere in the boundary;
-  no resize — the Mac owns pane geometry.
+  control session's stdin. No byte interpretation happens anywhere in the
+  boundary.
 
 Both ops ride the plain `/operator/v1/dispatch` JSON path — input is
 request/response, not a stream. The relay maps them to the `terminalControl`
@@ -58,7 +64,7 @@ flowchart LR
   Composer["App composer / key bar /<br/>direct SwiftTerm typing"] -->|"raw VT bytes (base64)"| Authority["TerminalControlAuthority<br/>lease request/renew/release + write"]
   Authority -->|"terminal_control · terminal_input<br/>POST /operator/v1/dispatch"| Relay["Relay<br/>terminalControl grant"]
   Relay --> Captain["Captain<br/>HerdrTerminalControlStore<br/>one lease per terminal"]
-  Captain -->|"terminal.input NDJSON"| Control["herdr terminal session control"]
+  Captain -->|"terminal.input / terminal.resize / terminal.scroll NDJSON"| Control["herdr terminal session control"]
   Control --> Pane["Herdr pane PTY"]
 ```
 
@@ -85,4 +91,7 @@ flowchart LR
   with it.
 - The lease arbitrates relay-side surfaces only; the Mac's own keyboard is
   never gated.
+- A deliberate device zoom can temporarily reflow the shared pane while that
+  device owns the lease. Observe-only surfaces keep the pane-authored grid and
+  never attempt local reflow of cursor-addressed frames.
 - Existing paired devices keep their narrower grants until re-paired.

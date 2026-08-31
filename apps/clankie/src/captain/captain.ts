@@ -477,8 +477,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const workingDirectory = options.workingDirectory ?? homedir();
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
   const autonomy = new AutonomyStore(join(options.stateDir, "autonomy.json"));
-  const herdrTerminals = new HerdrTerminalStore();
   const herdrTerminalControls = new HerdrTerminalControlStore();
+  const herdrTerminals = new HerdrTerminalStore({
+    readControlledGrid: (terminalId, surfaceClientId) =>
+      herdrTerminalControls.geometryFor(terminalId, surfaceClientId),
+  });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"));
   const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();

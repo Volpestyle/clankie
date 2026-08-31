@@ -74,6 +74,24 @@ describe("herdr terminal observation", () => {
     store.close();
   });
 
+  it("observes at the holder's resized grid after an explicit device reflow", async () => {
+    const starts: unknown[] = [];
+    const store = new HerdrTerminalStore({
+      readGrid: async () => ({ columns: 126, rows: 50 }),
+      readControlledGrid: (_terminalId, surfaceClientId) =>
+        surfaceClientId === "native-ios" ? { columns: 48, rows: 24 } : undefined,
+      startObserver: (terminalId, columns, rows) => {
+        starts.push({ terminalId, columns, rows });
+        return observer([frame(1, true, "G1sySg==")]);
+      },
+      waitMs: 10,
+    });
+
+    await store.tail({ ...request, columns: 48, rows: 24 });
+    expect(starts).toEqual([{ terminalId: "term-worker", columns: 48, rows: 24 }]);
+    store.close();
+  });
+
   it("seeds SwiftTerm's native scrollback from vanilla Herdr ANSI history", async () => {
     const reads: string[] = [];
     const store = new HerdrTerminalStore({

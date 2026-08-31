@@ -27,6 +27,9 @@ export type StartHerdrTerminalController = (
 
 export type ReadHerdrTerminalGrid = (terminalId: string) => Promise<HerdrPaneGrid | undefined>;
 
+/** Structured sink for one control action and its outcome. */
+export type HerdrTerminalControlLog = (fields: Readonly<Record<string, unknown>>) => void;
+
 /**
  * Exclusive, renewable input leases over Herdr's terminal control sessions
  * (ADR 0144). One lease per terminal; the holder rides raw VT bytes through a
@@ -35,6 +38,7 @@ export type ReadHerdrTerminalGrid = (terminalId: string) => Promise<HerdrPaneGri
  */
 export class HerdrTerminalControlStore {
   private readonly leases = new Map<string, TerminalLease>();
+  private readonly log: HerdrTerminalControlLog;
   private readonly startController: StartHerdrTerminalController;
   private readonly readGrid: ReadHerdrTerminalGrid;
   private readonly leaseTtlMs: number;
@@ -43,6 +47,7 @@ export class HerdrTerminalControlStore {
 
   public constructor(
     options: {
+      readonly log?: HerdrTerminalControlLog;
       readonly startController?: StartHerdrTerminalController;
       readonly readGrid?: ReadHerdrTerminalGrid;
       readonly leaseTtlMs?: number;
@@ -50,6 +55,9 @@ export class HerdrTerminalControlStore {
       readonly clock?: () => number;
     } = {},
   ) {
+    // Default to the service log stream: these lines are the only record of
+    // which control action a surface sent and what it got back.
+    this.log = options.log ?? ((fields) => console.info(JSON.stringify({ service: "clankie", ...fields })));
     this.startController = options.startController ?? startHerdrTerminalController;
     this.readGrid = options.readGrid ?? ((terminalId) => readTerminalGrid(terminalId));
     this.leaseTtlMs = options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
@@ -58,6 +66,23 @@ export class HerdrTerminalControlStore {
   }
 
   public async control(request: OperatorTerminalControlRequest): Promise<OperatorTerminalControlResult> {
+    const result = await this.controlAction(request);
+    // Only op names reach the relay log, so without this the action mix and its
+    // outcome are invisible while debugging a surface that "does nothing".
+    this.log({
+      event: "terminal.control",
+      terminalId: request.terminalId,
+      surfaceClientId: request.surfaceClientId,
+      action: request.action,
+      status: result.status,
+      ...(result.status === "unavailable" || result.status === "denied" ? { reason: result.reason } : {}),
+    });
+    return result;
+  }
+
+  private async controlAction(
+    request: OperatorTerminalControlRequest,
+  ): Promise<OperatorTerminalControlResult> {
     this.sweep();
     const lease = this.leases.get(request.terminalId);
     switch (request.action) {
@@ -85,6 +110,7 @@ export class HerdrTerminalControlStore {
         const created: TerminalLease = {
           leaseToken: randomUUID(),
           owner: { principalId: request.surfaceClientId },
+          grid,
           expiresAtMs: 0,
           controller,
           expiryTimer: undefined,
@@ -116,7 +142,59 @@ export class HerdrTerminalControlStore {
           terminalId: request.terminalId,
         };
       }
+      case "resize": {
+        if (lease === undefined) return denied(request.terminalId, "lease_required");
+        if (lease.owner.principalId !== request.surfaceClientId) {
+          return this.contended(request.terminalId, lease);
+        }
+        if (request.leaseToken !== lease.leaseToken) return denied(request.terminalId, "lease_expired");
+        const columns = request.columns;
+        const rows = request.rows;
+        if (columns === undefined || rows === undefined) {
+          return unavailableControl(request.terminalId, "controller_closed");
+        }
+        if (!lease.controller.write(JSON.stringify({ type: "terminal.resize", cols: columns, rows }))) {
+          this.drop(request.terminalId, lease);
+          return unavailableControl(request.terminalId, "controller_closed");
+        }
+        lease.grid = { ...lease.grid, columns, rows };
+        return this.grantResult(request.terminalId, lease);
+      }
+      case "scroll": {
+        if (lease === undefined) return denied(request.terminalId, "lease_required");
+        if (lease.owner.principalId !== request.surfaceClientId) {
+          return this.contended(request.terminalId, lease);
+        }
+        if (request.leaseToken !== lease.leaseToken) return denied(request.terminalId, "lease_expired");
+        const { direction, lines, column, row } = request;
+        if (direction === undefined || lines === undefined) {
+          return unavailableControl(request.terminalId, "controller_closed");
+        }
+        // Herdr routes the wheel by the pane's own modes — mouse report, cursor
+        // keys, or pane scrollback — which the surface cannot see (ADR 0144).
+        const command = {
+          type: "terminal.scroll",
+          direction,
+          lines,
+          source: "wheel",
+          ...(column === undefined ? {} : { column }),
+          ...(row === undefined ? {} : { row }),
+        };
+        if (!lease.controller.write(JSON.stringify(command))) {
+          this.drop(request.terminalId, lease);
+          return unavailableControl(request.terminalId, "controller_closed");
+        }
+        return this.grantResult(request.terminalId, lease);
+      }
     }
+  }
+
+  public geometryFor(terminalId: string, surfaceClientId: string): HerdrPaneGrid | undefined {
+    this.sweep();
+    const lease = this.leases.get(terminalId);
+    if (lease === undefined) return undefined;
+    const owner = lease.owner.principalId;
+    return surfaceClientId === owner || surfaceClientId.startsWith(`${owner}:`) ? lease.grid : undefined;
   }
 
   public input(request: OperatorTerminalInputRequest): OperatorTerminalInputResult {
@@ -164,6 +242,10 @@ export class HerdrTerminalControlStore {
       if (this.leases.get(terminalId) === lease) this.drop(terminalId, lease);
     }, this.leaseTtlMs);
     lease.expiryTimer.unref?.();
+    return this.grantResult(terminalId, lease);
+  }
+
+  private grantResult(terminalId: string, lease: TerminalLease): OperatorTerminalControlResult {
     return {
       schemaVersion: 1,
       status: "granted",
@@ -204,6 +286,7 @@ export class HerdrTerminalControlStore {
 interface TerminalLease {
   leaseToken: string;
   readonly owner: OperatorTerminalControlOwner;
+  grid: HerdrPaneGrid | undefined;
   expiresAtMs: number;
   readonly controller: HerdrTerminalController;
   expiryTimer: ReturnType<typeof setTimeout> | undefined;

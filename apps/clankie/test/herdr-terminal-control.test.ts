@@ -10,9 +10,10 @@ const PHONE = "command-center-mobile";
 const TABLET = "command-center-tablet";
 
 function controlRequest(
-  action: "request" | "renew" | "release",
+  action: "request" | "renew" | "release" | "resize" | "scroll",
   surfaceClientId: string,
   leaseToken?: string,
+  fields?: Record<string, number | string>,
 ) {
   return {
     schemaVersion: 1 as const,
@@ -20,6 +21,7 @@ function controlRequest(
     terminalId: TERMINAL,
     surfaceClientId,
     ...(leaseToken === undefined ? {} : { leaseToken }),
+    ...fields,
   };
 }
 
@@ -162,6 +164,70 @@ describe("herdr terminal control leases", () => {
 
     await store.control(controlRequest("request", PHONE));
     expect(claims).toEqual([{ terminalId: TERMINAL, grid: { columns: 126, rows: 50 } }]);
+    store.close();
+  });
+
+  it("resizes only through the holder's lease and exposes that grid to its observer", async () => {
+    const controller = fakeController();
+    const store = new HerdrTerminalControlStore({
+      readGrid: async () => ({ paneId: "w1:p4", columns: 126, rows: 50 }),
+      startController: () => controller,
+    });
+    const granted = await store.control(controlRequest("request", PHONE));
+    if (granted.status !== "granted") throw new Error("grant expected");
+
+    expect(
+      await store.control(
+        controlRequest("resize", TABLET, granted.grant.leaseToken, { columns: 48, rows: 24 }),
+      ),
+    ).toMatchObject({ status: "contended" });
+    expect(
+      await store.control(
+        controlRequest("resize", PHONE, granted.grant.leaseToken, { columns: 48, rows: 24 }),
+      ),
+    ).toMatchObject({ status: "granted", grant: { leaseToken: granted.grant.leaseToken } });
+    expect(controller.written).toEqual([JSON.stringify({ type: "terminal.resize", cols: 48, rows: 24 })]);
+    expect(store.geometryFor(TERMINAL, PHONE)).toEqual({ paneId: "w1:p4", columns: 48, rows: 24 });
+    expect(store.geometryFor(TERMINAL, `${PHONE}:native-feed`)).toEqual({
+      paneId: "w1:p4",
+      columns: 48,
+      rows: 24,
+    });
+    expect(store.geometryFor(TERMINAL, TABLET)).toBeUndefined();
+    store.close();
+  });
+
+  it("hands a scroll intent to Herdr as a wheel through the holder's lease", async () => {
+    const controller = fakeController();
+    const store = new HerdrTerminalControlStore({
+      readGrid: async () => ({ paneId: "w1:p4", columns: 126, rows: 50 }),
+      startController: () => controller,
+    });
+    const granted = await store.control(controlRequest("request", PHONE));
+    if (granted.status !== "granted") throw new Error("grant expected");
+
+    const scroll = { direction: "up", lines: 3, column: 10, row: 4 };
+    expect(
+      await store.control(controlRequest("scroll", TABLET, granted.grant.leaseToken, scroll)),
+    ).toMatchObject({
+      status: "contended",
+    });
+    expect(await store.control(controlRequest("scroll", PHONE, "stale", scroll))).toMatchObject({
+      status: "denied",
+    });
+    expect(
+      await store.control(controlRequest("scroll", PHONE, granted.grant.leaseToken, scroll)),
+    ).toMatchObject({ status: "granted", grant: { leaseToken: granted.grant.leaseToken } });
+    expect(controller.written).toEqual([
+      JSON.stringify({
+        type: "terminal.scroll",
+        direction: "up",
+        lines: 3,
+        source: "wheel",
+        column: 10,
+        row: 4,
+      }),
+    ]);
     store.close();
   });
 
