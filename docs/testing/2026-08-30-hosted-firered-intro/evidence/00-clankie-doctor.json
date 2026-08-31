@@ -1,0 +1,137 @@
+{
+  "ok": true,
+  "kind": "checkout",
+  "version": "0.2.0",
+  "repoRoot": "/Users/james/dev/clankie",
+  "model": "xai/grok-4.6",
+  "imageModel": "xai/grok-imagine-image-quality",
+  "videoModel": null,
+  "persona": {
+    "displayName": "Clankie"
+  },
+  "discord": {
+    "activeBody": "bot",
+    "textIngressEnabled": true,
+    "voiceEnabled": true,
+    "userSessionEnabled": false,
+    "machineGrantUsers": 1,
+    "machineGrantGuilds": 0
+  },
+  "voice": {
+    "realtimeProvider": "openai",
+    "ttsProvider": "elevenlabs"
+  },
+  "gameplay": {
+    "pokeagentMmoEnabled": true
+  },
+  "emailConfigured": true,
+  "mcpServers": [],
+  "credentials": [
+    {
+      "id": "anthropic",
+      "type": "api"
+    },
+    {
+      "id": "clankie_activity_producer",
+      "type": "api"
+    },
+    {
+      "id": "clankie_captain",
+      "type": "api"
+    },
+    {
+      "id": "clankie_discord_bridge",
+      "type": "api"
+    },
+    {
+      "id": "clankie_discord_user_bridge",
+      "type": "api"
+    },
+    {
+      "id": "clankie_discord_user_voice_bridge",
+      "type": "api"
+    },
+    {
+      "id": "clankie_discord_voice_bridge",
+      "type": "api"
+    },
+    {
+      "id": "clankie_operator",
+      "type": "api"
+    },
+    {
+      "id": "clankie_play_voice",
+      "type": "api"
+    },
+    {
+      "id": "clankie_possessor_voice",
+      "type": "api"
+    },
+    {
+      "id": "clankie_runner",
+      "type": "api"
+    },
+    {
+      "id": "discord_bot",
+      "type": "api"
+    },
+    {
+      "id": "ds4",
+      "type": "api"
+    },
+    {
+      "id": "elevenlabs",
+      "type": "api"
+    },
+    {
+      "id": "email",
+      "type": "api"
+    },
+    {
+      "id": "openai",
+      "type": "api"
+    },
+    {
+      "id": "openai-codex",
+      "type": "oauth"
+    },
+    {
+      "id": "pokeagent_mmo_world",
+      "type": "api"
+    },
+    {
+      "id": "xai",
+      "type": "oauth"
+    }
+  ],
+  "commands": {
+    "herdr": {
+      "present": true,
+      "detail": "herdr 0.8.2"
+    },
+    "ffmpeg": {
+      "present": true,
+      "detail": "ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers"
+    },
+    "yt-dlp": {
+      "present": true,
+      "detail": "2026.07.04"
+    },
+    "herdr-lead": {
+      "present": true
+    }
+  },
+  "herdrPlugin": {
+    "bundled": true,
+    "bundlePath": "/Users/james/dev/clankie/integrations/herdr-plugin",
+    "linked": true,
+    "enabled": true,
+    "manifestPath": "/Users/james/dev/clankie/integrations/herdr-plugin/herdr-plugin.toml"
+  },
+  "selectedModel": {
+    "ref": "xai/grok-4.6",
+    "providerId": "xai",
+    "modelId": "grok-4.6"
+  },
+  "remediations": []
+}

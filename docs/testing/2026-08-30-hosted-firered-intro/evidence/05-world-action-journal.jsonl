@@ -1,0 +1,14 @@
+{"kind":"header","schemaVersion":1,"sessionId":"ses_d6d572aeec79f6b565c7185c83d7d023","worldId":"kanto","playerId":"plr_7f100a60f6d911f372667f8c4dc3fac3","gameId":"firered","harness":"clankie","bodyGeneration":1,"startedAt":"2026-08-30T18:14:36.560Z"}
+{"kind":"act","at":"2026-08-30T18:14:50.739Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-1","action":{"kind":"button_press","button":"a","holdFrames":16,"repeat":12},"frame":828,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:15:07.577Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-2","action":{"kind":"button_press","button":"a","holdFrames":8,"repeat":12},"frame":1801,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:15:23.865Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-3","action":{"kind":"advance_dialog"},"frame":2724,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:15:33.419Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-4","action":{"kind":"advance_dialog"},"frame":3274,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:15:43.157Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-5","action":{"kind":"advance_dialog"},"frame":3821,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:15:49.468Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-6","action":{"kind":"advance_dialog"},"frame":4176,"outcome":"rejected","refusal":{"reason":"semantic_state_unavailable"}}
+{"kind":"act","at":"2026-08-30T18:16:04.341Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-7","action":{"kind":"button_press","button":"a","holdFrames":16},"frame":5014,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:16:15.042Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-8","action":{"kind":"button_press","button":"a","holdFrames":8,"repeat":8},"frame":5633,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:16:34.595Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-9","action":{"kind":"enter_text","text":"CLANKIE"},"frame":6776,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:16:39.279Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-10","action":{"kind":"frame_advance","frames":45},"frame":7042,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:16:52.192Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-11","action":{"kind":"select_menu_entry","entry":"yes"},"frame":7769,"outcome":"ran","replayed":false}
+{"kind":"act","at":"2026-08-30T18:17:10.522Z","idempotencyKey":"clankie-action-9a85eea3-497f-458b-b596-2455ff2c8ed8-12","action":{"kind":"advance_dialog"},"frame":8813,"outcome":"ran","replayed":false}
+{"kind":"leave","at":"2026-08-30T18:17:10.529Z","frame":8814}

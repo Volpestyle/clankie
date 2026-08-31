@@ -1,0 +1,6 @@
+{
+  "ok": true,
+  "games": { "pokeagentMmoEnabled": true },
+  "settingsFile": "/Users/james/.config/clankie/settings.json",
+  "restart": "clankie restart captain"
+}

@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "runId": "embodiment-7c0493bc-d431-413c-b919-d15f5243c510",
+  "worldSessionId": "ses_d6d572aeec79f6b565c7185c83d7d023",
+  "allPass": true,
+  "checks": [
+    {
+      "id": "clankie_ready",
+      "ok": true
+    },
+    {
+      "id": "services_healthy",
+      "ok": true
+    },
+    {
+      "id": "pokeagent_mmo_enabled",
+      "ok": true
+    },
+    {
+      "id": "world_credential_present",
+      "ok": true
+    },
+    {
+      "id": "join_venue_world",
+      "ok": true
+    },
+    {
+      "id": "provenance_world_only",
+      "ok": true
+    },
+    {
+      "id": "named_clankie",
+      "ok": true
+    },
+    {
+      "id": "confirmed_name",
+      "ok": true
+    },
+    {
+      "id": "orderly_stop",
+      "ok": true
+    },
+    {
+      "id": "accepted_majority",
+      "ok": true
+    },
+    {
+      "id": "no_local_emulator_venue",
+      "ok": true
+    }
+  ],
+  "metrics": {
+    "turns": 12,
+    "accepted": 11,
+    "rejected_by_adapter": 1,
+    "durationMs": 153681,
+    "framesPublished": 2265,
+    "framesDropped": 179,
+    "bodies": ["world"],
+    "journeyId": "world:kanto:player:plr_7f100a60f6d911f372667f8c4dc3fac3"
+  }
+}

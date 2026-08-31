@@ -1,0 +1,11 @@
+   kanto  00:08:10
+
+   bodies    ○○○○○○○○  0/8
+   regions   emerald, firered
+   core      mgba
+   socket    /Users/james/.pokeagent-mmo/world/host.sock
+   viewer    http://127.0.0.1:7780
+   watch url http://127.0.0.1:7780/gallery
+   roms      /Users/james/.pokeagent-mmo/roms
+
+   ctrl-c to stop

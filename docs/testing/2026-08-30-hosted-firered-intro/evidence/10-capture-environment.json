@@ -1,0 +1,33 @@
+{
+  "capturedAt": "2026-08-30T18:19:19.615030+00:00",
+  "run": {
+    "runId": "embodiment-7c0493bc-d431-413c-b919-d15f5243c510",
+    "environmentSessionId": "ses_d6d572aeec79f6b565c7185c83d7d023",
+    "startedAt": "2026-08-30T18:14:36.847Z",
+    "endedAt": "2026-08-30T18:17:10.528Z"
+  },
+  "sourceRepositories": {
+    "clankie": {
+      "path": "/Users/james/dev/clankie",
+      "head": "a7a2bf200b43c18cfde22a2ddd02c28f9da0b70b",
+      "dirty": [
+        " M apps/clankie/src/captain/channel-projection.ts",
+        " M apps/clankie/src/captain/conversations.ts",
+        " M apps/clankie/src/discord-presence-runtime.ts",
+        " M apps/clankie/test/operator-conversation-channel.test.ts",
+        " M apps/discord-bridge/src/presence-runtime-module.ts",
+        " M apps/discord-bridge/test/presence-runtime-module.test.ts",
+        " M packages/discord-presence-core/src/discord-rest.ts",
+        " M packages/discord-presence-core/test/discord-rest.test.ts",
+        " M packages/protocol/src/index.ts",
+        "?? docs/testing/2026-08-30-hosted-firered-intro/"
+      ]
+    },
+    "pokeagents": {
+      "path": "/Users/james/dev/pokeagents",
+      "head": "37dc628713096e49fea5691b27fd30e968998e62",
+      "dirty": [" M docs/hosting-emerald-multiplayer.md"]
+    }
+  },
+  "note": "Clankie service pid 42709 and pokeagents pid 41839 were already running at prompt time. Repository heads recorded immediately before the play prompt."
+}

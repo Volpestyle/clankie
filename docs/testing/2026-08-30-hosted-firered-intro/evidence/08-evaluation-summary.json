@@ -1,0 +1,102 @@
+{
+  "run": {
+    "runId": "embodiment-7c0493bc-d431-413c-b919-d15f5243c510",
+    "scenarioId": "world:pokemon-firered",
+    "journalSchemaVersion": 3,
+    "startedAt": "2026-08-30T18:14:36.847Z",
+    "terminal": {
+      "source": "summary",
+      "outcome": "stopped",
+      "at": "2026-08-30T18:17:10.528Z",
+      "summaryPresent": true,
+      "lifecycleEventType": "embodiment.session.stopped",
+      "lifecycleConsistent": true
+    }
+  },
+  "aggregate": {
+    "turns": 12,
+    "outcomes": {
+      "accepted": 11,
+      "rejected_by_adapter": 1
+    },
+    "timing": {
+      "decision": {
+        "known": 12,
+        "unknown": 0,
+        "totalMs": 72500,
+        "averageMs": 6041.666666666667
+      },
+      "action": {
+        "known": 12,
+        "unknown": 0,
+        "totalMs": 47746,
+        "averageMs": 3978.8333333333335
+      }
+    },
+    "intentToAction": {
+      "aligned": 6,
+      "misaligned": 6
+    },
+    "goalToAction": {
+      "unknown": 12
+    },
+    "movementEffectiveness": {
+      "not_applicable": 12
+    },
+    "sceneActionAppropriateness": {
+      "appropriate": 8,
+      "unknown": 4
+    },
+    "rejectionRecovery": {
+      "not_applicable": 11,
+      "recovered": 1
+    },
+    "narration": {
+      "model_silent": 7,
+      "no_attempt": 3,
+      "suppressed": 2
+    },
+    "stalls": {
+      "signalledTurns": 0,
+      "maxTurnsSinceNewTile": 11,
+      "maxRepeatedTurns": null,
+      "maxRecurringTurns": 12
+    },
+    "summary": {
+      "kind": "summary",
+      "schemaVersion": 2,
+      "at": "2026-08-30T18:17:10.528Z",
+      "outcome": "stopped",
+      "turnsTaken": 12,
+      "accepted": 11,
+      "durationMs": 153681,
+      "framesPublished": 2265,
+      "framesDropped": 179,
+      "checkpointId": null,
+      "progress": {
+        "distinctTiles": 0,
+        "maps": [],
+        "turnsSinceNewTile": 12,
+        "actionsPerNewTile": null
+      },
+      "volition": {
+        "offered": 12,
+        "taken": 3,
+        "suppressed": 2,
+        "skipped": 7
+      },
+      "coherence": 0.2,
+      "longestUnchangedRun": 1,
+      "longestRecurringRun": 12,
+      "objectivesRetired": 0,
+      "screenshot": {
+        "path": ".screenshots/2026-08-30T18-14-36-847Z-embodiment-7c0493bc-d431-413c-b919-d15f5243c510/terminal-terminal.png",
+        "byteLength": 2519,
+        "sha256": "7dbafc134100658739b8222fd9033fc01ab6570a40eec8187972c8f34cf35b5c",
+        "width": 240,
+        "height": 160,
+        "reasons": ["terminal"]
+      }
+    }
+  }
+}

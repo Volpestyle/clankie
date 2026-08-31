@@ -26,3 +26,4 @@ all other capabilities from the files present.
 
 - [2026-08-16 PokeAgent performance](2026-08-16-pokeagent-performance/README.md)
 - [2026-08-18 PokeAgents trial run](2026-08-18-pokeagents-trial-run/README.md)
+- [2026-08-30 Hosted FireRed intro on current Clankie](2026-08-30-hosted-firered-intro/README.md)

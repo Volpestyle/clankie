@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "runId": "embodiment-7c0493bc-d431-413c-b919-d15f5243c510",
+  "generatedAt": "2026-08-30T18:19:35.065828+00:00",
+  "evidence": [
+    {
+      "path": "00-clankie-doctor.json",
+      "bytes": 2609,
+      "sha256": "143b804cb610020de004f2bdd5e3b431fa6bae6f32fd9b849b5f1f3a803ca019"
+    },
+    {
+      "path": "00-clankie-status.json",
+      "bytes": 854,
+      "sha256": "fa44cc6d938096a209152f6c2ee55c83bdece8d68ae84ff184941683454c1c9d"
+    },
+    {
+      "path": "00-games.json",
+      "bytes": 145,
+      "sha256": "e9960e10325f0673d5e8e3356b7466a607e944f16c0959ad23678f8bc390d0da"
+    },
+    {
+      "path": "01-play-journal.jsonl",
+      "bytes": 70603,
+      "sha256": "69d290d0b266c6398d3e854b077859ab91d08e5b7e3179066b420efe1e4d5a50"
+    },
+    {
+      "path": "02-lifecycle-events.jsonl",
+      "bytes": 2698,
+      "sha256": "4f64d2c64149e3cac93bd88362614a8f00fb90d8b424fa631cfd4c79ea1a5fc7"
+    },
+    {
+      "path": "05-world-action-journal.jsonl",
+      "bytes": 2948,
+      "sha256": "0b115acbab4774b7572580c3ffbf1ba7ae480a32eaf632d295923bedc97367a9"
+    },
+    {
+      "path": "08-evaluation-summary.json",
+      "bytes": 2505,
+      "sha256": "5237d9b41f0404da66f4382c939ef5e46fe7a7baddc1b65bd5be4d499997a8b8"
+    },
+    {
+      "path": "09-turn-timeline.tsv",
+      "bytes": 2900,
+      "sha256": "54dc5fb53da36b0a7eacc973a2837284f9621b353e4b1df32fca533f373cb8bf"
+    },
+    {
+      "path": "10-capture-environment.json",
+      "bytes": 1458,
+      "sha256": "5f36def1e03b5760831d837a9c25bc276c4086afa1088ee1ba2d9aca6559f5c8"
+    },
+    {
+      "path": "11-tui-recent.txt",
+      "bytes": 2327,
+      "sha256": "cb90e9f832a0988e27249a26f9296b08fcab06a50dbf2f85ca4d2beabdc65543"
+    },
+    {
+      "path": "12-world-host-tui.txt",
+      "bytes": 311,
+      "sha256": "f7090ca7c130d24143222e5cbd37ed8d57dedba2fef24cfa77f81047876775bc"
+    },
+    {
+      "path": "13-assertions.json",
+      "bytes": 1160,
+      "sha256": "1614f2856974831d5d534d0d3d25d1f06212ebe1d1d71eec908ad47fcebd3e69"
+    },
+    {
+      "path": "screenshots/terminal-terminal.png",
+      "bytes": 2519,
+      "sha256": "7dbafc134100658739b8222fd9033fc01ab6570a40eec8187972c8f34cf35b5c"
+    },
+    {
+      "path": "screenshots/turn-000000-initial.png",
+      "bytes": 3771,
+      "sha256": "f5e02d81a618bd651bf226328e8960782431cf6a91a6dc72984d047506b5698b"
+    },
+    {
+      "path": "screenshots/turn-000001-scene_change-noteworthy.png",
+      "bytes": 2875,
+      "sha256": "fe0c6d16fda885b698e011e002e9241cad2916323c3669c23acc1f658d9d517a"
+    },
+    {
+      "path": "screenshots/turn-000002-scene_change.png",
+      "bytes": 2669,
+      "sha256": "c35ef0433a4a23558fcb73c7aa5cfaf82211c4b8e043bf59c5c22331504b3578"
+    },
+    {
+      "path": "screenshots/turn-000003-scene_change.png",
+      "bytes": 2832,
+      "sha256": "b5bf1ec732e19c84a6b797dccf7902af5dd6165957ac644662e6caef3d2d0978"
+    },
+    {
+      "path": "screenshots/turn-000004-scene_change-noteworthy.png",
+      "bytes": 2384,
+      "sha256": "2623da3a23398e15398bf467c0b2984ebf1c56dc078741158598d90d94d2688a"
+    },
+    {
+      "path": "screenshots/turn-000005-noteworthy-failure.png",
+      "bytes": 1777,
+      "sha256": "456e0bab33bc63a51afcd20618174605c2afb100d8b72433f3d5d1a6f9cd5ccb"
+    },
+    {
+      "path": "screenshots/turn-000007-scene_change.png",
+      "bytes": 3158,
+      "sha256": "f2cb7ad2710a8b251023375b69e0a7f9025922542602acf4c6b10560282c3dd7"
+    },
+    {
+      "path": "screenshots/turn-000008-noteworthy.png",
+      "bytes": 192,
+      "sha256": "47fbde60709a27683035d7b385f06dd1447f68c6548272758e15a335cf3bc15e"
+    },
+    {
+      "path": "screenshots/turn-000010-scene_change-noteworthy.png",
+      "bytes": 2483,
+      "sha256": "da497b3f85165ae524d265627f366ef487381a0f13ee6110a19d192a095ffdc1"
+    },
+    {
+      "path": "screenshots/turn-000011-scene_change.png",
+      "bytes": 2519,
+      "sha256": "7dbafc134100658739b8222fd9033fc01ab6570a40eec8187972c8f34cf35b5c"
+    }
+  ]
+}
