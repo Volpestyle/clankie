@@ -110,11 +110,15 @@ without ending the turn or spending his reply. Its description tells him when:
 when someone is actually waiting on slow work and a meaningful delay would
 otherwise leave them hanging. Unsolicited links he elects to inspect get no
 progress announcement. What he says is his; nothing here writes it for him. The
-typing indicator now also runs for the whole turn rather than stopping after a
-minute, so "he is working" stays visible the entire time. Silence and answers
-take about the same time, so delaying the indicator cannot distinguish them
-without also hiding useful progress. Knowing sooner needs a mid-turn signal the
-captain does not send today.
+typing indicator runs for the whole turn rather than stopping after a minute, so
+"he is working" stays visible the entire time — but it starts when he starts
+writing, not when the message arrived. The captain watches his own reply stream
+and signals the body (a `typing` captain action, host-stamped, carrying no
+content) the moment the words can no longer become `[[stay-silent]]`; the body
+lights the delivery it is already holding, so DMs work like channels and no new
+authority is involved. A turn he ends in silence never lights the room, and a
+turn spent entirely in tools shows the tool-activity card and `send_text_update`
+rather than an indicator promising words he has not written.
 
 **One derived attachment root, shared by writer and reader.**
 `discordAttachmentRoot(env)` in `@clankie/settings` defaults to
@@ -150,10 +154,11 @@ sequenceDiagram
     participant L as Durable lane
     R->>L: "what was the biggest upset?"
     L->>R: send_text_update — "hang on, pulling the bracket up"
-    Note over R: typing stays lit for the whole turn
+    Note over R: nothing is typing yet — he has written no reply
     loop as long as it keeps working
         L->>L: browse, read, click — each event resets the stall clock
     end
+    L->>R: first words of the reply — typing lights, and stays lit
     L->>R: the answer, however long it took
 ```
 

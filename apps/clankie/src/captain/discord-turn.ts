@@ -3,6 +3,20 @@ import type { FinishedRender } from "../media-generation.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import { roomKey } from "./tools.ts";
 
+/**
+ * Whether the words streaming out of a turn are a reply he is going to send.
+ *
+ * The decision and the words arrive together — a turn ends either in his answer
+ * or in the silence sentinel — so the earliest anything can honestly say "he is
+ * answering" is the moment his stream can no longer become that sentinel. Text
+ * that is still a prefix of it is not yet a reply, and matching only the whole
+ * token means a reply that merely quotes it stays a reply.
+ */
+export function replyIsUnderway(streamedText: string): boolean {
+  const text = streamedText.trim();
+  return text.length > 0 && !CAPTAIN_SILENT_REPLY_SENTINEL.startsWith(text);
+}
+
 export interface NormalizedDiscordTurn {
   /** Both planes continue a durable session per channel (ADR 0118). */
   readonly sessionKey: string;

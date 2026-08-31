@@ -670,6 +670,14 @@ async function executeCaptainDiscordAction(
   input: DiscordCaptainActionInput,
 ): Promise<DiscordCaptainActionResult> {
   if (shuttingDown) return { ok: false, message: "My Discord body is shutting down." };
+  // He has started writing, so the delivery he is answering lights its channel
+  // (ADR 0118). Nothing is posted from here and no channel is named — this is
+  // the body's own in-flight turn, already admitted when it was accepted.
+  if (input.action === "typing") {
+    return textIngress.beginTyping(input.messageId)
+      ? { ok: true, message: "The channel can see you typing." }
+      : { ok: false, message: "That delivery is not in flight here." };
+  }
   const admitted = admitCaptainDiscordAction({
     action: input,
     admittedGuildIds: guildIds,

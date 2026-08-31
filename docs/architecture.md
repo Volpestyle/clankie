@@ -63,7 +63,10 @@ stays quiet. In channels where the owner enables `/clankie tools mode:on`, the
 host also edits one quiet tool-activity card with public-safe work categories,
 counts, elapsed time, and a terminal state; tool names, arguments, and results
 stay in the local Pi trail ([ADR 0134](adr/0134-discord-tool-work-is-a-status-card.md)).
-Discord shows him typing for the whole turn rather than for a capped minute.
+Discord shows him typing from his first words to the end of the turn: the
+captain signals the body when his reply stream can no longer be the silence
+sentinel, so a turn he ends in silence never shows the room a reply being
+written.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): durable agent personas, their current fleet seats,

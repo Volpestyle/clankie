@@ -54,7 +54,12 @@ import { createChannelProjection } from "./channel-projection.ts";
 import { PersonaStore } from "./personas.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
-import { discordTurnSessionKey, normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
+import {
+  discordTurnSessionKey,
+  normalizeDiscordTurn,
+  replyIsUnderway,
+  type NormalizedDiscordTurn,
+} from "./discord-turn.ts";
 import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
@@ -1027,8 +1032,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
             deps.discordActions,
           );
+    // The mid-turn signal ADR 0118 wanted: the room learns he is answering the
+    // moment he starts writing words, not the moment the message arrived. A
+    // turn he ends in silence never lights the channel. Only the run owner
+    // signals — an absorbed delivery rides the indicator already lit.
+    const typing =
+      live || normalized.lane !== "discord_presence" || deps.discordActions === undefined
+        ? undefined
+        : (): void => {
+            void deps
+              .discordActions!.execute({
+                action: "typing",
+                callId: turnId,
+                actorId: normalized.actorId,
+                ...(normalized.guildId === undefined ? {} : { guildId: normalized.guildId }),
+                channelId: normalized.channelId,
+                messageId: normalized.messageId,
+              })
+              .catch(() => undefined);
+          };
+    let typingSignalled = typing === undefined;
     const unsubscribeEvents =
-      metrics === undefined && toolProgress === undefined
+      metrics === undefined && toolProgress === undefined && typing === undefined
         ? () => undefined
         : lane.session.subscribe((event) => {
             if (metrics !== undefined) recordPiToolStart(metrics, event);
@@ -1036,6 +1061,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               toolProgress?.toolStarted(event.toolCallId, event.toolName);
             } else if (event.type === "tool_execution_end") {
               toolProgress?.toolEnded(event.toolCallId, event.isError);
+            } else if (!typingSignalled && event.type === "message_update") {
+              const streaming = event.assistantMessageEvent;
+              if (streaming.type !== "text_start" && streaming.type !== "text_delta") return;
+              if (!replyIsUnderway(assistantText(streaming.partial))) return;
+              typingSignalled = true;
+              typing?.();
             }
           });
     let role: "ran" | "absorbed" = "ran";

@@ -30,6 +30,14 @@ export function admitCaptainDiscordAction(input: {
   admittedChannelIds: ReadonlySet<string>;
   ownsProgressMessage: (id: string) => boolean;
 }): CaptainDiscordActionAdmission {
+  if (input.action.action === "typing") {
+    // Each body lights its own in-flight delivery before admission — there is
+    // no channel to authorize, only a delivery it already holds.
+    return {
+      kind: "refuse",
+      result: { ok: false, message: "Typing belongs to the body holding that delivery." },
+    };
+  }
   if (input.action.guildId === undefined) {
     return { kind: "refuse", result: { ok: false, message: "That Discord action is not available in DMs." } };
   }
@@ -159,6 +167,8 @@ export function planNonWatchCaptainDiscordAction(
         payload: { kind: "join_thread", channelId },
         successMessage: "I joined the thread.",
       };
+    // Not a presence write: the bodies intercept it before admission.
+    case "typing":
     case "watch_start":
     case "watch_stop":
       return undefined;

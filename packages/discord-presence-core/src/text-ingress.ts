@@ -314,7 +314,7 @@ export const TYPING_REFRESH_MS = 8_000;
  * Insurance against a turn request that never comes back at all — not a limit
  * on how long he may work.
  *
- * The indicator's real lifetime is the turn's: `showTyping` returns a stop that
+ * The indicator's real lifetime is the turn's: `armTyping` returns a stop that
  * the turn's `finally` always calls, and the captain's own stall watchdog makes
  * sure the turn itself ends. So while he is working, the room sees him working,
  * for as long as that takes. This only exists so a genuinely hung HTTP request
@@ -357,6 +357,8 @@ export class DiscordTextIngress {
   private readonly deliveries = new Map<string, RetainedDelivery>();
   /** `channelId` -> what has happened there since he last spoke. */
   private readonly channels = new Map<string, ChannelActivity>();
+  /** Deliveries in flight, by id: how each one lights its channel when he speaks. */
+  private readonly typing = new Map<string, () => void>();
   private readonly port: DiscordTextIngressPort;
   private readonly config: DiscordTextIngressConfig;
   private readonly evidence: (event: DiscordTextIngressEvidence) => void;
@@ -520,14 +522,16 @@ export class DiscordTextIngress {
       ...(context.visual === undefined ? {} : { contextVisual: context.visual }),
     });
     event("accepted");
-    const stopTyping = this.showTyping(message, identity);
+    const typing = this.armTyping(message, identity);
+    if (typing !== undefined) this.typing.set(message.id, typing.begin);
     let result: CaptainChannelTurnResult;
     try {
       result = await this.port.submitDiscordCaptainChannelTurn(request);
     } finally {
       // The reply that follows clears the indicator on its own; stopping here
       // just keeps a settled-but-silent turn from showing him typing forever.
-      stopTyping();
+      this.typing.delete(message.id);
+      typing?.stop();
     }
     if (result.state === "failed") {
       event("failed", {
@@ -595,35 +599,40 @@ export class DiscordTextIngress {
   }
 
   /**
-   * Somebody just said something he is reading live, so the channel shows him
-   * typing while the turn is in flight — the reply itself then clears the
-   * indicator, exactly as it does for a person.
+   * The room sees him typing once he is actually writing a reply, and not
+   * before — the mid-turn signal ADR 0118 wanted and did not have.
    *
-   * Every live turn earns this, not only the ones that repeat his name. A
-   * follow-up inside a conversation he is already in ("did it pass?") is the
-   * case where the indicator matters most, and gating on being re-addressed
-   * made him answer a back-and-forth with no sign he was there. He may still
-   * choose silence, which reads as someone starting a reply and thinking
-   * better of it — the honest cost of not knowing his answer before he gives
-   * it. Nothing here can know earlier: the captain turn returns his decision
-   * and his words together (`CAPTAIN_SILENT_REPLY_SENTINEL`), with no
-   * mid-turn signal to wait for.
+   * Arriving is not answering. The turn that lights the indicator is the same
+   * turn that decides whether to speak at all, so an indicator lit on delivery
+   * showed him "typing" through every turn he ended in silence. The captain now
+   * calls `beginTyping` the moment his reply stream stops being a possible
+   * `[[stay-silent]]`, which is the earliest anything can honestly know.
    *
-   * A catch-up turn is the exception. Reading a backlog minutes later is him
-   * checking in, not answering a room that is waiting on him, and a channel
-   * that lights up on a timer advertises presence nobody asked for.
+   * Everything after that is unchanged: the indicator's lifetime is the turn's,
+   * the refresh keeps it lit for as long as the work takes, and the reply — or
+   * the `finally` below it — takes it down. A turn that never writes a word
+   * never lights the channel, which is the point.
+   *
+   * A catch-up turn is armed for nothing at all. Reading a backlog minutes later
+   * is him checking in, not answering a room that is waiting on him, and a
+   * channel that lights up on a timer advertises presence nobody asked for.
    *
    * The indicator is cosmetic, so it must never delay or fail the turn: posts
    * are fire-and-forget, and the first failure stops the refresh instead of
    * re-hitting a path that is already refusing. Successful posts land in the
    * service's narrative ledger like every other presence write.
    */
-  private showTyping(message: DiscordInboundMessage, identity: DiscordPresenceWrite["identity"]): () => void {
-    if (message.catchingUp === true) return () => undefined;
+  private armTyping(
+    message: DiscordInboundMessage,
+    identity: DiscordPresenceWrite["identity"],
+  ): { begin: () => void; stop: () => void } | undefined {
+    if (message.catchingUp === true) return undefined;
     let sequence = 0;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const stop = (): void => {
-      clearInterval(timer);
-      clearTimeout(deadline);
+      if (timer !== undefined) clearInterval(timer);
+      if (deadline !== undefined) clearTimeout(deadline);
     };
     const post = (): void => {
       const write = DiscordPresenceWriteSchema.parse({
@@ -636,12 +645,29 @@ export class DiscordTextIngress {
       sequence += 1;
       void this.port.executeDiscordPresenceAction(write).catch(stop);
     };
-    post();
-    const timer = setInterval(post, TYPING_REFRESH_MS);
-    timer.unref?.();
-    const deadline = setTimeout(stop, TYPING_MAX_DURATION_MS);
-    deadline.unref?.();
-    return stop;
+    return {
+      begin: (): void => {
+        if (timer !== undefined) return;
+        post();
+        timer = setInterval(post, TYPING_REFRESH_MS);
+        timer.unref?.();
+        deadline = setTimeout(stop, TYPING_MAX_DURATION_MS);
+        deadline.unref?.();
+      },
+      stop,
+    };
+  }
+
+  /**
+   * He has started writing his reply to this delivery, so the channel shows it.
+   * False when nothing is in flight under that id — a settled turn, a catch-up,
+   * or a delivery this process never held.
+   */
+  public beginTyping(deliveryId: string): boolean {
+    const begin = this.typing.get(deliveryId);
+    if (begin === undefined) return false;
+    begin();
+    return true;
   }
 
   private refusalReason(message: DiscordInboundMessage): string | undefined {

@@ -204,9 +204,9 @@ describe("DiscordTextIngress", () => {
     expect(conflict).toEqual({ state: "dropped", reason: "delivery_id_conflict" });
     expect(port.turns).toHaveLength(1);
     expect(port.replies).toHaveLength(1);
-    // The admitted turn signals once; neither its deduplicated retry nor the
-    // refused conflict starts another indicator.
-    expect(port.typing).toHaveLength(1);
+    // No turn here ever started writing, so no delivery — admitted, deduplicated
+    // or refused — lit the channel.
+    expect(port.typing).toHaveLength(0);
     expect(evidence.map((event) => event.outcome)).toContain("deduplicated");
     expect(JSON.stringify(evidence)).not.toContain("first body");
     expect(JSON.stringify(evidence)).not.toContain("drifted body");
@@ -636,6 +636,13 @@ describe("typing while he composes", () => {
 
       const outcome = ingress.handle(guildMessage("message-typing"));
       await vi.advanceTimersByTimeAsync(0);
+      // Arriving is not answering: the channel stays dark until he writes.
+      expect(port.typing).toHaveLength(0);
+
+      expect(ingress.beginTyping("message-typing")).toBe(true);
+      expect(port.typing).toHaveLength(1);
+      // He signals on his first words; a second one is the same indicator.
+      expect(ingress.beginTyping("message-typing")).toBe(true);
       expect(port.typing).toHaveLength(1);
       expect(port.typing[0]).toMatchObject({
         action: "discord.presence.typing_start",
@@ -683,6 +690,7 @@ describe("typing while he composes", () => {
         body: "clankie how did the run go?",
       });
       await vi.advanceTimersByTimeAsync(0);
+      expect(ingress.beginTyping("message-asked")).toBe(true);
       expect(port.typing).toHaveLength(1);
       pending.get("message-asked")?.(settled("message-asked"));
       await asked;
@@ -697,6 +705,7 @@ describe("typing while he composes", () => {
         body: "did it though?",
       });
       await vi.advanceTimersByTimeAsync(0);
+      expect(ingress.beginTyping("message-followup")).toBe(true);
       expect(port.typing).toHaveLength(2);
       expect(port.typing[1]).toMatchObject({
         idempotencyKey: "message-followup:typing:0",
@@ -733,6 +742,7 @@ describe("typing while he composes", () => {
         body: "clankie how did the run go?",
       });
       await vi.advanceTimersByTimeAsync(0);
+      expect(ingress.beginTyping("message-asked")).toBe(true);
       expect(port.typing).toHaveLength(1);
       pending.get("message-asked")?.(settled("message-asked"));
       await asked;
@@ -749,6 +759,8 @@ describe("typing while he composes", () => {
       // Checking in on a channel minutes later is him reading, not the room
       // waiting on him; a timer must never light the channel up.
       const caught = ingress.catchUp();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ingress.beginTyping("message-later")).toBe(false);
       await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS);
       pending.get("message-later")?.(settled("message-later"));
       await expect(caught).resolves.toMatchObject([{ state: "settled" }]);
@@ -772,6 +784,8 @@ describe("typing while he composes", () => {
       const ingress = new DiscordTextIngress(port, config());
 
       const outcome = ingress.handle(guildMessage("message-typing-down"));
+      await vi.advanceTimersByTimeAsync(0);
+      ingress.beginTyping("message-typing-down");
       await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS * 3);
       // The first failed post stops the refresh; the indicator is cosmetic.
       expect(port.typing).toHaveLength(1);
@@ -800,6 +814,8 @@ describe("typing while he composes", () => {
       const ingress = new DiscordTextIngress(port, config());
 
       const outcome = ingress.handle(guildMessage("message-long-lookup"));
+      await vi.advanceTimersByTimeAsync(0);
+      ingress.beginTyping("message-long-lookup");
       // Nine minutes of browsing a bracket, far past the old 60-second cutoff.
       await vi.advanceTimersByTimeAsync(9 * 60_000);
       expect(port.typing.length).toBeGreaterThan(60);
@@ -814,6 +830,36 @@ describe("typing while he composes", () => {
     }
   });
 
+  it("never lights the channel for a turn he ends in silence", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
+      const port = new RecordingPort(
+        (request) =>
+          new Promise((resolve) => {
+            pending.set(request.deliveryId, resolve);
+          }),
+      );
+      const ingress = new DiscordTextIngress(port, config());
+
+      // He read it and decided not to answer, so he never signalled. The room
+      // must never have seen him start a reply he was not writing.
+      const outcome = ingress.handle(guildMessage("message-silent"));
+      await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS * 4);
+      pending.get("message-silent")?.({
+        state: "silent",
+        captainSessionId: "session-silent",
+        turnId: "turn-silent",
+      });
+      await expect(outcome).resolves.toMatchObject({ state: "declined" });
+      expect(port.typing).toHaveLength(0);
+      // The delivery is done, so a late signal has nothing left to light.
+      expect(ingress.beginTyping("message-silent")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops refreshing at the backstop when the turn request never returns at all", async () => {
     vi.useFakeTimers();
     try {
@@ -821,6 +867,8 @@ describe("typing while he composes", () => {
       const ingress = new DiscordTextIngress(port, config());
 
       void ingress.handle(guildMessage("message-typing-wedged"));
+      await vi.advanceTimersByTimeAsync(0);
+      ingress.beginTyping("message-typing-wedged");
       await vi.advanceTimersByTimeAsync(TYPING_MAX_DURATION_MS);
       const writesAtDeadline = port.typing.length;
 

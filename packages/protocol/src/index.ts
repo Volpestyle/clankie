@@ -2867,6 +2867,13 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
     action: z.literal("send_text_update"),
     text: z.string().trim().min(1).max(600),
   }).strict(),
+  /**
+   * "He has started writing" — the mid-turn signal ADR 0118 left unbuilt.
+   * Host-stamped from the reply stream, never a model tool: it carries no
+   * content and posts nothing, it only lets the body light the indicator on a
+   * delivery it is already holding.
+   */
+  DiscordCaptainActionContextSchema.extend({ action: z.literal("typing") }).strict(),
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("tool_progress"),
     phase: DiscordToolProgressPhaseSchema,
