@@ -745,6 +745,39 @@ describe("hiring a seat", () => {
     store.close();
   });
 
+  it("waits out the gap between the harness taking input and its session appearing", async () => {
+    // pi is ready before it has written its session file; the hire is good.
+    const { session: _unset, ...rest } = hired;
+    const sessionless: HerdrAgentSnapshot = { ...rest, agent: "pi" };
+    const get = vi
+      .fn((_target: string) => Promise.resolve(sessionless))
+      .mockResolvedValueOnce(sessionless)
+      .mockResolvedValueOnce(sessionless)
+      .mockResolvedValue({ ...hired, agent: "pi" });
+    const closePane = vi.fn(() => Promise.resolve());
+    const runner: HerdrWatchRunner = {
+      get,
+      resolveTerminal: vi.fn(() => Promise.resolve(hired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent: vi.fn(() => Promise.resolve()),
+      closePane,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+
+    expect(result).toMatchObject({ outcome: "spawned" });
+    expect(closePane).not.toHaveBeenCalled();
+    expect(get.mock.calls.length).toBeGreaterThan(2);
+    store.close();
+  });
+
   it("names a directory that is not there instead of opening a tab for it", async () => {
     const createTab = vi.fn((_options: { cwd: string; label: string }) => Promise.resolve("w1C:p9"));
     const runner: HerdrWatchRunner = {

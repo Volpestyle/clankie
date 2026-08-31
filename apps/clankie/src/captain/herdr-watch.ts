@@ -115,6 +115,8 @@ const RETRY_ADMISSION_MS = 5_000;
 const HERDR_COMMAND_TIMEOUT_MS = 5_000;
 const SEAT_REPLY_READ_LINES = 240;
 const SEAT_TRANSCRIPT_TAIL_MS = 1_000;
+const SPAWN_SESSION_WAIT_MS = 10_000;
+const SPAWN_SESSION_POLL_MS = 250;
 const PI_ZONE_START = "\u001B]133;A\u0007";
 const PI_ZONE_END = "\u001B]133;B\u0007\u001B]133;C\u0007";
 
@@ -384,7 +386,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       const subject = herdrAgentName(input.title);
       await startAgent({ name: subject, kind: input.harness, paneId });
-      const agent = await this.runner.get(paneId);
+      const agent = await this.agentWithSession(paneId);
       if (agent.session === undefined)
         throw new Error("Herdr started an agent without a durable session identity");
       return {
@@ -404,6 +406,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const detail = reasonDetail(caught);
       return { outcome: "failed", reason: spawnFailureReason(detail), detail };
     }
+  }
+
+  /**
+   * Herdr calls a harness started once it takes input, which can be before the
+   * harness has written the session file Herdr reports as its identity — pi
+   * writes one on launch, so the gap is a race, not an absence. Waiting through
+   * it is what keeps a good hire from being torn down as a failure.
+   */
+  private async agentWithSession(paneId: string): Promise<HerdrAgentSnapshot> {
+    const deadline = Date.now() + SPAWN_SESSION_WAIT_MS;
+    let agent = await this.runner.get(paneId);
+    while (agent.session === undefined && Date.now() < deadline) {
+      await delay(SPAWN_SESSION_POLL_MS);
+      agent = await this.runner.get(paneId);
+    }
+    return agent;
   }
 
   public async closeSeat(seatId: string): Promise<boolean> {

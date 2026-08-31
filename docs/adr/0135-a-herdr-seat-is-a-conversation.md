@@ -110,8 +110,10 @@ role: "operator" | "captain" | "agent"
 
 `spawn_seat` runs `herdr tab create --cwd` then `herdr agent start --kind`,
 which returns only once herdr has detected the harness and considers it ready
-for input — so a `spawned` result means the seat can actually be messaged. The
-harness is an enum, not a string, because it reaches an exec. Failure is
+for input — so a `spawned` result means the seat can actually be messaged. A
+harness takes input before it has written the session file herdr reports as its
+identity, so the spawn waits out that gap rather than reading identity once.
+The harness is an enum, not a string, because it reaches an exec. Failure is
 typed rather than thrown: a surface renders it and keeps the operator's draft,
 and a start that fails closes the pane it opened so retries do not accumulate
 empty tabs. The new seat is tracked the moment it exists, the way a `create`
