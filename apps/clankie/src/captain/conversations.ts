@@ -713,14 +713,19 @@ export class ConversationStore {
     const checkpointIds = checkpoint?.entryIds ?? checkpoint?.messageIds ?? [];
     const seen = new Set(checkpoint?.sessionKey === transcript.sessionKey ? checkpointIds : []);
     let latestAgentReply: string | undefined;
+    // A tailing seat re-publishes the same transcript while it works; without
+    // this the checkpoint would be rewritten to disk on every quiet pass.
+    let advanced = false;
     for (const entry of transcript.entries) {
       if (seen.has(entry.id)) continue;
+      advanced = true;
       if (entry.type === "message" && entry.role === "agent") latestAgentReply = entry.text;
       if (entry.type !== "message" || entry.role !== "operator" || !this.matchesRecentSeatSend(meta, entry)) {
         this.append(meta, transcriptEventBody(entry), entry.occurredAt);
       }
       seen.add(entry.id);
     }
+    if (!advanced) return;
     meta.seatTranscript = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);

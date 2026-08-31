@@ -299,6 +299,38 @@ describe("HerdrWatchStore", () => {
     expect(read).not.toHaveBeenCalled();
     store.close();
   });
+
+  it("follows a working pane's transcript instead of waiting for it to settle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-seat-tail-"));
+    roots.push(root);
+    const entries = [
+      { type: "message" as const, id: "claude:a1", role: "agent" as const, text: "Reading the pane." },
+    ];
+    const transcript = vi.fn(() => Promise.resolve({ sessionKey: "session-1", entries: [...entries] }));
+    const project = vi.fn();
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      seatTranscriptTailMs: 5,
+      runner: {
+        get: () => Promise.resolve(working),
+        resolveTerminal: () => Promise.resolve(working),
+        wait: () => new Promise<HerdrAgentSnapshot>(() => undefined),
+        waitForChange: () => new Promise<HerdrAgentSnapshot>(() => undefined),
+        transcript,
+      },
+    });
+    store.start(() => Promise.resolve(), project);
+    store.trackSeat("term-potato");
+
+    await vi.waitFor(() => expect(transcript).toHaveBeenCalled());
+    entries.push({ type: "message", id: "claude:a2", role: "agent", text: "Shipped." });
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenCalledWith("term-potato", {
+        kind: "transcript",
+        transcript: { sessionKey: "session-1", entries },
+      }),
+    );
+    store.close();
+  });
 });
 
 describe("harness-native seat transcripts", () => {

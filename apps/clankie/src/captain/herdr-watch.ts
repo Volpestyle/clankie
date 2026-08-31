@@ -114,6 +114,7 @@ const AGENT_STATUSES = ["idle", "working", "blocked", "done", "unknown"] as cons
 const RETRY_ADMISSION_MS = 5_000;
 const HERDR_COMMAND_TIMEOUT_MS = 5_000;
 const SEAT_REPLY_READ_LINES = 240;
+const SEAT_TRANSCRIPT_TAIL_MS = 1_000;
 const PI_ZONE_START = "\u001B]133;A\u0007";
 const PI_ZONE_END = "\u001B]133;B\u0007\u001B]133;C\u0007";
 
@@ -308,6 +309,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
   private readonly summariesPath: string;
   private readonly summaryWatchIntervalMs: number;
+  private readonly seatTranscriptTailMs: number;
   private state: PersistedHerdrWatches;
   private wake: InternalWake | undefined;
   private projectSeat: ProjectSeat | undefined;
@@ -321,12 +323,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly runner?: HerdrWatchRunner;
       readonly summariesPath?: string;
       readonly summaryWatchIntervalMs?: number;
+      readonly seatTranscriptTailMs?: number;
     } = {},
   ) {
     this.path = path;
     this.runner = options.runner ?? defaultRunner();
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
+    this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;
     this.state = this.read();
   }
 
@@ -538,7 +542,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           current.status === "working" && current.agent === "pi"
             ? await this.readSeatReply(current, "visible")
             : undefined;
-        const changed = await this.runner.waitForChange(current.paneId, current.status, signal);
+        const changed = await this.followTranscript(
+          seatId,
+          current,
+          this.runner.waitForChange(current.paneId, current.status, signal),
+          signal,
+        );
         if (current.status === "working" && REPLY_STATUSES.has(changed.status)) {
           const changedHasTranscript = await this.publishSeatTranscript(seatId, changed);
           const reply = changedHasTranscript
@@ -557,6 +566,30 @@ export class HerdrWatchStore implements HerdrWatchPort {
         await delay(RETRY_ADMISSION_MS);
       }
     }
+  }
+
+  /**
+   * Re-read the harness transcript while the pane works, so every message and
+   * tool call reaches the app as it lands instead of only when the pane
+   * settles. The registry drops entries it already holds, so a re-publish that
+   * saw no new output costs nothing downstream.
+   */
+  // ponytail: a fixed tail poll re-parses the whole session file; watch the
+  // harness path instead if a long session makes the re-parse show up.
+  private async followTranscript(
+    seatId: string,
+    current: HerdrAgentSnapshot,
+    changed: Promise<HerdrAgentSnapshot>,
+    signal: AbortSignal,
+  ): Promise<HerdrAgentSnapshot> {
+    if (current.status !== "working" || !this.transcriptSeats.has(seatId)) return changed;
+    const tick = Symbol("tail");
+    while (!signal.aborted) {
+      const settled = await Promise.race([changed, delay(this.seatTranscriptTailMs).then(() => tick)]);
+      if (typeof settled !== "symbol") return settled;
+      await this.publishSeatTranscript(seatId, current);
+    }
+    return changed;
   }
 
   private async publishSeatTranscript(seatId: string, agent: HerdrAgentSnapshot): Promise<boolean> {

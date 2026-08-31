@@ -152,10 +152,12 @@ projection_, built from signals the service already has:
   the durable log; the short row stays compact while every surface can expand
   the typed `tool.detail`. Injected instructions and reasoning never enter the
   public stream. Raw PTY parsing remains outside this lane.
-- Stable native entry ids checkpoint each session. Re-reading on status
-  changes is idempotent, the subject binding keeps a replacement session on the
-  durable persona, and the first native import replaces the old one-answer seed
-  behind a typed cursor-recovery boundary.
+- Stable native entry ids checkpoint each session. A working pane's session
+  tree is re-read on a short tail as well as on status changes, so each message
+  and tool call reaches the thread while the agent is still working rather than
+  when it settles. Re-reading is idempotent, the subject binding keeps a
+  replacement session on the durable persona, and the first native import
+  replaces the old one-answer seed behind a typed cursor-recovery boundary.
 - A harness without a native transcript normalizer retains the bounded
   summary/final-answer projection. Adding its normalizer upgrades the same
   conversation without changing the relay or app.
