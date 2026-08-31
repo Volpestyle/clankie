@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CaptainSettingsSchema,
   DiscordSettingsSchema,
   EmailSettingsSchema,
   GameplaySettingsSchema,
+  HerdrSettingsSchema,
   McpServerSchema,
   VoiceSettingsSchema,
   applyDiscordSettingsToEnvironment,
@@ -27,6 +29,16 @@ async function tempStore(): Promise<SettingsStore> {
 }
 
 describe("settings store", () => {
+  it("defaults the herdr binding to herdr's own default session (ADR 0149)", () => {
+    expect(emptySettings().herdr).toEqual({ session: "default" });
+    expect(emptySettings().captain).toEqual({});
+    expect(HerdrSettingsSchema.parse({ session: "clankies" })).toEqual({ session: "clankies" });
+    expect(() => HerdrSettingsSchema.parse({ session: "no spaces" })).toThrow();
+    expect(CaptainSettingsSchema.parse({ workingDirectory: "/Users/op" })).toEqual({
+      workingDirectory: "/Users/op",
+    });
+  });
+
   it("enables PokeAgent play by default and lets the owner turn it off", () => {
     expect(GameplaySettingsSchema.parse({})).toEqual({ pokeagentMmoEnabled: true });
     expect(GameplaySettingsSchema.parse({ pokeagentMmoEnabled: false })).toEqual({

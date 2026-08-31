@@ -87,7 +87,7 @@ export interface InstallDoctorReport {
  * name a provider that is unreachable, a model the endpoint does not serve, or
  * an endpoint that wants a key nothing has stored.
  */
-export interface SelectedModelReport {
+interface SelectedModelReport {
   readonly ref: string;
   readonly providerId: string;
   readonly modelId: string;

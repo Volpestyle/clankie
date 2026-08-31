@@ -82,8 +82,11 @@ describe("Discord text readiness", () => {
                       name: "private-guild-must-not-appear",
                       roles: [
                         { id: env.DISCORD_SWARM_GUILD_ID, permissions: "0" },
-                        // Manage Channels (1<<4) plus Manage Webhooks (1<<29).
-                        { id: "666666666666666666", permissions: String((1n << 4n) | (1n << 29n)) },
+                        // Manage Channels, Manage Webhooks, and Send Messages.
+                        {
+                          id: "666666666666666666",
+                          permissions: String((1n << 4n) | (1n << 29n) | (1n << 11n)),
+                        },
                       ],
                     }
                   : { user: { username: "private-user-must-not-appear" } },

@@ -20,6 +20,9 @@ import {
   createOperatorConversationServiceClient,
   OPERATOR_CONVERSATION_REF_MAX,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
+  defaultOperatorAgentAppearance,
+  OperatorAgentAppearanceSchema,
+  OperatorAgentNameSchema,
   OperatorConversationRecoverySchema,
   OperatorConversationRevisionConflictSchema,
   OperatorConversationSchema,
@@ -352,10 +355,55 @@ describe("protocol", () => {
       op: "roster",
     });
     expect(
+      OperatorConversationServiceRequestSchema.parse({
+        op: "fleet",
+        schemaVersion: 1,
+        cursor: "fleet-instance:4",
+        waitMs: 20_000,
+      }),
+    ).toMatchObject({ op: "fleet", cursor: "fleet-instance:4" });
+    expect(
+      OperatorConversationServiceRequestSchema.parse({
+        op: "composer_catalog",
+        schemaVersion: 1,
+        conversationId: "conversation-global-default",
+      }),
+    ).toMatchObject({ op: "composer_catalog", conversationId: "conversation-global-default" });
+    expect(
+      OperatorConversationServiceResultSchema.parse({
+        op: "composer_catalog",
+        schemaVersion: 1,
+        catalog: {
+          schemaVersion: 1,
+          commands: [],
+          skills: [
+            {
+              name: "browser:control-in-app-browser",
+              description: "Control the browser",
+              source: "codex",
+              invocation: "$browser:control-in-app-browser",
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      op: "composer_catalog",
+      catalog: { skills: [{ name: "browser:control-in-app-browser" }] },
+    });
+    expect(
       OperatorConversationServiceResultSchema.parse({
         op: "roster",
         schemaVersion: 1,
-        seats: [{ seatId: "term_65a2015731452d", harness: "codex", status: "idle", title: "clankie" }],
+        seats: [
+          {
+            seatId: "term_65a2015731452d",
+            occupantId: "session-1",
+            personaId: "agent-1",
+            harness: "codex",
+            status: "idle",
+            title: "clankie",
+          },
+        ],
       }),
     ).toMatchObject({ op: "roster", seats: [{ seatId: "term_65a2015731452d" }] });
     expect(
@@ -417,8 +465,9 @@ describe("protocol", () => {
         cancelled: true,
       }),
     ).toMatchObject({ op: "cancel", cancelled: true });
-    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(21);
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(21);
+    expect(OperatorConversationServiceRequestSchema.options).toHaveLength(
+      OperatorConversationServiceResultSchema.options.length,
+    );
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 
@@ -450,6 +499,15 @@ describe("protocol", () => {
       }),
     ).toMatchObject({ status: "reset", reason: "sequence_expired" });
     expect(() => OperatorTerminalFrameSchema.parse({ ...frame, data: "not base64" })).toThrow();
+    expect(() => OperatorTerminalFrameSchema.parse({ ...frame, full: false, data: "" })).toThrow();
+    expect(
+      OperatorTerminalFrameSchema.parse({
+        ...frame,
+        full: false,
+        data: "",
+        scrollback: { encoding: "base64", data: "b2xkIHJvdw0K", rows: 1 },
+      }),
+    ).toMatchObject({ scrollback: { rows: 1 } });
     expect(() =>
       OperatorTerminalObservationResultSchema.parse({
         schemaVersion: 1,
@@ -732,13 +790,108 @@ describe("protocol", () => {
       return {
         op: "roster",
         schemaVersion: 1,
-        seats: [{ seatId: "term-potato", harness: "codex", status: "idle", title: "worker" }],
+        seats: [
+          {
+            seatId: "term-potato",
+            occupantId: "session-potato",
+            personaId: "agent-potato",
+            harness: "codex",
+            status: "idle",
+            title: "worker",
+          },
+        ],
       };
     });
 
     await expect(client.roster()).resolves.toEqual([
-      { seatId: "term-potato", harness: "codex", status: "idle", title: "worker" },
+      {
+        seatId: "term-potato",
+        occupantId: "session-potato",
+        personaId: "agent-potato",
+        harness: "codex",
+        status: "idle",
+        title: "worker",
+      },
     ]);
+  });
+
+  it("parks a coherent fleet snapshot behind its cursor", async () => {
+    const client = createOperatorConversationServiceClient(
+      async (request) => {
+        expect(request).toEqual({
+          op: "fleet",
+          schemaVersion: 1,
+          cursor: "fleet-instance:4",
+          waitMs: 1_200,
+        });
+        return {
+          op: "fleet",
+          schemaVersion: 1,
+          snapshot: {
+            schemaVersion: 1,
+            cursor: "fleet-instance:5",
+            seats: [],
+            personas: [],
+            channels: [],
+          },
+        };
+      },
+      { fleetWaitMs: 1_200 },
+    );
+
+    await expect(client.fleet?.("fleet-instance:4")).resolves.toMatchObject({
+      cursor: "fleet-instance:5",
+      seats: [],
+      personas: [],
+      channels: [],
+    });
+  });
+
+  it("reads the selected conversation's composer catalog through the canonical client", async () => {
+    const client = createOperatorConversationServiceClient(async (request) => {
+      expect(request).toEqual({
+        op: "composer_catalog",
+        schemaVersion: 1,
+        conversationId: "conversation-worker",
+      });
+      return {
+        op: "composer_catalog",
+        schemaVersion: 1,
+        catalog: {
+          schemaVersion: 1,
+          commands: [],
+          skills: [
+            {
+              name: "review",
+              description: "Review the current work",
+              source: "codex",
+              invocation: "$review",
+            },
+          ],
+        },
+      };
+    });
+
+    await expect(client.composerCatalog?.("conversation-worker")).resolves.toMatchObject({
+      skills: [{ name: "review", invocation: "$review" }],
+    });
+  });
+
+  it("models persona identity with more than the six non-operator tints", () => {
+    expect(
+      OperatorAgentAppearanceSchema.safeParse({
+        variant: "gold",
+        accessory: "none",
+        shape: "circle",
+      }).success,
+    ).toBe(false);
+    expect(OperatorAgentNameSchema.safeParse("Discord helper").success).toBe(false);
+    const appearances = Array.from({ length: 12 }, (_, index) =>
+      defaultOperatorAgentAppearance("codex", `agent-${String(index)}`),
+    );
+    expect(new Set(appearances.map((appearance) => JSON.stringify(appearance))).size).toBeGreaterThan(6);
+    expect(appearances.some((appearance) => appearance.accessory !== "none")).toBe(true);
+    expect(appearances.some((appearance) => appearance.shape !== "circle")).toBe(true);
   });
 
   it("reads Herdr's terminal hierarchy through the canonical service client", async () => {

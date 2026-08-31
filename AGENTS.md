@@ -37,6 +37,8 @@ service (`apps/clankie`) plus the surfaces that reach it.
 - Project planning and issue tracking live in the [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview).
 - Match the surrounding code. Run the narrowest relevant check first, then
   `pnpm check` before handoff.
+- Build every feature API- and CLI-first, expose any settings it needs in the
+  TUI, and update the relevant agent-facing skill and human-facing docs.
 - The repository is Apache-2.0 except `apps/vox`, which retains its own
   AGPL-3.0-or-later license and provenance record.
 - The credential broker (Keychain on macOS) is the canonical secret store.

@@ -1,6 +1,7 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
+import { promisify } from "node:util";
 import {
   OPERATOR_TERMINAL_FRAME_BASE64_MAX,
   OperatorTerminalFrameSchema,
@@ -10,6 +11,7 @@ import {
   type OperatorTerminalObservationUnavailable,
 } from "@clankie/protocol";
 import { z } from "zod";
+import { readTerminalGrid, type HerdrPaneGrid } from "./herdr-census.ts";
 
 const DEFAULT_COLUMNS = 120;
 const DEFAULT_ROWS = 40;
@@ -18,6 +20,12 @@ const DEFAULT_WAIT_MS = 250;
 const DEFAULT_IDLE_MS = 30_000;
 const DEFAULT_MAX_SESSIONS = 64;
 const DEFAULT_MAX_FRAMES = 256;
+const HISTORY_LINES = 1_000;
+const HERDR_READ_TIMEOUT_MS = 5_000;
+const SCROLLBACK_QUIET_MS = 150;
+const SCROLLBACK_MAX_LATENCY_MS = 1_000;
+
+const execFileAsync = promisify(execFile);
 
 type UnavailableReason = OperatorTerminalObservationUnavailable["reason"];
 
@@ -48,6 +56,9 @@ export type StartHerdrTerminalObserver = (
   rows: number,
 ) => HerdrTerminalObserver;
 
+export type ReadHerdrTerminalGrid = (terminalId: string) => Promise<HerdrPaneGrid | undefined>;
+export type ReadHerdrTerminalHistory = (paneId: string) => Promise<string | undefined>;
+
 /**
  * Bounded per-native-surface terminal observers. Herdr owns VT rendering; this
  * store only retains enough sequenced ANSI frames to bridge relay tail polls.
@@ -55,6 +66,10 @@ export type StartHerdrTerminalObserver = (
 export class HerdrTerminalStore {
   private readonly sessions = new Map<string, TerminalSession>();
   private readonly startObserver: StartHerdrTerminalObserver;
+  private readonly readGrid: ReadHerdrTerminalGrid;
+  private readonly readHistory: ReadHerdrTerminalHistory;
+  private readonly scrollbackQuietMs: number;
+  private readonly scrollbackMaxLatencyMs: number;
   private readonly waitMs: number;
   private readonly idleMs: number;
   private readonly maxSessions: number;
@@ -63,6 +78,10 @@ export class HerdrTerminalStore {
   public constructor(
     options: {
       readonly startObserver?: StartHerdrTerminalObserver;
+      readonly readGrid?: ReadHerdrTerminalGrid;
+      readonly readHistory?: ReadHerdrTerminalHistory;
+      readonly scrollbackQuietMs?: number;
+      readonly scrollbackMaxLatencyMs?: number;
       readonly waitMs?: number;
       readonly idleMs?: number;
       readonly maxSessions?: number;
@@ -70,6 +89,10 @@ export class HerdrTerminalStore {
     } = {},
   ) {
     this.startObserver = options.startObserver ?? startHerdrTerminalObserver;
+    this.readGrid = options.readGrid ?? ((terminalId) => readTerminalGrid(terminalId));
+    this.readHistory = options.readHistory ?? readHerdrTerminalHistory;
+    this.scrollbackQuietMs = options.scrollbackQuietMs ?? SCROLLBACK_QUIET_MS;
+    this.scrollbackMaxLatencyMs = options.scrollbackMaxLatencyMs ?? SCROLLBACK_MAX_LATENCY_MS;
     this.waitMs = options.waitMs ?? DEFAULT_WAIT_MS;
     this.idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
@@ -78,11 +101,19 @@ export class HerdrTerminalStore {
 
   public async tail(request: OperatorTerminalObservationRequest): Promise<OperatorTerminalObservationResult> {
     const key = sessionKey(request);
-    const columns = request.columns ?? DEFAULT_COLUMNS;
-    const rows = request.rows ?? DEFAULT_ROWS;
     let session = this.sessions.get(key);
 
     if (request.cursor === undefined) {
+      // Observe at the pane's own grid, not the surface's viewport. Herdr renders
+      // a pane cropped into whatever area an observer asks for, so asking for a
+      // phone's width truncates every line the pane wrapped at its real width.
+      // The surface fits the frame it is handed instead (see the frame's own
+      // columns/rows). Falls back to the surface's request when Herdr cannot
+      // report the grid.
+      const grid = await this.readGrid(request.terminalId);
+      const columns = grid?.columns ?? request.columns ?? DEFAULT_COLUMNS;
+      const rows = grid?.rows ?? request.rows ?? DEFAULT_ROWS;
+      const history = grid?.paneId === undefined ? undefined : await this.readHistory(grid.paneId);
       session?.close();
       this.sessions.delete(key);
       this.admit();
@@ -93,6 +124,15 @@ export class HerdrTerminalStore {
           columns,
           rows,
           observer: this.startObserver(request.terminalId, columns, rows),
+          ...(history === undefined ? {} : { history }),
+          ...(grid?.paneId === undefined
+            ? {}
+            : {
+                paneId: grid.paneId,
+                readHistory: this.readHistory,
+                scrollbackQuietMs: this.scrollbackQuietMs,
+                scrollbackMaxLatencyMs: this.scrollbackMaxLatencyMs,
+              }),
           idleMs: this.idleMs,
           maxFrames: this.maxFrames,
           onIdle: () => {
@@ -103,12 +143,10 @@ export class HerdrTerminalStore {
         return unavailable(request, "herdr_unavailable");
       }
       this.sessions.set(key, session);
-    } else if (
-      session === undefined ||
-      session.streamId !== request.cursor.streamId ||
-      session.columns !== columns ||
-      session.rows !== rows
-    ) {
+      // A surface resize no longer invalidates the stream: the frame geometry is
+      // the pane's, and the surface refits it. The stream does go stale if the
+      // pane itself is resized mid-observation; it heals on the next reconnect.
+    } else if (session === undefined || session.streamId !== request.cursor.streamId) {
       return {
         schemaVersion: 1,
         status: "reset",
@@ -149,15 +187,25 @@ class TerminalSession {
   private readonly terminalId: string;
   private readonly surfaceClientId: string;
   private readonly observer: HerdrTerminalObserver;
+  private readonly paneId: string | undefined;
+  private readonly readHistory: ReadHerdrTerminalHistory | undefined;
+  private readonly scrollbackQuietMs: number;
+  private readonly scrollbackMaxLatencyMs: number;
+  private history: string | undefined;
+  private historyRows: string[];
   private readonly idleMs: number;
   private readonly maxFrames: number;
   private readonly onIdle: () => void;
   private readonly frames: OperatorTerminalFrame[] = [];
   private readonly listeners = new Set<() => void>();
   private retainedBytes = 0;
+  private lastObserverSequence = 0;
   private lastSequence = 0;
   private ended: UnavailableReason | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  private scrollbackTimer: ReturnType<typeof setTimeout> | undefined;
+  private scrollbackDirtySince: number | undefined;
+  private refreshingScrollback = false;
 
   public constructor(options: {
     readonly terminalId: string;
@@ -165,6 +213,11 @@ class TerminalSession {
     readonly columns: number;
     readonly rows: number;
     readonly observer: HerdrTerminalObserver;
+    readonly history?: string;
+    readonly paneId?: string;
+    readonly readHistory?: ReadHerdrTerminalHistory;
+    readonly scrollbackQuietMs?: number;
+    readonly scrollbackMaxLatencyMs?: number;
     readonly idleMs: number;
     readonly maxFrames: number;
     readonly onIdle: () => void;
@@ -174,6 +227,12 @@ class TerminalSession {
     this.columns = options.columns;
     this.rows = options.rows;
     this.observer = options.observer;
+    this.history = options.history;
+    this.historyRows = historyRows(options.history, options.rows);
+    this.paneId = options.paneId;
+    this.readHistory = options.readHistory;
+    this.scrollbackQuietMs = options.scrollbackQuietMs ?? SCROLLBACK_QUIET_MS;
+    this.scrollbackMaxLatencyMs = options.scrollbackMaxLatencyMs ?? SCROLLBACK_MAX_LATENCY_MS;
     this.idleMs = options.idleMs;
     this.maxFrames = options.maxFrames;
     this.onIdle = options.onIdle;
@@ -204,6 +263,7 @@ class TerminalSession {
 
   public close(): void {
     if (this.idleTimer !== undefined) clearTimeout(this.idleTimer);
+    if (this.scrollbackTimer !== undefined) clearTimeout(this.scrollbackTimer);
     this.observer.close();
     this.finish("observer_closed");
   }
@@ -235,7 +295,7 @@ class TerminalSession {
           schemaVersion: 1,
           type: "terminal.frame",
           terminalId: this.terminalId,
-          sequence: parsed.data.seq,
+          sequence: this.lastSequence + 1,
           encoding: "base64",
           data: parsed.data.bytes,
           columns: parsed.data.width,
@@ -244,23 +304,26 @@ class TerminalSession {
         });
         if (
           !frame.success ||
-          frame.data.sequence !== this.lastSequence + 1 ||
-          (this.lastSequence === 0 && !frame.data.full)
+          parsed.data.seq !== this.lastObserverSequence + 1 ||
+          (this.lastObserverSequence === 0 && !frame.data.full)
         ) {
           this.finish("invalid_frame");
           return;
         }
-        this.frames.push(frame.data);
-        this.lastSequence = frame.data.sequence;
-        this.retainedBytes += frame.data.data.length;
-        while (
-          this.frames.length > this.maxFrames ||
-          (this.retainedBytes > OPERATOR_TERMINAL_FRAME_BASE64_MAX && this.frames.length > 1)
-        ) {
-          const removed = this.frames.shift();
-          if (removed !== undefined) this.retainedBytes -= removed.data.length;
+        let accepted = frame.data;
+        if (this.lastObserverSequence === 0 && this.history !== undefined) {
+          const seeded = OperatorTerminalFrameSchema.safeParse({
+            ...frame.data,
+            data: Buffer.concat([Buffer.from(this.history), Buffer.from(frame.data.data, "base64")]).toString(
+              "base64",
+            ),
+          });
+          if (seeded.success) accepted = seeded.data;
+          this.history = undefined;
         }
-        this.wake();
+        this.lastObserverSequence = parsed.data.seq;
+        this.appendFrame(accepted);
+        this.scheduleScrollbackRefresh();
       }
       this.finish(await this.observer.done);
     } catch {
@@ -268,6 +331,88 @@ class TerminalSession {
     } finally {
       this.observer.close();
     }
+  }
+
+  private scheduleScrollbackRefresh(): void {
+    if (this.paneId === undefined || this.readHistory === undefined || this.ended !== undefined) return;
+    const now = Date.now();
+    this.scrollbackDirtySince ??= now;
+    if (this.scrollbackTimer !== undefined) clearTimeout(this.scrollbackTimer);
+    const maxDelay = Math.max(0, this.scrollbackMaxLatencyMs - (now - this.scrollbackDirtySince));
+    this.scrollbackTimer = setTimeout(
+      () => {
+        this.scrollbackTimer = undefined;
+        void this.refreshScrollback();
+      },
+      Math.min(this.scrollbackQuietMs, maxDelay),
+    );
+    this.scrollbackTimer.unref?.();
+  }
+
+  private async refreshScrollback(): Promise<void> {
+    if (this.refreshingScrollback) return;
+    const paneId = this.paneId;
+    const read = this.readHistory;
+    if (paneId === undefined || read === undefined) return;
+    this.refreshingScrollback = true;
+    this.scrollbackDirtySince = undefined;
+    try {
+      const snapshot = await read(paneId);
+      if (snapshot === undefined) return;
+      const next = historyRows(snapshot, this.rows);
+      const overlap = suffixPrefixOverlap(this.historyRows, next);
+      const appended = next.slice(overlap);
+      if (this.historyRows.length > 0 && overlap === 0) {
+        this.appendSyntheticFrame(Buffer.from("\u001b[3J").toString("base64"));
+      }
+      if (appended.length > 0) {
+        this.appendSyntheticFrame("", {
+          encoding: "base64",
+          data: Buffer.from(`${appended.join("\r\n")}\r\n`).toString("base64"),
+          rows: appended.length,
+        });
+      }
+      this.historyRows = next;
+    } finally {
+      this.refreshingScrollback = false;
+      if (this.scrollbackDirtySince !== undefined) this.scheduleScrollbackRefresh();
+    }
+  }
+
+  private appendSyntheticFrame(
+    data: string,
+    scrollback?: { readonly encoding: "base64"; readonly data: string; readonly rows: number },
+  ): void {
+    if (this.ended !== undefined) return;
+    const parsed = OperatorTerminalFrameSchema.safeParse({
+      schemaVersion: 1,
+      type: "terminal.frame",
+      terminalId: this.terminalId,
+      sequence: this.lastSequence + 1,
+      encoding: "base64",
+      data,
+      columns: this.columns,
+      rows: this.rows,
+      full: false,
+      ...(scrollback === undefined ? {} : { scrollback }),
+    });
+    if (parsed.success) this.appendFrame(parsed.data);
+  }
+
+  private appendFrame(frame: OperatorTerminalFrame): void {
+    this.frames.push(frame);
+    this.lastSequence = frame.sequence;
+    this.retainedBytes += frame.data.length + (frame.scrollback?.data.length ?? 0);
+    while (
+      this.frames.length > this.maxFrames ||
+      (this.retainedBytes > OPERATOR_TERMINAL_FRAME_BASE64_MAX && this.frames.length > 1)
+    ) {
+      const removed = this.frames.shift();
+      if (removed !== undefined) {
+        this.retainedBytes -= removed.data.length + (removed.scrollback?.data.length ?? 0);
+      }
+    }
+    this.wake();
   }
 
   private page(afterSequence: number, limit: number): OperatorTerminalObservationResult | undefined {
@@ -281,9 +426,10 @@ class TerminalSession {
     let bytes = 0;
     for (const frame of this.frames) {
       if (frame.sequence <= afterSequence) continue;
-      if (frames.length >= limit || bytes + frame.data.length > OPERATOR_TERMINAL_FRAME_BASE64_MAX) break;
+      const frameBytes = frame.data.length + (frame.scrollback?.data.length ?? 0);
+      if (frames.length >= limit || bytes + frameBytes > OPERATOR_TERMINAL_FRAME_BASE64_MAX) break;
       frames.push(frame);
-      bytes += frame.data.length;
+      bytes += frameBytes;
     }
     if (frames.length === 0) return undefined;
     const sequence = frames.at(-1)?.sequence ?? afterSequence;
@@ -332,6 +478,7 @@ class TerminalSession {
   private finish(reason: UnavailableReason): void {
     if (this.ended !== undefined) return;
     this.ended = reason;
+    if (this.scrollbackTimer !== undefined) clearTimeout(this.scrollbackTimer);
     this.wake();
   }
 
@@ -376,6 +523,43 @@ function startHerdrTerminalObserver(
       if (child.exitCode === null && child.signalCode === null) child.kill();
     },
   };
+}
+
+async function readHerdrTerminalHistory(paneId: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "herdr",
+      ["pane", "read", paneId, "--source", "recent", "--lines", String(HISTORY_LINES), "--raw"],
+      { timeout: HERDR_READ_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
+    );
+    return String(stdout);
+  } catch {
+    return undefined;
+  }
+}
+
+function historyRows(snapshot: string | undefined, viewportRows: number): string[] {
+  if (snapshot === undefined) return [];
+  const rendered = snapshot.split(/\r\n|\n|\r/u);
+  if (rendered.at(-1) === "") rendered.pop();
+  return rendered.slice(0, Math.max(0, rendered.length - viewportRows));
+}
+
+function suffixPrefixOverlap(previous: readonly string[], next: readonly string[]): number {
+  // ponytail: quadratic scan is bounded by vanilla Herdr's 1,000-row read;
+  // replace with KMP only if profiles show this quiet-path comparison matters.
+  const maximum = Math.min(previous.length, next.length);
+  for (let length = maximum; length > 0; length -= 1) {
+    let matches = true;
+    for (let index = 0; index < length; index += 1) {
+      if (previous[previous.length - length + index] !== next[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return length;
+  }
+  return 0;
 }
 
 function sessionKey(request: OperatorTerminalObservationRequest): string {

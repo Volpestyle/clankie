@@ -11,6 +11,55 @@ afterEach(async () => {
 });
 
 describe("seat conversations", () => {
+  it("keeps an offline persona distinct from the Herdr seat it does not have", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-persona-conversation-"));
+    roots.push(root);
+    const sendToSeat = vi.fn(() => Promise.resolve(true));
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      sendToSeat,
+      undefined,
+      undefined,
+      undefined,
+      () => undefined,
+    );
+    const created = await store.serve({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "persona", personaId: "agent-durable" },
+      title: "Durable agent",
+    });
+    if (created.op !== "create") throw new Error("create expected");
+    store.renamePersona("agent-durable", "Atlas");
+    const renamed = await store.serve({
+      op: "get",
+      schemaVersion: 1,
+      conversationId: created.conversation.conversationId,
+    });
+    expect(renamed.op === "get" ? renamed.conversation?.title : undefined).toBe("Atlas");
+
+    const sent = await store.serve({
+      op: "send",
+      schemaVersion: 1,
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: created.conversation.conversationId,
+        surfaceClientId: "ios",
+        expectedRevision: 0,
+        message: "Are you there?",
+      },
+    });
+    expect(sent.op === "send" ? sent.result : undefined).toMatchObject({
+      status: "seat_offline",
+      personaId: "agent-durable",
+    });
+    expect(sent.op === "send" ? sent.result : undefined).not.toHaveProperty("seatId");
+    expect(sendToSeat).not.toHaveBeenCalled();
+  });
+
   it("creates one thread per seat, delivers directly, rejects offline, and replays projections", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-seat-conversation-"));
     roots.push(root);

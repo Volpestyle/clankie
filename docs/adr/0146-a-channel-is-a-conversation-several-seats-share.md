@@ -1,18 +1,19 @@
-# ADR 0146: A channel is a conversation several seats share
+# ADR 0146: A channel is a conversation several agents share
 
 Status: accepted (James, 2026-08-30). Extends
-[ADR 0135](0135-a-herdr-seat-is-a-conversation.md) — a seat stays a
-conversation; a channel is a conversation several seats share. Inherits the
+[ADR 0135](0135-a-herdr-seat-is-a-conversation.md) and
+[ADR 0147](0147-an-agent-persona-outlives-its-herdr-seat.md) — a persona keeps
+one direct conversation; a channel is a conversation several personas share. Inherits the
 Discord identity boundary from [ADR 0024](0024-discord-dual-plane-presence.md)
 and [ADR 0048](0048-discord-user-session-transport.md). Built on 0135's native
 harness transcript, which is how a member's reply reaches the round.
 
 ## Context
 
-ADR 0135 gave every herdr seat a durable DM thread. The operator can talk to any
+ADR 0135 gives every Herdr agent persona a durable DM thread. The operator can talk to any
 agent, and each agent can answer — but only ever one at a time, and only ever to
 the operator. `OperatorConversationScopeSchema` is a closed union of `global`,
-`workspace`, and `seat`, and `create()` takes exactly one scope, so a
+`workspace`, `persona`, and legacy `seat`, and `create()` takes exactly one scope, so a
 conversation has exactly one counterpart by construction. There is no way for
 three agents working the same problem to be in a room together, and no way for
 one of them to read what another already said.
@@ -40,7 +41,7 @@ join and leave without the conversation changing identity. One shared transcript
 every member reads all of it and writes into it, and the operator is a member
 like any other participant.
 
-A seat conversation is unchanged. A channel is not a new kind of thing — it is
+A persona conversation is unchanged. A channel is not a new kind of thing — it is
 the same conversation record with more than one counterpart.
 
 ### Replies are emergent, not routed
@@ -110,7 +111,35 @@ carry reactions for free, and no surface keeps a second copy that can drift.
 
 A Clankie channel may be projected into a guild. It is the _same_ conversation:
 the same transcript, the same members, the same turn-taking. Discord renders and
-participates; it does not own anything.
+participates; it does not own anything. The conversation event log on the
+Clankie host is the one source of truth. The app consumes that log directly;
+Discord sends operator messages into it and receives agent and app-originated
+messages as a projection. Both surfaces synchronize through the host; they
+never reconcile two peer transcripts.
+
+```mermaid
+flowchart LR
+  subgraph host[Clankie host — canonical state]
+    solo[Solo Clankie conversation]
+    room[Shared channel event log]
+    agents[Herdr agent personas]
+    agents <--> room
+  end
+
+  app[Clankie app Messaging UI] <--> room
+
+  subgraph inhabited[Inhabited Discord server]
+    ordinary[Ordinary channel]
+  end
+  ordinary <-->|solo ingress / presence| solo
+
+  subgraph swarm[Explicit swarm home]
+    forum[Forum container]
+    post[One post / thread per Clankie room]
+    forum --> post
+  end
+  post <-->|same conversation| room
+```
 
 - **Reads** ride the existing bot gateway — one connection, already receiving
   messages, mentions, `typing_start`, and reactions. The bridge does not hold a
@@ -118,7 +147,7 @@ participates; it does not own anything.
   channel is projected, so it offers each message to the service and the service
   answers whether it took it. A message nothing is projected onto comes straight
   back, so a guild Clankie merely reads is unaffected by channels existing.
-- **Who may speak** from Discord is decided on the bridge, which is the seat that
+- **Who may speak** from Discord is decided on the bridge, which is the boundary that
   knows who sent a message, and only the operator drives a round. A channel is a
   fan-out amplifier, so a guild member who can get an answer out of Clankie must
   not thereby get a turn out of every agent in a room; anyone else's message
@@ -132,8 +161,14 @@ participates; it does not own anything.
 - **Reactions** are performed by the bot, which already carries `react` and
   `unreact` in `DiscordCaptainActionInputSchema`.
 
-Agent avatars come from the pixel variant the app already renders per harness,
-so an agent wears the same face in Discord that it wears in the commons.
+Agent names and appearance tuples are host-owned persona state. The app bakes
+the exact `variant × accessory × shape` face it renders into a PNG when a
+persona is discovered or edited. Gold remains reserved for the operator. The
+host validates the PNG and exposes it under a SHA-256 content-hashed filename on
+the existing public Activity origin. `avatar_url` is therefore a reachable
+HTTPS URL, not a data URI or local asset, and a changed hash bypasses Discord's
+server-side avatar cache. Discord and the app read the same persona record and
+the same conversation log; neither keeps a peer identity or transcript store.
 
 ### Identity is webhooks, and this is not negotiable
 
@@ -141,7 +176,7 @@ Each agent appearing as its own Discord user must not mean a real user account
 per agent. ADR 0048 already treats _one_ automated user account as an accepted
 ToS risk that is off by default; N of them is N violations, and the risk is the
 account owner's. It must also not mean a bot application per agent — legitimate,
-but a registration, a token, and an invite for every seat is exactly the
+but a registration, a token, and an invite for every agent is exactly the
 un-ergonomic setup this feature exists to avoid.
 
 Webhooks give N apparent participants from one per-channel credential, entirely
@@ -154,10 +189,15 @@ room, and a feature whose point is that rooms are cheap to make cannot cost that
 each time.
 
 Which room a channel lands in is therefore a pick, not a paste: the swarm home's
-own channel list is offered, with a new channel as the default. Text and
-announcement channels are what that list holds, because those are what a webhook
-posts into; forums and threads are not modelled here, and hosting a room inside
-one would be its own decision. The list is read only when the operator opens the
+own channel list is offered, with a new text channel as the default. A text or
+announcement channel carries the room directly. A forum is a container, so
+selecting one creates a new forum post whose thread carries the room. The
+webhook belongs to the parent forum and every persona post names the thread id;
+inbound Discord messages arrive with that same thread id and route back into the
+canonical conversation. Several Clankie rooms may therefore share one forum
+without sharing identity. Forums configured to require a tag stay out of the
+picker because projecting without an explicit tag choice would fail or assign
+meaning the operator did not choose. The list is read only when the operator opens the
 choice, so a room that never goes to Discord never costs a call to it, and a
 guild Clankie cannot read is an empty picker rather than an error — the
 new-channel path still works.
@@ -176,7 +216,7 @@ Those are different relationships and they get different fields.
 
 `swarmGuildId` names the **swarm home**: the one guild his agents may be given
 rooms in. Every other guild he is in is one he **inhabits** — he reads it,
-talks in it, joins its voice — and no path puts a herdr seat in it. The ingress,
+talks in it, joins its voice — and no path puts his fleet in it. The ingress,
 presence, and voice allowlists are about inhabiting, and say nothing about
 where rooms may go; `guildId` is the command and live-proof server, a third
 thing again. None of them answer for the swarm home, and the swarm home is
@@ -193,6 +233,9 @@ Pasting a webhook URL stays as the second path, for when Clankie lacks
 `Manage Webhooks` in the swarm home and the owner makes one there by hand. It is
 a fallback within that server, never a way out of it: a URL resolving to any
 other guild is refused, and with no swarm home set neither path projects at all.
+Because a webhook on a forum identifies only the parent and not a post, a pasted
+forum webhook is refused; selecting the forum in the picker supplies the missing
+post identity safely.
 Either way the host keeps the token half and the operator boundary carries only
 the webhook id, so the credential that can post never leaves the machine.
 
@@ -201,11 +244,12 @@ rooms rather than trusted. The grant is guild-scoped, so an id from a guild he
 only inhabits would otherwise reach a room the swarm fence was supposed to be
 the whole of.
 
-One Clankie channel per guild room, and the claim is checked before Discord is
-touched. Inbound guild text finds its channel by looking up the room it arrived
-in, so a second channel bound to the same room would take delivery from the
-first — arbitrarily, and silently. Threads would be the way to put two rooms in
-one channel; until there are threads, the second binding is refused.
+One Clankie channel per message-bearing Discord location. For a direct channel
+that location is its channel id; for a forum room it is the post's thread id.
+The claim is checked before Discord is touched when the location already
+exists, and again against the provisioned location. Inbound guild text can
+therefore resolve to exactly one canonical conversation while distinct forum
+posts remain distinct rooms under the same parent.
 
 Nothing local moves until the projection is settled. Resolving a webhook, or
 provisioning one, is the part that can fail, and a room half-created by a
@@ -220,6 +264,17 @@ longer controls. So inbound routing and outbound posting both read the
 projection through the same swarm check, and a room outside it is simply not
 projected any more.
 
+A projection is removed the way it is made: an upsert whose choice is `off`
+drops the projection while the room and its transcript stay, and deleting or
+pruning the room does the same implicitly. Either way the webhook Clankie
+provisioned is deleted in Discord — retired best-effort and fire-and-forget, so
+the local change never waits on Discord — while a pasted webhook is the
+operator's own and stays, as does the Discord channel or forum post itself:
+what was said there remains readable, it just stops being a live view. Which
+webhooks Clankie made is recorded on the projection (`provisioned`); records
+from before the flag are treated as pasted rather than guessed at.
+Re-projecting a room elsewhere retires the old credential the same way.
+
 The limitation is accepted deliberately: webhook posts carry a BOT tag, cannot
 be DM'd, and have no presence. Inside a channel none of that is visible. Wanting
 to DM an individual agent _in Discord_ would need a real bot identity, and that
@@ -233,9 +288,9 @@ is a separate decision.
   the known price of the emergent behaviour, and the reply lease is the planned
   reduction. A channel with many members is expensive by construction, which is
   a reason to keep membership deliberate.
-- Discord setup is provisioning inside a guild the owner already has — channels
-  and webhooks created by Clankie — not guild creation, which bots may only do
-  under narrow conditions. It needs `Manage Channels` and `Manage Webhooks` on
+- Discord setup is provisioning inside a guild the owner already has — channels,
+  forum posts, and webhooks created by Clankie — not guild creation. It needs
+  `Manage Channels`, `Manage Webhooks`, and `Send Messages` on
   the bot in the swarm home, which is named outright: an unset swarm home is
   refused rather than guessed at, because there is no right answer to which of
   the owner's servers a room belongs in, and guessing one puts the fleet in a
@@ -245,7 +300,7 @@ is a separate decision.
 - The app renders channels natively; nothing about the app's rendering is
   privileged over Discord's, and neither surface may hold state the conversation
   does not.
-- Altering a roster fans one message out to every seat in it, so the op that
+- Altering a roster fans one message out to every agent in it, so the op that
   does it is a control action and rides the `steer` grant, not `chat`. Reading
   channels and reacting stay on `chat`.
 - Membership arrives as the whole list the operator wants, in turn order, and

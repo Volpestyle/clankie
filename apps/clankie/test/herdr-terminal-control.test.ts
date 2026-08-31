@@ -23,7 +23,10 @@ function controlRequest(
   };
 }
 
-function fakeController(): HerdrTerminalController & { written: string[]; closed: boolean } {
+function fakeController(): HerdrTerminalController & {
+  written: string[];
+  closed: boolean;
+} {
   let resolveDone: () => void = () => {};
   const done = new Promise<void>((resolve) => {
     resolveDone = resolve;
@@ -46,16 +49,19 @@ function fakeController(): HerdrTerminalController & { written: string[]; closed
 }
 
 describe("herdr terminal control leases", () => {
-  it("grants an exclusive lease, writes raw bytes through it, and releases the controller", () => {
+  it("grants an exclusive lease, writes raw bytes through it, and releases the controller", async () => {
     const controllers: ReturnType<typeof fakeController>[] = [];
     const startController: StartHerdrTerminalController = () => {
       const controller = fakeController();
       controllers.push(controller);
       return controller;
     };
-    const store = new HerdrTerminalControlStore({ startController });
+    const store = new HerdrTerminalControlStore({
+      readGrid: async () => undefined,
+      startController,
+    });
 
-    const granted = store.control(controlRequest("request", PHONE));
+    const granted = await store.control(controlRequest("request", PHONE));
     if (granted.status !== "granted") throw new Error("grant expected");
     expect(granted.grant.owner).toEqual({ principalId: PHONE });
 
@@ -70,18 +76,21 @@ describe("herdr terminal control leases", () => {
     expect(controllers).toHaveLength(1);
     expect(controllers[0]!.written).toEqual([JSON.stringify({ type: "terminal.input", bytes: "aGVsbG8=" })]);
 
-    const released = store.control(controlRequest("release", PHONE, granted.grant.leaseToken));
+    const released = await store.control(controlRequest("release", PHONE, granted.grant.leaseToken));
     expect(released).toMatchObject({ status: "released" });
     expect(controllers[0]!.closed).toBe(true);
     store.close();
   });
 
-  it("reports contention to another surface and lets the holder renew or reclaim", () => {
-    const store = new HerdrTerminalControlStore({ startController: fakeController });
-    const granted = store.control(controlRequest("request", PHONE));
+  it("reports contention to another surface and lets the holder renew or reclaim", async () => {
+    const store = new HerdrTerminalControlStore({
+      readGrid: async () => undefined,
+      startController: fakeController,
+    });
+    const granted = await store.control(controlRequest("request", PHONE));
     if (granted.status !== "granted") throw new Error("grant expected");
 
-    expect(store.control(controlRequest("request", TABLET))).toMatchObject({
+    expect(await store.control(controlRequest("request", TABLET))).toMatchObject({
       status: "contended",
       owner: { principalId: PHONE },
     });
@@ -95,26 +104,27 @@ describe("herdr terminal control leases", () => {
       }),
     ).toMatchObject({ status: "contended", owner: { principalId: PHONE } });
 
-    const renewed = store.control(controlRequest("renew", PHONE, granted.grant.leaseToken));
+    const renewed = await store.control(controlRequest("renew", PHONE, granted.grant.leaseToken));
     expect(renewed).toMatchObject({ status: "granted" });
     // A relaunched holder reclaims with a plain request; the stale token dies.
-    const reclaimed = store.control(controlRequest("request", PHONE));
+    const reclaimed = await store.control(controlRequest("request", PHONE));
     if (reclaimed.status !== "granted") throw new Error("grant expected");
-    expect(store.control(controlRequest("renew", PHONE, granted.grant.leaseToken))).toMatchObject({
+    expect(await store.control(controlRequest("renew", PHONE, granted.grant.leaseToken))).toMatchObject({
       status: "denied",
       reason: "lease_expired",
     });
     store.close();
   });
 
-  it("expires leases on the clock and fails soft when Herdr cannot spawn", () => {
+  it("expires leases on the clock and fails soft when Herdr cannot spawn", async () => {
     let now = 0;
     const store = new HerdrTerminalControlStore({
+      readGrid: async () => undefined,
       startController: fakeController,
       leaseTtlMs: 1_000,
       clock: () => now,
     });
-    const granted = store.control(controlRequest("request", PHONE));
+    const granted = await store.control(controlRequest("request", PHONE));
     if (granted.status !== "granted") throw new Error("grant expected");
     now = 2_000;
     expect(
@@ -129,20 +139,39 @@ describe("herdr terminal control leases", () => {
     store.close();
 
     const unavailable = new HerdrTerminalControlStore({
+      readGrid: async () => undefined,
       startController: () => {
         throw new Error("spawn herdr ENOENT");
       },
     });
-    expect(unavailable.control(controlRequest("request", PHONE))).toMatchObject({
+    await expect(unavailable.control(controlRequest("request", PHONE))).resolves.toMatchObject({
       status: "unavailable",
       reason: "herdr_unavailable",
     });
   });
 
+  it("claims control at the pane's own grid so the pane never reflows", async () => {
+    const claims: unknown[] = [];
+    const store = new HerdrTerminalControlStore({
+      readGrid: async () => ({ columns: 126, rows: 50 }),
+      startController: (terminalId, grid) => {
+        claims.push({ terminalId, grid });
+        return fakeController();
+      },
+    });
+
+    await store.control(controlRequest("request", PHONE));
+    expect(claims).toEqual([{ terminalId: TERMINAL, grid: { columns: 126, rows: 50 } }]);
+    store.close();
+  });
+
   it("drops the lease when the controller process dies so input fails typed", async () => {
     const controller = fakeController();
-    const store = new HerdrTerminalControlStore({ startController: () => controller });
-    const granted = store.control(controlRequest("request", PHONE));
+    const store = new HerdrTerminalControlStore({
+      readGrid: async () => undefined,
+      startController: () => controller,
+    });
+    const granted = await store.control(controlRequest("request", PHONE));
     if (granted.status !== "granted") throw new Error("grant expected");
     controller.close();
     await Promise.resolve();

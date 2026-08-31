@@ -257,6 +257,38 @@ export const RelaySettingsSchema = z
   .strict();
 export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
 
+/**
+ * Which herdr session is his (ADR 0149).
+ *
+ * The name is chosen here and resolved to that session's socket at service
+ * startup, which pins `HERDR_SOCKET_PATH` for every herdr child the service
+ * spawns — census, seat observation, watches, and his own shell. The binding
+ * never depends on where the service or a console happened to be launched.
+ */
+export const HerdrSettingsSchema = z
+  .object({
+    /** Named herdr session he leads; `default` is herdr's own default session. */
+    session: z
+      .string()
+      .regex(/^[\w][\w.-]{0,63}$/u, "must be a herdr session name")
+      .default("default"),
+  })
+  .strict();
+export type HerdrSettings = z.infer<typeof HerdrSettingsSchema>;
+
+/** The captain's own runtime home, distinct from what he is allowed to do. */
+export const CaptainSettingsSchema = z
+  .object({
+    /**
+     * Absolute directory his shell and sessions run in. Unset means the
+     * operator's home directory — never the install root, which on a release
+     * is an immutable directory he has no business working inside.
+     */
+    workingDirectory: z.string().min(1).max(1_024).optional(),
+  })
+  .strict();
+export type CaptainSettings = z.infer<typeof CaptainSettingsSchema>;
+
 /** Whether the captain may offer play at all. */
 export const GameplaySettingsSchema = z
   .object({
@@ -394,6 +426,8 @@ export const ClankieSettingsSchema = z
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
+    herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
+    captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
     mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),

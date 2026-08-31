@@ -41,16 +41,16 @@ starts the clankie service if needed and attaches the fullscreen face.
 `--json` is required only where the default is human-readable (pairing QR,
 device table, credential-rotate sentence). Everything else is already JSON.
 
-| Command                                                 | stdout                                                                                       |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`         | JSON                                                                                         |
-| `model …`, `effort …`, `image-model …`, `video-model …` | JSON                                                                                         |
-| `persona …`, `games …`, `discord …`                     | JSON                                                                                         |
-| `play status`                                           | JSON                                                                                         |
-| `play stop`                                             | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
-| `pair`, `devices`, `operator-credential rotate`         | Human text; pass `--json`                                                                    |
-| `help`                                                  | This index (plain text)                                                                      |
-| `--version`                                             | `clankie <version>`                                                                          |
+| Command                                                     | stdout                                                                                       |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `health`, `status`, `doctor`, `restart`, `down`             | JSON                                                                                         |
+| `model …`, `effort …`, `image-model …`, `video-model …`     | JSON                                                                                         |
+| `persona …`, `games …`, `herdr …`, `workdir …`, `discord …` | JSON                                                                                         |
+| `play status`                                               | JSON                                                                                         |
+| `play stop`                                                 | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
+| `pair`, `devices`, `operator-credential rotate`             | Human text; pass `--json`                                                                    |
+| `help`                                                      | This index (plain text)                                                                      |
+| `--version`                                                 | `clankie <version>`                                                                          |
 
 Do not edit `~/.config/clankie/clankie.json`,
 `~/.config/clankie/settings.json`, or Keychain entries by hand.
@@ -318,6 +318,50 @@ Read or set whether the PokeAgent MMO body is available. JSON contains the
 `games.pokeagentMmoEnabled` boolean, `settingsFile`, and
 `"restart": "clankie restart captain"`. The TUI `/games` command calls this
 same writer.
+
+### `herdr [status]` / `herdr set --session NAME`
+
+Which herdr session the captain leads
+([ADR 0149](adr/0149-his-herdr-session-is-chosen-not-inherited.md)). The
+service resolves the name to that session's socket at startup and pins
+`HERDR_SOCKET_PATH` for every herdr child it spawns; `default` (the default)
+is herdr's own default session. JSON contains `herdr.session`, `settingsFile`,
+and `"restart": "clankie restart captain"`. A name unknown to
+`herdr session list` still writes; the service logs a warning at startup and
+herdr's own default resolution applies until the session exists.
+
+### `workdir [status]` / `workdir set PATH` / `workdir clear`
+
+The captain's working directory — where his shell and sessions run when a
+conversation names no workspace. Unset (the default) means the operator's
+home directory. `set` expands a leading `~` and stores the absolute path.
+JSON contains `workingDirectory` (the configured value or `null`),
+`effective` (what the captain runs in after a restart), `settingsFile`, and
+`"restart": "clankie restart captain"`.
+
+### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
+
+For agents, not for people ([ADR 0148](adr/0148-an-agent-moves-its-own-figure.md)).
+Say what you are doing with your own figure in the commons; the operator's app
+poses it and moves it accordingly, and prints your note on your Messages row.
+
+Takes no seat argument by design: the seat is resolved from `HERDR_PANE_ID` in
+the caller's own environment against the live Herdr census, so this can only ever
+move the figure the caller is sitting in. `--for` defaults to 15 minutes and is
+capped at one hour — a stance is a live statement, and once it lapses the figure
+goes back to being posed by what its pane is observed to be doing.
+
+```json
+{
+  "outcome": "stated",
+  "seatId": "…",
+  "personaId": "…",
+  "stance": { "pose": "stuck", "note": "waiting on the build", "statedAt": "…", "expiresAt": "…" }
+}
+```
+
+`{"outcome":"unseated"}` means the pane holds no fleet seat — normal in a plain
+shell pane, and not an error.
 
 ### `discord [status]`
 

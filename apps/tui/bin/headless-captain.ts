@@ -5,6 +5,8 @@ import { statusCommand } from "../src/command/status.ts";
 import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
 import { runGamesCommand } from "../src/command/games.ts";
+import { runHerdrCommand } from "../src/command/herdr.ts";
+import { runWorkdirCommand } from "../src/command/workdir.ts";
 import { runEffortCommand } from "../src/command/effort.ts";
 import { runImageModelCommand } from "../src/command/image-model.ts";
 import { runVideoModelCommand } from "../src/command/video-model.ts";
@@ -13,6 +15,7 @@ import { runRestartCommand, runDownCommand } from "../src/command/restart.ts";
 import { runPairCommand } from "../src/command/pair.ts";
 import { runDevicesCommand } from "../src/command/devices.ts";
 import { runPlayCommand } from "../src/command/play.ts";
+import { runStanceCommand } from "../src/command/stance.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
 import { commandHelp } from "../src/command/registry.ts";
 import { outputJson, type Writable } from "../src/command/io.ts";
@@ -104,6 +107,19 @@ export async function runHeadlessCaptainCommand(
       const result = await runGamesCommand(rest, options);
       outputJson(stdout, result);
       return 0;
+    }
+    if (command === "herdr") {
+      const result = await runHerdrCommand(rest, options);
+      outputJson(stdout, result);
+      return 0;
+    }
+    if (command === "workdir") {
+      const result = await runWorkdirCommand(rest, options);
+      outputJson(stdout, result);
+      return 0;
+    }
+    if (command === "stance") {
+      return await runStanceCommand(rest, { ...options, stdout });
     }
     if (command === "discord") {
       const result = await runDiscordCommand(rest, options);

@@ -8,7 +8,7 @@ the terminal input this record deferred.
 ## Context
 
 Seat conversations expose readable agent messages, not terminal truth. The app
-keeps its native terminal renderer and links each seat thread to the seat's
+keeps its native terminal renderer and links each persona thread to its current seat's
 stable terminal identity, but the pi rewrite retires the old
 `terminal-protocol` package and its separate gateway. The renderer therefore
 has no live backend wire.
@@ -23,16 +23,17 @@ The replacement has four constraints:
 - a missing binary, down socket, dead terminal, or malformed local frame is a
   typed unavailable/reset result, never a failed conversation surface.
 
-Herdr already owns the hard part. In Herdr 0.8.0 at `d1a30cdadd5f`,
+Herdr already owns the hard part. In Herdr 0.8.x,
 `herdr terminal session observe <target> --cols N --rows N` connects to the
 normal Herdr client socket in read-only terminal mode. It resolves pane, agent,
 or stable terminal targets, renders hidden panes, and emits NDJSON with an
 initial full ANSI redraw followed by monotonic base64 diffs. Its frame fields
-are sequence, width, height, full/diff, and bytes. `herdr pane read` instead
-formats rendered text snapshots; it cannot preserve VT state or provide a live
-byte stream. The observer bytes are Herdr-generated render output rather than
-raw PTY ingress; separate terminal control messages such as clipboard writes do
-not enter this stream.
+are sequence, width, height, full/diff, and bytes. Stock `herdr pane layout`
+reports the pane's cell rectangle, while `herdr pane read --raw` formats a
+bounded ANSI snapshot with styled CRLF rows. The read is not a live byte stream,
+so the observer remains the source of live VT state. Observer bytes are
+Herdr-generated render output rather than raw PTY ingress; separate terminal
+control messages such as clipboard writes do not enter this stream.
 
 The relay already supplies the other hard part: current device-session bearer
 validation before a stream, between polls, and immediately before emission.
@@ -45,8 +46,8 @@ Terminal observation extends the existing callable operator service envelope
 with a bounded `terminal_catalog` operation and a `terminal_tail` operation.
 The catalog preserves Herdr's workspace, tab, and pane coordinates beside each
 stable terminal id. It projects Herdr's full pane list, including ordinary
-shell panes that are absent from the agent roster. Tail bytes use the dedicated relay streaming path
-`POST /operator/v1/terminal-tail`.
+shell panes that are absent from the agent roster. Tail bytes use the dedicated
+relay streaming path `POST /operator/v1/terminal-tail`.
 
 The callable envelope already owns the captain-authenticated service hop,
 strict result validation, redaction, and relay dispatch used by every operator
@@ -64,18 +65,35 @@ The request names:
 - an optional `{ streamId, sequence }` cursor;
 - a bounded page limit.
 
-The service starts one Herdr observer per native surface. This gives every
-renderer its own initial full redraw and its own dimensions without sharing a
-mutable VT baseline. The service validates Herdr's NDJSON, requires contiguous
-sequence numbers and a full first frame, retains at most 256 frames and 16 MiB
-of base64 data, and expires an idle observer after 30 seconds. Falling behind
-retention returns `sequence_expired`; losing the observer returns `stream_lost`.
-Both tell the native client to reconnect without a cursor and receive a fresh
-full redraw.
+The service resolves the stable terminal id through `pane list`, reads its cell
+grid through `pane layout`, and starts one Herdr observer per native surface at
+that grid. This gives every renderer its own initial full redraw without
+sharing a mutable VT baseline or resizing the pane. At attachment it prepends
+up to 1,000 recent ANSI rows from `pane read --raw` to the observer's first full
+frame. The native renderer therefore builds local scrollback before the live
+viewport repaint.
+
+Observer frames also schedule a bounded history refresh. The service waits 150
+ms for output to become quiet, with a one-second maximum delay for continuous
+output, then reads the latest 1,000 styled rows through the same stock `pane
+read --raw` command. It compares the immutable history portion with the prior
+snapshot and emits only the rows that entered history. If the bounded windows
+no longer overlap, it first clears native history and then sends the current
+window. These synthetic scrollback-only frames use the service stream's
+sequence; Herdr's sequence remains a separately validated upstream ordering.
+The live ANSI observer bytes never wait for this quiet-path read.
+
+The service validates Herdr's NDJSON, requires contiguous upstream sequence
+numbers and a full first frame, retains at most 256 frames and 16 MiB of base64
+data (live bytes plus scrollback), and expires an idle observer after 30
+seconds. Falling behind retention returns `sequence_expired`; losing the
+observer returns `stream_lost`. Both tell the native client to reconnect
+without a cursor and receive a fresh full redraw.
 
 The relay emits strict NDJSON items:
 
-- `frame` carries one bounded base64 ANSI frame and its stream id;
+- `frame` carries bounded base64 ANSI bytes, optional styled scrollback rows,
+  and its stream id;
 - `reset` ends a stream whose cursor cannot be resumed;
 - `unavailable` ends a stream whose terminal or Herdr observer is unavailable;
 - `auth_failure` ends a stream whose live device authority disappears.
@@ -90,7 +108,9 @@ flowchart LR
   Native["Native terminal client"] -->|"device bearer + terminal_tail"| Relay
   Relay -->|"terminalObserve recheck"| Device["Device projection"]
   Relay -->|"captain bearer"| Service["Clankie service"]
+  Service -->|"pane list + pane layout + bounded pane read --raw"| Snapshot["vanilla herdr snapshots"]
   Service -->|"stable terminal id"| Observer["herdr terminal session observe"]
+  Snapshot -->|"initial history + later row deltas"| Service
   Observer -->|"full ANSI + sequenced diffs"| Service
   Service -->|"bounded pages"| Relay
   Relay -->|"NDJSON frames"| Native
@@ -103,8 +123,10 @@ Observation neither accepts input nor implies control authority.
 
 ## Alternatives considered
 
-- **Poll `herdr pane read`.** Rejected: text snapshots discard VT bytes,
-  alternate-screen state, cursor behavior, and incremental ordering.
+- **Poll `herdr pane read` as the live transport.** Rejected: snapshots have no
+  incremental ordering or live cursor state. A single bounded ANSI read remains
+  useful for seeding and extending the native renderer's scrollback alongside
+  the live observer.
 - **Expose Herdr's client socket through the relay.** Rejected: it couples the
   app to Herdr's private binary protocol and bypasses the service's bounded
   schema and fail-soft boundary.
@@ -119,13 +141,20 @@ Observation neither accepts input nor implies control authority.
 
 ## Consequences
 
-- A seat thread's terminal link attaches to pane truth by stable terminal id.
+- A live persona thread's terminal link attaches to pane truth by its current
+  seat's terminal id.
 - The terminal browser mirrors Herdr's workspace → tab → pane organization
   without deriving mutable hierarchy from stable terminal ids or display labels.
 - The native app can write decoded bytes directly into SwiftTerm or another
   native renderer without routing them through React state.
 - Reconnect is deterministic: resume a live observer by cursor or reset to a
   new full redraw.
+- Each observation starts with styled native scrollback and continues appending
+  rows as they leave the live viewport. The app holds that history locally, so
+  reading it never changes Herdr's shared pane offset.
+- Vanilla Herdr bounds a recent read to 1,000 rows. The app therefore keeps a
+  1,000-row native history window; when two snapshots do not overlap, the newer
+  bounded window replaces the older one.
 - Herdr failure is contained to the terminal destination; messages and roster
   remain available.
 - One service process owns at most 64 active native observer sessions. If real

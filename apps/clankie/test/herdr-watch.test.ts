@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OPERATOR_CONVERSATION_TEXT_MAX } from "@clankie/protocol";
 import { parseHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import {
   distillHerdrSeatReply,
   herdrAgentName,
@@ -401,7 +402,8 @@ describe("harness-native seat transcripts", () => {
           parentUuid: "local-command",
           message: {
             role: "user",
-            content: "<command-name>/clear</command-name>\n            <command-message>clear</command-message>",
+            content:
+              "<command-name>/clear</command-name>\n            <command-message>clear</command-message>",
           },
         },
         {
@@ -572,6 +574,7 @@ describe("hiring a seat", () => {
     agent: "codex",
     status: "idle",
     title: "Release prep",
+    session: { source: "herdr:codex", kind: "id", value: "session-hired" },
   };
 
   async function storePath(): Promise<string> {
@@ -582,9 +585,7 @@ describe("hiring a seat", () => {
 
   it("opens a tab in the directory, starts the harness, and returns the seat", async () => {
     const createTab = vi.fn((_options: { cwd: string; label: string }) => Promise.resolve("w1C:p9"));
-    const startAgent = vi.fn(
-      (_options: { name: string; kind: string; paneId: string }) => Promise.resolve(),
-    );
+    const startAgent = vi.fn((_options: { name: string; kind: string; paneId: string }) => Promise.resolve());
     const runner: HerdrWatchRunner = {
       get: vi.fn(() => Promise.resolve(hired)),
       resolveTerminal: vi.fn(() => Promise.resolve(hired)),
@@ -605,6 +606,8 @@ describe("hiring a seat", () => {
       outcome: "spawned",
       seat: {
         seatId: "term-hired",
+        subject: expect.stringMatching(/^release-prep-[a-f0-9]{4}$/u),
+        occupantId: occupantIdForHerdrSession(hired.session!),
         harness: "codex",
         status: "idle",
         title: "Release prep",
@@ -613,6 +616,9 @@ describe("hiring a seat", () => {
     });
     expect(createTab).toHaveBeenCalledWith({ cwd: tmpdir(), label: "Release prep" });
     expect(startAgent.mock.calls[0]?.[0]).toMatchObject({ kind: "codex", paneId: "w1C:p9" });
+    if (result.outcome === "spawned") {
+      expect(startAgent.mock.calls[0]?.[0].name).toBe(result.seat.subject);
+    }
     store.close();
   });
 

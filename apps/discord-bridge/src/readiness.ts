@@ -264,9 +264,9 @@ export async function inspectDiscordTextReadiness(
           "swarm home permissions",
           missing.length === 0,
           missing.length === 0
-            ? "Manage Channels and Manage Webhooks are granted in the swarm home"
+            ? "Manage Channels, Manage Webhooks, and Send Messages are granted in the swarm home"
             : `missing ${missing.join(" and ")} in the swarm home`,
-          "Reinstall the bot with the invite from /discord invite, which requests both. Guild-wide grants can still be denied on one room by that channel's permission overwrites.",
+          "Reinstall the bot with the invite from /discord invite, which requests all three. Guild-wide grants can still be denied on one room by that channel's permission overwrites.",
         );
       } catch (error) {
         add(
@@ -321,10 +321,11 @@ export async function inspectDiscordTextReadiness(
 
 const MANAGE_CHANNELS = 1n << 4n;
 const MANAGE_WEBHOOKS = 1n << 29n;
+const SEND_MESSAGES = 1n << 11n;
 const ADMINISTRATOR = 1n << 3n;
 
 /**
- * Which of the two room-making permissions the bot lacks across the swarm home,
+ * Which room-making permissions the bot lacks across the swarm home,
  * by name of the permission only — no guild, channel, role, or member name
  * enters the report. A bot application's user id is its application id, so the
  * member lookup needs no extra identity call.
@@ -350,6 +351,7 @@ async function missingSwarmPermissions(
   return [
     ...((granted & MANAGE_CHANNELS) === 0n ? ["Manage Channels"] : []),
     ...((granted & MANAGE_WEBHOOKS) === 0n ? ["Manage Webhooks"] : []),
+    ...((granted & SEND_MESSAGES) === 0n ? ["Send Messages"] : []),
   ];
 }
 

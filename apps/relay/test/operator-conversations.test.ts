@@ -58,7 +58,7 @@ afterEach(async () => {
 });
 
 describe("authenticated operator conversation relay", () => {
-  it("lists, gets, creates seat threads, reads the roster, and closes through the callable contract", async () => {
+  it("lists, gets, creates seat threads, reads the roster and composer catalog, and closes", async () => {
     const seen: OperatorConversationServiceRequest[] = [];
     const relay = await startRelay({
       dispatch: async (request) => {
@@ -75,12 +75,45 @@ describe("authenticated operator conversation relay", () => {
             seats: [
               {
                 seatId: "term-worker",
+                occupantId: "session-worker",
+                personaId: "agent-worker",
                 harness: "codex",
                 status: "idle",
                 title: "Worker",
                 conversationId: "conversation-2",
               },
             ],
+          };
+        }
+        if (request.op === "fleet") {
+          return {
+            op: "fleet",
+            schemaVersion: 1,
+            snapshot: {
+              schemaVersion: 1,
+              cursor: "fleet-instance:1",
+              seats: [],
+              personas: [],
+              channels: [],
+            },
+          };
+        }
+        if (request.op === "composer_catalog") {
+          return {
+            op: "composer_catalog",
+            schemaVersion: 1,
+            catalog: {
+              schemaVersion: 1,
+              commands: [],
+              skills: [
+                {
+                  name: "review",
+                  description: "Review this work",
+                  source: "codex",
+                  invocation: "$review",
+                },
+              ],
+            },
           };
         }
         if (request.op === "terminal_catalog") {
@@ -127,6 +160,8 @@ describe("authenticated operator conversation relay", () => {
         title: "Worker",
       },
       { op: "roster", schemaVersion: 1 },
+      { op: "fleet", schemaVersion: 1, waitMs: 0 },
+      { op: "composer_catalog", schemaVersion: 1, conversationId: "conversation-2" },
       { op: "terminal_catalog", schemaVersion: 1 },
       { op: "close_seat", schemaVersion: 1, seatId: "term-worker" },
       { op: "close", schemaVersion: 1, conversationId: "conversation-2" },
@@ -140,6 +175,8 @@ describe("authenticated operator conversation relay", () => {
       "get",
       "create",
       "roster",
+      "fleet",
+      "composer_catalog",
       "terminal_catalog",
       "close_seat",
       "close",
@@ -218,7 +255,7 @@ describe("authenticated operator conversation relay", () => {
       channelId: "channel-1",
       conversationId: "conv-channel-1",
       title: "atlas slowness",
-      members: [{ seatId: "atlas", position: 0, joinedAt: "2026-08-30T00:00:00.000Z" }],
+      members: [{ personaId: "atlas", position: 0, joinedAt: "2026-08-30T00:00:00.000Z" }],
       createdAt: "2026-08-30T00:00:00.000Z",
       updatedAt: "2026-08-30T00:00:00.000Z",
     };
@@ -985,6 +1022,29 @@ function parseNdjson(text: string): TailFrame[] {
       throw new Error("unknown operator conversation tail frame");
     });
 }
+
+describe("state_stance stays on the local door (ADR 0148)", () => {
+  it("refuses the op for an authorized device and never asks the captain", async () => {
+    // The op's identity claim is "the pane I am sitting in", which only a local
+    // caller can make. The refusal must come before the grant map, so even a
+    // fully granted device cannot move another agent's figure by typing a pane id.
+    const seen: OperatorConversationServiceRequest[] = [];
+    const relay = await startRelay({
+      dispatch: (request) => {
+        seen.push(request);
+        return Promise.reject(new Error("state_stance must not reach the captain through the relay"));
+      },
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "state_stance",
+      schemaVersion: 1,
+      stance: { herdrPaneId: "w1:p2", pose: "stuck", note: "typed from a phone" },
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "op_is_local_to_the_machine" });
+    expect(seen).toEqual([]);
+  });
+});
 
 function parseTerminalNdjson(text: string) {
   return text

@@ -4,6 +4,7 @@ import {
   encodeReactionEmoji,
   parseDiscordWebhookUrl,
   planDiscordChannelCreate,
+  planDiscordForumPostCreate,
   planDiscordGuildChannels,
   planDiscordWebhookCreate,
   planDiscordWebhookPost,
@@ -74,6 +75,15 @@ describe("planDiscordWebhookPost", () => {
       "discord_webhook_invalid_content",
     );
   });
+
+  it("accepts only a public HTTPS-shaped avatar URL", () => {
+    expect(() => planDiscordWebhookPost({ ...base, avatarUrl: "data:image/png;base64,face" })).toThrow(
+      "discord_webhook_invalid_avatar_url",
+    );
+    expect(() => planDiscordWebhookPost({ ...base, avatarUrl: "http://localhost/face.png" })).toThrow(
+      "discord_webhook_invalid_avatar_url",
+    );
+  });
 });
 
 describe("parseDiscordWebhookUrl", () => {
@@ -136,6 +146,20 @@ describe("provisioning plans", () => {
     });
   });
 
+  it("makes one post when the selected container is a forum", () => {
+    expect(planDiscordForumPostCreate({ forumId: "forum-1", name: "Atlas slowness" })).toEqual({
+      method: "post",
+      path: "/channels/forum-1/threads",
+      body: {
+        name: "Atlas slowness",
+        message: {
+          content: "This post mirrors a Clankie room.",
+          allowed_mentions: { parse: [] },
+        },
+      },
+    });
+  });
+
   it("keeps a reserved word out of the webhook name, which Discord would refuse", () => {
     expect(planDiscordWebhookCreate({ channelId: "c", name: "discord ops" }).body).toEqual({
       name: "Clankie channel",
@@ -153,11 +177,14 @@ describe("provisioning plans", () => {
         { id: "4", name: "Category", type: 4 },
         { id: "5", name: "Voice", type: 2 },
         { id: "6", name: "announcements", type: 5 },
+        { id: "8", name: "field-notes", type: 15 },
+        { id: "9", name: "tag-required", type: 15, flags: 1 << 4 },
         { id: "7", type: 0 },
       ]),
     ).toEqual([
-      { channelId: "6", name: "announcements" },
-      { channelId: "3", name: "general" },
+      { kind: "channel", channelId: "6", name: "announcements" },
+      { kind: "forum", channelId: "8", name: "field-notes" },
+      { kind: "channel", channelId: "3", name: "general" },
     ]);
     // A guild he cannot read is an empty picker, not a thrown listing.
     expect(readDiscordGuildRooms({ message: "Missing Access" })).toEqual([]);

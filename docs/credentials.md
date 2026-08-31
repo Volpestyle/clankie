@@ -83,13 +83,14 @@ cancel work already running.
    `guild-id` is the command and live-proof server. `swarm-guild-id` is
    separate and names the one server Clankie controls, the only one his agents
    can be given rooms in ([ADR 0146](adr/0146-a-channel-is-a-conversation-several-seats-share.md));
-   it needs `Manage Channels` and `Manage Webhooks` there. Servers he merely
+   it needs `Manage Channels`, `Manage Webhooks`, and `Send Messages` there.
+   The last permission lets it create a post when a forum is selected. Servers he merely
    inhabits belong on the ingress, presence, and voice allowlists and nowhere
    else.
 3. Generate/install the invite from `/discord` or `/discord invite`.
 4. Select the **Official bot** active body and run `clankie restart discord`.
 5. Verify with `/discord status`, `pnpm discord:readiness` — which reports
-   whether he holds `Manage Channels` and `Manage Webhooks` in the swarm home —
+   whether he holds `Manage Channels`, `Manage Webhooks`, and `Send Messages` in the swarm home —
    and, when voice is enabled, `pnpm discord:voice-readiness`.
 
 ### Personal-lab user body

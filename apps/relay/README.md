@@ -20,7 +20,10 @@ authorization: every request carries a device-session bearer.
 
 The HTTP surface composes the strict `@clankie/protocol` operator service contract:
 
-- `POST /operator/v1/dispatch` accepts strict `list`, `roster`, `get`, `create`, `close`, `send`, and `replay` requests. Seat-scoped creates and sends use the same authenticated boundary.
+- `POST /operator/v1/dispatch` accepts the strict operator service contract,
+  including the cursor-long-polled `fleet` snapshot and persona, roster,
+  channel, terminal, and conversation operations. Seat-scoped creates and sends
+  use the same authenticated boundary.
 - `POST /operator/v1/tail` accepts the same strict `tail` request and emits newline-delimited `{ kind: "event", event }`, `{ kind: "recovery", recovery }`, or terminal `{ kind: "auth_failure", failure }` frames.
 - `POST /operator/v1/terminal-tail` accepts a strict `terminal_tail` request and emits bounded native-consumable ANSI `frame`, `reset`, `unavailable`, or `auth_failure` items.
 
@@ -63,7 +66,7 @@ Configuration:
 - `CLANKIE_CAPTAIN_URL` defaults to `http://127.0.0.1:4310` (conversation dispatch on the same service).
 - `CLANKIE_CAPTAIN_TOKEN` enables the authenticated captain hop; conversation requests fail closed when absent, and the relay refuses to start with a token under 16 characters.
 - `CLANKIE_RELAY_HOST` defaults to loopback; set it to a specific tailnet interface for direct physical-device access.
-- `PORT` defaults to `4320`.
+- `CLANKIE_RELAY_PORT` defaults to `4321`; `PORT` is its deployment-platform fallback.
 
 Structured logs contain bounded, redacted route, operation, device,
 conversation, surface, status, and recovery metadata only. They never include

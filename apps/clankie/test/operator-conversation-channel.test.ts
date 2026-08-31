@@ -1,8 +1,9 @@
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { foldOperatorConversationReactions } from "@clankie/protocol";
+import { foldOperatorConversationReactions, type UpsertOperatorChannel } from "@clankie/protocol";
 import { ConversationStore } from "../src/captain/conversations.ts";
 
 const roots: string[] = [];
@@ -54,7 +55,7 @@ describe("channel conversations", () => {
       },
     });
     if (created.op !== "channel") throw new Error("channel expected");
-    expect(created.channel.members.map((member) => member.seatId)).toEqual([
+    expect(created.channel.members.map((member) => member.personaId)).toEqual([
       "atlas",
       "dev",
       "greenhouse",
@@ -102,14 +103,188 @@ describe("channel conversations", () => {
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
     const said = replay.result.events.flatMap((event) =>
-      event.type === "message" ? [{ role: event.role, seatId: event.seatId, text: event.text }] : [],
+      event.type === "message" ? [{ role: event.role, personaId: event.personaId, text: event.text }] : [],
     );
     expect(said).toEqual([
-      { role: "operator", seatId: undefined, text: "why is the atlas slow?" },
-      { role: "agent", seatId: "atlas", text: "it re-decodes the atlas on every mount" },
-      { role: "agent", seatId: "dev", text: "confirms what I saw in the profile" },
+      { role: "operator", personaId: undefined, text: "why is the atlas slow?" },
+      { role: "agent", personaId: "atlas", text: "it re-decodes the atlas on every mount" },
+      { role: "agent", personaId: "dev", text: "confirms what I saw in the profile" },
     ]);
     await store.close();
+  });
+
+  it("tells the room when a round reached nobody, and stays quiet when it merely passed", async () => {
+    const root = await makeRoot("clankie-channel-silence-");
+    const posted: Record<string, unknown>[] = [];
+    let seated = false;
+    let store: ConversationStore;
+    const sendToSeat = vi.fn((seatId: string) => {
+      if (!seated) return Promise.resolve(false);
+      setTimeout(() => {
+        store.publishSeatEvent(seatId, { type: "message", role: "agent", text: "PASS", streaming: false });
+      }, 0);
+      return Promise.resolve(true);
+    });
+    store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      sendToSeat,
+      undefined,
+      undefined,
+      {
+        post: (post) => {
+          posted.push({ ...post });
+          return Promise.resolve();
+        },
+        resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
+        swarmGuildId: () => "guild-1",
+      },
+    );
+
+    const created = await store.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: {
+        schemaVersion: 1,
+        title: "clankies united",
+        members: ["atlas", "grove"],
+        discord: {
+          kind: "webhook",
+          webhookUrl: "https://discord.com/api/webhooks/42/super-secret-token",
+        },
+      },
+    });
+    if (created.op !== "channel") throw new Error("channel expected");
+    const send = (expectedRevision: number, message: string) =>
+      store.serve({
+        op: "send",
+        schemaVersion: 1,
+        turn: {
+          schemaVersion: 1,
+          kind: "message",
+          conversationId: created.conversation.conversationId,
+          surfaceClientId: "ios",
+          expectedRevision,
+          message,
+        },
+      });
+
+    // Nobody is seated: the operator typed into a room that could not ask
+    // anyone, and used to get silence indistinguishable from a quiet room.
+    const first = await send(0, "hi clankies");
+    if (first.op !== "send" || first.result.status !== "accepted") throw new Error("accepted expected");
+    await store.awaitRun(first.result.runId);
+    const notice = posted.at(-1);
+    expect(notice?.username).toBe("room");
+    expect(String(notice?.content)).toContain("No one here has a live seat");
+    expect(String(notice?.content)).toContain("atlas and grove");
+
+    // A room that was asked and had nothing to add stays silent, as designed.
+    seated = true;
+    posted.length = 0;
+    const current = await store.serve({
+      op: "get",
+      schemaVersion: 1,
+      conversationId: created.conversation.conversationId,
+    });
+    if (current.op !== "get" || current.conversation === undefined) throw new Error("get expected");
+    const second = await send(current.conversation.revision, "hi again");
+    if (second.op !== "send" || second.result.status !== "accepted") throw new Error("accepted expected");
+    await store.awaitRun(second.result.runId);
+    expect(posted.map((post) => post.username)).toEqual(["operator"]);
+
+    // And the notice is a delivery fact, not something anyone said, so it is
+    // never in the record the members read back.
+    const replay = await store.serve({
+      op: "replay",
+      schemaVersion: 1,
+      replay: {
+        schemaVersion: 1,
+        conversationId: created.conversation.conversationId,
+        surfaceClientId: "ios",
+        limit: 50,
+      },
+    });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
+    const said = replay.result.events.flatMap((event) => (event.type === "message" ? [event.text] : []));
+    expect(said).toEqual(["hi clankies", "hi again"]);
+    await store.close();
+  });
+
+  it("tells the room a round died with the process it was running in", async () => {
+    const root = await makeRoot("clankie-channel-restart-");
+    const projection = (posted: Record<string, unknown>[]) => ({
+      post: (post: Record<string, unknown>) => {
+        posted.push({ ...post });
+        return Promise.resolve();
+      },
+      resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
+      swarmGuildId: () => "guild-1",
+    });
+    const before: Record<string, unknown>[] = [];
+    const first = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      // Nothing ever answers, so the run is still accepted when the lights go out.
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      projection(before) as never,
+    );
+    const created = await first.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: {
+        schemaVersion: 1,
+        title: "clankies united",
+        members: ["atlas"],
+        discord: {
+          kind: "webhook",
+          webhookUrl: "https://discord.com/api/webhooks/42/super-secret-token",
+        },
+      },
+    });
+    if (created.op !== "channel") throw new Error("channel expected");
+    const conversationId = created.conversation.conversationId;
+    await first.close();
+
+    // What a kill -9 mid-round leaves on disk: a run accepted and never settled.
+    const dir = join(root, conversationId);
+    const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")) as Record<string, unknown>;
+    writeFileSync(join(dir, "meta.json"), JSON.stringify({ ...meta, sessionState: "active" }));
+    appendFileSync(
+      join(dir, "events.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        conversationId,
+        cursor: "000000009999",
+        revision: 1,
+        occurredAt: new Date().toISOString(),
+        type: "turn",
+        runId: "run-lost",
+        phase: "accepted",
+      })}\n`,
+    );
+
+    const after: Record<string, unknown>[] = [];
+    const second = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      projection(after) as never,
+    );
+    // The notice is fired off at boot rather than awaited, so booting is never
+    // held up by Discord being slow or down.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(after).toHaveLength(1);
+    expect(after[0]?.username).toBe("room");
+    expect(String(after[0]?.content)).toContain("cut off by a service restart");
+    await second.close();
   });
 
   it("projects what members say onto a guild without ever handing out the webhook token", async () => {
@@ -277,18 +452,19 @@ describe("channel conversations", () => {
 
   it("puts a room in a channel the server already has, without a pasted webhook", async () => {
     const root = await makeRoot("clankie-channel-existing-");
-    const provision = vi.fn((input: { name: string; channelId?: string }) =>
-      Promise.resolve({
-        guildId: "guild-1",
-        channelId: input.channelId ?? "made-up",
-        webhookId: "101",
-        webhookToken: "provisioned-secret",
-      }),
+    const provision = vi.fn(
+      (input: { name: string; room?: { kind: "channel" | "forum"; channelId: string } }) =>
+        Promise.resolve({
+          guildId: "guild-1",
+          channelId: input.room?.channelId ?? "made-up",
+          webhookId: "101",
+          webhookToken: "provisioned-secret",
+        }),
     );
     const rooms = vi.fn(() =>
       Promise.resolve([
-        { channelId: "42", name: "general" },
-        { channelId: "43", name: "fleet" },
+        { kind: "channel" as const, channelId: "42", name: "general" },
+        { kind: "channel" as const, channelId: "43", name: "fleet" },
       ]),
     );
     const store = new ConversationStore(
@@ -320,13 +496,103 @@ describe("channel conversations", () => {
         schemaVersion: 1,
         title: "Atlas slowness",
         members: ["atlas"],
-        discord: { kind: "provision", channelId: "43" },
+        discord: { kind: "provision", room: { kind: "channel", channelId: "43" } },
       },
     });
     if (created.op !== "channel") throw new Error("channel expected");
-    expect(provision).toHaveBeenCalledWith({ name: "Atlas slowness", channelId: "43" });
+    expect(provision).toHaveBeenCalledWith({
+      name: "Atlas slowness",
+      room: { kind: "channel", channelId: "43" },
+    });
     expect(created.channel.discord?.channelId).toBe("43");
     expect(JSON.stringify(created)).not.toContain("provisioned-secret");
+  });
+
+  it("uses one forum post as the same conversation in Discord and the app", async () => {
+    const root = await makeRoot("clankie-channel-forum-");
+    let nextPost = 0;
+    const post = vi.fn(() => Promise.resolve());
+    const provision = vi.fn(
+      (input: { name: string; room?: { kind: "channel" | "forum"; channelId: string } }) =>
+        Promise.resolve({
+          guildId: "oathkeeper",
+          channelId: input.room?.channelId ?? "made-up",
+          ...(input.room?.kind === "forum" ? { threadId: `forum-post-${String(++nextPost)}` } : {}),
+          webhookId: "101",
+          webhookToken: "provisioned-secret",
+        }),
+    );
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      { post, resolve: vi.fn(), provision, swarmGuildId: () => "oathkeeper" },
+    );
+
+    const created = await store.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: {
+        schemaVersion: 1,
+        title: "Field notes",
+        members: [],
+        discord: { kind: "provision", room: { kind: "forum", channelId: "forum-1" } },
+      },
+    });
+    if (created.op !== "channel") throw new Error("channel expected");
+    expect(created.channel.discord).toEqual({
+      guildId: "oathkeeper",
+      channelId: "forum-1",
+      threadId: "forum-post-1",
+      webhookId: "101",
+    });
+
+    const sent = await store.serve({
+      op: "send",
+      schemaVersion: 1,
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: created.conversation.conversationId,
+        surfaceClientId: "ios",
+        expectedRevision: 0,
+        message: "from the app",
+      },
+    });
+    if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("accepted expected");
+    await store.awaitRun(sent.result.runId);
+    expect(post).toHaveBeenCalledWith({
+      guildId: "oathkeeper",
+      channelId: "forum-1",
+      threadId: "forum-post-1",
+      webhookId: "101",
+      webhookToken: "provisioned-secret",
+      username: "operator",
+      content: "from the app",
+    });
+
+    expect(store.submitProjectedMessage("oathkeeper", "forum-1", "wrong level")).toBeUndefined();
+    const inbound = store.submitProjectedMessage("oathkeeper", "forum-post-1", "from Discord");
+    expect(inbound?.conversationId).toBe(created.conversation.conversationId);
+    await store.awaitRun(inbound!.runId);
+
+    // A forum is a container, not the conversation identity: another room gets
+    // another post under the same parent without stealing inbound delivery.
+    await expect(
+      store.serve({
+        op: "channel",
+        schemaVersion: 1,
+        channel: {
+          schemaVersion: 1,
+          title: "Second post",
+          members: [],
+          discord: { kind: "provision", room: { kind: "forum", channelId: "forum-1" } },
+        },
+      }),
+    ).resolves.toBeDefined();
   });
 
   it("lists no rooms rather than failing where nothing can read the guild", async () => {
@@ -368,6 +634,77 @@ describe("channel conversations", () => {
         },
       }),
     ).rejects.toThrow("paste one from your swarm server instead");
+  });
+
+  it("gives one seat reply to one room, so a shared member is not echoed into both", async () => {
+    const root = await makeRoot("clankie-channel-sharedseat-");
+    const posted: { username: string; content: string }[] = [];
+    // Runs chain FIFO per conversation, so two rounds only overlap across two
+    // rooms — and a seat may sit in several. Both rooms then wait on one seat.
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(true)),
+      undefined,
+      undefined,
+      {
+        post: (post) => {
+          posted.push({ username: post.username, content: post.content });
+          return Promise.resolve();
+        },
+        resolve: (credential) =>
+          Promise.resolve({ guildId: "guild-1", channelId: `discord-${credential.webhookId}` }),
+        swarmGuildId: () => "guild-1",
+      },
+    );
+    const room = async (title: string, webhookId: string) => {
+      const made = await store.serve({
+        op: "channel",
+        schemaVersion: 1,
+        channel: {
+          schemaVersion: 1,
+          title,
+          members: ["atlas"],
+          discord: {
+            kind: "webhook",
+            webhookUrl: `https://discord.com/api/webhooks/${webhookId}/tok`,
+          },
+        },
+      });
+      if (made.op !== "channel") throw new Error("channel expected");
+      return made.conversation.conversationId;
+    };
+    const send = (conversationId: string, message: string) =>
+      store.serve({
+        op: "send",
+        schemaVersion: 1,
+        turn: {
+          schemaVersion: 1,
+          kind: "message",
+          conversationId,
+          surfaceClientId: "ios",
+          expectedRevision: 0,
+          message,
+        },
+      });
+
+    const left = await send(await room("release", "42"), "WADDAP");
+    await send(await room("standup", "43"), "morning");
+    if (left.op !== "send" || left.result.status !== "accepted") throw new Error("accepted expected");
+
+    // The seat speaks once. Handing that to every waiter would publish the same
+    // words in both rooms; only the round that asked first may have it.
+    store.publishSeatEvent("atlas", {
+      type: "message",
+      role: "agent",
+      text: "one answer",
+      streaming: false,
+    });
+    await store.awaitRun(left.result.runId);
+    expect(posted.filter((entry) => entry.username === "atlas")).toEqual([
+      { username: "atlas", content: "one answer" },
+    ]);
   });
 
   it("leaves no room behind when the projection it was asked for fails", async () => {
@@ -439,19 +776,119 @@ describe("channel conversations", () => {
     if (listed.op !== "channels") throw new Error("channels expected");
     expect(listed.channels).toHaveLength(1);
     expect(listed.channels[0]?.title).toBe("Atlas slowness");
-    expect(listed.channels[0]?.members.map((member) => member.seatId)).toEqual(["atlas"]);
+    expect(listed.channels[0]?.members.map((member) => member.personaId)).toEqual(["atlas"]);
     expect(listed.channels[0]?.discord).toBeUndefined();
+  });
+
+  it("unprojects a room on request, deleting only a webhook Clankie made", async () => {
+    const root = await makeRoot("clankie-channel-unproject-");
+    const remove = vi.fn(() => Promise.resolve());
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      {
+        post: vi.fn(() => Promise.resolve()),
+        resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "pasted-channel" }),
+        provision: () =>
+          Promise.resolve({
+            guildId: "guild-1",
+            channelId: "made-channel",
+            webhookId: "77",
+            webhookToken: "made-secret",
+          }),
+        remove,
+        swarmGuildId: () => "guild-1",
+      },
+    );
+    const upsert = (channel: Omit<UpsertOperatorChannel, "schemaVersion">) =>
+      store.serve({ op: "channel", schemaVersion: 1, channel: { schemaVersion: 1, ...channel } });
+
+    const made = await upsert({ title: "release", members: ["atlas"], discord: { kind: "provision" } });
+    if (made.op !== "channel") throw new Error("channel expected");
+    const off = await upsert({
+      channelId: made.channel.channelId,
+      title: "release",
+      members: ["atlas"],
+      discord: { kind: "off" },
+    });
+    if (off.op !== "channel") throw new Error("channel expected");
+    // The room keeps its transcript and roster; only the projection is gone —
+    // and with it the webhook Clankie provisioned, retired in Discord too.
+    expect(off.channel.discord).toBeUndefined();
+    expect(remove).toHaveBeenCalledWith({ webhookId: "77", webhookToken: "made-secret" });
+    expect(store.submitProjectedMessage("guild-1", "made-channel", "anyone?")).toBeUndefined();
+
+    // A pasted webhook is the operator's own; unprojecting leaves it in place.
+    const pasted = await upsert({
+      title: "standup",
+      members: ["atlas"],
+      discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/88/pasted-secret" },
+    });
+    if (pasted.op !== "channel") throw new Error("channel expected");
+    await upsert({
+      channelId: pasted.channel.channelId,
+      title: "standup",
+      members: ["atlas"],
+      discord: { kind: "off" },
+    });
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires the webhook it made when a projected room is deleted", async () => {
+    const root = await makeRoot("clankie-channel-deletecleanup-");
+    const remove = vi.fn(() => Promise.resolve());
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      {
+        post: vi.fn(() => Promise.resolve()),
+        resolve: vi.fn(),
+        provision: () =>
+          Promise.resolve({
+            guildId: "guild-1",
+            channelId: "made-channel",
+            webhookId: "77",
+            webhookToken: "made-secret",
+          }),
+        remove,
+        swarmGuildId: () => "guild-1",
+      },
+    );
+    const made = await store.serve({
+      op: "channel",
+      schemaVersion: 1,
+      channel: { schemaVersion: 1, title: "release", members: ["atlas"], discord: { kind: "provision" } },
+    });
+    if (made.op !== "channel") throw new Error("channel expected");
+
+    const closed = await store.serve({
+      op: "close",
+      schemaVersion: 1,
+      conversationId: made.conversation.conversationId,
+    });
+    if (closed.op !== "close") throw new Error("close expected");
+    expect(closed.closed).toBe(true);
+    expect(remove).toHaveBeenCalledWith({ webhookId: "77", webhookToken: "made-secret" });
   });
 
   it("keeps one room per guild channel, so inbound guild text has one place to go", async () => {
     const root = await makeRoot("clankie-channel-oneroom-");
-    const provision = vi.fn((input: { name: string; channelId?: string }) =>
-      Promise.resolve({
-        guildId: "guild-1",
-        channelId: input.channelId ?? "made-up",
-        webhookId: "77",
-        webhookToken: "secret",
-      }),
+    const provision = vi.fn(
+      (input: { name: string; room?: { kind: "channel" | "forum"; channelId: string } }) =>
+        Promise.resolve({
+          guildId: "guild-1",
+          channelId: input.room?.channelId ?? "made-up",
+          webhookId: "77",
+          webhookToken: "secret",
+        }),
     );
     const store = new ConversationStore(
       root,
@@ -469,7 +906,7 @@ describe("channel conversations", () => {
         schemaVersion: 1,
         title: "Atlas slowness",
         members: ["atlas"],
-        discord: { kind: "provision", channelId: "42" },
+        discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
       },
     });
     if (first.op !== "channel") throw new Error("channel expected");
@@ -482,7 +919,7 @@ describe("channel conversations", () => {
           schemaVersion: 1,
           title: "Second room",
           members: ["dev"],
-          discord: { kind: "provision", channelId: "42" },
+          discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
         },
       }),
     ).rejects.toThrow("already holds");
@@ -499,7 +936,7 @@ describe("channel conversations", () => {
           channelId: first.channel.channelId,
           title: "Atlas slowness",
           members: ["atlas", "dev"],
-          discord: { kind: "provision", channelId: "42" },
+          discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
         },
       }),
     ).resolves.toBeDefined();
@@ -550,6 +987,38 @@ describe("channel conversations", () => {
     const listed = await store.serve({ op: "channels", schemaVersion: 1 });
     if (listed.op !== "channels") throw new Error("channels expected");
     expect(listed.channels).toHaveLength(0);
+  });
+
+  it("refuses a pasted forum webhook because it does not identify a post", async () => {
+    const root = await makeRoot("clankie-channel-forum-webhook-");
+    const store = new ConversationStore(
+      root,
+      vi.fn(() => Promise.resolve()),
+      undefined,
+      vi.fn(() => Promise.resolve(false)),
+      undefined,
+      undefined,
+      {
+        post: vi.fn(() => Promise.resolve()),
+        resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "forum-1" })),
+        rooms: vi.fn(() =>
+          Promise.resolve([{ kind: "forum" as const, channelId: "forum-1", name: "field-notes" }]),
+        ),
+        swarmGuildId: () => "oathkeeper",
+      },
+    );
+    await expect(
+      store.serve({
+        op: "channel",
+        schemaVersion: 1,
+        channel: {
+          schemaVersion: 1,
+          title: "Field notes",
+          members: [],
+          discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
+        },
+      }),
+    ).rejects.toThrow("does not identify a post");
   });
 
   it("projects nothing at all when no swarm home is set", async () => {
@@ -700,9 +1169,9 @@ describe("channel conversations", () => {
     expect(restated.channel.conversationId).toBe(conversationId);
     expect(restated.channel.title).toBe("atlas slowness (deep)");
     expect(restated.channel.members).toEqual([
-      { seatId: "dev", position: 0, joinedAt: expect.any(String) },
-      { seatId: "atlas", position: 1, joinedAt: joinedAtlas },
-      { seatId: "gh", position: 2, joinedAt: expect.any(String) },
+      { personaId: "dev", position: 0, joinedAt: expect.any(String) },
+      { personaId: "atlas", position: 1, joinedAt: joinedAtlas },
+      { personaId: "gh", position: 2, joinedAt: expect.any(String) },
     ]);
 
     const second = await store.serve({

@@ -241,6 +241,7 @@ export {
   discordChannelName,
   parseDiscordWebhookUrl,
   planDiscordChannelCreate,
+  planDiscordForumPostCreate,
   planDiscordGuildChannels,
   planDiscordWebhookCreate,
   planDiscordWebhookPost,

@@ -1,5 +1,5 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
-export const HEADLESS_COMMAND_HELP = [
+const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["health", "status"],
     lines: ["  health | status          Probe every launcher-owned service (JSON)"],
@@ -62,6 +62,28 @@ export const HEADLESS_COMMAND_HELP = [
     lines: ["  persona set --display-name NAME [--aliases name,name] [--character-notes TEXT] …"],
   },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
+  {
+    nouns: ["herdr"],
+    lines: [
+      "  herdr [status] | set --session NAME",
+      "                           Which herdr session the captain leads (default: default)",
+    ],
+  },
+  {
+    nouns: ["workdir"],
+    lines: [
+      "  workdir [status] | set PATH | clear",
+      "                           The captain's working directory (default: the home directory)",
+    ],
+  },
+  {
+    nouns: ["stance"],
+    lines: [
+      "  stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]",
+      "                           For agents: say what you are doing with your own figure",
+      "                           in the commons. Your seat comes from HERDR_PANE_ID.",
+    ],
+  },
   {
     nouns: ["discord"],
     lines: ["  discord [status]         Read non-secret Discord identifiers and body selection"],

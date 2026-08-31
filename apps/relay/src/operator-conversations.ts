@@ -74,6 +74,15 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeJson(response, 400, { error: "invalid_conversation_request" });
       return true;
     }
+    // A stance is safe to reach from the agent side for exactly one reason: the
+    // caller names the Herdr pane it is sitting in, and the service checks that
+    // against the census (ADR 0148). A remote device cannot make that claim — it
+    // would be typing some other pane's id — so the op stays on the local door
+    // rather than riding a device grant.
+    if (serviceRequest.op === "state_stance") {
+      writeJson(response, 403, { error: "op_is_local_to_the_machine" });
+      return true;
+    }
     const grant =
       serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
@@ -82,6 +91,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           : serviceRequest.op === "close_seat" ||
               serviceRequest.op === "spawn_seat" ||
               serviceRequest.op === "channel" ||
+              serviceRequest.op === "update_persona" ||
               serviceRequest.op === "discord_rooms"
             ? // Hiring is at least as consequential as closing: it starts a
               // process on the operator's machine. Listing the home guild's rooms

@@ -649,10 +649,7 @@ client.on("voiceStateUpdate", (previous, current) => {
  * decision is taken here and never downstream. Anyone else falls through to
  * ordinary ingress, exactly as this channel behaved before it was projected.
  */
-async function takenByProjectedChannel(
-  message: Message,
-  authorIsBot: boolean,
-): Promise<boolean> {
+async function takenByProjectedChannel(message: Message, authorIsBot: boolean): Promise<boolean> {
   const body = message.content.trim();
   if (
     authorIsBot ||

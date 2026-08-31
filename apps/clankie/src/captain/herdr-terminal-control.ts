@@ -8,6 +8,7 @@ import type {
   OperatorTerminalInputRequest,
   OperatorTerminalInputResult,
 } from "@clankie/protocol";
+import { readTerminalGrid, type HerdrPaneGrid } from "./herdr-census.ts";
 
 const DEFAULT_LEASE_TTL_MS = 45_000;
 const DEFAULT_MAX_CONTROLLERS = 16;
@@ -19,7 +20,12 @@ export interface HerdrTerminalController {
   close(): void;
 }
 
-export type StartHerdrTerminalController = (terminalId: string) => HerdrTerminalController;
+export type StartHerdrTerminalController = (
+  terminalId: string,
+  grid: HerdrPaneGrid | undefined,
+) => HerdrTerminalController;
+
+export type ReadHerdrTerminalGrid = (terminalId: string) => Promise<HerdrPaneGrid | undefined>;
 
 /**
  * Exclusive, renewable input leases over Herdr's terminal control sessions
@@ -30,6 +36,7 @@ export type StartHerdrTerminalController = (terminalId: string) => HerdrTerminal
 export class HerdrTerminalControlStore {
   private readonly leases = new Map<string, TerminalLease>();
   private readonly startController: StartHerdrTerminalController;
+  private readonly readGrid: ReadHerdrTerminalGrid;
   private readonly leaseTtlMs: number;
   private readonly maxControllers: number;
   private readonly clock: () => number;
@@ -37,18 +44,20 @@ export class HerdrTerminalControlStore {
   public constructor(
     options: {
       readonly startController?: StartHerdrTerminalController;
+      readonly readGrid?: ReadHerdrTerminalGrid;
       readonly leaseTtlMs?: number;
       readonly maxControllers?: number;
       readonly clock?: () => number;
     } = {},
   ) {
     this.startController = options.startController ?? startHerdrTerminalController;
+    this.readGrid = options.readGrid ?? ((terminalId) => readTerminalGrid(terminalId));
     this.leaseTtlMs = options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
     this.maxControllers = options.maxControllers ?? DEFAULT_MAX_CONTROLLERS;
     this.clock = options.clock ?? Date.now;
   }
 
-  public control(request: OperatorTerminalControlRequest): OperatorTerminalControlResult {
+  public async control(request: OperatorTerminalControlRequest): Promise<OperatorTerminalControlResult> {
     this.sweep();
     const lease = this.leases.get(request.terminalId);
     switch (request.action) {
@@ -62,9 +71,14 @@ export class HerdrTerminalControlStore {
         if (this.leases.size >= this.maxControllers) {
           return unavailableControl(request.terminalId, "controller_closed");
         }
+        // Herdr resizes a pane to its controlling client on attach and then pins
+        // it there for the lease. Claiming control at the pane's own grid makes
+        // that resize a no-op, so a phone taking the keyboard never reflows the
+        // operator's desktop pane out from under them.
+        const grid = await this.readGrid(request.terminalId);
         let controller: HerdrTerminalController;
         try {
-          controller = this.startController(request.terminalId);
+          controller = this.startController(request.terminalId, grid);
         } catch {
           return unavailableControl(request.terminalId, "herdr_unavailable");
         }
@@ -96,7 +110,11 @@ export class HerdrTerminalControlStore {
           lease.controller.write(JSON.stringify({ type: "terminal.release" }));
           this.drop(request.terminalId, lease);
         }
-        return { schemaVersion: 1, status: "released", terminalId: request.terminalId };
+        return {
+          schemaVersion: 1,
+          status: "released",
+          terminalId: request.terminalId,
+        };
       }
     }
   }
@@ -127,7 +145,11 @@ export class HerdrTerminalControlStore {
         reason: "controller_closed",
       };
     }
-    return { schemaVersion: 1, status: "delivered", terminalId: request.terminalId };
+    return {
+      schemaVersion: 1,
+      status: "delivered",
+      terminalId: request.terminalId,
+    };
   }
 
   public close(): void {
@@ -201,8 +223,12 @@ function unavailableControl(
   return { schemaVersion: 1, status: "unavailable", terminalId, reason };
 }
 
-function startHerdrTerminalController(terminalId: string): HerdrTerminalController {
-  const child = spawn("herdr", ["terminal", "session", "control", terminalId], {
+function startHerdrTerminalController(
+  terminalId: string,
+  grid: HerdrPaneGrid | undefined,
+): HerdrTerminalController {
+  const geometry = grid === undefined ? [] : ["--cols", String(grid.columns), "--rows", String(grid.rows)];
+  const child = spawn("herdr", ["terminal", "session", "control", terminalId, ...geometry], {
     stdio: ["pipe", "pipe", "ignore"],
   });
   // The control stream echoes rendered frames; drain them so the pipe never

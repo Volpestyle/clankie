@@ -1,5 +1,7 @@
 import { ensureActivityProducerCredential } from "@clankie/credential-broker";
 import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RenderedSurfaceHub } from "./frame-hub.ts";
 import { createFrameProducerServer } from "./producer.ts";
@@ -16,7 +18,11 @@ if (
 ) {
   const port = positiveInt(process.env.CLANKIE_ACTIVITY_PORT ?? "4320", "CLANKIE_ACTIVITY_PORT");
   const hub = new RenderedSurfaceHub();
-  const activity = createDiscordActivityServer({ hub });
+  const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
+  const activity = createDiscordActivityServer({
+    hub,
+    avatarDirectory: join(stateRoot, "captain", "persona-avatars"),
+  });
   const bound = await activity.listen(port);
   process.stdout.write(`clankie activity surface listening on 127.0.0.1:${String(bound)}\n`);
 

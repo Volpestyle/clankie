@@ -721,6 +721,8 @@ function conversationHint(conversation: {
       return "workspace";
     case "seat":
       return "seat";
+    case "persona":
+      return "agent";
     case "channel":
       return "channel";
     case "global":

@@ -20,6 +20,15 @@ Its live lower third keeps Clankie's self-authored objective, intent, and
 monologue separate from the observed effect; spoken output stays on the
 voice surface rather than being duplicated here.
 
+The same public listener serves host-baked agent persona avatars at
+`/avatars/agent-<persona-uuid>-<png-sha256>.png` (and retains the version-1
+SHA-256 persona form during migration). The app renders the exact
+Garden `variant × accessory × shape` face, the captain validates and stores the
+PNG under `~/.clankie/captain/persona-avatars/`, and this server returns it with
+an immutable cache header. Discord webhook `avatar_url` requires this publicly
+reachable HTTPS path; data URIs and local app assets are not fetchable by
+Discord. The content hash changes the URL whenever the bytes change.
+
 The older
 [rendered-frame architecture JPG](../../docs/diagrams/discord-activity-architecture.jpg)
 is a historical snapshot. Current game-body ownership is diagrammed in

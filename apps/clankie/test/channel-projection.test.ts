@@ -14,12 +14,14 @@ describe("createChannelProjectionPost", () => {
     await createChannelProjection({ fetch: fetchImpl as unknown as typeof fetch }).post({
       ...CREDENTIAL,
       username: "atlas",
+      avatarUrl: "https://activity.clankie.bot/avatars/agent-face.png",
       content: "it re-decodes per mount",
     });
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://discord.com/api/v10/webhooks/42/tok?wait=true");
     expect(JSON.parse(String(init.body))).toEqual({
       username: "atlas",
+      avatar_url: "https://activity.clankie.bot/avatars/agent-face.png",
       content: "it re-decodes per mount",
       // An agent's words must never be able to ping a room.
       allowed_mentions: { parse: [] },
@@ -37,6 +39,19 @@ describe("createChannelProjectionPost", () => {
     expect(body.content).toHaveLength(2_000);
     expect(body.content.endsWith("…")).toBe(true);
     expect(body.username).toHaveLength(80);
+  });
+
+  it("targets the forum post when the webhook belongs to its parent forum", async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(new Response("{}", { status: 200 })));
+    await createChannelProjection({ fetch: fetchImpl as unknown as typeof fetch }).post({
+      ...CREDENTIAL,
+      threadId: "forum-post-9",
+      username: "atlas",
+      content: "from the same room",
+    });
+    expect((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[0]).toBe(
+      "https://discord.com/api/v10/webhooks/42/tok?wait=true&thread_id=forum-post-9",
+    );
   });
 
   it("reports a refused post so the caller can treat the projection as best-effort", async () => {

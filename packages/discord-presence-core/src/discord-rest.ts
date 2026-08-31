@@ -1,4 +1,8 @@
-import type { DiscordPresenceActionRequest, DiscordToolProgressCategory } from "@clankie/protocol";
+import type {
+  DiscordGuildRoom,
+  DiscordPresenceActionRequest,
+  DiscordToolProgressCategory,
+} from "@clankie/protocol";
 
 type DiscordToolProgressPayload = Extract<DiscordPresenceActionRequest, { readonly kind: "tool_progress" }>;
 
@@ -222,6 +226,17 @@ export function planDiscordWebhookPost(post: DiscordWebhookPersonaPost): Discord
   if (content.length === 0 || content.length > WEBHOOK_CONTENT_MAX) {
     throw new Error("discord_webhook_invalid_content");
   }
+  let avatarUrl: string | undefined;
+  if (post.avatarUrl !== undefined) {
+    try {
+      const parsed = new URL(post.avatarUrl);
+      if (parsed.protocol !== "https:" || parsed.username.length > 0 || parsed.password.length > 0)
+        throw new Error();
+      avatarUrl = parsed.toString();
+    } catch {
+      throw new Error("discord_webhook_invalid_avatar_url");
+    }
+  }
   const query =
     post.threadId === undefined ? "?wait=true" : `?wait=true&thread_id=${encodeURIComponent(post.threadId)}`;
   return {
@@ -230,7 +245,7 @@ export function planDiscordWebhookPost(post: DiscordWebhookPersonaPost): Discord
     body: {
       username,
       content,
-      ...(post.avatarUrl === undefined ? {} : { avatar_url: post.avatarUrl }),
+      ...(avatarUrl === undefined ? {} : { avatar_url: avatarUrl }),
       // An agent's words must never be able to ping a room. Same rule the bot
       // send path already holds.
       allowed_mentions: { parse: [] },
@@ -313,6 +328,24 @@ export function planDiscordChannelCreate(input: {
   };
 }
 
+/** Make the one forum post that carries a projected Clankie room. */
+export function planDiscordForumPostCreate(input: {
+  readonly forumId: string;
+  readonly name: string;
+}): DiscordProvisionPlan {
+  return {
+    method: "post",
+    path: `/channels/${input.forumId}/threads`,
+    body: {
+      name: input.name.trim().slice(0, 100),
+      message: {
+        content: "This post mirrors a Clankie room.",
+        allowed_mentions: { parse: [] },
+      },
+    },
+  };
+}
+
 /** The one per-channel credential every member of the room posts through. */
 export function planDiscordWebhookCreate(input: {
   readonly channelId: string;
@@ -327,12 +360,12 @@ export function planDiscordWebhookCreate(input: {
 }
 
 /**
- * Channel types a webhook can post into: a guild text channel and an
- * announcement channel. Everything else in a guild list — categories, voice,
- * forums, stage — is not a room a fleet can be put in, so it never reaches
- * the picker.
+ * Containers a projection can use: a guild text or announcement channel
+ * directly, or one new post under a forum.
  */
-const WEBHOOKABLE_CHANNEL_TYPES = new Set([0, 5]);
+const DIRECT_CHANNEL_TYPES = new Set([0, 5]);
+const FORUM_CHANNEL_TYPE = 15;
+const REQUIRE_TAG_CHANNEL_FLAG = 1 << 4;
 
 /**
  * The rooms in a guild a channel could be projected onto (ADR 0146). Projection
@@ -345,20 +378,24 @@ export function planDiscordGuildChannels(guildId: string): { readonly method: "g
 }
 
 /** Guild channels narrowed to the ones a webhook can post into, named for a picker. */
-export function readDiscordGuildRooms(
-  raw: unknown,
-): readonly { readonly channelId: string; readonly name: string }[] {
+export function readDiscordGuildRooms(raw: unknown): readonly DiscordGuildRoom[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((channel): channel is { id: string; name: string; type: number } => {
-      const record = channel as { id?: unknown; name?: unknown; type?: unknown };
+    .filter((channel): channel is { id: string; name: string; type: number; flags?: number } => {
+      const record = channel as { id?: unknown; name?: unknown; type?: unknown; flags?: unknown };
       return (
         typeof record.id === "string" &&
         typeof record.name === "string" &&
         typeof record.type === "number" &&
-        WEBHOOKABLE_CHANNEL_TYPES.has(record.type)
+        (DIRECT_CHANNEL_TYPES.has(record.type) ||
+          (record.type === FORUM_CHANNEL_TYPE &&
+            !(typeof record.flags === "number" && (record.flags & REQUIRE_TAG_CHANNEL_FLAG) !== 0)))
       );
     })
-    .map((channel) => ({ channelId: channel.id, name: channel.name.slice(0, 100) }))
+    .map((channel) => ({
+      kind: channel.type === FORUM_CHANNEL_TYPE ? ("forum" as const) : ("channel" as const),
+      channelId: channel.id,
+      name: channel.name.slice(0, 100),
+    }))
     .sort((left, right) => left.name.localeCompare(right.name));
 }

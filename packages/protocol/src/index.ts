@@ -142,10 +142,102 @@ export const OperatorConversationChannelIdSchema = z
   .max(OPERATOR_CONVERSATION_REF_MAX);
 export type OperatorConversationChannelId = z.infer<typeof OperatorConversationChannelIdSchema>;
 
+/** Durable character identity for one fleet agent, independent of any Herdr pane. */
+export const OperatorAgentPersonaIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
+export type OperatorAgentPersonaId = z.infer<typeof OperatorAgentPersonaIdSchema>;
+/** One name that is valid in both the app and Discord's per-message webhook identity. */
+export const OperatorAgentNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine((name) => !/discord|clyde/iu.test(name), "Agent names cannot contain Discord or Clyde");
+export const OperatorAgentAppearanceSchema = z
+  .object({
+    /** Gold belongs to the operator and is intentionally absent here. */
+    variant: z.enum(["green", "teal", "amber", "dusk", "onyx", "azure"]),
+    accessory: z.enum([
+      "none",
+      "lead",
+      "planner",
+      "implementer",
+      "verifier",
+      "reviewer",
+      "debugger",
+      "evaluator",
+    ]),
+    shape: z.enum(["circle", "squircle", "tile"]),
+  })
+  .strict();
+export type OperatorAgentAppearance = z.infer<typeof OperatorAgentAppearanceSchema>;
+/** Shared full-tuple default; six tints alone cannot identify a real fleet. */
+export function defaultOperatorAgentAppearance(
+  harness: string,
+  personaId = harness,
+): OperatorAgentAppearance {
+  const variants = ["green", "teal", "amber", "dusk", "onyx", "azure"] as const;
+  const accessories = [
+    "none",
+    "lead",
+    "planner",
+    "implementer",
+    "verifier",
+    "reviewer",
+    "debugger",
+    "evaluator",
+  ] as const;
+  const shapes = ["circle", "squircle", "tile"] as const;
+  let hash = 2_166_136_261;
+  for (const character of `${harness}\0${personaId}`) {
+    hash = Math.imul(hash ^ character.charCodeAt(0), 16_777_619) >>> 0;
+  }
+  let choice = hash % (variants.length * accessories.length * shapes.length);
+  const variant = variants[choice % variants.length]!;
+  choice = Math.floor(choice / variants.length);
+  const accessory = accessories[choice % accessories.length]!;
+  choice = Math.floor(choice / accessories.length);
+  return { variant, accessory, shape: shapes[choice % shapes.length]! };
+}
+export const OperatorAgentPersonaSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    personaId: OperatorAgentPersonaIdSchema,
+    name: OperatorAgentNameSchema,
+    appearance: OperatorAgentAppearanceSchema,
+    /** Last known harness, retained while the persona has no live seat. */
+    harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
+    /** Present while this character occupies a live Herdr seat. */
+    activeSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    /** Present once the persona's durable DM exists. */
+    conversationId: OperatorConversationIdSchema.optional(),
+    /** SHA-256 of the current host-served PNG; also busts Discord's avatar cache. */
+    avatarRevision: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorAgentPersona = z.infer<typeof OperatorAgentPersonaSchema>;
+export const UpdateOperatorAgentPersonaSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    personaId: OperatorAgentPersonaIdSchema,
+    name: OperatorAgentNameSchema,
+    appearance: OperatorAgentAppearanceSchema,
+    /** Optional exact app-rendered PNG. The host validates and serves it to Discord. */
+    avatarPngBase64: z.string().min(1).max(700_000).optional(),
+  })
+  .strict();
+export type UpdateOperatorAgentPersona = z.infer<typeof UpdateOperatorAgentPersonaSchema>;
+
 export const OperatorConversationScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("global") }).strict(),
   z.object({ kind: z.literal("workspace"), workspaceId: z.string().trim().min(1).max(512) }).strict(),
-  /** One DM thread per fleet seat (ADR 0135). `seatId` is herdr's stable terminal identity. */
+  /** One DM thread per durable fleet character (ADR 0147). */
+  z.object({ kind: z.literal("persona"), personaId: OperatorAgentPersonaIdSchema }).strict(),
+  /** Legacy persisted scope. New surfaces create persona scopes. */
   z.object({ kind: z.literal("seat"), seatId: z.string().trim().min(1).max(512) }).strict(),
   /**
    * One conversation several seats share (ADR 0146). Membership lives on the
@@ -168,19 +260,31 @@ export const OPERATOR_CHANNEL_MEMBER_MAX = 12;
  * Projection is not limited to rooms Clankie made: he owns Manage Webhooks in
  * the one server he controls, so any text or announcement channel there is a
  * place the fleet can be put without the owner copying a URL out of Server
- * Settings. Servers he merely inhabits never appear here.
+ * Settings. A forum is a container: choosing one creates a distinct post for
+ * the Clankie room. Servers he merely inhabits never appear here.
  */
 export const DiscordGuildRoomIdSchema = z.string().trim().min(1).max(128);
 export const DISCORD_GUILD_ROOM_MAX = 500;
+export const DiscordGuildRoomTargetSchema = z
+  .object({
+    kind: z.enum(["channel", "forum"]),
+    channelId: DiscordGuildRoomIdSchema,
+  })
+  .strict();
+export type DiscordGuildRoomTarget = z.infer<typeof DiscordGuildRoomTargetSchema>;
 export const DiscordGuildRoomSchema = z
-  .object({ channelId: DiscordGuildRoomIdSchema, name: z.string().trim().min(1).max(100) })
+  .object({
+    kind: z.enum(["channel", "forum"]),
+    channelId: DiscordGuildRoomIdSchema,
+    name: z.string().trim().min(1).max(100),
+  })
   .strict();
 export type DiscordGuildRoom = z.infer<typeof DiscordGuildRoomSchema>;
 
-/** A seat in a channel. The operator is implicit and always present. */
+/** A durable fleet character in a channel. The operator is implicit and always present. */
 export const OperatorChannelMemberSchema = z
   .object({
-    seatId: z.string().trim().min(1).max(512),
+    personaId: OperatorAgentPersonaIdSchema,
     /** Order the member is offered a turn in. Stable across restarts. */
     position: z.number().int().nonnegative(),
     joinedAt: z.string().datetime(),
@@ -207,7 +311,10 @@ export const OperatorChannelSchema = z
     discord: z
       .object({
         guildId: z.string().trim().min(1).max(128),
+        /** The webhook's owning channel: direct room or parent forum. */
         channelId: z.string().trim().min(1).max(128),
+        /** Present when the Clankie room lives in one post under a forum. */
+        threadId: z.string().trim().min(1).max(128).optional(),
         /** Webhook id only. The token is a secret and never leaves the host. */
         webhookId: z.string().trim().min(1).max(128),
       })
@@ -235,11 +342,17 @@ export const UpsertOperatorChannelSchema = z
      *
      * `provision` is the ordinary path and the one that makes rooms cheap to
      * create: Clankie makes the webhook himself inside the swarm home — a fresh
-     * channel when no `channelId` is given, or an existing one when there is.
+     * channel when no `room` is given, an existing channel when one is named,
+     * or a new post inside a selected forum.
      * `webhook` is the manual fallback for a webhook the owner made by hand in
      * that same server, for when Clankie lacks the permission to make one. It
      * is not a way into another guild: a URL resolving outside the swarm home
      * is refused, and with no swarm home set neither path projects anything.
+     * `off` removes an existing projection: the room stays, with its whole
+     * transcript, and stops posting to or hearing from the guild. A webhook
+     * Clankie provisioned is deleted in Discord; a pasted one belongs to the
+     * operator and is left in place. The Discord channel or forum post itself
+     * is never deleted — what was said there stays readable.
      *
      * Either way the host keeps the token and only `webhookId` comes back out,
      * so this field is the one direction the secret ever moves.
@@ -249,11 +362,12 @@ export const UpsertOperatorChannelSchema = z
         z
           .object({
             kind: z.literal("provision"),
-            /** An existing room in the home guild; absent makes a new one. */
-            channelId: DiscordGuildRoomIdSchema.optional(),
+            /** An existing container in the home guild; absent makes a text channel. */
+            room: DiscordGuildRoomTargetSchema.optional(),
           })
           .strict(),
         z.object({ kind: z.literal("webhook"), webhookUrl: z.string().trim().min(1).max(512) }).strict(),
+        z.object({ kind: z.literal("off") }).strict(),
       ])
       .optional(),
   })
@@ -330,11 +444,87 @@ export const OperatorConversationReactionSchema = z
   .strict();
 export type OperatorConversationReaction = z.infer<typeof OperatorConversationReactionSchema>;
 
+/**
+ * What an agent is doing with its own body in the commons (ADR 0148).
+ *
+ * The roster already says what a pane *is observed* to be doing — running,
+ * waiting, offline — and the app's figures read it. A stance is the other half:
+ * what the agent *says* it is doing, in its own words, chosen by it.
+ *
+ * Three properties keep it honest. It is **attributed** — the service resolves
+ * the seat from the pane the command ran in, so an agent can only move its own
+ * figure and never another's. It **expires** — a stance is a live statement,
+ * not a fact that accumulates, so a stale one falls back to the observed status
+ * rather than outliving the agent that struck it. And it is **sayable** — the
+ * note rides the seat, so every surface that lists the fleet can print it, which
+ * is what keeps a graphical fact from being one only the room can see.
+ *
+ * Poses are meanings rather than sprite names; each surface owns its own art.
+ */
+export const OperatorAgentPoseSchema = z.enum(["working", "thinking", "stuck", "hauling", "resting"]);
+export type OperatorAgentPose = z.infer<typeof OperatorAgentPoseSchema>;
+
+export const OPERATOR_AGENT_STANCE_NOTE_MAX = 120;
+/** A stance older than this is ignored however long it asked for. */
+export const OPERATOR_AGENT_STANCE_MAX_MS = 60 * 60 * 1000;
+export const OPERATOR_AGENT_STANCE_DEFAULT_MS = 15 * 60 * 1000;
+
+export const OperatorAgentStanceSchema = z
+  .object({
+    pose: OperatorAgentPoseSchema,
+    /** One short line in the agent's own voice; shown wherever the seat is listed. */
+    note: z.string().trim().max(OPERATOR_AGENT_STANCE_NOTE_MAX).optional(),
+    statedAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorAgentStance = z.infer<typeof OperatorAgentStanceSchema>;
+
+/**
+ * An agent stating its own stance. It names no seat: the service reads the
+ * Herdr pane the caller is sitting in and resolves the seat from the live
+ * census, so identity is checked rather than claimed.
+ */
+export const StateOperatorAgentStanceSchema = z
+  .object({
+    herdrPaneId: z.string().trim().min(1).max(128),
+    pose: OperatorAgentPoseSchema,
+    note: z.string().trim().max(OPERATOR_AGENT_STANCE_NOTE_MAX).optional(),
+    /** How long this statement stands. Clamped to the ceiling above. */
+    ttlMs: z.number().int().positive().max(OPERATOR_AGENT_STANCE_MAX_MS).optional(),
+  })
+  .strict();
+export type StateOperatorAgentStance = z.infer<typeof StateOperatorAgentStanceSchema>;
+
+/** Why a stance did not take, so an agent is told rather than left guessing. */
+export const StateOperatorAgentStanceResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("stated"),
+      seatId: z.string().trim().min(1).max(512),
+      personaId: OperatorAgentPersonaIdSchema,
+      stance: OperatorAgentStanceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("unseated"),
+      /** The pane holds no live fleet seat — a shell pane, or a census yet to catch up. */
+      herdrPaneId: z.string().trim().min(1).max(128),
+    })
+    .strict(),
+]);
+export type StateOperatorAgentStanceResult = z.infer<typeof StateOperatorAgentStanceResultSchema>;
+
 /** Bounded fleet roster entry: one herdr seat as a messageable contact (ADR 0135). */
 export const OPERATOR_FLEET_ROSTER_MAX = 48;
 export const OperatorFleetSeatSchema = z
   .object({
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    /** Harness-session identity; stable when the same agent moves panes. */
+    occupantId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    /** Durable character occupying this temporary Herdr seat. */
+    personaId: OperatorAgentPersonaIdSchema,
     /** Harness kind — claude, codex, pi, … — contact-card metadata, never routing. */
     harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     status: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
@@ -342,7 +532,7 @@ export const OperatorFleetSeatSchema = z
     /** Herd-lead distilled summary, when one has been written for the seat's pane. */
     summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
     next: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
-    /** Present once the seat's DM thread exists in the registry. */
+    /** Present once the occupying persona's DM thread exists in the registry. */
     conversationId: OperatorConversationIdSchema.optional(),
     /**
      * Absolute path the agent is working in. The commons keys its districts off
@@ -350,9 +540,28 @@ export const OperatorFleetSeatSchema = z
      * join. Absent when the shell cannot resolve one.
      */
     workingDirectory: z.string().trim().max(OPERATOR_SEAT_DIRECTORY_MAX).optional(),
+    /**
+     * What the occupying agent last said it was doing, while that statement
+     * stands. Absent once it expires, so a surface never has to reason about
+     * staleness — the seat simply stops carrying one.
+     */
+    stance: OperatorAgentStanceSchema.optional(),
   })
   .strict();
 export type OperatorFleetSeat = z.infer<typeof OperatorFleetSeatSchema>;
+
+/** A full live-fleet read plus the cursor that wakes its next long poll. */
+export const OPERATOR_FLEET_WAIT_MS_MAX = 30_000;
+export const OperatorFleetSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    cursor: OperatorConversationCursorSchema,
+    seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+    personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+    channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
+  })
+  .strict();
+export type OperatorFleetSnapshot = z.infer<typeof OperatorFleetSnapshotSchema>;
 
 /**
  * Herdr's `agent start --kind` allowlist. A harness value reaches an exec
@@ -396,7 +605,7 @@ export const SpawnOperatorSeatSchema = z
     schemaVersion: z.literal(1),
     harness: z.enum(OPERATOR_SEAT_HARNESSES),
     /** What the roster calls it; herdr's own agent name is derived from this. */
-    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    title: OperatorAgentNameSchema,
     /** Absolute path it starts in — the district it joins (ADR 0022). */
     workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX),
   })
@@ -420,6 +629,52 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
     .strict(),
 ]);
 export type OperatorSeatSpawnResult = z.infer<typeof OperatorSeatSpawnResultSchema>;
+
+/** One message-scope slash command a conversation endpoint can actually accept. */
+export const OperatorComposerCommandSchema = z
+  .object({
+    name: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]*$/u)
+      .max(64),
+    aliases: z
+      .array(
+        z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9-]*$/u)
+          .max(64),
+      )
+      .max(12),
+    summary: z.string().trim().min(1).max(256),
+    argumentHint: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
+export type OperatorComposerCommand = z.infer<typeof OperatorComposerCommandSchema>;
+
+/** One exact skill loaded by the target conversation, with its native invocation. */
+export const OperatorComposerSkillSchema = z
+  .object({
+    name: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9:_-]*$/u)
+      .max(64),
+    description: z.string().trim().min(1).max(512),
+    source: z.string().trim().min(1).max(32),
+    /** A single sigil token; arguments are appended by the client. */
+    invocation: z.string().regex(/^[/$][^\s]{1,127}$/u),
+  })
+  .strict();
+export type OperatorComposerSkill = z.infer<typeof OperatorComposerSkillSchema>;
+
+export const OPERATOR_COMPOSER_CATALOG_MAX = 256;
+export const OperatorComposerCatalogSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    commands: z.array(OperatorComposerCommandSchema).max(OPERATOR_COMPOSER_CATALOG_MAX),
+    skills: z.array(OperatorComposerSkillSchema).max(OPERATOR_COMPOSER_CATALOG_MAX),
+  })
+  .strict();
+export type OperatorComposerCatalog = z.infer<typeof OperatorComposerCatalogSchema>;
 
 /** Herdr's native workspace → tab → pane location for one observable terminal. */
 export const OperatorTerminalSessionSchema = z
@@ -570,15 +825,17 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("message"),
-    /** `agent` is a fleet seat speaking in its own thread (ADR 0135). */
+    /** `agent` is a durable fleet character speaking (ADR 0147). */
     role: z.enum(["operator", "captain", "agent"]),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
     /**
-     * Which seat spoke. Absent in a seat thread, where the counterpart is the
-     * conversation's own scope; present in a channel, where several agents
+     * Which persona spoke. Absent in a persona thread, where the counterpart is
+     * the conversation's own scope; present in a channel, where several agents
      * share one transcript and the surface must attribute each line (ADR 0146).
      */
+    personaId: OperatorAgentPersonaIdSchema.optional(),
+    /** Legacy channel attribution retained while old event logs are readable. */
     seatId: z.string().trim().min(1).max(512).optional(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
@@ -851,13 +1108,16 @@ export const OperatorConversationRevisionConflictSchema = z
   .strict();
 export type OperatorConversationRevisionConflict = z.infer<typeof OperatorConversationRevisionConflictSchema>;
 
-/** A seat thread stays readable when its Herdr pane is not currently live. */
+/** An agent thread stays readable when its durable character has no live Herdr seat. */
 export const OperatorConversationSeatOfflineSchema = z
   .object({
     schemaVersion: z.literal(1),
     status: z.literal("seat_offline"),
     conversationId: OperatorConversationIdSchema,
-    seatId: OperatorConversationEventRefSchema,
+    /** Present for a legacy seat-scoped conversation. */
+    seatId: OperatorConversationEventRefSchema.optional(),
+    /** Present for a durable persona conversation. */
+    personaId: OperatorAgentPersonaIdSchema.optional(),
     currentRevision: z.number().int().nonnegative(),
     safeCursor: OperatorConversationCursorSchema,
   })
@@ -883,6 +1143,7 @@ export const OPERATOR_TERMINAL_TAIL_PATH = "/operator/v1/terminal-tail";
 export const OPERATOR_TERMINAL_DIMENSION_MAX = 1_000;
 export const OPERATOR_TERMINAL_FRAME_BASE64_MAX = 16 * 1024 * 1024;
 export const OPERATOR_TERMINAL_TAIL_FRAMES_MAX = 64;
+export const OPERATOR_TERMINAL_SCROLLBACK_ROWS_MAX = 1_000;
 
 export const OperatorTerminalIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
 export type OperatorTerminalId = z.infer<typeof OperatorTerminalIdSchema>;
@@ -916,13 +1177,42 @@ export const OperatorTerminalFrameSchema = z
     data: z
       .string()
       .max(OPERATOR_TERMINAL_FRAME_BASE64_MAX)
-      .refine(isCanonicalBase64, { message: "expected non-empty canonical base64" }),
+      .refine((value) => value.length === 0 || isCanonicalBase64(value), {
+        message: "expected canonical base64",
+      }),
     columns: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX),
     rows: z.number().int().positive().max(OPERATOR_TERMINAL_DIMENSION_MAX),
     /** A full frame resets the native renderer; later frames are ANSI diffs. */
     full: z.boolean(),
+    /** Styled rows that entered history without mutating the live viewport. */
+    scrollback: z
+      .object({
+        encoding: z.literal("base64"),
+        data: z
+          .string()
+          .max(OPERATOR_TERMINAL_FRAME_BASE64_MAX)
+          .refine(isCanonicalBase64, { message: "expected non-empty canonical base64" }),
+        rows: z.number().int().positive().max(OPERATOR_TERMINAL_SCROLLBACK_ROWS_MAX),
+      })
+      .strict()
+      .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((frame, context) => {
+    if (frame.data.length === 0 && frame.scrollback === undefined) {
+      context.addIssue({ code: "custom", path: ["data"], message: "terminal frame is empty" });
+    }
+    if (frame.full && frame.data.length === 0) {
+      context.addIssue({ code: "custom", path: ["data"], message: "full terminal frame is empty" });
+    }
+    if (frame.data.length + (frame.scrollback?.data.length ?? 0) > OPERATOR_TERMINAL_FRAME_BASE64_MAX) {
+      context.addIssue({
+        code: "custom",
+        path: ["scrollback"],
+        message: "terminal frame exceeds byte bound",
+      });
+    }
+  });
 export type OperatorTerminalFrame = z.infer<typeof OperatorTerminalFrameSchema>;
 
 export const OperatorTerminalObservationRequestSchema = z
@@ -951,7 +1241,10 @@ export const OperatorTerminalObservationPageSchema = z
   .strict()
   .superRefine((page, context) => {
     if (
-      page.frames.reduce((total, frame) => total + frame.data.length, 0) > OPERATOR_TERMINAL_FRAME_BASE64_MAX
+      page.frames.reduce(
+        (total, frame) => total + frame.data.length + (frame.scrollback?.data.length ?? 0),
+        0,
+      ) > OPERATOR_TERMINAL_FRAME_BASE64_MAX
     ) {
       context.addIssue({ code: "custom", path: ["frames"], message: "terminal page exceeds byte bound" });
     }
@@ -1318,6 +1611,19 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("personas"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("update_persona"),
+      schemaVersion: z.literal(1),
+      persona: UpdateOperatorAgentPersonaSchema,
+    })
+    .strict(),
   /**
    * The swarm home's rooms, so choosing where a channel is projected is a pick
    * rather than a snowflake typed from memory. Empty where no Discord runtime
@@ -1353,6 +1659,38 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("roster"),
       schemaVersion: z.literal(1),
+    })
+    .strict(),
+  /**
+   * One cursor-based live fleet read. An absent/old cursor returns now; the
+   * current cursor parks until Herdr or fleet-owned state changes.
+   */
+  z
+    .object({
+      op: z.literal("fleet"),
+      schemaVersion: z.literal(1),
+      cursor: OperatorConversationCursorSchema.optional(),
+      waitMs: z.number().int().min(0).max(OPERATOR_FLEET_WAIT_MS_MAX).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("composer_catalog"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+    })
+    .strict(),
+  /**
+   * An agent stating what it is doing with its own figure (ADR 0148). Unlike
+   * `channel` and `spawn_seat`, this one is meant to be reached from the agent
+   * side, and it is safe there for the reason those are not: it names no seat,
+   * so the only figure a caller can move is the one it is sitting in.
+   */
+  z
+    .object({
+      op: z.literal("state_stance"),
+      schemaVersion: z.literal(1),
+      stance: StateOperatorAgentStanceSchema,
     })
     .strict(),
   z
@@ -1489,6 +1827,20 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("personas"),
+      schemaVersion: z.literal(1),
+      personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("update_persona"),
+      schemaVersion: z.literal(1),
+      persona: OperatorAgentPersonaSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("discord_rooms"),
       schemaVersion: z.literal(1),
       rooms: z.array(DiscordGuildRoomSchema).max(DISCORD_GUILD_ROOM_MAX),
@@ -1516,6 +1868,27 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("roster"),
       schemaVersion: z.literal(1),
       seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("fleet"),
+      schemaVersion: z.literal(1),
+      snapshot: OperatorFleetSnapshotSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("composer_catalog"),
+      schemaVersion: z.literal(1),
+      catalog: OperatorComposerCatalogSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("state_stance"),
+      schemaVersion: z.literal(1),
+      result: StateOperatorAgentStanceResultSchema,
     })
     .strict(),
   z
@@ -1604,13 +1977,26 @@ export type OperatorConversationTailItem =
 export interface OperatorConversationServiceClient {
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
+  /** Park until the fleet cursor changes, then return one coherent snapshot. */
+  fleet?(cursor?: string, signal?: AbortSignal): Promise<OperatorFleetSnapshot>;
+  /** Commands and skills accepted by this exact conversation target. */
+  composerCatalog?(conversationId: string): Promise<OperatorComposerCatalog>;
+  /**
+   * An agent saying what it is doing with its own figure (ADR 0148). The seat
+   * comes from the pane the caller sits in, never from the caller's word for it.
+   */
+  stateStance?(input: StateOperatorAgentStance): Promise<StateOperatorAgentStanceResult>;
+  /** Durable fleet characters, including those with no live Herdr seat. */
+  personas?(): Promise<readonly OperatorAgentPersona[]>;
+  /** Rename or restyle one character for every surface, including Discord. */
+  updatePersona?(input: UpdateOperatorAgentPersona): Promise<OperatorAgentPersona>;
   /** Observable terminals in Herdr's native hierarchy; absent on older injected clients. */
   terminalCatalog?(): Promise<readonly OperatorTerminalSession[]>;
   /** Acquire, renew, or release the exclusive input lease on one terminal; absent on older injected clients. */
   terminalControl?(request: OperatorTerminalControlRequest): Promise<OperatorTerminalControlResult>;
   /** Write raw VT bytes under a live input lease; absent on older injected clients. */
   terminalInput?(request: OperatorTerminalInputRequest): Promise<OperatorTerminalInputResult>;
-  /** Close the Herdr pane currently occupying a durable fleet seat. */
+  /** Close the live Herdr seat without deleting its occupying persona. */
   closeSeat(seatId: string): Promise<boolean>;
   /**
    * Open a pane in a working directory and start a harness in it, returning the
@@ -1668,13 +2054,18 @@ export interface OperatorConversationServiceClient {
 
 export function createOperatorConversationServiceClient(
   dispatch: OperatorConversationServiceDispatch,
-  options: { readonly tailIdleMs?: number; readonly tailWaitMs?: number } = {},
+  options: {
+    readonly tailIdleMs?: number;
+    readonly tailWaitMs?: number;
+    readonly fleetWaitMs?: number;
+  } = {},
 ): OperatorConversationServiceClient {
   const tailIdleMs = options.tailIdleMs ?? 250;
   // A service that honours `waitMs` parks the request instead of answering
   // empty, so the idle sleep below only pays out the remainder it did not
   // spend waiting — an older service that ignores it keeps today's cadence.
   const tailWaitMs = Math.min(options.tailWaitMs ?? 10_000, OPERATOR_CONVERSATION_TAIL_WAIT_MS_MAX);
+  const fleetWaitMs = Math.min(options.fleetWaitMs ?? 20_000, OPERATOR_FLEET_WAIT_MS_MAX);
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   return {
     async list(scope) {
@@ -1690,6 +2081,45 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "roster", schemaVersion: 1 });
       if (result.op !== "roster") throw new Error(`Unexpected ${result.op} result for roster`);
       return result.seats;
+    },
+    async fleet(cursor, signal) {
+      const result = await dispatch(
+        {
+          op: "fleet",
+          schemaVersion: 1,
+          ...(cursor === undefined ? {} : { cursor }),
+          waitMs: fleetWaitMs,
+        },
+        signal,
+      );
+      if (result.op !== "fleet") throw new Error(`Unexpected ${result.op} result for fleet`);
+      return result.snapshot;
+    },
+    async composerCatalog(conversationId) {
+      const result = await dispatch({ op: "composer_catalog", schemaVersion: 1, conversationId });
+      if (result.op !== "composer_catalog") {
+        throw new Error(`Unexpected ${result.op} result for composer_catalog`);
+      }
+      return result.catalog;
+    },
+    async stateStance(input) {
+      const result = await dispatch({ op: "state_stance", schemaVersion: 1, stance: input });
+      if (result.op !== "state_stance") {
+        throw new Error(`Unexpected ${result.op} result for state_stance`);
+      }
+      return result.result;
+    },
+    async personas() {
+      const result = await dispatch({ op: "personas", schemaVersion: 1 });
+      if (result.op !== "personas") throw new Error(`Unexpected ${result.op} result for personas`);
+      return result.personas;
+    },
+    async updatePersona(input) {
+      const result = await dispatch({ op: "update_persona", schemaVersion: 1, persona: input });
+      if (result.op !== "update_persona") {
+        throw new Error(`Unexpected ${result.op} result for update_persona`);
+      }
+      return result.persona;
     },
     async terminalCatalog() {
       const result = await dispatch({ op: "terminal_catalog", schemaVersion: 1 });

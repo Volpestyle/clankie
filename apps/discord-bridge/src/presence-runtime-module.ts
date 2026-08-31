@@ -2,13 +2,19 @@ import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@cla
 import {
   parseDiscordIdSet,
   planDiscordChannelCreate,
+  planDiscordForumPostCreate,
   planDiscordGuildChannels,
   planDiscordWebhookCreate,
   presenceActGrantRequest,
   readDiscordGuildRooms,
 } from "@clankie/discord-presence-core";
 import { REST as DiscordREST } from "discord.js";
-import type { DiscordActivitySurface, DiscordPresenceWrite } from "@clankie/protocol";
+import type {
+  DiscordActivitySurface,
+  DiscordGuildRoom,
+  DiscordGuildRoomTarget,
+  DiscordPresenceWrite,
+} from "@clankie/protocol";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import { discordAttachmentRoot } from "@clankie/settings";
 import type { REST } from "discord.js";
@@ -27,14 +33,15 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
   provisionChannel(input: {
     readonly name: string;
     readonly topic?: string;
-    readonly channelId?: string;
+    readonly room?: DiscordGuildRoomTarget;
   }): Promise<{
     readonly guildId: string;
     readonly channelId: string;
+    readonly threadId?: string;
     readonly webhookId: string;
     readonly webhookToken: string;
   }>;
-  listRooms(): Promise<readonly { readonly channelId: string; readonly name: string }[]>;
+  listRooms(): Promise<readonly DiscordGuildRoom[]>;
   swarmGuildId(): string | undefined;
 } {
   if (process.env.DISCORD_USER_TOKEN) {
@@ -103,16 +110,18 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
     },
     /**
      * Behind one guild-scoped grant: make the channel when there is none to
-     * use, then its webhook. The guild allowlist is the fence — nothing here
-     * can reach a server the owner has not approved, and a `channelId` handed
-     * in is checked against that guild's own rooms rather than trusted, so a
+     * use, or make one post in a selected forum, then its webhook. The guild
+     * allowlist is the fence — nothing here
+     * can reach a server the owner has not approved, and a `room` handed in is
+     * checked against that guild's own rooms rather than trusted, so a
      * room in a merely-inhabited guild cannot be reached through the swarm one.
      */
     async provisionChannel(input) {
       const guildId = provisionGuildId();
       const rest = await guildRest(guildId);
-      let channelId = input.channelId;
-      if (channelId === undefined) {
+      let channelId: string;
+      let threadId: string | undefined;
+      if (input.room === undefined) {
         const channelPlan = planDiscordChannelCreate({
           guildId,
           name: input.name,
@@ -124,11 +133,25 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
         if (typeof channel.id !== "string") throw new Error("discord_channel_provision_failed");
         channelId = channel.id;
       } else {
+        const requestedRoom = input.room;
         const rooms = readDiscordGuildRooms(
           await rest.get(planDiscordGuildChannels(guildId).path as `/${string}`),
         );
-        if (!rooms.some((room) => room.channelId === channelId)) {
+        const room = rooms.find(
+          (candidate) =>
+            candidate.channelId === requestedRoom.channelId && candidate.kind === requestedRoom.kind,
+        );
+        if (room === undefined) {
           throw new Error("discord_channel_not_in_swarm_guild");
+        }
+        channelId = room.channelId;
+        if (room.kind === "forum") {
+          const postPlan = planDiscordForumPostCreate({ forumId: room.channelId, name: input.name });
+          const thread = (await rest.post(postPlan.path as `/${string}`, {
+            body: postPlan.body,
+          })) as { id?: unknown };
+          if (typeof thread.id !== "string") throw new Error("discord_forum_post_provision_failed");
+          threadId = thread.id;
         }
       }
       const webhookPlan = planDiscordWebhookCreate({ channelId, name: input.name });
@@ -141,6 +164,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       return {
         guildId,
         channelId,
+        ...(threadId === undefined ? {} : { threadId }),
         webhookId: webhook.id,
         webhookToken: webhook.token,
       };

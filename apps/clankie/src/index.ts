@@ -33,6 +33,7 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
+import { pinHerdrSessionEnvironment } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "./world/session.ts";
@@ -86,6 +87,16 @@ const settingsFilledNames = [
   ...applyVoiceSettingsToEnvironment(startupSettings.voice),
   ...applyRelaySettingsToEnvironment(startupSettings.relay),
 ];
+
+// Which herdr session he leads is chosen in settings, never inherited from
+// wherever this process was launched (ADR 0149).
+const herdrSessionPin = await pinHerdrSessionEnvironment(startupSettings.herdr.session);
+if (herdrSessionPin.outcome === "unknown_session") {
+  logger.warn(
+    { event: "herdr.session.unknown", session: herdrSessionPin.session },
+    "configured herdr session not found; herdr commands fall back to the default session",
+  );
+}
 
 const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
 // Keep the existing on-disk directory so browser profiles survive the process merge.
@@ -355,6 +366,9 @@ const captain = createCaptain(
   },
   {
     repoRoot,
+    ...(startupSettings.captain.workingDirectory === undefined
+      ? {}
+      : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
     settings: settingsStore,
     discordEnvironment: captainDiscordEnvironment,

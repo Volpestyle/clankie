@@ -66,15 +66,27 @@ stay in the local Pi trail ([ADR 0134](adr/0134-discord-tool-work-is-a-status-ca
 Discord shows him typing for the whole turn rather than for a capped minute.
 
 The TUI and relay speak the same operator-conversation contract
-(`/operator/v1/dispatch`): fleet roster, revision-fenced sends, cursored replay,
+(`/operator/v1/dispatch`): durable agent personas, their current fleet seats,
+one coherent cursor-long-polled fleet snapshot, revision-fenced sends, cursored replay,
 and long-polled tails. A tail carries two things: the durable events, and the
 message the captain is typing right now — a volatile draft held in memory,
 never in the event log, that the settled `message` event replaces in the block
 it streamed into ([ADR 0141](adr/0141-the-console-watches-him-type.md)). Herdr
-seat conversations are direct-send lanes with no Pi session. Their readable
+persona conversations are direct-send lanes with no Pi session. The persona
+owns its name, full appearance tuple, DM, and channel memberships; its current
+Herdr seat supplies live status and terminal routing. Their readable
 history folds the complete active user/assistant branch from Herdr's native
 Claude Code, Codex, Pi, or Grok session identity; raw terminal bytes stay on the
-terminal lane ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)).
+terminal lane ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)). The app
+and controlled swarm-home Discord project those same host-owned records and
+logs. Discord faces are app-baked PNGs served under content-hashed HTTPS paths
+by the existing Activity origin
+([ADR 0147](adr/0147-an-agent-persona-outlives-its-herdr-seat.md)).
+Herdr's native event subscription advances the volatile fleet cursor; persona,
+seat, channel, and stance changes advance the same cursor. Foreground apps
+therefore render one current seats/personas/channels moment without polling or
+persisting a second world projection
+([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)).
 A TUI process creates a fresh captain conversation unless `--chat` explicitly
 resumes one. A captain conversation and its Pi session are one lifetime: bounded
 retention removes their shared directory, while public event logs rotate with
@@ -143,6 +155,13 @@ global 128-episode ring and per-person fact files live under
 that same store through operator-only routes. [`docs/memory.md`](memory.md) is
 the full picture — what each store holds, who may read it, and what bounds it.
 
+A second hidden extension appends the model card: the name, ref, and provider he
+is actually running on, his reasoning effort, and his context and output limits.
+It resolves the same selection Pi executes, on every run rather than once per
+session, because `/model` and `/effort` swap the model under a live conversation.
+Asked what he runs on, he answers from the prompt like he answers with his own
+address — no tool call, no guess, and silence if the selection cannot be resolved.
+
 ## Where things run
 
 - **Captain tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
@@ -181,10 +200,19 @@ the full picture — what each store holds, who may read it, and what bounds it.
   browser's idle timeout ([ADR 0127](adr/0127-his-accounts-are-his.md)).
 - **Leading agents.** Clankie leads coding agents through the herdr CLI over
   bash, guided by skills — there is no worker protocol. The service is his
-  durable body; joining a herdr session (the operator console in a pane)
-  is how he acquires the fleet. A seated turn attaches a live agent census
-  so he can lead, route, and harvest without rediscovering the room. The
-  herdr-lead board is the companion dashboard
+  durable body, and which herdr session he leads is chosen in settings
+  (`herdr.session`, default herdr's default session): the service pins that
+  session's socket for every herdr child at startup, so the binding never
+  depends on where a console or the service was launched
+  ([ADR 0149](adr/0149-his-herdr-session-is-chosen-not-inherited.md)). The
+  service also subscribes to that socket's native events to wake fleet readers;
+  the default setting therefore covers every agent in the default session,
+  across all of its workspaces
+  ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)). Any
+  operator turn whose session is up attaches a live agent census so he can
+  lead, route, and harvest without rediscovering the room; a turn from the
+  operator console sitting in a pane is additionally a join — that pane is
+  him. The herdr-lead board is the companion dashboard
   ([ADR 0097](adr/0097-herdr-lead-is-the-companion-dashboard.md)). Agents
   coordinate through herdr and plain files.
 - **His body.** `runFreePlay` drives one seam, `GbaDriverIo`

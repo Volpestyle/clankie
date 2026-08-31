@@ -30,6 +30,7 @@ export function createChannelProjection(
   return {
     post: post(fetchImpl),
     resolve: resolve(fetchImpl),
+    remove: remove(fetchImpl),
     ...(options.provision === undefined ? {} : { provision: options.provision }),
     ...(options.rooms === undefined ? {} : { rooms: options.rooms }),
     ...(options.swarmGuildId === undefined ? {} : { swarmGuildId: options.swarmGuildId }),
@@ -60,6 +61,23 @@ function resolve(fetchImpl: typeof fetch): ChannelProjection["resolve"] {
   };
 }
 
+/**
+ * Delete a webhook Clankie made, when its room is unprojected or removed.
+ * Token-authenticated like `resolve`, so no bot grant is needed. A webhook
+ * already gone is the state being asked for, not a failure.
+ */
+function remove(fetchImpl: typeof fetch): NonNullable<ChannelProjection["remove"]> {
+  return async (credential) => {
+    const response = await fetchImpl(
+      `${DISCORD_API}/webhooks/${credential.webhookId}/${credential.webhookToken}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`discord_webhook_delete_failed_${response.status}`);
+    }
+  };
+}
+
 function post(fetchImpl: typeof fetch): ChannelProjection["post"] {
   return async (post) => {
     const plan = planDiscordWebhookPost({
@@ -69,6 +87,8 @@ function post(fetchImpl: typeof fetch): ChannelProjection["post"] {
       // holds all of it, and Discord is a view of the transcript.
       username: bounded(post.username, USERNAME_MAX),
       content: bounded(post.content, CONTENT_MAX),
+      ...(post.avatarUrl === undefined ? {} : { avatarUrl: post.avatarUrl }),
+      ...(post.threadId === undefined ? {} : { threadId: post.threadId }),
     });
     const response = await fetchImpl(`${DISCORD_API}${plan.path}`, {
       method: "POST",

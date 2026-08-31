@@ -1,12 +1,17 @@
-# ADR 0135: A herdr seat is a conversation
+# ADR 0135: A Herdr agent has a direct conversation
 
 Status: accepted (James, 2026-08-28). Amends the no-bespoke-Herdr-tools
 decision in [ADR 0097](0097-herdr-lead-is-the-companion-dashboard.md) a second
 time (the first was [ADR 0131](0131-herdr-completion-watches-wake-the-operator-thread.md)),
 extending the service's herdr machinery from one lifecycle bridge to a fleet
-conversation projection. Closes the "per-agent send has no transport" gap
+conversation projection. [ADR 0147](0147-an-agent-persona-outlives-its-herdr-seat.md)
+defines the durable persona that owns the conversation while a Herdr seat is
+its current terminal address. Closes the "per-agent send has no transport" gap
 recorded in the app repo's ADR 0012 (worker transcripts on the conversation
-stream).
+stream). [ADR 0149](0149-his-herdr-session-is-chosen-not-inherited.md) amends
+the fleet-acquisition story: the led session is chosen in settings and an
+unseated operator turn also carries the census; sitting in a pane remains what
+makes a pane him.
 
 ## Context
 
@@ -36,17 +41,19 @@ power.
 
 ## Decision
 
-Herdr seats are projected through the existing operator-conversation registry
+Herdr agent personas are projected through the existing operator-conversation registry
 and relay. No new service, route family, or credential.
 
-### Seat identity
+### Persona and seat identity
 
-A **seat** is the durable identity a thread hangs off: herdr's stable agent
-identity (the named agent where one exists, the stable terminal identity
-otherwise — the same identity ADR 0131's watches already record and
-re-resolve). Pane ids are ephemeral; a seat's pane sessions come and go inside
-one thread the way a contact gets a new phone. A dead pane renders the seat
-offline; history stays; a respawned pane resumes the same thread.
+A **persona** is the durable identity a thread hangs off. Its harness-native
+occupant is replaceable. The host mints the persona id once and binds it to the
+immutable Herdr subject (a managed name, or an unnamed pane's stable fallback);
+the current harness session supplies a
+separate occupant id. A **seat** is the current Herdr terminal address and
+carries live status, cwd, and terminal routing. A dead pane renders the persona
+offline; its history stays. A replacement session presenting the same subject
+rebinds the persona without changing its thread.
 
 ### Contract sketch
 
@@ -54,23 +61,25 @@ The registry contract grows three things, all inside the existing bounded,
 redacted schema discipline:
 
 ```ts
-// 1. Scope: a conversation can belong to a seat. Distinct from the existing
+// 1. Scope: a conversation belongs to a persona. Distinct from the existing
 //    "workspace" kind, which names a working directory.
 OperatorConversationScope =
   | { kind: "global" }
   | { kind: "workspace"; workspaceId: string }
-  | { kind: "seat"; seatId: string };          // one DM thread per seat
+  | { kind: "persona"; personaId: string };    // one DM thread per agent
 
 // 2. Roster: one bounded dispatch op for the contact list.
 { op: "roster" } → {
   seats: Array<{
     seatId: string;
+    occupantId: string;
+    personaId: string;
     harness: string;        // claude, codex, pi, … from herdr's agent field
     status: string;         // working | idle | done | blocked | offline
     title: string;          // pane title, bounded
     summary?: string;       // herd-lead distilled summary, when written
     next?: string;
-    conversationId?: string; // present once the seat thread exists
+    conversationId?: string; // the persona's thread
     workingDirectory?: string; // herdr's cwd; the district key for app ADR 0022
   }>;                        // capped like the census (48)
 }
@@ -78,7 +87,7 @@ OperatorConversationScope =
 // 3. Attribution: the message event's role union gains the seat's voice.
 role: "operator" | "captain" | "agent"
 
-// 4. Closing a seat ends its current pane without deleting its durable thread.
+// 4. Closing a seat ends its pane without deleting the persona or thread.
 { op: "close_seat", seatId: string } → { seatId: string; closed: boolean }
 
 // 5. Hiring is its symmetric twin: a tab in a working directory, a harness
@@ -90,6 +99,13 @@ role: "operator" | "captain" | "agent"
           reason: "unknown_directory" | "harness_unavailable"
                 | "not_ready" | "herdr_unreachable";
           detail?: string } }
+
+// 6. Composer discovery follows the conversation target, not app-global state.
+{ op: "composer_catalog", conversationId: string }
+  → { catalog: {
+      commands: Array<{ name, aliases, summary, argumentHint? }>;
+      skills: Array<{ name, description, source, invocation }>;
+    } }
 ```
 
 `spawn_seat` runs `herdr tab create --cwd` then `herdr agent start --kind`,
@@ -99,18 +115,29 @@ harness is an enum, not a string, because it reaches an exec. Failure is
 typed rather than thrown: a surface renders it and keeps the operator's draft,
 and a start that fails closes the pane it opened so retries do not accumulate
 empty tabs. The new seat is tracked the moment it exists, the way a `create`
-with a seat scope tracks one, or its first reply lands in a thread nothing is
+with a persona scope tracks one, or its first reply lands in a thread nothing is
 listening to.
 
-`create` with a seat scope is idempotent per seat, like the default global
-conversation. `send` to a seat conversation pipes the text to the seat's
-current pane (`herdr pane send-text` + Enter) under the service's own herdr
-seat — a direct lane, no captain model turn. A seat with no live pane rejects
-the send with a typed failure; the thread stays readable.
+`create` with a persona scope is idempotent per persona, like the default global
+conversation. `send` to a persona conversation resolves its current seat and
+pipes the text to that pane (`herdr pane send-text` + Enter) — a direct lane,
+no captain model turn. A persona with no live seat rejects the send with a
+typed failure; the thread stays readable.
+
+`composer_catalog` resolves through the same address. A Clankie conversation
+reports the Pi resources its captain session loads. A persona conversation
+reports skills visible to the current seat's harness and working directory,
+with the exact invocation token the harness accepts (`$name` for Codex,
+`/name` for Claude, `/skill:name` for Pi). Codex discovery uses its native
+`skills/list` app-server method, including enabled plugin skills, and fails soft
+to the same filesystem roots used for other harnesses when that method is not
+available. An offline persona and a channel return empty target catalogs.
+Commands are restricted to operations whose effect belongs in the message
+lane; terminal-only menus remain in the terminal.
 
 ### What becomes bubbles
 
-A pty stream is not messages. The seat thread carries the _readable
+A pty stream is not messages. The persona thread carries the _readable
 projection_, built from signals the service already has:
 
 - `activity` events from agent-status transitions — `working` is literally a
@@ -123,9 +150,9 @@ projection_, built from signals the service already has:
   assistant text attributed to `agent`. Injected instructions, reasoning, tool
   calls, and tool results never enter the public stream.
 - Stable native message ids checkpoint each session. Re-reading on status
-  changes is idempotent, a new harness session appends to the durable seat, and
-  the first native import replaces the old one-answer seed behind a typed
-  cursor-recovery boundary.
+  changes is idempotent, the subject binding keeps a replacement session on the
+  durable persona, and the first native import replaces the old one-answer seed
+  behind a typed cursor-recovery boundary.
 - A harness without a native transcript normalizer retains the bounded
   summary/final-answer projection. Adding its normalizer upgrades the same
   conversation without changing the relay or app.
@@ -139,15 +166,17 @@ existing transport, one tap from the thread.
 
 ### Transparency
 
-Seat conversations are not side channels. The captain can list and replay
+Persona conversations are not side channels. The captain can list and replay
 them like any conversation — the lead sees everything his branches do, he is
 just no longer a mandatory relay hop for steering them.
 
 ```mermaid
 flowchart LR
-  App["App: messages home"] -->|"dispatch (roster, send, close seat) / tail"| Relay
+  App["App: messages home"] -->|"dispatch (personas, roster, composer catalog, send, close seat) / tail"| Relay
   Relay -->|captain credential| Registry["Operator-conversation registry"]
-  Registry -->|"seat send / close"| Pane["herdr pane (any harness)"]
+  Registry -->|"persona → current seat send / close"| Pane["herdr pane (any harness)"]
+  Registry -->|"conversation → harness + cwd"| Catalog["composer commands + skills"]
+  Catalog --> App
   Pane -->|"agent-status + native session identity"| Proj["Seat projection"]
   Proj -->|"bounded events"| Registry
   Registry -.->|"list / replay"| Captain["Clankie (head of staff)"]
@@ -160,13 +189,9 @@ projection loops, and the retired terminal transport:
 
 [Editable turbopuffer tldraw source](../diagrams/seat-conversations.tldraw)
 
-### Phases
-
-DMs first: roster, seat threads, direct send, status/summary projection.
-Channels (a herdr workspace or tab as a group thread of its panes) and
-compose-to-spawn (new message → spawn a pane in a chosen harness) follow once
-the DM projection has proven the event shapes; both reuse the same scope and
-roster machinery.
+Channels and compose-to-spawn reuse the same persona, scope, roster, and direct
+send machinery. A channel contains personas; only its live routing resolves
+through seats.
 
 ## Alternatives considered
 
@@ -196,7 +221,7 @@ roster machinery.
   their safe summary projection until they gain a transcript normalizer.
 - Closing an agent is a seat operation guarded by the device's `steer` grant:
   it closes the current Herdr pane and removes the live roster entry while the
-  durable thread remains available if that stable seat returns.
+  persona and durable thread remain available offline.
 - ADR 0097's "no general herdr tool suite" holds for captain _tools_; the
   service's herdr machinery nonetheless grows a standing projection loop
   (roster cache, seat watchers, native transcript folding) that must fail soft the way

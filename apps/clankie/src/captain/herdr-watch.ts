@@ -19,6 +19,7 @@ import {
   type SpawnOperatorSeat,
 } from "@clankie/protocol";
 import { z } from "zod";
+import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import {
   readHerdrSeatTranscript,
@@ -50,6 +51,7 @@ type PersistedHerdrWatches = z.infer<typeof PersistedHerdrWatchesSchema>;
 export interface HerdrAgentSnapshot {
   readonly paneId: string;
   readonly terminalId: string;
+  readonly name?: string;
   readonly agent: string;
   readonly status: string;
   readonly title: string;
@@ -144,6 +146,7 @@ function snapshotOf(value: unknown): HerdrAgentSnapshot {
   return {
     paneId,
     terminalId,
+    ...(typeof value.name === "string" && value.name.length > 0 ? { name: value.name } : {}),
     agent: typeof value.agent === "string" ? value.agent : "unknown",
     status: typeof value.agent_status === "string" ? value.agent_status : "unknown",
     title: titleOf(value),
@@ -240,9 +243,7 @@ function defaultRunner(): HerdrWatchRunner {
     pressEnter: (target) => runHerdr(["pane", "send-keys", target, "Enter"]).then(() => undefined),
     closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
     createTab: async ({ cwd, label }) =>
-      parseHerdrRootPaneId(
-        await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus"]),
-      ),
+      parseHerdrRootPaneId(await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus"])),
     startAgent: ({ name, kind, paneId }) =>
       // Returns only once herdr has detected the harness and considers it ready
       // for input, so a resolved call means the seat can actually be messaged.
@@ -277,10 +278,9 @@ function parseHerdrRootPaneId(stdout: string): string {
 
 /**
  * Herdr agent names are `[a-z][a-z0-9_-]{0,31}` and must be unique among live
- * agents, so the operator's free-text title has to become one. `agent list`
- * does not surface names, so uniqueness cannot be checked — it is made, with a
- * short suffix. The operator never types this; it is the roster title that
- * carries their words.
+ * agents, so the operator's free-text title has to become one. A short suffix
+ * makes the immutable subject unique while the roster title carries the
+ * operator's original words.
  */
 export function herdrAgentName(title: string, suffix: string = randomUUID().slice(0, 4)): string {
   const slug = title
@@ -291,6 +291,10 @@ export function herdrAgentName(title: string, suffix: string = randomUUID().slic
   const base = (slug.length === 0 ? "agent" : slug).slice(0, 32 - suffix.length - 1);
   return `${base}-${suffix}`;
 }
+
+export type HerdrSeatSpawnResult =
+  | Exclude<OperatorSeatSpawnResult, { readonly outcome: "spawned" }>
+  | { readonly outcome: "spawned"; readonly seat: ObservedFleetSeat };
 
 /** Persisted, event-driven one-shot watches that wake an operator conversation when an agent settles. */
 export class HerdrWatchStore implements HerdrWatchPort {
@@ -356,7 +360,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * A start that fails leaves no stray tab behind: the pane opened for it is
    * closed on the way out, so a retry does not accumulate empty shells.
    */
-  public async spawnSeat(input: SpawnOperatorSeat): Promise<OperatorSeatSpawnResult> {
+  public async spawnSeat(input: SpawnOperatorSeat): Promise<HerdrSeatSpawnResult> {
     const { createTab, startAgent } = this.runner;
     if (this.closed || createTab === undefined || startAgent === undefined) {
       return { outcome: "failed", reason: "herdr_unreachable" };
@@ -374,12 +378,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return { outcome: "failed", reason: "herdr_unreachable", detail: reasonDetail(caught) };
     }
     try {
-      await startAgent({ name: herdrAgentName(input.title), kind: input.harness, paneId });
+      const subject = herdrAgentName(input.title);
+      await startAgent({ name: subject, kind: input.harness, paneId });
       const agent = await this.runner.get(paneId);
+      if (agent.session === undefined)
+        throw new Error("Herdr started an agent without a durable session identity");
       return {
         outcome: "spawned",
         seat: {
           seatId: agent.terminalId,
+          subject,
+          occupantId: occupantIdForHerdrSession(agent.session),
           harness: agent.agent,
           status: agent.status,
           title: agent.title || input.title,

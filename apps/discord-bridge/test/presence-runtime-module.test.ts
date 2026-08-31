@@ -81,6 +81,7 @@ describe("channel provisioning against the swarm home", () => {
   const GUILD_ROOMS = [
     { id: "42", name: "general", type: 0 },
     { id: "43", name: "fleet", type: 0 },
+    { id: "45", name: "field-notes", type: 15 },
     { id: "44", name: "Voice", type: 2 },
   ];
 
@@ -112,7 +113,11 @@ describe("channel provisioning against the swarm home", () => {
       post: (route: string) => {
         calls.push(`POST ${route}`);
         return Promise.resolve(
-          route.endsWith("/webhooks") ? { id: "webhook-1", token: "webhook-secret" } : { id: "new-channel" },
+          route.endsWith("/webhooks")
+            ? { id: "webhook-1", token: "webhook-secret" }
+            : route.endsWith("/threads")
+              ? { id: "forum-post-1" }
+              : { id: "new-channel" },
         );
       },
     };
@@ -144,15 +149,21 @@ describe("channel provisioning against the swarm home", () => {
   it("offers only the rooms a webhook can post into", async () => {
     const { runtime, calls } = await runtimeWithFakeRest();
     expect(await runtime.listRooms()).toEqual([
-      { channelId: "43", name: "fleet" },
-      { channelId: "42", name: "general" },
+      { kind: "forum", channelId: "45", name: "field-notes" },
+      { kind: "channel", channelId: "43", name: "fleet" },
+      { kind: "channel", channelId: "42", name: "general" },
     ]);
     expect(calls).toEqual(["GET /guilds/guild-1/channels"]);
   });
 
   it("puts the webhook on a room the server already has, making no channel", async () => {
     const { runtime, calls } = await runtimeWithFakeRest();
-    expect(await runtime.provisionChannel({ name: "Atlas slowness", channelId: "43" })).toEqual({
+    expect(
+      await runtime.provisionChannel({
+        name: "Atlas slowness",
+        room: { kind: "channel", channelId: "43" },
+      }),
+    ).toEqual({
       guildId: "guild-1",
       channelId: "43",
       webhookId: "webhook-1",
@@ -162,11 +173,35 @@ describe("channel provisioning against the swarm home", () => {
     expect(calls).toEqual(["GET /guilds/guild-1/channels", "POST /channels/43/webhooks"]);
   });
 
+  it("creates one post in a selected forum and targets the parent webhook at that thread", async () => {
+    const { runtime, calls } = await runtimeWithFakeRest();
+    expect(
+      await runtime.provisionChannel({
+        name: "Atlas slowness",
+        room: { kind: "forum", channelId: "45" },
+      }),
+    ).toEqual({
+      guildId: "guild-1",
+      channelId: "45",
+      threadId: "forum-post-1",
+      webhookId: "webhook-1",
+      webhookToken: "webhook-secret",
+    });
+    expect(calls).toEqual([
+      "GET /guilds/guild-1/channels",
+      "POST /channels/45/threads",
+      "POST /channels/45/webhooks",
+    ]);
+  });
+
   it("refuses a channel id from outside the swarm home before creating anything", async () => {
     const { runtime, calls } = await runtimeWithFakeRest();
-    await expect(runtime.provisionChannel({ name: "Atlas slowness", channelId: "999" })).rejects.toThrow(
-      /discord_channel_not_in_swarm_guild/,
-    );
+    await expect(
+      runtime.provisionChannel({
+        name: "Atlas slowness",
+        room: { kind: "channel", channelId: "999" },
+      }),
+    ).rejects.toThrow(/discord_channel_not_in_swarm_guild/);
     // The guild-scoped grant would otherwise reach a room in a guild Clankie
     // only inhabits, which the swarm fence is supposed to be the whole of.
     expect(calls).toEqual(["GET /guilds/guild-1/channels"]);

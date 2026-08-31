@@ -89,9 +89,9 @@ The text checker reads the current process environment plus the broker; when
 validating a settings-file deployment, pass the equivalent non-secret settings
 as environment overrides. It validates brokered identities, application/guild
 membership, Message Content Intent, text ingress/presence allowlist alignment,
-service composition, and whether the bot holds `Manage Channels` and
-`Manage Webhooks` in the swarm home (`DISCORD_SWARM_GUILD_ID`) — the two
-permissions channels need and the ordinary text lane never exercises, so an
+service composition, and whether the bot holds `Manage Channels`,
+`Manage Webhooks`, and `Send Messages` in the swarm home
+(`DISCORD_SWARM_GUILD_ID`) — the permissions room provisioning needs, so an
 otherwise healthy install fails only when a room is first projected. A
 guild-wide grant can still be denied on one room by that channel's permission
 overwrites. Voice readiness separately loads stored settings and

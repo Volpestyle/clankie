@@ -12,10 +12,10 @@
 import type { OperatorChannelMember } from "@clankie/protocol";
 
 /** One member's outcome on the turn it was offered. */
-export type ChannelTurnOutcome = "spoke" | "passed";
+type ChannelTurnOutcome = "spoke" | "passed";
 
 export interface ChannelTurnRecord {
-  readonly seatId: string;
+  readonly personaId: string;
   readonly outcome: ChannelTurnOutcome;
 }
 
@@ -28,7 +28,7 @@ export interface ChannelTurnState {
    * Seats that have posted since the operator last spoke, including any that
    * started the exchange. A member never answers its own message.
    */
-  readonly lastSpeakerSeatId?: string;
+  readonly lastSpeakerPersonaId?: string;
 }
 
 /**
@@ -41,10 +41,12 @@ export interface ChannelTurnState {
  * the operator, exactly as a person in a group DM does.
  */
 export function nextChannelTurn(state: ChannelTurnState): OperatorChannelMember | undefined {
-  const done = new Set(state.taken.map((record) => record.seatId));
+  const done = new Set(state.taken.map((record) => record.personaId));
   return [...state.members]
-    .sort((first, second) => first.position - second.position || first.seatId.localeCompare(second.seatId))
-    .find((member) => !done.has(member.seatId) && member.seatId !== state.lastSpeakerSeatId);
+    .sort(
+      (first, second) => first.position - second.position || first.personaId.localeCompare(second.personaId),
+    )
+    .find((member) => !done.has(member.personaId) && member.personaId !== state.lastSpeakerPersonaId);
 }
 
 /**
@@ -62,22 +64,19 @@ export function channelRoundComplete(state: ChannelTurnState): boolean {
  * along is what lets a member see its point already made and stay quiet.
  */
 export interface ChannelTurnPrompt {
-  readonly seatId: string;
+  readonly personaId: string;
   /** Members who already spoke on this message, in the order they spoke. */
   readonly spokeBefore: readonly string[];
   /** True when nobody has answered yet, so this member is first to respond. */
   readonly firstResponder: boolean;
 }
 
-export function channelTurnPrompt(
-  state: ChannelTurnState,
-  member: OperatorChannelMember,
-): ChannelTurnPrompt {
+export function channelTurnPrompt(state: ChannelTurnState, member: OperatorChannelMember): ChannelTurnPrompt {
   const spokeBefore = state.taken
     .filter((record) => record.outcome === "spoke")
-    .map((record) => record.seatId);
+    .map((record) => record.personaId);
   return {
-    seatId: member.seatId,
+    personaId: member.personaId,
     spokeBefore,
     firstResponder: spokeBefore.length === 0,
   };
@@ -90,7 +89,7 @@ export function channelTurnPrompt(
  * is bounded (ADR 0146).
  */
 export function channelRoundCost(state: ChannelTurnState): number {
-  return state.members.filter((member) => member.seatId !== state.lastSpeakerSeatId).length;
+  return state.members.filter((member) => member.personaId !== state.lastSpeakerPersonaId).length;
 }
 
 /**
@@ -100,20 +99,90 @@ export function channelRoundCost(state: ChannelTurnState): number {
  * to signal on. A pass is matched exactly and is never written to the
  * transcript, so a room full of passes stays silent.
  */
-export const CHANNEL_TURN_PASS = "PASS";
+const CHANNEL_TURN_PASS = "PASS";
 
 export function isChannelTurnPass(reply: string): boolean {
   return reply.trim().toUpperCase() === CHANNEL_TURN_PASS;
 }
 
+/**
+ * What the room actually hears from one member, or undefined when it says
+ * nothing.
+ *
+ * The exact match above is right and stays: `PASS — but check the decode path`
+ * is a member making a point, and swallowing it would lose the point. What it
+ * does not cover is a member that writes `PASS` on its own line and then keeps
+ * talking — a mind changed mid-reply. That published the sentinel and the
+ * deliberation behind it straight into Discord on 2026-08-30. Take the words,
+ * drop the line: nothing is swallowed and the sentinel never ships.
+ */
+export function channelTurnReply(reply: string | undefined): string | undefined {
+  if (reply === undefined) return undefined;
+  const trimmed = reply.trim();
+  if (trimmed.length === 0 || isChannelTurnPass(trimmed)) return undefined;
+  const breakAt = trimmed.indexOf("\n");
+  if (breakAt === -1 || !isChannelTurnPass(trimmed.slice(0, breakAt))) return trimmed;
+  const remainder = trimmed.slice(breakAt + 1).trim();
+  return remainder.length === 0 ? undefined : remainder;
+}
+
+/** Names in a notice, bounded so a full room does not print a roster. */
+const NOTICE_NAMES_MAX = 4;
+
+function nameList(names: readonly string[]): string {
+  if (names.length <= NOTICE_NAMES_MAX) {
+    return names.length <= 1
+      ? (names[0] ?? "")
+      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]!}`;
+  }
+  return `${names.slice(0, NOTICE_NAMES_MAX).join(", ")} and ${String(names.length - NOTICE_NAMES_MAX)} more`;
+}
+
+/**
+ * What the room is told when a round ends having said nothing.
+ *
+ * Silence is the one thing every failure here looks like, which is why it is
+ * worth breaking. On 2026-08-30 the operator typed into the room five times and
+ * got nothing back twice over, for two unrelated reasons — no member held a
+ * live seat, then a restart cut a round mid-answer — and neither was
+ * distinguishable from a room that simply had nothing to add.
+ *
+ * A room where everyone genuinely passed still stays quiet: that is the design
+ * (see `CHANNEL_TURN_PASS`) and it is not a fault. Only a round that failed to
+ * reach someone says so, and it says it in the guild rather than the
+ * transcript — the record holds what was said, not why nothing was.
+ */
+export function channelRoundNotice(round: {
+  readonly spoke: number;
+  /** Members never asked, or asked and never heard from. */
+  readonly unreachable: readonly string[];
+  readonly members: number;
+}): string | undefined {
+  if (round.spoke > 0 || round.unreachable.length === 0) return undefined;
+  const who = nameList(round.unreachable);
+  return round.unreachable.length >= round.members
+    ? `No one here has a live seat right now, so nobody was asked — ${who}. Start their panes and say it again.`
+    : `No answer: ${who} could not be reached, and everyone else passed.`;
+}
+
+/** What the room is told about a round its process did not survive. */
+export const CHANNEL_ROUND_INTERRUPTED_NOTICE =
+  "That round was cut off by a service restart, and no answer survived it. Say it again.";
+
+/**
+ * Who a notice is from. Not a member and not the operator: nobody said it, the
+ * room did, and a name no persona can hold keeps it from reading as either.
+ */
+export const CHANNEL_NOTICE_AUTHOR = "room";
+
 /** Transcript lines a member is shown, oldest first. */
-export const CHANNEL_TURN_TRANSCRIPT_MAX = 24;
+const CHANNEL_TURN_TRANSCRIPT_MAX = 24;
 /** Bounds the single line typed into a member's pane. */
 export const CHANNEL_TURN_PROMPT_MAX = 8_192;
 
 export interface ChannelTranscriptEntry {
-  /** The seat that said it, or absent for the operator. */
-  readonly seatId?: string;
+  /** The durable character that said it, or absent for the operator. */
+  readonly personaId?: string;
   readonly text: string;
 }
 
@@ -123,6 +192,8 @@ export interface ChannelTurnPromptInput {
   readonly members: readonly OperatorChannelMember[];
   /** The transcript as it stands at this moment, including replies that just landed. */
   readonly entries: readonly ChannelTranscriptEntry[];
+  /** Human-facing name shared by the app and Discord. */
+  readonly nameOf: (personaId: string) => string;
 }
 
 /**
@@ -136,14 +207,17 @@ export interface ChannelTurnPromptInput {
 export function renderChannelTurnPrompt(input: ChannelTurnPromptInput): string {
   const roster = [...input.members]
     .sort((first, second) => first.position - second.position)
-    .map((member) => member.seatId)
+    .map((member) => input.nameOf(member.personaId))
     .join(", ");
   const transcript = input.entries
     .slice(-CHANNEL_TURN_TRANSCRIPT_MAX)
-    .map((entry) => `${entry.seatId ?? "operator"}: ${flatten(entry.text)}`)
+    .map(
+      (entry) =>
+        `${entry.personaId === undefined ? "operator" : input.nameOf(entry.personaId)}: ${flatten(entry.text)}`,
+    )
     .join(" | ");
   return bounded(
-    `[#${flatten(input.title)}] group chat · you are ${input.member.seatId} · members: ${roster} · ` +
+    `[#${flatten(input.title)}] group chat · you are ${input.nameOf(input.member.personaId)} · members: ${roster} · ` +
       `reply with what you would say in the room, or exactly ${CHANNEL_TURN_PASS} if you have nothing ` +
       `to add or your point is already made · transcript: ${transcript}`,
   );

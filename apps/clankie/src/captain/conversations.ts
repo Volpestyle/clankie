@@ -15,6 +15,7 @@ import {
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
   type DiscordGuildRoom,
+  type DiscordGuildRoomTarget,
   type OperatorChannel,
   type OperatorChannelMember,
   type OperatorConversation,
@@ -34,7 +35,10 @@ import {
 } from "@clankie/protocol";
 import { parseDiscordWebhookUrl } from "@clankie/discord-presence-core";
 import {
-  isChannelTurnPass,
+  CHANNEL_NOTICE_AUTHOR,
+  CHANNEL_ROUND_INTERRUPTED_NOTICE,
+  channelRoundNotice,
+  channelTurnReply,
   nextChannelTurn,
   renderChannelTurnPrompt,
   type ChannelTranscriptEntry,
@@ -46,6 +50,11 @@ type ConversationServiceRequest = Exclude<
   OperatorConversationServiceRequest,
   | { op: "autonomy" }
   | { op: "roster" }
+  | { op: "fleet" }
+  | { op: "composer_catalog" }
+  | { op: "state_stance" }
+  | { op: "personas" }
+  | { op: "update_persona" }
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "spawn_seat" }
@@ -57,6 +66,11 @@ type ConversationServiceResult = Exclude<
   OperatorConversationServiceResult,
   | { op: "autonomy" }
   | { op: "roster" }
+  | { op: "fleet" }
+  | { op: "composer_catalog" }
+  | { op: "state_stance" }
+  | { op: "personas" }
+  | { op: "update_persona" }
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "spawn_seat" }
@@ -90,7 +104,7 @@ interface SeatTranscriptCheckpoint {
 
 interface ConversationMeta {
   readonly conversationId: string;
-  readonly scope: OperatorConversationScope;
+  scope: OperatorConversationScope;
   title: string;
   isDefault: boolean;
   readonly createdAt: string;
@@ -101,7 +115,7 @@ interface ConversationMeta {
   readonly parentConversationId?: string;
   /** Exclusive replay boundary immediately before the oldest retained event. */
   retainedFromCursor?: string;
-  /** Harness-native messages already folded into this durable seat thread. */
+  /** Harness-native messages already folded into this durable persona thread. */
   seatTranscript?: SeatTranscriptCheckpoint;
   /**
    * The channel roster, in turn order. Present exactly on a `channel` scope
@@ -117,9 +131,19 @@ interface ConversationMeta {
    */
   channelDiscord?: {
     readonly guildId: string;
+    /** The direct channel, or the parent forum that owns the webhook. */
     readonly channelId: string;
+    /** The forum post carrying this room, when projected into a forum. */
+    readonly threadId?: string;
     readonly webhookId: string;
     readonly webhookToken: string;
+    /**
+     * Clankie made this webhook, so unprojecting or deleting the room deletes
+     * it in Discord too. Absent on a pasted webhook — the operator made that
+     * one by hand and keeps it — and on records from before the flag existed,
+     * which are treated as pasted rather than guessed at.
+     */
+    readonly provisioned?: true;
   };
 }
 
@@ -161,6 +185,11 @@ export type ConversationRunner = (
 ) => Promise<void>;
 
 type SeatSender = (seatId: string, message: string) => Promise<boolean>;
+type PersonaSeatResolver = (personaId: string) => string | undefined;
+type PersonaPresentation = (personaId: string) => Promise<{
+  readonly username: string;
+  readonly avatarUrl?: string;
+}>;
 /**
  * Posts one agent's words into the guild a channel is projected onto
  * (ADR 0146). Discord renders and participates; it owns nothing. A post that
@@ -171,9 +200,11 @@ export interface ChannelProjection {
   post: (post: {
     readonly guildId: string;
     readonly channelId: string;
+    readonly threadId?: string;
     readonly webhookId: string;
     readonly webhookToken: string;
     readonly username: string;
+    readonly avatarUrl?: string;
     readonly content: string;
   }) => Promise<void>;
   /** Which room a webhook points at, so the operator supplies only its URL. */
@@ -183,14 +214,16 @@ export interface ChannelProjection {
   }>;
   /**
    * Make the webhook rather than being handed one — on a fresh room, or on an
-   * existing one named by `channelId`. Absent where the bot lacks
+   * existing container named by `room`. A forum container gets one new post.
+   * Absent where the bot lacks
    * `Manage Webhooks` in the swarm home, which is the one case the manual
    * pasted webhook is for; a host with no Discord runtime at all has no swarm
    * home either, and projects nothing by any path.
    */
-  provision?: (input: { readonly name: string; readonly channelId?: string }) => Promise<{
+  provision?: (input: { readonly name: string; readonly room?: DiscordGuildRoomTarget }) => Promise<{
     readonly guildId: string;
     readonly channelId: string;
+    readonly threadId?: string;
     readonly webhookId: string;
     readonly webhookToken: string;
   }>;
@@ -198,6 +231,13 @@ export interface ChannelProjection {
   rooms?: () => Promise<readonly DiscordGuildRoom[]>;
   /** The one guild rooms may live in, which a pasted webhook is held to. */
   swarmGuildId?: () => string | undefined;
+  /**
+   * Delete one webhook in Discord — the cleanup half of `provision`, called
+   * when a room is unprojected or removed. Authenticated by the token itself,
+   * like `resolve`, so it needs no bot grant. Best-effort: a webhook already
+   * gone is success, and a failure never blocks the local change.
+   */
+  remove?: (credential: { readonly webhookId: string; readonly webhookToken: string }) => Promise<void>;
 }
 type ConversationForker = (input: {
   readonly parentConversationId: string;
@@ -257,6 +297,8 @@ export class ConversationStore {
   private readonly sendToSeat: SeatSender | undefined;
   private readonly forkConversation: ConversationForker | undefined;
   private readonly projection: ChannelProjection | undefined;
+  private readonly seatForPersona: PersonaSeatResolver | undefined;
+  private readonly personaPresentation: PersonaPresentation | undefined;
   /** Longest a parked tail may wait here, whatever a caller asks for. */
   private readonly tailWaitMs: number;
   /** Per-conversation parked tails, woken by `append` and by a live draft. */
@@ -273,6 +315,8 @@ export class ConversationStore {
     tailWaitMs = DEFAULT_TAIL_WAIT_MS,
     forkConversation?: ConversationForker,
     projection?: ChannelProjection,
+    seatForPersona?: PersonaSeatResolver,
+    personaPresentation?: PersonaPresentation,
   ) {
     this.root = root;
     this.runner = runner;
@@ -281,6 +325,8 @@ export class ConversationStore {
     this.tailWaitMs = tailWaitMs;
     this.forkConversation = forkConversation;
     this.projection = projection;
+    this.seatForPersona = seatForPersona;
+    this.personaPresentation = personaPresentation;
     mkdirSync(root, { recursive: true });
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -291,7 +337,13 @@ export class ConversationStore {
         // A crash mid-run leaves "active"; on boot nothing is running.
         if (meta.sessionState === "active") {
           meta.sessionState = "waiting";
-          this.failOrphanedRuns(meta);
+          // Settling the run stops a tailing client hanging forever, but the
+          // room it was answering hears nothing at all — which is how an
+          // operator came to type into a dead round five times. One line, once
+          // per room however many runs it lost, and never fatal to boot.
+          if (this.failOrphanedRuns(meta) > 0 && meta.scope.kind === "channel") {
+            void this.projectChannelNotice(meta, CHANNEL_ROUND_INTERRUPTED_NOTICE);
+          }
         }
         this.metas.set(meta.conversationId, meta);
       } catch {
@@ -340,7 +392,7 @@ export class ConversationStore {
    * A turn accepted before a crash never got its terminal event, and a client
    * mid-tail would wait on it forever. Close each orphan out as failed.
    */
-  private failOrphanedRuns(meta: ConversationMeta): void {
+  private failOrphanedRuns(meta: ConversationMeta): number {
     const terminal = new Set<string>();
     const accepted: string[] = [];
     for (const event of this.readEvents(meta.conversationId)) {
@@ -348,9 +400,11 @@ export class ConversationStore {
       if (event.phase === "accepted") accepted.push(event.runId);
       else terminal.add(event.runId);
     }
-    for (const runId of accepted.filter((id) => !terminal.has(id))) {
+    const orphans = accepted.filter((id) => !terminal.has(id));
+    for (const runId of orphans) {
       this.append(meta, { type: "turn", runId, phase: "failed", reasonCode: "service_restarted" });
     }
+    return orphans.length;
   }
 
   public async serve(request: ConversationServiceRequest): Promise<ConversationServiceResult> {
@@ -497,9 +551,14 @@ export class ConversationStore {
     return this.metas.has(conversationId);
   }
 
+  public conversation(conversationId: string): OperatorConversation | undefined {
+    const meta = this.metas.get(conversationId);
+    return meta === undefined ? undefined : publicConversation(meta);
+  }
+
   /**
    * Whether Clankie himself answers here. He does in his own global and
-   * workspace rooms; he does not in a seat thread, where the counterpart is
+   * workspace rooms; he does not in a persona thread, where the counterpart is
    * that agent, nor in a channel, where the members answer (ADR 0146). Every
    * caller that would hand him a turn asks this first.
    */
@@ -513,17 +572,78 @@ export class ConversationStore {
       ?.conversationId;
   }
 
+  public conversationIdForPersona(personaId: string): string | undefined {
+    return [...this.metas.values()].find(
+      (meta) => meta.scope.kind === "persona" && meta.scope.personaId === personaId,
+    )?.conversationId;
+  }
+
+  public renamePersona(personaId: string, title: string): void {
+    const conversationId = this.conversationIdForPersona(personaId);
+    const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
+    if (meta === undefined || meta.title === title) return;
+    meta.title = title;
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+  }
+
+  /**
+   * Bind a durable character to its current seat and carry any legacy seat DM
+   * and channel membership forward without copying or splitting transcripts.
+   */
+  public bindPersona(personaId: string, seatId: string, title: string): string {
+    const current = this.conversationIdForPersona(personaId);
+    if (current !== undefined) this.renamePersona(personaId, title);
+    const legacy =
+      current === undefined
+        ? [...this.metas.values()].find((meta) => meta.scope.kind === "seat" && meta.scope.seatId === seatId)
+        : undefined;
+    if (legacy !== undefined && current === undefined) {
+      legacy.scope = { kind: "persona", personaId };
+      legacy.title = title;
+      legacy.updatedAt = new Date().toISOString();
+      this.saveMeta(legacy);
+    }
+    for (const channel of this.metas.values()) {
+      if (channel.scope.kind !== "channel" || channel.channelMembers === undefined) continue;
+      let changed = false;
+      channel.channelMembers = channel.channelMembers.map((member) => {
+        const raw = member as OperatorChannelMember & { readonly seatId?: string };
+        if (raw.seatId !== seatId) return member;
+        changed = true;
+        return { personaId, position: member.position, joinedAt: member.joinedAt };
+      });
+      if (changed) this.saveMeta(channel);
+    }
+    return (
+      current ?? legacy?.conversationId ?? this.create({ kind: "persona", personaId }, title).conversationId
+    );
+  }
+
   public seatIds(): readonly string[] {
     return [...this.metas.values()].flatMap((meta) =>
       meta.scope.kind === "seat" ? [meta.scope.seatId] : [],
     );
   }
 
-  public publishSeatEvent(seatId: string, body: OperatorConversationEventBody): void {
+  public publishPersonaEvent(personaId: string, seatId: string, body: OperatorConversationEventBody): void {
     // Before the seat's own thread, and regardless of whether it has one: a
     // channel round offered this seat a turn and is waiting on exactly this.
     if (body.type === "message" && body.role === "agent") this.resolveSeatReply(seatId, body.text);
-    const conversationId = this.conversationIdForSeat(seatId);
+    const conversationId = this.conversationIdForPersona(personaId);
+    this.publishConversationEvent(conversationId, body);
+  }
+
+  /** Legacy test/API path while persisted seat scopes migrate on discovery. */
+  public publishSeatEvent(seatId: string, body: OperatorConversationEventBody): void {
+    if (body.type === "message" && body.role === "agent") this.resolveSeatReply(seatId, body.text);
+    this.publishConversationEvent(this.conversationIdForSeat(seatId), body);
+  }
+
+  private publishConversationEvent(
+    conversationId: string | undefined,
+    body: OperatorConversationEventBody,
+  ): void {
     const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
     if (meta === undefined) return;
     const events = this.readEvents(meta.conversationId);
@@ -540,9 +660,22 @@ export class ConversationStore {
     this.saveMeta(meta);
   }
 
-  /** Fold one harness session's complete active chat branch into its durable seat thread. */
+  /** Fold one harness session's complete active chat branch into its durable persona thread. */
+  public syncPersonaTranscript(personaId: string, seatId: string, transcript: HerdrSeatTranscript): void {
+    const conversationId = this.conversationIdForPersona(personaId);
+    this.syncConversationTranscript(conversationId, seatId, transcript);
+  }
+
+  /** Legacy test/API path while persisted seat scopes migrate on discovery. */
   public syncSeatTranscript(seatId: string, transcript: HerdrSeatTranscript): void {
-    const conversationId = this.conversationIdForSeat(seatId);
+    this.syncConversationTranscript(this.conversationIdForSeat(seatId), seatId, transcript);
+  }
+
+  private syncConversationTranscript(
+    conversationId: string | undefined,
+    seatId: string,
+    transcript: HerdrSeatTranscript,
+  ): void {
     const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
     if (meta === undefined || transcript.messages.length === 0) return;
     const checkpoint = meta.seatTranscript;
@@ -596,6 +729,10 @@ export class ConversationStore {
   }
 
   private create(scope: OperatorConversationScope, title: string): ConversationMeta {
+    if (scope.kind === "persona") {
+      const existing = this.conversationIdForPersona(scope.personaId);
+      if (existing !== undefined) return this.metas.get(existing)!;
+    }
     if (scope.kind === "seat") {
       const existing = this.conversationIdForSeat(scope.seatId);
       if (existing !== undefined) return this.metas.get(existing)!;
@@ -634,8 +771,8 @@ export class ConversationStore {
    * room keeps the `joinedAt` it had.
    */
   private async upsertChannel(request: UpsertOperatorChannel): Promise<ConversationMeta> {
-    const seatIds = [...new Set(request.members)];
-    if (seatIds.length > OPERATOR_CHANNEL_MEMBER_MAX) {
+    const personaIds = [...new Set(request.members)];
+    if (personaIds.length > OPERATOR_CHANNEL_MEMBER_MAX) {
       throw new Error(`A channel holds at most ${OPERATOR_CHANNEL_MEMBER_MAX} members`);
     }
     const channelId = request.channelId ?? `channel-${randomUUID()}`;
@@ -643,24 +780,35 @@ export class ConversationStore {
     // moves. A projection that cannot be reached must not leave behind a room
     // the operator never got, nor a half-applied roster on one they already had.
     const discord =
-      request.discord === undefined
+      request.discord === undefined || request.discord.kind === "off"
         ? undefined
         : await this.resolveProjection(request.discord, channelId, request.title);
     const meta = this.create({ kind: "channel", channelId }, request.title);
-    const previous = new Map((meta.channelMembers ?? []).map((member) => [member.seatId, member]));
+    const previous = new Map(
+      (meta.channelMembers ?? []).map((member) => [channelMemberPersonaId(member), member]),
+    );
     const now = new Date().toISOString();
     meta.title = request.title;
-    meta.channelMembers = seatIds.map((seatId, position) => ({
-      seatId,
+    meta.channelMembers = personaIds.map((personaId, position) => ({
+      personaId,
       position,
-      joinedAt: previous.get(seatId)?.joinedAt ?? now,
+      joinedAt: previous.get(personaId)?.joinedAt ?? now,
     }));
-    if (discord !== undefined) meta.channelDiscord = discord;
+    if (request.discord?.kind === "off") {
+      this.discardProjection(meta.channelDiscord);
+      delete meta.channelDiscord;
+    } else if (discord !== undefined) {
+      // Re-projecting elsewhere retires the old credential the same way
+      // unprojecting does; nothing keeps posting through a webhook no room uses.
+      if (meta.channelDiscord?.webhookId !== discord.webhookId) {
+        this.discardProjection(meta.channelDiscord);
+      }
+      meta.channelDiscord = discord;
+    }
     meta.updatedAt = now;
     this.saveMeta(meta);
-    // A member is someone the operator can also reach on their own, and the
-    // seat thread is where this seat's replies are already being watched for.
-    for (const seatId of seatIds) this.create({ kind: "seat", seatId }, seatId);
+    // A member is someone the operator can also reach on their own.
+    for (const personaId of personaIds) this.create({ kind: "persona", personaId }, personaId);
     return meta;
   }
 
@@ -668,14 +816,15 @@ export class ConversationStore {
    * Settle where a room is going in Discord without touching anything local
    * (ADR 0146), so a refusal here costs the operator nothing but the message.
    *
-   * One Clankie room per guild channel is an invariant, not a preference:
-   * inbound guild text is routed by looking a channel up by its guild room, so
-   * a second room bound to the same one would silently steal or split delivery.
-   * The claim is therefore checked against the id being asked for *before*
-   * provisioning creates anything, and again against what came back.
+   * One Clankie room per message-bearing Discord location is an invariant, not
+   * a preference: inbound guild text is routed by its channel id, which is the
+   * direct channel or the forum post's thread. A second room bound to the same
+   * location would silently steal or split delivery. Existing locations are
+   * checked before provisioning creates anything, and every result is checked
+   * again. Forum parents are containers and may hold several distinct posts.
    */
   private async resolveProjection(
-    choice: NonNullable<UpsertOperatorChannel["discord"]>,
+    choice: Exclude<NonNullable<UpsertOperatorChannel["discord"]>, { kind: "off" }>,
     channelId: string,
     title: string,
   ): Promise<NonNullable<ConversationMeta["channelDiscord"]>> {
@@ -698,6 +847,12 @@ export class ConversationStore {
       if (resolved.guildId !== swarmGuildId) {
         throw new Error("That webhook is not in Clankie’s swarm server.");
       }
+      const resolvedRoom = (await this.projection.rooms?.())?.find(
+        (room) => room.channelId === resolved.channelId,
+      );
+      if (resolvedRoom?.kind === "forum") {
+        throw new Error("A forum webhook does not identify a post; choose the forum from Clankie’s server.");
+      }
       this.assertRoomUnclaimed(resolved.channelId, channelId);
       return resolved;
     }
@@ -706,10 +861,10 @@ export class ConversationStore {
     }
     // Checked first for a named room: provisioning makes a webhook in Discord,
     // and a refusal afterwards would leave one behind that nothing posts to.
-    if (choice.channelId !== undefined) this.assertRoomUnclaimed(choice.channelId, channelId);
+    if (choice.room?.kind === "channel") this.assertRoomUnclaimed(choice.room.channelId, channelId);
     const provisioned = await this.projection.provision({
       name: title,
-      ...(choice.channelId === undefined ? {} : { channelId: choice.channelId }),
+      ...(choice.room === undefined ? {} : { room: choice.room }),
     });
     // Held to the same fence as a paste. The trusted module answers for the
     // swarm home, but a room is only a room here if it landed in the guild this
@@ -717,22 +872,25 @@ export class ConversationStore {
     if (provisioned.guildId !== swarmGuildId) {
       throw new Error("That Discord room is not in Clankie’s swarm server.");
     }
-    this.assertRoomUnclaimed(provisioned.channelId, channelId);
-    return provisioned;
+    if (choice.room?.kind === "forum" && provisioned.threadId === undefined) {
+      throw new Error("Discord did not create a post in that forum.");
+    }
+    this.assertRoomUnclaimed(provisioned.threadId ?? provisioned.channelId, channelId);
+    return { ...provisioned, provisioned: true };
   }
 
-  /** Refuses a guild room another channel is already projected onto. */
-  private assertRoomUnclaimed(guildChannelId: string, exceptChannelId: string): void {
+  /** Refuses a Discord channel or forum post another Clankie room already uses. */
+  private assertRoomUnclaimed(discordRoomId: string, exceptChannelId: string): void {
     const claimed = [...this.metas.values()].find(
       (meta) =>
-        meta.channelDiscord?.channelId === guildChannelId &&
+        (meta.channelDiscord?.threadId ?? meta.channelDiscord?.channelId) === discordRoomId &&
         !(meta.scope.kind === "channel" && meta.scope.channelId === exceptChannelId),
     );
     if (claimed !== undefined) {
       // Ends in a full stop deliberately: the operator surface shows a host
       // message verbatim only when it reads as a finished sentence, and the
       // generic fallback here would blame permissions for a naming conflict.
-      throw new Error(`That Discord channel already holds “${claimed.title}”.`);
+      throw new Error(`That Discord room already holds “${claimed.title}”.`);
     }
   }
 
@@ -896,7 +1054,14 @@ export class ConversationStore {
     if (meta === undefined) {
       throw new Error(`Unknown conversation ${turn.conversationId}`);
     }
-    if (meta.scope.kind === "seat") return this.queueSeatSend(meta, meta.scope.seatId, turn);
+    if (meta.scope.kind === "seat") {
+      return this.queueSeatSend(meta, meta.scope.seatId, turn, { seatId: meta.scope.seatId });
+    }
+    if (meta.scope.kind === "persona") {
+      const seatId =
+        this.seatForPersona === undefined ? meta.scope.personaId : this.seatForPersona(meta.scope.personaId);
+      return this.queueSeatSend(meta, seatId, turn, { personaId: meta.scope.personaId });
+    }
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
       return {
@@ -942,7 +1107,7 @@ export class ConversationStore {
   ): { readonly conversationId: string; readonly runId: string } | undefined {
     const meta = [...this.metas.values()].find((candidate) => {
       const live = this.liveProjection(candidate);
-      return live?.guildId === guildId && live.channelId === channelId;
+      return live?.guildId === guildId && (live.threadId ?? live.channelId) === channelId;
     });
     if (meta === undefined) return undefined;
     // Already on screen in the room it was typed in, so it is not echoed back.
@@ -971,31 +1136,62 @@ export class ConversationStore {
       // questions, so a message sent from the app is shown in the guild too.
       if (echoOperator) await this.projectChannelMessage(meta, "operator", message);
       const members = meta.channelMembers ?? [];
+      const names = new Map(
+        await Promise.all(
+          members.map(async (member) => {
+            const personaId = channelMemberPersonaId(member);
+            const presentation = await this.personaPresentation?.(personaId);
+            return [personaId, presentation?.username ?? personaId] as const;
+          }),
+        ),
+      );
       const taken: ChannelTurnRecord[] = [];
+      // A member that was never asked, or asked and never heard from, is not
+      // the same as one that passed — and telling them apart is the whole
+      // difference between a quiet room and a broken one.
+      const unreachable: string[] = [];
+      let spoke = 0;
       for (;;) {
         if (context.signal.aborted) return;
         const member = nextChannelTurn({ members, taken });
-        if (member === undefined) return;
+        if (member === undefined) break;
         const prompt = renderChannelTurnPrompt({
           title: meta.title,
           member,
           members,
           entries: this.channelEntries(conversationId),
+          nameOf: (personaId) => names.get(personaId) ?? personaId,
         });
         // An offline seat passes: the room carries on without it rather than
         // stalling on a pane that is not there to answer.
-        const reply = (await this.sendToSeat?.(member.seatId, prompt))
-          ? await this.awaitSeatReply(member.seatId, context.signal)
-          : undefined;
-        if (reply === undefined || reply.trim().length === 0 || isChannelTurnPass(reply)) {
-          taken.push({ seatId: member.seatId, outcome: "passed" });
+        const personaId = channelMemberPersonaId(member);
+        const seatId = this.seatForPersona === undefined ? personaId : this.seatForPersona(personaId);
+        const asked = seatId !== undefined && (await this.sendToSeat?.(seatId, prompt)) === true;
+        const reply = asked ? await this.awaitSeatReply(seatId, context.signal) : undefined;
+        const spokenText = channelTurnReply(reply);
+        if (spokenText === undefined) {
+          if (!asked || reply === undefined) unreachable.push(names.get(personaId) ?? personaId);
+          taken.push({ personaId, outcome: "passed" });
           continue;
         }
-        publish({ type: "message", role: "agent", text: reply, streaming: false, seatId: member.seatId });
-        taken.push({ seatId: member.seatId, outcome: "spoke" });
-        await this.projectChannelMessage(meta, member.seatId, reply);
+        publish({ type: "message", role: "agent", text: spokenText, streaming: false, personaId });
+        spoke += 1;
+        taken.push({ personaId, outcome: "spoke" });
+        await this.projectChannelMessage(meta, personaId, spokenText);
       }
+      const notice = channelRoundNotice({ spoke, unreachable, members: members.length });
+      if (notice !== undefined) await this.projectChannelNotice(meta, notice);
     };
+  }
+
+  /**
+   * Say in the guild what the transcript has no business recording: that a
+   * round reached nobody. It is authored by the room rather than by a member,
+   * because no member said it, and it is deliberately not published — the
+   * record holds what was said, not why nothing was.
+   */
+  private async projectChannelNotice(meta: ConversationMeta, notice: string): Promise<void> {
+    await this.projectChannelMessage(meta, CHANNEL_NOTICE_AUTHOR, notice);
   }
 
   /**
@@ -1007,13 +1203,18 @@ export class ConversationStore {
    */
   private async projectChannelMessage(
     meta: ConversationMeta,
-    seatId: string,
+    personaId: string,
     content: string,
   ): Promise<void> {
     const target = this.liveProjection(meta);
     if (target === undefined || this.projection === undefined) return;
     try {
-      await this.projection.post({ ...target, username: seatId, content });
+      const presentation =
+        personaId === "operator" || personaId === CHANNEL_NOTICE_AUTHOR
+          ? { username: personaId }
+          : ((await this.personaPresentation?.(personaId)) ?? { username: personaId });
+      const { provisioned: _provisioned, ...credential } = target;
+      await this.projection.post({ ...credential, ...presentation, content });
     } catch {
       // The transcript is the record; the room in Discord is a view of it.
     }
@@ -1021,11 +1222,11 @@ export class ConversationStore {
 
   /** The shared transcript as a member sees it: who said what, oldest first. */
   private channelEntries(conversationId: string): readonly ChannelTranscriptEntry[] {
-    return this.readEvents(conversationId).flatMap((event) =>
-      event.type === "message" && event.text.trim().length > 0
-        ? [{ ...(event.seatId === undefined ? {} : { seatId: event.seatId }), text: event.text }]
-        : [],
-    );
+    return this.readEvents(conversationId).flatMap((event) => {
+      if (event.type !== "message" || event.text.trim().length === 0) return [];
+      const personaId = event.personaId ?? event.seatId;
+      return [{ ...(personaId === undefined ? {} : { personaId }), text: event.text }];
+    });
   }
 
   /**
@@ -1064,18 +1265,23 @@ export class ConversationStore {
   private resolveSeatReply(seatId: string, text: string): void {
     const waiters = this.seatReplyWaiters.get(seatId);
     if (waiters === undefined) return;
-    // Each waiter removes only itself as it settles, and a set never revisits
-    // an element it has already yielded, so this walks the live set.
-    for (const waiter of waiters) waiter(text);
+    // One reply answers one offered turn, oldest first. Two messages sent close
+    // together run two rounds, and both offer the same seat a turn — handing
+    // this text to every waiter would publish the seat's single answer once per
+    // round, so the room hears it twice and Discord shows it twice. The seat
+    // said it once; the other round keeps waiting for its own answer.
+    const [oldest] = waiters;
+    oldest?.(text);
   }
 
   private queueSeatSend(
     meta: ConversationMeta,
-    seatId: string,
+    seatId: string | undefined,
     turn: SubmitOperatorConversationTurn,
+    offlineIdentity: { readonly seatId: string } | { readonly personaId: string },
   ): Promise<SubmitOperatorConversationTurnResult> {
     const previous = this.seatSends.get(meta.conversationId) ?? Promise.resolve();
-    const pending = previous.then(() => this.deliverSeatTurn(meta, seatId, turn));
+    const pending = previous.then(() => this.deliverSeatTurn(meta, seatId, offlineIdentity, turn));
     const settled = pending.then(
       () => undefined,
       () => undefined,
@@ -1089,7 +1295,8 @@ export class ConversationStore {
 
   private async deliverSeatTurn(
     meta: ConversationMeta,
-    seatId: string,
+    seatId: string | undefined,
+    offlineIdentity: { readonly seatId: string } | { readonly personaId: string },
     turn: SubmitOperatorConversationTurn,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const safeCursor = this.lastCursor(meta);
@@ -1103,12 +1310,12 @@ export class ConversationStore {
         safeCursor,
       };
     }
-    if (!(await this.sendToSeat?.(seatId, turn.message))) {
+    if (seatId === undefined || !(await this.sendToSeat?.(seatId, turn.message))) {
       return {
         schemaVersion: 1,
         status: "seat_offline",
         conversationId: meta.conversationId,
-        seatId,
+        ...offlineIdentity,
         currentRevision: meta.revision,
         safeCursor,
       };
@@ -1362,9 +1569,9 @@ export class ConversationStore {
   }
 
   private trimEventLog(meta: ConversationMeta): void {
-    // A seat thread and a channel are both durable rooms an agent keeps talking
+    // A persona thread and a channel are both durable rooms an agent keeps talking
     // in; Clankie's own conversations turn over with his sessions.
-    const room = meta.scope.kind === "seat" || meta.scope.kind === "channel";
+    const room = meta.scope.kind === "seat" || meta.scope.kind === "persona" || meta.scope.kind === "channel";
     const maximum = room ? SEAT_CONVERSATION_RETAINED_EVENTS_MAX : OPERATOR_CONVERSATION_RETAINED_EVENTS_MAX;
     const retainedCount = room
       ? SEAT_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM
@@ -1506,7 +1713,22 @@ export class ConversationStore {
     }
   }
 
+  /**
+   * Retire a projection's webhook in Discord, when it is one Clankie made. A
+   * pasted webhook is the operator's and stays. Fire-and-forget: the local
+   * change this rides on (unproject, re-project, delete) never waits on
+   * Discord, and a webhook that cannot be reached now is deleted the next time
+   * the operator prunes Server Settings, not a reason to keep the projection.
+   */
+  private discardProjection(discord: ConversationMeta["channelDiscord"]): void {
+    if (discord?.provisioned !== true) return;
+    void this.projection
+      ?.remove?.({ webhookId: discord.webhookId, webhookToken: discord.webhookToken })
+      .catch(() => {});
+  }
+
   private remove(meta: ConversationMeta): void {
+    this.discardProjection(meta.channelDiscord);
     rmSync(join(this.root, meta.conversationId), { recursive: true, force: true });
     this.metas.delete(meta.conversationId);
     this.chains.delete(meta.conversationId);
@@ -1587,6 +1809,7 @@ function directoryBytes(path: string): number {
 function sameScope(a: OperatorConversationScope, b: OperatorConversationScope): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "workspace" && b.kind === "workspace") return a.workspaceId === b.workspaceId;
+  if (a.kind === "persona" && b.kind === "persona") return a.personaId === b.personaId;
   if (a.kind === "seat" && b.kind === "seat") return a.seatId === b.seatId;
   if (a.kind === "channel" && b.kind === "channel") return a.channelId === b.channelId;
   return true;
@@ -1601,7 +1824,11 @@ function publicChannel(meta: ConversationMeta): OperatorChannel {
     channelId: meta.scope.channelId,
     conversationId: meta.conversationId,
     title: meta.title,
-    members: [...(meta.channelMembers ?? [])],
+    members: (meta.channelMembers ?? []).map((member) => ({
+      personaId: channelMemberPersonaId(member),
+      position: member.position,
+      joinedAt: member.joinedAt,
+    })),
     createdAt: meta.createdAt,
     updatedAt: meta.updatedAt,
     ...(meta.channelDiscord === undefined
@@ -1610,10 +1837,16 @@ function publicChannel(meta: ConversationMeta): OperatorChannel {
           discord: {
             guildId: meta.channelDiscord.guildId,
             channelId: meta.channelDiscord.channelId,
+            ...(meta.channelDiscord.threadId === undefined ? {} : { threadId: meta.channelDiscord.threadId }),
             webhookId: meta.channelDiscord.webhookId,
           },
         }),
   };
+}
+
+/** Reads pre-ADR-0147 channel records without keeping seat identity in the public model. */
+function channelMemberPersonaId(member: OperatorChannelMember): string {
+  return member.personaId ?? (member as OperatorChannelMember & { readonly seatId: string }).seatId;
 }
 
 function publicConversation(meta: ConversationMeta): OperatorConversation {

@@ -169,24 +169,26 @@ describe("Discord channel projection route (ADR 0146)", () => {
   const projectionApp = async (
     submit: (input: unknown) => Promise<{ state: "not_projected" } | { state: "accepted" }>,
   ) =>
-    (await createClankieApp({
-      captain: createStubCaptain({
-        submitChannelProjectionMessage: async (request) => {
-          const result = await submit(request);
-          return result.state === "accepted"
-            ? { schemaVersion: 1, state: "accepted", conversationId: "conv-1", runId: "run-1" }
-            : { schemaVersion: 1, state: "not_projected" };
-        },
-      }),
-      authenticateCaptain: (request) =>
-        Promise.resolve(
-          request.headers.get("authorization") === "Bearer discord-captain"
-            ? { captainId: "discord-bridge", steerSourceLane: "discord_text" }
-            : request.headers.get("authorization") === "Bearer voice"
-              ? { captainId: "discord-voice", steerSourceLane: "discord_voice" }
-              : undefined,
-        ),
-    })).app;
+    (
+      await createClankieApp({
+        captain: createStubCaptain({
+          submitChannelProjectionMessage: async (request) => {
+            const result = await submit(request);
+            return result.state === "accepted"
+              ? { schemaVersion: 1, state: "accepted", conversationId: "conv-1", runId: "run-1" }
+              : { schemaVersion: 1, state: "not_projected" };
+          },
+        }),
+        authenticateCaptain: (request) =>
+          Promise.resolve(
+            request.headers.get("authorization") === "Bearer discord-captain"
+              ? { captainId: "discord-bridge", steerSourceLane: "discord_text" }
+              : request.headers.get("authorization") === "Bearer voice"
+                ? { captainId: "discord-voice", steerSourceLane: "discord_voice" }
+                : undefined,
+          ),
+      })
+    ).app;
 
   const send = (app: Awaited<ReturnType<typeof createClankieApp>>["app"], authorization?: string) =>
     app.request("/v1/captain/channel-projection-messages", {
