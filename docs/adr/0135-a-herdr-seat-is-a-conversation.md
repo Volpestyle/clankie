@@ -142,14 +142,17 @@ projection_, built from signals the service already has:
 
 - `activity` events from agent-status transitions — `working` is literally a
   typing indicator; `done`/`blocked`/`idle` are delivery states.
-- `message` events from the harness-native session tree. Herdr's resume
+- `message` and `tool` events from the harness-native session tree. Herdr's resume
   identity selects Claude Code, Codex, and Pi sessions. Grok's exact foreground
   PID selects the matching entry in its native active-session registry, so two
   panes in the same working directory cannot cross-wire. Each active branch is
-  folded in full, in order, with user text attributed to `operator` and
-  assistant text attributed to `agent`. Injected instructions, reasoning, tool
-  calls, and tool results never enter the public stream.
-- Stable native message ids checkpoint each session. Re-reading on status
+  folded in full, in order, with user text attributed to `operator`, assistant
+  text attributed to `agent`, and every tool start/result joined by its native
+  call id. Tool arguments and results are redacted and bounded before they enter
+  the durable log; the short row stays compact while every surface can expand
+  the typed `tool.detail`. Injected instructions and reasoning never enter the
+  public stream. Raw PTY parsing remains outside this lane.
+- Stable native entry ids checkpoint each session. Re-reading on status
   changes is idempotent, the subject binding keeps a replacement session on the
   durable persona, and the first native import replaces the old one-answer seed
   behind a typed cursor-recovery boundary.
@@ -217,7 +220,7 @@ through seats.
 - The app's per-agent send gap (its ADR 0012) closes with no new backend
   surface: configuring live captain chat configures the fleet lane.
 - Any harness gets a messageable DM from the pane contract. Claude Code,
-  Codex, Pi, and Grok also supply complete native history; other harnesses retain
+  Codex, Pi, and Grok also supply complete native message and tool history; other harnesses retain
   their safe summary projection until they gain a transcript normalizer.
 - Closing an agent is a seat operation guarded by the device's `steer` grant:
   it closes the current Herdr pane and removes the live roster entry while the

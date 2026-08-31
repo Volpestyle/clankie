@@ -44,7 +44,11 @@ import {
   type ChannelTranscriptEntry,
   type ChannelTurnRecord,
 } from "./channel-turns.ts";
-import type { HerdrSeatTranscript, HerdrTranscriptMessage } from "./herdr-transcript.ts";
+import type {
+  HerdrSeatTranscript,
+  HerdrTranscriptEntry,
+  HerdrTranscriptMessage,
+} from "./herdr-transcript.ts";
 
 type ConversationServiceRequest = Exclude<
   OperatorConversationServiceRequest,
@@ -99,7 +103,9 @@ const CHANNEL_TURN_TIMEOUT_MS = 5 * 60 * 1_000;
 
 interface SeatTranscriptCheckpoint {
   readonly sessionKey: string;
-  readonly messageIds: readonly string[];
+  readonly entryIds?: readonly string[];
+  /** Pre-tool transcript checkpoints; read once and rewritten as `entryIds`. */
+  readonly messageIds?: readonly string[];
 }
 
 interface ConversationMeta {
@@ -262,6 +268,19 @@ function workspaceOf(scope: OperatorConversationScope): string | undefined {
 
 function messageKey(role: "operator" | "agent", text: string): string {
   return `${role}\u0000${text}`;
+}
+
+function transcriptEventBody(entry: HerdrTranscriptEntry): OperatorConversationEventBody {
+  if (entry.type === "message") {
+    return { type: "message", role: entry.role, text: entry.text, streaming: false };
+  }
+  return {
+    type: "tool",
+    toolCallId: entry.toolCallId,
+    name: entry.name,
+    phase: entry.phase,
+    ...(entry.detail === undefined ? {} : { detail: entry.detail }),
+  };
 }
 
 /**
@@ -677,38 +696,32 @@ export class ConversationStore {
     transcript: HerdrSeatTranscript,
   ): void {
     const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
-    if (meta === undefined || transcript.messages.length === 0) return;
+    if (meta === undefined || transcript.entries.length === 0) return;
     const checkpoint = meta.seatTranscript;
     if (checkpoint === undefined && this.retainedEventCount(meta.conversationId) > 0) {
-      this.replaceSeatMessages(meta, transcript.messages);
+      this.replaceSeatEntries(meta, transcript.entries);
       meta.seatTranscript = {
         sessionKey: transcript.sessionKey,
-        messageIds: transcript.messages.map(({ id }) => id),
+        entryIds: transcript.entries.map(({ id }) => id),
       };
       this.saveMeta(meta);
       return;
     }
 
-    const seen = new Set(checkpoint?.sessionKey === transcript.sessionKey ? checkpoint.messageIds : []);
+    // ponytail: legacy checkpoints append their newly typed historical tools once;
+    // add a cursor/reaction-remapping migration only if pre-upgrade ordering matters.
+    const checkpointIds = checkpoint?.entryIds ?? checkpoint?.messageIds ?? [];
+    const seen = new Set(checkpoint?.sessionKey === transcript.sessionKey ? checkpointIds : []);
     let latestAgentReply: string | undefined;
-    for (const message of transcript.messages) {
-      if (seen.has(message.id)) continue;
-      if (message.role === "agent") latestAgentReply = message.text;
-      if (message.role !== "operator" || !this.matchesRecentSeatSend(meta, message)) {
-        this.append(
-          meta,
-          {
-            type: "message",
-            role: message.role,
-            text: message.text,
-            streaming: false,
-          },
-          message.occurredAt,
-        );
+    for (const entry of transcript.entries) {
+      if (seen.has(entry.id)) continue;
+      if (entry.type === "message" && entry.role === "agent") latestAgentReply = entry.text;
+      if (entry.type !== "message" || entry.role !== "operator" || !this.matchesRecentSeatSend(meta, entry)) {
+        this.append(meta, transcriptEventBody(entry), entry.occurredAt);
       }
-      seen.add(message.id);
+      seen.add(entry.id);
     }
-    meta.seatTranscript = { sessionKey: transcript.sessionKey, messageIds: [...seen] };
+    meta.seatTranscript = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
     if (latestAgentReply !== undefined) this.resolveSeatReply(seatId, latestAgentReply);
@@ -1603,10 +1616,11 @@ export class ConversationStore {
   }
 
   /** One-time migration from the old last-answer projection to the native ordered transcript. */
-  private replaceSeatMessages(meta: ConversationMeta, transcript: readonly HerdrTranscriptMessage[]): void {
+  private replaceSeatEntries(meta: ConversationMeta, transcript: readonly HerdrTranscriptEntry[]): void {
     const events = this.readEvents(meta.conversationId);
     const covered = new Map<string, number>();
     for (const message of transcript) {
+      if (message.type !== "message") continue;
       const key = messageKey(message.role, message.text);
       covered.set(key, (covered.get(key) ?? 0) + 1);
     }
@@ -1620,24 +1634,30 @@ export class ConversationStore {
         covered.set(key, remaining - 1);
         return [];
       }
-      return [{ role, text: event.text, occurredAt: event.occurredAt }];
+      return [
+        {
+          body: { type: "message" as const, role, text: event.text, streaming: false as const },
+          occurredAt: event.occurredAt,
+        },
+      ];
     });
+    const projected = transcript.map((entry) => ({
+      body: transcriptEventBody(entry),
+      occurredAt: entry.occurredAt ?? new Date().toISOString(),
+    }));
     const previousSequence = this.eventSequence(meta);
     let sequence = previousSequence + 1;
     meta.retainedFromCursor = String(sequence).padStart(CURSOR_WIDTH, "0");
-    const rebuilt = [...preserved, ...transcript].map((message) => {
+    const rebuilt = [...preserved, ...projected].map(({ body, occurredAt }) => {
       sequence += 1;
       return {
         schemaVersion: 1 as const,
         conversationId: meta.conversationId,
         cursor: String(sequence).padStart(CURSOR_WIDTH, "0"),
         revision: meta.revision,
-        occurredAt: message.occurredAt ?? new Date().toISOString(),
-        type: "message" as const,
-        role: message.role,
-        text: message.text,
-        streaming: false,
-      };
+        occurredAt,
+        ...body,
+      } as OperatorConversationStreamEvent;
     });
     const path = this.eventsPath(meta.conversationId);
     const temporary = `${path}.${process.pid}.tmp`;

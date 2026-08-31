@@ -186,17 +186,33 @@ describe("seat conversations", () => {
     });
     const initial = {
       sessionKey: "herdr:codex:id:session-1",
-      messages: [
-        { id: "u1", role: "operator" as const, text: "First prompt" },
-        { id: "a1", role: "agent" as const, text: "First answer" },
-        { id: "u2", role: "operator" as const, text: "Latest prompt" },
-        { id: "a2", role: "agent" as const, text: "Latest answer" },
+      entries: [
+        { type: "message" as const, id: "u1", role: "operator" as const, text: "First prompt" },
+        { type: "message" as const, id: "a1", role: "agent" as const, text: "First answer" },
+        {
+          type: "tool" as const,
+          id: "t1",
+          toolCallId: "call-1",
+          name: "exec_command",
+          phase: "started" as const,
+          detail: '{"cmd":"pnpm test"}',
+        },
+        {
+          type: "tool" as const,
+          id: "t2",
+          toolCallId: "call-1",
+          name: "exec_command",
+          phase: "completed" as const,
+          detail: "12 tests passed",
+        },
+        { type: "message" as const, id: "u2", role: "operator" as const, text: "Latest prompt" },
+        { type: "message" as const, id: "a2", role: "agent" as const, text: "Latest answer" },
       ],
     };
     store.syncSeatTranscript("term-potato", initial);
     store.syncSeatTranscript("term-potato", initial);
 
-    const replayMessages = async () => {
+    const replayEvents = async () => {
       let result = await store.serve({
         op: "replay" as const,
         schemaVersion: 1 as const,
@@ -216,11 +232,33 @@ describe("seat conversations", () => {
         });
       }
       if (result.op !== "replay" || result.result.status !== "page") throw new Error("page expected");
-      return result.result.events.flatMap((event) =>
+      return result.result.events;
+    };
+    const replayMessages = async () =>
+      (await replayEvents()).flatMap((event) =>
         event.type === "message" ? [{ role: event.role, text: event.text }] : [],
       );
-    };
-    expect(await replayMessages()).toEqual(initial.messages.map(({ role, text }) => ({ role, text })));
+    expect(await replayMessages()).toEqual(
+      initial.entries.flatMap((entry) =>
+        entry.type === "message" ? [{ role: entry.role, text: entry.text }] : [],
+      ),
+    );
+    expect((await replayEvents()).filter((event) => event.type === "tool")).toEqual([
+      expect.objectContaining({
+        type: "tool",
+        toolCallId: "call-1",
+        name: "exec_command",
+        phase: "started",
+        detail: '{"cmd":"pnpm test"}',
+      }),
+      expect.objectContaining({
+        type: "tool",
+        toolCallId: "call-1",
+        name: "exec_command",
+        phase: "completed",
+        detail: "12 tests passed",
+      }),
+    ]);
 
     const sentAt = new Date().toISOString();
     await store.serve({
@@ -237,10 +275,10 @@ describe("seat conversations", () => {
     });
     store.syncSeatTranscript("term-potato", {
       ...initial,
-      messages: [
-        ...initial.messages,
-        { id: "u3", role: "operator", text: "One more", occurredAt: sentAt },
-        { id: "a3", role: "agent", text: "Done", occurredAt: sentAt },
+      entries: [
+        ...initial.entries,
+        { type: "message", id: "u3", role: "operator", text: "One more", occurredAt: sentAt },
+        { type: "message", id: "a3", role: "agent", text: "Done", occurredAt: sentAt },
       ],
     });
     expect((await replayMessages()).slice(-2)).toEqual([

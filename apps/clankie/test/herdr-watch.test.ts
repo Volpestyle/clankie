@@ -269,9 +269,9 @@ describe("HerdrWatchStore", () => {
     roots.push(root);
     const transcript = {
       sessionKey: "herdr:claude:id:session-1",
-      messages: [
-        { id: "claude:u1", role: "operator" as const, text: "Ship it" },
-        { id: "claude:a1", role: "agent" as const, text: "Shipped." },
+      entries: [
+        { type: "message" as const, id: "claude:u1", role: "operator" as const, text: "Ship it" },
+        { type: "message" as const, id: "claude:a1", role: "agent" as const, text: "Shipped." },
       ],
     };
     const project = vi.fn();
@@ -302,9 +302,9 @@ describe("HerdrWatchStore", () => {
 });
 
 describe("harness-native seat transcripts", () => {
-  it("keeps Codex user text and assistant commentary/final text, not injected instructions", () => {
+  it("keeps Codex words and complete tool executions, not injected instructions", () => {
     const line = (value: unknown) => JSON.stringify(value);
-    const messages = parseHerdrSeatTranscript(
+    const entries = parseHerdrSeatTranscript(
       "codex",
       [
         line({
@@ -342,6 +342,34 @@ describe("harness-native seat transcripts", () => {
         line({
           type: "response_item",
           payload: {
+            id: "tool-start",
+            type: "function_call",
+            call_id: "call-1",
+            name: "exec_command",
+            arguments: '{"cmd":"pnpm test"}',
+          },
+        }),
+        line({
+          type: "response_item",
+          payload: {
+            id: "tool-result",
+            type: "function_call_output",
+            call_id: "call-1",
+            output: "12 tests passed",
+          },
+        }),
+        line({
+          type: "response_item",
+          payload: {
+            id: "search-result",
+            type: "web_search_call",
+            status: "completed",
+            action: { type: "search", query: "current docs" },
+          },
+        }),
+        line({
+          type: "response_item",
+          payload: {
             id: "a2",
             type: "message",
             role: "assistant",
@@ -352,14 +380,28 @@ describe("harness-native seat transcripts", () => {
       ].join("\n"),
     );
 
-    expect(messages.map(({ role, text }) => ({ role, text }))).toEqual([
-      { role: "operator", text: "Ship it" },
-      { role: "agent", text: "Running tests." },
-      { role: "agent", text: "Shipped." },
+    expect(
+      entries.map((entry) =>
+        entry.type === "message"
+          ? { type: entry.type, role: entry.role, text: entry.text }
+          : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
+      ),
+    ).toEqual([
+      { type: "message", role: "operator", text: "Ship it" },
+      { type: "message", role: "agent", text: "Running tests." },
+      { type: "tool", name: "exec_command", phase: "started", detail: '{"cmd":"pnpm test"}' },
+      { type: "tool", name: "exec_command", phase: "completed", detail: "12 tests passed" },
+      {
+        type: "tool",
+        name: "web_search",
+        phase: "completed",
+        detail: '{\n  "action": {\n    "type": "search",\n    "query": "current docs"\n  }\n}',
+      },
+      { type: "message", role: "agent", text: "Shipped." },
     ]);
   });
 
-  it("follows Claude and Pi's active message trees and omits tool traffic", () => {
+  it("follows Claude and Pi's active trees with typed tool traffic", () => {
     const claude = parseHerdrSeatTranscript(
       "claude",
       [
@@ -374,14 +416,22 @@ describe("harness-native seat transcripts", () => {
           type: "assistant",
           uuid: "tool",
           parentUuid: "a1",
-          message: { role: "assistant", content: [{ type: "tool_use", name: "Read" }] },
+          message: {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "call-claude", name: "Read", input: { file_path: "README.md" } },
+            ],
+          },
         },
         {
           type: "user",
           uuid: "result",
           parentUuid: "tool",
           sourceToolAssistantUUID: "tool",
-          message: { role: "user", content: [{ type: "tool_result", content: "secret" }] },
+          message: {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "call-claude", content: "README contents" }],
+          },
         },
         {
           type: "user",
@@ -434,7 +484,20 @@ describe("harness-native seat transcripts", () => {
             content: [
               { type: "thinking", thinking: "hidden" },
               { type: "text", text: "Green." },
+              { type: "toolCall", id: "call-pi", name: "bash", arguments: { command: "pnpm test" } },
             ],
+          },
+        },
+        {
+          type: "message",
+          id: "r1",
+          parentId: "a1",
+          message: {
+            role: "toolResult",
+            toolCallId: "call-pi",
+            toolName: "bash",
+            content: [{ type: "text", text: "green" }],
+            isError: false,
           },
         },
       ]
@@ -442,19 +505,35 @@ describe("harness-native seat transcripts", () => {
         .join("\n"),
     );
 
-    expect(claude.map(({ role, text }) => ({ role, text }))).toEqual([
-      { role: "operator", text: "Review it" },
-      { role: "agent", text: "Reviewing." },
-      { role: "agent", text: "Looks good." },
+    expect(
+      claude.map((entry) =>
+        entry.type === "message"
+          ? { type: entry.type, role: entry.role, text: entry.text }
+          : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
+      ),
+    ).toEqual([
+      { type: "message", role: "operator", text: "Review it" },
+      { type: "message", role: "agent", text: "Reviewing." },
+      { type: "tool", name: "Read", phase: "started", detail: '{\n  "file_path": "README.md"\n}' },
+      { type: "tool", name: "Read", phase: "completed", detail: "README contents" },
+      { type: "message", role: "agent", text: "Looks good." },
     ]);
-    expect(pi.map(({ role, text }) => ({ role, text }))).toEqual([
-      { role: "operator", text: "Test it" },
-      { role: "agent", text: "Green." },
+    expect(
+      pi.map((entry) =>
+        entry.type === "message"
+          ? { type: entry.type, role: entry.role, text: entry.text }
+          : { type: entry.type, name: entry.name, phase: entry.phase },
+      ),
+    ).toEqual([
+      { type: "message", role: "operator", text: "Test it" },
+      { type: "message", role: "agent", text: "Green." },
+      { type: "tool", name: "bash", phase: "started" },
+      { type: "tool", name: "bash", phase: "completed" },
     ]);
   });
 
   it("keeps Grok prompts and assistant text, not injected context or synthetic reminders", () => {
-    const messages = parseHerdrSeatTranscript(
+    const entries = parseHerdrSeatTranscript(
       "grok",
       [
         { type: "system", content: "hidden system prompt" },
@@ -466,18 +545,30 @@ describe("harness-native seat transcripts", () => {
         },
         { type: "user", prompt_index: 0, content: [{ type: "text", text: "Fix it" }] },
         { type: "reasoning", summary: "hidden reasoning" },
-        { type: "assistant", content: "Working.", tool_calls: [{ name: "shell" }] },
-        { type: "tool_result", content: "hidden output" },
+        {
+          type: "assistant",
+          content: "Working.",
+          tool_calls: [{ id: "call-grok", name: "shell", arguments: '{"command":"pnpm test"}' }],
+        },
+        { type: "tool_result", tool_call_id: "call-grok", content: "tests passed" },
         { type: "assistant", content: "Fixed." },
       ]
         .map((entry) => JSON.stringify(entry))
         .join("\n"),
     );
 
-    expect(messages.map(({ role, text }) => ({ role, text }))).toEqual([
-      { role: "operator", text: "Fix it" },
-      { role: "agent", text: "Working." },
-      { role: "agent", text: "Fixed." },
+    expect(
+      entries.map((entry) =>
+        entry.type === "message"
+          ? { type: entry.type, role: entry.role, text: entry.text }
+          : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
+      ),
+    ).toEqual([
+      { type: "message", role: "operator", text: "Fix it" },
+      { type: "message", role: "agent", text: "Working." },
+      { type: "tool", name: "shell", phase: "started", detail: '{"command":"pnpm test"}' },
+      { type: "tool", name: "shell", phase: "completed", detail: "tests passed" },
+      { type: "message", role: "agent", text: "Fixed." },
     ]);
   });
 });
