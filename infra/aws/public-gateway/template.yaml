@@ -89,7 +89,7 @@ Resources:
     Type: AWS::Lightsail::StaticIp
     Properties:
       AttachedTo: !Ref GatewayInstance
-      StaticIpName: clankie-public-gateway
+      StaticIpName: clankie-public-gateway-ip
 
 Outputs:
   GatewayIp:
