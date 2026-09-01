@@ -191,6 +191,21 @@ export class PersonaStore {
   private bindSeat(observed: ObservedFleetSeat): { readonly seat: OperatorFleetSeat; changed: boolean } {
     let changed = false;
     let binding = this.bindings.get(observed.subject);
+    let renamed = false;
+    if (binding === undefined && observed.renamed !== undefined) {
+      // Naming an agent in Herdr re-keys the character the operator is already
+      // talking to; it never hires a stranger (ADR 0147). Without this the
+      // rename strands that persona and its conversation offline, and the
+      // replacement takes its name from a terminal title nobody chose.
+      const previous = this.bindings.get(observed.renamed.from);
+      if (previous !== undefined) {
+        this.bindings.delete(observed.renamed.from);
+        binding = { ...previous, subject: observed.subject, occupantId: observed.occupantId };
+        this.bindings.set(observed.subject, binding);
+        changed = true;
+        renamed = true;
+      }
+    }
     if (binding === undefined) {
       // Compatibility only: v1 derived persona ids from occupants. Retaining a
       // matching record preserves its conversations; new ids are always minted.
@@ -205,10 +220,14 @@ export class PersonaStore {
       changed = true;
     }
 
+    // A name the operator typed outranks a title the harness happened to write.
+    const chosen =
+      observed.renamed === undefined ? undefined : OperatorAgentNameSchema.safeParse(observed.renamed.name);
     const current = this.records.get(binding.personaId);
     if (current === undefined) {
       const now = new Date().toISOString();
-      const discoveredName = OperatorAgentNameSchema.safeParse(observed.title.trim());
+      const discoveredName =
+        chosen?.success === true ? chosen : OperatorAgentNameSchema.safeParse(observed.title.trim());
       this.records.set(binding.personaId, {
         schemaVersion: 1,
         personaId: binding.personaId,
@@ -219,16 +238,22 @@ export class PersonaStore {
         updatedAt: now,
       });
       changed = true;
-    } else if (current.harness !== observed.harness) {
-      this.records.set(binding.personaId, {
-        ...current,
-        harness: observed.harness,
-        updatedAt: new Date().toISOString(),
-      });
-      changed = true;
+    } else {
+      // Only the rename itself adopts the Herdr name, so a later rename in the
+      // app is not overwritten on the next census.
+      const name = renamed && chosen?.success === true ? chosen.data : current.name;
+      if (name !== current.name || current.harness !== observed.harness) {
+        this.records.set(binding.personaId, {
+          ...current,
+          name,
+          harness: observed.harness,
+          updatedAt: new Date().toISOString(),
+        });
+        changed = true;
+      }
     }
 
-    const { subject: _subject, ...seat } = observed;
+    const { subject: _subject, renamed: _renamed, ...seat } = observed;
     return { seat: { ...seat, personaId: binding.personaId }, changed };
   }
 

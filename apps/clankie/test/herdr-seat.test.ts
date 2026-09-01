@@ -108,6 +108,7 @@ describe("herdr session census", () => {
       {
         seatId: "term-worker",
         subject: "release-prep-ab12",
+        renamed: { name: "release-prep-ab12", from: expect.stringMatching(/^adhoc-[a-f0-9]{20}$/u) },
         occupantId: occupantIdForHerdrSession(session),
         harness: "codex",
         status: "idle",
@@ -126,6 +127,46 @@ describe("herdr session census", () => {
         title: "",
       },
     ]);
+  });
+
+  it("keys a free-form Herdr name to a subject the persona store can read back", async () => {
+    const session = { source: "herdr:codex", kind: "id" as const, value: "session-named" };
+    const roster = {
+      result: {
+        agents: [
+          {
+            pane_id: "w15:p8",
+            terminal_id: "term-worker",
+            // Herdr accepts what the operator types; a binding subject is a
+            // persisted key and cannot.
+            name: "Atlas The Great!",
+            agent: "codex",
+            agent_status: "idle",
+            agent_session: session,
+          },
+          {
+            pane_id: "w15:p9",
+            terminal_id: "term-unslugged",
+            name: "!!!",
+            agent: "codex",
+            agent_status: "idle",
+            agent_session: { source: "herdr:codex", kind: "id", value: "session-unslugged" },
+          },
+        ],
+      },
+    };
+    const seats = await readFleetSeats({
+      runCommand: () => Promise.resolve({ stdout: JSON.stringify(roster), stderr: "" }),
+    });
+
+    expect(seats[0]).toMatchObject({
+      subject: "atlas-the-great",
+      renamed: { name: "Atlas The Great!" },
+    });
+    expect(seats[0]!.subject).toMatch(/^[a-z][a-z0-9_-]{0,31}$/u);
+    // Nothing to slug leaves the seat on its pane key rather than an unreadable one.
+    expect(seats[1]!.subject).toMatch(/^adhoc-[a-f0-9]{20}$/u);
+    expect(seats[1]).not.toHaveProperty("renamed");
   });
 
   it("resolves a pane to its own seat and nothing else (ADR 0148)", async () => {

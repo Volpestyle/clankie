@@ -47,6 +47,16 @@ pane exists, but cannot claim to be the same character in a different pane.
 Legacy seat-scoped conversations and channel members migrate in place when the
 host first discovers their persona; the transcript is never copied or split.
 
+Naming is not only a hiring act. `herdr agent rename` gives a name to an agent
+the operator is already talking to, so the rename re-keys that character from
+its pane-derived subject to the name and adopts the name as the persona's
+display name. Only the rename itself adopts it; a later name chosen in the app
+survives every census after. Herdr names are free-form and a subject is a
+persisted key, so the host slugs the name deterministically — the same name
+always recovers the same character — and a name with nothing to slug leaves the
+seat on its pane-derived subject rather than writing a record the store cannot
+read back.
+
 ```mermaid
 flowchart LR
   Subject["Subject<br/>Herdr name or pane-derived key"] -->|persisted binding| Persona
@@ -105,6 +115,9 @@ his fleet.
 - Every agent in the owner-selected Herdr session appears in the fleet. Naming
   one gives it a rebinding key that follows it to another pane; an unnamed
   agent's persona stays tied to its current pane.
+- Renaming a seated agent in Herdr is visible in Messages as that contact taking
+  the new name, with its conversation intact — not as the contact going offline
+  beside a new one named after a terminal title.
 - The app is responsible for rendering proprietary skin art; the public host
   stores only semantic appearance fields and baked PNG bytes.
 - Content-hashed filenames make Discord avatar changes immediate despite its

@@ -54,10 +54,34 @@ function subjectForHerdrPane(paneId: string): string {
   return `adhoc-${createHash("sha256").update(paneId).digest("hex").slice(0, 20)}`;
 }
 
+/**
+ * A binding subject for a name Herdr accepted. Herdr names are free-form, and a
+ * subject is a persisted key, so an operator typing `herdr agent rename p1 Atlas`
+ * must not write a record the store can never read back. The slug is
+ * deterministic — the same name always recovers the same character — and a name
+ * with nothing to slug leaves the seat on its pane-derived subject.
+ */
+function subjectForHerdrName(name: string): string | undefined {
+  const slug = name
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_-]+/gu, "-")
+    .replace(/^[^a-z]+/u, "")
+    .replace(/-+$/u, "")
+    .slice(0, 32);
+  return slug.length === 0 ? undefined : slug;
+}
+
 export interface ObservedFleetSeat {
   readonly seatId: string;
   /** Managed-agent name, or pane-derived fallback, used to recover the persona binding. */
   readonly subject: string;
+  /**
+   * Set once Herdr has named this seat: the operator's chosen name and the
+   * pane-derived subject the character was filed under before it. Naming an
+   * agent re-keys a character the operator may already be talking to; without
+   * the old key the rename would strand that persona and mint a stranger.
+   */
+  readonly renamed?: { readonly name: string; readonly from: string };
   readonly occupantId: string;
   readonly harness: string;
   readonly status: string;
@@ -337,12 +361,17 @@ export async function readFleetSeats(
       .slice(0, MAX_AGENTS)
       .map((entry) => {
         const written = summaries[entry.paneId];
+        const paneSubject = subjectForHerdrPane(entry.paneId);
+        const named = entry.name === undefined ? undefined : subjectForHerdrName(entry.name);
         return {
           seatId: entry.terminalId,
           // The owner-selected session is the fleet boundary (ADR 0149).
           // Named agents rebind across panes; an ad-hoc one remains stable for
           // its pane and never borrows identity from a rotating harness session.
-          subject: entry.name ?? subjectForHerdrPane(entry.paneId),
+          subject: named ?? paneSubject,
+          ...(named === undefined || entry.name === undefined
+            ? {}
+            : { renamed: { name: bounded(entry.name, 80), from: paneSubject } }),
           occupantId: occupantIdForHerdrSession(entry.session),
           harness: entry.agent,
           status: entry.status,

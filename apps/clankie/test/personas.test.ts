@@ -29,6 +29,53 @@ describe("PersonaStore", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
+  it("carries the character across a Herdr rename instead of minting a stranger", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const paneSubject = "adhoc-0123456789abcdef0123";
+    const before = store.reconcile([{ ...observed("term-1"), subject: paneSubject }])[0]!;
+    store.update({
+      schemaVersion: 1,
+      personaId: before.personaId,
+      name: "Build grove",
+      appearance: { variant: "azure", accessory: "implementer", shape: "squircle" },
+    });
+
+    const after = store.reconcile([
+      { ...observed("term-1"), subject: "atlas", renamed: { name: "Atlas", from: paneSubject } },
+    ])[0]!;
+
+    // Same character, now filed under the name and wearing it.
+    expect(after.personaId).toBe(before.personaId);
+    expect(store.all([after], () => undefined)).toMatchObject([
+      { personaId: before.personaId, name: "Atlas" },
+    ]);
+    // The stranded pane key is gone, so the old contact cannot linger offline.
+    const restarted = new PersonaStore(root);
+    expect(restarted.reconcile([{ ...observed("term-1"), subject: paneSubject }])[0]!.personaId).not.toBe(
+      before.personaId,
+    );
+  });
+
+  it("leaves an app-chosen name alone on later censuses of a named seat", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const named = { ...observed("term-1"), subject: "atlas", renamed: { name: "Atlas", from: "adhoc-x" } };
+    const seat = store.reconcile([named])[0]!;
+    store.update({
+      schemaVersion: 1,
+      personaId: seat.personaId,
+      name: "Atlas the Second",
+      appearance: { variant: "azure", accessory: "implementer", shape: "squircle" },
+    });
+
+    store.reconcile([named]);
+
+    expect(store.all([seat], () => undefined)).toMatchObject([{ name: "Atlas the Second" }]);
+  });
+
   it("keeps one minted character when a replacement occupant presents the same subject", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
     roots.push(root);
