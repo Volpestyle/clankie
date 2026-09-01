@@ -89,10 +89,15 @@ export CLANKIE_GATEWAY_PUBLIC_SSH=false
 infra/aws/public-gateway/deploy.sh provision
 ```
 
-Create a Tailscale workload-identity OAuth client for this repository with the
-`tag:clankie-deployer` tag. Configure the GitHub `production` environment with
-required reviewer protection, allow only `main` and `v*` refs, and add these
-secrets and this variable:
+Create a Tailscale OpenID Connect trust credential with these settings:
+
+- issuer: GitHub (`https://token.actions.githubusercontent.com`)
+- subject: `repo:Volpestyle/clankie:environment:production`
+- scope: Auth Keys write, restricted to the exact `tag:clankie-deployer` tag
+
+Tailscale generates the client id and audience. Configure the GitHub
+`production` environment with required reviewer protection, allow only `main`
+and `v*` refs, and add those values as secrets alongside this variable:
 
 | Kind     | Name                           | Value                                            |
 | -------- | ------------------------------ | ------------------------------------------------ |
