@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "verdant-path-trainer-battle",
+  "scenarioVersion": 1,
+  "coreId": "gba-core-double-v1",
+  "savestateId": "verdant-path-savestate-v1",
+  "savestateSha256": "9be05ed42a7ec145e7f98cc22003844f63501b478f829e58581e805c0abd90fe",
+  "rngSeed": 20260719,
+  "worldId": "gba-emulator-lab-v1",
+  "maxEvidenceEvents": 64,
+  "maxDecisions": 64,
+  "map": {
+    "mapId": "verdant-path",
+    "width": 8,
+    "height": 6,
+    "blocked": [
+      { "x": 2, "y": 2 },
+      { "x": 2, "y": 3 }
+    ]
+  },
+  "player": {
+    "characterId": "clankie",
+    "start": { "mapId": "verdant-path", "x": 0, "y": 1 },
+    "party": [
+      {
+        "slot": 0,
+        "speciesId": "embercub",
+        "level": 8,
+        "maxHp": 20,
+        "moves": [
+          { "moveId": "tackle", "power": 3 },
+          { "moveId": "ember", "power": 5 }
+        ]
+      },
+      {
+        "slot": 1,
+        "speciesId": "leafling",
+        "level": 7,
+        "maxHp": 18,
+        "moves": [{ "moveId": "vine-tap", "power": 4 }]
+      }
+    ]
+  },
+  "trainer": {
+    "trainerId": "rival-mira",
+    "position": { "mapId": "verdant-path", "x": 4, "y": 1 },
+    "interactionDistance": 1,
+    "dialog": ["Rival Mira wants to battle!"],
+    "opponent": {
+      "speciesId": "sproutlet",
+      "level": 6,
+      "maxHp": 12,
+      "retaliationDamage": 2
+    }
+  },
+  "targetLocation": { "mapId": "verdant-path", "x": 3, "y": 1 },
+  "expected": {
+    "battleResult": "won",
+    "minimumDecisions": 6
+  }
+}
