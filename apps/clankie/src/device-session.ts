@@ -1,5 +1,5 @@
 import { constants as fsConstants } from "node:fs";
-import { mkdir, open } from "node:fs/promises";
+import { link, mkdir, open, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
@@ -122,20 +122,31 @@ export class DeviceSessionSigner {
 export async function loadOrCreateDeviceSessionKey(path: string): Promise<Uint8Array | undefined> {
   const existing = await readDeviceSessionKey(path);
   if (existing !== undefined) return existing;
+  const tempPath = `${path}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
   try {
     await mkdir(dirname(path), { recursive: true });
-    const handle = await open(path, "wx", KEY_MODE);
+    const key = randomBytes(KEY_BYTES);
+    const handle = await open(tempPath, "wx", KEY_MODE);
     try {
       await handle.chmod(KEY_MODE);
-      await handle.writeFile(randomBytes(KEY_BYTES).toString("hex"), "utf8");
+      await handle.writeFile(key.toString("hex"), "utf8");
+      await handle.sync();
     } finally {
       await handle.close();
     }
-    return readDeviceSessionKey(path);
-  } catch (error) {
-    // Lost a create race: another process wrote the key first — read theirs.
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return readDeviceSessionKey(path);
+    try {
+      await link(tempPath, path);
+      return Uint8Array.from(key);
+    } catch (error) {
+      // The complete temporary file is published atomically; a race loser can
+      // therefore read the winner without observing an empty key file.
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return readDeviceSessionKey(path);
+      return undefined;
+    }
+  } catch {
     return undefined;
+  } finally {
+    await unlink(tempPath).catch(() => undefined);
   }
 }
 

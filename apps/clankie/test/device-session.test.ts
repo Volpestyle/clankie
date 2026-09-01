@@ -158,11 +158,8 @@ describe("loadOrCreateDeviceSessionKey", () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-devkey-"));
     tempDirs.push(root);
     const path = join(root, "device-session.key");
-    const [a, b] = await Promise.all([
-      loadOrCreateDeviceSessionKey(path),
-      loadOrCreateDeviceSessionKey(path),
-    ]);
-    expect(a).toBeInstanceOf(Uint8Array);
-    expect(Buffer.from(a ?? new Uint8Array()).equals(Buffer.from(b ?? new Uint8Array()))).toBe(true);
+    const keys = await Promise.all(Array.from({ length: 32 }, () => loadOrCreateDeviceSessionKey(path)));
+    expect(keys.every((key) => key instanceof Uint8Array)).toBe(true);
+    expect(keys.every((key) => Buffer.from(key ?? []).equals(Buffer.from(keys[0] ?? [])))).toBe(true);
   });
 });
