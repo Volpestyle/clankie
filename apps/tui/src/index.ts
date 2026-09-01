@@ -108,6 +108,9 @@ const conversationPrompt = new OperatorConversationPromptSession({
   herdrPaneId: () => herdrPaneIdFromEnv(),
 });
 await conversationPrompt.initialize();
+let conversationObservation:
+  | { readonly controller: AbortController; readonly done: Promise<void> }
+  | undefined;
 let conversationNotice: string | undefined;
 let currentWorkspace = launchedWorkspace ?? repoRoot;
 let currentConversationTitle: string | undefined;
@@ -147,22 +150,35 @@ const conversationsContext = {
   },
   select: async (conversationId: string) => {
     await shell.detachActiveTurn();
-    const conversation = await selectConversation(conversationId);
-    shell.clearTranscript();
-    if (!(await conversationPrompt.restoreHistory(conversationShellSink()))) {
-      throw new Error("The selected conversation history is no longer available");
+    await stopConversationObservation();
+    try {
+      const conversation = await selectConversation(conversationId);
+      shell.clearTranscript();
+      if (!(await conversationPrompt.restoreHistory(conversationShellSink()))) {
+        throw new Error("The selected conversation history is no longer available");
+      }
+      startConversationObservation();
+      shell.refreshStatus("ready");
+      return conversation;
+    } catch (error) {
+      startConversationObservation();
+      throw error;
     }
-    shell.refreshStatus("ready");
-    return conversation;
   },
   fork: async () => {
     const parentConversationId = conversationSelection.conversationId;
     if (parentConversationId === undefined) throw new Error("No conversation is selected");
     if (sideConversation !== undefined) throw new Error("A side conversation is already open");
-    const child = await conversationClient.fork(parentConversationId);
-    const selected = await selectConversation(child.conversationId);
-    sideConversation = { parentConversationId, conversationId: child.conversationId };
-    return selected;
+    await stopConversationObservation();
+    try {
+      const child = await conversationClient.fork(parentConversationId);
+      const selected = await selectConversation(child.conversationId);
+      sideConversation = { parentConversationId, conversationId: child.conversationId };
+      return selected;
+    } catch (error) {
+      startConversationObservation();
+      throw error;
+    }
   },
   create: async (title?: string) => {
     const conversationId = conversationSelection.conversationId;
@@ -207,6 +223,31 @@ function conversationShellSink() {
       shell.refreshStatusView();
     },
   });
+}
+
+function startConversationObservation(): void {
+  if (conversationSelection.conversationId === undefined || conversationObservation !== undefined) return;
+  const controller = new AbortController();
+  const done = conversationPrompt
+    .observe(conversationShellSink(), controller.signal)
+    .catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      const detail = error instanceof Error ? error.message : "Unknown observation error";
+      shell.insertMarkdown(`**Live conversation unavailable**\n\n${detail}. History remains durable.`);
+      shell.refreshStatus("live conversation unavailable");
+    });
+  conversationObservation = { controller, done };
+  void done.finally(() => {
+    if (conversationObservation?.controller === controller) conversationObservation = undefined;
+  });
+}
+
+async function stopConversationObservation(): Promise<void> {
+  const observation = conversationObservation;
+  if (observation === undefined) return;
+  conversationObservation = undefined;
+  observation.controller.abort();
+  await observation.done;
 }
 
 const settingsStore = new SettingsStore();
@@ -274,6 +315,7 @@ const shell = new ClankieFaceShell({
   ],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal) => {
+    await stopConversationObservation();
     await reportHerdrAgent("working", { source: "clankie", agent: "clankie", message: "turn" });
     try {
       await conversationPrompt.prompt(
@@ -288,6 +330,7 @@ const shell = new ClankieFaceShell({
         signal,
       );
     } finally {
+      startConversationObservation();
       await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
     }
   },
@@ -296,6 +339,7 @@ const shell = new ClankieFaceShell({
   onInterrupt: () => conversationPrompt.interruptActive(),
   onSideExit: returnFromSideConversation,
   onExit: async () => {
+    await stopConversationObservation();
     presence.stop();
     herdrRoster.stop();
     if (sideConversation !== undefined) {
@@ -309,13 +353,23 @@ const shell = new ClankieFaceShell({
 async function returnFromSideConversation(): Promise<void> {
   const side = sideConversation;
   if (side === undefined) return;
-  if (!(await conversationClient.close(side.conversationId))) {
+  await stopConversationObservation();
+  let closed: boolean;
+  try {
+    closed = await conversationClient.close(side.conversationId);
+  } catch (error) {
+    startConversationObservation();
+    throw error;
+  }
+  if (!closed) {
+    startConversationObservation();
     throw new Error("The side conversation could not be closed");
   }
   await selectConversation(side.parentConversationId);
   sideConversation = undefined;
   shell.endSideConversation();
   await conversationPrompt.restore(conversationShellSink());
+  startConversationObservation();
   shell.refreshStatus("ready");
 }
 
@@ -377,11 +431,16 @@ shell.insertMarkdown(
 );
 shell.refreshStatus("ready");
 if (conversationSelection.conversationId !== undefined) {
-  void conversationPrompt.restoreHistory(conversationShellSink()).catch((error: unknown) => {
-    const detail = error instanceof Error ? error.message : "Unknown restore error";
-    shell.insertMarkdown(`**Conversation restore unavailable**\n\n${detail}. No prompt was sent.`);
-    shell.refreshStatus("conversation restore unavailable");
-  });
+  void conversationPrompt
+    .restoreHistory(conversationShellSink())
+    .then((restored) => {
+      if (restored) startConversationObservation();
+    })
+    .catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : "Unknown restore error";
+      shell.insertMarkdown(`**Conversation restore unavailable**\n\n${detail}. No prompt was sent.`);
+      shell.refreshStatus("conversation restore unavailable");
+    });
 }
 void loadConfig({ env: process.env, cwd: repoRoot })
   .then(({ config }) => {

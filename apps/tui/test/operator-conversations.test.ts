@@ -164,7 +164,12 @@ function streamEvent(
   conversationId: string,
   cursor: string,
   body:
-    | { readonly type: "message"; readonly role: "captain"; readonly text: string; readonly streaming: false }
+    | {
+        readonly type: "message";
+        readonly role: "captain" | "operator";
+        readonly text: string;
+        readonly streaming: false;
+      }
     | { readonly type: "turn"; readonly runId: string; readonly phase: "completed" | "cancelled" },
 ): OperatorConversationStreamEvent {
   return {
@@ -389,6 +394,75 @@ describe("TUI operator conversation selection", () => {
 });
 
 describe("TUI selected-conversation prompt path", () => {
+  it("renders phone turns and replies while no local prompt is active", async () => {
+    const { store } = await tempTailStore();
+    const selection = new OperatorConversationSelection(client());
+    await selection.selectDefault();
+    const routed: OperatorConversationClient = {
+      ...client(),
+      tail: async function* (request) {
+        yield {
+          kind: "event",
+          event: streamEvent(request.conversationId, "global-default:phone", {
+            type: "message",
+            role: "operator",
+            text: "from the phone",
+            streaming: false,
+          }),
+        };
+        yield {
+          kind: "event",
+          event: streamEvent(request.conversationId, "global-default:reply", {
+            type: "message",
+            role: "captain",
+            text: "back to every surface",
+            streaming: false,
+          }),
+        };
+      },
+    };
+    const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
+    const recorded = recordingTarget();
+    await session.initialize();
+
+    await session.observe(createOperatorConversationShellSink(recorded.target));
+
+    expect(recorded.userMessages).toEqual(["from the phone"]);
+    expect(recorded.assistantMessages).toEqual(["back to every surface"]);
+    expect(store.cursor("global-default")).toBe("global-default:reply");
+  });
+
+  it("stops an idle observation without surfacing the aborted parked request", async () => {
+    const { store } = await tempTailStore();
+    const selection = new OperatorConversationSelection(client());
+    await selection.selectDefault();
+    let tailStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      tailStarted = resolve;
+    });
+    const routed: OperatorConversationClient = {
+      ...client(),
+      tail: async function* (_request, signal) {
+        tailStarted();
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+            once: true,
+          });
+        });
+        yield { kind: "live", draft: undefined };
+      },
+    };
+    const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
+    const controller = new AbortController();
+    await session.initialize();
+
+    const observation = session.observe(recordingSink().sink, controller.signal);
+    await started;
+    controller.abort();
+
+    await expect(observation).resolves.toBeUndefined();
+  });
+
   it("rehydrates retained history after the surface cursor reached the end", async () => {
     const { store } = await tempTailStore();
     await store.initialize();

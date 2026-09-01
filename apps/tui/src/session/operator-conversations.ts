@@ -180,6 +180,9 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+/** Abort can flip during an await; keep it opaque to TypeScript's loop narrowing. */
+const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true;
+
 /**
  * The newest retained conversation rooted at a workspace directory, used by
  * `/cd`. Process startup creates a fresh conversation instead.
@@ -390,11 +393,11 @@ export interface OperatorConversationEventSink {
 }
 
 /**
- * Production plain-prompt adapter. It snapshots the selected conversation for
- * each prompt, catches up that surface's durable cursor, sends with the current
- * revision fence, then consumes the typed tail until this accepted run reaches
- * a terminal lifecycle event. No direct/default local session exists in this
- * path, and aborting observation never cancels the already accepted turn.
+ * Production prompt and observation adapter. One cursor follows the selected
+ * conversation whether the console is idle or awaiting its own turn; the face
+ * hands observation between those two modes so only one tail owns it at once.
+ * No direct/default local session exists in this path, and aborting observation
+ * never cancels an already accepted turn.
  */
 export class OperatorConversationPromptSession {
   private readonly client: OperatorConversationClient;
@@ -432,6 +435,13 @@ export class OperatorConversationPromptSession {
   public async restoreHistory(sink: OperatorConversationEventSink): Promise<boolean> {
     const conversationId = this.requiredConversationId();
     return await this.restoreConversation(conversationId, sink, true);
+  }
+
+  /** Keep the selected conversation live while the console is otherwise idle. */
+  public async observe(sink: OperatorConversationEventSink, signal?: AbortSignal): Promise<void> {
+    const conversationId = this.requiredConversationId();
+    if (!(await this.restoreConversation(conversationId, sink))) return;
+    await this.observeTail(conversationId, sink, signal);
   }
 
   private async restoreConversation(
@@ -514,7 +524,7 @@ export class OperatorConversationPromptSession {
     }
     this.activeRun = { conversationId, runId: accepted.runId };
     try {
-      await this.observeRun(conversationId, accepted.runId, sink, signal);
+      await this.observeTail(conversationId, sink, signal, accepted.runId);
     } finally {
       if (this.activeRun?.runId === accepted.runId) this.activeRun = undefined;
     }
@@ -537,13 +547,13 @@ export class OperatorConversationPromptSession {
     }
   }
 
-  private async observeRun(
+  private async observeTail(
     conversationId: string,
-    runId: string,
     sink: OperatorConversationEventSink,
     signal?: AbortSignal,
+    runId?: string,
   ): Promise<void> {
-    tail: while (signal?.aborted !== true) {
+    tail: while (!isAborted(signal)) {
       const cursor = this.tails.cursor(conversationId);
       try {
         for await (const item of this.client.tail(
@@ -571,6 +581,7 @@ export class OperatorConversationPromptSession {
           sink.event(item.event);
           await this.tails.writeCursor(conversationId, item.event.cursor);
           if (
+            runId !== undefined &&
             item.event.type === "turn" &&
             item.event.runId === runId &&
             ["completed", "failed", "cancelled"].includes(item.event.phase)
@@ -580,6 +591,7 @@ export class OperatorConversationPromptSession {
         }
         return;
       } catch (error) {
+        if (isAborted(signal)) return;
         // Fetch uses TypeError for a dropped connection. Re-open only the
         // idempotent durable tail; send and schema/HTTP failures stay terminal.
         if (!(error instanceof TypeError)) throw error;

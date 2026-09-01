@@ -59,6 +59,12 @@ insertions (user box, assistant markdown, reasoning, tool begin/complete)
 instead of markdown strings, so tool calls get pi's bordered execution blocks
 with live loaders.
 
+The selected conversation keeps exactly one cursor-backed tail attached. While
+the editor is idle, that tail renders operator turns and Clankie replies from
+phone, desktop, or another surface immediately. A local prompt briefly takes
+over the same cursor until its run settles, then idle observation resumes; the
+two modes never tail concurrently.
+
 Clankie's chrome stays Clankie's — the banner (name and rule only — the model
 and workspace moved to the footer), the slash-command typeahead panel, the
 `Ctrl+/` command workbench, the guided-flow modals, and the inline `!` shell
