@@ -21,6 +21,7 @@ import {
   ensureDiscordUserVoiceBridgeCredential,
   ensureDiscordVoiceBridgeCredential,
   ensureOperatorCredential,
+  resolvePublicGatewayCredential,
 } from "@clankie/credential-broker";
 import { createLogger } from "@clankie/observability";
 import {
@@ -54,6 +55,7 @@ import { createWorldPlayExecution } from "./play-execution-world.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
+import { PublicGatewayConnector } from "./public-gateway-connector.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 
@@ -102,9 +104,43 @@ const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie
 // Keep the existing on-disk directory so browser profiles survive the process merge.
 const capabilityStateRoot = join(stateRoot, "runner");
 const eventLogPath = process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "events.jsonl");
+const port = Number(process.env.PORT ?? 4310);
+const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? 4321);
 
 const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
+let publicGatewayConnector: PublicGatewayConnector | undefined;
+if (startupSettings.publicGateway.url !== undefined && startupSettings.publicGateway.hostId !== undefined) {
+  try {
+    const hostToken = await resolvePublicGatewayCredential({
+      env: process.env,
+      store: operatorCredentialStore,
+    });
+    if (hostToken === undefined) {
+      logger.warn(
+        { hostId: startupSettings.publicGateway.hostId },
+        "public gateway is configured but its credential is missing; direct access remains available",
+      );
+    } else {
+      publicGatewayConnector = new PublicGatewayConnector({
+        gatewayUrl: startupSettings.publicGateway.url,
+        hostId: startupSettings.publicGateway.hostId,
+        hostToken,
+        controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
+        relayUrl: `http://127.0.0.1:${String(relayPort)}`,
+        logger,
+      });
+    }
+  } catch (error) {
+    logger.warn(
+      {
+        hostId: startupSettings.publicGateway.hostId,
+        error: error instanceof Error ? error.name : "UnknownError",
+      },
+      "public gateway configuration is unusable; direct access remains available",
+    );
+  }
+}
 const localVoiceConfig = parseVoiceRealtimeEnv(process.env);
 const localVoiceCredential = await operatorCredentialStore.get(localVoiceConfig.realtimeProvider);
 const localVoiceElevenLabsCredential =
@@ -392,6 +428,12 @@ const clankie = await createClankieApp({
   },
   playSight,
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
+  ...(publicGatewayConnector === undefined
+    ? {}
+    : {
+        pairingOfferPublisher: publicGatewayConnector,
+        publicGatewayHostBaseUrl: publicGatewayConnector.hostBaseUrl,
+      }),
   authenticateCaptain: async (request) =>
     (await authenticateDiscordBridge(request)) ??
     (await authenticateDiscordVoiceBridge(request)) ??
@@ -436,7 +478,6 @@ void playHost.runForever(playAbort.signal).catch((error: unknown) => {
 });
 logger.info({ environmentIds: ["pokemon-firered", "pokemon-emerald"] }, "embodiment play host started");
 
-const port = Number(process.env.PORT ?? 4310);
 const listenHost = "127.0.0.1";
 const webSocketServer = new WebSocketServer({
   noServer: true,
@@ -448,6 +489,10 @@ const server = serve({
   hostname: listenHost,
   websocket: { server: webSocketServer as unknown as WebSocketServerLike },
 });
+if (publicGatewayConnector !== undefined) {
+  if (server.listening) publicGatewayConnector.start();
+  else server.once("listening", () => publicGatewayConnector?.start());
+}
 logger.info(
   {
     hostname: listenHost,
@@ -469,6 +514,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
+  publicGatewayConnector?.close();
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
   server.close();

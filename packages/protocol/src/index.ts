@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./public-gateway.ts";
+
 /** Frozen event-log partition key. Still serialized as `missionId`. */
 export const MissionIdSchema = z.string().min(1);
 /** Frozen optional attribution on the event envelope. */
@@ -3636,6 +3638,27 @@ export type PairingOfferWire = z.infer<typeof PairingOfferWireSchema>;
 export const PairingHostSchema = z.object({ name: z.string().min(1) });
 export type PairingHost = z.infer<typeof PairingHostSchema>;
 
+export const DeviceHostBaseUrlSchema = z
+  .string()
+  .max(2_048)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        (url.protocol === "http:" || url.protocol === "https:") &&
+        url.username.length === 0 &&
+        url.password.length === 0 &&
+        !value.includes("?") &&
+        !value.includes("#") &&
+        url.search.length === 0 &&
+        url.hash.length === 0
+      );
+    } catch {
+      return false;
+    }
+  }, "expected an http(s) base URL without credentials, query, or fragment");
+export type DeviceHostBaseUrl = z.infer<typeof DeviceHostBaseUrlSchema>;
+
 /** Redeem step: the offer secret or typed code is the capability; carries device metadata. */
 export const PairingRedeemRequestSchema = z
   .object({
@@ -3658,6 +3681,7 @@ export type PairingRedeemRequest = z.infer<typeof PairingRedeemRequestSchema>;
 export const PairingRedeemResponseSchema = z.object({
   deviceId: z.string().min(1),
   host: PairingHostSchema,
+  hostBaseUrl: DeviceHostBaseUrlSchema.optional(),
   offeredGrants: DeviceGrantSetSchema,
   completionToken: z.string().min(1),
   expiresAt: z.string().datetime(),
@@ -3676,6 +3700,7 @@ export const PairingCompleteResponseSchema = z.object({
   deviceToken: z.string().min(1),
   grants: DeviceGrantSetSchema,
   sessionExpiresAt: z.string().datetime(),
+  relayUrl: DeviceHostBaseUrlSchema.optional(),
 });
 export type PairingCompleteResponse = z.infer<typeof PairingCompleteResponseSchema>;
 
@@ -3683,6 +3708,7 @@ export const DeviceSessionRefreshResponseSchema = z.object({
   deviceToken: z.string().min(1),
   grants: DeviceGrantSetSchema,
   sessionExpiresAt: z.string().datetime(),
+  relayUrl: DeviceHostBaseUrlSchema.optional(),
 });
 export type DeviceSessionRefreshResponse = z.infer<typeof DeviceSessionRefreshResponseSchema>;
 

@@ -41,6 +41,12 @@ export {
 } from "./linear-oauth.ts";
 export { resolveProviderBearer } from "./provider-bearer.ts";
 export {
+  PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
+  PUBLIC_GATEWAY_FORBIDDEN_ENV,
+  resolvePublicGatewayCredential,
+  type PublicGatewayCredentialOptions,
+} from "./public-gateway-credential.ts";
+export {
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_PRESENCE_CAPABILITIES,
   DiscordBotCredentialProvider,

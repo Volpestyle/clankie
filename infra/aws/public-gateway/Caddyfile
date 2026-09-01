@@ -1,0 +1,8 @@
+api.clankie.bot {
+	reverse_proxy clankie-gateway:8080
+
+	log {
+		output stdout
+		format json
+	}
+}

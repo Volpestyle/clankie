@@ -257,6 +257,54 @@ export const RelaySettingsSchema = z
   .strict();
 export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
 
+/** Public AWS doorway used by App Store builds; the host bearer stays in Keychain. */
+export const PublicGatewaySettingsSchema = z
+  .object({
+    url: z
+      .string()
+      .max(512)
+      .superRefine((value, context) => {
+        let parsed: URL;
+        try {
+          parsed = new URL(value);
+        } catch {
+          context.addIssue({ code: "custom", message: "must be an absolute URL" });
+          return;
+        }
+        const loopback =
+          parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
+        if (
+          (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) ||
+          parsed.username.length > 0 ||
+          parsed.password.length > 0 ||
+          parsed.pathname !== "/" ||
+          value.includes("?") ||
+          value.includes("#") ||
+          parsed.search.length > 0 ||
+          parsed.hash.length > 0
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "must be an exact HTTPS origin (HTTP is loopback-only)",
+          });
+        }
+      })
+      .optional(),
+    hostId: z
+      .string()
+      .min(16)
+      .max(128)
+      .regex(/^[A-Za-z0-9_-]+$/u)
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.url === undefined) !== (value.hostId === undefined)) {
+      context.addIssue({ code: "custom", message: "url and hostId must be configured together" });
+    }
+  });
+export type PublicGatewaySettings = z.infer<typeof PublicGatewaySettingsSchema>;
+
 /**
  * Which herdr session is his (ADR 0149).
  *
@@ -426,6 +474,7 @@ export const ClankieSettingsSchema = z
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
+    publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),

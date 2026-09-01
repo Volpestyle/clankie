@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Clankie public gateway — one 1 GB Lightsail instance with a static IPv4 address
+
+Parameters:
+  KeyPairName:
+    Type: String
+    Description: Existing Lightsail key pair used for operator SSH access
+  OperatorCidr:
+    Type: String
+    Description: Operator public IPv4 CIDR allowed to reach SSH, for example 203.0.113.10/32
+  BlueprintId:
+    Type: String
+    Default: amazon_linux_2023
+    Description: Active Lightsail Linux blueprint ID
+  BundleId:
+    Type: String
+    Default: micro_3_0
+    Description: 1 GB Linux bundle with public IPv4
+
+Resources:
+  GatewayInstance:
+    Type: AWS::Lightsail::Instance
+    Properties:
+      InstanceName: clankie-public-gateway
+      BlueprintId: !Ref BlueprintId
+      BundleId: !Ref BundleId
+      KeyPairName: !Ref KeyPairName
+      Networking:
+        Ports:
+          - AccessDirection: inbound
+            AccessType: public
+            Cidrs:
+              - !Ref OperatorCidr
+            CommonName: SSH
+            FromPort: 22
+            Protocol: tcp
+            ToPort: 22
+          - AccessDirection: inbound
+            AccessType: public
+            Cidrs:
+              - 0.0.0.0/0
+            CommonName: HTTP
+            FromPort: 80
+            Protocol: tcp
+            ToPort: 80
+          - AccessDirection: inbound
+            AccessType: public
+            Cidrs:
+              - 0.0.0.0/0
+            CommonName: HTTPS
+            FromPort: 443
+            Protocol: tcp
+            ToPort: 443
+      Tags:
+        - Key: app
+          Value: clankie-public-gateway
+      UserData: |
+        #!/bin/bash
+        set -euxo pipefail
+        dnf upgrade -y
+        dnf install -y docker
+        getent group clankie-gateway-secrets >/dev/null || groupadd --system --gid 1999 clankie-gateway-secrets
+        install -d -o root -g root -m 0755 /opt/clankie-gateway
+        install -d -o root -g clankie-gateway-secrets -m 0750 /etc/clankie-gateway
+        install -d -o root -g root -m 0755 /etc/docker
+        printf '%s\n' '{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"5"}}' > /etc/docker/daemon.json
+        chmod 0644 /etc/docker/daemon.json
+        systemctl enable --now docker
+
+  GatewayStaticIp:
+    Type: AWS::Lightsail::StaticIp
+    Properties:
+      AttachedTo: !Ref GatewayInstance
+      StaticIpName: clankie-public-gateway
+
+Outputs:
+  GatewayIp:
+    Description: Add a DNS-only Cloudflare A record for api.clankie.bot to this address
+    Value: !GetAtt GatewayStaticIp.IpAddress
+  InstanceName:
+    Description: Lightsail instance name
+    Value: !Ref GatewayInstance

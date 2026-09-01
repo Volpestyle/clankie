@@ -874,7 +874,7 @@ paths:
               device: { name: Yaak, platform: macos }
       responses:
         "200":
-          description: Pending device + completion token
+          description: Pending device + completion token; a configured gateway also returns the host-scoped base URL
 
   /v1/pairing/complete:
     post:
@@ -895,7 +895,7 @@ paths:
                 terminalControl: false
       responses:
         "200":
-          description: Device token issued
+          description: Device token issued; relayUrl is the host-scoped gateway base when configured
 
   /v1/devices:
     get:
@@ -939,7 +939,7 @@ paths:
       security: [{ deviceBearer: [] }]
       responses:
         "200":
-          description: New token
+          description: New token; relayUrl republishes the host-scoped gateway base when configured
 
 components:
   parameters:

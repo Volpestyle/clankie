@@ -337,8 +337,9 @@ describe("auth command", () => {
         "  mistral       missing",
         "",
         "services:",
-        "  elevenlabs   API key",
-        "  discord_bot  bot token",
+        "  clankie-public-gateway  missing",
+        "  elevenlabs              API key",
+        "  discord_bot             bot token",
         "",
         "Worker harnesses keep their own logins (`codex login`, `claude login`).",
       ].join("\n"),
@@ -356,8 +357,9 @@ describe("auth command", () => {
     expect(text).toContain("  anthropic     missing");
     expect(text).toContain("  openai        missing");
     expect(text).toContain("  openai-codex  missing");
-    expect(text).toContain("  elevenlabs   missing");
-    expect(text).toContain("  discord_bot  missing");
+    expect(text).toContain("  clankie-public-gateway  missing");
+    expect(text).toContain("  elevenlabs              missing");
+    expect(text).toContain("  discord_bot             missing");
     expect(text).not.toContain("No provider keys");
   });
 

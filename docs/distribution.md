@@ -66,6 +66,15 @@ are on PATH. The headless command contract is
 skills under `.agents/dev-skills` stay out of the archive. The rest of
 `docs/` does not ship.
 
+The AWS public gateway is a separate deployment, not part of the Mac release.
+The release contains the outbound connector and `/gateway` setup wizard; the
+single-instance Lightsail/Caddy deployment procedure lives under
+[`infra/aws/public-gateway`](../infra/aws/public-gateway/README.md). The
+[public gateway launch gate](public-gateway-launch.md) joins hosting,
+user-perceived metrics, scaling triggers, and the App Store review journey.
+Tailscale remains an optional direct development lane and is not required by an
+App Store client.
+
 ## Build and release
 
 On an Apple silicon Mac with the repository toolchain installed:

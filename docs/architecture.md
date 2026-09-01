@@ -10,7 +10,12 @@ flowchart LR
   TUI["operator TUI"] --> Commands --> Config["clankie.json + settings.json"]
   TUI --> Service["apps/clankie<br/>captain, tools, HTTP authority"]
   TUI -. "secret wizards" .-> State
-  Remote["phone / menu bar / relay"] --> Service
+  Phone["iPhone / iPad"] --> Gateway["api.clankie.bot<br/>Lightsail + Caddy gateway"]
+  Service -->|"authenticated outbound WebSocket"| Gateway
+  Gateway --> Relay["apps/relay<br/>device-authorized operator API"]
+  Gateway --> Service
+  Phone -. "optional direct Tailscale lane" .-> Relay
+  Phone -. "optional direct Tailscale lane" .-> Service
   Body["one active Discord body<br/>official bot or lab user"] --> Service
   Body --> Client["@clankie/vox-client<br/>Apache-2.0 IPC boundary"]
   Client --> Vox["one clankvox child<br/>AGPL-3.0-or-later"]
@@ -27,6 +32,13 @@ This Mermaid diagram, [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md
 [ADR 0145](adr/0145-the-world-is-the-only-body.md) are the canonical current
 architecture diagrams. The JPG/tldraw exports under `docs/diagrams/` are
 historical snapshots.
+
+The public gateway is a doorway, not a hosted Clankie. It keeps only live host
+connections, expiring pairing-route hashes, and bounded in-flight exchanges.
+The Mac remains authoritative for offers, devices, grants, conversations,
+terminal sessions, Herdr, and credentials. Pairing begins at the stable global
+origin, then the Mac returns `/h/{hostId}` as the control and relay base for the
+device session. See [ADR 0151](adr/0151-the-public-doorway-routes-home.md).
 
 ## How a message becomes a turn
 

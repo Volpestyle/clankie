@@ -1,0 +1,9 @@
+.git
+.turbo
+.data
+artifacts
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+apps/vox

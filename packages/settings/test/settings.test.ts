@@ -9,6 +9,7 @@ import {
   GameplaySettingsSchema,
   HerdrSettingsSchema,
   McpServerSchema,
+  PublicGatewaySettingsSchema,
   VoiceSettingsSchema,
   applyDiscordSettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
@@ -44,6 +45,32 @@ describe("settings store", () => {
     expect(GameplaySettingsSchema.parse({ pokeagentMmoEnabled: false })).toEqual({
       pokeagentMmoEnabled: false,
     });
+  });
+
+  it("keeps the public gateway non-secret, complete, and HTTPS", () => {
+    expect(emptySettings().publicGateway).toEqual({});
+    expect(
+      PublicGatewaySettingsSchema.parse({
+        url: "https://api.clankie.bot",
+        hostId: "mac_james_12345678",
+      }),
+    ).toEqual({ url: "https://api.clankie.bot", hostId: "mac_james_12345678" });
+    expect(() => PublicGatewaySettingsSchema.parse({ url: "https://api.clankie.bot" })).toThrow();
+    expect(() =>
+      PublicGatewaySettingsSchema.parse({
+        url: "http://api.clankie.bot",
+        hostId: "mac_james_12345678",
+      }),
+    ).toThrow();
+    for (const url of ["https://api.clankie.bot?", "https://api.clankie.bot#"]) {
+      expect(() => PublicGatewaySettingsSchema.parse({ url, hostId: "mac_james_12345678" })).toThrow();
+    }
+    expect(
+      PublicGatewaySettingsSchema.parse({
+        url: "http://127.0.0.1:8080",
+        hostId: "mac_james_12345678",
+      }),
+    ).toBeDefined();
   });
 
   it("drops the retired local-emulator toggle from an older settings file", () => {

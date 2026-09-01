@@ -65,7 +65,9 @@ async function makeStore(): Promise<EventLog> {
 
 async function makeApp(
   store: EventLog,
-  options: { deviceSessionKey?: Uint8Array } = { deviceSessionKey: DEVICE_KEY },
+  options: { deviceSessionKey?: Uint8Array; publicGatewayHostBaseUrl?: string } = {
+    deviceSessionKey: DEVICE_KEY,
+  },
 ): Promise<Harness> {
   let nowMs = Date.parse("2026-07-13T12:00:00.000Z");
   const { app } = await createClankieApp({
@@ -75,6 +77,9 @@ async function makeApp(
     hostDisplayName: "Test Mac",
     clock: () => new Date(nowMs),
     ...(options.deviceSessionKey === undefined ? {} : { deviceSessionKey: options.deviceSessionKey }),
+    ...(options.publicGatewayHostBaseUrl === undefined
+      ? {}
+      : { publicGatewayHostBaseUrl: options.publicGatewayHostBaseUrl }),
   });
   return {
     app,
@@ -190,6 +195,26 @@ describe("control-plane device pairing surface", () => {
     const scrambled = code.toLowerCase().replace(/-/g, "");
     const res = await redeem(app, { code: scrambled, device: { name: "iPad", platform: "ios" } });
     expect(res.status).toBe(200);
+  });
+
+  it("returns the host-scoped public base through redeem, completion, and refresh", async () => {
+    const hostBaseUrl = "https://api.clankie.bot/h/mac_james_12345678";
+    const { app } = await makeApp(await makeStore(), {
+      deviceSessionKey: DEVICE_KEY,
+      publicGatewayHostBaseUrl: hostBaseUrl,
+    });
+    const { offerSecret } = await mintOffer(app);
+    const redeemed = await redeem(app, { offerSecret, device: IOS });
+    expect(await redeemed.clone().json()).toMatchObject({ hostBaseUrl });
+    const completionToken = ((await redeemed.json()) as { completionToken: string }).completionToken;
+    const completed = await complete(app, { completionToken, acceptedGrants: SUPERVISE_GRANTS });
+    expect(await completed.clone().json()).toMatchObject({ relayUrl: hostBaseUrl });
+    const token = ((await completed.json()) as { deviceToken: string }).deviceToken;
+    expect(
+      await devicePost(app, "/v1/devices/self/session/refresh", token).then((response) => response.json()),
+    ).toMatchObject({
+      relayUrl: hostBaseUrl,
+    });
   });
 
   it("carries no grants inside the session token", async () => {

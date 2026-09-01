@@ -25,6 +25,13 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["devices"], lines: ["  devices [--json]         List paired devices"] },
   {
+    nouns: ["gateway"],
+    lines: [
+      "  gateway [status]         Public doorway configuration (JSON)",
+      "  gateway set --url URL --host-id ID | disable",
+    ],
+  },
+  {
     nouns: ["devices"],
     lines: ["  devices revoke <id> [--json]", "                           Revoke a device"],
   },

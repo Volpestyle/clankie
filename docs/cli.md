@@ -41,16 +41,16 @@ starts the clankie service if needed and attaches the fullscreen face.
 `--json` is required only where the default is human-readable (pairing QR,
 device table, credential-rotate sentence). Everything else is already JSON.
 
-| Command                                                     | stdout                                                                                       |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`             | JSON                                                                                         |
-| `model …`, `effort …`, `image-model …`, `video-model …`     | JSON                                                                                         |
-| `persona …`, `games …`, `herdr …`, `workdir …`, `discord …` | JSON                                                                                         |
-| `play status`                                               | JSON                                                                                         |
-| `play stop`                                                 | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
-| `pair`, `devices`, `operator-credential rotate`             | Human text; pass `--json`                                                                    |
-| `help`                                                      | This index (plain text)                                                                      |
-| `--version`                                                 | `clankie <version>`                                                                          |
+| Command                                                                  | stdout                                                                                       |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `health`, `status`, `doctor`, `restart`, `down`                          | JSON                                                                                         |
+| `model …`, `effort …`, `image-model …`, `video-model …`                  | JSON                                                                                         |
+| `persona …`, `games …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON                                                                                         |
+| `play status`                                                            | JSON                                                                                         |
+| `play stop`                                                              | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
+| `pair`, `devices`, `operator-credential rotate`                          | Human text; pass `--json`                                                                    |
+| `help`                                                                   | This index (plain text)                                                                      |
+| `--version`                                                              | `clankie <version>`                                                                          |
 
 Do not edit `~/.config/clankie/clankie.json`,
 `~/.config/clankie/settings.json`, or Keychain entries by hand.
@@ -183,6 +183,19 @@ Empty human output is `No paired devices.`
 ### `devices revoke <id> [--json]`
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
+
+### `gateway [status]` / `gateway set --url URL --host-id ID` / `gateway disable`
+
+Read or write the non-secret public doorway binding. JSON includes
+`publicGateway`, `credentialPresent`, `enabled`, `settingsFile`, and the restart
+command. `set` requires an exact HTTPS origin (loopback HTTP is accepted for
+local verification) and a 16–128 character host id. It never accepts the host
+bearer as a flag.
+
+Use the interactive TUI `/gateway` wizard to enter the URL, host id, and bearer
+together. The bearer is stored as `clankie-public-gateway` in Keychain. `disable`
+removes both the settings binding and that credential. Restart the captain after
+a change.
 
 ### `operator-credential rotate [--json]`
 

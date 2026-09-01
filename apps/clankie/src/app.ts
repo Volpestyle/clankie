@@ -111,7 +111,7 @@ import {
   DiscordUserSessionOptInProjection,
 } from "./discord-user-session-opt-in.ts";
 import { EmbodimentManager, embodimentEventScope, isEmbodimentEventType } from "./embodiment.ts";
-import { mintPairingOffer, pairingOfferWire, PairingOfferStore } from "./pairing.ts";
+import { mintPairingOffer, pairingOfferWire, PairingOfferStore, type StoredPairingOffer } from "./pairing.ts";
 import { applyDeviceEvent, deviceListItem, isDevicePendingExpired, type DeviceRegistry } from "./devices.ts";
 import {
   COMPLETION_TOKEN_TTL_MS,
@@ -261,6 +261,10 @@ export interface TrustedOperatorIdentity {
 }
 export type OperatorAuthenticator = (request: Request) => Promise<TrustedOperatorIdentity | undefined>;
 
+interface PairingOfferPublisher {
+  publishPairingOffer(offer: StoredPairingOffer): Promise<void>;
+}
+
 interface TrustedDeviceIdentity {
   deviceId: string;
   grants: DeviceGrantSet;
@@ -291,6 +295,10 @@ export interface ClankieAppDependencies {
   authenticateOperator?: OperatorAuthenticator;
   /** HMAC key (≥32 bytes) signing device session tokens; absent fails pairing closed (503). */
   deviceSessionKey?: Uint8Array;
+  /** Optional ADR 0151 carrier. When configured, every displayed offer is published before use. */
+  pairingOfferPublisher?: PairingOfferPublisher;
+  /** Host-scoped public base returned at redeem and used as the paired relay origin. */
+  publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;
   captainLeaseDurationMs?: number;
   captainHeartbeatRecordIntervalMs?: number;
@@ -1665,13 +1673,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   // Mint a one-time pairing offer. The offer secret appears once in the
   // response and is never logged; events carry only the non-secret offer id.
-  // The relay origin a paired device should speak to, when the operator has
-  // published one (typically the machine's tailnet hostname in front of the
-  // launcher-supervised relay). The app stores it from pairing and refresh
-  // responses; an omitted field keeps whatever the device already holds, so
-  // hosts that publish nothing keep their build-time override behavior.
+  // Public gateway wins when configured. Otherwise the existing owner-authored
+  // direct LAN/Tailscale relay origin remains the advanced transport.
   const advertisedRelayUrl = (): { relayUrl: string } | Record<never, never> => {
-    const raw = process.env.CLANKIE_RELAY_URL?.trim();
+    const raw = dependencies.publicGatewayHostBaseUrl ?? process.env.CLANKIE_RELAY_URL?.trim();
     return raw === undefined || raw.length === 0 ? {} : { relayUrl: raw };
   };
 
@@ -1683,6 +1688,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const now = clock();
     pairingOffers.prune(now);
     const offer = mintPairingOffer({ now, mintedBy: operator.operatorId, idFactory });
+    if (dependencies.pairingOfferPublisher !== undefined) {
+      try {
+        await dependencies.pairingOfferPublisher.publishPairingOffer(offer);
+      } catch (error) {
+        logger.warn(
+          { offerId: offer.offerId, error: error instanceof Error ? error.name : "UnknownError" },
+          "pairing offer could not reach the public gateway",
+        );
+        return context.json({ error: "public_gateway_unavailable" }, 503);
+      }
+    }
     pairingOffers.add(offer);
     recordEvent("pairing.offer.minted", `pairing:${offer.offerId}`, offer.createdAt, {
       offerId: offer.offerId,
@@ -1739,6 +1755,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({
       deviceId,
       host: { name: hostDisplayName },
+      ...(dependencies.publicGatewayHostBaseUrl === undefined
+        ? {}
+        : { hostBaseUrl: dependencies.publicGatewayHostBaseUrl }),
       offeredGrants: TAKE_CONTROL_GRANTS,
       completionToken,
       expiresAt: pendingExpiresAt,
@@ -1790,7 +1809,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         grants: accepted,
         sessionExpiresAt,
         ...advertisedRelayUrl(),
-      } satisfies PairingCompleteResponse & { relayUrl?: string });
+      } satisfies PairingCompleteResponse);
     });
   });
 
@@ -1835,7 +1854,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         grants: record.grants,
         sessionExpiresAt,
         ...advertisedRelayUrl(),
-      } satisfies DeviceSessionRefreshResponse & { relayUrl?: string });
+      } satisfies DeviceSessionRefreshResponse);
     });
   });
 

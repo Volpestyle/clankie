@@ -184,3 +184,20 @@ exceptions are the documented operator and captain test/CI overrides.
 
 Storage implementation and grant validation details live in
 [`@clankie/credential-broker`](../packages/credential-broker/README.md).
+
+## Public gateway host credential
+
+The AWS doorway authenticates this Mac with the broker entry
+`clankie-public-gateway`. Its non-secret URL and host id live under
+`publicGateway` in `settings.json`; the bearer never does. Run `/gateway` in the
+operator console to enter all three values, or use `clankie gateway set` for the
+non-secret half and `/auth` for the bearer. `CLANKIE_PUBLIC_GATEWAY_TOKEN` is
+refused so the host credential cannot leak into a shell profile or process
+environment.
+
+The matching gateway runtime file is a JSON map from host id to bearer. It is
+root-owned, group-readable only by the unprivileged gateway container, and
+mounted read-only rather than passed through the process environment. The Mac
+sends the bearer only in the outbound WebSocket handshake. It is never sent to
+the mobile app or forwarded with a device request. Rotation replaces the file,
+restarts the gateway, updates the Keychain entry, and restarts Clankie.

@@ -9,6 +9,7 @@ import {
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_USER_SESSION_PROVIDER_ID,
   LINEAR_PROVIDER_ID,
+  PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
   type CredentialStore,
   type RedactedCredential,
 } from "@clankie/credential-broker";
@@ -156,6 +157,11 @@ const FEATURED_PROVIDERS = ["anthropic", "openai", "xai", "google", "openrouter"
  */
 const FEATURED_SERVICE_PROVIDERS: readonly MenuOption[] = [
   {
+    value: PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
+    label: "Clankie public gateway",
+    description: "Authenticates this Mac's outbound tunnel to api.clankie.bot.",
+  },
+  {
     value: "elevenlabs",
     label: "ElevenLabs",
     description: "Voice TTS for Discord (ADR 0070); pick the voice itself with /voice.",
@@ -169,6 +175,7 @@ const SERVICE_CREDENTIAL_IDS = new Set([
   "elevenlabs",
   "email",
   LINEAR_PROVIDER_ID,
+  PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
 ]);
 
 /** First-class /auth slots always shown on status, stored or missing. */

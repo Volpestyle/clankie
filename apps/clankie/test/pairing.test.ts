@@ -80,6 +80,35 @@ describe("control-plane pairing offer surface", () => {
     expect(second.deepLink).not.toBe(offer.deepLink);
   });
 
+  it("publishes a public-gateway offer before exposing it and fails closed when publication fails", async () => {
+    const published: Array<{ readonly offerSecret: string; readonly code: string }> = [];
+    const app = await makeApp({
+      authenticateOperator: operator,
+      pairingOfferPublisher: {
+        publishPairingOffer: (offer) => {
+          published.push({ offerSecret: offer.offerSecret, code: offer.code });
+          return Promise.resolve();
+        },
+      },
+    });
+    const response = await mintOffer(app, "operator-secret");
+    expect(response.status).toBe(200);
+    const wire = ClientPairingOfferSchema.parse(await response.json());
+    expect(published).toHaveLength(1);
+    expect(new URL(wire.deepLink).searchParams.get("offer")).toBe(published[0]?.offerSecret);
+    expect(wire.code).toBe(published[0]?.code);
+
+    const unavailable = await makeApp({
+      authenticateOperator: operator,
+      pairingOfferPublisher: {
+        publishPairingOffer: () => Promise.reject(new Error("offline")),
+      },
+    });
+    const denied = await mintOffer(unavailable, "operator-secret");
+    expect(denied.status).toBe(503);
+    await expect(denied.json()).resolves.toEqual({ error: "public_gateway_unavailable" });
+  });
+
   it("records a secret-free audit event for each minted offer", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-pairing-"));
     tempDirs.push(root);
