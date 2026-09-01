@@ -1,0 +1,47 @@
+name: Deploy public gateway
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    concurrency:
+      group: clankie-public-gateway-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://api.clankie.bot/health
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check deployment configuration
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
+          CLANKIE_GATEWAY_TAILNET_HOST: ${{ vars.CLANKIE_GATEWAY_TAILNET_HOST }}
+        run: |
+          test -n "$TS_OAUTH_CLIENT_ID" || { echo "Missing production secret TS_OAUTH_CLIENT_ID" >&2; exit 1; }
+          test -n "$TS_AUDIENCE" || { echo "Missing production secret TS_AUDIENCE" >&2; exit 1; }
+          test -n "$CLANKIE_GATEWAY_TAILNET_HOST" || { echo "Missing production variable CLANKIE_GATEWAY_TAILNET_HOST" >&2; exit 1; }
+      - name: Join the private deployment plane
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:clankie-deployer
+          ping: ${{ vars.CLANKIE_GATEWAY_TAILNET_HOST }}
+      - name: Deploy gateway
+        env:
+          CLANKIE_GATEWAY_TARGET: ${{ vars.CLANKIE_GATEWAY_TAILNET_HOST }}
+          CLANKIE_GATEWAY_SSH_USER: clankie-deploy
+        run: infra/aws/public-gateway/deploy.sh release
+      - name: Verify the public doorway
+        run: curl --fail --show-error --silent --retry 10 --retry-all-errors --retry-delay 3 https://api.clankie.bot/health

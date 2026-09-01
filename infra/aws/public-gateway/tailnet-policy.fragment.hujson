@@ -1,0 +1,48 @@
+{
+  "tagOwners": {
+    "tag:clankie-gateway": ["autogroup:admin"],
+    "tag:clankie-deployer": ["autogroup:admin"]
+  },
+  "grants": [
+    {
+      "src": ["autogroup:member"],
+      "dst": ["*"],
+      "ip": ["*"]
+    },
+    {
+      "src": ["tag:clankie-deployer"],
+      "dst": ["tag:clankie-gateway"],
+      "ip": ["tcp:22"]
+    }
+  ],
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["tag:clankie-deployer"],
+      "dst": ["tag:clankie-gateway"],
+      "users": ["clankie-deploy"]
+    },
+    {
+      "action": "check",
+      "src": ["autogroup:admin"],
+      "dst": ["tag:clankie-gateway"],
+      "users": ["ec2-user"]
+    }
+  ],
+  "tests": [
+    {
+      "src": "tag:clankie-deployer",
+      "proto": "tcp",
+      "accept": ["tag:clankie-gateway:22"],
+      "deny": ["tag:clankie-gateway:80", "tag:clankie-gateway:443"]
+    }
+  ],
+  "sshTests": [
+    {
+      "src": "tag:clankie-deployer",
+      "dst": ["tag:clankie-gateway"],
+      "accept": ["clankie-deploy"],
+      "deny": ["root", "ec2-user"]
+    }
+  ]
+}

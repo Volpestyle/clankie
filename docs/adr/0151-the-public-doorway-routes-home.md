@@ -105,6 +105,26 @@ required; durable Clankie or device state never moves into that broker.
 - Docker applies bounded local log rotation. Lightsail supplies host metrics;
   metadata-only application logs stay on the instance for the first beta.
 
+## Deployment control plane
+
+The public data plane and private deployment plane are separate. Ports 80 and
+443 remain public; Lightsail's public port 22 rule exists only for bootstrap.
+The host joins Tailscale as `tag:clankie-gateway` with Tailscale SSH enabled,
+then public SSH closes.
+
+GitHub release runners join through Tailscale workload identity federation as
+short-lived `tag:clankie-deployer` nodes. Tailnet policy grants that tag only
+TCP 22 to the gateway and only the `clankie-deploy` SSH account. The account's
+only passwordless root command is a root-owned release activator. The activator
+validates the uploaded release shape and ownership, validates the pinned Caddy
+configuration, verifies the host-token file boundary, health-checks the new
+gateway, and restores the previous component on startup failure. GitHub stores
+neither an AWS credential nor a reusable SSH private key.
+
+The tagged release workflow builds and tests first, deploys through a protected
+GitHub `production` environment, verifies the public health endpoint, and only
+then publishes the GitHub Release. Pushes to `main` remain CI-only.
+
 AWS IoT Secure Tunneling is not this product boundary. It is an operator-opened
 source/destination proxy whose current multiplexing contract supports at most
 three data streams and requires access tokens and local proxies on both ends.
@@ -154,15 +174,16 @@ feature.
 - Existing pairing, revocation, grants, redaction, replay, fleet cursors,
   terminal observation, and terminal-control leases remain authoritative.
 - Tailscale remains available for development, private direct access, and a
-  fail-independent advanced path.
+  fail-independent advanced path. It also carries operator and release access
+  to the gateway without exposing SSH publicly.
 - An AWS outage removes remote reachability but does not stop Clankie, local
   operator surfaces, or direct transport. Reconnect and cursor recovery repair
   the public path without inventing cloud-owned conversation state.
 - A single instance and process are the deliberate initial availability and
   scale ceiling. Horizontal routing arrives with measured demand and requires an external
   live-connection broker, not a migration of Clankie state.
-- App Review and a small invited beta fit this boundary. Automatic public host
-  enrollment and application-layer end-to-end encryption arrive before
+- App Review and a small invited paid beta fit this boundary. Automatic public
+  host enrollment and application-layer end-to-end encryption arrive before
   unrelated customers share it.
 - Metadata-only logging and no content retention keep the gateway's privacy
   surface small. Application-layer end-to-end encryption remains required

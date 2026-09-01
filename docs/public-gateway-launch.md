@@ -26,6 +26,8 @@ flowchart LR
 The first deployment exposes only evidence already produced by the system:
 
 - `GET https://api.clankie.bot/health` proves Caddy can reach the gateway;
+- the tagged Release workflow records the tested commit, protected production
+  approval, private deployment, public health verification, and publication;
 - Lightsail reports instance CPU, network, and status checks;
 - Docker keeps bounded local gateway and Caddy logs;
 - gateway logs report metadata-only host connects, disconnects, request status,
@@ -76,7 +78,7 @@ invited beta. Change it only when evidence identifies the limiting layer:
 AWS IoT, a second mobile protocol, multiple gateway instances, and multi-region
 deployment remain outside this launch boundary.
 
-## Required before broad public beta
+## Required before unrelated paid users
 
 The repository does not yet implement dashboards, alert delivery, client UX
 telemetry, or synthetic review journeys. Before a broad public beta, add:
@@ -90,5 +92,8 @@ telemetry, or synthetic review journeys. Before a broad public beta, add:
 - an always-on synthetic pairing, message, and terminal-observation journey.
 
 Application-layer device-to-Mac encryption and automatic host enrollment are
-separate prerequisites before unrelated customers share the service. An
-external connection broker arrives only when horizontal scale is measured.
+separate prerequisites before unrelated customers share the service. Digital
+features or subscriptions sold in the iOS app use StoreKit and App Store
+Connect products. App privacy labels, the privacy policy, review notes, account
+support, and actual data handling must agree before submission. An external
+connection broker arrives only when horizontal scale is measured.

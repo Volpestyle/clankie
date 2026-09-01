@@ -8,6 +8,11 @@ Parameters:
   OperatorCidr:
     Type: String
     Description: Operator public IPv4 CIDR allowed to reach SSH, for example 203.0.113.10/32
+  PublicSshEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Keep public SSH open only through the initial Tailscale bootstrap
   BlueprintId:
     Type: String
     Default: amazon_linux_2023
@@ -16,6 +21,9 @@ Parameters:
     Type: String
     Default: micro_3_0
     Description: 1 GB Linux bundle with public IPv4
+
+Conditions:
+  PublicSshIsEnabled: !Equals [!Ref PublicSshEnabled, "true"]
 
 Resources:
   GatewayInstance:
@@ -27,14 +35,17 @@ Resources:
       KeyPairName: !Ref KeyPairName
       Networking:
         Ports:
-          - AccessDirection: inbound
-            AccessType: public
-            Cidrs:
-              - !Ref OperatorCidr
-            CommonName: SSH
-            FromPort: 22
-            Protocol: tcp
-            ToPort: 22
+          - !If
+            - PublicSshIsEnabled
+            - AccessDirection: inbound
+              AccessType: public
+              Cidrs:
+                - !Ref OperatorCidr
+              CommonName: SSH
+              FromPort: 22
+              Protocol: tcp
+              ToPort: 22
+            - !Ref AWS::NoValue
           - AccessDirection: inbound
             AccessType: public
             Cidrs:
@@ -58,14 +69,21 @@ Resources:
         #!/bin/bash
         set -euxo pipefail
         dnf upgrade -y
-        dnf install -y docker
+        dnf install -y docker yum-utils
+        yum-config-manager --add-repo https://pkgs.tailscale.com/stable/amazon-linux/2023/tailscale.repo
+        yum install -y tailscale
         getent group clankie-gateway-secrets >/dev/null || groupadd --system --gid 1999 clankie-gateway-secrets
+        id clankie-deploy >/dev/null 2>&1 || useradd --create-home --shell /bin/bash clankie-deploy
         install -d -o root -g root -m 0755 /opt/clankie-gateway
         install -d -o root -g clankie-gateway-secrets -m 0750 /etc/clankie-gateway
         install -d -o root -g root -m 0755 /etc/docker
         printf '%s\n' '{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"5"}}' > /etc/docker/daemon.json
         chmod 0644 /etc/docker/daemon.json
         systemctl enable --now docker
+        systemctl enable --now tailscaled
+        printf '%s\n' 'clankie-deploy ALL=(root) NOPASSWD: /usr/local/sbin/clankie-gateway-activate' > /etc/sudoers.d/clankie-deploy
+        chmod 0440 /etc/sudoers.d/clankie-deploy
+        visudo -cf /etc/sudoers.d/clankie-deploy
 
   GatewayStaticIp:
     Type: AWS::Lightsail::StaticIp
