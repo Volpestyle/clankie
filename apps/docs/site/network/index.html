@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Public network surface — Clankie Docs</title>
+    <meta
+      name="description"
+      content="The exact public routes Clankie exposes and the authorization each route requires."
+    />
+    <link rel="canonical" href="https://docs.clankie.bot/network/" />
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+    <meta name="theme-color" content="#171c1f" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="/"><span class="seed" aria-hidden="true"></span>clankie <em>docs</em></a>
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="/#local">Mac</a>
+          <a href="/#app">App</a>
+          <a aria-current="page" class="optional" href="/network/">Network</a>
+          <a href="https://clankie.bot/support/">Support</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="content" class="page">
+      <article class="article">
+        <p class="eyebrow">Public network surface</p>
+        <h1>A narrow doorway, not a hosted Clankie.</h1>
+        <p class="article-lede">
+          <code>api.clankie.bot</code> accepts only the routes below. The gateway carries bounded exchanges to
+          an authenticated Mac; the Mac still owns devices, grants, conversations, and terminal authority.
+        </p>
+
+        <h2>Connection shape</h2>
+        <pre><code>iPhone or iPad ── HTTPS ── api.clankie.bot ── outbound WebSocket ── your Mac</code></pre>
+        <p>
+          The first pairing redemption uses the stable public origin. Successful redemption returns an opaque,
+          host-scoped origin. Normal app calls use that origin and a device credential minted by the Mac.
+          Users do not copy a host id, URL, or bearer token.
+        </p>
+
+        <h2>Published routes</h2>
+        <p>
+          This table is generated from the protocol package’s production allowlist. The docs build fails when
+          a route changes without a matching access and purpose description.
+        </p>
+      </article>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Method</th>
+              <th scope="col">Route</th>
+              <th scope="col">Access</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{PUBLIC_GATEWAY_TABLE}}
+          </tbody>
+        </table>
+      </div>
+
+      <article class="article">
+        <h2>What the gateway does not do</h2>
+        <ul>
+          <li>It does not run Clankie, a model, a terminal, or a Herdr fleet.</li>
+          <li>It does not mint device sessions or decide device grants.</li>
+          <li>It does not expose arbitrary Mac paths or arbitrary HTTP forwarding.</li>
+          <li>It does not retain request bodies, response bodies, message content, or terminal frames.</li>
+        </ul>
+
+        <h2>Security boundary</h2>
+        <p>
+          Public TLS terminates at the gateway and the Mac maintains a separate authenticated TLS connection
+          to it. The gateway is therefore able to read forwarded content in transit even though it does not
+          retain content bodies. Device grants are enforced by the Mac on every request. Pairing capabilities
+          expire, are single-use, and are registered at the gateway only by their hashes.
+        </p>
+
+        <h2>For integrators</h2>
+        <p>
+          These routes document the product’s observable internet boundary; they are not a general third-party
+          API. Clients pair through Clankie and must use credentials and grants issued by the user’s Mac. The
+          private local service has a larger contract and is deliberately not published at the public origin.
+        </p>
+        <p>
+          See the <a href="https://github.com/Volpestyle/clankie">source repository</a> for the current
+          protocol and the <a href="https://clankie.bot/privacy/">privacy notice</a> for data handling.
+        </p>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Clankie runs on your Mac.</span>
+        <div class="footer-links">
+          <a href="https://clankie.bot">Home</a>
+          <a href="https://clankie.bot/privacy/">Privacy</a>
+          <a href="https://clankie.bot/support/">Support</a>
+          <a href="https://github.com/Volpestyle/clankie">GitHub</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

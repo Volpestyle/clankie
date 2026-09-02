@@ -77,6 +77,12 @@ user-perceived metrics, scaling triggers, and the App Store review journey.
 Tailscale remains an optional direct development lane and is not required by an
 App Store client.
 
+Public setup and network-boundary documentation lives in
+[`apps/docs`](../apps/docs/README.md) and deploys to
+[`docs.clankie.bot`](https://docs.clankie.bot) from `main`. It links the landing
+site's canonical App Store privacy and support pages. The docs site is separate
+from the Mac release and reuses its existing private S3 and CloudFront hosting.
+
 ## Build and release
 
 On an Apple silicon Mac with the repository toolchain installed:

@@ -1,0 +1,10 @@
+# Clankie
+
+Clankie is a local-first agent system for Apple-silicon Macs with a terminal UI and an optional iPhone and iPad app.
+The Mac remains authoritative. The app reaches it through a narrow public gateway and does not require Tailscale.
+
+- User paths and setup: https://docs.clankie.bot/
+- Privacy: https://clankie.bot/privacy/
+- Support: https://clankie.bot/support/
+- Public network surface: https://docs.clankie.bot/network/
+- Source: https://github.com/Volpestyle/clankie

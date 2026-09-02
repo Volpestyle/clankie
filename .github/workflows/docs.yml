@@ -1,0 +1,84 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/docs/**
+      - branding/clankie-logo-512-alpha.png
+      - packages/protocol/src/public-gateway.ts
+      - infra/aws/public-docs/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/docs.yml
+  pull_request:
+    paths:
+      - apps/docs/**
+      - branding/clankie-logo-512-alpha.png
+      - packages/protocol/src/public-gateway.ts
+      - infra/aws/public-docs/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+concurrency:
+  group: clankie-public-docs-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  DOCS_BUCKET: clankie-bot-docs
+  DOCS_DISTRIBUTION_ID: E2SL4SXV9RAPNU
+  DEPLOY_ROLE_ARN: arn:aws:iam::842434829012:role/clankie-docs-deploy
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm docs:public:check
+      - run: pnpm docs:public:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: apps/docs/dist
+          if-no-files-found: error
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          path: docs-site
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: >-
+          aws s3 sync docs-site "s3://${DOCS_BUCKET}/" --delete
+          --cache-control 'public,max-age=300,must-revalidate'
+      - run: >-
+          aws cloudfront create-invalidation
+          --distribution-id "$DOCS_DISTRIBUTION_ID" --paths '/*'

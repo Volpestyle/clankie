@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clankie Docs — Start local or connect the app</title>
+    <meta
+      name="description"
+      content="Install Clankie on your Mac, use the local TUI, or connect the iPhone and iPad app."
+    />
+    <link rel="canonical" href="https://docs.clankie.bot/" />
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+    <meta name="theme-color" content="#171c1f" />
+    <meta property="og:title" content="Clankie Docs" />
+    <meta property="og:description" content="Two ways in. Same Clankie on your Mac." />
+    <meta property="og:image" content="https://docs.clankie.bot/assets/clankie.png" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="/"><span class="seed" aria-hidden="true"></span>clankie <em>docs</em></a>
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="/#local">Mac</a>
+          <a href="/#app">App</a>
+          <a class="optional" href="/network/">Network</a>
+          <a href="https://clankie.bot/support/">Support</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="content" class="page">
+      <section class="hero">
+        <p class="eyebrow">Choose how you want to work</p>
+        <h1>Two ways in.<br />The same <em>Clankie.</em></h1>
+        <p class="lede">
+          Work entirely from the TUI on your Mac, or connect the iPhone and iPad app and let the Mac become
+          the quiet host you return to from anywhere.
+        </p>
+
+        <div class="choice-grid">
+          <a class="choice" href="#local">
+            <span class="number">01 · Local operator</span>
+            <h2>Stay in the terminal</h2>
+            <p>
+              No Clankie account, gateway, or mobile app required. Add Herdr when you want a visible fleet.
+            </p>
+            <span class="arrow">Start on this Mac →</span>
+          </a>
+          <a class="choice" href="#app">
+            <span class="number">02 · App-enabled operator</span>
+            <h2>Reach your Mac remotely</h2>
+            <p>Set up the Mac once, pair the app, then work hybrid or spend nearly every day in the app.</p>
+            <span class="arrow">Connect iPhone or iPad →</span>
+          </a>
+        </div>
+
+        <div class="flow" aria-label="Clankie app connection path">
+          <div class="flow-node">
+            <div><strong>iPhone / iPad</strong><span>Clankie app</span></div>
+          </div>
+          <div class="flow-node">
+            <div><strong>Public doorway</strong><span>api.clankie.bot</span></div>
+          </div>
+          <div class="flow-node">
+            <div><strong>Your Mac</strong><span>outbound connection</span></div>
+          </div>
+          <div class="flow-node">
+            <div><strong>Clankie</strong><span>local service + TUI</span></div>
+          </div>
+          <div class="flow-node">
+            <div><strong>Herdr</strong><span>optional visible fleet</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="local" class="section">
+        <div class="section-head">
+          <span class="section-number">01 · Local operator</span>
+          <h2>Clankie works without the app.</h2>
+          <p>
+            The TUI is a complete local way to talk to Clankie. Remote access is an option, not an
+            installation requirement.
+          </p>
+        </div>
+
+        <div class="prose">
+          <h3>Install and open him</h3>
+          <p>Clankie currently supports Apple-silicon Macs running macOS 14 or newer.</p>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
+clankie</code></pre>
+
+          <h3>Give him a model</h3>
+          <p>
+            In the console, run <code>/auth</code> to add a provider key or OAuth login, then
+            <code>/model</code> to choose the captain model. Credentials stay in the Mac’s Keychain-backed
+            broker.
+          </p>
+
+          <h3>Use the terminal you already like</h3>
+          <p>
+            The TUI can run in an ordinary terminal or inside a terminal multiplexer. The supported fleet
+            integration is <strong>Herdr</strong>: Clankie can lead, watch, and steer its visible agent panes.
+            Other multiplexer adapters are not currently part of the product surface.
+          </p>
+          <pre><code>clankie doctor
+clankie status
+clankie herdr status</code></pre>
+        </div>
+      </section>
+
+      <section id="app" class="section">
+        <div class="section-head">
+          <span class="section-number">02 · App-enabled operator</span>
+          <h2>Set up the Mac once. Carry the window with you.</h2>
+          <p>
+            Clankie still runs on your Mac. The app reaches that Mac through a narrow public doorway; it does
+            not move your agent into a hosted cloud service.
+          </p>
+        </div>
+
+        <ol class="steps">
+          <li>
+            <h3>Finish the local setup</h3>
+            <p>
+              Install Clankie, open the TUI, authenticate a model, and confirm <code>clankie doctor</code>.
+            </p>
+          </li>
+          <li>
+            <h3>Enable remote access</h3>
+            <p>
+              Run <code>/gateway</code>, choose <strong>Enable remote access</strong>, and complete the email
+              one-time-code flow. During an invite-only beta, use the email named in your invitation.
+            </p>
+          </li>
+          <li>
+            <h3>Keep the Mac available</h3>
+            <p>Run <code>clankie autostart enable</code>. The Mac must stay awake, online, and signed in.</p>
+          </li>
+          <li>
+            <h3>Pair the app</h3>
+            <p>
+              Open the iPhone or iPad app, run <code>clankie pair</code> on the Mac, then scan the QR code or
+              type its single-use code. Review the requested grants before connecting.
+            </p>
+          </li>
+        </ol>
+
+        <div class="mode-grid">
+          <article class="mode">
+            <h3>Hybrid</h3>
+            <p>Move between the local TUI and the app. Both are windows into the same Clankie and Mac.</p>
+          </article>
+          <article class="mode">
+            <h3>App-first</h3>
+            <p>
+              After setup, spend nearly all your time in Messages, fleet views, and terminal observation on
+              iPhone or iPad. The Mac quietly remains the host.
+            </p>
+          </article>
+        </div>
+
+        <div class="callout">
+          <p>
+            <strong>You do not need Tailscale.</strong> App users do not copy URLs, host ids, or bearer
+            tokens, and they do not need to understand Herdr unless they want fleet panes.
+          </p>
+        </div>
+      </section>
+
+      <section id="trust" class="section">
+        <div class="section-head">
+          <span class="section-number">What stays where</span>
+          <h2>Your Mac remains the center.</h2>
+          <p>The doorway routes an authenticated device home; it is not a hosted Clankie runtime.</p>
+        </div>
+        <div class="fact-grid">
+          <article class="fact">
+            <h3>On your Mac</h3>
+            <p>
+              Clankie, model credentials, conversations, Herdr panes, terminal processes, and owner settings.
+            </p>
+          </article>
+          <article class="fact">
+            <h3>At the doorway</h3>
+            <p>
+              Account discovery, authenticated Mac presence, short-lived pairing routes, and request transit.
+            </p>
+          </article>
+        </div>
+        <div class="prose">
+          <p>
+            Read the <a href="https://clankie.bot/privacy/">privacy notice</a> for data handling and the
+            <a href="/network/">public network surface</a> for the exact internet-facing routes and their
+            access requirements.
+          </p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <span class="section-number">When something feels off</span>
+          <h2>Start with one truthful card.</h2>
+          <p>
+            <code>clankie doctor</code> reports the installation, model, credentials, optional tools, and
+            services.
+          </p>
+        </div>
+        <div class="prose">
+          <pre><code>clankie doctor
+clankie status
+clankie autostart status
+clankie gateway status</code></pre>
+          <p>
+            If the diagnostic card does not resolve it, continue with
+            <a href="https://clankie.bot/support/">Clankie support</a>.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Clankie runs on your Mac.</span>
+        <div class="footer-links">
+          <a href="https://clankie.bot">Home</a>
+          <a href="https://clankie.bot/privacy/">Privacy</a>
+          <a href="https://clankie.bot/support/">Support</a>
+          <a href="https://github.com/Volpestyle/clankie">GitHub</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
