@@ -571,6 +571,63 @@ paths:
         "404":
           description: Unknown or expired session
 
+  /v1/seat/events:
+    get:
+      tags: [Captain, Operator]
+      operationId: pollSeatEvents
+      summary: Long-poll the seat's outbox
+      description: |
+        Wakes, herdr completion watches, and room escalations queued for a
+        bound head (ADR 0152). Polling is what binds the seat: `clankie mcp`
+        asks again the moment a poll returns and pushes each event into the
+        session as a channel notification. Operator bearer only; a Discord
+        bridge bearer is 403. `wait` is capped at 30000 ms.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: query
+          name: wait
+          schema: { type: integer, minimum: 0, maximum: 30000, default: 0 }
+      responses:
+        "200":
+          description: Events taken from the outbox, possibly none
+          content:
+            application/json:
+              example:
+                schemaVersion: 1
+                events:
+                  - schemaVersion: 1
+                    id: seat-1
+                    kind: wake
+                    conversationId: global-default
+                    source: service
+                    content: "This is a self-wake you scheduled…"
+                    createdAt: "2026-09-01T20:00:00.000Z"
+        "403":
+          description: Not the operator lane
+
+  /v1/seat/events/{id}/reply:
+    post:
+      tags: [Captain, Operator]
+      operationId: replySeatEvent
+      summary: Answer an escalation from the seat
+      description: The reply lands in the escalating conversation as his own message and settles that run.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: { schemaVersion: 1, text: "On it — the build is green." }
+      responses:
+        "200":
+          description: Replied
+        "404":
+          description: Nothing is waiting on that event
+
   /v1/memory:
     get:
       tags: [Memory, Operator]

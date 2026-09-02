@@ -19,6 +19,7 @@ import {
   type ObservableCaptainLane,
   type OperatorConversationActivityPhase,
   type OperatorFleetSeat,
+  type OperatorSeatEventKind,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
 } from "@clankie/protocol";
@@ -37,12 +38,14 @@ import {
 import { ConversationStore } from "./conversations.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
-  readFleetSeats,
+  readFleet,
   readHerdrSessionCensus,
   readSeatIdForHerdrPane,
   readTerminalCatalog,
   type HerdrSessionCensus,
+  type ObservedHeadSeat,
 } from "./herdr-census.ts";
+import { SeatOutbox } from "./seat-outbox.ts";
 import { createStanceStore } from "./stances.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
 import { HerdrTerminalStore } from "./herdr-terminal.ts";
@@ -568,6 +571,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const fleetChanges = new FleetChangeClock();
   const stopFleetChanges = watchHerdrFleetChanges(fleetChanges);
   let modelRuntime: Promise<CaptainModelRuntime> | undefined;
+  // The seat (ADR 0152): the herdr pane holding his name, and the outbox its
+  // bridge polls. The head conversation is always the default global one.
+  const seatOutbox = new SeatOutbox();
+  let headSeat: ObservedHeadSeat | undefined;
 
   const settings = (): Promise<ClankieSettings> => settingsStore.load();
   const runtime = (): Promise<CaptainModelRuntime> =>
@@ -697,9 +704,45 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return created;
   }
 
+  /**
+   * What a turn is to a bound seat, or nothing when pi runs it. Wakes and
+   * watches go to the seat from any conversation; a human send goes only when
+   * it lands in the head conversation, where the seat is the one answering.
+   * A goal continuation stays with its pi loop: the seat has no turn boundary
+   * the autonomy runner could wait on, so handing it over would spin.
+   */
+  function seatEventKind(
+    conversationId: string,
+    context: { readonly internal?: true; readonly origin?: "goal" | "wake" | "watch" },
+  ): OperatorSeatEventKind | undefined {
+    if (!seatOutbox.bound()) return undefined;
+    if (context.internal === true) {
+      return context.origin === "wake" || context.origin === "watch" ? context.origin : undefined;
+    }
+    return conversationId === conversations.defaultGlobalConversationId() ? "escalation" : undefined;
+  }
+
   const conversations = new ConversationStore(
     join(options.stateDir, "conversations"),
     async (conversationId, message, publish, context) => {
+      const kind = seatEventKind(conversationId, context);
+      if (kind !== undefined) {
+        const delivery = await seatOutbox.deliver({
+          kind,
+          conversationId,
+          source: context.surfaceClientId ?? "service",
+          content: message,
+          wantsReply: kind === "escalation",
+          signal: context.signal,
+        });
+        if (delivery.outcome === "replied") {
+          publish({ type: "message", role: "captain", text: delivery.text, streaming: false });
+          return;
+        }
+        // Taken by the seat, or the operator cancelled: either way this run is
+        // over. Only a seat that vanished before taking it hands the turn to pi.
+        if (delivery.outcome !== "unbound") return;
+      }
       const lane = await durableSession(
         `operator:${conversationId}`,
         "operator",
@@ -949,8 +992,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     async (personaId) => personas.presentation(personaId, (await settings()).discord.activityTunnelHostname),
   );
 
+  /**
+   * A pane named `clankie` is his head, never a fleet contact (ADR 0152): it is
+   * watched like a seat so its transcript reaches the head conversation, and
+   * it is not reconciled into a persona. Newest wins by construction — herdr
+   * keeps live agent names unique, so the census carries at most one.
+   */
+  function bindHeadSeat(head: ObservedHeadSeat | undefined): void {
+    if (head?.seatId === headSeat?.seatId) return;
+    if (headSeat !== undefined) herdrWatches.untrackSeat(headSeat.seatId);
+    headSeat = head;
+    if (head !== undefined) herdrWatches.trackSeat(head.seatId);
+  }
+
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
-    const seats = personas.reconcile(await readFleetSeats());
+    const fleet = await readFleet();
+    bindHeadSeat(fleet.head);
+    const seats = personas.reconcile(fleet.seats);
     const names = new Map(
       personas.all(seats, () => undefined).map((persona) => [persona.personaId, persona.name]),
     );
@@ -997,12 +1055,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  autonomy.start(async (conversationId, prompt) => {
+  autonomy.start(async (conversationId, prompt, origin) => {
     if (!conversations.runsCaptainTurns(conversationId)) {
       autonomy.clearConversation(conversationId);
       return;
     }
-    const result = conversations.submitInternal(conversationId, prompt);
+    const result = conversations.submitInternal(conversationId, prompt, origin);
     if (result.status !== "accepted") throw new Error("Internal autonomy turn was not accepted");
     if (!(await conversations.awaitRunResult(result.runId))) {
       throw new Error("Internal autonomy turn failed");
@@ -1015,11 +1073,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         herdrWatches.cancelConversation(conversationId);
         return Promise.resolve();
       }
-      const result = conversations.submitInternal(conversationId, prompt);
+      const result = conversations.submitInternal(conversationId, prompt, "watch");
       if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
       return Promise.resolve();
     },
     (seatId, projection) => {
+      if (seatId === headSeat?.seatId) {
+        // His own words, in his own thread: the seat's transcript is the head
+        // conversation the app pins, spoken as captain, never as an agent.
+        if (projection.kind === "transcript") {
+          conversations.syncHeadTranscript(seatId, projection.transcript);
+        } else if (projection.kind === "status") {
+          conversations.publishHeadEvent({
+            type: "activity",
+            phase: projection.status === "working" ? "responding" : "waiting",
+          });
+        } else {
+          conversations.publishHeadEvent({
+            type: "message",
+            role: "captain",
+            text: projection.text,
+            streaming: false,
+          });
+        }
+        return;
+      }
       const personaId = liveSeats.find((seat) => seat.seatId === seatId)?.personaId;
       if (personaId === undefined) return;
       if (projection.kind === "transcript") {
@@ -1546,7 +1624,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
     },
 
+    pollSeatEvents(waitMs, signal) {
+      return seatOutbox.poll(waitMs, signal);
+    },
+
+    replySeatEvent(eventId, text) {
+      return Promise.resolve(seatOutbox.reply(eventId, text));
+    },
+
     async close(): Promise<void> {
+      seatOutbox.close();
       herdrTerminals.close();
       herdrTerminalControls.close();
       herdrWatches.close();

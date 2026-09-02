@@ -25,7 +25,8 @@ const PersistedAutonomySchema = z
   .strict();
 
 type PersistedAutonomy = z.infer<typeof PersistedAutonomySchema>;
-type InternalRun = (conversationId: string, prompt: string) => Promise<void>;
+/** A goal continuation loops until the goal settles; a wake is one turn Clankie asked for. */
+type InternalRun = (conversationId: string, prompt: string, origin: "goal" | "wake") => Promise<void>;
 
 const GoalDecisionSchema = z
   .object({
@@ -274,7 +275,7 @@ export class AutonomyStore {
   private queueGoal(conversationId: string, goal: OperatorGoal): void {
     if (this.run === undefined || this.goalRuns.has(conversationId)) return;
     this.goalRuns.add(conversationId);
-    void this.run(conversationId, goalPrompt(goal))
+    void this.run(conversationId, goalPrompt(goal), "goal")
       .then(() => {
         this.goalRuns.delete(conversationId);
         const current = this.state.conversations[conversationId]?.goal;
@@ -312,7 +313,7 @@ export class AutonomyStore {
       if (!this.state.enabled) break;
       const wake = record.wake;
       try {
-        await this.run(conversationId, wakePrompt(wake));
+        await this.run(conversationId, wakePrompt(wake), "wake");
         if (this.state.conversations[conversationId]?.wake === wake) {
           delete this.state.conversations[conversationId]!.wake;
           this.pruneRecord(conversationId);

@@ -9,6 +9,7 @@ import type {
   ObservableCaptainLane,
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
+  OperatorSeatEvent,
 } from "@clankie/protocol";
 
 /**
@@ -84,6 +85,13 @@ export interface CaptainPort {
   /** The memory card that lane's next run would inject, filtered the same way. */
   laneMemoryCard(lane: CaptainSessionLaneV2): Promise<string>;
   /**
+   * The seat's outbox (ADR 0152): wakes, watches, and escalations for a bound
+   * head, long-polled by its bridge. Polling is what binds the head.
+   */
+  pollSeatEvents(waitMs: number, signal?: AbortSignal): Promise<readonly OperatorSeatEvent[]>;
+  /** The seat's answer to an escalation; false when nothing waits on that id. */
+  replySeatEvent(eventId: string, text: string): Promise<boolean>;
+  /**
    * That lane's authority plan as callable tools, for a seat in another harness
    * (VUH-1085). Each call opens its own turn context, so one seat's attachments
    * and room never leak into another's.
@@ -119,6 +127,8 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     voiceLaneInstructions: () => "You are in a voice room.",
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
     laneMemoryCard: async () => "",
+    pollSeatEvents: async () => [],
+    replySeatEvent: async () => false,
     laneToolBank: async (lane) => ({ lane, tools: [] }),
     close: async () => {},
     ...overrides,

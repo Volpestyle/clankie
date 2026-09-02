@@ -268,7 +268,8 @@ function claudeEntries(entries: readonly Record<string, unknown>[]): HerdrTransc
         ];
       }
       const text = messageText(message.content);
-      if (/^<(?:local-command-|command-name>|system-reminder>)/u.test(text.trimStart())) return [];
+      if (/^<(?:local-command-|command-name>|system-reminder>|channel[ >])/u.test(text.trimStart()))
+        return [];
       return transcriptMessage(`claude:${nativeId}`, "operator", text, at);
     }),
   );

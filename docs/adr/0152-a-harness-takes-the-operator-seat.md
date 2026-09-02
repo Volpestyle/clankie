@@ -90,8 +90,10 @@ flowchart LR
   bearer from the broker so no secret lands in a config file), and his product
   skills linked from `.agents/skills`. `clankie seat` is the launcher: it checks
   the plugin, passes the permission allowlist for `clankie` commands and the
-  channel development flag (the two things a plugin cannot carry), names the
-  herdr pane `clankie`, and starts Claude Code. Codex is not a Claude plugin;
+  channel development flag (the two things a plugin cannot carry), enables the
+  plugin for its own session only (a forced output style applies wherever the
+  plugin is enabled, so it stays disabled at user scope), names the herdr pane
+  `clankie`, and starts Claude Code. Codex is not a Claude plugin;
   it takes the same `clankie mcp` over stdio and the same skills directory.
 - **The seated pane is his head.** A herdr agent named `clankie` is never a
   fleet contact: the census binds it to Clankie's own persona, and its Claude

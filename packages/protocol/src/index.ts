@@ -1522,6 +1522,44 @@ export type OperatorTerminalInputResult = z.infer<typeof OperatorTerminalInputRe
 /** The authenticated route path that carries the callable service contract. */
 export const OPERATOR_CONVERSATION_DISPATCH_PATH = "/operator/v1/dispatch";
 
+// ---------------------------------------------------------------------------
+// The seat's head and its outbox (ADR 0152).
+//
+// A harness sitting in the operator seat is his head. The service tells a
+// seated herdr pane from a fleet contact by one name, and hands the seat its
+// wakes, watches, and escalations through one long-polled outbox.
+// ---------------------------------------------------------------------------
+
+/** The herdr agent name that makes a pane Clankie's own head rather than a fleet contact. */
+export const OPERATOR_HEAD_AGENT_NAME = "clankie";
+/** Long-polled by the seat's stdio bridge; each event becomes one channel notification. */
+export const OPERATOR_SEAT_EVENTS_PATH = "/v1/seat/events";
+export const OPERATOR_SEAT_EVENT_WAIT_MS_MAX = 30_000;
+export const OperatorSeatEventKindSchema = z.enum(["wake", "watch", "escalation"]);
+export type OperatorSeatEventKind = z.infer<typeof OperatorSeatEventKindSchema>;
+export const OperatorSeatEventSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    id: z.string().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    kind: OperatorSeatEventKindSchema,
+    conversationId: OperatorConversationIdSchema,
+    /** Who handed the head this: `service` for his own wakes and watches, otherwise the sending surface. */
+    source: z.string().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
+    content: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
+    createdAt: z.string().min(1),
+  })
+  .strict();
+export type OperatorSeatEvent = z.infer<typeof OperatorSeatEventSchema>;
+export const OperatorSeatEventsPageSchema = z
+  .object({ schemaVersion: z.literal(1), events: z.array(OperatorSeatEventSchema).max(64) })
+  .strict();
+export type OperatorSeatEventsPage = z.infer<typeof OperatorSeatEventsPageSchema>;
+/** The seat's answer to one escalation; it lands in the conversation as his reply. */
+export const OperatorSeatReplySchema = z
+  .object({ schemaVersion: z.literal(1), text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX) })
+  .strict();
+export type OperatorSeatReply = z.infer<typeof OperatorSeatReplySchema>;
+
 /** Private loopback voice chat used by authenticated local operator surfaces. */
 export const LOCAL_VOICE_CHAT_PATH = "/operator/v1/voice-chat";
 

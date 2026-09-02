@@ -48,7 +48,11 @@ import {
   DiscordVoiceTranscriptCursorSchema,
   LOCAL_VOICE_CHAT_PATH,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
+  OPERATOR_SEAT_EVENTS_PATH,
   OperatorConversationServiceRequestSchema,
+  OperatorSeatReplySchema,
+  type OperatorSeatEventsPage,
   CaptainChannelTurnResultSchema,
   DiscordChannelProjectionMessagePath,
   DiscordChannelProjectionMessageSchema,
@@ -585,6 +589,34 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.text(
       await dependencies.captain.lanePrompt({ lane, ...(sections === undefined ? {} : { sections }) }),
     );
+  });
+
+  // The seat's outbox (ADR 0152). Only the operator's own bearer polls it —
+  // the seat is the owner's — and only the service's own turns fill it, so no
+  // other principal can put text in front of him through this door.
+  app.get(OPERATOR_SEAT_EVENTS_PATH, async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const wait = Number(context.req.query("wait") ?? 0);
+    const waitMs = Number.isFinite(wait)
+      ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
+      : 0;
+    const events = await dependencies.captain.pollSeatEvents(waitMs, context.req.raw.signal);
+    const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
+    return context.json(page);
+  });
+
+  app.post(`${OPERATOR_SEAT_EVENTS_PATH}/:id/reply`, async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const parsed = OperatorSeatReplySchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const replied = await dependencies.captain.replySeatEvent(context.req.param("id"), parsed.data.text);
+    return replied
+      ? context.json({ schemaVersion: 1 as const, replied: true as const })
+      : context.json({ error: "unknown_event" }, 404);
   });
 
   app.get("/v1/captain/memory-card", async (context) => {

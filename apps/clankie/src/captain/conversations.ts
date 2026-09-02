@@ -167,6 +167,10 @@ export interface ConversationTurnContext {
   readonly workspace?: string;
   readonly seat?: ConversationTurnSeat;
   readonly internal?: true;
+  /** What queued an internal turn: a goal continuation, a due self-wake, or a settled herdr watch. */
+  readonly origin?: "goal" | "wake" | "watch";
+  /** The surface a human send arrived from, as it named itself. */
+  readonly surfaceClientId?: string;
   /** Side conversations inherit a Pi branch but never continue their parent's active task. */
   readonly side?: true;
   /** Conversation-store run id; one metrics line uses this, including absorbed steers. */
@@ -270,9 +274,17 @@ function messageKey(role: "operator" | "agent", text: string): string {
   return `${role}\u0000${text}`;
 }
 
-function transcriptEventBody(entry: HerdrTranscriptEntry): OperatorConversationEventBody {
+function transcriptEventBody(
+  entry: HerdrTranscriptEntry,
+  agentRole: "agent" | "captain",
+): OperatorConversationEventBody {
   if (entry.type === "message") {
-    return { type: "message", role: entry.role, text: entry.text, streaming: false };
+    return {
+      type: "message",
+      role: entry.role === "agent" ? agentRole : entry.role,
+      text: entry.text,
+      streaming: false,
+    };
   }
   return {
     type: "tool",
@@ -696,6 +708,20 @@ export class ConversationStore {
     this.syncConversationTranscript(conversationId, seatId, transcript);
   }
 
+  /**
+   * The seat's head is the default global conversation, the thread the app
+   * pins as Clankie (ADR 0152). A seated harness's transcript folds into it
+   * as his own words — `captain`, not `agent` — and always appends: this
+   * thread already holds his pi turns, so nothing here replaces them.
+   */
+  public syncHeadTranscript(seatId: string, transcript: HerdrSeatTranscript): void {
+    this.syncConversationTranscript(this.defaultGlobalConversationId(), seatId, transcript, "captain");
+  }
+
+  public publishHeadEvent(body: OperatorConversationEventBody): void {
+    this.publishConversationEvent(this.defaultGlobalConversationId(), body);
+  }
+
   /** Legacy test/API path while persisted seat scopes migrate on discovery. */
   public syncSeatTranscript(seatId: string, transcript: HerdrSeatTranscript): void {
     this.syncConversationTranscript(this.conversationIdForSeat(seatId), seatId, transcript);
@@ -705,11 +731,19 @@ export class ConversationStore {
     conversationId: string | undefined,
     seatId: string,
     transcript: HerdrSeatTranscript,
+    agentRole: "agent" | "captain" = "agent",
   ): void {
     const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
     if (meta === undefined || transcript.entries.length === 0) return;
     const checkpoint = meta.seatTranscript;
-    if (checkpoint === undefined && this.retainedEventCount(meta.conversationId) > 0) {
+    // A persona thread seeded before native transcripts existed is rebuilt
+    // from the transcript once; the head thread is his own history and only
+    // ever grows.
+    if (
+      agentRole === "agent" &&
+      checkpoint === undefined &&
+      this.retainedEventCount(meta.conversationId) > 0
+    ) {
       this.replaceSeatEntries(meta, transcript.entries);
       meta.seatTranscript = {
         sessionKey: transcript.sessionKey,
@@ -732,7 +766,7 @@ export class ConversationStore {
       advanced = true;
       if (entry.type === "message" && entry.role === "agent") latestAgentReply = entry.text;
       if (entry.type !== "message" || entry.role !== "operator" || !this.matchesRecentSeatSend(meta, entry)) {
-        this.append(meta, transcriptEventBody(entry), entry.occurredAt);
+        this.append(meta, transcriptEventBody(entry, agentRole), entry.occurredAt);
       }
       seen.add(entry.id);
     }
@@ -744,13 +778,17 @@ export class ConversationStore {
   }
 
   /** Queue a host-authored continuation without forging an operator message. */
-  public submitInternal(conversationId: string, message: string): SubmitOperatorConversationTurnResult {
+  public submitInternal(
+    conversationId: string,
+    message: string,
+    origin: NonNullable<ConversationTurnContext["origin"]>,
+  ): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new Error(`Unknown conversation ${conversationId}`);
     if (!this.runsCaptainTurns(conversationId)) {
       throw new Error(`Conversation ${conversationId} does not run captain turns`);
     }
-    return this.enqueue(meta, message, undefined, false);
+    return this.enqueue(meta, message, undefined, false, this.runner, { origin });
   }
 
   public async close(): Promise<void> {
@@ -1111,6 +1149,7 @@ export class ConversationStore {
       turn.herdrPaneId,
       true,
       meta.scope.kind === "channel" ? this.channelRound(true) : this.runner,
+      { surfaceClientId: turn.surfaceClientId },
     );
   }
 
@@ -1373,6 +1412,7 @@ export class ConversationStore {
     herdrPaneId: string | undefined,
     publishOperatorMessage: boolean,
     runner: ConversationRunner = this.runner,
+    provenance: Pick<ConversationTurnContext, "origin" | "surfaceClientId"> = {},
   ): SubmitOperatorConversationTurnResult {
     const workspace = workspaceOf(meta.scope);
     const safeCursor = this.lastCursor(meta);
@@ -1418,6 +1458,10 @@ export class ConversationStore {
             this.setLiveDraft(conversationId, text);
           },
           ...(publishOperatorMessage ? {} : { internal: true as const }),
+          ...(provenance.origin === undefined ? {} : { origin: provenance.origin }),
+          ...(provenance.surfaceClientId === undefined
+            ? {}
+            : { surfaceClientId: provenance.surfaceClientId }),
           ...(meta.parentConversationId === undefined ? {} : { side: true as const }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),
@@ -1658,7 +1702,7 @@ export class ConversationStore {
       ];
     });
     const projected = transcript.map((entry) => ({
-      body: transcriptEventBody(entry),
+      body: transcriptEventBody(entry, "agent"),
       occurredAt: entry.occurredAt ?? new Date().toISOString(),
     }));
     const previousSequence = this.eventSequence(meta);

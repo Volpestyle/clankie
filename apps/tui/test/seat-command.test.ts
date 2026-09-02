@@ -79,9 +79,10 @@ describe("clankie seat", () => {
     expect(() => parseSeatArgs(["status"])).toThrow("Usage: clankie seat");
   });
 
-  it("reads the plugin registry for the installed seat", () => {
+  it("reads the plugin registry for the installed seat, enabled or not", () => {
     expect(pluginInstalled(JSON.stringify([{ id: SEAT_PLUGIN_ID, enabled: true }]))).toBe(true);
-    expect(pluginInstalled(JSON.stringify([{ id: SEAT_PLUGIN_ID, enabled: false }]))).toBe(false);
+    expect(pluginInstalled(JSON.stringify([{ id: SEAT_PLUGIN_ID, enabled: false }]))).toBe(true);
+    expect(pluginInstalled(JSON.stringify([{ id: "other@market", enabled: true }]))).toBe(false);
     expect(pluginInstalled("not json")).toBe(false);
   });
 
@@ -107,12 +108,19 @@ describe("clankie seat", () => {
 
     const installed = await planSeat(
       { resume: false, dryRun: true },
-      { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: true }] }) },
+      { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: false }] }) },
     );
     expect(installed.plugin).toEqual({ source: "installed" });
     expect(installed.channel).toBe(true);
     expect(installed.args).toContain(`plugin:${SEAT_PLUGIN_ID}`);
     expect(installed.args).not.toContain("--plugin-dir");
+    // The plugin stays disabled at user scope (its forced style would take every
+    // session); the seat enables it for this session only.
+    const seatSettings = installed.args[installed.args.indexOf("--settings") + 1];
+    expect(JSON.parse(seatSettings ?? "{}")).toEqual({
+      permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"] },
+      enabledPlugins: { [SEAT_PLUGIN_ID]: true },
+    });
   });
 
   it("refuses without Claude Code on PATH", async () => {

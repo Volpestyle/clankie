@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
-import type { OperatorTerminalSession } from "@clankie/protocol";
+import { OPERATOR_HEAD_AGENT_NAME, type OperatorTerminalSession } from "@clankie/protocol";
 import { readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 
 const execFileAsync = promisify(execFile);
@@ -335,29 +335,61 @@ export async function readSeatIdForHerdrPane(
 }
 
 /**
- * The fleet as occupied, messageable seats (ADR 0147). Fail-soft: a down herdr socket
- * renders an empty roster — seats offline, never a failed conversation surface.
+ * The pane the owner sits in as him (ADR 0152): a herdr agent named
+ * `clankie`. It is never a fleet contact; its transcript is his own thread.
  */
-export async function readFleetSeats(
+export interface ObservedHeadSeat {
+  readonly seatId: string;
+  readonly paneId: string;
+  readonly occupantId: string;
+  readonly harness: string;
+  readonly status: string;
+}
+
+export interface ObservedFleet {
+  readonly seats: readonly ObservedFleetSeat[];
+  readonly head?: ObservedHeadSeat;
+}
+
+/**
+ * The fleet as occupied, messageable seats (ADR 0147), and the head seat when
+ * a pane holds his name. Fail-soft: a down herdr socket renders an empty roster —
+ * seats offline, never a failed conversation surface.
+ */
+export async function readFleet(
   options: { readonly runCommand?: HerdrCensusRunner } = {},
-): Promise<readonly ObservedFleetSeat[]> {
+): Promise<ObservedFleet> {
   const run = options.runCommand ?? defaultRunner;
   try {
     const { stdout } = await run("herdr", ["agent", "list"]);
     const summaries = readHerdrSummariesFile().agents;
-    return parseHerdrAgentList(stdout)
-      .filter(
-        (
-          entry,
-        ): entry is HerdrCensusAgent & {
-          readonly terminalId: string;
-          readonly session: NonNullable<HerdrCensusAgent["session"]>;
-        } =>
-          entry.agent !== "shell" &&
-          entry.agent !== "clankie" &&
-          entry.terminalId !== undefined &&
-          entry.session !== undefined,
-      )
+    const occupied = parseHerdrAgentList(stdout).filter(
+      (
+        entry,
+      ): entry is HerdrCensusAgent & {
+        readonly terminalId: string;
+        readonly session: NonNullable<HerdrCensusAgent["session"]>;
+      } =>
+        entry.agent !== "shell" &&
+        entry.agent !== "clankie" &&
+        entry.terminalId !== undefined &&
+        entry.session !== undefined,
+    );
+    // One head at a time: the first pane herdr lists under his name is him,
+    // and herdr keeps live agent names unique, so there is at most one.
+    const headEntry = occupied.find((entry) => entry.name === OPERATOR_HEAD_AGENT_NAME);
+    const head: ObservedHeadSeat | undefined =
+      headEntry === undefined
+        ? undefined
+        : {
+            seatId: headEntry.terminalId,
+            paneId: headEntry.paneId,
+            occupantId: occupantIdForHerdrSession(headEntry.session),
+            harness: headEntry.agent,
+            status: headEntry.status,
+          };
+    const seats = occupied
+      .filter((entry) => entry !== headEntry)
       .slice(0, MAX_AGENTS)
       .map((entry) => {
         const written = summaries[entry.paneId];
@@ -381,9 +413,17 @@ export async function readFleetSeats(
           ...(entry.cwd === undefined ? {} : { workingDirectory: bounded(entry.cwd, SEAT_DIRECTORY_MAX) }),
         };
       });
+    return head === undefined ? { seats } : { seats, head };
   } catch {
-    return [];
+    return { seats: [] };
   }
+}
+
+/** The fleet's contacts only; the head is not one of them. */
+export async function readFleetSeats(
+  options: { readonly runCommand?: HerdrCensusRunner } = {},
+): Promise<readonly ObservedFleetSeat[]> {
+  return (await readFleet(options)).seats;
 }
 
 /** Live agent census for a seated turn. Fail-soft: a down socket is not a failed turn. */

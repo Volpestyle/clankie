@@ -426,13 +426,15 @@ nothing yet, which is not an error.
 ### `seat [--resume] [--plugin-dir PATH] [--dry-run]`
 
 Sit in Claude Code as Clankie ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
-Needs a TTY and `claude` on `PATH`. The launcher does the two things the
-plugin cannot: it passes `--settings` with the permission allowlist for
-`clankie` commands, and, when the plugin is installed from the repo's
-marketplace (`clankie@clankie`), the channel development flag so wakes and
-escalations reach the session. When the plugin is not installed it loads the
-bundled `integrations/claude-plugin` with `--plugin-dir` (tools and skills,
-no channel). Inside a herdr pane it names that pane `clankie` once Claude Code
+Needs a TTY and `claude` on `PATH`. The launcher does the things the plugin
+cannot: it passes `--settings` with the permission allowlist for `clankie`
+commands and, when the plugin is installed from the repo's marketplace
+(`clankie@clankie`), `enabledPlugins` for this session only plus the channel
+development flag so wakes and escalations reach the session. The plugin stays
+disabled at user scope, because its forced output style would otherwise make
+every Claude Code session answer as him. When the plugin is not installed it
+loads the bundled `integrations/claude-plugin` with `--plugin-dir` (tools and
+skills, no channel). Inside a herdr pane it names that pane `clankie` once Claude Code
 is detected there, which binds the pane to his own persona rather than a fleet
 contact; a second pane claiming the name stays an ordinary fleet agent and is
 told so on stderr. The pane is un-named again when the session ends.
@@ -467,9 +469,10 @@ service-side conversation the app pins is the same either way.
 ```
 
 `plugin.source` is `installed` with `channel: true` after
-`claude plugin marketplace add <repoRoot>/integrations/claude-plugin` and
-`claude plugin install clankie@clankie`. The plugin README documents the
-install and what the plugin carries.
+`claude plugin marketplace add <repoRoot>/integrations/claude-plugin`,
+`claude plugin install clankie@clankie`, and `claude plugin disable
+clankie@clankie`. The plugin README documents the install and what the plugin
+carries.
 
 ### `mcp [--lane operator]`
 
@@ -479,6 +482,16 @@ credential broker so no secret lands in a harness config. The plugin's
 `.mcp.json` names it; a Codex MCP config names the same command. Only the
 operator lane has a bearer on this side. stdout is the wire: progress goes to
 stderr, and the process ends when the harness closes stdin.
+
+It is also his channel. While it runs it long-polls `/v1/seat/events` and
+pushes each self-wake, herdr completion watch, and room escalation into the
+session as `<channel source="clankie" kind="wake|watch|escalation"
+conversation="…" event_id="…">`; that polling is what binds the seat as his
+head, and with no bridge polling the same turns run the pi operator lane. A
+`reply` tool answers an escalation by `event_id`; the reply lands in the
+escalating conversation as his own message. Claude Code loads the channel
+only when `clankie seat` passes its development flag; without it the tools
+still work and the events are dropped.
 
 ### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
 

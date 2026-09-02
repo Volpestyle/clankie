@@ -33,20 +33,24 @@ clankie seat --resume     # reopen the last seat's conversation
 clankie seat --dry-run    # print the launch plan as JSON without starting Claude Code
 ```
 
-`clankie seat` needs Claude Code on `PATH` and a TTY. It passes the permission
-allowlist for `clankie` commands (`--settings`), names the herdr pane `clankie`
-when it is one, and starts Claude Code with `--name Clankie`. With the plugin
-installed from the repo's marketplace it also passes the channel development
-flag, so wakes and escalations reach the session; a `--plugin-dir` seat gets
-his tools and skills but not his wakes, because the channel preview accepts
-only marketplace-installed plugins.
+`clankie seat` needs Claude Code on `PATH` and a TTY. It passes `--settings`
+with the permission allowlist for `clankie` commands and, when the plugin is
+installed, `enabledPlugins` for this session only; names the herdr pane
+`clankie` when it is one; and starts Claude Code with `--name Clankie`. With
+the plugin installed from the repo's marketplace it also passes the channel
+development flag, so wakes and escalations reach the session; a `--plugin-dir`
+seat gets his tools and skills but not his wakes, because the channel preview
+accepts only marketplace-installed plugins.
 
 Install from a checkout or an installed release (`clankie doctor` names
-`repoRoot`):
+`repoRoot`), then disable it at user scope: the forced output style applies to
+every Claude Code session while the plugin is enabled there, and the seat is
+the only session that should be him.
 
 ```bash
 claude plugin marketplace add "$PWD/integrations/claude-plugin"
 claude plugin install clankie@clankie
+claude plugin disable clankie@clankie
 ```
 
 Then confirm it took:
@@ -69,7 +73,8 @@ bank, not the harness.
 
 | Symptom                                    | Fix                                                                                        |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| He answers as Claude Code                  | The output style is not applied: `claude plugin list` must show `clankie@clankie` enabled  |
+| He answers as Claude Code                  | The seat was not launched by `clankie seat`, which enables the plugin for its session      |
+| Every Claude Code session answers as him   | The plugin is enabled at user scope; `claude plugin disable clankie@clankie`               |
 | `/mcp` shows `clankie` failed              | The service is down or the operator credential is missing: `clankie status`                |
 | No persona or memory card at session start | `clankie` is not on the hook's `PATH`; `pnpm cli:install` symlinks it into `~/.local/bin`  |
 | Wakes never arrive                         | The seat was loaded with `--plugin-dir`; install from the marketplace for the channel flag |

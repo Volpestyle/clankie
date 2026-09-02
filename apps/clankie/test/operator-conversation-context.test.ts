@@ -50,7 +50,7 @@ describe("operator conversation context", () => {
       publish({ type: "message", role: "captain", text: `ran: ${message}`, streaming: false });
     });
 
-    const accepted = store.submitInternal("global-default", "scheduled wake");
+    const accepted = store.submitInternal("global-default", "scheduled wake", "wake");
     if (accepted.status !== "accepted") throw new Error("internal turn was not accepted");
     await store.awaitRun(accepted.runId);
     const replay = await store.serve({
@@ -89,7 +89,7 @@ describe("operator conversation context", () => {
       });
     });
 
-    const internal = store.submitInternal("global-default", "autonomy");
+    const internal = store.submitInternal("global-default", "autonomy", "goal");
     if (internal.status !== "accepted") throw new Error("internal turn was not accepted");
     await drain();
     expect(started).toEqual(["autonomy"]);
@@ -225,7 +225,7 @@ describe("operator conversation context", () => {
     await drain();
     expect(started).toEqual(["start:first"]);
 
-    const internal = store.submitInternal("global-default", "queued-wake");
+    const internal = store.submitInternal("global-default", "queued-wake", "wake");
     if (internal.status !== "accepted") throw new Error("internal turn was not accepted");
     await drain();
     expect(started).toEqual(["start:first"]);

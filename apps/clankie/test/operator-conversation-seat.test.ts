@@ -80,7 +80,7 @@ describe("seat conversations", () => {
     if (first.op !== "create" || second.op !== "create") throw new Error("create expected");
     expect(second.conversation.conversationId).toBe(first.conversation.conversationId);
     expect(first.conversation.sessionState).toBe("unbound");
-    expect(() => store.submitInternal(first.conversation.conversationId, "wake")).toThrow(
+    expect(() => store.submitInternal(first.conversation.conversationId, "wake", "wake")).toThrow(
       "does not run captain turns",
     );
 

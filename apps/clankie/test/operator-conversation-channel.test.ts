@@ -1151,7 +1151,7 @@ describe("channel conversations", () => {
       }),
     ).rejects.toThrow("channel op");
     // Nor does anything hand Clankie a turn in a room the members answer in.
-    expect(() => store.submitInternal(conversationId, "wake")).toThrow("does not run captain turns");
+    expect(() => store.submitInternal(conversationId, "wake", "wake")).toThrow("does not run captain turns");
 
     // Restating the roster reorders, adds, and drops in one write, and a member
     // that was already there keeps the joinedAt it had.

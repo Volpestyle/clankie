@@ -23,6 +23,13 @@ export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
 const SEAT_AGENT_NAME = "clankie";
 const SEAT_PERMISSIONS = { permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"] } };
+/**
+ * The plugin's output style is forced on wherever the plugin is enabled, so an
+ * installed plugin stays disabled at user scope — otherwise every Claude Code
+ * session on the machine would answer as him — and the seat enables it for
+ * its own session only.
+ */
+const SEAT_SETTINGS = { ...SEAT_PERMISSIONS, enabledPlugins: { [SEAT_PLUGIN_ID]: true } };
 const HERDR_DETECT_TIMEOUT_MS = 30_000;
 const HERDR_DETECT_POLL_MS = 500;
 
@@ -121,7 +128,7 @@ function defaultSpawn(command: string, args: readonly string[], cwd: string): Pr
   });
 }
 
-/** Whether the plugin is installed and enabled at any scope, per `claude plugin list --json`. */
+/** Whether the plugin is installed at any scope, enabled or not, per `claude plugin list --json`. */
 export function pluginInstalled(listJson: string): boolean {
   try {
     const parsed: unknown = JSON.parse(listJson);
@@ -129,10 +136,7 @@ export function pluginInstalled(listJson: string): boolean {
       Array.isArray(parsed) &&
       parsed.some(
         (entry) =>
-          typeof entry === "object" &&
-          entry !== null &&
-          (entry as { id?: unknown }).id === SEAT_PLUGIN_ID &&
-          (entry as { enabled?: unknown }).enabled === true,
+          typeof entry === "object" && entry !== null && (entry as { id?: unknown }).id === SEAT_PLUGIN_ID,
       )
     );
   } catch {
@@ -202,7 +206,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     "--name",
     "Clankie",
     "--settings",
-    JSON.stringify(SEAT_PERMISSIONS),
+    JSON.stringify(plugin.source === "installed" ? SEAT_SETTINGS : SEAT_PERMISSIONS),
     ...(plugin.source === "plugin-dir" ? ["--plugin-dir", plugin.path] : []),
     ...(channel ? ["--dangerously-load-development-channels", `plugin:${SEAT_PLUGIN_ID}`] : []),
     ...(previous === undefined ? ["--session-id", sessionId] : ["--resume", sessionId]),
