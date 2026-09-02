@@ -31,10 +31,16 @@ sequenceDiagram
 ```bash
 export CLANKIE_AWS_REGION=us-east-1
 export CLANKIE_ACCOUNT_EMAIL_IDENTITY=verified-sender@example.com
+export CLANKIE_ACCOUNT_ALARM_EMAIL=operator@example.com
 infra/aws/accounts/deploy.sh provision
 infra/aws/accounts/deploy.sh invite tester@example.com
 infra/aws/accounts/deploy.sh config
 ```
+
+`CLANKIE_ACCOUNT_ALARM_EMAIL` receives the stack's SES send-volume alarm (SNS
+sends a subscription confirmation on the first provision; confirm it). The
+alarm fires when the account's hourly SES sends exceed
+`CLANKIE_ACCOUNT_SEND_ALARM_PER_HOUR` (default 200, one code per sign-in).
 
 The default is an invite-only beta. `invite` suppresses Cognito's admin-created
 user message; the tester receives the normal OTP only after entering the email
@@ -55,11 +61,31 @@ infra/aws/accounts/deploy.sh provision
 ```
 
 The identity and From address are separate because one verified domain covers
-every sender at that domain. Keep SES in its sandbox only for a private smoke
-test: sandbox delivery is limited to verified recipients. Request SES
-production access before inviting ordinary testers. Cognito Essentials has no
-identity charge for the first 10,000 direct monthly active users; SES delivery
-and later paid tiers remain separate.
+every sender at that domain. Cognito Essentials has no identity charge for the
+first 10,000 direct monthly active users; SES delivery and later paid tiers
+remain separate.
+
+## Leave the SES sandbox
+
+The sandbox delivers only to verified recipients and Cognito's default sender
+caps at 50 messages a day, so an invited tester whose address is not verified
+never receives a code. Before the first outside tester (TestFlight external
+testing included):
+
+```bash
+infra/aws/accounts/deploy.sh ses-status        # ProductionAccess, DKIM status, the CNAMEs
+infra/aws/accounts/deploy.sh ses-production    # opens the production-access case
+```
+
+`ses-status` reads what App Review and testers depend on: the account's
+production flag and 24-hour quota, and the `clankie.bot` identity's
+`VerifiedForSending` and `DkimStatus`. Publish the three DKIM CNAMEs as
+DNS-only records in Cloudflare (proxied records break DKIM lookups) and wait
+for `DkimStatus` to read `SUCCESS`. `ses-production` files the request with
+the transactional-OTP use case; AWS usually answers within a day, after which
+`ses-status` shows `ProductionAccess` true. Then prove delivery: invite an
+address that was never verified in SES, run `/gateway` on a Mac with it, and
+confirm the code arrives within a minute.
 
 The user pool has deletion protection and a retained resource policy. Access
 tokens last one hour; refresh tokens rotate and last 90 days. Removing or

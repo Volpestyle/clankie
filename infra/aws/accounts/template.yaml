@@ -17,6 +17,15 @@ Parameters:
   EmailFrom:
     Type: String
     Description: From address covered by EmailSourceIdentity
+  AlarmEmail:
+    Type: String
+    AllowedPattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+    Description: Address that receives the SES send-volume alarm
+  SendAlarmThresholdPerHour:
+    Type: Number
+    Default: 200
+    MinValue: 1
+    Description: SES sends in one hour above which the alarm fires (the pool sends one OTP per sign-in)
 
 Conditions:
   SelfSignUpIsDisabled: !Equals [!Ref SelfSignUpEnabled, "false"]
@@ -79,7 +88,35 @@ Resources:
         Feature: ENABLED
         RetryGracePeriodSeconds: 60
 
+  SendAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: clankie-accounts-alarms
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlarmEmail
+
+  # SES publishes account-level Send/Bounce/Complaint metrics without dimensions.
+  # One hourly sum bounds a runaway or abused sign-in loop before self-signup opens.
+  SendVolumeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: clankie-accounts-ses-send-volume
+      AlarmDescription: Amazon SES sends in the last hour exceeded the expected sign-in volume
+      Namespace: AWS/SES
+      MetricName: Send
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: !Ref SendAlarmThresholdPerHour
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SendAlarmTopic
+
 Outputs:
+  SendVolumeAlarm:
+    Value: !Ref SendVolumeAlarm
   SendingDomain:
     Value: !Ref SendingIdentity
   SendingIdentityArn:

@@ -50,6 +50,16 @@ case "$command_name" in
         exit 2
       }
     fi
+    alarm_email="${CLANKIE_ACCOUNT_ALARM_EMAIL:-}"
+    [[ "$alarm_email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || {
+      echo "Set CLANKIE_ACCOUNT_ALARM_EMAIL to the address that receives the SES send-volume alarm" >&2
+      exit 2
+    }
+    send_alarm_per_hour="${CLANKIE_ACCOUNT_SEND_ALARM_PER_HOUR:-200}"
+    [[ "$send_alarm_per_hour" =~ ^[1-9][0-9]*$ ]] || {
+      echo "CLANKIE_ACCOUNT_SEND_ALARM_PER_HOUR must be a positive integer" >&2
+      exit 2
+    }
     verified="$(aws sesv2 get-email-identity \
       --region "$region" \
       --email-identity "$email_identity" \
@@ -67,7 +77,9 @@ case "$command_name" in
         "SendingDomain=$sending_domain" \
         "SelfSignUpEnabled=$self_signup" \
         "EmailSourceIdentity=$email_identity" \
-        "EmailFrom=$email_from"
+        "EmailFrom=$email_from" \
+        "AlarmEmail=$alarm_email" \
+        "SendAlarmThresholdPerHour=$send_alarm_per_hour"
     aws cloudformation describe-stacks \
       --region "$region" \
       --stack-name "$stack_name" \
@@ -81,6 +93,37 @@ case "$command_name" in
       --arg client_id "$(stack_output ClientId)" \
       --arg self_signup "$(stack_output SelfSignUpEnabled)" \
       '{schemaVersion: 1, account: {provider: "cognito_email_otp", endpoint: $endpoint, issuer: $issuer, clientId: $client_id, selfSignUpEnabled: ($self_signup == "true")}}'
+    ;;
+  ses-status)
+    # Everything App Review and external testers depend on, in one read.
+    sending_domain="${CLANKIE_ACCOUNT_SENDING_DOMAIN:-clankie.bot}"
+    aws sesv2 get-account \
+      --region "$region" \
+      --query '{ProductionAccess:ProductionAccessEnabled,SendingEnabled:SendingEnabled,Max24HourSend:SendQuota.Max24HourSend,ReviewStatus:Details.ReviewDetails.Status}' \
+      --output table
+    aws sesv2 get-email-identity \
+      --region "$region" \
+      --email-identity "$sending_domain" \
+      --query '{Identity:`'"$sending_domain"'`,VerifiedForSending:VerifiedForSendingStatus,DkimStatus:DkimAttributes.Status,DkimCnames:DkimAttributes.Tokens}' \
+      --output table
+    ;;
+  ses-production)
+    # Opens the SES production-access case for this region. AWS answers within
+    # about 24 hours; `ses-status` shows ProductionAccess true when granted.
+    contact="${CLANKIE_ACCOUNT_ALARM_EMAIL:-}"
+    [[ "$contact" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || {
+      echo "Set CLANKIE_ACCOUNT_ALARM_EMAIL to the address AWS may contact about the request" >&2
+      exit 2
+    }
+    aws sesv2 put-account-details \
+      --region "$region" \
+      --production-access-enabled \
+      --mail-type TRANSACTIONAL \
+      --website-url https://clankie.bot \
+      --contact-language EN \
+      --additional-contact-email-addresses "$contact" \
+      --use-case-description "Clankie sends one-time sign-in codes from Amazon Cognito (passwordless email OTP) to people who enroll their own Mac for remote access from the Clankie iPhone app. Recipients request each code themselves by entering their email on their Mac; there is no marketing mail and no list. Expected volume is well under a hundred codes a day during the invited beta and TestFlight review. Bounces and complaints are handled by disabling the Cognito user; a CloudWatch alarm on hourly send volume pages the operator."
+    echo "Production access requested; poll with: $0 ses-status"
     ;;
   invite)
     email="${2:-}"
@@ -105,7 +148,7 @@ case "$command_name" in
     fi
     ;;
   *)
-    echo "Usage: $0 provision|config|invite person@example.com" >&2
+    echo "Usage: $0 provision|config|ses-status|ses-production|invite person@example.com" >&2
     exit 2
     ;;
 esac
