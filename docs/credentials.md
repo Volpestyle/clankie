@@ -184,6 +184,11 @@ environment fallback when no broker entry exists; Discord account and internal
 body credentials remain broker-only. The only internal bearer environment
 exceptions are the documented operator and captain test/CI overrides.
 
+For compatibility, the clankie service also fills absent environment keys from
+a gitignored root `.env.local`; existing shell values win. `pnpm doctor`
+reports broker status and exported OpenAI/Anthropic fallbacks without loading
+`.env.local` or printing secret values.
+
 Storage implementation and grant validation details live in
 [`@clankie/credential-broker`](../packages/credential-broker/README.md).
 

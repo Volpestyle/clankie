@@ -11,7 +11,7 @@ import {
   type PublicGatewayPairingRouteFrame,
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
-} from "@clankie/protocol";
+} from "@clankie/protocol/public-gateway";
 import { WebSocket, type RawData } from "ws";
 
 const CONNECT_TIMEOUT_MS = 5_000;

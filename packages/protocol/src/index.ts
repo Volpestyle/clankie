@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-export * from "./public-gateway.ts";
-
 /** Frozen event-log partition key. Still serialized as `missionId`. */
 export const MissionIdSchema = z.string().min(1);
 /** Frozen optional attribution on the event envelope. */
@@ -518,6 +516,8 @@ export const StateOperatorAgentStanceResultSchema = z.discriminatedUnion("outcom
 ]);
 export type StateOperatorAgentStanceResult = z.infer<typeof StateOperatorAgentStanceResultSchema>;
 
+/** Durable personas outlive seats, so their public bound cannot be the live roster bound. */
+export const OPERATOR_AGENT_PERSONA_LIST_MAX = 1_000;
 /** Bounded fleet roster entry: one herdr seat as a messageable contact (ADR 0135). */
 export const OPERATOR_FLEET_ROSTER_MAX = 48;
 export const OperatorFleetSeatSchema = z
@@ -559,7 +559,7 @@ export const OperatorFleetSnapshotSchema = z
     schemaVersion: z.literal(1),
     cursor: OperatorConversationCursorSchema,
     seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
-    personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+    personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),
     channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
   })
   .strict();
@@ -1913,7 +1913,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .object({
       op: z.literal("personas"),
       schemaVersion: z.literal(1),
-      personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+      personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),
     })
     .strict(),
   z

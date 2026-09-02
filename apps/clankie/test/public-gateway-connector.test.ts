@@ -8,7 +8,7 @@ import {
   type PublicGatewayPairingRouteFrame,
   type PublicGatewayResponseChunkFrame,
   type PublicGatewayTunnelFrame,
-} from "@clankie/protocol";
+} from "@clankie/protocol/public-gateway";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { PublicGatewayConnector } from "../src/public-gateway-connector.ts";

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PairingRedeemResponseSchema } from "../src/index.ts";
 import {
   PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX,
   PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX,
@@ -8,9 +9,8 @@ import {
   PublicGatewayRequestFrameSchema,
   PublicGatewayResponseChunkFrameSchema,
   PublicGatewayTunnelFrameSchema,
-  PairingRedeemResponseSchema,
   publicGatewayTargetFor,
-} from "../src/index.ts";
+} from "../src/public-gateway.ts";
 
 const requestId = "request_12345678";
 

@@ -78,6 +78,8 @@ occupant column when a replacement session appears; persona ids are never
 derived from credentials, sessions, panes, or display names. Version-1
 session-derived records are retained only by the one-time state migration so
 their existing conversations and avatar files remain addressable.
+Public persona reads carry a separate 1,000-record bound; they do not inherit
+the 48-entry live-seat roster bound because closed seats leave durable personas.
 
 Appearance identity is the full `variant × accessory × shape` tuple. Gold is
 reserved for the operator, leaving six agent variants; accessories and shapes

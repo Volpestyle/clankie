@@ -46,21 +46,66 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
 
 ## Get started
 
-On macOS 14 or newer with Apple silicon:
+Clankie runs on your Mac: macOS 14 or newer, Apple silicon. The iPhone and iPad
+app is a companion that reaches that Mac through `api.clankie.bot`; nothing of
+his runs in the cloud.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
-clankie              # start the service and open the TUI
-```
+1. **Install and open him.**
 
-The release includes its Node runtime, services, assets, and native Vox media
-process. `clankie doctor` reports whether this is a release or a checkout,
-which models and credentials are configured, and whether optional tools such
-as herdr are on PATH. See [`docs/distribution.md`](docs/distribution.md) for
-the installed layout, version pinning, and release process.
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
+   clankie
+   ```
 
-For development from a checkout, install Node 24+, pnpm 11+, Git, Rust 1.88+,
-and CMake:
+   The launcher starts the service and opens the console. `clankie doctor`
+   prints the install card whenever you want to know what is configured.
+
+2. **Give him a model.** In the console, `/auth` stores a provider key or OAuth
+   login in the Keychain-backed credential broker and `/model` picks the captain
+   model. `/persona`, `/image-model`, `/discord`, and `/connect` are optional
+   and can wait.
+
+3. **Sign the Mac in.** `/gateway`, choose **Enable remote access**, enter the
+   email your invitation named, then the one-time code it receives. That
+   enrolls this Mac at the public doorway under your account. There are no
+   URLs, host ids, or tokens to copy.
+
+4. **Keep him running.**
+
+   ```bash
+   clankie autostart enable
+   ```
+
+   Clankie and his relay now start when you log in. Leave the Mac awake and on
+   power if you want him reachable while you are away.
+
+5. **Install the app** from your TestFlight invitation and open it.
+
+6. **Pair the phone.**
+
+   ```bash
+   clankie pair
+   ```
+
+   Scan the QR, or type the code, in the app; review the access it offers and
+   connect. Each offer is single-use. `clankie devices` lists and revokes paired
+   devices.
+
+From here the app is Messages, the fleet, and the terminal on your Mac.
+
+To invite someone, an operator runs `infra/aws/accounts/deploy.sh invite <email>`
+before that person reaches step 3
+([`infra/aws/accounts`](infra/aws/accounts/README.md)).
+
+Every headless noun's flags, JSON, and exit codes are in
+[`docs/cli.md`](docs/cli.md); `clankie help` prints the index. Where each
+secret lives and who verifies it is in
+[`docs/credentials.md`](docs/credentials.md). The installed layout and version
+pinning are in [`docs/distribution.md`](docs/distribution.md).
+
+### From a checkout
+
+Install Node 24+, pnpm 11+, Git, Rust 1.88+, and CMake, then:
 
 ```bash
 corepack enable
@@ -70,23 +115,7 @@ pnpm cli:install     # symlink the `clankie` launcher into ~/.local/bin
 clankie
 ```
 
-The credential broker is the canonical secret store (macOS Keychain, or a
-mode-0600 file store elsewhere). Configure it from inside the TUI: `/auth` for
-provider keys or OAuth, `/model` for the captain model, `/image-model` for
-generation, `/persona` for who he is, `/connect` for Linear and email, and
-`/discord` for either Discord body. Agents and scripts use the same stores
-through the headless CLI — `clankie doctor`, `clankie model`,
-`clankie restart captain` — documented in [`docs/cli.md`](docs/cli.md).
-`clankie help` prints the same index. Secrets never go on flags.
-
-For compatibility, the clankie service also fills absent environment
-keys from a gitignored root `.env.local`, and model/media providers may fall
-back to their declared API-key environment variables when the broker has no
-entry. Existing shell values win. Discord account, bridge, activity-producer,
-and play-voice credentials remain broker-only and reject their forbidden
-environment names. Operator and captain bearers retain documented test/CI
-overrides. `pnpm doctor` reports broker status and exported
-OpenAI/Anthropic fallbacks; it does not load `.env.local` or print secret values.
+The steps above are the same from a checkout.
 
 ## Apps
 
@@ -106,7 +135,8 @@ OpenAI/Anthropic fallbacks; it does not load `.env.local` or print secret values
 seam; `packages/` holds the shared contracts. The body itself is his seat in a
 PokeAgents world ([ADR 0145](docs/adr/0145-the-world-is-the-only-body.md), and
 [ADR 0129](docs/adr/0129-each-player-owns-a-body.md) for the identity boundary).
-The graphical garden app is a separate private repo (`clankie-app`).
+The iPhone, iPad, and macOS companion app is a separate private repo
+(`clankie-app`).
 
 ## Development
 

@@ -18,6 +18,7 @@ import {
   resolveDiscordPresenceLedgerContent,
   IntentContextSchema,
   createOperatorConversationServiceClient,
+  OPERATOR_AGENT_PERSONA_LIST_MAX,
   OPERATOR_CONVERSATION_REF_MAX,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   defaultOperatorAgentAppearance,
@@ -29,6 +30,7 @@ import {
   OperatorConversationServiceRequestSchema,
   OperatorConversationServiceResultSchema,
   OperatorConversationStreamEventSchema,
+  OPERATOR_FLEET_ROSTER_MAX,
   OPERATOR_TERMINAL_INPUT_BASE64_MAX,
   OperatorTerminalControlRequestSchema,
   OperatorTerminalControlResultSchema,
@@ -43,6 +45,31 @@ import {
 } from "../src/index.ts";
 
 describe("protocol", () => {
+  it("bounds durable personas separately from the live-seat roster", () => {
+    const personas = Array.from({ length: OPERATOR_FLEET_ROSTER_MAX + 1 }, (_, index) => ({
+      schemaVersion: 1 as const,
+      personaId: `agent-${index}`,
+      name: `Agent ${index}`,
+      appearance: defaultOperatorAgentAppearance("codex", `agent-${index}`),
+      harness: "codex",
+      createdAt: "2026-07-12T00:00:00.000Z",
+      updatedAt: "2026-07-12T00:00:00.000Z",
+    }));
+
+    expect(personas).toHaveLength(OPERATOR_FLEET_ROSTER_MAX + 1);
+    expect(personas.length).toBeLessThanOrEqual(OPERATOR_AGENT_PERSONA_LIST_MAX);
+    expect(
+      OperatorConversationServiceResultSchema.parse({ op: "personas", schemaVersion: 1, personas }),
+    ).toMatchObject({ op: "personas", personas });
+    expect(
+      OperatorConversationServiceResultSchema.parse({
+        op: "fleet",
+        schemaVersion: 1,
+        snapshot: { schemaVersion: 1, cursor: "fleet-instance:1", seats: [], personas, channels: [] },
+      }),
+    ).toMatchObject({ op: "fleet", snapshot: { personas } });
+  });
+
   it("exports provider-neutral operator conversation fixtures", () => {
     expect(CaptainLaneSchema.options).toEqual(["tui", "discord_voice", "gameplay"]);
     expect(CaptainSessionLaneV2Schema.options).toEqual([

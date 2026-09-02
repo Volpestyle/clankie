@@ -2,8 +2,8 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import { PairingRedeemRequestSchema } from "@clankie/protocol";
 import {
-  PairingRedeemRequestSchema,
   PUBLIC_GATEWAY_CONFIG_PATH,
   PUBLIC_GATEWAY_HEALTH_PATH,
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
@@ -21,7 +21,7 @@ import {
   type PublicGatewayHttpHeader,
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
-} from "@clankie/protocol";
+} from "@clankie/protocol/public-gateway";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 const PUBLIC_REQUEST_DEADLINE_MS = 60_000;

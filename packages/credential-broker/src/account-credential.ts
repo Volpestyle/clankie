@@ -4,12 +4,12 @@ import {
   PublicGatewayConfigSchema,
   PublicGatewayInstallationIdSchema,
   type PublicGatewayConfig,
-} from "@clankie/protocol";
+} from "@clankie/protocol/public-gateway";
 import { z } from "zod";
 import type { CredentialStore, ProviderCredential } from "./credential-store.ts";
 
 export const CLANKIE_ACCOUNT_PROVIDER_ID = "clankie-account";
-export { derivePublicGatewayHostId } from "@clankie/protocol";
+export { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 
 const ACCESS_REFRESH_WINDOW_MS = 5 * 60_000;
 const TOKEN_LIFETIME_FALLBACK_SECONDS = 3_600;

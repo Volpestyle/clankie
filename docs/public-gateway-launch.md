@@ -52,7 +52,8 @@ Before submission or adding an invited user:
 - the gateway and review Mac remain live for the intended review window;
 - an invited email can complete `/gateway`, survive an access-token refresh and
   a Mac login, and connect without Tailscale, SSH, or a copied bearer;
-- App Review receives a fresh QR or typed pairing code and exact setup notes;
+- App Review receives a fresh QR or typed pairing code and exact setup notes
+  (the README's Get started steps are that text; do not keep a second copy);
 - pairing, reconnect, chat, fleet/agent control, and terminal observation pass
   on physical off-network iPhone and iPad devices;
 - gateway and Caddy logs show no restart loop, repeated host disconnect, TLS

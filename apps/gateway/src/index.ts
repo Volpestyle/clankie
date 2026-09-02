@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { PublicGatewayConfigSchema } from "@clankie/protocol";
+import { PublicGatewayConfigSchema } from "@clankie/protocol/public-gateway";
 import { createCognitoAccessTokenVerifier } from "./cognito-jwt.ts";
 import { createPublicGateway, loadHostTokens, type PublicGatewayLogger } from "./gateway.ts";
 

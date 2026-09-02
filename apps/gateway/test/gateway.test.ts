@@ -11,7 +11,7 @@ import {
   derivePublicGatewayHostId,
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
-} from "@clankie/protocol";
+} from "@clankie/protocol/public-gateway";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
