@@ -122,7 +122,8 @@ Provision the separate Cognito stack, install its public discovery document on
 the gateway host, and release the account-aware gateway:
 
 ```bash
-export CLANKIE_ACCOUNT_EMAIL_IDENTITY=verified-sender@example.com
+export CLANKIE_ACCOUNT_EMAIL_IDENTITY=clankie.bot
+export CLANKIE_ACCOUNT_EMAIL_FROM=no-reply@clankie.bot
 infra/aws/accounts/deploy.sh provision
 infra/aws/public-gateway/deploy.sh configure-account
 infra/aws/public-gateway/deploy.sh bootstrap  # activator v2, once

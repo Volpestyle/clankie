@@ -42,11 +42,24 @@ in Clankie's `/gateway` flow. The command is idempotent for an existing email.
 Set `CLANKIE_ACCOUNT_SELF_SIGNUP=true` and provision the same stack when signup
 should open to any email address.
 
-Cognito passwordless email OTP requires a verified Amazon SES sender. Keep SES
-in its sandbox only for a private smoke test: sandbox delivery is limited to
-verified recipients. Request SES production access before inviting ordinary
-testers. Cognito Essentials has no identity charge for the first 10,000 direct
-monthly active users; SES delivery and later paid tiers remain separate.
+Cognito passwordless email OTP requires a verified Amazon SES sender. The stack
+owns the `clankie.bot` domain identity and outputs its three Easy DKIM CNAMEs.
+On the first deployment, leave the existing verified address active, publish
+those CNAMEs as DNS-only records, and wait for the domain identity to report
+`SUCCESS`. Then make the production sender active:
+
+```bash
+export CLANKIE_ACCOUNT_EMAIL_IDENTITY=clankie.bot
+export CLANKIE_ACCOUNT_EMAIL_FROM=no-reply@clankie.bot
+infra/aws/accounts/deploy.sh provision
+```
+
+The identity and From address are separate because one verified domain covers
+every sender at that domain. Keep SES in its sandbox only for a private smoke
+test: sandbox delivery is limited to verified recipients. Request SES
+production access before inviting ordinary testers. Cognito Essentials has no
+identity charge for the first 10,000 direct monthly active users; SES delivery
+and later paid tiers remain separate.
 
 The user pool has deletion protection and a retained resource policy. Access
 tokens last one hour; refresh tokens rotate and last 90 days. Removing or

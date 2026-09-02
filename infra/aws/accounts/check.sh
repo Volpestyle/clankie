@@ -13,3 +13,15 @@ if CLANKIE_ACCOUNT_SELF_SIGNUP=invalid infra/aws/accounts/deploy.sh provision >/
   echo "Invalid self-sign-up configuration was accepted" >&2
   exit 1
 fi
+
+if CLANKIE_ACCOUNT_EMAIL_IDENTITY=clankie.bot CLANKIE_ACCOUNT_EMAIL_FROM=invalid \
+  infra/aws/accounts/deploy.sh provision >/dev/null 2>&1; then
+  echo "Invalid account sender address was accepted" >&2
+  exit 1
+fi
+
+if CLANKIE_ACCOUNT_EMAIL_IDENTITY=clankie.bot CLANKIE_ACCOUNT_EMAIL_FROM=no-reply@example.com \
+  infra/aws/accounts/deploy.sh provision >/dev/null 2>&1; then
+  echo "Sender outside the verified identity was accepted" >&2
+  exit 1
+fi

@@ -2,22 +2,35 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Clankie accounts — passwordless email OTP identity for Mac enrollment
 
 Parameters:
+  SendingDomain:
+    Type: String
+    Default: clankie.bot
+    Description: Domain identity owned by this stack for production account mail
   SelfSignUpEnabled:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
     Description: Permit any verified email to create an account; keep false for the invited beta
-  EmailSourceArn:
+  EmailSourceIdentity:
     Type: String
-    Description: Verified Amazon SES email or domain identity ARN used for passwordless OTP mail
+    Description: Verified Amazon SES email or domain identity used for passwordless OTP mail
   EmailFrom:
     Type: String
-    Description: From address covered by EmailSourceArn
+    Description: From address covered by EmailSourceIdentity
 
 Conditions:
   SelfSignUpIsDisabled: !Equals [!Ref SelfSignUpEnabled, "false"]
 
 Resources:
+  SendingIdentity:
+    Type: AWS::SES::EmailIdentity
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EmailIdentity: !Ref SendingDomain
+      DkimAttributes:
+        SigningEnabled: true
+
   AccountUserPool:
     Type: AWS::Cognito::UserPool
     DeletionPolicy: Retain
@@ -42,7 +55,7 @@ Resources:
         AllowAdminCreateUserOnly: !If [SelfSignUpIsDisabled, true, false]
       EmailConfiguration:
         EmailSendingAccount: DEVELOPER
-        SourceArn: !Ref EmailSourceArn
+        SourceArn: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${EmailSourceIdentity}
         From: !Sub Clankie <${EmailFrom}>
 
   MacClient:
@@ -67,6 +80,22 @@ Resources:
         RetryGracePeriodSeconds: 60
 
 Outputs:
+  SendingDomain:
+    Value: !Ref SendingIdentity
+  SendingIdentityArn:
+    Value: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${SendingIdentity}
+  DkimName1:
+    Value: !GetAtt SendingIdentity.DkimDNSTokenName1
+  DkimValue1:
+    Value: !GetAtt SendingIdentity.DkimDNSTokenValue1
+  DkimName2:
+    Value: !GetAtt SendingIdentity.DkimDNSTokenName2
+  DkimValue2:
+    Value: !GetAtt SendingIdentity.DkimDNSTokenValue2
+  DkimName3:
+    Value: !GetAtt SendingIdentity.DkimDNSTokenName3
+  DkimValue3:
+    Value: !GetAtt SendingIdentity.DkimDNSTokenValue3
   UserPoolId:
     Value: !Ref AccountUserPool
   ClientId:

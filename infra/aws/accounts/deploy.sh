@@ -23,11 +23,33 @@ case "$command_name" in
       echo "CLANKIE_ACCOUNT_SELF_SIGNUP must be true or false" >&2
       exit 2
     }
-    email_identity="${CLANKIE_ACCOUNT_EMAIL_IDENTITY:-}"
-    [[ "$email_identity" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || {
-      echo "Set CLANKIE_ACCOUNT_EMAIL_IDENTITY to a verified Amazon SES email address" >&2
+    sending_domain="${CLANKIE_ACCOUNT_SENDING_DOMAIN:-clankie.bot}"
+    [[ "$sending_domain" =~ ^[[:alnum:]][[:alnum:].-]*\.[[:alpha:]]{2,}$ ]] || {
+      echo "CLANKIE_ACCOUNT_SENDING_DOMAIN must be a domain" >&2
       exit 2
     }
+    email_identity="${CLANKIE_ACCOUNT_EMAIL_IDENTITY:-}"
+    [[ "$email_identity" =~ ^([^[:space:]@]+@)?[[:alnum:]][[:alnum:].-]*\.[[:alpha:]]{2,}$ ]] || {
+      echo "Set CLANKIE_ACCOUNT_EMAIL_IDENTITY to a verified Amazon SES email or domain identity" >&2
+      exit 2
+    }
+    email_from="${CLANKIE_ACCOUNT_EMAIL_FROM:-$email_identity}"
+    [[ "$email_from" =~ ^[^[:space:]@]+@[[:alnum:]][[:alnum:].-]*\.[[:alpha:]]{2,}$ ]] || {
+      echo "CLANKIE_ACCOUNT_EMAIL_FROM must be an email address" >&2
+      exit 2
+    }
+    if [[ "$email_identity" == *"@"* ]]; then
+      [[ "$email_from" == "$email_identity" ]] || {
+        echo "An email identity can send only from that exact address" >&2
+        exit 2
+      }
+    else
+      from_domain="${email_from##*@}"
+      [[ "$from_domain" == "$email_identity" || "$from_domain" == *".$email_identity" ]] || {
+        echo "CLANKIE_ACCOUNT_EMAIL_FROM must belong to the verified domain identity" >&2
+        exit 2
+      }
+    fi
     verified="$(aws sesv2 get-email-identity \
       --region "$region" \
       --email-identity "$email_identity" \
@@ -37,16 +59,15 @@ case "$command_name" in
       echo "Amazon SES identity is not verified: $email_identity" >&2
       exit 1
     }
-    account_id="$(aws sts get-caller-identity --query Account --output text)"
-    source_arn="arn:aws:ses:$region:$account_id:identity/$email_identity"
     aws cloudformation deploy \
       --region "$region" \
       --stack-name "$stack_name" \
       --template-file infra/aws/accounts/template.yaml \
       --parameter-overrides \
+        "SendingDomain=$sending_domain" \
         "SelfSignUpEnabled=$self_signup" \
-        "EmailSourceArn=$source_arn" \
-        "EmailFrom=$email_identity"
+        "EmailSourceIdentity=$email_identity" \
+        "EmailFrom=$email_from"
     aws cloudformation describe-stacks \
       --region "$region" \
       --stack-name "$stack_name" \
