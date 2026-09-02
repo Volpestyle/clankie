@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
@@ -35,6 +36,19 @@ export const PublicGatewayInstallationIdSchema = z
   .length(22)
   .regex(/^[A-Za-z0-9_-]+$/u);
 export type PublicGatewayInstallationId = z.infer<typeof PublicGatewayInstallationIdSchema>;
+
+export function derivePublicGatewayHostId(accountId: string, installationId: string): PublicGatewayHostId {
+  const parsedInstallationId = PublicGatewayInstallationIdSchema.parse(installationId);
+  if (accountId.length === 0 || accountId.length > 2_048) throw new Error("Account id is invalid");
+  return PublicGatewayHostIdSchema.parse(
+    createHash("sha256")
+      .update("clankie-host-v1\0")
+      .update(accountId)
+      .update("\0")
+      .update(parsedInstallationId)
+      .digest("base64url"),
+  );
+}
 
 const ExactHttpsOrLoopbackOriginSchema = z
   .string()

@@ -8,12 +8,12 @@ import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayTunnelFrameSchema,
+  derivePublicGatewayHostId,
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
 } from "@clankie/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { derivePublicGatewayHostId } from "@clankie/credential-broker";
 import {
   createPublicGateway,
   loadHostTokens,

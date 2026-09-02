@@ -2,7 +2,6 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
-import { derivePublicGatewayHostId } from "@clankie/credential-broker";
 import {
   PairingRedeemRequestSchema,
   PUBLIC_GATEWAY_CONFIG_PATH,
@@ -15,6 +14,7 @@ import {
   PublicGatewayHostIdSchema,
   PublicGatewayInstallationIdSchema,
   PublicGatewayTunnelFrameSchema,
+  derivePublicGatewayHostId,
   publicGatewayTargetFor,
   type PublicGatewayCapabilityHash,
   type PublicGatewayConfig,

@@ -11,7 +11,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@clankie/credential-broker": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "ws": "8.21.0",
     "zod": "4.4.3"

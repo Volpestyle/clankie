@@ -1,15 +1,16 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   PUBLIC_GATEWAY_CONFIG_PATH,
   PublicGatewayConfigSchema,
-  PublicGatewayHostIdSchema,
   PublicGatewayInstallationIdSchema,
+  derivePublicGatewayHostId,
   type PublicGatewayConfig,
 } from "@clankie/protocol";
 import { z } from "zod";
 import type { CredentialStore, ProviderCredential } from "./credential-store.ts";
 
 export const CLANKIE_ACCOUNT_PROVIDER_ID = "clankie-account";
+export { derivePublicGatewayHostId } from "@clankie/protocol";
 
 const ACCESS_REFRESH_WINDOW_MS = 5 * 60_000;
 const TOKEN_LIFETIME_FALLBACK_SECONDS = 3_600;
@@ -80,19 +81,6 @@ export type ClankieAccountTokenProvider = () => Promise<ClankieAccountAccessToke
 
 export function generatePublicGatewayInstallationId(): string {
   return PublicGatewayInstallationIdSchema.parse(randomBytes(16).toString("base64url"));
-}
-
-export function derivePublicGatewayHostId(accountId: string, installationId: string): string {
-  const parsedInstallationId = PublicGatewayInstallationIdSchema.parse(installationId);
-  if (accountId.length === 0 || accountId.length > 2_048) throw new Error("Account id is invalid");
-  return PublicGatewayHostIdSchema.parse(
-    createHash("sha256")
-      .update("clankie-host-v1\0")
-      .update(accountId)
-      .update("\0")
-      .update(parsedInstallationId)
-      .digest("base64url"),
-  );
 }
 
 export async function discoverPublicGatewayAccount(
