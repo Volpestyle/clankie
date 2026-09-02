@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./public-gateway.ts";
 
 /** Frozen event-log partition key. Still serialized as `missionId`. */
 export const MissionIdSchema = z.string().min(1);
@@ -3672,6 +3671,14 @@ export const DeviceRecordSchema = z
     }
   });
 export type DeviceRecord = z.infer<typeof DeviceRecordSchema>;
+
+/**
+ * Longest a pairing route may sit at the public gateway, and so the ceiling on
+ * a review offer's lifetime (ADR 0154): one number, two limits, no drift. It
+ * lives here rather than in `public-gateway.ts` because the React Native
+ * client bundles this index and that module needs `node:crypto`.
+ */
+export const PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS = 31 * 24 * 60 * 60_000;
 
 /**
  * `POST /v1/pairing/offer` body. Empty means an ordinary five-minute offer;

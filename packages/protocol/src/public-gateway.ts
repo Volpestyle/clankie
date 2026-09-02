@@ -10,12 +10,8 @@ export const PUBLIC_GATEWAY_HOST_PATH_PREFIX = "/h";
 export const PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX = 1024 * 1024;
 export const PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX = 48 * 1024;
 export const PUBLIC_GATEWAY_IN_FLIGHT_MAX = 128;
-/**
- * Longest a pairing route may sit at the gateway. The control plane caps a
- * review offer's lifetime with this same number (ADR 0154), so the offer
- * lifetime and the gateway's route window move together by construction.
- */
-export const PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS = 31 * 24 * 60 * 60_000;
+/** The gateway's route window; defined beside the review-offer cap it shares (ADR 0154). */
+export { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./index.ts";
 
 export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/pairing/redeem", target: "control" },
