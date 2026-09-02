@@ -47,6 +47,10 @@ index). Configure through the headless CLI:
 | Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`              |
 | Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`               |
 | Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                   |
+| Which herdr session he leads          | `clankie herdr status`, `clankie herdr set --session NAME`                            |
+| His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`         |
+| Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)       |
+| Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                |
 | Pick up model/provider config         | `clankie restart captain`                                                             |
 | Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json` |
 | Rotate operator credential            | `clankie operator-credential rotate --json`                                           |
@@ -58,7 +62,12 @@ JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `play stop` prints `Nothing is playing.` (not JSON) when idle. A bare
 `--base-url` origin is rewritten to `/v1`. `--set` selects the first listed
 model. If the probe fails, pass `--models id,id`. Local LLM servers (ds4,
-Ollama, LM Studio) are not launcher-owned; start them yourself.
+Ollama, LM Studio) are not launcher-owned; start them yourself. `stance` moves
+your own figure in the commons and takes no seat argument — it resolves
+`HERDR_PANE_ID` against the live census, so it can only move the figure you are
+sitting in. `--for` defaults to 15 minutes, caps at an hour, and then lapses
+back to observed behavior. `{"outcome":"unseated"}` means this pane holds no
+fleet seat — normal in a plain shell, not an error.
 
 The person at the console can still use slash commands (`/auth`, `/provider`,
 `/model`, `/effort`, `/image-model`, `/video-model`, `/games`, `/discord`,

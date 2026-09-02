@@ -10,7 +10,7 @@ service (`apps/clankie`) plus the surfaces that reach it.
 ## Map
 
 - `apps/clankie` — the service: pi-based captain (sessions, tools, persona),
-  HTTP API, game bodies, browser host, media generation, presence, memory.
+  HTTP API, game body, browser host, media generation, presence, memory.
 - `apps/tui` — the operator console (`clankie` launcher lives here).
 - `apps/menu-bar` — native macOS menu bar: private local voice and operator
   conversation tails.
@@ -18,6 +18,8 @@ service (`apps/clankie`) plus the surfaces that reach it.
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/relay` — remote access for the phone/desktop app.
+- `apps/gateway` — the public AWS doorway (ADR 0151); holds no state and
+  routes back to a configured Mac over its outbound socket.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
 - `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
   actions); all other herdr integration is vanilla CLI/socket (ADR 0139).

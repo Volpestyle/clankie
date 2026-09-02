@@ -12,7 +12,9 @@ flowchart LR
   TUI -. "secret wizards" .-> State
   OperatorSeat["Claude Code seat<br/>clankie plugin · owner's plan"] -->|"clankie mcp · hooks"| Service
   Phone["iPhone / iPad"] --> Gateway["api.clankie.bot<br/>Lightsail + Caddy gateway"]
-  Service -->|"authenticated outbound WebSocket"| Gateway
+  Service -->|"outbound WebSocket<br/>Cognito access token"| Gateway
+  Service -->|"email one-time code<br/>access + refresh token"| Accounts["Cognito user pool<br/>account authority"]
+  Gateway -. "verifies the JWT via JWKS<br/>derives the host route" .-> Accounts
   Gateway --> Relay["apps/relay<br/>device-authorized operator API"]
   Gateway --> Service
   Phone -. "optional direct Tailscale lane" .-> Relay
@@ -40,6 +42,18 @@ The Mac remains authoritative for offers, devices, grants, conversations,
 terminal sessions, Herdr, and credentials. Pairing begins at the stable global
 origin, then the Mac returns `/h/{hostId}` as the control and relay base for the
 device session. See [ADR 0151](adr/0151-the-public-doorway-routes-home.md).
+
+A Mac earns its place at that doorway by signing in, not by an operator copying
+a bearer. One Cognito user pool is the account authority: `/gateway` completes
+an email one-time code, the broker keeps the access and rotating refresh token
+as `clankie-account`, and the Mac presents the access token on its outbound
+WebSocket. The gateway verifies that JWT against Cognito's published keys and
+derives the host route from the account subject plus a per-installation id, so
+it needs no account or host database and every Mac under one account keeps a
+distinct route. Cognito identifies Macs only; phones are identified by device
+sessions the Mac itself signs. See
+[ADR 0153](adr/0153-an-account-signs-the-mac-in.md) and the secret-by-secret
+trust map in [`docs/credentials.md`](credentials.md#who-holds-which-secret).
 
 ## How a message becomes a turn
 
@@ -378,6 +392,8 @@ release so he can describe and set up this machine without a git tree
 | Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                                     |
 | Herdr plugin (board, console)     | [`integrations/herdr-plugin/README.md`](../integrations/herdr-plugin/README.md)                   |
 | Claude Code seat plugin           | [`integrations/claude-plugin/README.md`](../integrations/claude-plugin/README.md)                 |
+| Public doorway (AWS gateway)      | [`apps/gateway/README.md`](../apps/gateway/README.md)                                             |
+| Account sign-in (Cognito)         | [`infra/aws/accounts/README.md`](../infra/aws/accounts/README.md)                                 |
 | Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                         |
 | Install card (`clankie doctor`)   | [`docs/adr/0142-the-install-tells-him-the-truth.md`](adr/0142-the-install-tells-him-the-truth.md) |
 | macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                           |

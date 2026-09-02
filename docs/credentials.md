@@ -48,6 +48,8 @@ flowchart LR
   Broker --> User[lab user account]
   Broker --> PlayVoice[clankie_play_voice]
   Broker --> Seat[pokeagent_mmo_world]
+  Broker --> Account[clankie-account]
+  Account --> Doorway[this Mac's route at api.clankie.bot]
   PlayVoice --> Active[active Discord body]
   PlayVoice --> ClankiePlay[Clankie's local or hosted play]
   Seat --> ClankieSeat[Clankie's hosted player identity]
@@ -199,3 +201,49 @@ request. The gateway verifies its Cognito signature and claims without storing
 an account or host registry. `/gateway` disable removes the local account token
 and installation binding. The old `clankie-public-gateway` static bearer remains
 readable only for migration and local development; new users never enter it.
+
+### Who holds which secret
+
+Remote access layers four secrets, each held by one party and checked by
+another. No user ever receives a certificate: one TLS certificate secures every
+pipe, and identity comes from tokens.
+
+```mermaid
+flowchart LR
+  subgraph Phone["iPhone / iPad"]
+    DeviceBearer["device session bearer<br/>platform Keychain"]
+  end
+  subgraph Edge["api.clankie.bot on Lightsail"]
+    Cert["one TLS certificate<br/>Caddy · Let's Encrypt"]
+    Gateway["gateway<br/>verifies the Mac's JWT<br/>forwards the device bearer unread"]
+  end
+  subgraph Mac["this Mac"]
+    Account["clankie-account<br/>Cognito access + refresh"]
+    DeviceKey["device-session.key<br/>HMAC signer, mode 0600"]
+    Devices["device projection<br/>grants · revocation"]
+  end
+  Cognito["Cognito user pool<br/>issues tokens · publishes JWKS"]
+  Phone -->|"HTTPS"| Cert
+  Account -->|"HTTPS WebSocket<br/>Bearer access token"| Cert
+  Cert --> Gateway
+  Account -. "email one-time code<br/>hourly refresh" .-> Cognito
+  Gateway -. "JWKS" .-> Cognito
+  Gateway -->|"bounded exchange over<br/>the Mac's own socket"| Devices
+  DeviceKey -->|"signs and verifies"| Devices
+```
+
+| Secret                                      | Lives on                                   | Issued by                              | Verified by                                                                                            | Proves                                                               |
+| ------------------------------------------- | ------------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| TLS certificate for `api.clankie.bot`       | Caddy's volume on the Lightsail instance   | Let's Encrypt, renewed by Caddy        | every phone's and Mac's TLS stack                                                                      | the client reached the real doorway; nothing about who the client is |
+| `clankie-account` access and refresh tokens | Mac Keychain via the broker                | Cognito, after the email one-time code | the gateway, offline against Cognito's JWKS on every connect                                           | which account and which installation this Mac is                     |
+| `device-session.key`                        | `~/.clankie/device-session.key`, mode 0600 | the Mac itself on first run            | the Mac itself; it never leaves the machine                                                            | nothing to anyone else; it signs the bearers below                   |
+| Device session bearer                       | the phone's Keychain                       | the Mac at pairing completion          | the Mac and relay on every request, with grants read from the projection; the gateway only forwards it | which paired device is asking, and only for the Mac that signed it   |
+
+Cognito therefore identifies Macs and only Macs. Phones never talk to Cognito,
+and the gateway never mints, validates, or stores a device session. Because
+public TLS terminates on the gateway instance, that process handles forwarded
+bytes in the clear while it relays them; it retains and logs none of them.
+Application-layer device-to-Mac encryption is the stated gate before unrelated
+customers share the doorway
+([ADR 0151](adr/0151-the-public-doorway-routes-home.md),
+[ADR 0153](adr/0153-an-account-signs-the-mac-in.md)).
