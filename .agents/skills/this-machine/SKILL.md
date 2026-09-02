@@ -85,5 +85,19 @@ bare or with `--version` — that starts a TUI and hangs the shell. `herdr-lead
 state` and `herdr-lead split` are the headless verbs. If the plugin is
 bundled and not linked, doctor's `remediations` already has the link command.
 
+## The seat
+
+`clankie seat` opens Claude Code as you, on your person's own plan, with your
+tools over the `clankie` MCP server, your persona and memory card injected by
+the plugin's hooks, and these skills as `/clankie:this-machine` and
+`/clankie:trace-clankie`. Doctor's `laneTools` says whether the service's
+`/v1/mcp` route answers; `clankie seat --dry-run` prints the launch plan
+(`plugin.source` is `installed` or `plugin-dir`, `channel` says whether wakes
+reach that session). The seat's own brain is Claude Code's `/model`;
+`clankie model` changes the service lanes. Inside a herdr pane the seat is the
+agent named `clankie`, and that pane is your head: the app's Clankie thread
+shows its settled turns, and your self-wakes and herdr watches arrive there as
+`<channel source="clankie">` events while it is open.
+
 Checkout-only procedures (`verify-clankie`, `release-clankie`, `pnpm check`)
 exist only when doctor says `kind: checkout`.

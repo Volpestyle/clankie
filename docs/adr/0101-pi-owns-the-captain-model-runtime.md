@@ -1,6 +1,10 @@
 # ADR 0101: Pi owns the captain model runtime
 
-Status: accepted (James, 2026-08-15).
+Status: accepted (James, 2026-08-15). Amended by
+[ADR 0152](0152-a-harness-takes-the-operator-seat.md) (2026-09-01): pi owns the
+model runtime for the pi lanes. A harness in the operator seat runs on its own
+model; `clankie model` and `/effort` change the service lanes, and the seat's
+harness owns its own selection.
 
 ## Context
 

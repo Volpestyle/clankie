@@ -24,6 +24,10 @@ service (`apps/clankie`) plus the surfaces that reach it.
   Optional, linked per checkout or from an installed release (`clankie doctor`
   names the path): setup and troubleshooting in its README, status in
   `pnpm doctor` (checkout) or `clankie doctor` (any install).
+- `integrations/claude-plugin` — Clankie's Claude Code plugin: the operator
+  seat as an output style, hooks, the `clankie mcp` stdio bridge, and linked
+  product skills (ADR 0152). `clankie seat` launches it; it carries only what
+  a plugin can uniquely declare, like the herdr plugin.
 - `.agents/skills` — product skills shipped with every install (`this-machine`,
   `trace-clankie`). Checkout-only skills live in `.agents/dev-skills`.
 - `packages/play` — his play mind above one body seam; the body itself is his

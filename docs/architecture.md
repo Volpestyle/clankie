@@ -10,6 +10,7 @@ flowchart LR
   TUI["operator TUI"] --> Commands --> Config["clankie.json + settings.json"]
   TUI --> Service["apps/clankie<br/>captain, tools, HTTP authority"]
   TUI -. "secret wizards" .-> State
+  OperatorSeat["Claude Code seat<br/>clankie plugin · owner's plan"] -->|"clankie mcp · hooks"| Service
   Phone["iPhone / iPad"] --> Gateway["api.clankie.bot<br/>Lightsail + Caddy gateway"]
   Service -->|"authenticated outbound WebSocket"| Gateway
   Gateway --> Relay["apps/relay<br/>device-authorized operator API"]
@@ -102,6 +103,24 @@ seat, channel, and stance changes advance the same cursor. Foreground apps
 therefore render one current seats/personas/channels moment without polling or
 persisting a second world projection
 ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)).
+The operator seat is a place any harness can sit
+([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)). `clankie seat`
+opens Claude Code, on the owner's own plan, as Clankie: the plugin at
+[`integrations/claude-plugin`](../integrations/claude-plugin/README.md) forces
+his identity as the output style, injects the owner persona, reach, address,
+and service model card at session start (`clankie prompt`) and the newest
+memory card on every turn (`clankie memory-card`), and names one stdio MCP
+server, `clankie mcp`, that bridges to the service's lane tool bank at
+`/v1/mcp` with the operator bearer read from the broker. The bank is the same
+authored registry the pi session is built from, wrapped once at runtime and
+scoped by the bearer's lane, so a Codex pane with the same entry is the same
+seat. A herdr pane named `clankie` is his head: the census binds it to his own
+persona rather than a fleet contact and projects its transcript into the
+conversation the app pins. While a seat is bound, self-wakes, herdr completion
+watches, and room escalations reach it as channel events pushed by `clankie
+mcp`; with no seat open they run the TUI operator lane on pi as before. Social
+lanes never sit in the seat: the owner's plan carries only the owner.
+
 A TUI process creates a fresh captain conversation unless `--chat` explicitly
 resumes one. A captain conversation and its Pi session are one lifetime: bounded
 retention removes their shared directory, while public event logs rotate with
@@ -358,6 +377,7 @@ release so he can describe and set up this machine without a git tree
 | Launcher command layer            | [`docs/cli.md`](cli.md)                                                                           |
 | Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                                     |
 | Herdr plugin (board, console)     | [`integrations/herdr-plugin/README.md`](../integrations/herdr-plugin/README.md)                   |
+| Claude Code seat plugin           | [`integrations/claude-plugin/README.md`](../integrations/claude-plugin/README.md)                 |
 | Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                         |
 | Install card (`clankie doctor`)   | [`docs/adr/0142-the-install-tells-him-the-truth.md`](adr/0142-the-install-tells-him-the-truth.md) |
 | macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                           |
