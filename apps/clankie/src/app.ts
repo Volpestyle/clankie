@@ -75,6 +75,7 @@ import {
   type CallBrowserToolRequest,
   type CallBrowserToolResult,
   type CaptainChannelTurnResult,
+  type CaptainSessionLaneV2,
   type DeviceGrantSet,
   type DeviceRecord,
   type DeviceSelfResponse,
@@ -92,7 +93,7 @@ import {
 import { personaInstructions, SettingsStore, type ClankieSettings } from "@clankie/settings";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import type { CaptainPort } from "./captain/port.ts";
+import { CAPTAIN_PROMPT_SECTIONS, type CaptainPort, type CaptainPromptSection } from "./captain/port.ts";
 import {
   CaptainPresenceLeaseConflictError,
   CaptainPresenceManager,
@@ -119,6 +120,7 @@ import {
   DeviceSessionSigner,
   mintDeviceSessionClaims,
 } from "./device-session.ts";
+import { createLaneMcpEndpoint } from "./lane-mcp.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import type { MemoryStores } from "./memory.ts";
 import { LocalVoiceChatSession } from "./local-voice-chat.ts";
@@ -182,6 +184,26 @@ const LOCAL_VOICE_REALTIME_SURFACE_RULES = [
   REALTIME_MEMORY_AGENCY_RULE,
   "- Voice never approves privileged actions. If a tool needs typed input or approval, send the operator to the authenticated operator console.",
 ].join("\n");
+
+/**
+ * A headless read of a lane's prompt (VUH-1086). The lane defaults to the one
+ * the bearer speaks for; sections default to what the pi session starts with.
+ */
+const CaptainLanePromptQuerySchema = z
+  .object({
+    lane: CaptainSessionLaneV2Schema.optional(),
+    sections: z
+      .string()
+      .transform((raw) =>
+        raw
+          .split(",")
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0),
+      )
+      .pipe(z.array(z.enum(CAPTAIN_PROMPT_SECTIONS)).min(1).max(CAPTAIN_PROMPT_SECTIONS.length))
+      .optional(),
+  })
+  .strict();
 
 const DiscordPersonMemoryProposalRequestSchema = z
   .object({
@@ -523,7 +545,66 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return { principal: { kind: "operator", id: operator.operatorId } };
   };
 
+  /**
+   * Which captain lane a bearer speaks for. The operator credential and the
+   * console's own captain token are the operator; a Discord bridge bearer is
+   * the social lane it serves. This is the one place a bearer becomes a lane,
+   * so the seat's tool bank and the headless prompt reads cannot disagree
+   * about who holds what.
+   */
+  const authenticateLane = async (
+    context: Context,
+  ): Promise<{ lane: CaptainSessionLaneV2 } | { denial: Response }> => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain && captain !== "unavailable") {
+      if (captain.steerSourceLane === "discord_text") return { lane: "discord_presence" };
+      if (captain.steerSourceLane === "discord_voice") return { lane: "discord_voice" };
+      return { lane: "operator" };
+    }
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator && operator !== "unavailable") return { lane: "operator" };
+    if (captain === "unavailable" && operator === "unavailable") {
+      return { denial: context.json({ error: "authentication_unavailable" }, 503) };
+    }
+    return { denial: context.json({ error: "authentication_required" }, 401) };
+  };
+
   app.get("/health", (context) => context.json({ ok: true, service: "clankie" }));
+
+  // The lane's prompt and memory card, readable outside a pi session so a seat
+  // in another harness starts from the same words (VUH-1086). A bearer may read
+  // only its own lane: the operator card carries operator-private notes.
+  app.get("/v1/captain/prompt", async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    const query = CaptainLanePromptQuerySchema.safeParse(context.req.query());
+    if (!query.success) return context.json({ error: "invalid_request" }, 400);
+    const lane = query.data.lane ?? auth.lane;
+    if (lane !== auth.lane) return context.json({ error: "lane_forbidden" }, 403);
+    const sections: readonly CaptainPromptSection[] | undefined = query.data.sections;
+    return context.text(
+      await dependencies.captain.lanePrompt({ lane, ...(sections === undefined ? {} : { sections }) }),
+    );
+  });
+
+  app.get("/v1/captain/memory-card", async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    const lane = CaptainSessionLaneV2Schema.safeParse(context.req.query("lane") ?? auth.lane);
+    if (!lane.success) return context.json({ error: "invalid_request" }, 400);
+    if (lane.data !== auth.lane) return context.json({ error: "lane_forbidden" }, 403);
+    return context.text(await dependencies.captain.laneMemoryCard(lane.data));
+  });
+
+  // The same lane's tools, over streamable-HTTP MCP, for a seat in a harness
+  // that speaks it (VUH-1085). The bearer selects the lane; the captain's tool
+  // registry is still the only place a tool is defined.
+  const laneMcp = createLaneMcpEndpoint({ captain: dependencies.captain });
+  app.all("/v1/mcp", async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    return laneMcp.handle(context.req.raw, auth.lane);
+  });
 
   app.get("/v1/discord/readiness", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
@@ -2022,7 +2103,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         room?.channelId === undefined ? undefined : { guildId: room.guildId, channelId: room.channelId },
       );
     },
-    close: () => captainPresence.close(),
+    close: () => {
+      captainPresence.close();
+      void laneMcp.close();
+    },
   };
 }
 

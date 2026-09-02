@@ -586,6 +586,17 @@ export class ConversationStore {
     return kind === "global" || kind === "workspace";
   }
 
+  /**
+   * The one default global conversation — his own room, and the head a seat
+   * outside any delivery attributes to. The store guarantees it exists.
+   */
+  public defaultGlobalConversationId(): string {
+    for (const meta of this.metas.values()) {
+      if (meta.scope.kind === "global" && meta.isDefault) return meta.conversationId;
+    }
+    return "global-default";
+  }
+
   public conversationIdForSeat(seatId: string): string | undefined {
     return [...this.metas.values()].find((meta) => meta.scope.kind === "seat" && meta.scope.seatId === seatId)
       ?.conversationId;

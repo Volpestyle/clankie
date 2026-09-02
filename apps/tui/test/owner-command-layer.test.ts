@@ -73,6 +73,7 @@ describe("canonical owner command layer", () => {
       credentials: [],
       commands: {},
       herdrPlugin: { bundled: false },
+      laneTools: { url: "http://127.0.0.1:4310/v1/mcp", reachable: true },
       selectedModel: null,
       remediations: [],
     } as const;

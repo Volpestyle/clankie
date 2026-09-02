@@ -22,6 +22,9 @@ const missing: ExecFileImpl = async () => {
   throw Object.assign(new Error("not found"), { code: "ENOENT" });
 };
 
+/** Probes are a seam so a run never depends on what happens to answer locally. */
+const offline: typeof fetch = () => Promise.reject(new Error("no probe in tests"));
+
 describe("install doctor", () => {
   it("treats a tree with libexec/node and release.json as a release", async () => {
     const root = await installRoot();
@@ -59,6 +62,7 @@ describe("install doctor", () => {
       settings,
       credentialStore: store,
       execFileImpl: missing,
+      fetchImpl: offline,
     });
 
     expect(report.kind).toBe("checkout");
@@ -167,17 +171,18 @@ describe("install doctor", () => {
       );
       expect(healthy.remediations).toEqual([]);
 
-      let probed = false;
+      const probed: string[] = [];
       const builtin = await doctorWith(
         {},
         "xai/grok-4.6",
-        () => {
-          probed = true;
+        (input) => {
+          probed.push(String(input));
           return Promise.resolve(new Response("{}", { status: 200 }));
         },
         new FileCredentialStore(join(await installRoot(), "credentials.json")),
       );
-      expect(probed).toBe(false);
+      // The lane-tools route is probed on every run; a builtin provider is not.
+      expect(probed).toEqual([builtin.laneTools.url]);
       expect(builtin.selectedModel).toEqual({
         ref: "xai/grok-4.6",
         providerId: "xai",
@@ -185,6 +190,30 @@ describe("install doctor", () => {
       });
       expect(builtin.remediations).toEqual([]);
     });
+  });
+
+  it("names where a harness reaches his tools, on the evidence of the route's own 401", async () => {
+    const root = await installRoot();
+    const env = { HOME: join(root, "home"), CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:4310/" };
+    const store = new FileCredentialStore(join(root, "credentials.json"));
+    const served = await inspectInstall({
+      repoRoot: root,
+      env,
+      credentialStore: store,
+      execFileImpl: missing,
+      fetchImpl: (input) =>
+        Promise.resolve(new Response("", { status: String(input).endsWith("/v1/mcp") ? 401 : 404 })),
+    });
+    const unserved = await inspectInstall({
+      repoRoot: root,
+      env,
+      credentialStore: store,
+      execFileImpl: missing,
+      fetchImpl: () => Promise.resolve(new Response("", { status: 404 })),
+    });
+
+    expect(served.laneTools).toEqual({ url: "http://127.0.0.1:4310/v1/mcp", reachable: true });
+    expect(unserved.laneTools).toEqual({ url: "http://127.0.0.1:4310/v1/mcp", reachable: false });
   });
 
   it("asks to link a bundled herdr plugin when herdr is present and the plugin is not linked", async () => {
@@ -213,6 +242,7 @@ describe("install doctor", () => {
       repoRoot: root,
       env: { HOME: join(root, "home"), XDG_CONFIG_HOME: configHome },
       execFileImpl,
+      fetchImpl: offline,
     });
 
     expect(report.kind).toBe("release");
@@ -238,6 +268,7 @@ describe("install doctor", () => {
       repoRoot: root,
       env: { HOME: join(root, "home"), PATH: bin },
       execFileImpl,
+      fetchImpl: offline,
     });
 
     expect(report.commands["herdr-lead"]).toEqual({ present: true });

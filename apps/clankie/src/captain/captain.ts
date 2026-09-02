@@ -63,10 +63,10 @@ import {
 import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
-import type { CaptainPort } from "./port.ts";
-import { connectionTools } from "./connect-tools.ts";
+import type { CaptainPort, CaptainPromptSection } from "./port.ts";
+import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
-import { browserExtension, captainTools, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
+import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
 import {
   contextTokenCount,
   recordPiToolStart,
@@ -185,6 +185,11 @@ const EMPTY_EPISODE_CARD = [
   "Nothing yet — you have not written an episode. `remember_episode` is how one gets here.",
 ].join("\n");
 
+/** The card as it reaches the prompt: an empty ring says so rather than vanishing. */
+function renderEpisodeCard(card: string): string {
+  return card.length === 0 ? EMPTY_EPISODE_CARD : card;
+}
+
 /** Refresh bounded episodic recall as trusted context for every Pi run. */
 export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: CaptainSessionLaneV2) {
   return {
@@ -194,11 +199,76 @@ export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: Capt
       pi.on("before_agent_start", async (event) => {
         const card = await memory.recallEpisodeCard(lane).catch(() => undefined);
         if (card === undefined) return undefined;
-        const rendered = card.length === 0 ? EMPTY_EPISODE_CARD : card;
-        return { systemPrompt: `${event.systemPrompt}\n\n${rendered}` };
+        return { systemPrompt: `${event.systemPrompt}\n\n${renderEpisodeCard(card)}` };
       });
     },
   } satisfies InlineExtension;
+}
+
+/** The sections a pi session is built with; the model card is refreshed per run instead. */
+const SESSION_PROMPT_SECTIONS: readonly CaptainPromptSection[] = ["identity", "persona", "reach", "address"];
+
+/**
+ * The prompt a lane starts from, one section per concern. The pi session and a
+ * seat outside pi (`lanePrompt`) both call this, so the two can never drift:
+ * there is one assembly, and each caller names the sections it wants. Selected
+ * sections are trimmed and separated by one blank line; absent ones leave no
+ * gap.
+ */
+export function assembleLanePrompt(
+  lane: CaptainSessionLaneV2,
+  systemTools: boolean,
+  currentSettings: ClankieSettings,
+  selected: readonly CaptainPromptSection[] = SESSION_PROMPT_SECTIONS,
+  extra: Readonly<Partial<Record<CaptainPromptSection, string>>> = {},
+): string {
+  const identity = readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
+  const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
+  const reach = systemTools
+    ? [
+        "# Machine access",
+        "You have shell and filesystem tools in this authorized context. `herdr` talks to the local socket from this service. When a turn names your herdr pane, you have joined that session: the agents in `<herdr_session>` are yours to lead, route, and harvest. When it names none, you are on the socket only. Never run bare `herdr-lead` from this shell — that starts a TUI in-process and hangs.",
+      ].join("\n")
+    : [
+        "# This room",
+        "You do not have a shell or filesystem tools in this room. If someone asks you to inspect herdr, run a command, or read a file, say you cannot from here. Do not imply you chose not to look.",
+      ].join("\n");
+  // His own address is a fact he should be able to say without calling a tool
+  // for it, and it belongs to whichever mailbox is actually connected — so it
+  // is derived from settings rather than written into the persona a second
+  // time, where it would drift the day the mailbox changes.
+  const mailbox = currentSettings.email.fromAddress ?? currentSettings.email.username;
+  const address =
+    mailbox === undefined
+      ? ""
+      : [
+          "# Your address",
+          "",
+          `Your own mailbox is ${mailbox}. That is how someone reaches you directly, and you can give it out. Reading it stays at the console.`,
+        ].join("\n");
+  const sections: Partial<Record<CaptainPromptSection, string>> = {
+    identity,
+    persona,
+    reach,
+    address,
+    ...extra,
+  };
+  return selected
+    .map((name) => sections[name]?.trim() ?? "")
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+}
+
+/**
+ * What a lane holds by default, outside any turn: the operator console always
+ * has the shell; a social lane never does on its own. A Discord machine grant
+ * is decided per actor and per delivery by `planDiscordTurnSession`, which a
+ * bare lane bearer cannot present, so a lane read from outside a turn is the
+ * social default. `buildSession` takes the per-turn answer; this is the one for
+ * everything that asks about a lane rather than a turn.
+ */
+function laneHoldsSystemTools(lane: CaptainSessionLaneV2): boolean {
+  return lane === "operator";
 }
 
 /** 272000 -> "272k": a size he can say out loud, not an exact accounting. */
@@ -509,34 +579,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     currentSettings: ClankieSettings,
     sideConversation: boolean,
   ): string {
-    const identity = readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
-    const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
-    const reach = systemTools
-      ? [
-          "",
-          "# Machine access",
-          "You have shell and filesystem tools in this authorized context. `herdr` talks to the local socket from this service. When a turn names your herdr pane, you have joined that session: the agents in `<herdr_session>` are yours to lead, route, and harvest. When it names none, you are on the socket only. Never run bare `herdr-lead` from this shell — that starts a TUI in-process and hangs.",
-        ].join("\n")
-      : [
-          "",
-          "# This room",
-          "You do not have a shell or filesystem tools in this room. If someone asks you to inspect herdr, run a command, or read a file, say you cannot from here. Do not imply you chose not to look.",
-        ].join("\n");
-    // His own address is a fact he should be able to say without calling a tool
-    // for it, and it belongs to whichever mailbox is actually connected — so it
-    // is derived from settings rather than written into the persona a second
-    // time, where it would drift the day the mailbox changes.
-    const mailbox = currentSettings.email.fromAddress ?? currentSettings.email.username;
-    const address =
-      mailbox === undefined
-        ? ""
-        : [
-            "",
-            "# Your address",
-            "",
-            `Your own mailbox is ${mailbox}. That is how someone reaches you directly, and you can give it out. Reading it stays at the console.`,
-          ].join("\n");
-    return `${identity}\n\n${persona}${reach}${address}${sideConversation ? SIDE_CONVERSATION_INSTRUCTIONS : ""}`;
+    const prompt = assembleLanePrompt(lane, systemTools, currentSettings);
+    return `${prompt}${sideConversation ? SIDE_CONVERSATION_INSTRUCTIONS : ""}`;
   }
 
   /**
@@ -582,10 +626,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       model: selection.model,
       thinkingLevel: selection.thinkingLevel,
       modelRuntime: models,
-      customTools: [
-        ...captainTools(deps, capture, laneLog, lane, currentSettings.gameplay, autonomy, herdrWatches),
-        ...connectionTools(deps, lane),
-      ],
+      customTools: laneAuthoredTools(
+        deps,
+        capture,
+        laneLog,
+        lane,
+        currentSettings.gameplay,
+        autonomy,
+        herdrWatches,
+      ),
       resourceLoader: loader,
       sessionManager,
       settingsManager: piSettings,
@@ -1448,6 +1497,52 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         "You are present in a Discord voice channel. You hear only participants permitted by the room's consent policy and you speak " +
         "aloud: keep replies short, conversational, and free of markdown, links, file paths, or anything " +
         "that only makes sense on a screen. You are a participant in the room, not an assistant on call."
+      );
+    },
+
+    async lanePrompt({ lane, sections = SESSION_PROMPT_SECTIONS }) {
+      const currentSettings = await settings();
+      // The model card is per run in pi, so it is only assembled when asked for;
+      // a selection that cannot be resolved leaves the section out, as the
+      // extension does, rather than guessing.
+      const selection = sections.includes("model")
+        ? await (await runtime()).resolveSelection().catch(() => undefined)
+        : undefined;
+      return assembleLanePrompt(
+        lane,
+        laneHoldsSystemTools(lane),
+        currentSettings,
+        sections,
+        selection === undefined ? {} : { model: modelCard(selection) },
+      );
+    },
+
+    async laneMemoryCard(lane) {
+      return renderEpisodeCard(await deps.memory.recallEpisodeCard(lane));
+    },
+
+    async laneToolBank(lane) {
+      // One turn context per bank, so a seat's attachments and room stay its
+      // own. The operator seat's head is the default global conversation — the
+      // room `remember_episode`, `schedule_wake`, and `herdr_watch` attribute
+      // to. A social lane gets none: its attribution comes from a Discord
+      // delivery, which a bare bearer does not carry, and the tools that need
+      // one already say so.
+      const capture: TurnContext = {};
+      if (lane === "operator") {
+        const targetId = conversations.defaultGlobalConversationId();
+        capture.room = roomKey("operator", targetId);
+        capture.targetId = targetId;
+      }
+      const currentSettings = await settings();
+      return buildLaneToolBank(
+        deps,
+        capture,
+        laneLog,
+        lane,
+        currentSettings.gameplay,
+        autonomy,
+        herdrWatches,
       );
     },
 

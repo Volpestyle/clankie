@@ -1,6 +1,8 @@
 import type {
   CaptainChannelTurnResult,
   CaptainLaneObservationEntry,
+  CaptainSessionLaneV2,
+  CaptainTurnMedia,
   DiscordChannelProjectionMessage,
   DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
@@ -8,6 +10,44 @@ import type {
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
 } from "@clankie/protocol";
+
+/**
+ * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
+ * `reach`, and `address` are what a pi session starts with; `model` is the
+ * card a hidden extension refreshes per run. A seat that carries the identity
+ * some other way (a Claude Code output style) asks for the rest by name.
+ */
+export const CAPTAIN_PROMPT_SECTIONS = ["identity", "persona", "reach", "address", "model"] as const;
+export type CaptainPromptSection = (typeof CAPTAIN_PROMPT_SECTIONS)[number];
+
+/**
+ * One authored tool as a harness that is not pi sees it: a name, a description,
+ * the raw JSON Schema pi validates against, and a call. The captain's registry
+ * stays the single source of truth — this is a projection of it, never a second
+ * catalog to keep in step.
+ */
+export interface LaneTool {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: Record<string, unknown>;
+  call(args: Record<string, unknown>): Promise<LaneToolResult>;
+}
+
+export interface LaneToolResult {
+  readonly content: readonly (
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+  )[];
+  readonly isError?: boolean;
+  /** Media the call attached, exactly as a pi turn would carry it on the reply. */
+  readonly media?: CaptainTurnMedia;
+}
+
+/** One harness-neutral view of a lane's tools, with its own turn context (VUH-1085). */
+export interface LaneToolBank {
+  readonly lane: CaptainSessionLaneV2;
+  readonly tools: readonly LaneTool[];
+}
 
 /**
  * The seam between the HTTP app and the pi-based captain. The app layer parses
@@ -32,6 +72,23 @@ export interface CaptainPort {
   observeLanes(): Promise<readonly ObservableCaptainLane[]>;
   /** Prompt fragment describing the voice lane, for the realtime voice briefing. */
   voiceLaneInstructions(): string;
+  /**
+   * The system prompt a lane's pi session starts from, readable outside a pi
+   * session so a seat launcher or a per-turn hook can carry it into another
+   * harness. Sections default to what the session itself is built with.
+   */
+  lanePrompt(input: {
+    readonly lane: CaptainSessionLaneV2;
+    readonly sections?: readonly CaptainPromptSection[];
+  }): Promise<string>;
+  /** The memory card that lane's next run would inject, filtered the same way. */
+  laneMemoryCard(lane: CaptainSessionLaneV2): Promise<string>;
+  /**
+   * That lane's authority plan as callable tools, for a seat in another harness
+   * (VUH-1085). Each call opens its own turn context, so one seat's attachments
+   * and room never leak into another's.
+   */
+  laneToolBank(lane: CaptainSessionLaneV2): Promise<LaneToolBank>;
   /** Graceful shutdown: waits for in-flight turns. */
   close(): Promise<void>;
 }
@@ -60,6 +117,9 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     },
     observeLanes: async () => [],
     voiceLaneInstructions: () => "You are in a voice room.",
+    lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
+    laneMemoryCard: async () => "",
+    laneToolBank: async (lane) => ({ lane, tools: [] }),
     close: async () => {},
     ...overrides,
   };

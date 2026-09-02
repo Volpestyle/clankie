@@ -15,6 +15,7 @@ import {
   type LoadConfigResult,
 } from "@clankie/model-provider";
 import { SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
+import { commandHost } from "./command/io.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const PROBE_TIMEOUT_MS = 5_000;
@@ -77,6 +78,8 @@ export interface InstallDoctorReport {
   readonly credentials: readonly InstallDoctorCredential[];
   readonly commands: { readonly [name: string]: CommandPresence };
   readonly herdrPlugin: HerdrPluginReport;
+  /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
+  readonly laneTools: { readonly url: string; readonly reachable: boolean };
   readonly selectedModel: SelectedModelReport | null;
   readonly remediations: readonly string[];
 }
@@ -154,6 +157,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     bundled,
     pluginBundle,
   );
+  const laneTools = await inspectLaneTools(commandHost({ env }), options.fetchImpl ?? fetch);
   const model = unsetToNull(config.config.model);
   const credentialIds = new Set(credentials.map((entry) => entry.id));
   const selectedModel = await inspectSelectedModel(
@@ -203,9 +207,29 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     credentials,
     commands,
     herdrPlugin,
+    laneTools,
     selectedModel,
     remediations,
   };
+}
+
+/**
+ * The MCP route answers 401 unauthenticated, and that is the signal worth
+ * reporting: the route is served and it wants a lane bearer. Anything else —
+ * a refusal to connect, a 404 from an older service — means a seat pointed
+ * here would find nothing.
+ */
+async function inspectLaneTools(
+  host: string,
+  fetchImpl: typeof fetch,
+): Promise<{ readonly url: string; readonly reachable: boolean }> {
+  const url = `${host.replace(/\/+$/u, "")}/v1/mcp`;
+  try {
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    return { url, reachable: response.status === 401 };
+  } catch {
+    return { url, reachable: false };
+  }
 }
 
 /**

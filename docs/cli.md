@@ -115,6 +115,7 @@ tools are facts in `remediations`, not failures.
   "credentials": [{ "id": "openai", "type": "api" }],
   "commands": { "herdr": { "present": false } },
   "herdrPlugin": { "bundled": true, "bundlePath": "…/integrations/herdr-plugin" },
+  "laneTools": { "url": "http://127.0.0.1:4310/v1/mcp", "reachable": true },
   "remediations": ["Pick a captain model with `clankie model set provider/model` or `/model`."]
 }
 ```
@@ -122,6 +123,10 @@ tools are facts in `remediations`, not failures.
 `kind` is `checkout` or `release`. Credential entries are ids and types, never
 secrets. `commands` currently probes `herdr`, `ffmpeg`, `yt-dlp` (version
 strings) and `herdr-lead` (PATH only — never execute `herdr-lead --version`).
+`laneTools` names the streamable-HTTP MCP route that serves a lane's tool bank
+([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)); `reachable` is
+true when it answers an unauthenticated probe with 401, so the route is served
+and wants a lane bearer.
 
 ### `restart [service]`
 

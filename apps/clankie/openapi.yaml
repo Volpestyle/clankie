@@ -458,6 +458,119 @@ paths:
         "200":
           description: Lane listing
 
+  /v1/captain/prompt:
+    get:
+      tags: [Captain, Operator]
+      operationId: getCaptainLanePrompt
+      summary: The system prompt a lane's session starts from
+      description: |
+        Plain text, for a seat launcher in another harness. `sections` is a
+        comma-separated subset of `identity`, `persona`, `reach`, `address`,
+        `model`; omitted, it is the four a pi session starts with (`model` is
+        the per-run card, asked for by name). The lane must be the bearer's
+        own — the operator credential and the console captain token are
+        `operator`, a Discord bridge bearer is the lane it serves.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: query
+          name: lane
+          description: Defaults to the bearer's own lane.
+          schema: { type: string, enum: [operator, discord_voice, discord_presence, gameplay] }
+        - in: query
+          name: sections
+          schema: { type: string, example: "persona,model" }
+      responses:
+        "200":
+          description: The assembled prompt
+          content:
+            text/plain: {}
+        "400":
+          description: Unknown lane or section name
+        "403":
+          description: Lane is not the bearer's own
+
+  /v1/captain/memory-card:
+    get:
+      tags: [Captain, Operator]
+      operationId: getCaptainLaneMemoryCard
+      summary: The memory card that lane's next run injects
+      description: |
+        Plain text, for a per-turn hook. Filtered by lane the same way the pi
+        session's own injection is: operator-private episodes reach only the
+        operator lane. Empty when the lane has recalled nothing yet. The lane
+        must be the bearer's own.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: query
+          name: lane
+          description: Defaults to the bearer's own lane.
+          schema: { type: string, enum: [operator, discord_voice, discord_presence, gameplay] }
+      responses:
+        "200":
+          description: The lane's recall card
+          content:
+            text/plain: {}
+        "400":
+          description: Unknown lane
+        "403":
+          description: Lane is not the bearer's own
+
+  /v1/mcp:
+    post:
+      tags: [Captain]
+      operationId: laneMcp
+      summary: A lane's tool bank over streamable-HTTP MCP
+      description: |
+        Streamable-HTTP MCP over Clankie's authored tool registry. The bearer
+        selects the lane and the lane selects the tools: the operator credential
+        and the console captain token are `operator`, a Discord bridge bearer is
+        the lane it serves, and a connection lists exactly that lane's authority
+        plan (authored tools, the browser catalog, and the connected-service
+        tools that lane may reach). An `initialize` POST opens a session and
+        returns its id in `mcp-session-id`; every later request must carry that
+        header and resolve to the same lane. `DELETE` ends the session.
+        `clankie mcp` is the stdio bridge to this route (ADR 0152).
+      security:
+        [{ operatorBearer: [] }, { captainBearer: [] }, { discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      responses:
+        "200":
+          description: JSON-RPC response for this request
+        "400":
+          description: No session id on a non-initialize request
+        "403":
+          description: The session belongs to another lane
+        "404":
+          description: Unknown or expired session
+    get:
+      tags: [Captain]
+      operationId: laneMcpStream
+      summary: Server-to-client notification stream for an open session
+      description: Requires `mcp-session-id`; the bearer must resolve to the session's lane.
+      security:
+        [{ operatorBearer: [] }, { captainBearer: [] }, { discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      responses:
+        "200":
+          description: SSE stream
+        "400":
+          description: No session id
+        "403":
+          description: The session belongs to another lane
+        "404":
+          description: Unknown or expired session
+    delete:
+      tags: [Captain]
+      operationId: laneMcpClose
+      summary: End an MCP session
+      security:
+        [{ operatorBearer: [] }, { captainBearer: [] }, { discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      responses:
+        "200":
+          description: Session closed
+        "403":
+          description: The session belongs to another lane
+        "404":
+          description: Unknown or expired session
+
   /v1/memory:
     get:
       tags: [Memory, Operator]
