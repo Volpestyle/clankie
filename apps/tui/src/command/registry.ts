@@ -99,6 +99,20 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["prompt"],
+    lines: [
+      "  prompt [--lane LANE] [--sections identity,persona,reach,address,model]",
+      "                           The system prompt that lane's session starts from (plain text)",
+    ],
+  },
+  {
+    nouns: ["memory-card"],
+    lines: [
+      "  memory-card [--lane LANE]",
+      "                           The memory card that lane's next run injects (plain text)",
+    ],
+  },
+  {
     nouns: ["discord"],
     lines: ["  discord [status]         Read non-secret Discord identifiers and body selection"],
   },
@@ -141,6 +155,8 @@ export function commandHelp(): string {
     "",
     "pair / devices / operator-credential rotate default to human text; pass --json.",
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",
+    "prompt / memory-card print plain text, and only for the bearer's own lane:",
+    "  operator, discord_voice, discord_presence, gameplay (default: operator).",
     "Secret entry lives in the console, not here: /auth, /discord, /connect, /voice. The",
     "credential store is shared — what /auth writes is what this CLI's services read.",
     "Local LLM servers are not launcher-owned; start them yourself.",

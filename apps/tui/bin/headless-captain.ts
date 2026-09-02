@@ -16,6 +16,8 @@ import { runPairCommand } from "../src/command/pair.ts";
 import { runDevicesCommand } from "../src/command/devices.ts";
 import { runPlayCommand } from "../src/command/play.ts";
 import { runStanceCommand } from "../src/command/stance.ts";
+import { runPromptCommand } from "../src/command/prompt.ts";
+import { runMemoryCardCommand } from "../src/command/memory-card.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
 import { runGatewayCommand } from "../src/command/gateway.ts";
 import { runAutostartCommand } from "../src/command/autostart.ts";
@@ -140,6 +142,14 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "stance") {
       return await runStanceCommand(rest, { ...options, stdout });
+    }
+    // Prompt and memory card print the words themselves, not a JSON envelope:
+    // the consumer is another harness's system prompt or a per-turn hook.
+    if (command === "prompt") {
+      return await runPromptCommand(rest, { ...options, stdout });
+    }
+    if (command === "memory-card") {
+      return await runMemoryCardCommand(rest, { ...options, stdout });
     }
     if (command === "discord") {
       const result = await runDiscordCommand(rest, options);

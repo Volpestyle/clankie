@@ -48,6 +48,7 @@ device table, credential-rotate sentence). Everything else is already JSON.
 | `persona …`, `games …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON                                                                                         |
 | `play status`                                                            | JSON                                                                                         |
 | `play stop`                                                              | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
+| `prompt …`, `memory-card …`                                              | Plain text: the prompt or card itself, verbatim                                              |
 | `pair`, `devices`, `operator-credential rotate`                          | Human text; pass `--json`                                                                    |
 | `help`                                                                   | This index (plain text)                                                                      |
 | `--version`                                                              | `clankie <version>`                                                                          |
@@ -386,6 +387,39 @@ home directory. `set` expands a leading `~` and stores the absolute path.
 JSON contains `workingDirectory` (the configured value or `null`),
 `effective` (what the captain runs in after a restart), `settingsFile`, and
 `"restart": "clankie restart captain"`.
+
+### `prompt [--lane LANE] [--sections identity,persona,reach,address,model]`
+
+The system prompt that lane's session starts from, printed verbatim as plain
+text. The intended consumer is a seat launcher in another harness, which reads
+it once at startup so the seat begins from the same words the service lanes do.
+
+`LANE` is `operator` (the default), `discord_voice`, `discord_presence`, or
+`gameplay`, and must be the lane the bearer speaks for. The operator bearer
+comes from the credential broker, so this reads the operator lane.
+
+Sections default to the four a session is built with, joined by one blank line:
+
+| Section    | What it is                                                              |
+| ---------- | ----------------------------------------------------------------------- |
+| `identity` | `instructions.md` — who he is and how he works                          |
+| `persona`  | The owner-authored character configuration                              |
+| `reach`    | The machine-access or this-room paragraph for that lane                 |
+| `address`  | His own mailbox, when one is connected                                  |
+| `model`    | The card naming the model the service lanes run on (ask for it by name) |
+
+A seat that carries the identity some other way asks for the rest:
+`clankie prompt --sections persona,reach,address`.
+
+### `memory-card [--lane LANE]`
+
+The memory card that lane's next run injects, printed verbatim as plain text.
+The intended consumer is a per-turn hook, so a seat in another harness carries
+the same recent past his own sessions do.
+
+Filtered by lane exactly as the session's own injection is: operator-private
+episodes reach only the operator lane. Empty output means the lane has recalled
+nothing yet, which is not an error.
 
 ### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
 
