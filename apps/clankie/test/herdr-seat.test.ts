@@ -220,7 +220,10 @@ describe("herdr session census", () => {
         workspace: { id: "w15", label: "clankie", number: 2 },
         tab: { id: "w15:t3", label: "app", number: 3 },
         pane: { id: "w15:p8" },
+        agent: "codex",
       },
+      // A shell keeps no harness, however Herdr spells it, so a surface can
+      // tell an agent pane from an ordinary one.
       {
         terminalId: "term-shell",
         label: "",

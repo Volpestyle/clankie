@@ -702,6 +702,13 @@ export const OperatorTerminalSessionSchema = z
         id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
       })
       .strict(),
+    /**
+     * Harness occupying the pane — claude, codex, clankie, … Absent for a plain
+     * shell. Herdr draws this line itself (`herdr agent list` is the subset of
+     * panes carrying one), and it is why an operator opens the catalog at all,
+     * so surfaces must be able to tell the two apart without guessing.
+     */
+    agent: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
   })
   .strict();
 export type OperatorTerminalSession = z.infer<typeof OperatorTerminalSessionSchema>;

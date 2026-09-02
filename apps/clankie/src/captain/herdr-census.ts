@@ -289,6 +289,9 @@ export function parseHerdrTerminalCatalog(stdout: string): OperatorTerminalSessi
       typeof tab.number !== "number"
     )
       return [];
+    // Herdr names the harness only where one is seated; older builds spell a
+    // plain shell out as "shell" instead of omitting the field.
+    const agent = typeof pane.agent === "string" ? pane.agent.trim() : "";
     return [
       {
         terminalId,
@@ -296,6 +299,7 @@ export function parseHerdrTerminalCatalog(stdout: string): OperatorTerminalSessi
         workspace: { id: workspaceId, label: bounded(workspace.label, 200), number: workspace.number },
         tab: { id: tabId, label: bounded(tab.label, 200), number: tab.number },
         pane: { id: paneId },
+        ...(agent === "" || agent === "shell" ? {} : { agent: bounded(agent, 128) }),
       },
     ];
   });
