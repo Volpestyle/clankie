@@ -45,6 +45,15 @@ Offer publication completes only after the gateway returns a
 `pairing_route_ready` acknowledgment. The Mac does not expose a QR/code before
 that acknowledgment, so an immediate scan cannot outrun route registration.
 
+A pairing route may expire at most
+`PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS` (31 days) in the future, the
+constant `@clankie/protocol/public-gateway` shares with the Mac's review-offer
+cap ([ADR 0154](../../docs/adr/0154-a-review-offer-outlives-the-window.md)).
+A route past that window closes the host socket. Release the gateway before
+any Mac mints `clankie pair --review`: an older gateway still enforces fifteen
+minutes and drops the Mac connection, including on every reconnect replay,
+until that review offer expires or is redeemed.
+
 Everything else is `404`. An unavailable Mac is `503`; an expired or unknown
 pairing capability is `410`.
 

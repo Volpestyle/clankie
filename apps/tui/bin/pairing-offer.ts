@@ -1,4 +1,4 @@
-import { PairingOfferWireSchema, type PairingOfferWire } from "@clankie/protocol";
+import { PairingOfferWireSchema, type PairingOfferRequest, type PairingOfferWire } from "@clankie/protocol";
 import { operatorRequest } from "./operator-request.ts";
 
 // Narrow client for the device pairing-offer boundary. `clankie pair`
@@ -59,6 +59,8 @@ export interface RequestPairingOfferOptions {
   readonly operatorToken?: string | undefined;
   readonly fetchImpl?: typeof fetch;
   readonly signal?: AbortSignal;
+  /** Mint a long-lived review offer instead of the five-minute default (ADR 0154). */
+  readonly review?: PairingOfferRequest["review"];
 }
 
 /**
@@ -77,7 +79,12 @@ export async function requestPairingOffer(options: RequestPairingOfferOptions = 
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     },
     PairingOfferError,
-    { jsonBody: {}, contentType: "application/json" },
+    {
+      jsonBody: (options.review === undefined
+        ? {}
+        : { review: options.review }) satisfies PairingOfferRequest,
+      contentType: "application/json",
+    },
   );
 
   if (!response.ok) {

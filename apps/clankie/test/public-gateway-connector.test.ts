@@ -135,6 +135,34 @@ describe("public gateway Mac connector", () => {
     expect(await second.nextFrame()).toEqual(original);
   });
 
+  it("sends a restored review route on the first connect without a socket at restore time", async () => {
+    const target = await listen(createServer((_request, response) => response.end("{}")));
+    const gateway = await fakeGateway();
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      hostToken,
+      controlPlaneUrl: target,
+      relayUrl: target,
+      reconnectMinimumMs: 5,
+      reconnectMaximumMs: 10,
+    });
+    connectors.push(connector);
+    const route = {
+      offerHash: "a".repeat(64),
+      codeHash: "b".repeat(64),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+    };
+    connector.restorePairingRoute(route);
+    connector.start();
+    const connection = await gateway.nextConnection();
+    expect(await connection.nextFrame()).toEqual({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "pairing_route",
+      ...route,
+    });
+  });
+
   it("uses renewable account credentials with the installation-bound route", async () => {
     const target = await listen(createServer((_request, response) => response.end("{}")));
     const gateway = await fakeGateway();

@@ -9,6 +9,7 @@ import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_HOST_PATH_PREFIX,
   PUBLIC_GATEWAY_IN_FLIGHT_MAX,
+  PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS,
   PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayHostIdSchema,
@@ -25,7 +26,6 @@ import {
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 const PUBLIC_REQUEST_DEADLINE_MS = 60_000;
-const PAIRING_ROUTE_FUTURE_MAX_MS = 15 * 60_000;
 const HOST_HEARTBEAT_MS = 20_000;
 const WEBSOCKET_PAYLOAD_BYTES_MAX = 2 * 1024 * 1024;
 const RESPONSE_BYTES_MAX = 16 * 1024 * 1024;
@@ -375,7 +375,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     prunePairingRoutes();
     const expiresAtMs = Date.parse(frame.expiresAt);
     const now = clock();
-    if (expiresAtMs <= now || expiresAtMs > now + PAIRING_ROUTE_FUTURE_MAX_MS) {
+    if (expiresAtMs <= now || expiresAtMs > now + PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS) {
       connection.socket.close(1008, "pairing route expiry is outside the accepted window");
       return;
     }

@@ -247,3 +247,86 @@ describe("clankie pair — redaction", () => {
     expect(`${stdout.text()}${stderr.text()}`).not.toContain("body-secret-999");
   });
 });
+
+describe("clankie pair — review offers", () => {
+  it("mints a small set of long-lived single-use offers and marks the output", async () => {
+    const bodies: unknown[] = [];
+    let minted = 0;
+    const stdout = outputBuffer();
+    const exit = await runPair(["--review", "--days", "14"], {
+      fetchImpl: (async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        minted += 1;
+        return Response.json(
+          validOffer({
+            code: `CODE-000${minted}`,
+            deepLink: `clankie://connect?offer=OFFER-${minted}`,
+            expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60_000).toISOString(),
+            review: true,
+          }),
+        );
+      }) as typeof fetch,
+      stdout: stdout.stream,
+    });
+    expect(exit).toBe(0);
+    expect(bodies).toEqual([{ review: { days: 14 } }, { review: { days: 14 } }, { review: { days: 14 } }]);
+    const text = stdout.text();
+    expect(text).toContain("REVIEW OFFER — 14 days, 3 single-use codes.");
+    expect(text).toContain("clankie devices");
+    expect(text).toContain("Code 1: CODE-0001");
+    expect(text).toContain("Code 3: CODE-0003");
+    expect(text).toContain("clankie://connect?offer=OFFER-2");
+    expect(text).not.toContain("Pairing code:");
+  });
+
+  it("emits the review JSON shape with --count", async () => {
+    const offer = validOffer({ review: true });
+    const calls = { count: 0 };
+    const stdout = outputBuffer();
+    const exit = await runPair(["--review", "--days", "7", "--count", "2", "--json"], {
+      fetchImpl: jsonFetch(offer, undefined, calls),
+      stdout: stdout.stream,
+    });
+    expect(exit).toBe(0);
+    expect(calls.count).toBe(2);
+    expect(JSON.parse(stdout.text())).toEqual({
+      ok: true,
+      review: true,
+      expiresAt: offer.expiresAt,
+      offers: [
+        { code: offer.code, deepLink: offer.deepLink, expiresAt: offer.expiresAt },
+        { code: offer.code, deepLink: offer.deepLink, expiresAt: offer.expiresAt },
+      ],
+    });
+  });
+
+  it.each([
+    [["--review"], "--review requires --days"],
+    [["--days", "3"], "require --review"],
+    [["--review", "--days", "40"], "--days must be a whole number from 1 to 31"],
+    [["--review", "--days", "3", "--count", "11"], "--count must be a whole number from 1 to 10"],
+  ])("rejects %j without contacting the service", async (args, message) => {
+    const calls = { count: 0 };
+    const stderr = outputBuffer();
+    const exit = await runPair(args, {
+      fetchImpl: throwingFetch(new Error("must not be called"), calls),
+      stderr: stderr.stream,
+    });
+    expect(exit).toBe(1);
+    expect(calls.count).toBe(0);
+    expect(stderr.text()).toContain(message);
+  });
+
+  it("keeps the ordinary request body empty", async () => {
+    const bodies: unknown[] = [];
+    const exit = await runPair(["--json"], {
+      fetchImpl: (async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json(validOffer());
+      }) as typeof fetch,
+      stdout: outputBuffer().stream,
+    });
+    expect(exit).toBe(0);
+    expect(bodies).toEqual([{}]);
+  });
+});

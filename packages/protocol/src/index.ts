@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./public-gateway.ts";
 
 /** Frozen event-log partition key. Still serialized as `missionId`. */
 export const MissionIdSchema = z.string().min(1);
@@ -3649,6 +3650,8 @@ export const DeviceRecordSchema = z
     grants: DeviceGrantSetSchema,
     offerId: z.string().min(1),
     mintedBy: z.string().min(1),
+    /** Paired through a long-lived review offer (ADR 0154); revoke after the review. */
+    review: z.literal(true).optional(),
     createdAt: z.string().datetime(),
     pendingExpiresAt: z.string().datetime(),
     activatedAt: z.string().datetime().optional(),
@@ -3670,12 +3673,32 @@ export const DeviceRecordSchema = z
   });
 export type DeviceRecord = z.infer<typeof DeviceRecordSchema>;
 
+/**
+ * `POST /v1/pairing/offer` body. Empty means an ordinary five-minute offer;
+ * `review` mints a long-lived one for App Review or TestFlight testers
+ * (ADR 0154). Its ceiling is the gateway's route window, never more.
+ */
+export const PairingOfferRequestSchema = z.object({
+  review: z
+    .object({
+      days: z
+        .number()
+        .int()
+        .min(1)
+        .max(PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS / (24 * 60 * 60_000)),
+    })
+    .optional(),
+});
+export type PairingOfferRequest = z.infer<typeof PairingOfferRequestSchema>;
+
 /** Canonical `clankie pair` offer wire shape (server mints it, `clankie pair` renders it). */
 export const PairingOfferWireSchema = z.object({
   version: z.literal(1),
   deepLink: z.string().min(1),
   code: z.string().min(1),
   expiresAt: z.string().datetime(),
+  /** Present on long-lived review offers so the operator's output can say so. */
+  review: z.literal(true).optional(),
 });
 export type PairingOfferWire = z.infer<typeof PairingOfferWireSchema>;
 
@@ -3775,6 +3798,7 @@ export const DeviceListItemSchema = z.object({
   platform: DevicePlatformSchema,
   status: DeviceStatusSchema,
   grants: DeviceGrantSetSchema,
+  review: z.literal(true).optional(),
   createdAt: z.string().datetime(),
   activatedAt: z.string().datetime().optional(),
   lastRefreshAt: z.string().datetime().optional(),
@@ -3798,6 +3822,7 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
       platform: DevicePlatformSchema,
       offeredGrants: DeviceGrantSetSchema,
       mintedBy: z.string().min(1),
+      review: z.literal(true).optional(),
       pendingExpiresAt: z.string().datetime(),
     }),
   }),

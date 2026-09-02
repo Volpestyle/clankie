@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
+  PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayTunnelFrameSchema,
   derivePublicGatewayHostId,
@@ -167,6 +168,39 @@ describe("public gateway", () => {
         })
       ).status,
     ).toBe(503);
+  });
+
+  it("routes a days-long review offer and closes on an expiry past the shared window", async () => {
+    const { origin } = await startGateway([]);
+    const host = await connectHost(origin);
+    openSockets.push(host);
+    const routeReady = nextFrame(host);
+    send(host, {
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "pairing_route",
+      offerHash: hash("review-secret"),
+      codeHash: hash("REV1EWCD"),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+    });
+    expect(await routeReady).toMatchObject({ kind: "pairing_route_ready" });
+    const redeemPromise = fetch(`${origin}/v1/pairing/redeem`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "rev1-ewcd", device: { name: "Reviewer", platform: "ios" } }),
+    });
+    respond(host, await nextRequest(host), 200, "{}");
+    expect((await redeemPromise).status).toBe(200);
+
+    const closed = once(host, "close");
+    send(host, {
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "pairing_route",
+      offerHash: hash("too-long"),
+      codeHash: hash("TOOLONG1"),
+      expiresAt: new Date(Date.now() + PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS + 60_000).toISOString(),
+    });
+    const [code] = (await closed) as [number];
+    expect(code).toBe(1008);
   });
 
   it("fails host authentication closed and validates configured credentials", async () => {

@@ -194,10 +194,10 @@ changing them. `enable` is idempotent (a loaded agent is booted out first) and
 disagree; run `enable`). The job's own output lands in `log`; the services keep
 their usual per-process logs.
 
-### `pair [--json] [--timeout SEC]`
+### `pair [--json] [--timeout SEC] [--review --days N [--count N]]`
 
 Mint a one-time pairing offer (QR + code + deep link) for the phone/desktop
-app. Default timeout is 10 seconds.
+app. Default timeout is 10 seconds; an offer lives five minutes.
 
 Human mode writes the QR and code to stdout. Those values are secret-bearing
 display data — never log or persist them. `--json` is the agent form:
@@ -211,13 +211,24 @@ display data — never log or persist them. `--json` is the agent form:
 }
 ```
 
+`--review --days N` mints a review offer for App Review or a TestFlight tester
+who will pair hours or days later: `--count` (default 3, max 10) independent
+single-use codes that each live `N` days (max 31, the public gateway's route
+window) and survive a Clankie restart. Human output is headed `REVIEW OFFER`
+and lists `Code 1…N`; `--json` is
+`{ "ok": true, "review": true, "expiresAt": "…", "offers": [ { "code", "deepLink", "expiresAt" } ] }`.
+Mint review offers only after the public gateway release that accepts them;
+an older gateway drops the Mac connection on the first review route.
+
 Failure with `--json`: `{ "ok": false, "status": "unavailable"|"unauthorized"|"expired"|"malformed"|"interrupted", "error": "…" }`.
 Without `--json`, the same message goes to stderr and stdout stays empty.
 
 ### `devices [--json]`
 
-List paired devices. Human mode is a table; `--json` is `{ "ok": true, "devices": [ … ] }`.
-Empty human output is `No paired devices.`
+List paired devices. Human mode is a table whose `SOURCE` column reads `review`
+for devices paired through a review offer (revoke those after the review) and
+`pair` otherwise; `--json` is `{ "ok": true, "devices": [ … ] }` with
+`"review": true` on those rows. Empty human output is `No paired devices.`
 
 ### `devices revoke <id> [--json]`
 

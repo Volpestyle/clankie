@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,15 +40,39 @@ const ClientPairingOfferSchema = z.object({
   expiresAt: z.iso.datetime(),
 });
 
-const mintOffer = (app: Hono, token?: string) =>
+const mintOffer = (app: Hono, token?: string, body: unknown = {}) =>
   app.request("/v1/pairing/offer", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
     },
-    body: "{}",
+    body: JSON.stringify(body),
   });
+
+const redeem = (app: Hono, body: unknown) =>
+  app.request("/v1/pairing/redeem", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+const DEVICE_KEY = Uint8Array.from(Buffer.alloc(32, 7));
+const IOS = { name: "Reviewer iPhone", platform: "ios" } as const;
+
+async function tempEventLog(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "clankie-pairing-"));
+  tempDirs.push(root);
+  return join(root, "events.jsonl");
+}
+
+function readEvents(path: string): DomainEvent[] {
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as DomainEvent);
+}
 
 describe("control-plane pairing offer surface", () => {
   it("fails closed when no authenticated operator surface is configured", async () => {
@@ -141,5 +166,129 @@ describe("control-plane pairing offer surface", () => {
     const offerSecret = new URL(offer.deepLink).searchParams.get("offer");
     expect(offerSecret).toBeTruthy();
     expect(serialized).not.toContain(offerSecret as string);
+  });
+});
+
+describe("review pairing offers (ADR 0154)", () => {
+  it("mints a days-long review offer only within the gateway's route window", async () => {
+    const now = new Date("2026-09-02T12:00:00.000Z");
+    const app = await makeApp({ authenticateOperator: operator, clock: () => now });
+    const response = await mintOffer(app, "operator-secret", { review: { days: 14 } });
+    expect(response.status).toBe(200);
+    const wire = (await response.json()) as { expiresAt: string; review?: true };
+    expect(Date.parse(wire.expiresAt)).toBe(now.getTime() + 14 * 24 * 60 * 60_000);
+    expect(wire.review).toBe(true);
+    expect((await mintOffer(app, "operator-secret", { review: { days: 32 } })).status).toBe(400);
+    expect((await mintOffer(app, "operator-secret", { review: { days: 0 } })).status).toBe(400);
+    expect((await mintOffer(app, "operator-secret", { review: "yes" })).status).toBe(400);
+    // An ordinary offer is unchanged: five minutes, no review marker.
+    const ordinary = (await (await mintOffer(app, "operator-secret")).json()) as {
+      expiresAt: string;
+      review?: true;
+    };
+    expect(Date.parse(ordinary.expiresAt)).toBe(now.getTime() + 5 * 60_000);
+    expect(ordinary.review).toBeUndefined();
+  });
+
+  it("records the gateway hashes for a review offer and nothing secret-bearing beyond them", async () => {
+    const eventLogPath = await tempEventLog();
+    const app = await makeApp({ eventLogPath, authenticateOperator: operator });
+    const wire = (await (await mintOffer(app, "operator-secret", { review: { days: 7 } })).json()) as {
+      deepLink: string;
+      code: string;
+    };
+    const offerSecret = new URL(wire.deepLink).searchParams.get("offer") as string;
+    const minted = readEvents(eventLogPath).filter((event) => event.type === "pairing.offer.minted");
+    expect(minted).toHaveLength(1);
+    expect(minted[0]?.data).toMatchObject({
+      review: true,
+      offerHash: sha256(offerSecret),
+      codeHash: sha256(wire.code.replace("-", "")),
+    });
+    const serialized = JSON.stringify(minted[0]);
+    expect(serialized).not.toContain(wire.code);
+    expect(serialized).not.toContain(offerSecret);
+  });
+
+  it("restores an unredeemed review offer across a restart and hands the gateway its route", async () => {
+    const eventLogPath = await tempEventLog();
+    const first = await makeApp({
+      eventLogPath,
+      authenticateOperator: operator,
+      deviceSessionKey: DEVICE_KEY,
+    });
+    const wire = (await (await mintOffer(first, "operator-secret", { review: { days: 7 } })).json()) as {
+      deepLink: string;
+      code: string;
+    };
+    const offerSecret = new URL(wire.deepLink).searchParams.get("offer") as string;
+
+    const restored: Array<{ readonly offerHash: string; readonly codeHash: string }> = [];
+    const second = await makeApp({
+      eventLogPath,
+      authenticateOperator: operator,
+      deviceSessionKey: DEVICE_KEY,
+      pairingOfferPublisher: {
+        publishPairingOffer: () => Promise.resolve(),
+        restorePairingRoute: (route) => {
+          restored.push({ offerHash: route.offerHash, codeHash: route.codeHash });
+        },
+      },
+    });
+    expect(restored).toEqual([
+      { offerHash: sha256(offerSecret), codeHash: sha256(wire.code.replace("-", "")) },
+    ]);
+    const redeemed = await redeem(second, { code: wire.code.toLowerCase(), device: IOS });
+    expect(redeemed.status).toBe(200);
+    // Single use survives too: the same code is consumed on the restarted service.
+    expect((await redeem(second, { offerSecret, device: IOS })).status).toBe(409);
+    const devices = (await (
+      await second.request("/v1/devices", { headers: { authorization: "Bearer operator-secret" } })
+    ).json()) as Array<{ review?: true }>;
+    expect(devices).toHaveLength(1);
+    expect(devices[0]?.review).toBe(true);
+  });
+
+  it("does not restore a review offer that was redeemed, expired, or ordinary", async () => {
+    const eventLogPath = await tempEventLog();
+    let nowMs = Date.parse("2026-09-02T12:00:00.000Z");
+    const clock = () => new Date(nowMs);
+    const first = await makeApp({
+      eventLogPath,
+      authenticateOperator: operator,
+      deviceSessionKey: DEVICE_KEY,
+      clock,
+    });
+    const redeemedWire = (await (
+      await mintOffer(first, "operator-secret", { review: { days: 3 } })
+    ).json()) as {
+      code: string;
+    };
+    expect((await redeem(first, { code: redeemedWire.code, device: IOS })).status).toBe(200);
+    const expiredWire = (await (
+      await mintOffer(first, "operator-secret", { review: { days: 1 } })
+    ).json()) as {
+      code: string;
+    };
+    const ordinaryWire = (await (await mintOffer(first, "operator-secret")).json()) as { code: string };
+
+    nowMs += 2 * 24 * 60 * 60_000;
+    const restored: string[] = [];
+    const second = await makeApp({
+      eventLogPath,
+      authenticateOperator: operator,
+      deviceSessionKey: DEVICE_KEY,
+      clock,
+      pairingOfferPublisher: {
+        publishPairingOffer: () => Promise.resolve(),
+        restorePairingRoute: (route) => {
+          restored.push(route.offerId);
+        },
+      },
+    });
+    expect(restored).toEqual([]);
+    for (const code of [redeemedWire.code, expiredWire.code, ordinaryWire.code]) {
+      expect((await redeem(second, { code, device: IOS })).status).toBe(410);
+    }
   });
 });

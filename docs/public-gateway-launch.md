@@ -8,6 +8,13 @@ authority and transport boundary lives in
 evidence available for App Review and the first invited users without claiming
 an observability system that does not exist.
 
+The public [setup](https://docs.clankie.bot) and
+[network](https://docs.clankie.bot/network/) pages are built from
+[`apps/docs`](../apps/docs/README.md). The network table follows the protocol
+allowlist at build time rather than duplicating it by hand. The canonical App
+Store [privacy](https://clankie.bot/privacy/) and
+[support](https://clankie.bot/support/) pages live with the landing site.
+
 ```mermaid
 flowchart LR
   Build["Release iPhone and iPad build"] --> Edge["api.clankie.bot"]
@@ -54,6 +61,10 @@ Before submission or adding an invited user:
   a Mac login, and connect without Tailscale, SSH, or a copied bearer;
 - App Review receives a fresh QR or typed pairing code and exact setup notes
   (the README's Get started steps are that text; do not keep a second copy);
+  the codes come from `clankie pair --review --days N` on the review Mac,
+  minted after the gateway release that accepts days-long routes
+  ([ADR 0154](adr/0154-a-review-offer-outlives-the-window.md)), and the
+  resulting devices are revoked once the review closes;
 - pairing, reconnect, chat, fleet/agent control, and terminal observation pass
   on physical off-network iPhone and iPad devices;
 - gateway and Caddy logs show no restart loop, repeated host disconnect, TLS

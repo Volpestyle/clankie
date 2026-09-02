@@ -100,6 +100,19 @@ describe("clankie devices — list", () => {
     expect(stdout.text()).toContain("revoked");
   });
 
+  it("shows which devices came from a review offer", async () => {
+    const stdout = outputBuffer();
+    const exit = await runDevices([], {
+      fetchImpl: jsonFetch([device(), device({ deviceId: "device-rev001", name: "Reviewer", review: true })]),
+      stdout: stdout.stream,
+    });
+    expect(exit).toBe(0);
+    const rows = stdout.text().trimEnd().split("\n");
+    expect(rows[0]).toContain("SOURCE");
+    expect(rows.find((row) => row.startsWith("device-abc123"))).toContain("pair");
+    expect(rows.find((row) => row.startsWith("device-rev001"))).toContain("review");
+  });
+
   it("emits JSON with --json", async () => {
     const stdout = outputBuffer();
     const exit = await runDevices(["--json"], { fetchImpl: jsonFetch([device()]), stdout: stdout.stream });

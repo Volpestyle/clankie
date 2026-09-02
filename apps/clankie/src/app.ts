@@ -72,6 +72,7 @@ import {
   DiscordUserSessionOptInSchema,
   EmbodimentIntentSchema,
   PairingCompleteRequestSchema,
+  PairingOfferRequestSchema,
   PairingRedeemRequestSchema,
   TAKE_CONTROL_GRANTS,
   eventStreamKindForId,
@@ -116,7 +117,15 @@ import {
   DiscordUserSessionOptInProjection,
 } from "./discord-user-session-opt-in.ts";
 import { EmbodimentManager, embodimentEventScope, isEmbodimentEventType } from "./embodiment.ts";
-import { mintPairingOffer, pairingOfferWire, PairingOfferStore, type StoredPairingOffer } from "./pairing.ts";
+import {
+  mintPairingOffer,
+  pairingOfferRecord,
+  pairingOfferWire,
+  PairingOfferStore,
+  replayReviewOffers,
+  type PairingOfferRecord,
+  type StoredPairingOffer,
+} from "./pairing.ts";
 import { applyDeviceEvent, deviceListItem, isDevicePendingExpired, type DeviceRegistry } from "./devices.ts";
 import {
   COMPLETION_TOKEN_TTL_MS,
@@ -289,6 +298,8 @@ export type OperatorAuthenticator = (request: Request) => Promise<TrustedOperato
 
 interface PairingOfferPublisher {
   publishPairingOffer(offer: StoredPairingOffer): Promise<void>;
+  /** Re-register a review offer's route after a restart (ADR 0154); no acknowledgment awaited. */
+  restorePairingRoute?(route: PairingOfferRecord): void;
 }
 
 interface TrustedDeviceIdentity {
@@ -435,6 +446,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   const discordPresenceLiveSessions = new Map<string, DiscordPresenceSessionRecord>();
 
   const pairingOffers = new PairingOfferStore();
+  // Review offers outlive a restart (ADR 0154): rebuild the open ones from
+  // their hash-only audit events and give the gateway their routes back.
+  for (const record of replayReviewOffers(storedEvents, clock())) {
+    pairingOffers.add(record);
+    dependencies.pairingOfferPublisher?.restorePairingRoute?.(record);
+  }
   const completionTokens = new Map<string, PendingCompletion>();
   const deviceLocks = new Map<string, Promise<unknown>>();
   const discordPresenceLocks = new Map<string, Promise<unknown>>();
@@ -1798,9 +1815,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = PairingOfferRequestSchema.safeParse((await readJson(context.req.raw)) ?? {});
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
     const now = clock();
     pairingOffers.prune(now);
-    const offer = mintPairingOffer({ now, mintedBy: operator.operatorId, idFactory });
+    const offer = mintPairingOffer({
+      now,
+      mintedBy: operator.operatorId,
+      idFactory,
+      ...(parsed.data.review === undefined ? {} : { review: parsed.data.review }),
+    });
     if (dependencies.pairingOfferPublisher !== undefined) {
       try {
         await dependencies.pairingOfferPublisher.publishPairingOffer(offer);
@@ -1812,11 +1836,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return context.json({ error: "public_gateway_unavailable" }, 503);
       }
     }
-    pairingOffers.add(offer);
+    const record = pairingOfferRecord(offer);
+    pairingOffers.add(record);
+    // A review offer must survive a restart, so its gateway hashes go to the
+    // log; an ordinary offer stays secret-free there and dies with the process.
     recordEvent("pairing.offer.minted", `pairing:${offer.offerId}`, offer.createdAt, {
       offerId: offer.offerId,
       operatorId: operator.operatorId,
       expiresAt: offer.expiresAt,
+      ...(record.review === undefined
+        ? {}
+        : { review: true, offerHash: record.offerHash, codeHash: record.codeHash }),
     });
     logger.info(
       { offerId: offer.offerId, operatorId: operator.operatorId, expiresAt: offer.expiresAt },
@@ -1854,6 +1884,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       platform: parsed.data.device.platform,
       offeredGrants: TAKE_CONTROL_GRANTS,
       mintedBy: taken.offer.mintedBy,
+      ...(taken.offer.review === undefined ? {} : { review: true }),
       pendingExpiresAt,
     });
     applyDeviceEvent(devices, redeemed);

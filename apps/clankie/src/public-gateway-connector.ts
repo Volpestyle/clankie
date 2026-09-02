@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_IN_FLIGHT_MAX,
@@ -13,6 +12,7 @@ import {
   type PublicGatewayTunnelFrame,
 } from "@clankie/protocol/public-gateway";
 import { WebSocket, type RawData } from "ws";
+import { hashPairingCode, hashPairingSecret } from "./pairing.ts";
 
 const CONNECT_TIMEOUT_MS = 5_000;
 const RECONNECT_MIN_MS = 1_000;
@@ -45,6 +45,13 @@ export interface PublicGatewayConnectorOptions {
 export interface PublicGatewayPairingOffer {
   readonly offerSecret: string;
   readonly code: string;
+  readonly expiresAt: string;
+}
+
+/** A route as the gateway keys it: hashes only. */
+export interface PublicGatewayPairingRoute {
+  readonly offerHash: string;
+  readonly codeHash: string;
   readonly expiresAt: string;
 }
 
@@ -128,14 +135,20 @@ export class PublicGatewayConnector {
     this.connect();
   }
 
+  /**
+   * Re-register a route rebuilt from the durable log (ADR 0154). No socket is
+   * needed: `replayPairingRoutes` sends the map on every (re)connect.
+   */
+  public restorePairingRoute(route: PublicGatewayPairingRoute): void {
+    this.pairingRoutes.set(route.offerHash, pairingRouteFrame(route));
+  }
+
   public async publishPairingOffer(offer: PublicGatewayPairingOffer): Promise<void> {
-    const frame: PublicGatewayPairingRouteFrame = {
-      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
-      kind: "pairing_route",
-      offerHash: hashCapability(offer.offerSecret),
-      codeHash: hashCapability(normalizePairingCode(offer.code)),
+    const frame = pairingRouteFrame({
+      offerHash: hashPairingSecret(offer.offerSecret),
+      codeHash: hashPairingCode(offer.code),
       expiresAt: offer.expiresAt,
-    };
+    });
     const socket = await this.connectedSocket();
     this.pairingRoutes.set(frame.offerHash, frame);
     const ready = new Promise<void>((resolve, reject) => {
@@ -430,12 +443,14 @@ function requireHttpOrigin(raw: string, name: string): string {
   return parsed.origin;
 }
 
-function normalizePairingCode(code: string): string {
-  return code.toUpperCase().replace(/[\s-]/g, "");
-}
-
-function hashCapability(value: string): `${string}` {
-  return createHash("sha256").update(value).digest("hex");
+function pairingRouteFrame(route: PublicGatewayPairingRoute): PublicGatewayPairingRouteFrame {
+  return {
+    schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+    kind: "pairing_route",
+    offerHash: route.offerHash,
+    codeHash: route.codeHash,
+    expiresAt: route.expiresAt,
+  };
 }
 
 function publicResponseHeaders(response: Response): Array<{ readonly name: string; readonly value: string }> {
