@@ -1,6 +1,6 @@
 ---
 name: verify-clankie
-description: Use when validating a Clankie capability across a service, credential, emulator, ROM, or other runtime boundary, and when deciding what a green test actually proves before claiming the capability works.
+description: Use when validating a Clankie capability across a service, credential, hosted world, or other runtime boundary, and when deciding what a green test actually proves before claiming the capability works.
 ---
 
 # Verify Clankie
@@ -35,13 +35,15 @@ where a list of asserted maybes proves nothing.
 
 ## Game-body boundary
 
-- A GBA MCP probe proves only the private core/runtime created by that stdio
-  process. It cannot prove Clankie's local play, Activity publication, play
-  voice, room hearing, or interruption because none of those paths exist in the
-  harness.
-- Prove Clankie's local play through the captain/play-host path. Prove his hosted
-  play through the pinned native `@pokeagents/world-protocol` client path. Do
-  not substitute PokeAgents MCP for Clankie's native body seam.
+- There is one body: his credentialed seat in a hosted PokeAgents world
+  ([ADR 0145](../../../docs/adr/0145-the-world-is-the-only-body.md)). No
+  emulator runs in this repo, so "it booted locally" is not a claim available
+  to you.
+- Prove play through the captain/play-host path onto the pinned native
+  `@pokeagents/world-protocol` client. Do not substitute PokeAgents MCP for
+  Clankie's native body seam — MCP is a transport projection and proves only
+  the private session that stdio process created, not Activity publication,
+  play voice, room hearing, or interruption.
 - In the sibling PokeAgents repository, `WORLD_OPERATIONS` owns operation and
   capability schemas and the MCP surface derives from it. Treat stronger
   session-bound typed-client or catalog-only dispatch work as PokeAgents-owned
@@ -172,7 +174,7 @@ Add `--json` after `--` for machine-readable output.
 Evaluate one production play journal with lifecycle and receipt joins:
 
 ```bash
-pnpm --filter @clankie/gba-emulator gameplay:evaluate-journal -- \
+pnpm --filter @clankie/play gameplay:evaluate-journal -- \
   ~/.local/state/clankie/gba-play/<run>.jsonl
 ```
 

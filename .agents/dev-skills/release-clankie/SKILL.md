@@ -40,6 +40,10 @@ and the files being changed before editing. The active implementation lives in:
   target so another platform's locked dependencies do not enter the artifact.
 - Version directories and published tags are immutable. Publish a correction
   under a new version; do not clobber an existing release asset.
+- Retiring a subsystem is a release change. `build-release.mjs` names its
+  runtime inputs as literal paths and nothing in `pnpm check` reads them, so a
+  deleted directory stays green until the tag build fails. Run
+  `pnpm release:build` in the same change that deletes one.
 
 ## Packaging gotchas
 
@@ -49,11 +53,11 @@ and the files being changed before editing. The active implementation lives in:
 - macOS aliases `/var` as `/private/var`. Compare entrypoint paths through
   `realpath`, never by raw `import.meta.url` and `argv[1]` strings.
 - A bundled import may resolve assets relative to its flattened output file.
-  The captain instructions, Activity HTML, GBA fixtures/scenarios, mGBA glue
-  and Wasm, product skills under `.agents/skills`, `docs/cli.md`, the herdr
-  plugin, and Vox binary are runtime inputs, not development files.
-  Checkout-only skills under `.agents/dev-skills` stay out of the archive. The
-  rest of `docs/` does not ship.
+  The captain instructions, Activity HTML, product skills under
+  `.agents/skills`, `docs/cli.md`, the herdr plugin, and the Vox binary are
+  runtime inputs, not development files. Checkout-only skills under
+  `.agents/dev-skills` stay out of the archive. The rest of `docs/` does not
+  ship.
 - The Node version and its official checksum source are owned by
   `scripts/build-release.mjs`. Update the pin deliberately and prove the new
   runtime with a rebuilt archive.

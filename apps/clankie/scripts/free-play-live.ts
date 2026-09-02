@@ -1,7 +1,7 @@
 /**
  * Watch Clankie play, on the activity surface — the development alias.
  *
- * `pnpm gba:free-play-live`
+ * `pnpm play:live`
  *
  * The product path is the service's play host serving asked-play intents
  * (ADR 0063); this script drives the exact same execution composition with a

@@ -162,30 +162,11 @@ async function copyRuntimeAssets(targetRoot) {
     await mkdir(dirname(target), { recursive: true });
     await copyFile(join(repoRoot, source), target);
   }
-  for (const directory of [
-    ".agents/skills",
-    "integrations/gba-emulator/fixtures",
-    "integrations/herdr-plugin",
-    "scenarios/emulator",
-  ]) {
+  for (const directory of [".agents/skills", "integrations/herdr-plugin"]) {
     await cp(join(repoRoot, directory), join(targetRoot, directory), {
       recursive: true,
       filter: (source) => basename(source) !== ".DS_Store",
     });
-  }
-
-  const romdevEntry = output("node", [
-    "--input-type=module",
-    "--eval",
-    'import { createRequire } from "node:module"; const require = createRequire(import.meta.url); process.stdout.write(require.resolve("romdev-platform-gba", { paths: ["integrations/gba-emulator"] }));',
-  ]);
-  const romdevRoot = await findPackageRoot(romdevEntry);
-  if (romdevRoot === undefined) throw new Error(`Cannot locate romdev-platform-gba from ${romdevEntry}`);
-  for (const bundleDirectory of ["apps/clankie/src/wasm", "apps/tui/bin/wasm"]) {
-    const target = join(targetRoot, bundleDirectory);
-    await mkdir(target, { recursive: true });
-    await copyFile(join(romdevRoot, "wasm", "mgba_libretro.js"), join(target, "mgba_libretro.js"));
-    await copyFile(join(romdevRoot, "wasm", "mgba_libretro.wasm"), join(target, "mgba_libretro.wasm"));
   }
 }
 

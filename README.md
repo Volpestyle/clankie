@@ -99,6 +99,7 @@ OpenAI/Anthropic fallbacks; it does not load `.env.local` or print secret values
 | [`apps/discord-user-session`](apps/discord-user-session/README.md) | Personal-lab voice, screen-watch, and Go Live body (off by default)                         |
 | [`apps/discord-activity`](apps/discord-activity/README.md)         | The watch-me-play surface                                                                   |
 | [`apps/relay`](apps/relay/README.md)                               | Remote access for the phone/desktop app                                                     |
+| [`apps/gateway`](apps/gateway/README.md)                           | The public AWS doorway that routes back to a configured Mac                                 |
 | [`apps/vox`](apps/vox/README.md)                                   | Sole native Discord media owner behind an AGPL process boundary                             |
 
 [`packages/play`](packages/play/README.md) is the play mind above the body
@@ -114,7 +115,7 @@ pnpm typecheck
 pnpm deadcode
 pnpm test
 pnpm check           # required final check: fmt, lint, docs links, typecheck, tests
-pnpm gba:free-play   # drive the GBA body from a CLI
+pnpm play:live       # watch a playthrough without the service or a Discord ask
 pnpm discord:readiness
 ```
 
