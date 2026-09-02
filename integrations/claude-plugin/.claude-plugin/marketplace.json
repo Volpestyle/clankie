@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "clankie",
+  "description": "Clankie's own marketplace: one plugin, this checkout or the installed release.",
+  "owner": {
+    "name": "James Volpe",
+    "url": "https://github.com/Volpestyle"
+  },
+  "plugins": [
+    {
+      "name": "clankie",
+      "description": "Sit in Claude Code as Clankie: identity, persona, tools over MCP, memory card per turn, and skills.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

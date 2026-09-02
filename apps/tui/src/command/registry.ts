@@ -113,6 +113,17 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["seat"],
+    lines: [
+      "  seat [--resume] [--plugin-dir PATH] [--dry-run]",
+      "                           Sit in Claude Code as Clankie (TTY); --dry-run prints the launch plan (JSON)",
+    ],
+  },
+  {
+    nouns: ["mcp"],
+    lines: ["  mcp [--lane operator]    Serve Clankie's lane tool bank over stdio for a seated harness"],
+  },
+  {
     nouns: ["discord"],
     lines: ["  discord [status]         Read non-secret Discord identifiers and body selection"],
   },
@@ -157,6 +168,8 @@ export function commandHelp(): string {
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",
     "prompt / memory-card print plain text, and only for the bearer's own lane:",
     "  operator, discord_voice, discord_presence, gameplay (default: operator).",
+    "seat needs a TTY and Claude Code on PATH; mcp speaks JSON-RPC on stdout and is",
+    "  for a harness's MCP config, not for people.",
     "Secret entry lives in the console, not here: /auth, /discord, /connect, /voice. The",
     "credential store is shared — what /auth writes is what this CLI's services read.",
     "Local LLM servers are not launcher-owned; start them yourself.",

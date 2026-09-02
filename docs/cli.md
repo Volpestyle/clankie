@@ -49,6 +49,8 @@ device table, credential-rotate sentence). Everything else is already JSON.
 | `play status`                                                            | JSON                                                                                         |
 | `play stop`                                                              | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
 | `prompt …`, `memory-card …`                                              | Plain text: the prompt or card itself, verbatim                                              |
+| `seat`                                                                   | Interactive (TTY); `seat --dry-run` is JSON                                                  |
+| `mcp`                                                                    | JSON-RPC for a harness, never for people                                                     |
 | `pair`, `devices`, `operator-credential rotate`                          | Human text; pass `--json`                                                                    |
 | `help`                                                                   | This index (plain text)                                                                      |
 | `--version`                                                              | `clankie <version>`                                                                          |
@@ -420,6 +422,63 @@ the same recent past his own sessions do.
 Filtered by lane exactly as the session's own injection is: operator-private
 episodes reach only the operator lane. Empty output means the lane has recalled
 nothing yet, which is not an error.
+
+### `seat [--resume] [--plugin-dir PATH] [--dry-run]`
+
+Sit in Claude Code as Clankie ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
+Needs a TTY and `claude` on `PATH`. The launcher does the two things the
+plugin cannot: it passes `--settings` with the permission allowlist for
+`clankie` commands, and, when the plugin is installed from the repo's
+marketplace (`clankie@clankie`), the channel development flag so wakes and
+escalations reach the session. When the plugin is not installed it loads the
+bundled `integrations/claude-plugin` with `--plugin-dir` (tools and skills,
+no channel). Inside a herdr pane it names that pane `clankie` once Claude Code
+is detected there, which binds the pane to his own persona rather than a fleet
+contact; a second pane claiming the name stays an ordinary fleet agent and is
+told so on stderr. The pane is un-named again when the session ends.
+
+Every seat starts a new Claude Code session under a recorded id;
+`--resume` reopens the last one from the directory it was opened in. The
+service-side conversation the app pins is the same either way.
+
+`--dry-run` prints the launch plan instead of launching:
+
+```json
+{
+  "ok": true,
+  "command": "claude",
+  "args": [
+    "--name",
+    "Clankie",
+    "--settings",
+    "{…}",
+    "--plugin-dir",
+    "…/integrations/claude-plugin",
+    "--session-id",
+    "…"
+  ],
+  "plugin": { "source": "plugin-dir", "path": "…/integrations/claude-plugin" },
+  "channel": false,
+  "sessionId": "…",
+  "resumed": false,
+  "cwd": "/Users/me/dev/project",
+  "herdrPaneId": "w1:p2"
+}
+```
+
+`plugin.source` is `installed` with `channel: true` after
+`claude plugin marketplace add <repoRoot>/integrations/claude-plugin` and
+`claude plugin install clankie@clankie`. The plugin README documents the
+install and what the plugin carries.
+
+### `mcp [--lane operator]`
+
+The seat's stdio side: an MCP server on stdin/stdout that re-serves the
+service's lane tool bank (`/v1/mcp`), resolving the operator bearer from the
+credential broker so no secret lands in a harness config. The plugin's
+`.mcp.json` names it; a Codex MCP config names the same command. Only the
+operator lane has a bearer on this side. stdout is the wire: progress goes to
+stderr, and the process ends when the harness closes stdin.
 
 ### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
 

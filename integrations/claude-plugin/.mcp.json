@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "clankie": {
+      "command": "clankie",
+      "args": ["mcp", "--lane", "operator"]
+    }
+  }
+}

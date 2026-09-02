@@ -1,0 +1,29 @@
+{
+  "description": "Clankie's seat context: the owner persona, reach, address, and service model card at session start; the newest memory card on every turn.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["prompt", "--lane", "operator", "--sections", "persona,reach,address,model"],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["memory-card", "--lane", "operator"],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -328,6 +328,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 0.84.2
         version: 0.84.2(patch_hash=7a93d4f2f5befef68a7e2a3520a3e38525f1dce17708a690a50d8a85fad4819d)
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
       qrcode:
         specifier: 1.5.4
         version: 1.5.4

@@ -1,0 +1,13 @@
+{
+  "name": "clankie",
+  "displayName": "Clankie",
+  "version": "0.2.0",
+  "description": "Sit in Claude Code as Clankie: his identity, persona, tools over MCP, memory card per turn, and skills. The service keeps his body and his social lanes.",
+  "author": {
+    "name": "James Volpe",
+    "url": "https://github.com/Volpestyle"
+  },
+  "repository": "https://github.com/Volpestyle/clankie",
+  "license": "Apache-2.0",
+  "keywords": ["clankie", "seat", "agent", "herdr"]
+}
