@@ -3,7 +3,6 @@ import {
   PUBLIC_GATEWAY_CONFIG_PATH,
   PublicGatewayConfigSchema,
   PublicGatewayInstallationIdSchema,
-  derivePublicGatewayHostId,
   type PublicGatewayConfig,
 } from "@clankie/protocol";
 import { z } from "zod";
@@ -158,8 +157,8 @@ export async function completeClankieAccountLogin(input: {
   readonly fetchImpl?: typeof fetch;
 }): Promise<OauthCredential> {
   const code = input.code.trim();
-  if (!/^\d{6}$/u.test(code)) {
-    throw new ClankieAccountAuthError("code_invalid", "Enter the six-digit code from your email");
+  if (!/^\d+$/u.test(code)) {
+    throw new ClankieAccountAuthError("code_invalid", "Enter the numeric code from your email");
   }
   const fetchImpl = input.fetchImpl ?? fetch;
   const { challenge } = input;

@@ -187,7 +187,7 @@ Storage implementation and grant validation details live in
 
 ## Clankie account
 
-`/gateway` signs this Mac in with an invited email and a six-digit Cognito code.
+`/gateway` signs this Mac in with an invited email and a one-time Cognito code.
 The broker stores the access and rotating refresh token as `clankie-account` in
 Keychain. The non-secret doorway URL and random per-installation id live under
 `publicGateway` in `settings.json`; the public host id is derived from the

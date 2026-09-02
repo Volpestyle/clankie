@@ -228,7 +228,7 @@ Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device"
 Read the public doorway binding or disable it. JSON includes `publicGateway`,
 the derived `hostId`, `credentialPresent`, `enabled`, `settingsFile`, and the
 restart command. Use the interactive TUI `/gateway` wizard to sign in with an
-invited email and six-digit code; the rotating account credential goes to
+invited email and one-time code; the rotating account credential goes to
 Keychain and the wizard restarts Clankie automatically. `disable` signs this Mac
 out and removes its installation binding.
 

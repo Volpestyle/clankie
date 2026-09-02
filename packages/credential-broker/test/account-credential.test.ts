@@ -45,13 +45,16 @@ describe("Clankie account credential", () => {
       email: "  Person@Example.com ",
       fetchImpl,
     });
-    const credential = await completeClankieAccountLogin({ challenge, code: "123456", fetchImpl });
+    const credential = await completeClankieAccountLogin({ challenge, code: "12345678", fetchImpl });
 
     expect(challenge).toMatchObject({ mode: "signin", email: "person@example.com" });
     expect(requests.map((request) => request.target)).toEqual([
       "AWSCognitoIdentityProviderService.InitiateAuth",
       "AWSCognitoIdentityProviderService.RespondToAuthChallenge",
     ]);
+    expect(requests[1]?.body).toMatchObject({
+      ChallengeResponses: { EMAIL_OTP_CODE: "12345678" },
+    });
     expect(credential).toMatchObject({ type: "oauth", accountId: "account-1", clientId: "client123" });
     const installationId = generatePublicGatewayInstallationId();
     expect(installationId).toHaveLength(22);

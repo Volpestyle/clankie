@@ -19,7 +19,7 @@ sequenceDiagram
   participant Gateway
   User->>Mac: enter invited email
   Mac->>Cognito: USER_AUTH / EMAIL_OTP
-  Cognito-->>User: six-digit email code
+  Cognito-->>User: one-time email code
   User->>Mac: enter code
   Cognito-->>Mac: access + rotating refresh token
   Mac->>Gateway: installation id + signed access token

@@ -95,8 +95,8 @@ async function runWizard(
     flow.setStatus("sending a one-time code…");
     const challenge = await beginClankieAccountLogin({ gatewayUrl, email });
     const code = await flow.readText({
-      message: "Six-digit code from your email",
-      validate: (value) => (/^\d{6}$/u.test(value.trim()) ? undefined : "Enter the six-digit code."),
+      message: "Code from your email",
+      validate: (value) => (/^\d+$/u.test(value.trim()) ? undefined : "Enter the numeric code."),
     });
     if (code === undefined) return;
     flow.setStatus("signing this Mac in…");

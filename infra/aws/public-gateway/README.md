@@ -130,7 +130,7 @@ infra/aws/public-gateway/deploy.sh release
 infra/aws/accounts/deploy.sh invite tester@example.com
 ```
 
-The tester runs `/gateway`, enters that email and the six-digit code Cognito
+The tester runs `/gateway`, enters that email and the one-time code Cognito
 sends, then runs `/pair`. The Mac keeps its rotating refresh token in Keychain;
 the gateway derives the host route from the signed account subject and a random
 installation id. No host id, bearer, AWS access, SSH access, or Tailscale setup

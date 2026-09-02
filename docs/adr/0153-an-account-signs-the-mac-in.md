@@ -29,7 +29,7 @@ or gateway protocol.
 
 The Mac discovers the non-secret Cognito endpoint, issuer, client id, and signup
 mode from `GET /gateway/v1/config`. `/gateway` asks for an email, completes the
-six-digit email challenge, stores the access and rotating refresh token in the
+one-time email challenge, stores the access and rotating refresh token in the
 existing Keychain credential broker, creates one random installation id, and
 restarts the connector. It then tells the user to run the unchanged `/pair`
 flow. `clankie autostart enable` installs a per-user LaunchAgent so the existing
@@ -44,7 +44,7 @@ sequenceDiagram
   participant Phone as iPhone / iPad
   User->>Mac: /gateway, email
   Mac->>Cognito: passwordless EMAIL_OTP
-  Cognito-->>User: six-digit code
+  Cognito-->>User: one-time code
   User->>Mac: code
   Cognito-->>Mac: access + rotating refresh token
   Mac->>Gateway: access token + installation id
