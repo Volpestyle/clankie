@@ -13,6 +13,7 @@ import {
 } from "@clankie/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { derivePublicGatewayHostId } from "@clankie/credential-broker";
 import {
   createPublicGateway,
   loadHostTokens,
@@ -31,6 +32,51 @@ afterEach(async () => {
 });
 
 describe("public gateway", () => {
+  it("discovers account config and binds a signed account to one installation", async () => {
+    const installationId = "i".repeat(22);
+    const accountId = "account-1";
+    const accountHostId = derivePublicGatewayHostId(accountId, installationId);
+    const accountConfig = {
+      schemaVersion: 1,
+      account: {
+        provider: "cognito_email_otp",
+        endpoint: "https://cognito-idp.us-east-1.amazonaws.com",
+        issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_pool",
+        clientId: "client123",
+        selfSignUpEnabled: false,
+      },
+    } as const;
+    const gateway = createPublicGateway({
+      hostTokens: new Map(),
+      accountConfig,
+      authenticateAccountToken: async (token) => {
+        if (token !== "signed-access") throw new Error("denied");
+        return { accountId, expiresAtMs: Date.now() + 30_000 };
+      },
+    });
+    openGateways.push(gateway);
+    gateway.server.listen(0, "127.0.0.1");
+    await once(gateway.server, "listening");
+    const address = gateway.server.address() as AddressInfo;
+    const origin = `http://127.0.0.1:${address.port}`;
+
+    expect(await (await fetch(`${origin}/gateway/v1/config`)).json()).toEqual(accountConfig);
+    const socket = new WebSocket(
+      `${origin.replace("http", "ws")}${PUBLIC_GATEWAY_HOST_CONNECT_PATH}?hostId=${accountHostId}&installationId=${installationId}`,
+      { headers: { authorization: "Bearer signed-access" } },
+    );
+    openSockets.push(socket);
+    await once(socket, "open");
+
+    const denied = new WebSocket(
+      `${origin.replace("http", "ws")}${PUBLIC_GATEWAY_HOST_CONNECT_PATH}?hostId=${hostId}&installationId=${installationId}`,
+      { headers: { authorization: "Bearer signed-access" } },
+    );
+    openSockets.push(denied);
+    const [error] = (await once(denied, "error")) as [Error];
+    expect(error.message).toMatch(/401/u);
+  });
+
   it("routes one-time pairing and host-scoped relay exchanges over the Mac connection", async () => {
     const logs: Array<{ readonly fields: Readonly<Record<string, unknown>>; readonly message: string }> = [];
     const { gateway, origin } = await startGateway(logs);

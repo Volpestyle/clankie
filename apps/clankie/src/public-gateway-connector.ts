@@ -5,6 +5,7 @@ import {
   PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayHostIdSchema,
+  PublicGatewayInstallationIdSchema,
   PublicGatewayTunnelFrameSchema,
   publicGatewayTargetFor,
   type PublicGatewayPairingRouteFrame,
@@ -16,6 +17,7 @@ import { WebSocket, type RawData } from "ws";
 const CONNECT_TIMEOUT_MS = 5_000;
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+const TOKEN_REFRESH_WINDOW_MS = 5 * 60_000;
 const RESPONSE_BYTES_MAX = 16 * 1024 * 1024;
 const WEBSOCKET_PAYLOAD_BYTES_MAX = 2 * 1024 * 1024;
 const REQUEST_HEADER_ALLOWLIST = new Set(["accept", "authorization", "content-type"]);
@@ -29,7 +31,9 @@ export interface PublicGatewayConnectorLogger {
 export interface PublicGatewayConnectorOptions {
   readonly gatewayUrl: string;
   readonly hostId: string;
-  readonly hostToken: string;
+  readonly hostToken?: string;
+  readonly installationId?: string;
+  readonly resolveHostToken?: () => Promise<{ readonly token: string; readonly expiresAt: number }>;
   readonly controlPlaneUrl: string;
   readonly relayUrl: string;
   readonly logger?: PublicGatewayConnectorLogger;
@@ -63,7 +67,10 @@ export class PublicGatewayConnector {
 
   private readonly connectUrl: string;
   private readonly hostId: string;
-  private readonly hostToken: string;
+  private readonly hostToken: string | undefined;
+  private readonly resolveHostToken:
+    | (() => Promise<{ readonly token: string; readonly expiresAt: number }>)
+    | undefined;
   private readonly controlPlaneUrl: string;
   private readonly relayUrl: string;
   private readonly logger: PublicGatewayConnectorLogger;
@@ -76,15 +83,25 @@ export class PublicGatewayConnector {
   private readonly pairingRouteWaiters = new Map<string, PairingRouteWaiter>();
   private socket: WebSocket | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private tokenRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectDelayMs: number;
+  private connecting = false;
   private started = false;
 
   public constructor(options: PublicGatewayConnectorOptions) {
     const gatewayOrigin = requireHttpOrigin(options.gatewayUrl, "Gateway URL");
     this.hostId = PublicGatewayHostIdSchema.parse(options.hostId);
-    if (options.hostToken.length < 32)
+    if ((options.hostToken === undefined) === (options.resolveHostToken === undefined)) {
+      throw new Error("Configure one static or renewable gateway host token source");
+    }
+    if (options.hostToken !== undefined && options.hostToken.length < 32) {
       throw new Error("Gateway host token must contain at least 32 characters");
+    }
+    if ((options.installationId === undefined) !== (options.resolveHostToken === undefined)) {
+      throw new Error("Renewable gateway credentials require an installation id");
+    }
     this.hostToken = options.hostToken;
+    this.resolveHostToken = options.resolveHostToken;
     this.controlPlaneUrl = requireHttpOrigin(options.controlPlaneUrl, "Control-plane URL");
     this.relayUrl = requireHttpOrigin(options.relayUrl, "Relay URL");
     this.logger = options.logger ?? silentLogger;
@@ -96,6 +113,12 @@ export class PublicGatewayConnector {
     const connect = new URL(PUBLIC_GATEWAY_HOST_CONNECT_PATH, gatewayOrigin);
     connect.protocol = connect.protocol === "https:" ? "wss:" : "ws:";
     connect.searchParams.set("hostId", this.hostId);
+    if (options.installationId !== undefined) {
+      connect.searchParams.set(
+        "installationId",
+        PublicGatewayInstallationIdSchema.parse(options.installationId),
+      );
+    }
     this.connectUrl = connect.toString();
   }
 
@@ -143,7 +166,9 @@ export class PublicGatewayConnector {
     if (!this.started) return;
     this.started = false;
     if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
+    if (this.tokenRefreshTimer !== undefined) clearTimeout(this.tokenRefreshTimer);
     this.reconnectTimer = undefined;
+    this.tokenRefreshTimer = undefined;
     for (const controller of this.inFlight.values()) controller.abort("gateway connector closed");
     this.inFlight.clear();
     this.socket?.close(1001, "connector shutting down");
@@ -157,9 +182,29 @@ export class PublicGatewayConnector {
   }
 
   private connect(): void {
+    if (!this.started || this.socket !== undefined || this.connecting) return;
+    this.connecting = true;
+    void this.openSocket().finally(() => {
+      this.connecting = false;
+    });
+  }
+
+  private async openSocket(): Promise<void> {
+    let credential: { readonly token: string; readonly expiresAt?: number };
+    try {
+      credential =
+        this.resolveHostToken === undefined ? { token: this.hostToken ?? "" } : await this.resolveHostToken();
+    } catch (error) {
+      this.logger.warn(
+        { hostId: this.hostId, error: errorName(error) },
+        "public gateway credential refresh failed",
+      );
+      this.scheduleReconnect();
+      return;
+    }
     if (!this.started || this.socket !== undefined) return;
     const socket = new WebSocket(this.connectUrl, {
-      headers: { authorization: `Bearer ${this.hostToken}` },
+      headers: { authorization: `Bearer ${credential.token}` },
       handshakeTimeout: CONNECT_TIMEOUT_MS,
       maxPayload: WEBSOCKET_PAYLOAD_BYTES_MAX,
     });
@@ -172,6 +217,14 @@ export class PublicGatewayConnector {
         waiter.resolve(socket);
       }
       this.connectionWaiters.clear();
+      if (credential.expiresAt !== undefined) {
+        const refreshInMs = Math.max(0, credential.expiresAt - Date.now() - TOKEN_REFRESH_WINDOW_MS);
+        this.tokenRefreshTimer = setTimeout(() => {
+          this.tokenRefreshTimer = undefined;
+          if (this.socket === socket) socket.close(4000, "refreshing host credential");
+        }, refreshInMs);
+        this.tokenRefreshTimer.unref();
+      }
       void this.replayPairingRoutes(socket);
       this.logger.info({ hostId: this.hostId }, "public gateway connected");
     });
@@ -185,10 +238,16 @@ export class PublicGatewayConnector {
   private disconnected(socket: WebSocket): void {
     if (this.socket !== socket) return;
     this.socket = undefined;
+    if (this.tokenRefreshTimer !== undefined) clearTimeout(this.tokenRefreshTimer);
+    this.tokenRefreshTimer = undefined;
     for (const controller of this.inFlight.values()) controller.abort("public gateway disconnected");
     this.inFlight.clear();
     this.rejectPairingRouteWaiters("Public gateway disconnected before acknowledging the pairing route");
-    if (!this.started) return;
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.started || this.reconnectTimer !== undefined) return;
     const delayMs = this.reconnectDelayMs;
     this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, this.reconnectMaximumMs);
     this.reconnectTimer = setTimeout(() => {

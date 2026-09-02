@@ -35,6 +35,7 @@ clankie status                  # probe every launcher-owned service
 clankie doctor                  # this install: checkout vs release, models, credentials, optional herdr
 clankie restart [service]       # restart in dependency order
 clankie down [service]          # stop in reverse dependency order
+clankie autostart enable        # start clankie + relay at login (also status, disable)
 clankie pair --json             # one-time device pairing offer
 clankie devices --json          # list paired devices
 clankie devices revoke <id> --json
@@ -88,6 +89,12 @@ order ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)):
 ![Launcher-owned local process architecture](../../docs/diagrams/tui-supervision.jpg)
 
 [Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
+
+`clankie autostart enable` installs a user LaunchAgent that runs
+`clankie restart clankie` at login, so the same dependency-ordered start happens
+without a terminal. launchd launches it once (`RunAtLoad`, no `KeepAlive`) and
+this supervision owns the processes from there; details in
+[`docs/cli.md`](../../docs/cli.md).
 
 Each process has a mode-0600 pid record and adjacent log. Before signalling a
 pid, the launcher re-reads its live command and refuses if it no longer matches

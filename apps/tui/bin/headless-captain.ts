@@ -18,6 +18,7 @@ import { runPlayCommand } from "../src/command/play.ts";
 import { runStanceCommand } from "../src/command/stance.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
 import { runGatewayCommand } from "../src/command/gateway.ts";
+import { runAutostartCommand } from "../src/command/autostart.ts";
 import { commandHelp } from "../src/command/registry.ts";
 import { outputJson, type Writable } from "../src/command/io.ts";
 
@@ -75,6 +76,14 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "restart") return await runRestartCommand(rest, options);
     if (command === "down") return await runDownCommand(rest, options);
+    if (command === "autostart") {
+      const result = await runAutostartCommand(rest, {
+        ...(options.env === undefined ? {} : { env: options.env }),
+        ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
+      });
+      outputJson(stdout, result);
+      return 0;
+    }
     if (command === "pair") return await runPairCommand(rest, options);
     if (command === "devices") return await runDevicesCommand(rest, options);
     if (command === "operator-credential") return await runOperatorCredentialCommand(rest, options);

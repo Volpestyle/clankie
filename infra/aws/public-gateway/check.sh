@@ -5,7 +5,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 bash -n infra/aws/public-gateway/deploy.sh infra/aws/public-gateway/activate-release.sh
-[[ "$(infra/aws/public-gateway/activate-release.sh --version)" == 1 ]]
+[[ "$(infra/aws/public-gateway/activate-release.sh --version)" == 2 ]]
 jq -e . infra/aws/public-gateway/tailnet-policy.fragment.hujson >/dev/null
 
 instance_name="$(sed -n 's/^      InstanceName: //p' infra/aws/public-gateway/template.yaml)"

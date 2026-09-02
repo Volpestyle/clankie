@@ -5,6 +5,7 @@
  * only to the credential store and render only redacted.
  */
 import {
+  CLANKIE_ACCOUNT_PROVIDER_ID,
   createDefaultCredentialStore,
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_USER_SESSION_PROVIDER_ID,
@@ -157,11 +158,6 @@ const FEATURED_PROVIDERS = ["anthropic", "openai", "xai", "google", "openrouter"
  */
 const FEATURED_SERVICE_PROVIDERS: readonly MenuOption[] = [
   {
-    value: PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
-    label: "Clankie public gateway",
-    description: "Authenticates this Mac's outbound tunnel to api.clankie.bot.",
-  },
-  {
     value: "elevenlabs",
     label: "ElevenLabs",
     description: "Voice TTS for Discord (ADR 0070); pick the voice itself with /voice.",
@@ -175,6 +171,7 @@ const SERVICE_CREDENTIAL_IDS = new Set([
   "elevenlabs",
   "email",
   LINEAR_PROVIDER_ID,
+  CLANKIE_ACCOUNT_PROVIDER_ID,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
 ]);
 
@@ -183,6 +180,7 @@ const AUTH_STATUS_PROVIDER_IDS: readonly string[] = FEATURED_PROVIDERS.flatMap((
   id === "openai" ? [id, CODEX_PROVIDER_ID] : [id],
 );
 const AUTH_STATUS_SERVICE_IDS: readonly string[] = [
+  CLANKIE_ACCOUNT_PROVIDER_ID,
   ...FEATURED_SERVICE_PROVIDERS.map((option) => option.value),
   DISCORD_BOT_PROVIDER_ID,
 ];

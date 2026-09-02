@@ -1,6 +1,8 @@
 import {
+  CLANKIE_ACCOUNT_PROVIDER_ID,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
   createDefaultCredentialStore,
+  derivePublicGatewayHostId,
   type CredentialStore,
 } from "@clankie/credential-broker";
 import {
@@ -28,6 +30,7 @@ export interface GatewayCommandResult {
   readonly publicGateway: PublicGatewaySettings;
   readonly credentialPresent: boolean;
   readonly enabled: boolean;
+  readonly hostId?: string;
   readonly settingsFile: string;
   readonly restart: string;
 }
@@ -46,12 +49,24 @@ function stores(options: GatewayCommandOptions): {
 async function result(options: GatewayCommandOptions): Promise<GatewayCommandResult> {
   const { settings, credentials } = stores(options);
   const publicGateway = (await settings.load()).publicGateway;
-  const credentialPresent = (await credentials.list())[PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID] !== undefined;
+  const listed = await credentials.list();
+  const account = await credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID);
+  const accountReady =
+    publicGateway.installationId !== undefined &&
+    account?.type === "oauth" &&
+    account.accountId !== undefined;
+  const legacyReady =
+    publicGateway.hostId !== undefined && listed[PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID] !== undefined;
+  const hostId = accountReady
+    ? derivePublicGatewayHostId(account.accountId ?? "", publicGateway.installationId ?? "")
+    : publicGateway.hostId;
+  const credentialPresent = accountReady || legacyReady;
   return {
     ok: true,
     publicGateway,
     credentialPresent,
     enabled: publicGateway.url !== undefined && credentialPresent,
+    ...(hostId === undefined ? {} : { hostId }),
     settingsFile: settings.path,
     restart: "clankie restart captain",
   };
@@ -70,6 +85,7 @@ export async function gatewayConfigure(
 export async function gatewayDisable(options: GatewayCommandOptions = {}): Promise<GatewayCommandResult> {
   const { settings, credentials } = stores(options);
   await settings.update((current) => ({ ...current, publicGateway: {} }));
+  await credentials.delete(CLANKIE_ACCOUNT_PROVIDER_ID);
   await credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
   return await result(options);
 }

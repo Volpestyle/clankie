@@ -134,6 +134,35 @@ describe("public gateway Mac connector", () => {
     const second = await gateway.nextConnection();
     expect(await second.nextFrame()).toEqual(original);
   });
+
+  it("uses renewable account credentials with the installation-bound route", async () => {
+    const target = await listen(createServer((_request, response) => response.end("{}")));
+    const gateway = await fakeGateway();
+    const installationId = "YWFhYWFhYWFhYWFhYWFhYQ";
+    let resolutions = 0;
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      installationId,
+      resolveHostToken: async () => {
+        resolutions += 1;
+        return { token: "account-access-token", expiresAt: Date.now() + 60 * 60_000 };
+      },
+      controlPlaneUrl: target,
+      relayUrl: target,
+      reconnectMinimumMs: 5,
+      reconnectMaximumMs: 10,
+    });
+    connectors.push(connector);
+    connector.start();
+
+    const connection = await gateway.nextConnection();
+    expect(resolutions).toBe(1);
+    expect(connection.request.headers.authorization).toBe("Bearer account-access-token");
+    expect(connection.request.url).toBe(
+      `${PUBLIC_GATEWAY_HOST_CONNECT_PATH}?hostId=${hostId}&installationId=${installationId}`,
+    );
+  });
 });
 
 interface FakeGatewayConnection {

@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Clankie accounts — passwordless email OTP identity for Mac enrollment
+
+Parameters:
+  SelfSignUpEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Permit any verified email to create an account; keep false for the invited beta
+  EmailSourceArn:
+    Type: String
+    Description: Verified Amazon SES email or domain identity ARN used for passwordless OTP mail
+  EmailFrom:
+    Type: String
+    Description: From address covered by EmailSourceArn
+
+Conditions:
+  SelfSignUpIsDisabled: !Equals [!Ref SelfSignUpEnabled, "false"]
+
+Resources:
+  AccountUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: clankie-accounts
+      UserPoolTier: ESSENTIALS
+      DeletionProtection: ACTIVE
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      MfaConfiguration: "OFF"
+      Policies:
+        SignInPolicy:
+          AllowedFirstAuthFactors:
+            # Cognito's CreateUserPool currently rejects EMAIL_OTP unless PASSWORD is also present.
+            # Clankie creates users without passwords and requests only EMAIL_OTP.
+            - PASSWORD
+            - EMAIL_OTP
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: !If [SelfSignUpIsDisabled, true, false]
+      EmailConfiguration:
+        EmailSendingAccount: DEVELOPER
+        SourceArn: !Ref EmailSourceArn
+        From: !Sub Clankie <${EmailFrom}>
+
+  MacClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: clankie-mac
+      UserPoolId: !Ref AccountUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_AUTH
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 90
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+      RefreshTokenRotation:
+        Feature: ENABLED
+        RetryGracePeriodSeconds: 60
+
+Outputs:
+  UserPoolId:
+    Value: !Ref AccountUserPool
+  ClientId:
+    Value: !Ref MacClient
+  Endpoint:
+    Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com
+  Issuer:
+    Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${AccountUserPool}
+  SelfSignUpEnabled:
+    Value: !Ref SelfSignUpEnabled

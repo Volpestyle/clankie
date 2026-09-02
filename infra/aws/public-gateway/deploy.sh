@@ -59,7 +59,6 @@ case "$command_name" in
       --output table
     ;;
   bootstrap)
-    : "${CLANKIE_GATEWAY_SSH_KEY:?Set CLANKIE_GATEWAY_SSH_KEY to the Lightsail private key path}"
     target="$(gateway_target)"
     [[ -n "$target" && "$target" != None ]] || {
       echo "The gateway stack has no static IP output" >&2
@@ -72,6 +71,25 @@ case "$command_name" in
     scp "${ssh_options[@]}" infra/aws/public-gateway/activate-release.sh "$ssh_target:$remote_activator"
     ssh "${ssh_options[@]}" "$ssh_target" \
       "sudo install -o root -g root -m 0755 '$remote_activator' /usr/local/sbin/clankie-gateway-activate && rm -f '$remote_activator' && sudo /usr/local/sbin/clankie-gateway-activate --version"
+    ;;
+  configure-account)
+    target="$(gateway_target)"
+    [[ -n "$target" && "$target" != None ]] || {
+      echo "The gateway stack has no target" >&2
+      exit 1
+    }
+    account_config="$(mktemp -t clankie-gateway-account.XXXXXX)"
+    remote_config="/tmp/clankie-gateway-account.$$"
+    cleanup_account() { rm -f -- "$account_config"; }
+    trap cleanup_account EXIT
+    infra/aws/accounts/deploy.sh config > "$account_config"
+    jq -e '.schemaVersion == 1 and .account.provider == "cognito_email_otp"' "$account_config" >/dev/null
+    ssh_user="${CLANKIE_GATEWAY_SSH_USER:-ec2-user}"
+    ssh_target="$ssh_user@$target"
+    scp "${ssh_options[@]}" "$account_config" "$ssh_target:$remote_config"
+    ssh "${ssh_options[@]}" "$ssh_target" \
+      "sudo install -o root -g root -m 0644 '$remote_config' /etc/clankie-gateway/account.json && rm -f '$remote_config'"
+    echo "Installed Cognito account discovery on $target; release the gateway to activate it"
     ;;
   release)
     if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
@@ -118,7 +136,7 @@ case "$command_name" in
       "sudo /usr/local/sbin/clankie-gateway-activate '$remote_release_dir' '$image_ref'"
     ;;
   *)
-    echo "Usage: $0 provision|bootstrap|release" >&2
+    echo "Usage: $0 provision|bootstrap|configure-account|release" >&2
     exit 2
     ;;
 esac

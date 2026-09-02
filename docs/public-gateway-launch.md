@@ -14,7 +14,8 @@ flowchart LR
   Edge --> Gateway["Lightsail<br/>Caddy + gateway"]
   Gateway --> Mac["always-online review Mac"]
   Mac --> Product["Clankie + Herdr"]
-  Checks["manual health, logs,<br/>host metrics, real-device journey"] --> Gate{"ready?"}
+  Accounts["Cognito<br/>email OTP"] --> Mac
+  Checks["health, logs, account sign-in,<br/>host metrics, real-device journey"] --> Gate{"ready?"}
   Build --> Checks
   Gateway --> Checks
   Mac --> Checks
@@ -26,6 +27,8 @@ flowchart LR
 The first deployment exposes only evidence already produced by the system:
 
 - `GET https://api.clankie.bot/health` proves Caddy can reach the gateway;
+- `GET https://api.clankie.bot/gateway/v1/config` publishes the exact non-secret
+  Cognito issuer and client used by the Mac;
 - the tagged Release workflow records the tested commit, protected production
   approval, private deployment, public health verification, and publication;
 - Lightsail reports instance CPU, network, and status checks;
@@ -47,6 +50,8 @@ Before submission or adding an invited user:
 - the production Release bundle contains that origin, no `*.ts.net` origin,
   and no cleartext ATS exception;
 - the gateway and review Mac remain live for the intended review window;
+- an invited email can complete `/gateway`, survive an access-token refresh and
+  a Mac login, and connect without Tailscale, SSH, or a copied bearer;
 - App Review receives a fresh QR or typed pairing code and exact setup notes;
 - pairing, reconnect, chat, fleet/agent control, and terminal observation pass
   on physical off-network iPhone and iPad devices;
@@ -91,8 +96,9 @@ telemetry, or synthetic review journeys. Before a broad public beta, add:
   checks;
 - an always-on synthetic pairing, message, and terminal-observation journey.
 
-Application-layer device-to-Mac encryption and automatic host enrollment are
-separate prerequisites before unrelated customers share the service. Digital
+Application-layer device-to-Mac encryption remains a prerequisite before
+unrelated customers share the service. Obtain SES production access before
+inviting an address that is not a verified sandbox recipient. Digital
 features or subscriptions sold in the iOS app use StoreKit and App Store
 Connect products. App privacy labels, the privacy policy, review notes, account
 support, and actual data handling must agree before submission. An external

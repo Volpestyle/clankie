@@ -16,6 +16,8 @@ import {
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
+  createClankieAccountTokenProvider,
+  derivePublicGatewayHostId,
   ensureDiscordBridgeCredential,
   ensureDiscordUserBridgeCredential,
   ensureDiscordUserVoiceBridgeCredential,
@@ -138,6 +140,37 @@ if (startupSettings.publicGateway.url !== undefined && startupSettings.publicGat
         error: error instanceof Error ? error.name : "UnknownError",
       },
       "public gateway configuration is unusable; direct access remains available",
+    );
+  }
+}
+if (
+  publicGatewayConnector === undefined &&
+  startupSettings.publicGateway.url !== undefined &&
+  startupSettings.publicGateway.installationId !== undefined
+) {
+  try {
+    const resolveAccountToken = createClankieAccountTokenProvider({
+      gatewayUrl: startupSettings.publicGateway.url,
+      store: operatorCredentialStore,
+    });
+    const initial = await resolveAccountToken();
+    const hostId = derivePublicGatewayHostId(initial.accountId, startupSettings.publicGateway.installationId);
+    publicGatewayConnector = new PublicGatewayConnector({
+      gatewayUrl: startupSettings.publicGateway.url,
+      hostId,
+      installationId: startupSettings.publicGateway.installationId,
+      resolveHostToken: async () => {
+        const credential = await resolveAccountToken();
+        return { token: credential.token, expiresAt: credential.expiresAt };
+      },
+      controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
+      relayUrl: `http://127.0.0.1:${String(relayPort)}`,
+      logger,
+    });
+  } catch (error) {
+    logger.warn(
+      { error: error instanceof Error ? error.name : "UnknownError" },
+      "Clankie account cannot connect to the public gateway; direct access remains available",
     );
   }
 }

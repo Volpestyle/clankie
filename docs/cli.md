@@ -43,7 +43,7 @@ device table, credential-rotate sentence). Everything else is already JSON.
 
 | Command                                                                  | stdout                                                                                       |
 | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`                          | JSON                                                                                         |
+| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`           | JSON                                                                                         |
 | `model …`, `effort …`, `image-model …`, `video-model …`                  | JSON                                                                                         |
 | `persona …`, `games …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON                                                                                         |
 | `play status`                                                            | JSON                                                                                         |
@@ -155,6 +155,37 @@ not a no-op.
 Stop in reverse dependency order. Default `all`. Same stdout shape as restart,
 with `"status": "stopped"` on success.
 
+### `autostart enable` / `autostart disable` / `autostart status`
+
+Start Clankie when you log in. `enable` writes the user LaunchAgent
+`~/Library/LaunchAgents/bot.clankie.autostart.plist` and loads it into your
+`gui` domain. At login it runs this install's launcher as
+`clankie restart clankie`, so the service, the relay, and the selected Discord
+body start in dependency order and the launcher's supervision owns them from
+there. launchd launches it once (`RunAtLoad`, no `KeepAlive`), and only inside a
+logged-in session: a Mac waiting at the login window starts nothing. On a
+release install the agent records the `current` launcher path, so upgrades need
+no re-enable. It also records your `PATH`, `XDG_CONFIG_HOME`, and
+`XDG_STATE_HOME` as they were when you enabled it; run `enable` again after
+changing them. `enable` is idempotent (a loaded agent is booted out first) and
+`disable` unloads and removes the agent.
+
+```json
+{
+  "ok": true,
+  "status": "enabled",
+  "label": "bot.clankie.autostart",
+  "plist": "/Users/me/Library/LaunchAgents/bot.clankie.autostart.plist",
+  "loaded": true,
+  "command": ["/Users/me/.local/share/clankie/current/bin/clankie", "restart", "clankie"],
+  "log": "/Users/me/.local/state/clankie/autostart.log"
+}
+```
+
+`status` is `enabled`, `disabled`, or `stale` (the agent file and launchd
+disagree; run `enable`). The job's own output lands in `log`; the services keep
+their usual per-process logs.
+
 ### `pair [--json] [--timeout SEC]`
 
 Mint a one-time pairing offer (QR + code + deep link) for the phone/desktop
@@ -186,16 +217,15 @@ Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device"
 
 ### `gateway [status]` / `gateway set --url URL --host-id ID` / `gateway disable`
 
-Read or write the non-secret public doorway binding. JSON includes
-`publicGateway`, `credentialPresent`, `enabled`, `settingsFile`, and the restart
-command. `set` requires an exact HTTPS origin (loopback HTTP is accepted for
-local verification) and a 16–128 character host id. It never accepts the host
-bearer as a flag.
+Read the public doorway binding or disable it. JSON includes `publicGateway`,
+the derived `hostId`, `credentialPresent`, `enabled`, `settingsFile`, and the
+restart command. Use the interactive TUI `/gateway` wizard to sign in with an
+invited email and six-digit code; the rotating account credential goes to
+Keychain and the wizard restarts Clankie automatically. `disable` signs this Mac
+out and removes its installation binding.
 
-Use the interactive TUI `/gateway` wizard to enter the URL, host id, and bearer
-together. The bearer is stored as `clankie-public-gateway` in Keychain. `disable`
-removes both the settings binding and that credential. Restart the captain after
-a change.
+`set --url URL --host-id ID` remains only for legacy static-bearer migration and
+local verification. It never accepts a secret as a flag.
 
 ### `operator-credential rotate [--json]`
 
@@ -438,7 +468,7 @@ Unknown names fail closed without signalling any process.
 | `CLANKIE_CONTROL_PLANE_URL` | Service origin for probes, pairing, devices, play. Default `http://127.0.0.1:4310`.                                       |
 | `CLANKIE_CAPTAIN_URL`       | Compatibility alias for the same origin.                                                                                  |
 | `CLANKIE_OPERATOR_TOKEN`    | Test/CI override for the operator bearer. An env/store mismatch makes `health` fail. Remove it before rotating.           |
-| `CLANKIE_LAUNCHER_PATH`     | Path used to spawn a deferred self-restart.                                                                               |
+| `CLANKIE_LAUNCHER_PATH`     | Path used to spawn a deferred self-restart; `autostart enable` records it as the login agent's program.                   |
 | `XDG_CONFIG_HOME`           | Config root. Model/provider config is `$XDG_CONFIG_HOME/clankie/clankie.json` (default `~/.config/clankie/clankie.json`). |
 | `XDG_STATE_HOME`            | Process records and logs (`$XDG_STATE_HOME/clankie/`).                                                                    |
 

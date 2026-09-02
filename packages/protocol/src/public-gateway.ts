@@ -2,6 +2,7 @@ import { z } from "zod";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
 export const PUBLIC_GATEWAY_SCHEMA_VERSION = 1 as const;
+export const PUBLIC_GATEWAY_CONFIG_PATH = "/gateway/v1/config";
 export const PUBLIC_GATEWAY_HOST_CONNECT_PATH = "/gateway/v1/hosts/connect";
 export const PUBLIC_GATEWAY_HEALTH_PATH = "/health";
 export const PUBLIC_GATEWAY_HOST_PATH_PREFIX = "/h";
@@ -27,6 +28,83 @@ export const PublicGatewayHostIdSchema = z
   .max(128)
   .regex(/^[A-Za-z0-9_-]+$/u);
 export type PublicGatewayHostId = z.infer<typeof PublicGatewayHostIdSchema>;
+
+/** Stable random identity for one Clankie installation; not a credential. */
+export const PublicGatewayInstallationIdSchema = z
+  .string()
+  .length(22)
+  .regex(/^[A-Za-z0-9_-]+$/u);
+export type PublicGatewayInstallationId = z.infer<typeof PublicGatewayInstallationIdSchema>;
+
+const ExactHttpsOrLoopbackOriginSchema = z
+  .string()
+  .max(512)
+  .superRefine((value, context) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      context.addIssue({ code: "custom", message: "must be an absolute URL" });
+      return;
+    }
+    const loopback =
+      parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
+    if (
+      (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0 ||
+      parsed.pathname !== "/" ||
+      parsed.search.length > 0 ||
+      parsed.hash.length > 0
+    ) {
+      context.addIssue({ code: "custom", message: "must be an exact HTTPS origin (HTTP is loopback-only)" });
+    }
+  });
+
+const ExactHttpsIssuerSchema = z
+  .string()
+  .max(512)
+  .superRefine((value, context) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      context.addIssue({ code: "custom", message: "must be an absolute URL" });
+      return;
+    }
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0 ||
+      parsed.pathname === "/" ||
+      parsed.pathname.endsWith("/") ||
+      parsed.search.length > 0 ||
+      parsed.hash.length > 0
+    ) {
+      context.addIssue({ code: "custom", message: "must be an exact HTTPS issuer URL" });
+    }
+  });
+
+/** Public account discovery returned by the doorway; every value is non-secret. */
+export const PublicGatewayConfigSchema = z
+  .object({
+    schemaVersion: z.literal(PUBLIC_GATEWAY_SCHEMA_VERSION),
+    account: z
+      .object({
+        provider: z.literal("cognito_email_otp"),
+        endpoint: ExactHttpsOrLoopbackOriginSchema,
+        issuer: ExactHttpsIssuerSchema,
+        clientId: z
+          .string()
+          .min(1)
+          .max(128)
+          .regex(/^[A-Za-z0-9_+]+$/u),
+        selfSignUpEnabled: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+export type PublicGatewayConfig = z.infer<typeof PublicGatewayConfigSchema>;
 
 export const PublicGatewayRequestIdSchema = z
   .string()

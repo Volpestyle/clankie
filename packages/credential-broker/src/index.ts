@@ -41,6 +41,22 @@ export {
 } from "./linear-oauth.ts";
 export { resolveProviderBearer } from "./provider-bearer.ts";
 export {
+  CLANKIE_ACCOUNT_PROVIDER_ID,
+  ClankieAccountAuthError,
+  beginClankieAccountLogin,
+  completeClankieAccountLogin,
+  createClankieAccountTokenProvider,
+  derivePublicGatewayHostId,
+  discoverPublicGatewayAccount,
+  generatePublicGatewayInstallationId,
+  refreshClankieAccountCredential,
+  revokeClankieAccountCredential,
+  type ClankieAccountAccessToken,
+  type ClankieAccountAuthErrorCode,
+  type ClankieAccountLoginChallenge,
+  type ClankieAccountTokenProvider,
+} from "./account-credential.ts";
+export {
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
   PUBLIC_GATEWAY_FORBIDDEN_ENV,
   resolvePublicGatewayCredential,

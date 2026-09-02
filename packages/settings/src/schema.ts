@@ -296,11 +296,23 @@ export const PublicGatewaySettingsSchema = z
       .max(128)
       .regex(/^[A-Za-z0-9_-]+$/u)
       .optional(),
+    installationId: z
+      .string()
+      .length(22)
+      .regex(/^[A-Za-z0-9_-]+$/u)
+      .optional(),
   })
   .strict()
   .superRefine((value, context) => {
-    if ((value.url === undefined) !== (value.hostId === undefined)) {
-      context.addIssue({ code: "custom", message: "url and hostId must be configured together" });
+    const identityCount = Number(value.hostId !== undefined) + Number(value.installationId !== undefined);
+    if (
+      (value.url === undefined && identityCount !== 0) ||
+      (value.url !== undefined && identityCount !== 1)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "url requires exactly one account installation id or legacy host id",
+      });
     }
   });
 export type PublicGatewaySettings = z.infer<typeof PublicGatewaySettingsSchema>;

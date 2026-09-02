@@ -67,7 +67,9 @@ skills under `.agents/dev-skills` stay out of the archive. The rest of
 `docs/` does not ship.
 
 The AWS public gateway is a separate deployment, not part of the Mac release.
-The release contains the outbound connector and `/gateway` setup wizard; the
+The release contains the outbound connector, passwordless `/gateway` setup
+wizard, and launch-at-login command. Cognito account provisioning lives under
+[`infra/aws/accounts`](../infra/aws/accounts/README.md); the
 single-instance Lightsail/Caddy deployment procedure lives under
 [`infra/aws/public-gateway`](../infra/aws/public-gateway/README.md). The
 [public gateway launch gate](public-gateway-launch.md) joins hosting,

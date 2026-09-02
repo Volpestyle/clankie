@@ -1,4 +1,11 @@
-import { PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID, type CredentialStore } from "@clankie/credential-broker";
+import {
+  CLANKIE_ACCOUNT_PROVIDER_ID,
+  PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
+  beginClankieAccountLogin,
+  completeClankieAccountLogin,
+  generatePublicGatewayInstallationId,
+  type CredentialStore,
+} from "@clankie/credential-broker";
 import { PublicGatewaySettingsSchema, SettingsStore } from "@clankie/settings";
 import { gatewayConfigure, gatewayDisable, gatewayStatus } from "./command/gateway.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
@@ -6,6 +13,7 @@ import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 export function buildGatewayCommands(services: {
   readonly settings: SettingsStore;
   readonly credentials: CredentialStore;
+  readonly restartGateway?: () => Promise<void>;
 }): FaceShellCommand[] {
   return [
     {
@@ -35,7 +43,7 @@ async function showStatus(
     [
       `doorway: ${status.enabled ? "ready" : "disabled"}`,
       `url: ${status.publicGateway.url ?? "—"}`,
-      `host id: ${status.publicGateway.hostId ?? "—"}`,
+      `host id: ${status.hostId ?? "—"}`,
       `host credential: ${status.credentialPresent ? "stored" : "missing"}`,
       `settings file: ${status.settingsFile}`,
     ].join("\n"),
@@ -45,7 +53,11 @@ async function showStatus(
 
 async function runWizard(
   shell: ClankieFaceShell,
-  services: { readonly settings: SettingsStore; readonly credentials: CredentialStore },
+  services: {
+    readonly settings: SettingsStore;
+    readonly credentials: CredentialStore;
+    readonly restartGateway?: () => Promise<void>;
+  },
 ): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin("gateway");
@@ -54,9 +66,11 @@ async function runWizard(
     const action = await flow.readSelect({
       message: "Public doorway",
       options: [
-        { value: "configure", label: "Configure", hint: "AWS URL, host id, bearer" },
+        { value: "configure", label: "Enable remote access", hint: "email + one-time code" },
         { value: "status", label: "Show status" },
-        ...(current.publicGateway.url === undefined ? [] : [{ value: "disable", label: "Disable" }]),
+        ...(current.publicGateway.url === undefined
+          ? []
+          : [{ value: "disable", label: "Sign out and disable" }]),
       ],
     });
     if (action === "status") {
@@ -65,37 +79,37 @@ async function runWizard(
     }
     if (action === "disable") {
       await gatewayDisable(services);
-      flow.renderLine("Public doorway disabled and its host credential removed.", "success");
+      await services.restartGateway?.();
+      flow.renderLine("Remote access disabled and this Mac signed out.", "success");
       return;
     }
     if (action !== "configure") return;
 
-    const url = await flow.readText({
-      message: "Gateway URL",
-      defaultValue: current.publicGateway.url ?? "https://api.clankie.bot",
-      validate: (value) => (value.trim().length === 0 ? "Gateway URL is required." : undefined),
-    });
-    if (url === undefined) return;
-    const hostId = await flow.readText({
-      message: "Host id from the AWS deployment",
-      defaultValue: current.publicGateway.hostId ?? "",
+    const gatewayUrl = current.publicGateway.url ?? "https://api.clankie.bot";
+    const email = await flow.readText({
+      message: "Clankie account email",
       validate: (value) =>
-        /^[A-Za-z0-9_-]{16,128}$/u.test(value.trim()) ? undefined : "Use 16–128 letters, digits, _ or -.",
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value.trim()) ? undefined : "Enter a valid email address.",
     });
-    if (hostId === undefined) return;
-    const token = await flow.readSecret({
-      message: "Host bearer from the AWS deployment",
-      validate: (value) => {
-        const length = value.trim().length;
-        return length >= 32 && length <= 512 ? undefined : "The host bearer must be 32–512 characters.";
-      },
+    if (email === undefined) return;
+    flow.setStatus("sending a one-time code…");
+    const challenge = await beginClankieAccountLogin({ gatewayUrl, email });
+    const code = await flow.readText({
+      message: "Six-digit code from your email",
+      validate: (value) => (/^\d{6}$/u.test(value.trim()) ? undefined : "Enter the six-digit code."),
     });
-    if (token === undefined) return;
+    if (code === undefined) return;
+    flow.setStatus("signing this Mac in…");
+    const credential = await completeClankieAccountLogin({ challenge, code });
 
-    const publicGateway = PublicGatewaySettingsSchema.parse({ url: url.trim(), hostId: hostId.trim() });
-    await services.credentials.set(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID, { type: "api", key: token.trim() });
+    const installationId = current.publicGateway.installationId ?? generatePublicGatewayInstallationId();
+    const publicGateway = PublicGatewaySettingsSchema.parse({ url: gatewayUrl, installationId });
+    await services.credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, credential);
+    await services.credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
     await gatewayConfigure(publicGateway, services);
-    flow.renderLine("Public doorway configured. Restart Clankie to connect.", "success");
+    flow.setStatus("starting remote access…");
+    await services.restartGateway?.();
+    flow.renderLine("Remote access is ready. Run /pair to connect your phone.", "success");
   } finally {
     flow.end();
   }

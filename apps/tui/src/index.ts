@@ -45,6 +45,7 @@ import { formatCaptainPresenceStatus } from "./shell/footer.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
 import { doctorCommand } from "./command/doctor.ts";
+import { createServiceOptions, restartTarget } from "../bin/services.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 const stateHome = process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
@@ -284,7 +285,18 @@ const commands = [
       : {}),
   }),
   ...buildProviderCommands(services),
-  ...buildGatewayCommands({ settings: settingsStore, credentials: services.store }),
+  ...buildGatewayCommands({
+    settings: settingsStore,
+    credentials: services.store,
+    restartGateway: async () => {
+      const outcomes = await restartTarget(
+        "clankie",
+        await createServiceOptions({ repoRoot, env: process.env }),
+      );
+      const failed = outcomes.find((outcome) => !outcome.ok);
+      if (failed !== undefined) throw new Error(failed.error ?? `${failed.label} failed to restart`);
+    },
+  }),
   ...buildConnectCommands({
     ...brokeredCommands,
     runDiscordWizard,

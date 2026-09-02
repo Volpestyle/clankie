@@ -1,6 +1,7 @@
 # ADR 0151: The public doorway routes home
 
-Status: accepted (James, 2026-08-31). Extends
+Status: accepted (James, 2026-08-31), with manual host enrollment amended by
+[ADR 0153](0153-an-account-signs-the-mac-in.md). Extends
 [ADR 0138](0138-terminal-truth-rides-the-operator-relay.md) and
 [ADR 0144](0144-the-phone-reaches-into-the-pane.md) without moving device
 authority, conversations, terminal sessions, or Herdr state off the Mac.

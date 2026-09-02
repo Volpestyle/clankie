@@ -17,9 +17,11 @@ flowchart LR
 ```
 
 The Linux bundle with public IPv4 costs USD $7/month and includes the static IP
-while it stays attached. It is the only billed resource in this shape. The
-instance's 2 TB transfer allowance is far above the first invited-user load;
-transfer overage and snapshots are separate charges.
+while it stays attached. Cognito Essentials is free for the first 10,000 direct
+monthly active users, so it adds no identity charge at the invited-beta scale.
+The instance's 2 TB transfer allowance is far above the first invited-user load;
+transfer overage, snapshots, Amazon SES email, and later Cognito tiers are
+separate charges.
 
 ## Prerequisites
 
@@ -41,6 +43,10 @@ export CLANKIE_GATEWAY_OPERATOR_CIDR=203.0.113.10/32
 infra/aws/public-gateway/deploy.sh provision
 infra/aws/public-gateway/deploy.sh bootstrap
 ```
+
+Set `CLANKIE_GATEWAY_SSH_KEY` for the initial public-SSH bootstrap. After the
+host joins Tailscale, point `CLANKIE_GATEWAY_TARGET` at its MagicDNS name and
+the same command upgrades the activator through Tailscale SSH without a key.
 
 The stack uses the `micro_3_0` public-IPv4 bundle and the
 `amazon_linux_2023` blueprint. If AWS retires either identifier, pass an active
@@ -110,27 +116,30 @@ no AWS credential and no SSH private key. See Tailscale's
 [GitHub workload identity federation](https://tailscale.com/kb/1581/github-actions-workload-identity-federation)
 for the issuer and subject fields used by the OAuth client's trust credential.
 
-## Enroll the first Mac
+## Configure accounts and enroll a Mac
 
-Generate one opaque host id and one bearer of at least 32 random characters.
-Store the same pair in two places:
-
-1. Run `/gateway` in Clankie's operator console. Use
-   `https://api.clankie.bot`, the host id, and the bearer. The URL and host id
-   go to settings; the bearer goes to Keychain.
-2. SSH to the instance, run
-   `sudoedit /etc/clankie-gateway/host-tokens.json`, and enter a JSON map such
-   as `{"mac_example_123456":"replace-with-a-random-32-plus-character-token"}`.
-   Then enforce the runtime ownership:
+Provision the separate Cognito stack, install its public discovery document on
+the gateway host, and release the account-aware gateway:
 
 ```bash
-sudo chown root:clankie-gateway-secrets /etc/clankie-gateway/host-tokens.json
-sudo chmod 0640 /etc/clankie-gateway/host-tokens.json
+export CLANKIE_ACCOUNT_EMAIL_IDENTITY=verified-sender@example.com
+infra/aws/accounts/deploy.sh provision
+infra/aws/public-gateway/deploy.sh configure-account
+infra/aws/public-gateway/deploy.sh bootstrap  # activator v2, once
+infra/aws/public-gateway/deploy.sh release
+infra/aws/accounts/deploy.sh invite tester@example.com
 ```
 
-The container receives that file read-only and runs as its unprivileged Node
-user with only the file's supplemental group. The bearer is absent from the
-image, source tree, process environment, `docker inspect`, and logs.
+The tester runs `/gateway`, enters that email and the six-digit code Cognito
+sends, then runs `/pair`. The Mac keeps its rotating refresh token in Keychain;
+the gateway derives the host route from the signed account subject and a random
+installation id. No host id, bearer, AWS access, SSH access, or Tailscale setup
+is part of the tester journey. Run `clankie autostart enable` once so Clankie
+and its relay start after login.
+
+The legacy root-owned `host-tokens.json` may remain mounted during migration.
+It is not used for new accounts and can be removed after every existing Mac has
+signed in through `/gateway`.
 
 ## Release
 
@@ -162,11 +171,11 @@ sudo docker logs --since 30m clankie-caddy
 
 ## Rotate and operate
 
-Token rotation has a short, explicit disconnect because one host id accepts one
-bearer. Update the root-owned JSON file, run
-`sudo docker restart clankie-gateway`, immediately update the Mac's `/gateway`
-Keychain entry, and restart Clankie. The Mac reconnects and republishes fresh
-pairing routes; paired devices retry their existing host route.
+Account access tokens rotate automatically. The connector refreshes before
+expiry, reconnects, and republishes fresh pairing routes; paired devices retry
+their existing host route. Disable a Cognito user to revoke that account. Each
+Mac installation has its own derived route, while account disable is
+intentionally account-wide.
 
 Apply OS security updates with `sudo dnf upgrade -y` and reboot during a small
 maintenance window. Docker restarts both containers; the Mac reconnects. Caddy
@@ -177,9 +186,10 @@ if the instance is lost.
 ## Deliberate ceiling
 
 This single process is sufficient for App Review and a small invited paid beta.
-It is not a general multi-tenant service: TLS terminates at Caddy, one instance
-is one failure domain, host enrollment is manual, and gateway routing is in
-memory. Before unrelated customers share it, add application-layer end-to-end
-encryption and automatic public host enrollment. Add an external live
-connection broker only when measured load requires a second gateway process.
+It is not yet a general multi-tenant service: TLS terminates at Caddy, one
+instance is one failure domain, and gateway routing is in memory. Before
+unrelated customers share it, add application-layer end-to-end encryption.
+Obtain SES production access before any unverified tester needs a login code.
+Add an external live connection broker only
+when measured load requires a second gateway process.
 Tailscale remains the private operator and deployment lane throughout.

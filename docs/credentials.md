@@ -185,19 +185,17 @@ exceptions are the documented operator and captain test/CI overrides.
 Storage implementation and grant validation details live in
 [`@clankie/credential-broker`](../packages/credential-broker/README.md).
 
-## Public gateway host credential
+## Clankie account
 
-The AWS doorway authenticates this Mac with the broker entry
-`clankie-public-gateway`. Its non-secret URL and host id live under
-`publicGateway` in `settings.json`; the bearer never does. Run `/gateway` in the
-operator console to enter all three values, or use `clankie gateway set` for the
-non-secret half and `/auth` for the bearer. `CLANKIE_PUBLIC_GATEWAY_TOKEN` is
-refused so the host credential cannot leak into a shell profile or process
-environment.
+`/gateway` signs this Mac in with an invited email and a six-digit Cognito code.
+The broker stores the access and rotating refresh token as `clankie-account` in
+Keychain. The non-secret doorway URL and random per-installation id live under
+`publicGateway` in `settings.json`; the public host id is derived from the
+authenticated account subject and installation id.
 
-The matching gateway runtime file is a JSON map from host id to bearer. It is
-root-owned, group-readable only by the unprivileged gateway container, and
-mounted read-only rather than passed through the process environment. The Mac
-sends the bearer only in the outbound WebSocket handshake. It is never sent to
-the mobile app or forwarded with a device request. Rotation replaces the file,
-restarts the gateway, updates the Keychain entry, and restarts Clankie.
+The Mac sends only the short-lived access token in its outbound WebSocket
+handshake. The token is never sent to the mobile app or forwarded with a device
+request. The gateway verifies its Cognito signature and claims without storing
+an account or host registry. `/gateway` disable removes the local account token
+and installation binding. The old `clankie-public-gateway` static bearer remains
+readable only for migration and local development; new users never enter it.

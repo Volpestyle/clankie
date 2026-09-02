@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX,
   PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX,
+  PublicGatewayConfigSchema,
+  PublicGatewayInstallationIdSchema,
   PublicGatewayPairingRouteFrameSchema,
   PublicGatewayRequestFrameSchema,
   PublicGatewayResponseChunkFrameSchema,
@@ -13,6 +15,28 @@ import {
 const requestId = "request_12345678";
 
 describe("public gateway protocol", () => {
+  it("publishes only bounded non-secret account discovery", () => {
+    const config = {
+      schemaVersion: 1,
+      account: {
+        provider: "cognito_email_otp",
+        endpoint: "https://cognito-idp.us-east-1.amazonaws.com",
+        issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example",
+        clientId: "client123",
+        selfSignUpEnabled: false,
+      },
+    } as const;
+    expect(PublicGatewayConfigSchema.parse(config).account.provider).toBe("cognito_email_otp");
+    expect(PublicGatewayInstallationIdSchema.parse("a".repeat(22))).toHaveLength(22);
+    expect(() => PublicGatewayInstallationIdSchema.parse("too-short")).toThrow();
+    expect(() =>
+      PublicGatewayConfigSchema.parse({
+        ...config,
+        account: { ...config.account, issuer: `${config.account.issuer}?wrong=true` },
+      }),
+    ).toThrow();
+  });
+
   it("acknowledges that a pairing route is installed", () => {
     expect(
       PublicGatewayTunnelFrameSchema.parse({

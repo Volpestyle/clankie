@@ -2,8 +2,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import { derivePublicGatewayHostId } from "@clankie/credential-broker";
 import {
   PairingRedeemRequestSchema,
+  PUBLIC_GATEWAY_CONFIG_PATH,
   PUBLIC_GATEWAY_HEALTH_PATH,
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_HOST_PATH_PREFIX,
@@ -11,9 +13,11 @@ import {
   PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayHostIdSchema,
+  PublicGatewayInstallationIdSchema,
   PublicGatewayTunnelFrameSchema,
   publicGatewayTargetFor,
   type PublicGatewayCapabilityHash,
+  type PublicGatewayConfig,
   type PublicGatewayHttpHeader,
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
@@ -36,10 +40,16 @@ export interface PublicGatewayLogger {
 
 export interface PublicGatewayOptions {
   readonly hostTokens: ReadonlyMap<string, string>;
+  readonly accountConfig?: PublicGatewayConfig;
+  readonly authenticateAccountToken?: PublicGatewayHostAuthenticator;
   readonly logger?: PublicGatewayLogger;
   readonly clock?: () => number;
   readonly requestIdFactory?: () => string;
 }
+
+type PublicGatewayHostAuthenticator = (
+  token: string,
+) => Promise<{ readonly accountId: string; readonly expiresAtMs: number }>;
 
 export interface PublicGateway {
   readonly server: Server;
@@ -50,6 +60,7 @@ interface HostConnection {
   readonly hostId: string;
   readonly socket: WebSocket;
   readonly pendingRequestIds: Set<string>;
+  readonly credentialDeadline?: ReturnType<typeof setTimeout>;
   alive: boolean;
 }
 
@@ -95,7 +106,9 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     });
   });
 
-  server.on("upgrade", handleUpgrade);
+  server.on("upgrade", (request, socket, head) => {
+    void handleUpgrade(request, socket, head);
+  });
 
   const heartbeat = setInterval(() => {
     for (const connection of hosts.values()) {
@@ -112,6 +125,14 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   async function handlePublicRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (request.method === "GET" && request.url === PUBLIC_GATEWAY_HEALTH_PATH) {
       sendJson(response, 200, { ok: true });
+      return;
+    }
+    if (
+      request.method === "GET" &&
+      request.url === PUBLIC_GATEWAY_CONFIG_PATH &&
+      options.accountConfig !== undefined
+    ) {
+      sendJson(response, 200, options.accountConfig);
       return;
     }
 
@@ -233,29 +254,56 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     return body === null ? null : { host, target, path: hostRoute.path, body };
   }
 
-  function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
+  async function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const url = requestUrl(request);
     const hostId = url?.searchParams.get("hostId");
     const token = bearerToken(request.headers.authorization);
-    const expected = hostId === null || hostId === undefined ? undefined : options.hostTokens.get(hostId);
     if (
       url?.pathname !== PUBLIC_GATEWAY_HOST_CONNECT_PATH ||
-      url.searchParams.size !== 1 ||
       hostId === null ||
       hostId === undefined ||
       !PublicGatewayHostIdSchema.safeParse(hostId).success ||
-      token === null ||
-      expected === undefined ||
-      !constantTimeEqual(token, expected)
+      token === null
     ) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
-      socket.destroy();
+      denyUpgrade(socket);
       return;
     }
-    webSockets.handleUpgrade(request, socket, head, (webSocket) => attachHost(hostId, webSocket));
+
+    let expiresAtMs: number | undefined;
+    const staticToken = options.hostTokens.get(hostId);
+    const staticAccepted =
+      url.searchParams.size === 1 && staticToken !== undefined && constantTimeEqual(token, staticToken);
+    if (!staticAccepted) {
+      const installationId = url.searchParams.get("installationId");
+      if (
+        url.searchParams.size !== 2 ||
+        installationId === null ||
+        !PublicGatewayInstallationIdSchema.safeParse(installationId).success ||
+        options.accountConfig === undefined ||
+        options.authenticateAccountToken === undefined
+      ) {
+        denyUpgrade(socket);
+        return;
+      }
+      try {
+        const principal = await options.authenticateAccountToken(token);
+        if (!constantTimeEqual(hostId, derivePublicGatewayHostId(principal.accountId, installationId))) {
+          denyUpgrade(socket);
+          return;
+        }
+        expiresAtMs = principal.expiresAtMs;
+      } catch {
+        denyUpgrade(socket);
+        return;
+      }
+    }
+
+    webSockets.handleUpgrade(request, socket, head, (webSocket) =>
+      attachHost(hostId, webSocket, expiresAtMs),
+    );
   }
 
-  function attachHost(hostId: string, socket: WebSocket): void {
+  function attachHost(hostId: string, socket: WebSocket, expiresAtMs?: number): void {
     const prior = hosts.get(hostId);
     if (prior !== undefined) {
       for (const requestId of prior.pendingRequestIds) {
@@ -264,7 +312,18 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       }
       prior.socket.close(1012, "host connection replaced");
     }
-    const connection: HostConnection = { hostId, socket, pendingRequestIds: new Set(), alive: true };
+    const credentialDeadline =
+      expiresAtMs === undefined
+        ? undefined
+        : setTimeout(() => socket.close(4001, "host credential expired"), Math.max(0, expiresAtMs - clock()));
+    credentialDeadline?.unref();
+    const connection: HostConnection = {
+      hostId,
+      socket,
+      pendingRequestIds: new Set(),
+      ...(credentialDeadline === undefined ? {} : { credentialDeadline }),
+      alive: true,
+    };
     hosts.set(hostId, connection);
     socket.on("pong", () => {
       connection.alive = true;
@@ -428,6 +487,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   function detachHost(connection: HostConnection): void {
     if (hosts.get(connection.hostId) !== connection) return;
     hosts.delete(connection.hostId);
+    if (connection.credentialDeadline !== undefined) clearTimeout(connection.credentialDeadline);
     for (const requestId of connection.pendingRequestIds) {
       const exchange = pending.get(requestId);
       if (exchange !== undefined) finishExchange(exchange, 503, "host_unavailable");
@@ -460,7 +520,10 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     server,
     async close() {
       clearInterval(heartbeat);
-      for (const connection of hosts.values()) connection.socket.close(1001, "gateway shutting down");
+      for (const connection of hosts.values()) {
+        if (connection.credentialDeadline !== undefined) clearTimeout(connection.credentialDeadline);
+        connection.socket.close(1001, "gateway shutting down");
+      }
       webSockets.close();
       if (!server.listening) return;
       await new Promise<void>((resolve, reject) => {
@@ -504,9 +567,8 @@ export function loadHostTokens(env: NodeJS.ProcessEnv = process.env): ReadonlyMa
   if (file !== undefined && file.length > 0 && inline !== undefined && inline.length > 0) {
     throw new Error("Configure gateway host tokens by file or JSON, not both");
   }
-  return parseHostTokensJson(
-    file === undefined || file.length === 0 ? (inline ?? "") : readFileSync(file, "utf8"),
-  );
+  const raw = file === undefined || file.length === 0 ? inline : readFileSync(file, "utf8");
+  return raw === undefined || raw.length === 0 ? new Map() : parseHostTokensJson(raw);
 }
 
 function parseHostRoute(pathname: string): { readonly hostId: string; readonly path: string } | null {
@@ -567,6 +629,11 @@ function requestUrl(request: IncomingMessage): URL | null {
 function bearerToken(header: string | undefined): string | null {
   const match = /^Bearer ([^\s]+)$/u.exec(header ?? "");
   return match?.[1] ?? null;
+}
+
+function denyUpgrade(socket: Duplex): void {
+  socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+  socket.destroy();
 }
 
 function constantTimeEqual(left: string, right: string): boolean {

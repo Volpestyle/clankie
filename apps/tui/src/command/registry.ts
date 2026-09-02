@@ -17,6 +17,13 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["down"], lines: ["  down [service]           Stop in reverse order (JSON; progress on stderr)"] },
   {
+    nouns: ["autostart"],
+    lines: [
+      "  autostart enable|disable|status",
+      "                           Start clankie + relay at login via a user LaunchAgent (JSON)",
+    ],
+  },
+  {
     nouns: ["pair"],
     lines: [
       "  pair [--json] [--timeout SEC]",

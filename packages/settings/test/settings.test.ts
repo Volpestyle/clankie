@@ -55,7 +55,20 @@ describe("settings store", () => {
         hostId: "mac_james_12345678",
       }),
     ).toEqual({ url: "https://api.clankie.bot", hostId: "mac_james_12345678" });
+    expect(
+      PublicGatewaySettingsSchema.parse({
+        url: "https://api.clankie.bot",
+        installationId: "i".repeat(22),
+      }),
+    ).toEqual({ url: "https://api.clankie.bot", installationId: "i".repeat(22) });
     expect(() => PublicGatewaySettingsSchema.parse({ url: "https://api.clankie.bot" })).toThrow();
+    expect(() =>
+      PublicGatewaySettingsSchema.parse({
+        url: "https://api.clankie.bot",
+        hostId: "mac_james_12345678",
+        installationId: "i".repeat(22),
+      }),
+    ).toThrow();
     expect(() =>
       PublicGatewaySettingsSchema.parse({
         url: "http://api.clankie.bot",

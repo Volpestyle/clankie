@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly activator_version=1
+readonly activator_version=2
 readonly caddy_image=caddy:2.11.4-alpine
 readonly secret_file=/etc/clankie-gateway/host-tokens.json
+readonly account_file=/etc/clankie-gateway/account.json
 readonly caddy_file=/opt/clankie-gateway/Caddyfile
 
 if [[ "${1:-}" == "--version" ]]; then
@@ -47,8 +48,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
-[[ -r "$secret_file" && "$(stat -c %U:%G:%a "$secret_file")" == "root:clankie-gateway-secrets:640" ]] || {
-  echo "$secret_file must be root:clankie-gateway-secrets mode 0640" >&2
+gateway_config_args=()
+if [[ -e "$secret_file" ]]; then
+  [[ -r "$secret_file" && "$(stat -c %U:%G:%a "$secret_file")" == "root:clankie-gateway-secrets:640" ]] || {
+    echo "$secret_file must be root:clankie-gateway-secrets mode 0640" >&2
+    exit 1
+  }
+  gateway_config_args+=(
+    --env CLANKIE_GATEWAY_HOST_TOKENS_FILE=/run/secrets/host-tokens.json
+    --mount "type=bind,source=$secret_file,target=/run/secrets/host-tokens.json,readonly"
+  )
+fi
+if [[ -e "$account_file" ]]; then
+  [[ -r "$account_file" && "$(stat -c %U:%G:%a "$account_file")" == "root:root:644" ]] || {
+    echo "$account_file must be root:root mode 0644" >&2
+    exit 1
+  }
+  gateway_config_args+=(
+    --env CLANKIE_GATEWAY_ACCOUNT_CONFIG_FILE=/run/config/account.json
+    --mount "type=bind,source=$account_file,target=/run/config/account.json,readonly"
+  )
+fi
+[[ ${#gateway_config_args[@]} -gt 0 ]] || {
+  echo "Configure $account_file or the legacy $secret_file before release" >&2
   exit 1
 }
 
@@ -74,8 +96,7 @@ start_gateway() {
     --group-add 1999 \
     --memory 640m \
     --env NODE_OPTIONS=--max-old-space-size=384 \
-    --env CLANKIE_GATEWAY_HOST_TOKENS_FILE=/run/secrets/host-tokens.json \
-    --mount "type=bind,source=$secret_file,target=/run/secrets/host-tokens.json,readonly" \
+    "${gateway_config_args[@]}" \
     --health-cmd='node -e "fetch(\"http://127.0.0.1:8080/health\").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"' \
     --health-interval 10s \
     --health-timeout 5s \
