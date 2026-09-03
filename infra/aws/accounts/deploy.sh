@@ -122,8 +122,21 @@ case "$command_name" in
       --website-url https://clankie.bot \
       --contact-language EN \
       --additional-contact-email-addresses "$contact" \
-      --use-case-description "Clankie sends one-time sign-in codes from Amazon Cognito (passwordless email OTP) to people who enroll their own Mac for remote access from the Clankie iPhone app. Recipients request each code themselves by entering their email on their Mac; there is no marketing mail and no list. Expected volume is well under a hundred codes a day during the invited beta and TestFlight review. Bounces and complaints are handled by disabling the Cognito user; a CloudWatch alarm on hourly send volume pages the operator."
+      --use-case-description "Clankie sends one-time sign-in codes from Amazon Cognito (passwordless email OTP) to people who enroll their own Mac for remote access from the Clankie iPhone app. Recipients request each code themselves by entering their email on their Mac; there is no marketing mail and no list. Expected volume is well under a hundred codes a day during the invited beta and TestFlight review. Bounce, complaint, and reject events are delivered through a configuration set to an SNS topic that emails the operator, who disables that Cognito user so it receives no further mail; a CloudWatch alarm on hourly send volume pages the operator. Full answer: infra/aws/accounts/ses-production-case.md in github.com/Volpestyle/clankie."
     echo "Production access requested; poll with: $0 ses-status"
+    ;;
+  disable)
+    # A bounced or complaining address: no further mail, and its Mac loses remote access.
+    email="${2:-}"
+    [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || {
+      echo "Usage: $0 disable person@example.com" >&2
+      exit 2
+    }
+    aws cognito-idp admin-disable-user \
+      --region "$region" \
+      --user-pool-id "$(stack_output UserPoolId)" \
+      --username "$email"
+    echo "Disabled: $email"
     ;;
   invite)
     email="${2:-}"
@@ -148,7 +161,7 @@ case "$command_name" in
     fi
     ;;
   *)
-    echo "Usage: $0 provision|config|ses-status|ses-production|invite person@example.com" >&2
+    echo "Usage: $0 provision|config|ses-status|ses-production|invite person@example.com|disable person@example.com" >&2
     exit 2
     ;;
 esac

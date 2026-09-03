@@ -39,6 +39,48 @@ Resources:
       EmailIdentity: !Ref SendingDomain
       DkimAttributes:
         SigningEnabled: true
+      ConfigurationSetAttributes:
+        ConfigurationSetName: !Ref MailEvents
+
+  # Every send from the domain rides this set, Cognito's included, so bounce,
+  # complaint, and reject events reach the operator instead of the mailbox-less
+  # From address. The operator disables that Cognito user, which ends its mail.
+  MailEvents:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: clankie-accounts-mail
+
+  MailEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref MailEvents
+      EventDestination:
+        Name: operator-alarms
+        Enabled: true
+        MatchingEventTypes:
+          - BOUNCE
+          - COMPLAINT
+          - REJECT
+        SnsDestination:
+          TopicARN: !Ref SendAlarmTopic
+
+  SendAlarmTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SendAlarmTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SesEvents
+            Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SendAlarmTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   AccountUserPool:
     Type: AWS::Cognito::UserPool

@@ -37,10 +37,13 @@ infra/aws/accounts/deploy.sh invite tester@example.com
 infra/aws/accounts/deploy.sh config
 ```
 
-`CLANKIE_ACCOUNT_ALARM_EMAIL` receives the stack's SES send-volume alarm (SNS
-sends a subscription confirmation on the first provision; confirm it). The
-alarm fires when the account's hourly SES sends exceed
-`CLANKIE_ACCOUNT_SEND_ALARM_PER_HOUR` (default 200, one code per sign-in).
+`CLANKIE_ACCOUNT_ALARM_EMAIL` receives the stack's SES send-volume alarm and
+every bounce, complaint, and reject event for the domain (SNS sends a
+subscription confirmation on the first provision; confirm it). The alarm fires
+when the account's hourly SES sends exceed
+`CLANKIE_ACCOUNT_SEND_ALARM_PER_HOUR` (default 200, one code per sign-in). A
+bounced or complaining address gets `infra/aws/accounts/deploy.sh disable
+<email>`: no further mail, and that person's Mac loses remote access.
 
 The default is an invite-only beta. `invite` suppresses Cognito's admin-created
 user message; the tester receives the normal OTP only after entering the email
@@ -82,7 +85,8 @@ production flag and 24-hour quota, and the `clankie.bot` identity's
 `VerifiedForSending` and `DkimStatus`. Publish the three DKIM CNAMEs as
 DNS-only records in Cloudflare (proxied records break DKIM lookups) and wait
 for `DkimStatus` to read `SUCCESS`. `ses-production` files the request with
-the transactional-OTP use case; AWS usually answers within a day, after which
+the transactional-OTP use case (the long form AWS asks for is
+[`ses-production-case.md`](ses-production-case.md)); AWS usually answers within a day, after which
 `ses-status` shows `ProductionAccess` true. If `ses-status` already shows
 `ReviewStatus DENIED`, do not file again blind: open the case it names in the
 AWS Support Center (the Support API needs a paid plan), read the reason, and
