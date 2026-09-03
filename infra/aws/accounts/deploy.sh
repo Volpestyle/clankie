@@ -115,6 +115,9 @@ case "$command_name" in
       echo "Set CLANKIE_ACCOUNT_ALARM_EMAIL to the address AWS may contact about the request" >&2
       exit 2
     }
+    # The use case is the case reply itself (everything after the rule), so the
+    # API request and the Support Center answer never drift apart.
+    use_case="$(awk 'found { print } /^---$/ { found = 1 }' infra/aws/accounts/ses-production-case.md)"
     aws sesv2 put-account-details \
       --region "$region" \
       --production-access-enabled \
@@ -122,7 +125,7 @@ case "$command_name" in
       --website-url https://clankie.bot \
       --contact-language EN \
       --additional-contact-email-addresses "$contact" \
-      --use-case-description "Clankie sends one-time sign-in codes from Amazon Cognito (passwordless email OTP) to people who enroll their own Mac for remote access from the Clankie iPhone app. Recipients request each code themselves by entering their email on their Mac; there is no marketing mail and no list. Expected volume is well under a hundred codes a day during the invited beta and TestFlight review. Bounce, complaint, and reject events are delivered through a configuration set to an SNS topic that emails the operator, who disables that Cognito user so it receives no further mail; a CloudWatch alarm on hourly send volume pages the operator. Full answer: infra/aws/accounts/ses-production-case.md in github.com/Volpestyle/clankie."
+      --use-case-description "$use_case"
     echo "Production access requested; poll with: $0 ses-status"
     ;;
   disable)
