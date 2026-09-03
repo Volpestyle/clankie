@@ -83,7 +83,11 @@ production flag and 24-hour quota, and the `clankie.bot` identity's
 DNS-only records in Cloudflare (proxied records break DKIM lookups) and wait
 for `DkimStatus` to read `SUCCESS`. `ses-production` files the request with
 the transactional-OTP use case; AWS usually answers within a day, after which
-`ses-status` shows `ProductionAccess` true. Then prove delivery: invite an
+`ses-status` shows `ProductionAccess` true. If `ses-status` already shows
+`ReviewStatus DENIED`, do not file again blind: open the case it names in the
+AWS Support Center (the Support API needs a paid plan), read the reason, and
+reply there with the missing detail; a fresh `ses-production` only helps once
+that reason is addressed. Then prove delivery: invite an
 address that was never verified in SES, run `/gateway` on a Mac with it, and
 confirm the code arrives within a minute.
 
