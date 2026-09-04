@@ -6,7 +6,7 @@
     <title>Clankie Docs</title>
     <meta
       name="description"
-      content="Install Clankie on your Mac, give him a model, reach him from your phone, and learn how he works underneath."
+      content="Install Clankie on your machine, give him a model, reach him from your phone, and learn how he works underneath."
     />
     <link rel="canonical" href="https://docs.clankie.bot/" />
     <link rel="icon" href="/favicon.svg" />
@@ -15,7 +15,7 @@
     <meta property="og:title" content="Clankie Docs" />
     <meta
       property="og:description"
-      content="A persistent agent with a life of his own. He runs on your Mac."
+      content="A persistent agent with a life of his own. He runs on your machine."
     />
     <meta property="og:image" content="https://docs.clankie.bot/assets/clankie.png" />
   </head>
@@ -33,7 +33,7 @@
         <p class="eyebrow">A persistent agent with a life of his own</p>
         <h1>Clankie<em>.</em></h1>
         <p class="lede">
-          He lives on your Mac. He hangs out in your Discord in text and voice, plays Pokémon live on a watch
+          He lives on your machine. He hangs out in your Discord in text and voice, plays Pokémon live on a watch
           surface, draws pictures, makes videos, browses the web, remembers people, codes, and leads a fleet
           of coding agents you can watch.
         </p>
@@ -44,14 +44,14 @@
         <div class="choice-grid">
           <a class="choice" href="#start">
             <span class="number">01 · Start</span>
-            <h2>Install him on this Mac</h2>
+            <h2>Install him on your machine</h2>
             <p>One command, one model, and you are talking. No account, gateway, or phone required.</p>
             <span class="arrow">Get started →</span>
           </a>
           <a class="choice" href="#app">
             <span class="number">02 · App</span>
             <h2>Reach him from your phone</h2>
-            <p>Set up the Mac once, pair the iPhone or iPad app, then carry the window with you.</p>
+            <p>Set up your machine once, pair the iPhone or iPad app, then carry the window with you.</p>
             <span class="arrow">Connect the app →</span>
           </a>
           <a class="choice" href="/how-it-works/">
@@ -113,7 +113,7 @@
       <section id="start" class="section">
         <div class="section-head">
           <span class="section-number">01 · Start</span>
-          <h2>Install him on this Mac.</h2>
+          <h2>Install him on your machine.</h2>
           <p>
             An Apple-silicon Mac running macOS 14 or newer. The console is a complete way to talk to him;
             remote access is an option, not a requirement.
@@ -128,7 +128,7 @@ clankie</code></pre>
 
           <h3>Give him a model</h3>
           <p>
-            In the console, <code>/auth</code> stores a provider key or OAuth login in the Mac’s
+            In the console, <code>/auth</code> stores a provider key or OAuth login in your machine’s
             Keychain-backed credential broker, and <code>/model</code> picks the model he thinks with. That is
             the whole setup — talk to him. <code>/persona</code>, <code>/image-model</code>,
             <code>/discord</code>, and <code>/connect</code> are optional and can wait. A local runtime
@@ -156,16 +156,16 @@ clankie status</code></pre>
       <section id="app" class="section">
         <div class="section-head">
           <span class="section-number">02 · App</span>
-          <h2>Set up the Mac once. Carry the window with you.</h2>
+          <h2>Set up your machine once. Carry the window with you.</h2>
           <p>
-            The iPhone and iPad app reaches your Mac through a narrow public doorway. It does not move him
-            into a hosted service; the Mac remains the host you return to from anywhere.
+            The iPhone and iPad app reaches your machine through a narrow public doorway. It does not move him
+            into a hosted service; your machine remains the host you return to from anywhere.
           </p>
         </div>
 
         <ol class="steps">
           <li>
-            <h3>Sign the Mac in</h3>
+            <h3>Sign your machine in</h3>
             <p>
               Run <code>/gateway</code>, choose <strong>Enable remote access</strong>, enter the email your
               invitation named, then the one-time code it receives. There are no URLs, host ids, or tokens to
@@ -175,7 +175,7 @@ clankie status</code></pre>
           <li>
             <h3>Keep him running</h3>
             <p>
-              Run <code>clankie autostart enable</code>. He and his relay now start at login. Leave the Mac
+              Run <code>clankie autostart enable</code>. He and his relay now start at login. Leave your machine
               awake, online, and signed in if you want him reachable while you are away.
             </p>
           </li>
@@ -186,7 +186,7 @@ clankie status</code></pre>
           <li>
             <h3>Pair the phone</h3>
             <p>
-              Run <code>clankie pair</code> on the Mac, then scan the QR code or type its single-use code in
+              Run <code>clankie pair</code> on your machine, then scan the QR code or type its single-use code in
               the app. Review the access it offers and connect. <code>clankie devices</code> lists and revokes
               paired devices.
             </p>
@@ -201,7 +201,7 @@ clankie status</code></pre>
             <div><strong>Public doorway</strong><span>api.clankie.bot</span></div>
           </div>
           <div class="flow-node">
-            <div><strong>Your Mac</strong><span>outbound connection</span></div>
+            <div><strong>Your machine</strong><span>outbound connection</span></div>
           </div>
           <div class="flow-node">
             <div><strong>Clankie</strong><span>local service + console</span></div>
@@ -214,13 +214,13 @@ clankie status</code></pre>
         <div class="mode-grid">
           <article class="mode">
             <h3>Hybrid</h3>
-            <p>Move between the console and the app. Both are windows into the same Clankie and Mac.</p>
+            <p>Move between the console and the app. Both are windows into the same Clankie and the same machine.</p>
           </article>
           <article class="mode">
             <h3>App-first</h3>
             <p>
               After setup, spend nearly all your time in Messages, the fleet, and terminal observation on
-              iPhone or iPad. The Mac quietly remains the host.
+              iPhone or iPad. Your machine quietly remains the host.
             </p>
           </article>
         </div>
@@ -237,7 +237,7 @@ clankie status</code></pre>
       <section id="how" class="section">
         <div class="section-head">
           <span class="section-number">03 · Underneath</span>
-          <h2>Your Mac remains the center.</h2>
+          <h2>Your machine remains the center.</h2>
           <p>
             He is one local service plus the surfaces that reach it. The full shape is on
             <a href="/how-it-works/">How he works</a>; the short version is below.
@@ -245,7 +245,7 @@ clankie status</code></pre>
         </div>
         <div class="fact-grid">
           <article class="fact">
-            <h3>On your Mac</h3>
+            <h3>On your machine</h3>
             <p>
               Clankie, his model credentials, every conversation, his memory, Herdr panes, terminal processes,
               and the owner settings that shape him. HTTP on <code>127.0.0.1:4310</code>.
@@ -254,7 +254,7 @@ clankie status</code></pre>
           <article class="fact">
             <h3>At the doorway</h3>
             <p>
-              Account discovery, authenticated Mac presence, short-lived pairing routes, and request transit.
+              Account discovery, authenticated machine presence, short-lived pairing routes, and request transit.
               No model, no terminal, no message store.
             </p>
           </article>
@@ -332,7 +332,7 @@ clankie gateway status</code></pre>
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>Clankie runs on your Mac.</span>
+        <span>Clankie runs on your machine.</span>
         <div class="footer-links">
           <a href="https://clankie.bot">Home</a>
           <a href="https://clankie.bot/privacy/">Privacy</a>

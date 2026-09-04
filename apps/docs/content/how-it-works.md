@@ -1,8 +1,8 @@
 # How Clankie works
 
-Clankie is one service plus the surfaces that reach it. The service runs on your Mac. It owns the captain (a [pi](https://pi.dev)-based agent with durable sessions), his tools, his game body, his memory, and the HTTP API every surface speaks. Everything else — the console, the phone app, Discord, a Claude Code seat, the menu bar — is a window into that one process.
+Clankie is one service plus the surfaces that reach it. The service runs on your machine. It owns the captain (a [pi](https://pi.dev)-based agent with durable sessions), his tools, his game body, his memory, and the HTTP API every surface speaks. Everything else — the console, the phone app, Discord, a Claude Code seat, the menu bar — is a window into that one process.
 
-<div class="diagram" role="img" aria-label="Surfaces reach one local service, which reaches models, a browser, a herdr fleet, a PokeAgents world, and connected services. State stays on the Mac.">
+<div class="diagram" role="img" aria-label="Surfaces reach one local service, which reaches models, a browser, a herdr fleet, a PokeAgents world, and connected services. State stays on your machine.">
   <div class="diagram-col">
     <h4>Surfaces</h4>
     <div class="dnode"><strong>Console</strong><span>the TUI, in any terminal</span></div>
@@ -14,7 +14,7 @@ Clankie is one service plus the surfaces that reach it. The service runs on your
   <div class="diagram-col diagram-center">
     <h4>The service</h4>
     <div class="dnode dnode-main"><strong>apps/clankie</strong><span>captain · tools · rooms · memory</span><span>HTTP on 127.0.0.1:4310</span></div>
-    <div class="dnode"><strong>On this Mac</strong><span>Keychain credential broker</span><span>~/.clankie · ~/.config/clankie</span></div>
+    <div class="dnode"><strong>On your machine</strong><span>Keychain credential broker</span><span>~/.clankie · ~/.config/clankie</span></div>
   </div>
   <div class="diagram-col">
     <h4>What he reaches</h4>
@@ -72,7 +72,7 @@ The credential broker (Keychain on macOS, service `bot.clankie.credentials`) is 
 
 ## The doorway
 
-The app does not move Clankie into a cloud. The Mac signs in to one account with an email one-time code (`/gateway`), then holds one outbound WebSocket to `api.clankie.bot` carrying that account's access token. The gateway verifies the token, derives this Mac's route from the account plus a per-installation id, and forwards bounded exchanges; it keeps no account, host, or message database. Pairing is a single-use offer minted by the Mac (`clankie pair`); the device credential and every grant it carries are decided on the Mac. The [network page](/network/) lists the exact public routes, and the [HTTP API](/api/) is the full local contract underneath.
+The app does not move Clankie into a cloud. Your machine signs in to one account with an email one-time code (`/gateway`), then holds one outbound WebSocket to `api.clankie.bot` carrying that account's access token. The gateway verifies the token, derives your machine's route from the account plus a per-installation id, and forwards bounded exchanges; it keeps no account, host, or message database. Pairing is a single-use offer minted by your machine (`clankie pair`); the device credential and every grant it carries are decided on your machine. The [network page](/network/) lists the exact public routes, and the [HTTP API](/api/) is the full local contract underneath.
 
 ## Read deeper
 

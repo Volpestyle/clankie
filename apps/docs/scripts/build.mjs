@@ -38,13 +38,13 @@ const PAGES = [
   {
     path: "/",
     title: "Start",
-    description: "Install Clankie on your Mac, give him a model, reach him from your phone.",
+    description: "Install Clankie on your machine, give him a model, reach him from your phone.",
   },
   {
     path: "/how-it-works/",
     title: "How he works",
     description:
-      "One service on your Mac, the rooms he lives in, how a message becomes a turn, and what stays where.",
+      "One service on your machine, the rooms he lives in, how a message becomes a turn, and what stays where.",
   },
   {
     path: "/console/",
@@ -175,7 +175,7 @@ function buildNetworkRows() {
       "POST /operator/v1/dispatch",
       {
         access: "Device bearer plus the operation’s grant",
-        purpose: "Send a chat, fleet, steer, or terminal-control operation to the Mac.",
+        purpose: "Send a chat, fleet, steer, or terminal-control operation to your machine.",
       },
     ],
     [
@@ -189,7 +189,7 @@ function buildNetworkRows() {
       "POST /operator/v1/terminal-tail",
       {
         access: "Device bearer with terminal-observe access",
-        purpose: "Read terminal frames from the Mac’s supported Herdr integration.",
+        purpose: "Read terminal frames from your machine’s supported Herdr integration.",
       },
     ],
   ]);
@@ -210,8 +210,8 @@ function buildNetworkRows() {
     {
       method: "WS",
       route: `${PUBLIC_GATEWAY_HOST_CONNECT_PATH}?hostId=…&installationId=…`,
-      access: "Mac account bearer",
-      purpose: "Keep one authenticated outbound connection from a Clankie Mac.",
+      access: "Machine account bearer",
+      purpose: "Keep one authenticated outbound connection from a Clankie machine.",
     },
   ];
 
@@ -234,19 +234,19 @@ function buildNetworkRows() {
   const markdown = [
     "# Public network surface",
     "",
-    "`api.clankie.bot` accepts only the routes below. The gateway carries bounded exchanges to an authenticated Mac; the Mac still owns devices, grants, conversations, and terminal authority. It does not run Clankie, a model, a terminal, or a Herdr fleet, and it retains no request bodies, message content, or terminal frames.",
+    "`api.clankie.bot` accepts only the routes below. The gateway carries bounded exchanges to an authenticated machine; your machine still owns devices, grants, conversations, and terminal authority. It does not run Clankie, a model, a terminal, or a Herdr fleet, and it retains no request bodies, message content, or terminal frames.",
     "",
     "```",
-    "iPhone or iPad ── HTTPS ── api.clankie.bot ── outbound WebSocket ── your Mac",
+    "iPhone or iPad ── HTTPS ── api.clankie.bot ── outbound WebSocket ── your machine",
     "```",
     "",
-    "The first pairing redemption uses the stable public origin. Successful redemption returns an opaque, host-scoped origin (`/h/{hostId}`). Normal app calls use that origin and a device credential minted by the Mac.",
+    "The first pairing redemption uses the stable public origin. Successful redemption returns an opaque, host-scoped origin (`/h/{hostId}`). Normal app calls use that origin and a device credential minted by your machine.",
     "",
     "| Method | Route | Access | Purpose |",
     "| --- | --- | --- | --- |",
     ...rows.map((row) => `| ${row.method} | \`${row.route}\` | ${row.access} | ${row.purpose} |`),
     "",
-    "These routes are the product’s observable internet boundary, not a general third-party API. Clients pair through Clankie and use credentials and grants issued by the user’s Mac. The full local contract is the [HTTP API](/api/).",
+    "These routes are the product’s observable internet boundary, not a general third-party API. Clients pair through Clankie and use credentials and grants issued by the user’s machine. The full local contract is the [HTTP API](/api/).",
   ].join("\n");
 
   return { rows, markdown };
@@ -403,7 +403,7 @@ async function apiMarkdown() {
     "",
     `Base URL \`${spec.servers[0].url}\` · version ${spec.info.version} · the raw document is [openapi.yaml](/api/openapi.yaml).`,
     "",
-    "> This is the local contract on the Mac. From the internet only the [public network surface](/network/) is reachable, through `api.clankie.bot`, and the Mac still decides every grant.",
+    "> This is the local contract on your machine. From the internet only the [public network surface](/network/) is reachable, through `api.clankie.bot`, and your machine still decides every grant.",
     "",
     "## Bearers",
     "",
@@ -574,7 +574,7 @@ function llmsIndex() {
   return [
     "# Clankie",
     "",
-    "> A persistent agent with a life of his own. Clankie runs on an Apple-silicon Mac: he chats in Discord (text and voice), plays Pokémon live on a watch surface, makes images and videos, browses the web, remembers people, codes, and leads a fleet of coding agents through herdr panes. The Mac is authoritative; nothing of his runs in the cloud. An iPhone and iPad app reaches that Mac through a narrow public gateway (`api.clankie.bot`) and does not require Tailscale.",
+    "> A persistent agent with a life of his own. Clankie runs on your machine, an Apple-silicon Mac: he chats in Discord (text and voice), plays Pokémon live on a watch surface, makes images and videos, browses the web, remembers people, codes, and leads a fleet of coding agents through herdr panes. Your machine is authoritative; nothing of his runs in the cloud. An iPhone and iPad app reaches your machine through a narrow public gateway (`api.clankie.bot`) and does not require Tailscale.",
     "",
     "He is one local service (`apps/clankie`, HTTP on `127.0.0.1:4310`) plus the surfaces that reach it: the operator console (TUI), the companion app, one active Discord body, a Claude Code seat, and a macOS menu bar. The captain is a pi-based agent with durable sessions per room; persona is owner-authored; model output and Discord content are untrusted input. `clankie <noun> <verb>` is the headless control layer and prints one JSON document per command.",
     "",
