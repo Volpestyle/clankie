@@ -46,31 +46,31 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
 
 ## Get started
 
-Clankie runs on your Mac: macOS 14 or newer, Apple silicon. The iPhone and iPad
-app is a companion that reaches that Mac through `api.clankie.bot`; nothing of
-his runs in the cloud.
+On a Mac running macOS 14 or newer on Apple silicon:
 
-1. **Install and open him.**
+```bash
+curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
+clankie
+```
 
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
-   clankie
-   ```
+The launcher starts the service and opens the console. In it, `/auth` stores a
+provider key or OAuth login in the Keychain-backed credential broker and
+`/model` picks the captain model. That is the whole setup; talk to him.
+`/persona`, `/image-model`, `/discord`, and `/connect` are optional.
+`clankie doctor` prints the install card whenever you want to know what is
+configured.
 
-   The launcher starts the service and opens the console. `clankie doctor`
-   prints the install card whenever you want to know what is configured.
+### Reach him from your phone
 
-2. **Give him a model.** In the console, `/auth` stores a provider key or OAuth
-   login in the Keychain-backed credential broker and `/model` picks the captain
-   model. `/persona`, `/image-model`, `/discord`, and `/connect` are optional
-   and can wait.
+The iPhone and iPad app is a companion that reaches your Mac through
+`api.clankie.bot`; nothing of his runs in the cloud. Four more steps:
 
-3. **Sign the Mac in.** `/gateway`, choose **Enable remote access**, enter the
+1. **Sign the Mac in.** `/gateway`, choose **Enable remote access**, enter the
    email your invitation named, then the one-time code it receives. That
    enrolls this Mac at the public doorway under your account. There are no
    URLs, host ids, or tokens to copy.
 
-4. **Keep him running.**
+2. **Keep him running.**
 
    ```bash
    clankie autostart enable
@@ -79,9 +79,9 @@ his runs in the cloud.
    Clankie and his relay now start when you log in. Leave the Mac awake and on
    power if you want him reachable while you are away.
 
-5. **Install the app** from your TestFlight invitation and open it.
+3. **Install the app** from your TestFlight invitation and open it.
 
-6. **Pair the phone.**
+4. **Pair the phone.**
 
    ```bash
    clankie pair
@@ -94,8 +94,10 @@ his runs in the cloud.
 From here the app is Messages, the fleet, and the terminal on your Mac.
 
 To invite someone, an operator runs `infra/aws/accounts/deploy.sh invite <email>`
-before that person reaches step 3
+before that person reaches step 1
 ([`infra/aws/accounts`](infra/aws/accounts/README.md)).
+
+### Reference
 
 Every headless noun's flags, JSON, and exit codes are in
 [`docs/cli.md`](docs/cli.md); `clankie help` prints the index. Where each
