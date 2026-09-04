@@ -395,6 +395,7 @@ release so he can describe and set up this machine without a git tree
 | Public doorway (AWS gateway)      | [`apps/gateway/README.md`](../apps/gateway/README.md)                                             |
 | Account sign-in (Cognito)         | [`infra/aws/accounts/README.md`](../infra/aws/accounts/README.md)                                 |
 | Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                         |
+| Public docs site                  | [`apps/docs/README.md`](../apps/docs/README.md)                                                   |
 | Install card (`clankie doctor`)   | [`docs/adr/0142-the-install-tells-him-the-truth.md`](adr/0142-the-install-tells-him-the-truth.md) |
 | macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                           |
 | Official Discord bot operation    | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                               |

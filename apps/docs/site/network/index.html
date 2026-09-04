@@ -18,12 +18,7 @@
     <header class="site-header">
       <div class="header-inner">
         <a class="brand" href="/"><span class="seed" aria-hidden="true"></span>clankie <em>docs</em></a>
-        <nav class="site-nav" aria-label="Primary navigation">
-          <a href="/#local">Mac</a>
-          <a href="/#app">App</a>
-          <a aria-current="page" class="optional" href="/network/">Network</a>
-          <a href="https://clankie.bot/support/">Support</a>
-        </nav>
+        <nav class="site-nav" aria-label="Primary navigation">{{NAV}}</nav>
       </div>
     </header>
 
@@ -88,7 +83,8 @@
         <p>
           These routes document the product’s observable internet boundary; they are not a general third-party
           API. Clients pair through Clankie and must use credentials and grants issued by the user’s Mac. The
-          private local service has a larger contract and is deliberately not published at the public origin.
+          private local service has a larger contract — the <a href="/api/">HTTP API</a> — which is served
+          only on the Mac, never at the public origin.
         </p>
         <p>
           See the <a href="https://github.com/Volpestyle/clankie">source repository</a> for the current
@@ -104,6 +100,7 @@
           <a href="https://clankie.bot">Home</a>
           <a href="https://clankie.bot/privacy/">Privacy</a>
           <a href="https://clankie.bot/support/">Support</a>
+          <a href="/llms.txt">llms.txt</a>
           <a href="https://github.com/Volpestyle/clankie">GitHub</a>
         </div>
       </div>

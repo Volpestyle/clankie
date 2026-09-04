@@ -2,7 +2,10 @@
 
 Status: accepted (James, 2026-09-02). Extends the public doorway in
 [ADR 0151](0151-the-public-doorway-routes-home.md) and account enrollment in
-[ADR 0153](0153-an-account-signs-the-mac-in.md).
+[ADR 0153](0153-an-account-signs-the-mac-in.md). Amended by
+[ADR 0156](0156-the-docs-site-renders-the-canonical-references.md): the site
+leads with Clankie rather than two paths, and renders the console, CLI, and
+HTTP API references from their canonical files instead of only linking them.
 
 ## Context
 

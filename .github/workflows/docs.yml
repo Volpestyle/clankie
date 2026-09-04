@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths:
       - apps/docs/**
+      - apps/clankie/openapi.yaml
+      - apps/tui/README.md
+      - apps/tui/src/**
+      - docs/architecture.md
+      - docs/cli.md
       - branding/clankie-logo-512-alpha.png
       - packages/protocol/src/public-gateway.ts
       - infra/aws/public-docs/**
@@ -15,6 +20,11 @@ on:
   pull_request:
     paths:
       - apps/docs/**
+      - apps/clankie/openapi.yaml
+      - apps/tui/README.md
+      - apps/tui/src/**
+      - docs/architecture.md
+      - docs/cli.md
       - branding/clankie-logo-512-alpha.png
       - packages/protocol/src/public-gateway.ts
       - infra/aws/public-docs/**

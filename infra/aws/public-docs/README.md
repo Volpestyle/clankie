@@ -36,8 +36,12 @@ pnpm docs:public:check
 
 Pull requests build and validate the site. A docs-affecting push to `main`
 builds the same artifact, synchronizes it to S3, and invalidates CloudFront.
-The **Docs** workflow can also deploy the selected `main` commit manually. The
-site has no runtime, database, JavaScript bundle, or separate dependency tree.
+The **Docs** workflow can also deploy the selected `main` commit manually. A
+docs-affecting change includes the canonical files the site renders — the CLI
+contract, the OpenAPI document, the console source and README, and the
+architecture document — as listed in the workflow's path filters. The site has
+no runtime, database, or JavaScript bundle; its only build-time dependencies
+are a Markdown renderer and a YAML parser already in the lockfile.
 
 CloudFront already owns the certificate, domain alias, and directory-index
 rewrite. This deployment does not mutate DNS or those resources.

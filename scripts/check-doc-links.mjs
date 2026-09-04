@@ -22,6 +22,8 @@ for (const path of markdown) {
   for (const match of source.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
     const target = match[1];
     if (!target || /^(https?:|mailto:|#)/.test(target)) continue;
+    // Site-rooted links in the public docs content resolve inside apps/docs/dist; its own check verifies them.
+    if (target.startsWith("/") && path.includes("/apps/docs/content/")) continue;
     const clean = target.split("#")[0];
     if (!clean) continue;
     try {

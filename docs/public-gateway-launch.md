@@ -10,8 +10,9 @@ an observability system that does not exist.
 
 The public [setup](https://docs.clankie.bot) and
 [network](https://docs.clankie.bot/network/) pages are built from
-[`apps/docs`](../apps/docs/README.md). The network table follows the protocol
-allowlist at build time rather than duplicating it by hand. The canonical App
+[`apps/docs`](../apps/docs/README.md), alongside the rendered console, CLI, and
+HTTP API references. The network table follows the protocol allowlist at build
+time rather than duplicating it by hand. The canonical App
 Store [privacy](https://clankie.bot/privacy/) and
 [support](https://clankie.bot/support/) pages live with the landing site.
 
