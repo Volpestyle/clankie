@@ -45,7 +45,7 @@ device table, credential-rotate sentence). Everything else is already JSON.
 | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
 | `health`, `status`, `doctor`, `restart`, `down`, `autostart …`           | JSON                                                                                         |
 | `model …`, `effort …`, `image-model …`, `video-model …`                  | JSON                                                                                         |
-| `persona …`, `games …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON                                                                                         |
+| `persona …`, `games …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                            | JSON                                                                                         |
 | `play stop`                                                              | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
 | `prompt …`, `memory-card …`                                              | Plain text: the prompt or card itself, verbatim                                              |
@@ -390,16 +390,41 @@ Read or set whether the PokeAgent MMO body is available. JSON contains the
 `"restart": "clankie restart captain"`. The TUI `/games` command calls this
 same writer.
 
-### `herdr [status]` / `herdr set --session NAME`
+### `herdr [status|open]` / `herdr set --runtime auto|bundled|external` / `herdr set --session NAME`
 
-Which herdr session the captain leads
-([ADR 0149](adr/0149-his-herdr-session-is-chosen-not-inherited.md)). The
-service resolves the name to that session's socket at startup and pins
-`HERDR_SOCKET_PATH` for every herdr child it spawns; `default` (the default)
-is herdr's own default session. JSON contains `herdr.session`, `settingsFile`,
-and `"restart": "clankie restart captain"`. A name unknown to
-`herdr session list` still writes; the service logs a warning at startup and
-herdr's own default resolution applies until the session exists.
+Clankie saves one worker-runtime binding at service startup
+([ADR 0157](adr/0157-herdr-is-an-owned-runtime.md)). On the first `auto` start,
+he adopts the surrounding Herdr session when launched inside one; otherwise
+he starts private bundled Herdr. The service saves the chosen mode and exact
+external socket. Later launches, consoles, and restarts keep that binding.
+Existing explicitly named session settings are preserved.
+
+`bundled` requires the native release binary or `pnpm herdr:build` in a checkout.
+`set --session NAME` selects external mode and resolves that named session on
+restart. External mode never starts or stops the owner's server; a missing or
+unreachable session refuses startup. `set --runtime auto` clears the binding
+for selection at the next service start. Apply changes with
+`clankie restart captain`.
+
+`clankie herdr status` reports configured `herdr`, `settingsFile`, `restart`,
+and the running service's `active` binding (or `unavailable`). The authenticated
+operator endpoint `GET /v1/herdr` returns the running binding; pending settings
+do not redirect clients. `/health` includes owned Herdr's state and returns 503
+during recovery.
+
+`clankie-herdr` is the shortcut for `clankie herdr open`. It attaches a native
+viewer to the selected, already-running local server. Use **Ctrl+B, then Q**
+to detach with the default bindings. Closing the viewer leaves Clankie and his
+workers running. The TUI's `/herdr open` opens the same viewer and returns to
+the conversation after detach. Native viewing requires a local service.
+
+Every TUI reads the service's fleet, including from ordinary terminals and
+unrelated Herdr sessions. `/jump`, clickable pane IDs, and the optional
+herdr-lead `/board` commands target that fleet. Use the viewer to see a focused
+worker. The optional board requires herdr-lead installed and linked in the
+selected runtime. Pane-scoped messages and `clankie stance` carry the source
+socket in `x-clankie-herdr-socket`: unrelated pane IDs cannot attach to or
+change a worker with the same ID in another session.
 
 ### `workdir [status]` / `workdir set PATH` / `workdir clear`
 

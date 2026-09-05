@@ -13,6 +13,7 @@ export type HerdrAgentState = "idle" | "working" | "blocked" | "unknown";
 type HerdrCommandRunner = (
   command: string,
   args: readonly string[],
+  env: NodeJS.ProcessEnv,
 ) => Promise<{ stdout: string; stderr: string }>;
 
 export interface HerdrReportOptions {
@@ -32,11 +33,32 @@ export function herdrPaneIdFromEnv(env: NodeJS.ProcessEnv = process.env): string
 function defaultRunner(
   command: string,
   args: readonly string[],
+  env: NodeJS.ProcessEnv,
 ): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(command, [...args], { maxBuffer: 1024 * 1024 }).then(({ stdout, stderr }) => ({
-    stdout: String(stdout),
-    stderr: String(stderr),
-  }));
+  return execFileAsync(command, [...args], { env, timeout: 5_000, maxBuffer: 1024 * 1024 }).then(
+    ({ stdout, stderr }) => ({
+      stdout: String(stdout),
+      stderr: String(stderr),
+    }),
+  );
+}
+
+/** Resolve the caller's own session before sending any pane-scoped identity. */
+export async function sourceHerdrSocket(options: HerdrReportOptions = {}): Promise<string | undefined> {
+  const env = options.env ?? process.env;
+  if (env.HERDR_ENV !== "1") return undefined;
+  if (env.HERDR_SOCKET_PATH?.startsWith("/")) return env.HERDR_SOCKET_PATH;
+  try {
+    const { stdout } = await (options.runCommand ?? defaultRunner)(
+      "herdr",
+      ["session", "list", "--json"],
+      env,
+    );
+    const parsed = JSON.parse(stdout) as { sessions?: { name: string; socket_path: string }[] };
+    return parsed.sessions?.find((session) => session.name === (env.HERDR_SESSION || "default"))?.socket_path;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -59,7 +81,7 @@ export async function reportHerdrAgent(
     args.push("--message", options.message);
   }
   const run = options.runCommand ?? defaultRunner;
-  await run("herdr", args);
+  await run("herdr", args, env);
   return true;
 }
 
@@ -84,7 +106,7 @@ export async function reportHerdrMetadata(
   if (options.title !== undefined) args.push("--title", options.title);
   if (options.token !== undefined) args.push("--token", options.token);
   const run = options.runCommand ?? defaultRunner;
-  await run("herdr", args);
+  await run("herdr", args, env);
   return true;
 }
 
@@ -120,10 +142,10 @@ export async function jumpToHerdrAgent(
   options: HerdrReportOptions = {},
 ): Promise<HerdrJumpResult> {
   const env = options.env ?? process.env;
-  if (env.HERDR_ENV !== "1") return { outcome: "skipped", reason: "not_in_herdr" };
+  if (!env.HERDR_SOCKET_PATH && env.HERDR_ENV !== "1") return { outcome: "skipped", reason: "not_in_herdr" };
   const run = options.runCommand ?? defaultRunner;
   try {
-    await run("herdr", ["agent", "focus", target]);
+    await run("herdr", ["agent", "focus", target], env);
     return { outcome: "ok", target };
   } catch (caught) {
     return { outcome: "unavailable", error: herdrJumpError(caught) };

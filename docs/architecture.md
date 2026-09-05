@@ -248,14 +248,12 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   browser's idle timeout ([ADR 0127](adr/0127-his-accounts-are-his.md)).
 - **Leading agents.** Clankie leads coding agents through the herdr CLI over
   bash, guided by skills — there is no worker protocol. The service is his
-  durable body, and which herdr session he leads is chosen in settings
-  (`herdr.session`, default herdr's default session): the service pins that
-  session's socket for every herdr child at startup, so the binding never
-  depends on where a console or the service was launched
-  ([ADR 0149](adr/0149-his-herdr-session-is-chosen-not-inherited.md)). The
-  service also subscribes to that socket's native events to wake fleet readers;
-  the default setting therefore covers every agent in the default session,
-  across all of its workspaces
+  durable body. On first startup, `auto` adopts the surrounding Herdr session
+  or starts the private bundled runtime, then saves the binding. Every later
+  console and restart follows that choice; explicit settings select another
+  session ([ADR 0157](adr/0157-herdr-is-an-owned-runtime.md)).
+  The service subscribes to the chosen socket's native events to wake fleet
+  readers across all of its workspaces
   ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)). Any
   operator turn whose session is up attaches a live agent census so he can
   lead, route, and harvest without rediscovering the room; a turn from the

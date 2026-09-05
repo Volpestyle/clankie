@@ -1,3 +1,4 @@
+import { sourceHerdrSocket } from "../session/herdr-report.ts";
 /**
  * `clankie stance` — how an agent moves its own figure in the commons
  * ([ADR 0148](../../../../docs/adr/0148-an-agent-moves-its-own-figure.md)).
@@ -14,6 +15,7 @@
 import { resolveCaptainCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
   OPERATOR_AGENT_STANCE_MAX_MS,
+  HERDR_SOCKET_HEADER,
   OPERATOR_AGENT_STANCE_NOTE_MAX,
   OperatorAgentPoseSchema,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
@@ -90,12 +92,18 @@ export async function runStanceCommand(
   if (token === undefined) {
     throw new Error("No captain credential is available; start the clankie service once first.");
   }
+  const socket = await sourceHerdrSocket({ env });
   const fetchImpl = options.fetchImpl ?? fetch;
   const response = await fetchImpl(
     new URL(OPERATOR_CONVERSATION_DISPATCH_PATH, commandHost({ ...options, env })),
     {
       method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        ...(socket ? { [HERDR_SOCKET_HEADER]: socket } : {}),
+      },
+      redirect: "error",
       body: JSON.stringify({ op: "state_stance", schemaVersion: 1, stance }),
       signal: AbortSignal.timeout(5_000),
     },

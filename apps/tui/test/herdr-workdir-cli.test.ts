@@ -15,12 +15,34 @@ describe("clankie herdr", () => {
   it("reads the default binding and sets a named session", async () => {
     const settings = await tempStore();
     const status = await runHerdrCommand([], { settings });
-    expect(status.herdr).toEqual({ session: "default" });
+    expect(status.herdr).toEqual({ runtime: "auto", session: "default" });
     expect(status.restart).toBe("clankie restart captain");
 
     const updated = await runHerdrCommand(["set", "--session", "clankies"], { settings });
-    expect(updated.herdr).toEqual({ session: "clankies" });
+    expect(updated.herdr).toEqual({ runtime: "external", session: "clankies" });
     expect((await settings.load()).herdr.session).toBe("clankies");
+    const bundled = await runHerdrCommand(["set", "--runtime", "bundled"], { settings });
+    expect(bundled.herdr).toEqual({ runtime: "bundled", session: "clankies" });
+    await expect(runHerdrCommand(["set", "--runtime", "unknown"], { settings })).rejects.toThrow("Usage:");
+  });
+
+  it("clears the saved socket for explicit reselection without losing it on an external-mode no-op", async () => {
+    const settings = await tempStore();
+    await settings.update((current) => ({
+      ...current,
+      herdr: { runtime: "external", session: "chosen", socketPath: "/tmp/chosen.sock" },
+    }));
+    expect((await runHerdrCommand(["set", "--runtime", "external"], { settings })).herdr.socketPath).toBe(
+      "/tmp/chosen.sock",
+    );
+    expect((await runHerdrCommand(["set", "--runtime", "auto"], { settings })).herdr).toEqual({
+      runtime: "auto",
+      session: "default",
+    });
+    expect((await runHerdrCommand(["set", "--session", "next"], { settings })).herdr).toEqual({
+      runtime: "external",
+      session: "next",
+    });
   });
 
   it("rejects a name the schema refuses and bad argument shapes", async () => {

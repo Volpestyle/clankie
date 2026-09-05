@@ -2,7 +2,7 @@
 
 Clankie's downloadable release is a self-contained macOS Apple silicon bundle.
 It includes the native `clankie` launcher, a pinned Node runtime, compiled
-service entrypoints, runtime assets, and `clankvox`. The operator invokes one
+service entrypoints, runtime assets, a pinned Herdr server, and `clankvox`. The operator invokes one
 executable; the launcher keeps the existing process boundaries behind it.
 
 ## Install
@@ -40,6 +40,8 @@ browser-downloaded package.
 └── releases/v0.2.0/
     ├── bin/clankie
     ├── libexec/node
+    ├── bin/clankie-herdr      # attach-only viewer shortcut
+    ├── libexec/herdr          # Clankie-owned native worker runtime
     ├── .agents/skills/        # product skills (this-machine, trace-clankie)
     ├── docs/cli.md            # headless command contract
     ├── apps/                  # bundled services, assets, and clankvox
@@ -55,9 +57,19 @@ The working directory of an interactive Clankie conversation is the directory
 where the operator invokes `clankie`; supervised services run from their
 installed release root.
 
-Optional machine integrations such as Herdr, cloudflared, and external browser
-tools remain external executables. The release does not copy their code or
-licenses. Clankie's own herdr plugin declaration ships under
+Herdr is built from the checksum-pinned fork in `scripts/release/herdr.json`.
+The service owns its headless process and private state under
+`$CLANKIE_STATE/herdr` (default `~/.clankie/herdr`), with health and crash
+recovery through a child supervisor. See [ADR 0157](adr/0157-herdr-is-an-owned-runtime.md).
+On first service start, `auto` adopts the surrounding Herdr session or starts
+private bundled Herdr, then saves the binding for future clients and restarts.
+Source checkouts need `pnpm herdr:build` for private mode. Explicit
+`clankie herdr set --session NAME` selects an external session; restart Clankie
+to apply. `clankie-herdr` opens the running fleet without owning its lifetime.
+The Clankie TUI works inside vanilla Herdr in either distribution.
+
+Optional integrations such as cloudflared and external browser tools remain
+external executables. Clankie's own herdr plugin declaration ships under
 `integrations/herdr-plugin` so it can be linked without a git checkout.
 `clankie doctor` reports whether this tree is a release or a checkout, which
 models and credentials are configured, and whether those optional commands
@@ -86,7 +98,8 @@ from the Mac release and reuses its existing private S3 and CloudFront hosting.
 
 ## Build and release
 
-On an Apple silicon Mac with the repository toolchain installed:
+On an Apple silicon Mac with the repository toolchain and Zig 0.15.2 installed
+(the Herdr source pin supplies its own Rust toolchain):
 
 ```bash
 pnpm release:build
@@ -96,7 +109,12 @@ pnpm release:smoke
 The build writes `dist/clankie-darwin-arm64.tar.gz` and its checksum. It fails
 unless bundled JavaScript and reachable Cargo dependencies have declared
 licenses and included license text. The smoke test extracts the archive outside
-the checkout and exercises its launcher, service, Activity assets, and Vox IPC.
+the checkout and exercises its launcher, service, Activity assets, Vox IPC,
+and native Herdr worker execution, session restoration, crash recovery, and cleanup.
+
+`pnpm herdr:linux:smoke` builds and exercises the same pinned Herdr runtime
+inside Docker. This proves the native Linux boundary; the complete hosted
+service image and provisioning system are separate work.
 
 Pushing a version tag matching `package.json` (for example `v0.2.0`) runs the
 full repository check, builds and smoke-tests the archive on an Apple silicon

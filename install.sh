@@ -38,10 +38,13 @@ command -v shasum >/dev/null 2>&1 || { echo "clankie installer: shasum is requir
 install_root=${CLANKIE_INSTALL_ROOT:-"$HOME/.local/share/clankie"}
 bin_dir=${CLANKIE_BIN_DIR:-"$HOME/.local/bin"}
 bin_link="$bin_dir/clankie"
-if [ -e "$bin_link" ] && [ ! -L "$bin_link" ]; then
-  echo "clankie installer: $bin_link exists and is not a symlink; refusing to replace it" >&2
-  exit 1
-fi
+for command in clankie clankie-herdr; do
+  candidate="$bin_dir/$command"
+  if [ -e "$candidate" ] && [ ! -L "$candidate" ]; then
+    echo "clankie installer: $candidate exists and is not a symlink; refusing to replace it" >&2
+    exit 1
+  fi
+done
 if [ -e "$install_root/current" ] && [ ! -L "$install_root/current" ]; then
   echo "clankie installer: $install_root/current exists and is not a symlink; refusing to replace it" >&2
   exit 1
@@ -83,7 +86,9 @@ if [ ! -e "$target" ]; then
   mv "$temporary/clankie" "$target"
 fi
 ln -sfn "releases/$version" "$install_root/current"
-ln -sfn "$install_root/current/bin/clankie" "$bin_link"
+for command in clankie clankie-herdr; do
+  ln -sfn "$install_root/current/bin/$command" "$bin_dir/$command"
+done
 
 echo "Installed Clankie $version: $bin_link"
 case ":${PATH:-}:" in

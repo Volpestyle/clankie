@@ -1,3 +1,4 @@
+import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connection.ts";
 /**
  * The operator console's slash commands. Display fields feed the ported
  * typeahead / Ctrl+/ workbench / autocomplete; `run` handlers speak to the
@@ -31,8 +32,9 @@ import {
   type HerdLeadCompanionResult,
 } from "./observation/herd-lead-companion.ts";
 import { formatCaptainContextUsage } from "./shell/footer.ts";
-import { formatHerdrJumpResult, jumpToHerdrAgent } from "./session/herdr-report.ts";
+import { formatHerdrJumpResult } from "./session/herdr-report.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
+import { runHerdrCommand } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
 
@@ -40,6 +42,7 @@ type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
   readonly settings?: SettingsStore;
+  readonly herdrOptions?: HerdrConnectionOptions;
   readonly commandStatus?: () => Promise<StatusCommandResult>;
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
   readonly activityClient?: ActivityObservationClient;
@@ -50,7 +53,7 @@ export interface ConsoleCommandContext {
   readonly presence?: () => PresenceSnapshot | undefined;
   /** Latest durable context occupancy for the selected conversation. */
   readonly contextUsage?: () => OperatorConversationContextUsage | undefined;
-  /** Sibling Herdr pane agents, when running inside Herdr. */
+  /** Clankie service fleet, shared by every console. */
   readonly herdrRoster?: () => HerdrRosterSnapshot | undefined;
   /** herdr-lead board: companion dashboard beside this console. */
   readonly herdLead?: {
@@ -132,6 +135,38 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   }
 
   commands.push(
+    {
+      name: "herdr",
+      aliases: [],
+      description: "Choose the bundled runtime or an external Herdr session",
+      takesArgument: true,
+      argumentHint: "[status | open | set --runtime auto|bundled|external | set --session NAME]",
+      async run(argument, shell): Promise<void> {
+        try {
+          if (argument.trim() === "open") {
+            if (!context.herdrOptions) throw new Error("Herdr connection is unavailable");
+            const code = await shell.withTerminal(() => openHerdr(context.herdrOptions!));
+            if (code !== 0) throw new Error(`Herdr viewer exited with status ${code}`);
+            return;
+          }
+          const result = await runHerdrCommand(argument.trim().split(/\s+/u).filter(Boolean), {
+            ...context.herdrOptions,
+            ...(settings === undefined ? {} : { settings }),
+          });
+          shell.insertCommandResult(
+            "/herdr",
+            `Configured: ${result.herdr.runtime} · ${result.herdr.session}\n${result.active ? `Active: ${result.active.runtime} · ${result.active.socketPath}` : (result.unavailable ?? "")}\nApply changes with ${result.restart}`,
+            "success",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/herdr",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
     {
       name: "help",
       aliases: ["h"],
@@ -607,7 +642,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           );
           return;
         }
-        const formatted = formatHerdrJumpResult(await jumpToHerdrAgent(target));
+        const formatted = formatHerdrJumpResult(await shell.focusHerdrAgent(target));
         shell.insertCommandResult(`/jump ${target}`, formatted.text, formatted.tone);
       },
     },

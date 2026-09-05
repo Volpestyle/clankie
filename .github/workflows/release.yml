@@ -24,6 +24,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - run: brew install cmake
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm release:build

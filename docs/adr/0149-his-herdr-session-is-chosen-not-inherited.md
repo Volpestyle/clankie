@@ -4,6 +4,11 @@ Status: accepted (James, 2026-08-30). Amends the fleet-acquisition story of
 [ADR 0135](0135-a-herdr-seat-is-a-conversation.md): joining a pane is no
 longer the only way he acquires the fleet. The seat itself is unchanged.
 
+The runtime-selection portion is superseded by
+[ADR 0157](0157-herdr-is-an-owned-runtime.md): auto selects and saves a binding
+on first startup, and unreachable external sessions refuse startup. The
+persistent-service fleet and captain working-directory decisions remain in force.
+
 ## Context
 
 Which fleet Clankie leads was decided by two accidents of process environment,

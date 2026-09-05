@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "bin": {
-    "clankie": "./bin/clankie.ts"
+    "clankie": "./bin/clankie.ts",
+    "clankie-herdr": "./bin/clankie-herdr.ts"
   },
   "type": "module",
   "scripts": {

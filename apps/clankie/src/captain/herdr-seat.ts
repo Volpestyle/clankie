@@ -25,7 +25,7 @@ export function operatorPromptWithHerdrSeat(
       ? "You lead this herdr session from your service body; no pane is you this turn."
       : `You have joined this herdr session as pane ${herdrPaneId}. That pane is you.`,
     "The agents below are in the same session. You can lead them, route work to them, and harvest what they finish.",
-    "Load the herdr-lead skill before dispatching. Never run bare `herdr-lead` from this shell.",
+    "Use `herdr --help` for the CLI contract. Load the herdr-lead skill when available. Never run bare `herdr-lead` from this shell.",
     "",
     "<herdr_session>",
     session,

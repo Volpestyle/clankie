@@ -79,8 +79,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["herdr"],
     lines: [
-      "  herdr [status] | set --session NAME",
-      "                           Which herdr session the captain leads (default: default)",
+      "  herdr [status|open] | set --runtime auto|bundled|external | set --session NAME",
+      "                           Bundled runtime or an external Herdr session",
     ],
   },
   {

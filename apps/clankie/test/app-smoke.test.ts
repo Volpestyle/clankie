@@ -1,7 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
+import {
+  HERDR_BINDING_PATH,
+  HERDR_SOCKET_HEADER,
+  OPERATOR_CONVERSATION_DISPATCH_PATH,
+} from "@clankie/protocol";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
@@ -21,6 +25,127 @@ afterEach(async () => {
 });
 
 describe("clankie app smoke", () => {
+  it("does not interpret a client TUI's pane ID inside the private runtime", async () => {
+    for (const bundled of [false, true]) {
+      let receivedPane: string | undefined;
+      const clankie = await createClankieApp({
+        captain: createStubCaptain({
+          serveOperatorConversation: async (request) => {
+            if (request.op === "send") receivedPane = request.turn.herdrPaneId;
+            return { op: "list", schemaVersion: 1, conversations: [] };
+          },
+        }),
+        ...(bundled ? { herdrRuntime: () => "healthy" } : {}),
+        authenticateCaptain: async () => ({ captainId: "operator", steerSourceLane: "api" }),
+      });
+      try {
+        const response = await clankie.app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            op: "send",
+            schemaVersion: 1,
+            turn: {
+              schemaVersion: 1,
+              kind: "message",
+              conversationId: "global-default",
+              surfaceClientId: "tui",
+              expectedRevision: 0,
+              message: "hello",
+              herdrPaneId: "w1:p1",
+            },
+          }),
+        });
+        expect(response.status).toBe(200);
+        expect(receivedPane).toBe(bundled ? undefined : "w1:p1");
+      } finally {
+        clankie.close();
+      }
+    }
+  });
+  it("qualifies both messages and worker stances by their source session", async () => {
+    for (const runtime of ["bundled", "external"] as const) {
+      const received: unknown[] = [];
+      const binding = { runtime, session: "default", socketPath: "/tmp/chosen.sock" };
+      const clankie = await createClankieApp({
+        herdrBinding: binding,
+        captain: createStubCaptain({
+          serveOperatorConversation: async (request) => {
+            received.push(request);
+            return { op: "list", schemaVersion: 1, conversations: [] };
+          },
+        }),
+        authenticateOperator: async (request) =>
+          request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+        authenticateCaptain: async () => ({ captainId: "operator", steerSourceLane: "api" }),
+      });
+      try {
+        expect((await clankie.app.request(HERDR_BINDING_PATH)).status).toBe(401);
+        const live = await clankie.app.request(HERDR_BINDING_PATH, {
+          headers: { authorization: "Bearer owner" },
+        });
+        expect(await live.json()).toEqual(binding);
+        for (const socket of [undefined, "/tmp/other.sock", binding.socketPath]) {
+          const response = await clankie.app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(socket ? { [HERDR_SOCKET_HEADER]: socket } : {}),
+            },
+            body: JSON.stringify({
+              op: "state_stance",
+              schemaVersion: 1,
+              stance: { herdrPaneId: "w1:p1", pose: "working" },
+            }),
+          });
+          expect(response.status).toBe(socket === binding.socketPath ? 200 : 409);
+        }
+        expect(received).toHaveLength(1);
+        expect(received[0]).toMatchObject({ op: "state_stance", stance: { herdrPaneId: "w1:p1" } });
+        for (const socket of ["/tmp/other.sock", binding.socketPath]) {
+          await clankie.app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+            method: "POST",
+            headers: { "content-type": "application/json", [HERDR_SOCKET_HEADER]: socket },
+            body: JSON.stringify({
+              op: "send",
+              schemaVersion: 1,
+              turn: {
+                schemaVersion: 1,
+                kind: "message",
+                conversationId: "global-default",
+                surfaceClientId: "tui",
+                expectedRevision: 0,
+                message: "hi",
+                herdrPaneId: "w1:p1",
+              },
+            }),
+          });
+        }
+        expect(received[1]).toMatchObject({ turn: { message: "hi" } });
+        expect((received[1] as { turn: { herdrPaneId?: string } }).turn.herdrPaneId).toBeUndefined();
+        expect(received[2]).toMatchObject({ turn: { herdrPaneId: "w1:p1" } });
+      } finally {
+        clankie.close();
+      }
+    }
+  });
+  it("reports bundled runtime recovery through the public health endpoint", async () => {
+    let state = "recovering";
+    const clankie = await createClankieApp({ captain: createStubCaptain(), herdrRuntime: () => state });
+    try {
+      const recovering = await clankie.app.request("/health");
+      expect(recovering.status).toBe(503);
+      await expect(recovering.json()).resolves.toEqual({
+        ok: false,
+        service: "clankie",
+        herdr: "recovering",
+      });
+      state = "healthy";
+      expect((await clankie.app.request("/health")).status).toBe(200);
+    } finally {
+      clankie.close();
+    }
+  });
   it("gives realtime voice agency to initiate its own episodic memories", async () => {
     const clankie = await createClankieApp({
       captain: createStubCaptain(),

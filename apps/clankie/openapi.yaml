@@ -53,6 +53,31 @@ paths:
             application/json:
               example: { ok: true, service: clankie }
 
+  /v1/herdr:
+    get:
+      tags: [Operator]
+      operationId: getHerdrBinding
+      summary: Running service's worker-runtime binding
+      description: Pending settings do not change this binding until service restart.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Selected local worker runtime
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [runtime, session, socketPath]
+                properties:
+                  runtime: { type: string, enum: [bundled, external] }
+                  session: { type: string }
+                  socketPath: { type: string, pattern: "^/", maxLength: 102 }
+        "401":
+          description: Operator authentication required
+        "503":
+          description: Operator authentication or runtime binding unavailable
+
   /v1/discord/presence-status:
     get:
       tags: [Operator, Discord]
@@ -355,7 +380,16 @@ paths:
         identify Herdr direct-send/projection threads. `cancel` interrupts one
         accepted run: the captain aborts the live model turn and the durable
         log settles that run as `cancelled`. `fork` clones the current Pi leaf
-        into an ephemeral child conversation.
+        into an ephemeral child conversation. Pane-scoped `send` and
+        `state_stance` requests qualify their pane ID with the source socket.
+        A mismatched `send` loses its pane association; a mismatched stance
+        returns 409 without changing a worker.
+      parameters:
+        - in: header
+          name: x-clankie-herdr-socket
+          required: false
+          schema: { type: string }
+          description: Caller Herdr session's exact socket path, required for pane identity.
       security: [{ captainBearer: [] }]
       requestBody:
         required: true

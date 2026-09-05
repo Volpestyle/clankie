@@ -36,7 +36,8 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
-import { pinHerdrSessionEnvironment } from "./herdr-session.ts";
+import { resolveHerdrBinding } from "./herdr-session.ts";
+import { bundledHerdrBinary, startHerdrRuntime } from "./herdr-runtime.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "./world/session.ts";
@@ -92,17 +93,28 @@ const settingsFilledNames = [
   ...applyRelaySettingsToEnvironment(startupSettings.relay),
 ];
 
-// Which herdr session he leads is chosen in settings, never inherited from
-// wherever this process was launched (ADR 0149).
-const herdrSessionPin = await pinHerdrSessionEnvironment(startupSettings.herdr.session);
-if (herdrSessionPin.outcome === "unknown_session") {
-  logger.warn(
-    { event: "herdr.session.unknown", session: herdrSessionPin.session },
-    "configured herdr session not found; herdr commands fall back to the default session",
-  );
-}
-
 const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
+// Workers inherit private Herdr XDG paths; Clankie commands still use this owner settings file.
+process.env.CLANKIE_SETTINGS_FILE = settingsStore.path;
+const herdrBinding = await resolveHerdrBinding(startupSettings.herdr);
+const herdrBinary = bundledHerdrBinary(repoRoot, herdrBinding);
+const herdrRuntime =
+  herdrBinary === undefined
+    ? undefined
+    : await startHerdrRuntime({ binary: herdrBinary, repoRoot, stateRoot, env: process.env });
+if (JSON.stringify(herdrBinding) !== JSON.stringify(startupSettings.herdr)) {
+  try {
+    await settingsStore.update((current) => {
+      if (JSON.stringify(current.herdr) !== JSON.stringify(startupSettings.herdr)) {
+        throw new Error("Herdr settings changed during startup; restart Clankie to apply them");
+      }
+      return { ...current, herdr: herdrBinding };
+    });
+  } catch (error) {
+    await herdrRuntime?.close();
+    throw error;
+  }
+}
 // Keep the existing on-disk directory so browser profiles survive the process merge.
 const capabilityStateRoot = join(stateRoot, "runner");
 const eventLogPath = process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "events.jsonl");
@@ -498,6 +510,12 @@ const captain = createCaptain(
 
 const clankie = await createClankieApp({
   captain,
+  ...(herdrRuntime === undefined ? {} : { herdrRuntime: herdrRuntime.status }),
+  herdrBinding: {
+    runtime: herdrBinding.runtime === "external" ? "external" : "bundled",
+    session: herdrBinding.session,
+    socketPath: process.env.HERDR_SOCKET_PATH!,
+  },
   memory,
   settings: settingsStore,
   mediaGenerator,
@@ -603,6 +621,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await captain.close().catch(() => undefined);
+    await herdrRuntime?.close();
     await browserHost?.close().catch(() => undefined);
     await mcpHost.close().catch(() => undefined);
     clankie.close();

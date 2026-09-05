@@ -1,6 +1,8 @@
 # 0139. Clankie rides vanilla herdr
 
-Accepted 2026-08-29.
+Accepted 2026-08-29. The runtime ownership and fork-retirement decision is
+superseded by [ADR 0157](0157-herdr-is-an-owned-runtime.md). The upstream
+CLI/socket boundary and optional plugin remain applicable to external mode.
 
 ## Context
 

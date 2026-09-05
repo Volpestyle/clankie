@@ -57,11 +57,14 @@ int main(int argc, char **argv) {
     fail("cannot prepare the runtime environment");
   }
 
-  char **node_argv = calloc((size_t)argc + 2, sizeof(char *));
+  int viewer = strcmp(basename(argv[0]), "clankie-herdr") == 0;
+  char **node_argv = calloc((size_t)argc + 2 + (viewer ? 2 : 0), sizeof(char *));
   if (node_argv == NULL) fail("cannot allocate launcher arguments");
   node_argv[0] = node;
   node_argv[1] = entrypoint;
-  for (int index = 1; index < argc; index++) node_argv[index + 1] = argv[index];
+  int offset = 2;
+  if (viewer) { node_argv[offset++] = "herdr"; node_argv[offset++] = "open"; }
+  for (int index = 1; index < argc; index++) node_argv[offset++] = argv[index];
 
   execv(node, node_argv);
   fail("cannot start the bundled Node runtime");

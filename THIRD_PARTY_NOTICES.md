@@ -7,10 +7,16 @@ Vendored code:
   [provenance](apps/vox/PROVENANCE.md), and
   [native dependency notices](apps/vox/THIRD_PARTY_NOTICES.md).
 
+Release-built native dependency:
+
+- Herdr — the pinned `Volpestyle/clankie-herdr` source declares Apache-2.0.
+  Its repository, commit, and archive checksum are recorded in
+  [`scripts/release/herdr.json`](scripts/release/herdr.json). The release includes
+  the locked Cargo graph's license texts and the vendored libghostty-vt notices.
+
 The architecture uses or interoperates with, but does not vendor, the following projects:
 
 - `@earendil-works/pi-tui` and Pi packages — MIT.
-- Herdr — review its current AGPL/commercial terms before bundling or copying code. Treat it as an optional external agent-pane host unless counsel approves another arrangement.
 - Codex and Claude integrations are provider adapters. Follow each provider's current authentication, product, and distribution terms.
 
 Every downloadable release includes `SBOM.cdx.json`,

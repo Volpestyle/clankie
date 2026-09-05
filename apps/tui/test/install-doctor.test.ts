@@ -230,6 +230,10 @@ describe("install doctor", () => {
       `${JSON.stringify({ model: "xai/grok-4" })}\n`,
     );
     const pluginPath = join(root, "integrations", "herdr-plugin");
+    await writeFile(
+      join(configHome, "clankie", "settings.json"),
+      JSON.stringify({ schemaVersion: 1, herdr: { runtime: "external" } }),
+    );
     const execFileImpl: ExecFileImpl = async (command, args) => {
       if (command === "herdr" && args[0] === "plugin") {
         return { stdout: JSON.stringify({ result: { plugins: [] } }), stderr: "" };
@@ -251,6 +255,21 @@ describe("install doctor", () => {
     expect(report.commands.herdr).toEqual({ present: true, detail: "herdr 0.7.3" });
     expect(report.herdrPlugin).toEqual({ bundled: true, bundlePath: pluginPath, linked: false });
     expect(report.remediations).toEqual([`herdr plugin link ${pluginPath}`]);
+    await writeFile(join(configHome, "clankie", "settings.json"), JSON.stringify({ schemaVersion: 1 }));
+    const owned = await inspectInstall({
+      repoRoot: root,
+      env: { HOME: join(root, "home"), XDG_CONFIG_HOME: configHome },
+      execFileImpl: async (command, args) => {
+        if (command === join(root, "libexec/herdr")) {
+          expect(args).toEqual(["--version"]);
+          return { stdout: "herdr 0.8.2\n", stderr: "" };
+        }
+        return missing(command, args);
+      },
+      fetchImpl: offline,
+    });
+    expect(owned.commands.herdr).toEqual({ present: true, detail: "herdr 0.8.2" });
+    expect(owned.remediations).toEqual([]);
   });
 
   it("treats herdr-lead as present from PATH without executing it", async () => {

@@ -10,6 +10,7 @@ import {
   readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,6 +18,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { build } from "esbuild";
+import { buildHerdr, herdrPin, herdrSource } from "./build-herdr.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const outputDir = join(repoRoot, "dist");
@@ -31,6 +33,8 @@ const releaseVersion = `v${packageMetadata.version}`;
 const entrypoints = [
   "apps/tui/bin/clankie.ts",
   "apps/clankie/src/index.ts",
+  "apps/clankie/src/herdr-runtime.ts",
+  "apps/relay/src/index.ts",
   "apps/discord-bridge/src/index.ts",
   "apps/discord-bridge/src/presence-runtime-module.ts",
   "apps/discord-user-session/src/index.ts",
@@ -107,6 +111,7 @@ try {
         target: "darwin-arm64",
         minimumMacOSVersion: "14.0",
         nodeVersion,
+        herdr: herdrPin,
         revision: gitRevision(),
       },
       null,
@@ -209,6 +214,10 @@ async function copyDynamicRuntimePackages(targetRoot, metafilePath) {
 }
 
 async function installNativeBinaries(targetRoot) {
+  const herdr = join(targetRoot, "libexec/herdr");
+  await buildHerdr(herdr);
+  run("codesign", ["--force", "--sign", "-", herdr]);
+  requireArm64(herdr);
   const voxTarget = join(targetRoot, "apps", "vox", "target", "release", "clankvox");
   await mkdir(dirname(voxTarget), { recursive: true });
   await copyFile(join(repoRoot, "apps", "vox", "target", "release", "clankvox"), voxTarget);
@@ -232,6 +241,7 @@ async function installNativeBinaries(targetRoot) {
   ]);
   run("codesign", ["--force", "--sign", "-", launcher]);
   requireArm64(launcher);
+  await symlink("clankie", join(targetRoot, "bin", "clankie-herdr"));
 }
 
 function requireArm64(path) {
@@ -243,10 +253,26 @@ function requireArm64(path) {
 
 async function writeReleaseInventory(targetRoot, metafilePath) {
   const npmPackages = await npmComponents(metafilePath);
-  const cargoPackages = cargoComponents();
+  const cargoPackages = [
+    ...new Map(
+      [...cargoComponents("apps/vox/Cargo.toml"), ...cargoComponents(join(herdrSource, "Cargo.toml"))].map(
+        (component) => [`${component.name}@${component.version}`, component],
+      ),
+    ).values(),
+  ];
+  const ghostty = JSON.parse(await readFile(join(herdrSource, "vendor/libghostty-vt.vendor.json"), "utf8"));
+  const nativePackages = [
+    {
+      name: "libghostty-vt",
+      version: ghostty.source_commit,
+      license: "MIT",
+      root: join(herdrSource, "vendor/libghostty-vt"),
+    },
+  ];
   const components = [
     ...npmPackages.map(({ root: _root, ...component }) => cycloneComponent("npm", component)),
     ...cargoPackages.map(({ root: _root, ...component }) => cycloneComponent("cargo", component)),
+    ...nativePackages.map(({ root: _root, ...component }) => cycloneComponent("generic", component)),
     cycloneComponent("generic", {
       name: "node",
       version: nodeVersion,
@@ -256,8 +282,12 @@ async function writeReleaseInventory(targetRoot, metafilePath) {
   ].sort((left, right) => left["bom-ref"].localeCompare(right["bom-ref"]));
 
   const licenseRows = [];
-  for (const component of [...npmPackages, ...cargoPackages]) {
-    const ecosystem = npmPackages.includes(component) ? "npm" : "cargo";
+  for (const component of [...npmPackages, ...cargoPackages, ...nativePackages]) {
+    const ecosystem = npmPackages.includes(component)
+      ? "npm"
+      : cargoPackages.includes(component)
+        ? "cargo"
+        : "native";
     let files = await copyLicenseFiles(
       component.root,
       join(targetRoot, "licenses", ecosystem, safeName(component)),
@@ -364,7 +394,7 @@ function componentMetadata(manifest, root) {
   return { name: manifest.name, version: manifest.version, license, homepage, root };
 }
 
-function cargoComponents() {
+function cargoComponents(manifestPath) {
   const metadata = JSON.parse(
     output("cargo", [
       "metadata",
@@ -374,7 +404,7 @@ function cargoComponents() {
       "--filter-platform",
       "aarch64-apple-darwin",
       "--manifest-path",
-      "apps/vox/Cargo.toml",
+      manifestPath,
     ]),
   );
   const packages = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));

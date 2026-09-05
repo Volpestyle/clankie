@@ -3,36 +3,31 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const target = resolve(root, "apps/tui/bin/clankie.ts");
 const binDirectory = join(homedir(), ".local", "bin");
-const link = join(binDirectory, "clankie");
-
-await chmod(target, 0o755);
+const commands = ["clankie", "clankie-herdr"];
 await mkdir(binDirectory, { recursive: true });
-
-let existing;
-try {
-  existing = await lstat(link);
-} catch {
-  existing = undefined;
+// Check both destinations before replacing either link.
+for (const command of commands) {
+  const link = join(binDirectory, command);
+  const existing = await lstat(link).catch(() => undefined);
+  if (existing && !existing.isSymbolicLink())
+    throw new Error(`${link} exists and is not a symlink; refusing to replace it.`);
 }
-
-if (existing !== undefined && !existing.isSymbolicLink()) {
-  console.error(`${link} exists and is not a symlink; refusing to replace it.`);
-  process.exitCode = 1;
-} else {
-  if (existing !== undefined) await rm(link);
+for (const command of commands) {
+  const target = resolve(root, `apps/tui/bin/${command}.ts`);
+  const link = join(binDirectory, command);
+  await chmod(target, 0o755);
+  await rm(link, { force: true });
   await symlink(target, link);
   console.log(`Installed: ${link} -> ${target}`);
+}
+try {
+  await access(resolve(root, "apps/tui/node_modules"));
+} catch {
+  console.log("Note: run `pnpm install` before the first launch.");
+}
 
-  try {
-    await access(resolve(root, "apps/tui/node_modules"));
-  } catch {
-    console.log("Note: run `pnpm install` before the first launch.");
-  }
-
-  const onPath = (process.env.PATH ?? "").split(":").includes(binDirectory);
-  if (!onPath) {
-    console.log(`Note: ${binDirectory} is not on your PATH; add it in your shell profile.`);
-  }
+const onPath = (process.env.PATH ?? "").split(":").includes(binDirectory);
+if (!onPath) {
+  console.log(`Note: ${binDirectory} is not on your PATH; add it in your shell profile.`);
 }

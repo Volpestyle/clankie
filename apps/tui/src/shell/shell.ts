@@ -43,7 +43,12 @@ import {
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { ClankieBannerComponent, type BannerFields } from "../face/clankie-banner.ts";
 import { isClankieLeftMouseButton, parseClankieSgrMouse } from "../face/clankie-sgr-mouse.ts";
-import { formatHerdrJumpResult, herdrPaneRefAtColumn, jumpToHerdrAgent } from "../session/herdr-report.ts";
+import {
+  formatHerdrJumpResult,
+  herdrPaneRefAtColumn,
+  jumpToHerdrAgent,
+  type HerdrJumpResult,
+} from "../session/herdr-report.ts";
 import {
   clankieCommandCompletion,
   createClankieAutocompleteProvider,
@@ -91,6 +96,7 @@ export interface FaceShellCommand {
 }
 
 export interface FaceShellOptions {
+  readonly onHerdrJump?: (target: string) => Promise<HerdrJumpResult>;
   readonly commands: readonly FaceShellCommand[];
   /** Initial working directory for the `!` shell escape and path autocomplete; {@link ClankieFaceShell.setCwd} moves it. */
   readonly cwd: string;
@@ -458,6 +464,16 @@ export class ClankieFaceShell {
     }
   }
 
+  async withTerminal<T>(run: () => Promise<T>): Promise<T> {
+    this.tui.stop();
+    try {
+      return await run();
+    } finally {
+      this.tui.start();
+      this.tui.requestRender(true);
+    }
+  }
+
   requestRender(): void {
     this.tui.requestRender();
   }
@@ -712,8 +728,12 @@ export class ClankieFaceShell {
    * Follow a pane id Clankie wrote. A working jump speaks for itself — the
    * session moves — so only a refusal reaches the transcript.
    */
+  focusHerdrAgent(target: string): Promise<HerdrJumpResult> {
+    return this.options.onHerdrJump?.(target) ?? jumpToHerdrAgent(target, { env: this.env });
+  }
+
   private jumpToHerdrPane(target: string): void {
-    void jumpToHerdrAgent(target, { env: this.env }).then((result) => {
+    void this.focusHerdrAgent(target).then((result) => {
       if (result.outcome === "ok") return;
       const formatted = formatHerdrJumpResult(result);
       this.insertCommandResult(`/jump ${target}`, formatted.text, formatted.tone);

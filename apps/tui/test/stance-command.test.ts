@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OPERATOR_AGENT_STANCE_MAX_MS } from "@clankie/protocol";
+import { HERDR_SOCKET_HEADER, OPERATOR_AGENT_STANCE_MAX_MS } from "@clankie/protocol";
 import { parseStanceArgs, runStanceCommand } from "../src/command/stance.ts";
 
 describe("parseStanceArgs", () => {
@@ -31,10 +31,16 @@ describe("runStanceCommand", () => {
     let sent: Record<string, unknown> | undefined;
     const written: string[] = [];
     const code = await runStanceCommand(["thinking", "--note", "reading the failing test"], {
-      env: { HERDR_PANE_ID: "w3:p4", CLANKIE_CAPTAIN_TOKEN: "captain-token" },
+      env: {
+        HERDR_ENV: "1",
+        HERDR_SOCKET_PATH: "/tmp/chosen.sock",
+        HERDR_PANE_ID: "w3:p4",
+        CLANKIE_CAPTAIN_TOKEN: "captain-token",
+      },
       captainCredentialStore: credentialStore,
       stdout: { write: (chunk: string) => written.push(chunk) },
-      fetchImpl: ((_url: URL, init: { body: string }) => {
+      fetchImpl: ((_url: URL, init: { body: string; headers: HeadersInit }) => {
+        expect(new Headers(init.headers).get(HERDR_SOCKET_HEADER)).toBe("/tmp/chosen.sock");
         sent = JSON.parse(init.body) as Record<string, unknown>;
         return Promise.resolve(
           new Response(JSON.stringify({ op: "state_stance", result: { outcome: "stated" } }), {

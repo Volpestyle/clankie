@@ -5,6 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { resolveCaptainCredential, type CaptainCredentialOptions } from "@clankie/credential-broker";
 import {
   createOperatorConversationServiceClient,
+  HERDR_SOCKET_HEADER,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationCursorSchema,
   OperatorConversationIdSchema,
@@ -72,12 +73,14 @@ export function createCaptainRouteClient(input: {
   readonly host: string;
   readonly captainToken?: string;
   readonly fetchImpl?: typeof fetch;
+  readonly herdrSocketPath?: string;
 }): CaptainRouteFetcher {
   const captainToken = input.captainToken?.trim();
   const fetchImpl = input.fetchImpl ?? fetch;
   return {
     fetch: (path, init) => {
       const headers = new Headers(init?.headers);
+      if (input.herdrSocketPath) headers.set(HERDR_SOCKET_HEADER, input.herdrSocketPath);
       if (captainToken !== undefined && captainToken.length > 0) {
         headers.set("authorization", `Bearer ${captainToken}`);
       }

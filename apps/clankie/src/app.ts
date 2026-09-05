@@ -1,3 +1,4 @@
+import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@clankie/protocol";
 /**
  * The Clankie service's HTTP surface. Local capabilities are wired in-process.
  * Discord presence, the captain seam, memory, embodiment (play), browser,
@@ -312,6 +313,8 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
+  herdrRuntime?: () => string;
+  herdrBinding?: HerdrBinding;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
   memory?: MemoryStores;
@@ -590,7 +593,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return { denial: context.json({ error: "authentication_required" }, 401) };
   };
 
-  app.get("/health", (context) => context.json({ ok: true, service: "clankie" }));
+  app.get(HERDR_BINDING_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.herdrBinding) return context.json({ error: "herdr_binding_unavailable" }, 503);
+    return context.json(dependencies.herdrBinding);
+  });
+
+  app.get("/health", (context) => {
+    const herdr = dependencies.herdrRuntime?.();
+    const ok = herdr === undefined || herdr === "healthy";
+    return context.json(
+      { ok, service: "clankie", ...(herdr === undefined ? {} : { herdr }) },
+      ok ? 200 : 503,
+    );
+  });
 
   // The lane's prompt and memory card, readable outside a pi session so a seat
   // in another harness starts from the same words (VUH-1086). A bearer may read
@@ -2120,6 +2139,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const body = await readJson(context.req.raw);
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    // Pane IDs are local to their source session, in both runtime modes.
+    const sameHerdrSession =
+      dependencies.herdrBinding !== undefined
+        ? context.req.header(HERDR_SOCKET_HEADER) === dependencies.herdrBinding.socketPath
+        : dependencies.herdrRuntime === undefined;
+    if (!sameHerdrSession) {
+      if (parsed.data.op === "send") delete parsed.data.turn.herdrPaneId;
+      if (parsed.data.op === "state_stance") {
+        return context.json({ error: "herdr_session_mismatch" }, 409);
+      }
+    }
     return context.json(await dependencies.captain.serveOperatorConversation(parsed.data));
   });
 

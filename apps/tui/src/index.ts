@@ -1,3 +1,9 @@
+import { readHerdrBinding, herdrConnection } from "./session/herdr-connection.ts";
+import {
+  ensureHerdLeadCompanion,
+  focusHerdLeadCompanion,
+  closeHerdLeadCompanion,
+} from "./observation/herd-lead-companion.ts";
 /**
  * Operator console entry point: the Clankie face shell (ported v1 TUI design)
  * connected to the single clankie service on port 4310.
@@ -40,7 +46,14 @@ import { createOperatorConversationShellSink } from "./session/operator-conversa
 import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/lane-observation.ts";
 import { createDiscordVoiceTranscriptClient } from "./session/voice-transcripts.ts";
 import { HerdrRoster } from "./observation/herdr-roster.ts";
-import { herdrPaneIdFromEnv, reportHerdrAgent, reportHerdrMetadata } from "./session/herdr-report.ts";
+import {
+  herdrPaneIdFromEnv,
+  reportHerdrAgent,
+  reportHerdrMetadata,
+  sourceHerdrSocket,
+  jumpToHerdrAgent,
+  type HerdrJumpResult,
+} from "./session/herdr-report.ts";
 import { PresencePoller } from "./observation/presence.ts";
 import { formatCaptainPresenceStatus } from "./shell/footer.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
@@ -68,7 +81,6 @@ if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
 const serviceUrl =
   process.env.CLANKIE_CONTROL_PLANE_URL ?? process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310";
 
-const herdrRoster = new HerdrRoster();
 const operatorCredential = await resolveOperatorCredential({ env: process.env });
 const operatorClient = operatorCredential
   ? new ClankieApiClient({ baseUrl: serviceUrl, operatorToken: operatorCredential.token })
@@ -91,11 +103,29 @@ const services = createProviderServices({
 // credential broker (env override first), so a shell-launched face matches the
 // token the launcher injected into the service.
 const captainRouteToken = await resolveCaptainRouteToken({ env: process.env });
+const callerHerdrSocket = await sourceHerdrSocket();
 const captainRouteClient = createCaptainRouteClient({
   host: serviceUrl,
+  ...(callerHerdrSocket ? { herdrSocketPath: callerHerdrSocket } : {}),
   ...(captainRouteToken === undefined ? {} : { captainToken: captainRouteToken }),
 });
 const conversationClient = createCaptainOperatorConversationClient(captainRouteClient);
+const herdrRoster = new HerdrRoster(conversationClient);
+const herdrOptions = {
+  repoRoot,
+  host: serviceUrl,
+  env: { ...process.env, ...(callerHerdrSocket ? { HERDR_SOCKET_PATH: callerHerdrSocket } : {}) },
+};
+async function fleetEnvironment(): Promise<NodeJS.ProcessEnv> {
+  return herdrConnection(await readHerdrBinding(herdrOptions), herdrOptions).env;
+}
+async function jumpToFleetAgent(target: string): Promise<HerdrJumpResult> {
+  try {
+    return await jumpToHerdrAgent(target, { env: await fleetEnvironment() });
+  } catch (error) {
+    return { outcome: "unavailable", error: error instanceof Error ? error.message : String(error) };
+  }
+}
 // Read-only tails onto the rooms the console is not talking in (ADR 0083).
 const laneTrace = new CaptainLaneTraceController({
   lanes: createCaptainLaneClient(captainRouteClient),
@@ -277,7 +307,13 @@ const commands = [
     laneTrace,
     presence: () => presence.snapshot,
     contextUsage: () => currentContextUsage,
-    herdrRoster: () => (herdrRoster.active ? herdrRoster.snapshot() : undefined),
+    herdrRoster: () => herdrRoster.snapshot(),
+    herdrOptions,
+    herdLead: {
+      ensure: async () => ensureHerdLeadCompanion({ env: await fleetEnvironment() }),
+      focus: async () => focusHerdLeadCompanion({ env: await fleetEnvironment() }),
+      close: async () => closeHerdLeadCompanion({ env: await fleetEnvironment() }),
+    },
     ...(operatorClient
       ? {
           activityClient: operatorClient,
@@ -313,6 +349,7 @@ const commands = [
 
 const shell = new ClankieFaceShell({
   commands,
+  onHerdrJump: jumpToFleetAgent,
   cwd: currentWorkspace,
   autocomplete: { listSkills: () => skillCatalog },
   skills: skillCatalog,

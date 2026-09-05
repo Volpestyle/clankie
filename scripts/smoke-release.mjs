@@ -1,19 +1,21 @@
 import { spawn, spawnSync } from "node:child_process";
+import { smokeHerdr } from "./smoke-herdr.mjs";
+import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const archive = resolve(process.argv[2] ?? join(repoRoot, "dist", "clankie-darwin-arm64.tar.gz"));
-const temporary = await mkdtemp(join(tmpdir(), "clankie-release-smoke-"));
+const temporary = await mkdtemp("/tmp/clankie-release-smoke-");
 const extracted = join(temporary, "clankie");
 const workspace = join(temporary, "workspace");
 let directService;
 let activity;
+let externalRuntime;
 let launcherStarted = false;
 
 try {
@@ -38,6 +40,7 @@ try {
   }
 
   const binary = join(extracted, "bin", "clankie");
+  await smokeHerdr(extracted);
   const node = join(extracted, "libexec", "node");
   const binaryDescription = capture("file", [binary]).stdout;
   if (!binaryDescription.includes("Mach-O 64-bit executable arm64")) {
@@ -64,6 +67,10 @@ try {
     XDG_STATE_HOME: join(temporary, "state"),
     XDG_DATA_HOME: join(temporary, "data"),
     CLANKIE_STATE: join(temporary, "clankie-state"),
+    CLANKIE_SETTINGS_FILE: join(temporary, "config", "clankie", "settings.json"),
+    CLANKIE_OPERATOR_TOKEN: "release-smoke-operator",
+    CLANKIE_CAPTAIN_TOKEN: "release-smoke-captain",
+    SHELL: "/bin/sh",
     CLANKIE_CREDENTIALS_FILE: join(temporary, "config", "clankie", "credentials.json"),
     CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${servicePort}`,
     CLANKIE_BROWSER_ENABLED: "false",
@@ -87,6 +94,9 @@ try {
     CLANKIE_ACTIVITY_PRODUCER_PORT: String(producerPort),
   };
 
+  for (const name of Object.keys(env))
+    if (name.startsWith("HERDR_") || name.startsWith("HERD_LEAD_")) delete env[name];
+
   directService = start(node, [join(extracted, "apps", "clankie", "src", "index.js")], env, workspace);
   await waitFor(`http://127.0.0.1:${servicePort}/health`, directService);
   const health = await (await fetch(`http://127.0.0.1:${servicePort}/health`)).json();
@@ -98,8 +108,91 @@ try {
   ) {
     throw new Error(`packaged status failed: ${JSON.stringify(status)}`);
   }
+  const herdrStatus = () => JSON.parse(capture(binary, ["herdr", "status"], { cwd: workspace, env }).stdout);
+  const chosen = herdrStatus();
+  assert.equal(chosen.active.runtime, "bundled");
+  assert.equal(chosen.herdr.runtime, "bundled");
+  assert.equal(JSON.parse(await readFile(env.CLANKIE_SETTINGS_FILE, "utf8")).herdr.runtime, "bundled");
+  const native = join(extracted, "libexec/herdr");
+  const fleetEnv = { ...env, HERDR_SOCKET_PATH: chosen.active.socketPath };
+  capture(native, ["workspace", "create", "--cwd", workspace, "--label", "viewer-proof"], { env: fleetEnv });
+  const beforeViewer = JSON.parse(capture(native, ["api", "snapshot"], { env: fleetEnv }).stdout).result
+    .snapshot;
+  const viewer = join(extracted, "bin/clankie-herdr");
+  const nonInteractive = capture(viewer, [], { env, allowFailure: true });
+  assert.equal(nonInteractive.status, 1);
+  assert.ok(nonInteractive.stderr.includes("Herdr viewer requires a TTY"));
+  await smokeViewer(viewer, env, temporary);
+  const afterViewer = JSON.parse(capture(native, ["api", "snapshot"], { env: fleetEnv }).stdout).result
+    .snapshot;
+  assert.equal(
+    afterViewer.panes[0].terminal_id,
+    beforeViewer.panes[0].terminal_id,
+    "viewer detach keeps the worker terminal",
+  );
+  assert.equal((await fetch(`${env.CLANKIE_CONTROL_PLANE_URL}/health`)).status, 200);
   await stop(directService);
   directService = undefined;
+  // A later service start from a different terminal session keeps its saved private fleet.
+  directService = start(
+    node,
+    [join(extracted, "apps/clankie/src/index.js")],
+    {
+      ...env,
+      HERDR_ENV: "1",
+      HERDR_PANE_ID: "w1:p1",
+      HERDR_SOCKET_PATH: "/tmp/not-clankies-herdr.sock",
+    },
+    workspace,
+  );
+  await waitFor(`${env.CLANKIE_CONTROL_PLANE_URL}/health`, directService);
+  assert.deepEqual(herdrStatus().active, chosen.active);
+  await stop(directService);
+  directService = undefined;
+
+  // Adopt a real independent session, keep it across restarts, and leave its lifetime to its owner.
+  const runtimeModule = await import(
+    pathToFileURL(join(extracted, "apps/clankie/src/herdr-runtime.js")).href
+  );
+  const externalEnv = { ...env };
+  externalRuntime = await runtimeModule.startHerdrRuntime({
+    binary: native,
+    repoRoot: extracted,
+    stateRoot: join(temporary, "external"),
+    env: externalEnv,
+  });
+  capture(binary, ["herdr", "set", "--runtime", "auto"], { env });
+  const adoptedEnv = {
+    ...env,
+    PATH: externalEnv.PATH,
+    HERDR_ENV: "1",
+    HERDR_PANE_ID: "w1:p1",
+    HERDR_SOCKET_PATH: externalEnv.HERDR_SOCKET_PATH,
+  };
+  directService = start(node, [join(extracted, "apps/clankie/src/index.js")], adoptedEnv, workspace);
+  await waitFor(`${env.CLANKIE_CONTROL_PLANE_URL}/health`, directService);
+  const adopted = herdrStatus();
+  assert.equal(adopted.active.runtime, "external");
+  assert.equal(adopted.active.socketPath, externalEnv.HERDR_SOCKET_PATH);
+  assert.equal(adopted.herdr.socketPath, externalEnv.HERDR_SOCKET_PATH);
+  await stop(directService);
+  directService = undefined;
+  assert.equal(externalRuntime.status(), "healthy");
+  capture(native, ["api", "snapshot"], { env: externalEnv });
+  directService = start(
+    node,
+    [join(extracted, "apps/clankie/src/index.js")],
+    { ...env, PATH: externalEnv.PATH },
+    workspace,
+  );
+  await waitFor(`${env.CLANKIE_CONTROL_PLANE_URL}/health`, directService);
+  assert.deepEqual(herdrStatus().active, adopted.active);
+  await stop(directService);
+  directService = undefined;
+  capture(native, ["api", "snapshot"], { env: externalEnv });
+  await externalRuntime.close();
+  externalRuntime = undefined;
+  capture(binary, ["herdr", "set", "--runtime", "auto"], { env });
 
   activity = start(node, [join(extracted, "apps", "discord-activity", "src", "index.js")], env, workspace);
   await waitFor(`http://127.0.0.1:${activityPort}/`, activity);
@@ -128,6 +221,7 @@ try {
 } finally {
   if (directService !== undefined) await stop(directService).catch(() => undefined);
   if (activity !== undefined) await stop(activity).catch(() => undefined);
+  await externalRuntime?.close();
   if (launcherStarted) {
     const binary = join(extracted, "bin", "clankie");
     spawnSync(binary, ["down", "clankie"], {
@@ -196,6 +290,20 @@ async function stop(child) {
     child.kill("SIGKILL");
     await exited;
   }
+}
+
+async function smokeViewer(binary, env, root) {
+  const child = start(
+    "python3",
+    [join(repoRoot, "scripts/smoke-herdr-viewer.py"), binary],
+    { ...env, TERM: "xterm-256color" },
+    root,
+  );
+  const code = await new Promise((done, reject) => {
+    child.once("error", reject);
+    child.once("exit", done);
+  });
+  assert.equal(code, 0, child.smokeOutput());
 }
 
 async function freePort() {

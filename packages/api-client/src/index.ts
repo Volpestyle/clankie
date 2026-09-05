@@ -1,3 +1,4 @@
+import { HERDR_BINDING_PATH, HerdrBindingSchema, type HerdrBinding } from "@clankie/protocol";
 import {
   CaptainChannelTurnResultSchema,
   DiscordChannelProjectionMessagePath,
@@ -126,6 +127,16 @@ export class ClankieApiClient {
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
+  }
+
+  public async getHerdrBinding(): Promise<HerdrBinding> {
+    return HerdrBindingSchema.parse(
+      await this.request(HERDR_BINDING_PATH, {
+        headers: this.operatorHeaders(),
+        signal: AbortSignal.timeout(5_000),
+        redirect: "error",
+      }),
+    );
   }
 
   public async getHealth(): Promise<ControlPlaneHealth> {

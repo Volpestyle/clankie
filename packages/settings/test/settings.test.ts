@@ -31,9 +31,12 @@ async function tempStore(): Promise<SettingsStore> {
 
 describe("settings store", () => {
   it("defaults the herdr binding to herdr's own default session (ADR 0149)", () => {
-    expect(emptySettings().herdr).toEqual({ session: "default" });
+    expect(emptySettings().herdr).toEqual({ runtime: "auto", session: "default" });
     expect(emptySettings().captain).toEqual({});
-    expect(HerdrSettingsSchema.parse({ session: "clankies" })).toEqual({ session: "clankies" });
+    expect(HerdrSettingsSchema.parse({ session: "clankies" })).toEqual({
+      runtime: "auto",
+      session: "clankies",
+    });
     expect(() => HerdrSettingsSchema.parse({ session: "no spaces" })).toThrow();
     expect(CaptainSettingsSchema.parse({ workingDirectory: "/Users/op" })).toEqual({
       workingDirectory: "/Users/op",

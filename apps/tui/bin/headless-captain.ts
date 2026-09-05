@@ -1,3 +1,4 @@
+import { openHerdr } from "../src/session/herdr-connection.ts";
 import { type CredentialStore } from "@clankie/credential-broker";
 import { type ServiceRegistryOptions } from "./services.ts";
 import { doctorCommand, type ExecFileImpl } from "../src/command/doctor.ts";
@@ -134,6 +135,7 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "herdr") {
+      if (rest.length === 1 && rest[0] === "open") return await openHerdr(options);
       const result = await runHerdrCommand(rest, options);
       outputJson(stdout, result);
       return 0;

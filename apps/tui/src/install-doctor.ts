@@ -147,13 +147,20 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   const credentials = await listCredentialIds(
     options.credentialStore ?? createDefaultCredentialStore({ env }),
   );
-  const execFile = options.execFileImpl ?? defaultExecFile(env);
+  const execute = options.execFileImpl ?? defaultExecFile(env);
+  const herdrBinary =
+    settings.herdr.runtime === "bundled" ||
+    (settings.herdr.runtime === "auto" && settings.herdr.session === "default" && env.HERDR_ENV !== "1")
+      ? join(options.repoRoot, kind === "release" ? "libexec/herdr" : ".data/herdr/bin/herdr")
+      : "herdr";
+  const execFile: ExecFileImpl = (command, args) =>
+    execute(command === "herdr" ? herdrBinary : command, args);
   const commands = await probeCommands(execFile, env);
   const pluginBundle = join(options.repoRoot, "integrations", "herdr-plugin");
   const bundled = existsSync(join(pluginBundle, "herdr-plugin.toml"));
   const herdrPlugin = await inspectHerdrPlugin(
     execFile,
-    commands.herdr?.present === true,
+    herdrBinary === "herdr" && commands.herdr?.present === true,
     bundled,
     pluginBundle,
   );
@@ -423,7 +430,7 @@ function collectRemediations(input: {
     input.commands.herdr?.present === true &&
     input.herdrPlugin.bundled &&
     input.herdrPlugin.bundlePath !== undefined &&
-    input.herdrPlugin.linked !== true
+    input.herdrPlugin.linked === false
   ) {
     remediations.push(`herdr plugin link ${input.herdrPlugin.bundlePath}`);
   }

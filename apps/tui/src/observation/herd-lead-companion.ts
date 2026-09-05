@@ -28,10 +28,12 @@ function defaultRunner(
   args: readonly string[],
   env: NodeJS.ProcessEnv,
 ): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(command, [...args], { env, maxBuffer: 1024 * 1024 }).then(({ stdout, stderr }) => ({
-    stdout: String(stdout),
-    stderr: String(stderr),
-  }));
+  return execFileAsync(command, [...args], { env, timeout: 10_000, maxBuffer: 1024 * 1024 }).then(
+    ({ stdout, stderr }) => ({
+      stdout: String(stdout),
+      stderr: String(stderr),
+    }),
+  );
 }
 
 function companionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -70,7 +72,7 @@ export async function ensureHerdLeadCompanion(
   options: HerdLeadCompanionOptions = {},
 ): Promise<HerdLeadCompanionResult> {
   const env = options.env ?? process.env;
-  if (env.HERDR_ENV !== "1") return { outcome: "skipped", reason: "not_in_herdr" };
+  if (!env.HERDR_SOCKET_PATH && env.HERDR_ENV !== "1") return { outcome: "skipped", reason: "not_in_herdr" };
   const run = options.runCommand ?? defaultRunner;
   try {
     const { stdout, stderr } = await run("herdr-lead", ["split"], companionEnv(env));
@@ -98,7 +100,7 @@ export async function closeHerdLeadCompanion(
   options: HerdLeadCompanionOptions = {},
 ): Promise<HerdLeadCompanionResult> {
   const env = options.env ?? process.env;
-  if (env.HERDR_ENV !== "1") return { outcome: "skipped", reason: "not_in_herdr" };
+  if (!env.HERDR_SOCKET_PATH && env.HERDR_ENV !== "1") return { outcome: "skipped", reason: "not_in_herdr" };
   const run = options.runCommand ?? defaultRunner;
   const self = env.HERDR_PANE_ID?.trim();
   try {
@@ -117,7 +119,7 @@ export async function focusHerdLeadCompanion(
   options: HerdLeadCompanionOptions = {},
 ): Promise<HerdLeadCompanionResult> {
   const env = options.env ?? process.env;
-  if (env.HERDR_ENV !== "1") return { outcome: "skipped", reason: "not_in_herdr" };
+  if (!env.HERDR_SOCKET_PATH && env.HERDR_ENV !== "1") return { outcome: "skipped", reason: "not_in_herdr" };
   const run = options.runCommand ?? defaultRunner;
   try {
     const { stdout, stderr } = await run("herdr-lead", ["focus"], companionEnv(env));
