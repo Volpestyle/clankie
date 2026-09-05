@@ -28,7 +28,8 @@
         <h1>A narrow doorway, not a hosted Clankie.</h1>
         <p class="article-lede">
           <code>api.clankie.bot</code> accepts only the routes below. The gateway carries bounded exchanges to
-          an authenticated machine; your machine still owns devices, grants, conversations, and terminal authority.
+          an authenticated machine; your machine still owns devices, grants, conversations, and terminal
+          authority.
         </p>
 
         <h2>Connection shape</h2>
@@ -73,17 +74,17 @@
 
         <h2>Security boundary</h2>
         <p>
-          Public TLS terminates at the gateway and your machine maintains a separate authenticated TLS connection
-          to it. The gateway is therefore able to read forwarded content in transit even though it does not
-          retain content bodies. Device grants are enforced by your machine on every request. Pairing capabilities
-          expire, are single-use, and are registered at the gateway only by their hashes.
+          Public TLS terminates at the gateway and your machine maintains a separate authenticated TLS
+          connection to it. The gateway is therefore able to read forwarded content in transit even though it
+          does not retain content bodies. Device grants are enforced by your machine on every request. Pairing
+          capabilities expire, are single-use, and are registered at the gateway only by their hashes.
         </p>
 
         <h2>For integrators</h2>
         <p>
           These routes document the product’s observable internet boundary; they are not a general third-party
-          API. Clients pair through Clankie and must use credentials and grants issued by the user’s machine. The
-          private local service has a larger contract — the <a href="/api/">HTTP API</a> — which is served
+          API. Clients pair through Clankie and must use credentials and grants issued by the user’s machine.
+          The private local service has a larger contract — the <a href="/api/">HTTP API</a> — which is served
           only on your machine, never at the public origin.
         </p>
         <p>
