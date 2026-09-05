@@ -1,6 +1,6 @@
 # ADR 0159: The device authorizes push delivery
 
-Status: proposed (VUH-1052). The portable protocol is implemented; delivery integration is in progress.
+Status: proposed (VUH-1052). The protocol, host dispatcher and gateway delivery are implemented; app integration and native delivery verification are in progress.
 
 ## Context
 
@@ -38,8 +38,11 @@ sequenceDiagram
 ```
 
 The app stores a random registration UUID, 32-byte delivery key and monotonic
-sequence together in secure storage. It increments and persists the sequence
-before a registration or clear request. The key never goes to a host. The
+sequence together in secure storage. It persists the prepared registration
+payload before sending: a lost acknowledgement leaves that version possibly
+committed, so changed token, environment or pairing identity needs a newer
+version. Active delivery identifies both host and device. A clear also persists
+its newer sequence before sending. The key never goes to a host. The
 gateway checks a live device session at the claimed host and requires the
 delivery key to update an existing registration. Equal versions are retries
 only when the requested binding is identical; older or conflicting versions

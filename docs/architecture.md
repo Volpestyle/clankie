@@ -36,8 +36,10 @@ This Mermaid diagram, [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md
 architecture diagrams. The JPG/tldraw exports under `docs/diagrams/` are
 historical snapshots.
 
-The public gateway is a doorway, not a hosted Clankie. It keeps only live host
+The public gateway routes to the configured Clankie host. It keeps live host
 connections, expiring pairing-route hashes, and bounded in-flight exchanges.
+Optional APNs delivery also persists device-authorized routing registrations
+and revocation versions ([ADR 0159](adr/0159-the-device-authorizes-push-delivery.md)).
 The Mac remains authoritative for offers, devices, grants, conversations,
 terminal sessions, Herdr, and credentials. Pairing begins at the stable global
 origin, then the Mac returns `/h/{hostId}` as the control and relay base for the
