@@ -57,6 +57,9 @@ index). Configure through the headless CLI:
 | Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                 |
 | Play session                          | `clankie play status` / `clankie play stop`                                           |
 
+`clankie pair` and `/pair` start or reuse the local relay before minting a code;
+run pairing on the host that owns the relay.
+
 JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `operator-credential rotate` default to human text — pass `--json`.
 `play stop` prints `Nothing is playing.` (not JSON) when idle. A bare

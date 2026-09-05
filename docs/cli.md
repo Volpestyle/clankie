@@ -197,7 +197,12 @@ their usual per-process logs.
 ### `pair [--json] [--timeout SEC] [--review --days N [--count N]]`
 
 Mint a one-time pairing offer (QR + code + deep link) for the phone/desktop
-app. Default timeout is 10 seconds; an offer lives five minutes.
+app. Pairing reuses a healthy app relay or starts a stopped one before minting
+an offer. If the relay cannot start, no offer is minted. `--timeout` covers
+startup and minting together and defaults to 30 seconds; an ordinary offer
+lives five minutes. A remote `CLANKIE_CONTROL_PLANE_URL` fails with
+`unavailable`: run pairing on that host so its launcher can verify the relay.
+The console's `/pair` runs this same command and accepts the same flags.
 
 Human mode writes the QR and code to stdout. Those values are secret-bearing
 display data — never log or persist them. `--json` is the agent form:
@@ -221,7 +226,11 @@ Mint review offers only after the public gateway release that accepts them;
 an older gateway drops the Mac connection on the first review route.
 
 Failure with `--json`: `{ "ok": false, "status": "unavailable"|"unauthorized"|"expired"|"malformed"|"interrupted", "error": "…" }`.
-Without `--json`, the same message goes to stderr and stdout stays empty.
+Without `--json`, the same message goes to stderr and stdout stays empty when
+no offers were minted. If a review batch fails after minting some offers, the
+command still exits 1 and displays those live codes: JSON adds `partial: true`,
+`review: true`, and `offers`; terminal output starts with `PARTIAL`. Each code
+remains usable until consumed or expired.
 
 ### `devices [--json]`
 

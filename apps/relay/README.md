@@ -2,8 +2,13 @@
 
 The launcher supervises the relay like every other member of the stack:
 `clankie restart relay` owns it, `clankie status` reports it, and it restarts
-with the clankie service whose brokered captain bearer it holds. The headless
-command contract is [`docs/cli.md`](../../docs/cli.md).
+with the clankie service whose brokered captain bearer it holds. Pairing goes
+further and guarantees it: `clankie pair` and `/pair` reuse a healthy relay,
+start a stopped one, and mint no offer at all if it will not come up, so a
+paired device never points at a relay nobody started. A control plane that is
+not this machine runs its own relay; pairing says so instead of starting a
+local one that proves nothing. The headless command contract is
+[`docs/cli.md`](../../docs/cli.md).
 
 It listens on `CLANKIE_RELAY_PORT` (default 4321 — 4320 belongs to the
 activity surface). The origin remote devices should reach it on is

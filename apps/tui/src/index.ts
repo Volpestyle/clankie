@@ -21,6 +21,7 @@ import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./dis
 import { buildPersonaCommands } from "./persona-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
 import { buildMemoryCommands } from "./memory-commands.ts";
+import { buildPairCommands } from "./pair-commands.ts";
 import { buildGatewayCommands } from "./gateway-commands.ts";
 import {
   createCaptainRouteClient,
@@ -285,6 +286,7 @@ const commands = [
       : {}),
   }),
   ...buildProviderCommands(services),
+  ...buildPairCommands({ repoRoot, env: process.env, host: serviceUrl }),
   ...buildGatewayCommands({
     settings: settingsStore,
     credentials: services.store,

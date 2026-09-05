@@ -1,3 +1,8 @@
+import type { ChildProcess, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   mintOperatorToken,
@@ -8,8 +13,86 @@ import {
 } from "@clankie/credential-broker";
 import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
 import type { PairingOffer } from "../bin/pairing-offer.ts";
+import { buildPairCommands } from "../src/pair-commands.ts";
+import type { ClankieFaceShell } from "../src/shell/shell.ts";
 
 const OPERATOR_ENV: NodeJS.ProcessEnv = { CLANKIE_OPERATOR_TOKEN: "operator-secret" };
+
+/** The relay health probe `clankie pair` runs before it mints anything. */
+const RELAY_HEALTH = "127.0.0.1:4321/health";
+
+function requestUrl(input: unknown): string {
+  return input instanceof Request ? input.url : String(input);
+}
+
+/**
+ * Answers the relay probe healthy so a test that is about the offer never
+ * spawns a service. The relay's own guarantee has its own tests below.
+ */
+function withHealthyRelay(fetchImpl: typeof fetch): typeof fetch {
+  return (async (input: unknown, init: unknown) => {
+    if (requestUrl(input).includes(RELAY_HEALTH)) return new Response("ok");
+    return await (fetchImpl as (input: unknown, init: unknown) => Promise<Response>)(input, init);
+  }) as typeof fetch;
+}
+
+/**
+ * Process seams for the relay guarantee. Without them a probe would read this
+ * machine's own process table and a start would spawn a real service.
+ */
+interface RelaySeams {
+  readonly env: NodeJS.ProcessEnv;
+  readonly fetchImpl: typeof fetch;
+  readonly spawnImpl: typeof spawn;
+  readonly listProcessCommandsImpl: () => readonly (readonly [number, string])[];
+  readonly processIsAliveImpl: (pid: number) => boolean;
+}
+
+/** A child that has already exited, so a start fails on its first poll. */
+function exitingChild(): ChildProcess {
+  return Object.assign(new EventEmitter(), {
+    exitCode: 1,
+    pid: 424_242,
+    kill: () => true,
+    unref: () => {},
+  }) as unknown as ChildProcess;
+}
+
+/** A relay that answers nothing and cannot be started. */
+function stoppedRelay(offerFetch: typeof fetch): {
+  readonly options: RelaySeams;
+  readonly spawned: () => number;
+} {
+  let spawns = 0;
+  return {
+    spawned: () => spawns,
+    options: {
+      env: { ...OPERATOR_ENV, XDG_STATE_HOME: mkdtempSync(join(tmpdir(), "clankie-pair-")) },
+      fetchImpl: (async (input: unknown, init: unknown) => {
+        if (requestUrl(input).includes(RELAY_HEALTH)) throw new Error("connect ECONNREFUSED 127.0.0.1:4321");
+        return await (offerFetch as (input: unknown, init: unknown) => Promise<Response>)(input, init);
+      }) as typeof fetch,
+      spawnImpl: ((): ChildProcess => {
+        spawns += 1;
+        return exitingChild();
+      }) as unknown as typeof spawn,
+      listProcessCommandsImpl: () => [],
+      processIsAliveImpl: () => false,
+    },
+  };
+}
+
+/** A spawn seam that fails the test by counting a start nobody should make. */
+function countingSpawn(): { readonly impl: typeof spawn; readonly count: () => number } {
+  let count = 0;
+  return {
+    count: () => count,
+    impl: ((): ChildProcess => {
+      count += 1;
+      return exitingChild();
+    }) as unknown as typeof spawn,
+  };
+}
 
 class MemoryCredentialStore implements CredentialStore {
   public readonly credentials = new Map<string, ProviderCredential>();
@@ -83,17 +166,29 @@ async function runPair(
     operatorCredentialStore?: CredentialStore;
     stdout?: { write(chunk: string): void };
     stderr?: { write(chunk: string): void };
+    /** Process seams for the relay-guarantee tests. */
+    service?: Partial<RelaySeams>;
+    /** Opt out of the healthy-relay stub when the test owns the relay probe. */
+    rawFetch?: boolean;
   } = {},
 ): Promise<number> {
+  const fetchImpl =
+    overrides.fetchImpl === undefined || overrides.rawFetch === true
+      ? overrides.fetchImpl
+      : withHealthyRelay(overrides.fetchImpl);
   return await runHeadlessCaptainCommand(["pair", ...args], {
     repoRoot: "/unused",
     env: overrides.env ?? OPERATOR_ENV,
+    // The brokered captain bearer the relay would be started with. A memory
+    // store keeps every test off the real Keychain.
+    captainCredentialStore: new MemoryCredentialStore(),
     ...(overrides.operatorCredentialStore === undefined
       ? {}
       : { operatorCredentialStore: overrides.operatorCredentialStore }),
-    ...(overrides.fetchImpl === undefined ? {} : { fetchImpl: overrides.fetchImpl }),
+    ...(fetchImpl === undefined ? {} : { fetchImpl }),
     ...(overrides.stdout === undefined ? {} : { stdout: overrides.stdout }),
     ...(overrides.stderr === undefined ? {} : { stderr: overrides.stderr }),
+    ...overrides.service,
   });
 }
 
@@ -328,5 +423,274 @@ describe("clankie pair — review offers", () => {
     });
     expect(exit).toBe(0);
     expect(bodies).toEqual([{}]);
+  });
+});
+
+describe("clankie pair — the relay guarantee (VUH-1037)", () => {
+  it("reuses a healthy relay and starts nothing", async () => {
+    const probes: string[] = [];
+    const spawn = countingSpawn();
+    const stdout = outputBuffer();
+    const exit = await runPair(["--json"], {
+      rawFetch: true,
+      fetchImpl: (async (input: unknown) => {
+        probes.push(requestUrl(input));
+        return requestUrl(input).includes(RELAY_HEALTH) ? new Response("ok") : Response.json(validOffer());
+      }) as typeof fetch,
+      service: { spawnImpl: spawn.impl, listProcessCommandsImpl: () => [] },
+      stdout: stdout.stream,
+    });
+    expect(exit).toBe(0);
+    expect(spawn.count()).toBe(0);
+    // The relay is proven up before the offer exists, never after.
+    expect(probes[0]).toContain(RELAY_HEALTH);
+    expect(probes.at(-1)).toContain("/v1/pairing/offer");
+  });
+
+  it("mints no offer when the relay is down and cannot be started", async () => {
+    const offers = { count: 0 };
+    const relay = stoppedRelay(jsonFetch(validOffer(), undefined, offers));
+    const stdout = outputBuffer();
+    const exit = await runPair(["--json"], {
+      rawFetch: true,
+      service: relay.options,
+      stdout: stdout.stream,
+      stderr: outputBuffer().stream,
+    });
+    expect(exit).toBe(1);
+    expect(relay.spawned()).toBe(1);
+    expect(offers.count).toBe(0);
+    const parsed = JSON.parse(stdout.text());
+    expect(parsed.ok).toBe(false);
+    expect(parsed.status).toBe("unavailable");
+    expect(parsed.error).toContain("App relay is not running");
+  });
+
+  it("mints no review offer either when the relay fails", async () => {
+    const offers = { count: 0 };
+    const relay = stoppedRelay(jsonFetch(validOffer({ review: true }), undefined, offers));
+    const stderr = outputBuffer();
+    const stdout = outputBuffer();
+    const exit = await runPair(["--review", "--days", "7"], {
+      rawFetch: true,
+      service: relay.options,
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+    expect(exit).toBe(1);
+    expect(offers.count).toBe(0);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain("App relay is not running");
+  });
+
+  it("never starts a relay for a caller without an operator credential", async () => {
+    const spawn = countingSpawn();
+    const stderr = outputBuffer();
+    const exit = await runPair([], {
+      env: {},
+      operatorCredentialStore: new MemoryCredentialStore(),
+      rawFetch: true,
+      fetchImpl: throwingFetch(new Error("must not be called")),
+      service: { spawnImpl: spawn.impl, listProcessCommandsImpl: () => [] },
+      stderr: stderr.stream,
+    });
+    expect(exit).toBe(1);
+    expect(spawn.count()).toBe(0);
+    expect(stderr.text()).toContain("Operator credential unavailable");
+  });
+
+  it("fails closed for a remote control plane whose relay it cannot prove", async () => {
+    const requests: string[] = [];
+    const spawn = countingSpawn();
+    const stdout = outputBuffer();
+    const exit = await runPair(["--json"], {
+      // Userinfo in the origin must not survive into the message.
+      env: { ...OPERATOR_ENV, CLANKIE_CONTROL_PLANE_URL: "http://me:hunter2@100.64.0.5:4310" },
+      rawFetch: true,
+      fetchImpl: (async (input: unknown) => {
+        requests.push(requestUrl(input));
+        return Response.json(validOffer());
+      }) as typeof fetch,
+      service: { spawnImpl: spawn.impl, listProcessCommandsImpl: () => [] },
+      stdout: stdout.stream,
+      stderr: outputBuffer().stream,
+    });
+    expect(exit).toBe(1);
+    // No local relay started, and nothing minted against a relay it cannot see.
+    expect(spawn.count()).toBe(0);
+    expect(requests).toEqual([]);
+    const parsed = JSON.parse(stdout.text());
+    expect(parsed.ok).toBe(false);
+    expect(parsed.status).toBe("unavailable");
+    expect(parsed.error).toContain("100.64.0.5:4310");
+    expect(parsed.error).toContain("on that machine");
+    expect(stdout.text()).not.toContain("hunter2");
+  });
+
+  it("keeps a failing start's own words out of both streams", async () => {
+    const offers = { count: 0 };
+    const relay = stoppedRelay(jsonFetch(validOffer(), undefined, offers));
+    const stdout = outputBuffer();
+    const stderr = outputBuffer();
+    const exit = await runPair([], {
+      rawFetch: true,
+      service: {
+        ...relay.options,
+        spawnImpl: (() => {
+          throw new Error("spawn pnpm failed: CLANKIE_CAPTAIN_TOKEN=leaked-secret-xyz");
+        }) as unknown as RelaySeams["spawnImpl"],
+      },
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+    expect(exit).toBe(1);
+    expect(offers.count).toBe(0);
+    expect(`${stdout.text()}${stderr.text()}`).not.toContain("leaked-secret-xyz");
+    expect(stderr.text()).toContain("clankie restart relay");
+  });
+
+  it("mints nothing once the deadline passed while the relay was coming up", async () => {
+    const offers = { count: 0 };
+    const stdout = outputBuffer();
+    const exit = await runPair(["--json", "--timeout", "0.05"], {
+      rawFetch: true,
+      fetchImpl: (async (input: unknown) => {
+        // The probe answers healthy, but only after the command's own clock ran
+        // out; the offer double below ignores the abort signal entirely.
+        if (requestUrl(input).includes(RELAY_HEALTH)) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          return new Response("ok");
+        }
+        offers.count += 1;
+        return Response.json(validOffer());
+      }) as typeof fetch,
+      service: { spawnImpl: countingSpawn().impl, listProcessCommandsImpl: () => [] },
+      stdout: stdout.stream,
+    });
+    expect(exit).toBe(1);
+    expect(offers.count).toBe(0);
+    expect(JSON.parse(stdout.text()).status).toBe("interrupted");
+  });
+});
+
+describe("clankie pair — a batch that fails partway", () => {
+  const seams = { listProcessCommandsImpl: () => [] };
+
+  it("shows the offers it already minted instead of orphaning them", async () => {
+    // Each POST mints server-side, and an unredeemed offer has no revoke route:
+    // codes the command drops would be live capability nobody can see.
+    const minted: string[] = [];
+    let posts = 0;
+    const stdout = outputBuffer();
+    const stderr = outputBuffer();
+    const exit = await runPair(["--json", "--review", "--days", "31", "--count", "5"], {
+      fetchImpl: (async () => {
+        posts += 1;
+        if (posts === 4) return Response.json({ error: "internal" }, { status: 500 });
+        minted.push(`CODE-${posts}`);
+        return Response.json(
+          validOffer({
+            code: `CODE-${posts}`,
+            deepLink: `clankie://connect?offer=OFFER-${posts}`,
+            review: true,
+          }),
+        );
+      }) as typeof fetch,
+      service: seams,
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+
+    expect(exit).toBe(1);
+    // Stopped at the failure rather than minting the rest of the batch.
+    expect(posts).toBe(4);
+    expect(minted).toEqual(["CODE-1", "CODE-2", "CODE-3"]);
+    const parsed = JSON.parse(stdout.text());
+    expect(parsed).toMatchObject({ ok: false, status: "unavailable", partial: true, review: true });
+    expect(parsed.offers.map((offer: { code: string }) => offer.code)).toEqual(minted);
+    expect(stderr.text()).toContain("clankie:");
+  });
+
+  it("stops at the deadline mid-batch and still shows what it minted (human mode)", async () => {
+    let posts = 0;
+    const starts: number[] = [];
+    const stdout = outputBuffer();
+    const stderr = outputBuffer();
+    const timeoutMs = 150;
+    const startedAt = Date.now();
+    const exit = await runPair(["--review", "--days", "7", "--count", "5", "--timeout", "0.15"], {
+      fetchImpl: (async () => {
+        posts += 1;
+        starts.push(Date.now() - startedAt);
+        // Answers slowly and ignores the abort signal, so only the command's
+        // own clock can stop the batch.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return Response.json(validOffer({ code: `CODE-${posts}`, review: true }));
+      }) as typeof fetch,
+      service: seams,
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+
+    expect(exit).toBe(1);
+    // One mint began before the deadline; none began after it.
+    expect(posts).toBe(1);
+    expect(starts.every((start) => start < timeoutMs)).toBe(true);
+    expect(stdout.text()).toContain("PARTIAL — 1 offer had already been minted");
+    expect(stdout.text()).toContain("cannot be revoked");
+    expect(stdout.text()).toContain("Code 1: CODE-1");
+    expect(stderr.text()).toContain("clankie:");
+  });
+});
+
+describe("/pair in the console", () => {
+  function shellFixture(): {
+    readonly results: { prompt: string; body: string; tone: string }[];
+    readonly shell: ClankieFaceShell;
+  } {
+    const results: { prompt: string; body: string; tone: string }[] = [];
+    return {
+      results,
+      shell: {
+        insertCommandResult: (prompt: string, body: string, tone: string) =>
+          results.push({ prompt, body, tone }),
+      } as unknown as ClankieFaceShell,
+    };
+  }
+
+  it("renders the offer through the same command the CLI runs", async () => {
+    const offer = validOffer();
+    const view = shellFixture();
+    const command = buildPairCommands({
+      repoRoot: "/unused",
+      env: OPERATOR_ENV,
+      captainCredentialStore: new MemoryCredentialStore(),
+      fetchImpl: withHealthyRelay(jsonFetch(offer)),
+      spawnImpl: countingSpawn().impl,
+      listProcessCommandsImpl: () => [],
+    })[0]!;
+
+    await command.run("", view.shell);
+
+    expect(view.results[0]?.tone).toBe("success");
+    expect(view.results[0]?.body).toContain(`Pairing code: ${offer.code}`);
+    expect(view.results[0]?.body).toContain(offer.deepLink);
+  });
+
+  it("shares the relay guarantee: no offer, an error in the transcript", async () => {
+    const offers = { count: 0 };
+    const relay = stoppedRelay(jsonFetch(validOffer(), undefined, offers));
+    const view = shellFixture();
+    const command = buildPairCommands({
+      repoRoot: "/unused",
+      captainCredentialStore: new MemoryCredentialStore(),
+      ...relay.options,
+    })[0]!;
+
+    await command.run("", view.shell);
+
+    expect(offers.count).toBe(0);
+    expect(view.results[0]?.tone).toBe("error");
+    expect(view.results[0]?.body).toContain("App relay is not running");
   });
 });

@@ -31,8 +31,9 @@ export type PairingOfferStatus = "unavailable" | "unauthorized" | "expired" | "m
 export class PairingOfferError extends Error {
   public readonly status: PairingOfferStatus;
 
-  public constructor(status: PairingOfferStatus) {
-    super(pairingFailureMessage(status));
+  /** `message` overrides the stock guidance for a failure with its own cause. */
+  public constructor(status: PairingOfferStatus, message?: string) {
+    super(message ?? pairingFailureMessage(status));
     this.name = "PairingOfferError";
     this.status = status;
   }
