@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import {
+  DEVICE_PUSH_PATH,
+  PublicGatewayPushWakeFrameSchema,
+  PublicGatewayPushWakeResultFrameSchema,
+} from "./device-push.ts";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
 export const PUBLIC_GATEWAY_SCHEMA_VERSION = 1 as const;
@@ -17,6 +22,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/pairing/redeem", target: "control" },
   { method: "POST", path: "/v1/pairing/complete", target: "control" },
   { method: "GET", path: "/v1/devices/self", target: "control" },
+  { method: "POST", path: DEVICE_PUSH_PATH, target: "control" },
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
@@ -249,6 +255,8 @@ export const PublicGatewayResponseEndFrameSchema = z
 export type PublicGatewayResponseEndFrame = z.infer<typeof PublicGatewayResponseEndFrameSchema>;
 
 export const PublicGatewayTunnelFrameSchema = z.discriminatedUnion("kind", [
+  PublicGatewayPushWakeFrameSchema,
+  PublicGatewayPushWakeResultFrameSchema,
   PublicGatewayPairingRouteFrameSchema,
   PublicGatewayPairingRouteReadyFrameSchema,
   PublicGatewayRequestFrameSchema,

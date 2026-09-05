@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { DevicePushBindingSchema, DevicePushRequestSchema } from "./device-push.ts";
+export * from "./device-push.ts";
 
 /** Frozen event-log partition key. Still serialized as `missionId`. */
 export const MissionIdSchema = z.string().min(1);
@@ -3655,6 +3657,7 @@ export const DeviceRecordSchema = z
     pendingExpiresAt: z.string().datetime(),
     activatedAt: z.string().datetime().optional(),
     lastRefreshAt: z.string().datetime().optional(),
+    push: DevicePushBindingSchema.optional(),
     revokedAt: z.string().datetime().optional(),
     revokedBy: z.string().min(1).optional(),
   })
@@ -3819,6 +3822,13 @@ export type DeviceListItem = z.infer<typeof DeviceListItemSchema>;
  * `data` payload is secret-free; token material and offer secrets never appear.
  */
 export const DeviceEventSchema = z.discriminatedUnion("type", [
+  EventBaseSchema.extend({
+    type: z.literal("device.push.changed"),
+    data: DevicePushRequestSchema.extend({
+      schemaVersion: z.literal(1),
+      deviceId: z.string().min(1),
+    }).strict(),
+  }),
   EventBaseSchema.extend({
     type: z.literal("device.pairing.redeemed"),
     data: z.object({
