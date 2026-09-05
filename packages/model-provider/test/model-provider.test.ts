@@ -429,28 +429,196 @@ describe("subscriptionRefFor", () => {
 });
 
 describe("resolvePiModelSelection", () => {
-  it("applies subscription routing, effective-ref variant precedence, and Pi clamping", () => {
-    const model = { id: "gpt-5.6-sol", provider: "openai-codex", reasoning: true } as Model<Api>;
+  const sol = {
+    id: "gpt-5.6-sol",
+    provider: "openai-codex",
+    api: "openai-codex-responses",
+    baseUrl: "https://chatgpt.example/backend-api/codex",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
+    input: ["text", "image"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 272_000,
+    maxTokens: 128_000,
+    compat: {
+      supportsOpenAIGrammarTools: true,
+      supportsAdditionalTools: true,
+      supportsToolSearch: true,
+    },
+  } as Model<Api>;
+
+  /**
+   * Pi's bundled provider files are ordered oldest-first, and the oldest model
+   * on this transport is the only one lacking the newer tool flags. Nothing
+   * downstream repairs that — the codex API reads each flag as `?? false` — so
+   * the fill must not ride whichever sibling happens to come first.
+   */
+  const spark = {
+    ...sol,
+    id: "gpt-5.3-codex-spark",
+    input: ["text"],
+    contextWindow: 128_000,
+    compat: { supportsOpenAIGrammarTools: true },
+  } as Model<Api>;
+
+  /** models.dev shape for the ids these tests route between. */
+  const catalog = CatalogSchema.parse({
+    openai: {
+      id: "openai",
+      name: "OpenAI",
+      env: ["OPENAI_API_KEY"],
+      models: {
+        "gpt-5.3-codex-spark": {
+          id: "gpt-5.3-codex-spark",
+          name: "GPT-5.3 Codex Spark",
+          reasoning: true,
+          release_date: "2026-02-05",
+        },
+        "gpt-5.6-sol": {
+          id: "gpt-5.6-sol",
+          name: "GPT-5.6 Sol",
+          reasoning: true,
+          release_date: "2026-07-09",
+        },
+        "gpt-6-astra": {
+          id: "gpt-6-astra",
+          name: "GPT-6 Astra",
+          reasoning: true,
+          attachment: true,
+          modalities: { input: ["text", "image"], output: ["text"] },
+          limit: { context: 1_050_000, output: 128_000 },
+          release_date: "2026-09-04",
+        },
+      },
+    },
+  });
+
+  function piRuntime(models: readonly Model<Api>[], requested?: string[]) {
+    return {
+      getModel(providerId: string, modelId: string) {
+        requested?.push(`${providerId}/${modelId}`);
+        return models.find((model) => model.provider === providerId && model.id === modelId);
+      },
+      getModels: (providerId: string) => models.filter((model) => model.provider === providerId),
+    };
+  }
+
+  it("applies subscription routing and effective-ref variant precedence", () => {
     const requested: string[] = [];
     const selection = resolvePiModelSelection(
       {
         model: "openai/gpt-5.6",
-        variant: {
-          "openai/gpt-5.6": "low",
-          "openai-codex/gpt-5.6-sol": "xhigh",
-        },
+        variant: { "openai/gpt-5.6": "low", "openai-codex/gpt-5.6-sol": "xhigh" },
       },
-      {
-        getModel(providerId, modelId) {
-          requested.push(`${providerId}/${modelId}`);
-          return model;
-        },
-      },
-      true,
+      piRuntime([sol], requested),
+      { hasCodexSubscription: true, catalog },
     );
 
     expect(requested).toEqual(["openai-codex/gpt-5.6-sol"]);
-    expect(selection).toMatchObject({ ref: "openai-codex/gpt-5.6-sol", thinkingLevel: "high" });
+    expect(selection).toMatchObject({ ref: "openai-codex/gpt-5.6-sol", thinkingLevel: "xhigh" });
+  });
+
+  it("refuses an effort the model does not accept instead of quietly clamping it", () => {
+    const noHighTiers = { ...sol, thinkingLevelMap: { xhigh: null, max: null } } as Model<Api>;
+    expect(() =>
+      resolvePiModelSelection(
+        { model: "openai-codex/gpt-5.6-sol", variant: { "openai-codex/gpt-5.6-sol": "max" } },
+        piRuntime([noHighTiers]),
+        { hasCodexSubscription: true, catalog },
+      ),
+    ).toThrow(/Effort "max" is not supported by openai-codex\/gpt-5.6-sol; it accepts/u);
+  });
+
+  it("refuses an effort level nothing defines", () => {
+    expect(() =>
+      resolvePiModelSelection(
+        { model: "openai-codex/gpt-5.6-sol", variant: { "openai-codex/gpt-5.6-sol": "ultra" } },
+        piRuntime([sol]),
+        { hasCodexSubscription: true, catalog },
+      ),
+    ).toThrow(/Effort "ultra" is not supported/u);
+  });
+
+  it("fills a model Clankie's catalog knows and Pi's does not, at its own effort ladder", () => {
+    // Weakest sibling first, as Pi's own oldest-first data files present them.
+    const selection = resolvePiModelSelection(
+      { model: "openai/gpt-6-astra", variant: { "openai-codex/gpt-6-astra": "max" } },
+      piRuntime([spark, sol]),
+      { hasCodexSubscription: true, catalog },
+    );
+
+    expect(selection.ref).toBe("openai-codex/gpt-6-astra");
+    expect(selection.thinkingLevel).toBe("max");
+    // Rides the newest dated sibling's transport; carries its own catalog metadata.
+    expect(selection.model).toMatchObject({
+      id: "gpt-6-astra",
+      api: "openai-codex-responses",
+      baseUrl: sol.baseUrl,
+      input: ["text", "image"],
+      contextWindow: 400_000,
+      maxTokens: 128_000,
+      compat: sol.compat,
+    });
+  });
+
+  it("never rides an older sibling's capability flags, whatever order Pi lists them in", () => {
+    for (const siblings of [
+      [spark, sol],
+      [sol, spark],
+    ]) {
+      const selection = resolvePiModelSelection({ model: "openai-codex/gpt-6-astra" }, piRuntime(siblings), {
+        hasCodexSubscription: true,
+        catalog,
+      });
+      expect(selection.model.compat, JSON.stringify(siblings.map((m) => m.id))).toEqual(sol.compat);
+      expect(selection.model.input).toEqual(["text", "image"]);
+    }
+  });
+
+  it("keeps aggregator models on Pi's explicit transports instead of guessing a sibling", () => {
+    const known = { ...sol, provider: "opencode", id: "gpt-5", api: "openai-responses" } as Model<Api>;
+    const aggregatorCatalog = CatalogSchema.parse({
+      opencode: {
+        id: "opencode",
+        name: "OpenCode",
+        env: [],
+        models: { "gemini-3-pro": { id: "gemini-3-pro", name: "Gemini 3 Pro", reasoning: true } },
+      },
+    });
+    const input = { hasCodexSubscription: false, catalog: aggregatorCatalog };
+    expect(resolvePiModelSelection({ model: "opencode/gpt-5" }, piRuntime([known]), input).model).toBe(known);
+    expect(() =>
+      resolvePiModelSelection({ model: "opencode/gemini-3-pro" }, piRuntime([known]), input),
+    ).toThrow(/has no supported Pi model entry/);
+  });
+
+  it("falls back to catalog order when no sibling carries a release date", () => {
+    const undated = CatalogSchema.parse({
+      openai: {
+        id: "openai",
+        name: "OpenAI",
+        env: [],
+        models: {
+          "gpt-6-astra": { id: "gpt-6-astra", name: "GPT-6 Astra", reasoning: true },
+        },
+      },
+    });
+    const selection = resolvePiModelSelection(
+      { model: "openai-codex/gpt-6-astra" },
+      piRuntime([spark, sol]),
+      { hasCodexSubscription: true, catalog: undated },
+    );
+    // Last wins, because Pi's files run oldest-first.
+    expect(selection.model.compat).toEqual(sol.compat);
+  });
+
+  it("still refuses a ref neither catalog knows", () => {
+    expect(() =>
+      resolvePiModelSelection({ model: "openai-codex/gpt-9" }, piRuntime([sol]), {
+        hasCodexSubscription: true,
+        catalog,
+      }),
+    ).toThrow(/has no supported Pi model entry/u);
   });
 });
 
@@ -491,6 +659,11 @@ describe("effortVariantsFor", () => {
     const gpt5Pro = effortVariantsFor("openai", fakeModel("gpt-5-pro", true));
     expect(gpt5Pro.map((variant) => variant.id)).toEqual(["high"]);
 
+    // Astra drops `none` and `minimal` and reaches `max`; the pre-gpt-6 fallback
+    // would have hidden xhigh and max behind low/medium/high.
+    const astra = effortVariantsFor("openai", fakeModel("gpt-6-astra", true));
+    expect(astra.map((variant) => variant.id)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+
     const compatible = effortVariantsFor("openai-compatible", fakeModel("some-reasoner", true));
     expect(compatible.map((variant) => variant.id)).toEqual(["low", "medium", "high"]);
   });
@@ -503,7 +676,10 @@ describe("effortVariantsFor", () => {
     const gpt55 = effortVariantsFor("openai-codex", fakeModel("gpt-5.5", true));
     expect(gpt55.map((variant) => variant.id)).toEqual(["none", "low", "medium", "high", "xhigh"]);
 
-    for (const modelId of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]) {
+    const astra = effortVariantsFor("openai-codex", fakeModel("gpt-6-astra", true));
+    expect(astra.map((variant) => variant.id)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+
+    for (const modelId of ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]) {
       const ids = effortVariantsFor("openai-codex", fakeModel(modelId, true)).map((v) => v.id);
       expect(ids, `${modelId} must not offer the Codex-client-only tier`).not.toContain("ultra");
     }
@@ -666,15 +842,24 @@ describe("variantProviderOptions", () => {
 
   it("camelizes reasoning_effort for openai, xai, and openai-compatible namespaces", () => {
     expect(
-      variantProviderOptions({ id: "low", body: { reasoning_effort: "low" } }, "openai").providerOptions,
-    ).toEqual({ openai: { reasoningEffort: "low" } });
-    expect(
       variantProviderOptions({ id: "high", body: { reasoning_effort: "high" } }, "xai").providerOptions,
     ).toEqual({ xai: { reasoningEffort: "high" } });
     expect(
       variantProviderOptions({ id: "low", body: { reasoning_effort: "low" } }, "openai-compatible")
         .providerOptions,
     ).toEqual({ openaiCompatible: { reasoningEffort: "low" } });
+  });
+
+  it("forces reasoning on the openai family so a model the SDK has not learned still gets the effort", () => {
+    // @ai-sdk/openai gates reasoning on an `o*`/`gpt-5` id prefix list, and drops
+    // reasoningEffort with only a warning for anything newer (gpt-6-astra).
+    expect(
+      variantProviderOptions({ id: "max", body: { reasoning_effort: "max" } }, "openai").providerOptions,
+    ).toEqual({ openai: { reasoningEffort: "max", forceReasoning: true } });
+    // Nothing to force when the variant carries no reasoning body.
+    expect(
+      variantProviderOptions({ id: "custom", headers: { "x-a": "b" } }, "openai").providerOptions,
+    ).toBeUndefined();
   });
 
   it("passes variant headers through", () => {

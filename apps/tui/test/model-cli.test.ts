@@ -29,6 +29,7 @@ async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   return {
     XDG_CONFIG_HOME: root,
     XDG_STATE_HOME: root,
+    XDG_CACHE_HOME: join(root, "cache"),
     CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
   };
 }
@@ -116,5 +117,56 @@ describe("clankie model add-local / set / status", () => {
     });
     expect(listed.exit).toBe(1);
     expect(JSON.parse(listed.stdout)).toMatchObject({ ok: false });
+  });
+});
+
+describe("clankie model refresh", () => {
+  /**
+   * The catalog is otherwise whatever the install shipped with, so a model
+   * released after that version is unselectable until something fetches. This
+   * is the headless half of the TUI's "refresh model catalogs".
+   */
+  it("fetches models.dev, rewrites the cache, and reports what a later resolve will read", async () => {
+    const env = await isolatedEnv();
+    const catalog = {
+      openai: {
+        id: "openai",
+        name: "OpenAI",
+        env: ["OPENAI_API_KEY"],
+        models: { "gpt-6-astra": { id: "gpt-6-astra", name: "GPT-6 Astra", reasoning: true } },
+      },
+    };
+    const before = await runModel(["status"], { env });
+    expect(before.exit).toBe(0);
+
+    const refreshed = await runModel(["refresh"], {
+      env,
+      fetchImpl: (() => Promise.resolve(Response.json(catalog))) as unknown as typeof fetch,
+    });
+    expect(refreshed.exit).toBe(0);
+    expect(JSON.parse(refreshed.stdout)).toMatchObject({
+      ok: true,
+      source: "network",
+      updated: true,
+      providers: 1,
+      models: 1,
+      restart: "clankie restart captain",
+    });
+  });
+
+  it("reports the fallback source rather than failing when the network is down", async () => {
+    const env = await isolatedEnv();
+    const result = await runModel(["refresh"], {
+      env,
+      fetchImpl: (() => Promise.reject(new Error("offline"))) as unknown as typeof fetch,
+    });
+    // Exit 1 with an honest source beats a green run over a catalog that never moved.
+    expect(result.exit).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({ ok: false, source: "bundled", updated: false });
+  });
+
+  it("rejects extra arguments", async () => {
+    const result = await runModel(["refresh", "openai"]);
+    expect(result.exit).not.toBe(0);
   });
 });

@@ -14,7 +14,12 @@ import {
   type CredentialStore,
   type RedactedCredential,
 } from "@clankie/credential-broker";
-import { createModelRegistry, loadBundledCatalog, type ModelEntry } from "@clankie/model-registry";
+import {
+  createModelRegistry,
+  loadBundledCatalog,
+  type Catalog,
+  type ModelEntry,
+} from "@clankie/model-registry";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
@@ -25,6 +30,8 @@ import {
   loadConfig,
   LOCAL_CONTEXT_FALLBACK,
   parseModelRef,
+  piModelFor,
+  piModelsFor,
   probeLocalModels,
   resolvePiModelSelection,
   registerConfiguredPiProviders,
@@ -89,6 +96,11 @@ export function createProviderServices(options: {
       registerConfiguredPiProviders(created, config, await registry.catalog());
       return created;
     })());
+  /** What the model list and effort ladder are read against; see `piModelsFor`. */
+  const selectionCatalog = async (): Promise<{ config: ClankieConfig; catalog: Catalog }> => ({
+    config: (await loadConfig({ env, cwd })).config,
+    catalog: await registry.catalog(),
+  });
   return {
     store,
     registry,
@@ -99,21 +111,25 @@ export function createProviderServices(options: {
         return (await runtime()).getProviders().map(({ id, name }) => ({ id, name }));
       },
       async models(providerId) {
-        return (await runtime()).getModels(providerId).map(piModelEntry);
+        return piModelsFor(await runtime(), providerId, await selectionCatalog()).map(piModelEntry);
       },
       async thinkingLevels(providerId, modelId) {
-        const model = (await runtime()).getModel(providerId, modelId);
+        const model = piModelFor(await runtime(), providerId, modelId, await selectionCatalog());
         return model === undefined ? [] : getSupportedThinkingLevels(model);
       },
       async resolveSelection(config) {
-        return resolvePiModelSelection(
-          config,
-          await runtime(),
-          (await store.get(CODEX_PROVIDER_ID)) !== undefined,
-        );
+        return resolvePiModelSelection(config, await runtime(), {
+          hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+          catalog: await registry.catalog(),
+        });
       },
       async refresh() {
-        await (await runtime()).refresh({ allowNetwork: true, force: true });
+        // Both catalogs, because selection reads both: Pi's ships with the
+        // package, Clankie's is models.dev and never refreshes on its own.
+        await Promise.all([
+          (await runtime()).refresh({ allowNetwork: true, force: true }),
+          registry.refresh(true),
+        ]);
       },
       async register(config) {
         registerConfiguredPiProviders(await runtime(), config, await registry.catalog());
@@ -958,7 +974,7 @@ async function runProviderWizard(
           hint: providerConnectionHint(provider.id, listed, services.env),
         })),
         statusActions: [
-          { value: "__refresh__", label: "refresh Pi model catalog" },
+          { value: "__refresh__", label: "refresh model catalogs" },
           { value: "__local__", label: "add a local endpoint…", hint: "Ollama, LM Studio, vLLM" },
         ],
         ...(currentProvider === undefined ? {} : { currentValue: currentProvider }),
@@ -976,9 +992,9 @@ async function runProviderWizard(
         continue;
       }
       if (providerId === "__refresh__") {
-        flow.setStatus("refreshing Pi model catalog…");
+        flow.setStatus("refreshing model catalogs…");
         await services.captainModels.refresh();
-        flow.renderLine("Pi model catalog refreshed.", "success");
+        flow.renderLine("Model catalogs refreshed.", "success");
         continue;
       }
       const provider = providers.find((candidate) => candidate.id === providerId);
@@ -1158,7 +1174,7 @@ async function runModelWizard(
           hint: modelHint(model),
           description: model.name,
         })),
-        statusActions: [{ value: "__refresh__", label: "refresh Pi model catalog" }],
+        statusActions: [{ value: "__refresh__", label: "refresh model catalogs" }],
         ...(currentModelId === undefined ? {} : { currentValue: currentModelId }),
         allowBack: true,
       });
@@ -1169,9 +1185,9 @@ async function runModelWizard(
         return selectedProvider;
       }
       if (modelId === "__refresh__") {
-        flow.setStatus("refreshing Pi model catalog…");
+        flow.setStatus("refreshing model catalogs…");
         await services.captainModels.refresh();
-        flow.renderLine("Pi model catalog refreshed.", "success");
+        flow.renderLine("Model catalogs refreshed.", "success");
         continue;
       }
       const ref = formatModelRef({ providerId, modelId });

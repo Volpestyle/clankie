@@ -16,6 +16,13 @@ owns its catalog, auth, implementation, and thinking levels
 ([ADR 0101](../../docs/adr/0101-pi-owns-the-captain-model-runtime.md)). Gameplay
 and image/video generation keep the AI SDK path above.
 
+One selection, two catalogs — and Pi's ships inside its package, so it lags
+models.dev. For `openai` and `openai-codex`, `piModelsFor`/`piModelFor` fill a
+missing model from Clankie's catalog using the newest dated sibling's transport.
+Other providers keep Pi's explicit entries: aggregators can route models over
+different wire protocols that models.dev does not identify. Pi's own entry
+always wins where both catalogs know a model.
+
 ## config.ts — layered configuration
 
 `loadConfig()` reads the global file (`${XDG_CONFIG_HOME ?? ~/.config}/clankie/clankie.json`, via `globalConfigPath`) then the nearest repo `.clankie.json` walking up from `cwd` (`findRepoConfigPath`), and deep-merges repo over global: objects merge per key, arrays and scalars replace. It never throws — a file with invalid JSON or a failing schema becomes an entry in `issues` and is skipped.
@@ -74,6 +81,13 @@ patterns and fallback ladder are canonical in
 [`src/variants.ts`](src/variants.ts), where tests can fail when a change offers
 an unsupported wire value.
 
+A configured effort the model has no tier for is refused by name on both
+adapters rather than quietly downgraded — `resolvePiModelSelection` on the
+captain side, `resolveConfiguredLanguageModel` on the AI SDK side, both naming
+the ladder the model does accept. The one exception is `off` on a token-budget
+provider, where "no thinking options" is the honest reading; on an effort
+ladder the tiers are the whole vocabulary, so a missing tier is a refusal.
+
 Variant bodies are provider **wire-format** data (snake_case for OpenAI-style APIs). Lowering to AI SDK `providerOptions` happens at generate time via `variantProviderOptions` — a variant is data, not a model mutation.
 
 ## instantiate.ts — AI SDK construction
@@ -83,6 +97,13 @@ Variant bodies are provider **wire-format** data (snake_case for OpenAI-style AP
 API key resolution never throws: an `api`/`wellknown` credential supplies the key; an `oauth` credential gets the `"clankie-oauth"` placeholder (the real bearer is attached by the injected `fetchImpl` wrapper from the oauth module); otherwise the first set env var from `provider.env`; otherwise the `"clankie-unconfigured"` placeholder. Unconfigured models construct fine and fail at request time with the provider's own auth error, keeping listing/selection flows total.
 
 Variant `headers` are baked into the provider instance; variant `body` cannot be — pass it per call: `variantProviderOptions(variant, family)` returns `{providerOptions?, headers?}` for `generateText`/`streamText`, camelizing wire-format keys into the AI SDK option schemas (`reasoning_effort` → `reasoningEffort`, `budget_tokens` → `budgetTokens`) under the family's namespace (`anthropic`, `openai`, `google`, `xai`, `openaiCompatible`).
+
+An `openai`-family reasoning body also carries `forceReasoning`. `@ai-sdk/openai`
+decides whether a model reasons from a hardcoded `o*`/`gpt-5` id prefix list and
+drops `reasoningEffort` with only a console warning for anything newer, so
+without it a `gpt-6-astra` turn runs at the backend default while the receipt
+still reports the configured effort. The catalog already gated the variant on
+`reasoning: true`; this restates that answer to the SDK.
 
 ## oauth/ — provider OAuth flows
 

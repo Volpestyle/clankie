@@ -68,6 +68,14 @@ const catalog = CatalogSchema.parse({
         reasoning: true,
         limit: { context: 1_050_000, output: 128_000 },
       },
+      "gpt-6-astra": {
+        id: "gpt-6-astra",
+        name: "GPT-6 Astra",
+        reasoning: true,
+        attachment: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
+        limit: { context: 1_050_000, output: 128_000 },
+      },
       "gpt-5.6-luna": {
         id: "gpt-5.6-luna",
         name: "GPT 5.6 Luna",
@@ -157,7 +165,12 @@ describe("withCodexSubscriptionProvider", () => {
       cache_read: 0,
       cache_write: 0,
     });
+    expect(result["openai-codex"]?.models["gpt-6-astra"]).toBeDefined();
     expect(result["openai-codex"]?.models["gpt-5.6-pro"]).toBeUndefined();
+    // Dropped from the verified list after the backend refused it at every
+    // effort; the metered OpenAI key still serves it.
+    expect(result.openai?.models["gpt-5.4"]).toBeDefined();
+    expect(result["openai-codex"]?.models["gpt-5.4"]).toBeUndefined();
     expect(result.openai?.env).toEqual(["OPENAI_API_KEY"]);
     expect(result["openai-codex"]?.env).toEqual([]);
   });
@@ -166,7 +179,7 @@ describe("withCodexSubscriptionProvider", () => {
     const result = withCodexSubscriptionProvider(catalog);
     const backendLimit = { context: 400_000, input: 272_000, output: 128_000 };
     expect(result["openai-codex"]?.models["gpt-5.6-luna"]?.limit).toEqual(backendLimit);
-    expect(result["openai-codex"]?.models["gpt-5.4"]?.limit).toEqual(backendLimit);
+    expect(result["openai-codex"]?.models["gpt-6-astra"]?.limit).toEqual(backendLimit);
     expect(result.openai?.models["gpt-5.6-luna"]?.limit).toEqual({
       context: 300_000,
       output: 64_000,
@@ -247,6 +260,64 @@ describe("resolveConfiguredLanguageModel", () => {
     expect(capturedBody.reasoning).toMatchObject({ effort: "low" });
     expect(JSON.stringify(capturedBody)).not.toContain("access-secret");
     expect(JSON.stringify(capturedBody)).not.toContain("refresh-secret");
+  });
+
+  it("sends Astra's effort on the wire, forcing reasoning past the SDK's model-id gate", async () => {
+    const env = await configEnv({
+      model: "openai-codex/gpt-6-astra",
+      variant: { "openai-codex/gpt-6-astra": "max" },
+    });
+    const store = new MemoryCredentialStore({ "openai-codex": codexCredential() });
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const configured = await resolveConfiguredLanguageModel({
+      env,
+      cwd: tempDirs[0] as string,
+      catalog,
+      store,
+      fetchImpl: recordingCodexFetch(calls),
+    });
+    await generateText({ model: configured.model, prompt: "say live", ...configured.modelOptions });
+
+    // Without forceReasoning, @ai-sdk/openai drops the effort for any id
+    // outside its `o*`/`gpt-5` prefix list and the turn runs at the default.
+    expect(must(calls[0]).body.reasoning).toMatchObject({ effort: "max" });
+  });
+
+  it("refuses an effort Astra has no tier for instead of silently dropping it", async () => {
+    for (const effort of ["none", "minimal"]) {
+      const env = await configEnv({
+        model: "openai-codex/gpt-6-astra",
+        variant: { "openai-codex/gpt-6-astra": effort },
+      });
+      const store = new MemoryCredentialStore({ "openai-codex": codexCredential() });
+      await expect(
+        resolveConfiguredLanguageModel({ env, cwd: tempDirs[0] as string, catalog, store }),
+      ).rejects.toEqual(
+        expect.objectContaining<Partial<ConfiguredModelError>>({
+          name: "ConfiguredModelError",
+          message: expect.stringContaining(
+            `Model variant "${effort}" is not supported by openai-codex/gpt-6-astra; ` +
+              "it accepts low, medium, high, xhigh, max",
+          ),
+        }),
+      );
+    }
+  });
+
+  it("still reads `off` as no thinking options where the ladder is token budgets", async () => {
+    const env = await configEnv({
+      model: "anthropic/claude-test",
+      variant: { "anthropic/claude-test": "off" },
+      provider: { anthropic: { models: { "claude-test": { reasoning: true } } } },
+    });
+    const store = new MemoryCredentialStore({ anthropic: { type: "api", key: "sk-anthropic" } });
+    const configured = await resolveConfiguredLanguageModel({
+      env,
+      cwd: tempDirs[0] as string,
+      catalog,
+      store,
+    });
+    expect(configured.modelOptions).toBeUndefined();
   });
 
   it("never borrows the Codex credential for a model the subscription cannot serve", async () => {

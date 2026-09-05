@@ -101,13 +101,24 @@ function selectedVariant(
     (level === undefined
       ? undefined
       : variants.find((candidate) => thinkingLevelForVariant(candidate.id) === level));
-  if (variant === undefined && level === "off") return undefined;
+  // Turning thinking off is "send no thinking options" on a provider whose
+  // ladder is token budgets (anthropic, google) — those have no off tier to
+  // name. On an effort ladder the tiers are the whole vocabulary, so a ladder
+  // without `none` means the model rejects it: gpt-6-astra accepts low through
+  // max and nothing else, and swallowing `none` there would run the turn at the
+  // backend's default while the receipt still claimed the configured effort.
+  if (variant === undefined && level === "off" && !hasEffortLadder(variants)) return undefined;
   if (variant === undefined) {
     throw new ConfiguredModelError(
-      `Model variant "${variantId}" is not supported by ${providerId}/${model.id}`,
+      `Model variant "${variantId}" is not supported by ${providerId}/${model.id}; ` +
+        `it accepts ${variants.map((candidate) => candidate.id).join(", ")}`,
     );
   }
   return variant;
+}
+
+function hasEffortLadder(variants: readonly ModelVariant[]): boolean {
+  return variants.some((variant) => variant.body !== undefined && "reasoning_effort" in variant.body);
 }
 
 /**

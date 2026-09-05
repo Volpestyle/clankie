@@ -9,13 +9,19 @@ import { CODEX_PROVIDER_ID } from "./oauth/openai-codex.ts";
  * still be unavailable to third-party `originator` identities: the client's
  * `ultra` effort tier is refused on this transport, as is the bare `gpt-5.6`
  * alias, which the backend answers only by size slug.
+ *
+ * The list shrinks on the same evidence it grows on. `gpt-5.4` was dropped
+ * 2026-09-04 after the probe refused it at every effort with "The 'gpt-5.4'
+ * model is not supported when using Codex with a ChatGPT account"; an entry the
+ * backend will not serve only redirects an `openai/…` ref away from the metered
+ * key that still serves it.
  */
 export const CODEX_SUBSCRIPTION_MODEL_IDS = [
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
   "gpt-5.5",
-  "gpt-5.4",
   "gpt-5.4-mini",
 ] as const;
 
@@ -38,10 +44,16 @@ export function codexSubscriptionModelIdFor(modelId: string): string | undefined
 }
 
 /**
- * Every backend model shares one window regardless of the larger API-key
- * window models.dev reports for the same id, so the subscription entry states
- * the backend's own limit rather than inheriting a number the transport will
- * not honor.
+ * Every backend model shares one window regardless of the API-key window
+ * models.dev reports for the same id, so the subscription entry states the
+ * transport's own limit rather than inheriting a number it will not honor.
+ *
+ * This figure is a floor, not a measured ceiling: probed 2026-09-04, the
+ * backend accepted a 900,051-token input for both `gpt-6-astra` (API window
+ * 1,050,000) and `gpt-5.6-terra` (API window 272,000) without complaint, which
+ * says the two share one transport limit above this number but not that either
+ * attended to all of it. Raising it wants its own measurement of effective
+ * attention, since every subscription model's context management reads it.
  */
 const SUBSCRIPTION_LIMIT = { context: 400_000, input: 272_000, output: 128_000 };
 

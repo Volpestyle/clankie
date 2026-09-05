@@ -193,12 +193,33 @@ export function variantProviderOptions(
   if (variant.headers !== undefined && Object.keys(variant.headers).length > 0) {
     result.headers = { ...variant.headers };
   }
-  if (variant.body !== undefined && Object.keys(variant.body).length > 0) {
+  const body = withOpenAiReasoningForced(variant.body, providerFamily);
+  if (body !== undefined) {
     result.providerOptions = {
-      [PROVIDER_OPTIONS_NAMESPACE[providerFamily]]: camelizeKeys(variant.body) as Record<string, JSONValue>,
+      [PROVIDER_OPTIONS_NAMESPACE[providerFamily]]: camelizeKeys(body) as Record<string, JSONValue>,
     };
   }
   return result;
+}
+
+/**
+ * `@ai-sdk/openai` decides whether a model reasons from a hardcoded `o*` /
+ * `gpt-5` model-id prefix list. A newer reasoning model it has not learned yet
+ * — `gpt-6-astra` — therefore has its `reasoningEffort` dropped with a console
+ * warning and answers at the backend's default effort, which is exactly the
+ * undisclosed fallback selection is supposed to be free of. A reasoning body
+ * only exists because the catalog said `reasoning: true` (see
+ * `effortVariantsFor`), so restate that answer through the SDK's own
+ * `forceReasoning` override rather than let a stale prefix list overrule it.
+ * Redundant but harmless for the ids the SDK already recognises.
+ */
+function withOpenAiReasoningForced(
+  body: Record<string, unknown> | undefined,
+  providerFamily: ProviderFamily,
+): Record<string, unknown> | undefined {
+  if (body === undefined || Object.keys(body).length === 0) return undefined;
+  if (providerFamily !== "openai") return body;
+  return { ...body, force_reasoning: true };
 }
 
 function camelizeKey(key: string): string {

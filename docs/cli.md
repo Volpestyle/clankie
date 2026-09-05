@@ -338,6 +338,42 @@ LM Studio yourself; `clankie restart captain` only reloads Clankie's config.
 Select the captain. The ref splits on the **first** slash (model ids may
 contain slashes). JSON: `{ "ok": true, "model": "xai/grok-4.6", "restart": "clankie restart captain" }`.
 
+### `model refresh`
+
+Refresh the available model catalog. Use this when a newly released model is
+missing: the captain, gameplay, and commentary otherwise read the installed or
+cached catalog. The TUI's `/model` and `/provider` offer the same refresh.
+Restart the captain afterward with `clankie restart captain`.
+
+JSON contains `ok`, `source` (`network`, `cache`, or `bundled`), `updated`,
+provider and model counts, and the restart command. A successful network refresh
+exits 0. If the network fails or fetching is disabled, the existing catalog
+remains usable, but refresh returns `ok: false` and exits 1.
+`CLANKIE_DISABLE_MODELS_FETCH` and an explicit `CLANKIE_MODELS_PATH` skip fetching.
+
+For Astra, run `clankie model refresh`, then
+`clankie model set openai-codex/gpt-6-astra` and `clankie effort set high`.
+The supported efforts are `low`, `medium`, `high`, `xhigh`, and `max`.
+Captain, gameplay, and commentary use the selected model; voice and image/video
+generation keep their separate selections.
+
+Verified transport settings (2026-09-04):
+
+| Provider/model             | Transport        | Configured context / maximum output |
+| -------------------------- | ---------------- | ----------------------------------- |
+| `openai-codex/gpt-6-astra` | Codex Responses  | 400,000 / 128,000 tokens            |
+| `openai/gpt-6-astra`       | OpenAI Responses | 1,050,000 / 128,000 tokens          |
+
+The subscription context value is conservative, not a measured backend ceiling.
+An `openai` selection uses the subscription when available; disable the
+`openai-codex` provider to select the metered API transport explicitly.
+In a checkout, `pnpm --filter @clankie/clankie verify-model provider/model@effort`
+checks a captain tool-and-image turn, a gameplay action, and commentary using
+isolated settings. It makes live provider requests. Add `--metered` for the API
+transport or `--json` for a machine-readable receipt. `--config-home PATH`
+checks the selection previously written by the CLI under that configuration
+home. The owner's live selection remains unchanged.
+
 ### `effort [status]`
 
 Read the current captain model's stored effort override. JSON:
@@ -349,6 +385,10 @@ Read the current captain model's stored effort override. JSON:
 Set or remove the variant for the named model. Without `--model`, the currently
 configured captain model is the target. The TUI `/effort` modal obtains the
 supported levels from Pi and calls this writer.
+
+The writer saves the requested effort. At execution, an unsupported effort is
+refused by name with the supported ladder, consistently across captain,
+gameplay, and commentary; it is never silently downgraded.
 
 ### `image-model [status]` / `image-model set provider/model` / `image-model clear`
 

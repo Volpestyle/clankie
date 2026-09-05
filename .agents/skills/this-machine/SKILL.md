@@ -67,6 +67,11 @@ run pairing on the host that owns the relay.
 
 JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `operator-credential rotate` default to human text — pass `--json`.
+
+If a newly released model is missing, run `clankie model refresh`, select it
+with `clankie model set provider/model`, then restart the captain. Astra accepts
+`low`, `medium`, `high`, `xhigh`, and `max`; unsupported efforts fail when a turn
+executes. Voice and image/video models have independent selectors.
 `play stop` prints `Nothing is playing.` (not JSON) when idle. A bare
 `--base-url` origin is rewritten to `/v1`. `--set` selects the first listed
 model. If the probe fails, pass `--models id,id`. Local LLM servers (ds4,

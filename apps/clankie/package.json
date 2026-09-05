@@ -8,7 +8,8 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "free-play-live": "tsx scripts/free-play-live.ts"
+    "free-play-live": "tsx scripts/free-play-live.ts",
+    "verify-model": "tsx scripts/verify-model-selection.ts"
   },
   "dependencies": {
     "@clankie/credential-broker": "workspace:*",

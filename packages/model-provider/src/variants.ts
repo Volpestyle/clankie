@@ -42,8 +42,11 @@ function family(pattern: string): RegExp {
  * sibling and so are matched first, and newer generations precede the older
  * family fallbacks. Under-offering a tier only hides an option; offering one
  * the model rejects fails the whole request.
+ *
+ * `gpt-6` (Astra) drops `none` and `minimal` entirely and reaches `max`.
  */
 const OPENAI_EFFORTS: readonly EffortLadder[] = [
+  [family("gpt-6"), ["low", "medium", "high", "xhigh", "max"]],
   [family("gpt-5-pro"), ["high"]],
   [family("gpt-5\\.[2-9]-pro"), ["medium", "high", "xhigh"]],
   [family("gpt-5\\.6"), ["none", "low", "medium", "high", "xhigh", "max"]],

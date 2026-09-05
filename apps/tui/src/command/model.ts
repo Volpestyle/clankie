@@ -1,3 +1,4 @@
+import { createModelRegistry, type Catalog } from "@clankie/model-registry";
 import {
   declareLocalProvider,
   loadConfig,
@@ -11,6 +12,7 @@ import {
 
 const MODEL_USAGE = [
   "Usage: clankie model [status]",
+  "       clankie model refresh",
   "       clankie model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]",
   "       clankie model set providerId/modelId",
 ].join("\n");
@@ -54,6 +56,14 @@ export type ModelCommandResult =
   | {
       readonly ok: true;
       readonly model: string;
+      readonly restart: string;
+    }
+  | {
+      readonly ok: boolean;
+      readonly source: "network" | "cache" | "bundled";
+      readonly updated: boolean;
+      readonly providers: number;
+      readonly models: number;
       readonly restart: string;
     };
 
@@ -142,6 +152,42 @@ async function modelAddLocal(
   };
 }
 
+/**
+ * Re-reads the models.dev catalog every selection surface resolves against.
+ *
+ * The catalog is otherwise frozen at whatever the disk cache holds — the
+ * bundled snapshot on a fresh install — because `catalog()` deliberately never
+ * touches the network. So a model released after the installed version, Astra
+ * included, is invisible to `model set`, to the captain, and to gameplay until
+ * something fetches. The TUI does it inside `/provider` and `/model`; a
+ * headless install needs a command of its own, and the running service picks
+ * the new catalog up on `clankie restart captain`.
+ */
+async function modelRefresh(
+  options: ModelCommandOptions = {},
+): Promise<Extract<ModelCommandResult, { readonly source: string }>> {
+  const registry = createModelRegistry({
+    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  const result = await registry.refresh(true);
+  const catalog = await registry.catalog();
+  return {
+    // A network failure falls back to cache or bundled rather than throwing, so
+    // the source is the honest answer about what a later resolve will read.
+    ok: result.source === "network" || result.updated,
+    source: result.source,
+    updated: result.updated,
+    providers: Object.keys(catalog).length,
+    models: countModels(catalog),
+    restart: "clankie restart captain",
+  };
+}
+
+function countModels(catalog: Catalog): number {
+  return Object.values(catalog).reduce((total, provider) => total + Object.keys(provider.models).length, 0);
+}
+
 export async function modelSet(
   ref: string,
   options: ModelCommandOptions = {},
@@ -215,6 +261,10 @@ export async function runModelCommand(
 ): Promise<ModelCommandResult> {
   const subcommand = args[0];
   if (subcommand === undefined || subcommand === "status") return await modelStatus(options);
+  if (subcommand === "refresh") {
+    if (args.length !== 1) throw new Error(MODEL_USAGE);
+    return await modelRefresh(options);
+  }
   if (subcommand === "add-local") return await modelAddLocal(parseAddLocalArgs(args.slice(1)), options);
   if (subcommand === "set") {
     const ref = args[1];

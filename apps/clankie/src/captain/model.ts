@@ -118,17 +118,17 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
     refreshOnCreate: false,
   });
   const initialConfig = await loadConfig({ cwd: repoRoot });
-  registerConfiguredPiProviders(runtime, initialConfig.config, await createModelRegistry().catalog());
+  const catalog = await createModelRegistry().catalog();
+  registerConfiguredPiProviders(runtime, initialConfig.config, catalog);
   return {
     runtime,
     resolveSelection: async () => {
       const configured = await loadConfig({ cwd: repoRoot });
       try {
-        return resolvePiModelSelection(
-          configured.config,
-          runtime,
-          (await broker.get(CODEX_PROVIDER_ID)) !== undefined,
-        );
+        return resolvePiModelSelection(configured.config, runtime, {
+          hasCodexSubscription: (await broker.get(CODEX_PROVIDER_ID)) !== undefined,
+          catalog,
+        });
       } catch (error) {
         throw new CaptainModelError(error instanceof Error ? error.message : String(error));
       }

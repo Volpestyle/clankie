@@ -55,6 +55,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  play stop                Stop the live playthrough at the next turn boundary"],
   },
   { nouns: ["model"], lines: ["  model [status]           Captain model and local providers (JSON)"] },
+  { nouns: ["model"], lines: ["  model refresh            Refresh the available model catalog"] },
   {
     nouns: ["model"],
     lines: [
