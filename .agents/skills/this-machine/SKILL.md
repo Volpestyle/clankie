@@ -57,6 +57,11 @@ index). Configure through the headless CLI:
 | Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                                             |
 | Play session                          | `clankie play status` / `clankie play stop`                                                                       |
 
+`clankie devices --json` includes each device's optional `push` reference and
+`enabled` state. It is registration state, not an APNs delivery receipt. Push
+permission and registration belong to the phone; operator signing/storage setup
+is in `apps/gateway/README.md`. Tokens and delivery keys never go to the host.
+
 `clankie memory status` reports episodes and retention usage. Use `memory search
 <terms...>`, `memory retain|release|forget <episodeId>`, or `memory correct
 <episodeId> --summary "…"` to curate them through the operator API. Retained

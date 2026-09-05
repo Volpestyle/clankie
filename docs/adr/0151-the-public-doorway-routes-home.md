@@ -73,8 +73,10 @@ origin. A development build or an operator-selected advanced configuration may
 still use a direct LAN, Tailscale, Funnel, or other HTTPS origin; direct access
 is a transport choice, never authorization.
 
-The gateway does not mint device sessions, evaluate grants, interpret operator
-operations, or retain response bodies. It logs bounded route, host, request,
+The gateway does not mint device sessions or interpret operator operations.
+It forwards the host's grants; optional push registration requires that the
+host reports chat access ([ADR 0159](0159-the-device-authorizes-push-delivery.md)).
+Forwarded response bodies are not retained. It logs bounded route, host, request,
 status, byte-count, duration, and disconnect metadata only. It never logs
 authorization headers, pairing capabilities, message bodies, terminal bytes,
 or response bodies. Requests use TLS from the Apple device to Caddy and the Mac
@@ -89,6 +91,9 @@ volatile routes: Macs reconnect, new pairing offers register again, and
 already paired devices retry against the restored host route. Horizontal
 gateway scale adds an external connection broker only when a second process is
 required; durable Clankie or device state never moves into that broker.
+Optional APNs delivery uses a separate persistent SQLite registration table on
+this gateway. That table contains delivery routing metadata and device-held key
+hashes, not device sessions, conversation content, or grant authority.
 
 ## AWS shape
 

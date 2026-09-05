@@ -33,7 +33,7 @@ describe("device push boundary", () => {
   it("reserves token and delivery key for direct registration and supports host-independent clear", () => {
     const registration = {
       ...binding,
-      hostId: "host-1",
+      hostId: "host-123456789012",
       deviceToken: "ab".repeat(32),
       environment: "sandbox",
       deliveryKey: "A".repeat(43),

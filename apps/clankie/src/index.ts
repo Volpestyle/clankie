@@ -533,6 +533,8 @@ const clankie = await createClankieApp({
     : {
         pairingOfferPublisher: publicGatewayConnector,
         publicGatewayHostBaseUrl: publicGatewayConnector.hostBaseUrl,
+        // The same authenticated socket carries device wakes (ADR 0159).
+        pushWake: publicGatewayConnector,
       }),
   authenticateCaptain: async (request) =>
     (await authenticateDiscordBridge(request)) ??

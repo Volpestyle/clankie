@@ -84,6 +84,9 @@ import {
   type CaptainSessionLaneV2,
   type DeviceGrantSet,
   type DeviceRecord,
+  DevicePushRequestSchema,
+  DEVICE_PUSH_PATH,
+  type DevicePushBinding,
   type DeviceSelfResponse,
   type DeviceSessionRefreshResponse,
   type DiscordPersonIdentity,
@@ -128,6 +131,7 @@ import {
   type StoredPairingOffer,
 } from "./pairing.ts";
 import { applyDeviceEvent, deviceListItem, isDevicePendingExpired, type DeviceRegistry } from "./devices.ts";
+import { createPushDispatcher, type PushDispatcher, type PushWakeSender } from "./push.ts";
 import {
   COMPLETION_TOKEN_TTL_MS,
   DeviceSessionError,
@@ -337,6 +341,12 @@ export interface ClankieAppDependencies {
   deviceSessionKey?: Uint8Array;
   /** Optional ADR 0151 carrier. When configured, every displayed offer is published before use. */
   pairingOfferPublisher?: PairingOfferPublisher;
+  /**
+   * Outbound wake channel for devices that authorized push delivery (ADR 0159).
+   * Absent means no gateway is configured: pairing and chat are unaffected and
+   * a sleeping device simply catches up when it next opens.
+   */
+  pushWake?: PushWakeSender;
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;
@@ -2074,6 +2084,66 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
 
+  /**
+   * A device records that it authorized push delivery, or that it cleared it.
+   * Only the reference and its version land here — the APNs token and the
+   * delivery key stay between the app and the gateway (ADR 0159).
+   */
+  app.post(DEVICE_PUSH_PATH, async (context) => {
+    const identity = await authenticateDevice(context.req.raw);
+    if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+    if ("denied" in identity) return deviceDenialResponse(context, identity);
+    const parsed = DevicePushRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    const request = parsed.data;
+    return withSerializedLock(deviceLocks, identity.deviceId, async () => {
+      const now = clock();
+      const record = devices.get(identity.deviceId);
+      if (record === undefined || isDevicePendingExpired(record, now) || record.status !== "active") {
+        return context.json(
+          { error: record?.status === "revoked" ? "revoked" : "device_authentication_required" },
+          401,
+        );
+      }
+      // Ordered against the last state the device asked for, disabled included:
+      // a disable is a version, not an absence, so turning delivery off cannot
+      // hand the next request a clean slate to replay an old one into.
+      const current = record.push;
+      if (current !== undefined) {
+        if (request.sequence < current.sequence) {
+          return context.json({ error: "stale_push_registration" }, 409);
+        }
+        if (request.sequence === current.sequence) {
+          // An equal version may only restate what it already recorded. A
+          // different registration, or the same one flipped on or off, is two
+          // states claiming one version — including a re-enable at the version
+          // the gateway's own invalidation was recorded against.
+          if (request.registrationId !== current.registrationId || request.enabled !== current.enabled) {
+            return context.json({ error: "conflicting_push_registration" }, 409);
+          }
+          return context.json(current);
+        }
+      }
+      const changed = recordEvent("device.push.changed", `device:${identity.deviceId}`, now.toISOString(), {
+        schemaVersion: 1,
+        deviceId: identity.deviceId,
+        registrationId: request.registrationId,
+        sequence: request.sequence,
+        enabled: request.enabled,
+      });
+      applyDeviceEvent(devices, changed);
+      logger.info(
+        { deviceId: identity.deviceId, enabled: request.enabled, sequence: request.sequence },
+        "device push registration changed",
+      );
+      return context.json({
+        enabled: request.enabled,
+        registrationId: request.registrationId,
+        sequence: request.sequence,
+      });
+    });
+  });
+
   // A device reads its own registration to restore a session on launch.
   app.get("/v1/devices/self", async (context) => {
     const identity = await authenticateDevice(context.req.raw);
@@ -2231,6 +2301,58 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ schemaVersion: 1 as const, lanes: await dependencies.captain.observeLanes() });
   });
 
+  /**
+   * Delivery for devices that authorized it. The dispatcher owns coalescing and
+   * the send; clearing a binding the gateway has dropped runs here, where the
+   * device lock and the event log already live.
+   */
+  const clearPushBinding = async (deviceId: string, binding: DevicePushBinding): Promise<void> => {
+    await withSerializedLock(deviceLocks, deviceId, async () => {
+      const record = devices.get(deviceId);
+      // Conditional on the exact version that was sent: a late acknowledgement
+      // must never take away a registration the app has since replaced, turn a
+      // disable back into an event, or land a push change on a device revoked
+      // while the wake was in flight.
+      if (
+        record === undefined ||
+        record.status !== "active" ||
+        record.push === undefined ||
+        !record.push.enabled ||
+        record.push.registrationId !== binding.registrationId ||
+        record.push.sequence !== binding.sequence
+      ) {
+        return;
+      }
+      const cleared = recordEvent("device.push.changed", `device:${deviceId}`, clock().toISOString(), {
+        schemaVersion: 1,
+        deviceId,
+        ...binding,
+        enabled: false,
+      });
+      applyDeviceEvent(devices, cleared);
+      logger.info({ deviceId }, "device push registration cleared by the gateway");
+      return await Promise.resolve();
+    });
+  };
+
+  const pushDispatcher: PushDispatcher | undefined =
+    dependencies.pushWake === undefined
+      ? undefined
+      : createPushDispatcher({
+          devices: () => devices.values(),
+          sender: dependencies.pushWake,
+          clearBinding: clearPushBinding,
+          logger,
+        });
+  // Subscribed through this captain, not a process-wide bus: a second service
+  // instance in one process must never be woken by another's transcripts.
+  const stopObservingMessages =
+    pushDispatcher === undefined
+      ? undefined
+      : dependencies.captain.observeDurableMessages((notice) => {
+          pushDispatcher.notify(notice.conversationId);
+        });
+
   return {
     app,
     embodiment,
@@ -2250,6 +2372,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     },
     close: () => {
+      stopObservingMessages?.();
+      pushDispatcher?.close();
       captainPresence.close();
       void laneMcp.close();
     },

@@ -65,6 +65,29 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
       devices.set(record.deviceId, DeviceRecordSchema.parse({ ...record, lastRefreshAt: event.occurredAt }));
       return;
     }
+    case "device.push.changed": {
+      const record = requireDevice(devices, parsed.data.deviceId);
+      if (record.status !== "active") {
+        throw new Error(`device ${record.deviceId} changed push from ${record.status}`);
+      }
+      const { enabled, registrationId, sequence } = parsed.data;
+      // The app's sequence only moves forward; an older one on replay is a
+      // corrupt or reordered log, not a state this service ever wrote.
+      if (record.push !== undefined && sequence < record.push.sequence) {
+        throw new Error(`device ${record.deviceId} push sequence went backwards`);
+      }
+      devices.set(
+        record.deviceId,
+        DeviceRecordSchema.parse({
+          ...record,
+          // Disabled is a state at a version, not an absence. Dropping it here
+          // left the next request with nothing to be ordered against, so the
+          // first one after any disable was accepted at any version at all.
+          push: { registrationId, sequence, enabled },
+        }),
+      );
+      return;
+    }
     case "device.grant.denied":
       // Audit-only: records a rejected terminalControl request, no projection change.
       return;
@@ -102,6 +125,7 @@ export function deviceListItem(record: DeviceRecord): DeviceListItem {
     createdAt: record.createdAt,
     ...(record.activatedAt !== undefined ? { activatedAt: record.activatedAt } : {}),
     ...(record.lastRefreshAt !== undefined ? { lastRefreshAt: record.lastRefreshAt } : {}),
+    ...(record.push !== undefined ? { push: record.push } : {}),
     ...(record.revokedAt !== undefined ? { revokedAt: record.revokedAt } : {}),
     ...(record.revokedBy !== undefined ? { revokedBy: record.revokedBy } : {}),
   };

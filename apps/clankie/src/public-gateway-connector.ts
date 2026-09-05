@@ -11,8 +11,10 @@ import {
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
 } from "@clankie/protocol/public-gateway";
+import type { PublicGatewayPushWakeFrame } from "@clankie/protocol";
 import { WebSocket, type RawData } from "ws";
 import { hashPairingCode, hashPairingSecret } from "./pairing.ts";
+import type { PushWakeRequest, PushWakeStatus } from "./push.ts";
 
 const CONNECT_TIMEOUT_MS = 5_000;
 const RECONNECT_MIN_MS = 1_000;
@@ -67,6 +69,16 @@ interface PairingRouteWaiter {
   readonly deadline: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * A wake never fails a caller: an unanswered, disconnected, or unconfigured
+ * gateway resolves `unavailable`, because a device that missed a notification
+ * catches up the moment it opens the thread.
+ */
+interface PushWakeWaiter {
+  readonly settle: (status: PushWakeStatus) => void;
+  readonly deadline: ReturnType<typeof setTimeout>;
+}
+
 const silentLogger: PublicGatewayConnectorLogger = { info: () => undefined, warn: () => undefined };
 
 export class PublicGatewayConnector {
@@ -88,6 +100,7 @@ export class PublicGatewayConnector {
   private readonly inFlight = new Map<string, AbortController>();
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
   private readonly pairingRouteWaiters = new Map<string, PairingRouteWaiter>();
+  private readonly pushWakeWaiters = new Map<string, PushWakeWaiter>();
   private socket: WebSocket | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private tokenRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -175,6 +188,47 @@ export class PublicGatewayConnector {
     }
   }
 
+  /**
+   * Ask the gateway to wake one device about one conversation. The frame names
+   * ids and the registration version only; the gateway supplies host identity
+   * from this authenticated socket, and holds the token.
+   */
+  public async sendPushWake(request: PushWakeRequest): Promise<PushWakeStatus> {
+    const frame: PublicGatewayPushWakeFrame = {
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "push_wake",
+      wakeId: request.wakeId,
+      deviceId: request.deviceId,
+      conversationId: request.conversationId,
+      registrationId: request.registrationId,
+      sequence: request.sequence,
+    };
+    let socket: WebSocket;
+    try {
+      socket = await this.connectedSocket();
+    } catch {
+      return "unavailable";
+    }
+    const answered = new Promise<PushWakeStatus>((resolve) => {
+      const waiter: PushWakeWaiter = {
+        settle: resolve,
+        deadline: setTimeout(() => {
+          this.pushWakeWaiters.delete(frame.wakeId);
+          resolve("unavailable");
+        }, CONNECT_TIMEOUT_MS),
+      };
+      waiter.deadline.unref();
+      this.pushWakeWaiters.set(frame.wakeId, waiter);
+    });
+    try {
+      await sendFrame(socket, frame);
+    } catch {
+      this.settlePushWake(frame.wakeId, "unavailable");
+      return "unavailable";
+    }
+    return await answered;
+  }
+
   public close(): void {
     if (!this.started) return;
     this.started = false;
@@ -192,6 +246,7 @@ export class PublicGatewayConnector {
     }
     this.connectionWaiters.clear();
     this.rejectPairingRouteWaiters("Gateway connector closed");
+    this.settleAllPushWakes("unavailable");
   }
 
   private connect(): void {
@@ -256,6 +311,7 @@ export class PublicGatewayConnector {
     for (const controller of this.inFlight.values()) controller.abort("public gateway disconnected");
     this.inFlight.clear();
     this.rejectPairingRouteWaiters("Public gateway disconnected before acknowledging the pairing route");
+    this.settleAllPushWakes("unavailable");
     this.scheduleReconnect();
   }
 
@@ -296,6 +352,10 @@ export class PublicGatewayConnector {
         this.pairingRouteWaiters.delete(frame.offerHash);
         waiter.resolve();
       }
+      return;
+    }
+    if (frame.kind === "push_wake_result") {
+      this.settlePushWake(frame.wakeId, frame.status);
       return;
     }
     if (frame.kind === "cancel") {
@@ -417,6 +477,20 @@ export class PublicGatewayConnector {
       waiter.deadline.unref();
       this.connectionWaiters.add(waiter);
     });
+  }
+
+  private settlePushWake(wakeId: string, status: PushWakeStatus): void {
+    const waiter = this.pushWakeWaiters.get(wakeId);
+    if (waiter === undefined) return;
+    clearTimeout(waiter.deadline);
+    this.pushWakeWaiters.delete(wakeId);
+    waiter.settle(status);
+  }
+
+  private settleAllPushWakes(status: PushWakeStatus): void {
+    // Snapshot first: settling deletes from the map being read.
+    const pending = Array.from(this.pushWakeWaiters.keys());
+    for (const wakeId of pending) this.settlePushWake(wakeId, status);
   }
 
   private rejectPairingRouteWaiters(message: string): void {

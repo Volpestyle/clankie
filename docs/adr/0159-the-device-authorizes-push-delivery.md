@@ -49,11 +49,15 @@ depend on token and keychain lifetimes coinciding.
 Only the app's delivery key authorizes clearing a registration, including
 while its former host is offline. A clear retains the key hash and sequence
 as a tombstone, preventing a delayed registration from restoring delivery.
+Creating a tombstone before the first registration also requires a live device
+session: the clear request includes the claimed host only for that allocation.
+An unauthenticated caller cannot allocate rows by inventing registration ids.
 The app clears delivery when disconnecting or disabling notifications. Loss
 of secure storage does not silently bypass an existing registration's key.
 
-The host stores only registration id and sequence on its existing device
-record. A wake names these plus device and conversation ids; the gateway
+The host stores registration id, sequence and enabled state on its existing
+device record. Disabled state retains its version, so a delayed enable cannot
+restore an older binding. A wake names these plus device and conversation ids; the gateway
 requires all of them to match the current row and authenticated host socket.
 The host never receives the APNs token. APNs 410 invalidates only the token
 version actually sent, and only when Apple's timestamp does not predate its
@@ -62,7 +66,18 @@ registration; it cannot clear a newer registration that won the race.
 The gateway uses Node's SQLite support and a persistent local volume, with
 unique token/environment bindings and atomic conditional updates. A missing
 push configuration disables delivery without changing pairing or messaging.
-Per-host request limits and per-device coalescing bound traffic; no durable
+Registrations and tombstones have a combined limit of 1024 per authenticated
+account (per configured host for legacy static credentials). Reconnecting or
+creating another installation does not reset that limit. Registration and clear
+requests are limited before parsing, database access or host lookup: a burst of
+30 per connecting peer, replenished at one request per second. Forwarding headers
+are not trusted. Behind Caddy this bounds shared ingress rather than individual
+clients; per-client fairness requires an authenticated proxy identity. Each
+limiter map is bounded at 4096 entries and expires idle entries after ten minutes.
+
+Authenticated accounts have a separate 60-request burst, replenished at one per
+second; unauthenticated claims cannot spend that allowance. A global 32-send
+concurrency ceiling and per-device coalescing bound wake traffic. No durable
 message queue or retry worker is introduced.
 
 ## Alternatives and limits
@@ -77,6 +92,9 @@ message queue or retry worker is introduced.
 - A never-registered token leaked alongside a device session can be claimed
   first. Normal hosts never receive tokens. Registration conflicts surface
   explicitly; App Attest is an upgrade if this residual attack is observed.
+- Registration ids are random and reach the host only after gateway allocation.
+  Leaking an id before its first allocation permits an authenticated account to
+  reserve it under another key; the legitimate app sees an explicit key conflict.
 - The gateway and Apple see token, timing, host id and conversation id.
   Application message encryption is separate work (VUH-1112). Push does not
   claim to hide metadata or to encrypt the existing pairing transport.

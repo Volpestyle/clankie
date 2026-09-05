@@ -295,6 +295,12 @@ function transcriptEventBody(
   };
 }
 
+/** Metadata about a durable message that just landed. Never carries its text. */
+export interface DurableMessageNotice {
+  readonly conversationId: string;
+  readonly role: "captain" | "agent";
+}
+
 /**
  * File-backed conversation registry: `meta.json` + append-only `events.jsonl`
  * per conversation. The wire contract (list/get/create/close/replay/tail/send with
@@ -303,6 +309,13 @@ function transcriptEventBody(
  */
 export class ConversationStore {
   private readonly metas = new Map<string, ConversationMeta>();
+  /**
+   * Live durable-message observers, for delivery that happens outside the
+   * conversation (push wakes, ADR 0159). Per store: a second store — another
+   * service instance, or a test's own — has its own transcripts, and a wake it
+   * caused would name a conversation this one's devices cannot open.
+   */
+  private readonly durableMessageListeners = new Set<(notice: DurableMessageNotice) => void>();
   private readonly chains = new Map<string, Promise<void>>();
   private readonly runs = new Map<string, Promise<boolean>>();
   /** Live (accepted, unsettled) runs an operator `cancel` can interrupt. */
@@ -596,6 +609,17 @@ export class ConversationStore {
   public runsCaptainTurns(conversationId: string): boolean {
     const kind = this.metas.get(conversationId)?.scope.kind;
     return kind === "global" || kind === "workspace";
+  }
+
+  /**
+   * Subscribe to durable messages this store writes, as they are written.
+   * Returns an unsubscribe; a throwing listener cannot fail the write.
+   */
+  public observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void {
+    this.durableMessageListeners.add(listener);
+    return () => {
+      this.durableMessageListeners.delete(listener);
+    };
   }
 
   /**
@@ -1563,6 +1587,22 @@ export class ConversationStore {
     }
     if (meta.sessionState !== "active") this.trimEventLog(meta);
     this.wakeTails(meta.conversationId);
+    // A supplied `occurredAt` means this already happened somewhere else — a
+    // folded Herdr transcript replaying history. Only what is being said now
+    // wakes a sleeping device, so a first seat attach cannot become a burst of
+    // notifications about old messages.
+    if (occurredAt === undefined && body.type === "message" && body.streaming !== true) {
+      if (body.role === "captain" || body.role === "agent") {
+        const notice: DurableMessageNotice = { conversationId: meta.conversationId, role: body.role };
+        for (const listener of this.durableMessageListeners) {
+          try {
+            listener(notice);
+          } catch {
+            // Delivery is downstream of the transcript: it must never fail a write.
+          }
+        }
+      }
+    }
   }
 
   private waitForChange(conversationId: string, waitMs: number): Promise<void> {

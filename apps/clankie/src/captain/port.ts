@@ -11,6 +11,7 @@ import type {
   OperatorConversationServiceResult,
   OperatorSeatEvent,
 } from "@clankie/protocol";
+import type { DurableMessageNotice } from "./conversations.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -97,6 +98,14 @@ export interface CaptainPort {
    * and room never leak into another's.
    */
   laneToolBank(lane: CaptainSessionLaneV2): Promise<LaneToolBank>;
+  /**
+   * Subscribe to durable messages this captain's conversations write, for
+   * delivery that happens outside the conversation (push wakes, ADR 0159). The
+   * notice is metadata; the subscription is this captain's, so a second service
+   * instance in one process never hears another's transcripts. Returns an
+   * unsubscribe.
+   */
+  observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void;
   /** Graceful shutdown: waits for in-flight turns. */
   close(): Promise<void>;
 }
@@ -130,6 +139,9 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     pollSeatEvents: async () => [],
     replySeatEvent: async () => false,
     laneToolBank: async (lane) => ({ lane, tools: [] }),
+    // A stub writes no transcripts, so it has nothing to announce. A test that
+    // wants the trigger passes its own store's observer through `overrides`.
+    observeDurableMessages: () => () => {},
     close: async () => {},
     ...overrides,
   };

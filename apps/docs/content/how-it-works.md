@@ -74,6 +74,8 @@ The credential broker (Keychain on macOS, service `bot.clankie.credentials`) is 
 
 The app does not move Clankie into a cloud. Your machine signs in to one account with an email one-time code (`/gateway`), then holds one outbound WebSocket to `api.clankie.bot` carrying that account's access token. The gateway verifies the token, derives your machine's route from the account plus a per-installation id, and forwards bounded exchanges; it keeps no account, host, or message database. Pairing is a single-use offer minted by your machine (`clankie pair`); the device credential and every grant it carries are decided on your machine. The [network page](/network/) lists the exact public routes, and the [HTTP API](/api/) is the full local contract underneath.
 
+When push is configured, the gateway keeps a separate delivery database with APNs tokens, routing identifiers, delivery-key hashes and versioned revocations. The app authorizes that delivery; its machine holds only the registration reference. A wake contains a fixed alert and host/conversation identifiers, never a message excerpt. Pairing and messaging work without push configuration.
+
 ## Read deeper
 
 - [Architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md) — the canonical diagram and where each concern lives

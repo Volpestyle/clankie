@@ -247,6 +247,12 @@ List paired devices. Human mode is a table whose `SOURCE` column reads `review`
 for devices paired through a review offer (revoke those after the review) and
 `pair` otherwise; `--json` is `{ "ok": true, "devices": [ … ] }` with
 `"review": true` on those rows. Empty human output is `No paired devices.`
+The `PUSH` column shows `enabled` for an active device with chat access and an
+enabled delivery reference, otherwise `off`. This is the host's registration
+state, not proof that Apple delivered a notification. JSON includes the optional
+`push` object with `registrationId`, `sequence`, and `enabled`; disabled records
+retain their last version. The phone authorizes delivery and controls notification
+permission. Signing/storage setup is in the [gateway guide](../apps/gateway/README.md).
 
 ### `devices revoke <id> [--json]`
 

@@ -1,16 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly activator_version=2
+readonly activator_version=3
 readonly caddy_image=caddy:2.11.4-alpine
-readonly secret_file=/etc/clankie-gateway/host-tokens.json
-readonly account_file=/etc/clankie-gateway/account.json
+# Overridable only for --dry-run; a real activation refuses anything else.
+config_root="${CLANKIE_GATEWAY_CONFIG_ROOT:-/etc/clankie-gateway}"
+readonly config_root
+readonly secret_file="$config_root/host-tokens.json"
+readonly account_file="$config_root/account.json"
+readonly push_config_file="$config_root/push.json"
+readonly push_key_file="$config_root/apns.p8"
 readonly caddy_file=/opt/clankie-gateway/Caddyfile
+# APNs delivery (ADR 0159): read-only config and key, one writable directory for
+# the registration database. `node` in the runtime image is uid 1000.
+readonly push_data_dir=/var/lib/clankie-gateway/push
+readonly push_data_target=/var/lib/clankie-gateway
+readonly push_runtime_uid=1000
+push_mount_args=(
+  --env CLANKIE_GATEWAY_PUSH_CONFIG_FILE=/run/config/push.json
+  --mount "type=bind,source=$push_config_file,target=/run/config/push.json,readonly"
+  --mount "type=bind,source=$push_key_file,target=/run/secrets/apns.p8,readonly"
+  --mount "type=bind,source=$push_data_dir,target=$push_data_target"
+)
 
 if [[ "${1:-}" == "--version" ]]; then
   echo "$activator_version"
   exit 0
 fi
+
+# Prints what a real activation would mount for the current config root, and
+# nothing else: no root, no docker, no mutation. This is what the repository
+# check exercises.
+if [[ "${1:-}" == "--dry-run" ]]; then
+  echo "config-root $config_root"
+  if [[ -e "$push_config_file" ]]; then
+    echo "requires $push_config_file root:root:644"
+    echo "requires $push_key_file root:clankie-gateway-secrets:640"
+    echo "requires $push_data_dir uid:$push_runtime_uid:700"
+    echo "requires image-user node"
+    for ((i=0; i<${#push_mount_args[@]}; i+=2)); do
+      echo "arg ${push_mount_args[i]} ${push_mount_args[i+1]}"
+    done
+  else
+    echo "push disabled"
+  fi
+  exit 0
+fi
+
+[[ "$config_root" == /etc/clankie-gateway ]] || {
+  echo "CLANKIE_GATEWAY_CONFIG_ROOT is for --dry-run only" >&2
+  exit 2
+}
 
 if [[ $EUID -ne 0 || -z "${SUDO_USER:-}" || "$SUDO_USER" == root || $# -ne 2 ]]; then
   echo "Usage: sudo $0 /tmp/clankie-gateway-<release-id> clankie-public-gateway:<release-id>" >&2
@@ -74,7 +114,38 @@ fi
   exit 1
 }
 
+# Push is opt-in and entirely absent unless the operator placed push.json.
+push_enabled=false
+if [[ -e "$push_config_file" ]]; then
+  push_enabled=true
+  [[ -f "$push_config_file" && ! -L "$push_config_file" && "$(stat -c %U:%G:%a "$push_config_file")" == "root:root:644" ]] || {
+    echo "$push_config_file must be a regular root:root mode 0644 file" >&2
+    exit 1
+  }
+  [[ -f "$push_key_file" && ! -L "$push_key_file" && "$(stat -c %U:%G:%a "$push_key_file")" == "root:clankie-gateway-secrets:640" ]] || {
+    echo "$push_key_file must be a regular root:clankie-gateway-secrets mode 0640 file" >&2
+    exit 1
+  }
+  # The registration database is the delivery authorization for every paired
+  # phone. It lives outside the read-only container on a host directory the
+  # runtime user owns, so it survives a release and nothing else can read it.
+  [[ -d "$push_data_dir" && ! -L "$push_data_dir" && "$(stat -c %u:%a "$push_data_dir")" == "$push_runtime_uid:700" ]] || {
+    echo "$push_data_dir must be a real directory owned by uid $push_runtime_uid mode 0700" >&2
+    echo "  install -d -o $push_runtime_uid -g $push_runtime_uid -m 0700 $push_data_dir" >&2
+    exit 1
+  }
+  gateway_config_args+=("${push_mount_args[@]}")
+fi
+
 docker load --input "$release_dir/gateway-image.tar"
+if [[ "$push_enabled" == true ]]; then
+  # The directory ownership above only works if the image still runs as `node`.
+  image_user="$(docker image inspect --format '{{.Config.User}}' "$image_ref")"
+  [[ "$image_user" == node || "$image_user" == "$push_runtime_uid" ]] || {
+    echo "Image runs as '${image_user:-root}'; $push_data_dir is owned by uid $push_runtime_uid" >&2
+    exit 1
+  }
+fi
 docker pull "$caddy_image"
 docker network inspect clankie-gateway >/dev/null 2>&1 || docker network create clankie-gateway >/dev/null
 docker volume create clankie-caddy-data >/dev/null

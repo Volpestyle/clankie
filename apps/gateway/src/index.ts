@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { PublicGatewayConfigSchema } from "@clankie/protocol/public-gateway";
 import { createCognitoAccessTokenVerifier } from "./cognito-jwt.ts";
 import { createPublicGateway, loadHostTokens, type PublicGatewayLogger } from "./gateway.ts";
+import { createGatewayPush, loadGatewayPushConfig } from "./push-config.ts";
 
 const port = parsePort(process.env.PORT ?? "8080");
 const host = process.env.CLANKIE_GATEWAY_HOST ?? "0.0.0.0";
@@ -14,6 +15,9 @@ const logger: PublicGatewayLogger = {
 if (hostTokens.size === 0 && accountConfig === undefined) {
   throw new Error("Configure Cognito account discovery or at least one legacy gateway host credential");
 }
+// Optional: an unconfigured gateway boots exactly as before and answers wakes
+// `unavailable`. A configured one fails loudly rather than dropping them.
+const push = createGatewayPush(loadGatewayPushConfig());
 const gateway = createPublicGateway({
   hostTokens,
   ...(accountConfig === undefined
@@ -25,16 +29,22 @@ const gateway = createPublicGateway({
           clientId: accountConfig.account.clientId,
         }),
       }),
+  ...(push === undefined ? {} : { push: { registrations: push.registrations, sender: push.sender } }),
   logger,
 });
 
 gateway.server.listen(port, host, () => {
-  logger.info({ host, port }, "public gateway listening");
+  logger.info({ host, port, push: push !== undefined }, "public gateway listening");
 });
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void gateway.close().finally(() => process.exit(0));
+    // This module opened the push dependencies, so this module closes them —
+    // after the gateway stops handing them work.
+    void gateway
+      .close()
+      .then(async () => await push?.close())
+      .finally(() => process.exit(0));
   });
 }
 

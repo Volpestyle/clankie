@@ -1632,6 +1632,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return Promise.resolve(seatOutbox.reply(eventId, text));
     },
 
+    observeDurableMessages(listener) {
+      return conversations.observeDurableMessages(listener);
+    },
+
     async close(): Promise<void> {
       seatOutbox.close();
       herdrTerminals.close();

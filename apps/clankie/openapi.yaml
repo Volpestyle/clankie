@@ -1136,6 +1136,12 @@ paths:
       tags: [Devices, Operator]
       operationId: listDevices
       summary: List paired devices
+      description: |
+        Secret-free rows. `push` carries the device's last delivery state —
+        `{ registrationId, sequence, enabled }` — so the listing is truthful
+        about a device that turned notifications off or whose registration the
+        gateway invalidated. The APNs token and delivery key are never here
+        (ADR 0159).
       security: [{ operatorBearer: [] }]
       responses:
         "200":
@@ -1164,6 +1170,34 @@ paths:
       responses:
         "200":
           description: Self row
+
+  /v1/devices/self/push:
+    post:
+      tags: [Devices]
+      operationId: setDevicePush
+      summary: Device records or clears its push delivery reference
+      description: |
+        Body is `{ registrationId, sequence, enabled }`. The host stores only the
+        reference, its version and whether delivery is on — never the APNs token
+        or the delivery key, which the app registers with the gateway directly
+        (ADR 0159). Disabling records that state at its version rather than
+        forgetting it, so ordering survives it.
+
+        An older `sequence` is `409 stale_push_registration`. The same
+        `sequence` is accepted only when it restates what was already recorded:
+        a different `registrationId`, or the same one with `enabled` flipped, is
+        `409 conflicting_push_registration`. That is also what refuses a
+        re-enable at the version a gateway invalidation was recorded against.
+      security: [{ deviceBearer: [] }]
+      responses:
+        "200":
+          description: Accepted reference, echoed with its enabled state
+        "400":
+          description: Malformed body
+        "401":
+          description: Device session is unknown, expired, or revoked
+        "409":
+          description: Stale or conflicting registration version
 
   /v1/devices/self/session/refresh:
     post:

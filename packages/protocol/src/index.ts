@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DevicePushBindingSchema, DevicePushRequestSchema } from "./device-push.ts";
+import { DevicePushRequestSchema } from "./device-push.ts";
 export * from "./device-push.ts";
 
 /** Frozen event-log partition key. Still serialized as `missionId`. */
@@ -3657,7 +3657,12 @@ export const DeviceRecordSchema = z
     pendingExpiresAt: z.string().datetime(),
     activatedAt: z.string().datetime().optional(),
     lastRefreshAt: z.string().datetime().optional(),
-    push: DevicePushBindingSchema.optional(),
+    /**
+     * Last delivery state the device asked for, disabled included (ADR 0159).
+     * Retained rather than dropped so its version keeps ordering the next
+     * request; the token and delivery key stay at the gateway.
+     */
+    push: DevicePushRequestSchema.optional(),
     revokedAt: z.string().datetime().optional(),
     revokedBy: z.string().min(1).optional(),
   })
@@ -3812,6 +3817,8 @@ export const DeviceListItemSchema = z.object({
   createdAt: z.string().datetime(),
   activatedAt: z.string().datetime().optional(),
   lastRefreshAt: z.string().datetime().optional(),
+  /** Delivery reference and state only; the token and key live at the gateway (ADR 0159). */
+  push: DevicePushRequestSchema.optional(),
   revokedAt: z.string().datetime().optional(),
   revokedBy: z.string().min(1).optional(),
 });

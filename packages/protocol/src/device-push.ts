@@ -16,6 +16,11 @@ const DeliveryKeySchema = z
   .length(43)
   .regex(/^[A-Za-z0-9_-]+$/u);
 export const DevicePushEnvironmentSchema = z.enum(["sandbox", "production"]);
+export const ApnsDeviceTokenSchema = z
+  .string()
+  .min(32)
+  .max(512)
+  .regex(/^(?:[a-fA-F0-9]{2})+$/u);
 
 /** The host holds only a reference, never the APNs token or delivery secret. */
 export const DevicePushBindingSchema = z
@@ -31,13 +36,9 @@ export type DevicePushRequest = z.infer<typeof DevicePushRequestSchema>;
 
 /** Device initiated. The gateway verifies the bearer at hostId, then checks the delivery key. */
 export const PublicGatewayPushRegistrationRequestSchema = DevicePushBindingSchema.extend({
-  hostId: OpaqueIdSchema,
+  hostId: OpaqueIdSchema.min(16),
   deliveryKey: DeliveryKeySchema,
-  deviceToken: z
-    .string()
-    .min(32)
-    .max(512)
-    .regex(/^(?:[a-fA-F0-9]{2})+$/u),
+  deviceToken: ApnsDeviceTokenSchema,
   environment: DevicePushEnvironmentSchema,
 }).strict();
 export type PublicGatewayPushRegistrationRequest = z.infer<typeof PublicGatewayPushRegistrationRequestSchema>;
@@ -45,6 +46,8 @@ export type PublicGatewayPushRegistrationRequest = z.infer<typeof PublicGatewayP
 /** Delivery can be revoked with the app's key even when its former host is offline. */
 export const PublicGatewayPushClearRequestSchema = DevicePushBindingSchema.extend({
   deliveryKey: DeliveryKeySchema,
+  // Only needed to authorize creating a tombstone before the first registration.
+  hostId: OpaqueIdSchema.min(16).optional(),
 }).strict();
 export type PublicGatewayPushClearRequest = z.infer<typeof PublicGatewayPushClearRequestSchema>;
 

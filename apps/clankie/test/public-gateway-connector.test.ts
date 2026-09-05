@@ -201,6 +201,110 @@ interface FakeGatewayConnection {
   send(frame: PublicGatewayTunnelFrame): void;
 }
 
+describe("push wakes over the same socket", () => {
+  it("answers a wake with the gateway's status and carries ids only", async () => {
+    const gateway = await fakeGateway();
+    const connector = await startedConnector(gateway.origin);
+    const connection = await gateway.nextConnection();
+
+    const wake = connector.sendPushWake({
+      wakeId: "3f4a0d1e-2b6c-4d7e-8f90-a1b2c3d4e5f6",
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      registrationId: "6f1f0f9a-4e7c-4a4f-9c1a-2b6d5f0a1c33",
+      sequence: 5,
+    });
+    const frame = await connection.nextFrame();
+    expect(frame).toEqual({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "push_wake",
+      wakeId: "3f4a0d1e-2b6c-4d7e-8f90-a1b2c3d4e5f6",
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      registrationId: "6f1f0f9a-4e7c-4a4f-9c1a-2b6d5f0a1c33",
+      sequence: 5,
+    });
+    // No host id: the gateway takes that from the authenticated socket.
+    expect(JSON.stringify(frame)).not.toContain(hostId);
+    connection.send({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "push_wake_result",
+      wakeId: "3f4a0d1e-2b6c-4d7e-8f90-a1b2c3d4e5f6",
+      status: "unregistered",
+    });
+    await expect(wake).resolves.toBe("unregistered");
+  });
+
+  it("reports unavailable when the socket drops before the gateway answers", async () => {
+    const gateway = await fakeGateway();
+    const connector = await startedConnector(gateway.origin);
+    const connection = await gateway.nextConnection();
+
+    const wake = connector.sendPushWake({
+      wakeId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      registrationId: "6f1f0f9a-4e7c-4a4f-9c1a-2b6d5f0a1c33",
+      sequence: 1,
+    });
+    await connection.nextFrame();
+    connection.socket.close();
+    await expect(wake).resolves.toBe("unavailable");
+  });
+
+  it("reports unavailable when the connector is closed, and never rejects a caller", async () => {
+    const gateway = await fakeGateway();
+    const connector = await startedConnector(gateway.origin);
+    const connection = await gateway.nextConnection();
+
+    const wake = connector.sendPushWake({
+      wakeId: "1b2c3d4e-5f60-4718-9293-a4b5c6d7e8f9",
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      registrationId: "6f1f0f9a-4e7c-4a4f-9c1a-2b6d5f0a1c33",
+      sequence: 1,
+    });
+    await connection.nextFrame();
+    connector.close();
+    await expect(wake).resolves.toBe("unavailable");
+  });
+
+  it("closes the socket when the gateway sends a host-owned wake frame", async () => {
+    const gateway = await fakeGateway();
+    await startedConnector(gateway.origin);
+    const connection = await gateway.nextConnection();
+
+    connection.send({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "push_wake",
+      wakeId: "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      registrationId: "6f1f0f9a-4e7c-4a4f-9c1a-2b6d5f0a1c33",
+      sequence: 1,
+    });
+    const [code] = (await once(connection.socket, "close")) as [number];
+    expect(code).toBe(1008);
+  });
+});
+
+/** A started connector pointed at a fake gateway, with loopback stubs behind it. */
+async function startedConnector(gatewayOrigin: string): Promise<PublicGatewayConnector> {
+  const control = await listen(createServer((_request, response) => response.end("{}")));
+  const connector = new PublicGatewayConnector({
+    gatewayUrl: gatewayOrigin,
+    hostId,
+    hostToken,
+    controlPlaneUrl: control,
+    relayUrl: control,
+    reconnectMinimumMs: 5,
+    reconnectMaximumMs: 10,
+  });
+  connectors.push(connector);
+  connector.start();
+  return connector;
+}
+
 async function fakeGateway(): Promise<{
   readonly origin: string;
   nextConnection(): Promise<FakeGatewayConnection>;

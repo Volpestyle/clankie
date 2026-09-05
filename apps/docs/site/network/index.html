@@ -69,8 +69,17 @@
           <li>It does not run Clankie, a model, a terminal, or a Herdr fleet.</li>
           <li>It does not mint device sessions or decide device grants.</li>
           <li>It does not expose arbitrary machine paths or arbitrary HTTP forwarding.</li>
-          <li>It does not retain request bodies, response bodies, message content, or terminal frames.</li>
+          <li>It does not retain forwarded content bodies, message content, or terminal frames.</li>
         </ul>
+
+        <h2>Optional push delivery</h2>
+        <p>
+          When push is configured, the gateway stores APNs tokens, routing identifiers, delivery-key hashes,
+          and versioned revocations. The app’s key authorizes moving or clearing an existing registration,
+          including when its former machine is offline. The machine holds only a registration reference. Wakes
+          carry a fixed alert and host/conversation identifiers, never message text. Apple receives the token,
+          timing, and those identifiers. Pairing and messaging work without push configuration.
+        </p>
 
         <h2>Security boundary</h2>
         <p>

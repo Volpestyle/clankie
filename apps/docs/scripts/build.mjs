@@ -8,6 +8,11 @@ import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_ROUTES,
 } from "../../../packages/protocol/src/public-gateway.ts";
+import {
+  DEVICE_PUSH_PATH,
+  PUBLIC_GATEWAY_PUSH_CLEAR_PATH,
+  PUBLIC_GATEWAY_PUSH_REGISTRATIONS_PATH,
+} from "../../../packages/protocol/src/device-push.ts";
 
 const appRoot = resolve(import.meta.dirname, "..");
 const repoRoot = resolve(appRoot, "../..");
@@ -172,6 +177,13 @@ function buildNetworkRows() {
       },
     ],
     [
+      `POST ${DEVICE_PUSH_PATH}`,
+      {
+        access: "Device bearer",
+        purpose: "Enable or disable this device’s versioned push reference on its machine.",
+      },
+    ],
+    [
       "POST /operator/v1/dispatch",
       {
         access: "Device bearer plus the operation’s grant",
@@ -213,6 +225,18 @@ function buildNetworkRows() {
       access: "Machine account bearer",
       purpose: "Keep one authenticated outbound connection from a Clankie machine.",
     },
+    {
+      method: "POST",
+      route: PUBLIC_GATEWAY_PUSH_REGISTRATIONS_PATH,
+      access: "Device bearer verified by its machine, plus the app’s delivery key",
+      purpose: "Register or move versioned APNs delivery when push is configured.",
+    },
+    {
+      method: "POST",
+      route: PUBLIC_GATEWAY_PUSH_CLEAR_PATH,
+      access: "App delivery key; first allocation also requires a verified device bearer",
+      purpose: "Revoke delivery, including when the former machine is offline.",
+    },
   ];
 
   for (const route of PUBLIC_GATEWAY_ROUTES) {
@@ -234,13 +258,15 @@ function buildNetworkRows() {
   const markdown = [
     "# Public network surface",
     "",
-    "`api.clankie.bot` accepts only the routes below. The gateway carries bounded exchanges to an authenticated machine; your machine still owns devices, grants, conversations, and terminal authority. It does not run Clankie, a model, a terminal, or a Herdr fleet, and it retains no request bodies, message content, or terminal frames.",
+    "`api.clankie.bot` accepts only the routes below. The gateway carries bounded exchanges to an authenticated machine; your machine still owns devices, grants, conversations, and terminal authority. It does not run Clankie, a model, a terminal, or a Herdr fleet, and it retains no forwarded content bodies, message content, or terminal frames.",
     "",
     "```",
     "iPhone or iPad ── HTTPS ── api.clankie.bot ── outbound WebSocket ── your machine",
     "```",
     "",
     "The first pairing redemption uses the stable public origin. Successful redemption returns an opaque, host-scoped origin (`/h/{hostId}`). Normal app calls use that origin and a device credential minted by your machine.",
+    "",
+    "When push is configured, the gateway stores APNs tokens, routing identifiers, delivery-key hashes and versioned revocations. Only the app’s key can move or clear an existing delivery registration. Wakes contain a fixed alert and host/conversation identifiers, never message text. Apple receives the token, timing and those identifiers. An unconfigured gateway refuses push without changing pairing or messaging.",
     "",
     "| Method | Route | Access | Purpose |",
     "| --- | --- | --- | --- |",

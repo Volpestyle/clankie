@@ -18,8 +18,9 @@ service (`apps/clankie`) plus the surfaces that reach it.
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/relay` — remote access for the phone/desktop app.
-- `apps/gateway` — the public AWS doorway (ADR 0151); holds no state and
-  routes back to a configured Mac over its outbound socket.
+- `apps/gateway` — the public AWS doorway (ADR 0151); routes back to a
+  configured Mac over its outbound socket. Optional APNs delivery owns only
+  device-authorized routing registrations (ADR 0159), never conversations or grants.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
 - `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
   actions); all other herdr integration is vanilla CLI/socket (ADR 0139).
