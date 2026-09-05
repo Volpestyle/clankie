@@ -1,0 +1,147 @@
+== 0. build context: tracked files at HEAD only
+   1076 files from 258f776d
+   clankie-app client: 33e0ba9 (33e0ba9)
+== 1. image
+sha256:ff0b903eb67b3eda70111265b70f338e278f7e82c5793a7d5091bfb201064a34
+== 2. container (--init is required: see breakage 1)
+== 3. control-plane forwarder (stands in for the gateway; see breakage 2)
+== 4. synthetic provider (transport only; no credential, no model proof)
+== 5. boot: starts Clankie + relay, never the activity surface
+Starting Clankie…
+Starting App relay…
+Starting Discord bridge…
+✓ Clankie
+✓ App relay (devices on 127.0.0.1:4321)
+✓ Discord bridge
+{"ok":true,"status":"ready","host":"http://127.0.0.1:4310","owned":true,"pid":101,"operatorCredential":{"present":true,"source":"store","consistency":"store_only"},"services":[{"id":"clankie","label":"Clankie","state":"healthy","owned":true,"pid":101},{"id":"relay","label":"App relay","state":"healthy","owned":true,"detail":"devices on 127.0.0.1:4321","pid":224},{"id":"discord-bridge","label":"Discord bridge","state":"healthy","owned":true,"detail":"no presence session","pid":283},{"id":"discord-user-session","label":"Discord lab body","state":"healthy","owned":false,"detail":"lab body off"},{"id":"activity","label":"Activity surface","state":"unreachable","owned":false},{"id":"tunnel","label":"Activity tunnel","state":"healthy","owned":false,"detail":"not configured; activity stays local"}]}
+{"ok":true,"service":"clankie","herdr":"healthy"}
+   control plane reachable from the host on 14310
+== 5b. VUH-1030: conflicts are scoped to this instance's own resources
+decoy pid 386 on 4399; 4320 free; 4322 free
+stopService(activity) without an owned record: threw
+startService(activity): threw — Activity surface is occupied by a process the clankie launcher does not own and is not healthy. Stop it, then retry.
+OLD GUARD: blocked by the stranger's command shape, as expected. Decoy untouched.
+decoy pid 386 on 4399; 4320 free; 4322 free
+stopService(activity) without an owned record: returned
+startService(activity): returned — state healthy
+NEW GUARD: start proceeded past the stranger. Decoy untouched.
+stopService(activity): returned
+NEW GUARD: stop proceeded past the stranger. Decoy untouched.
+decoy pid 386 on 4399; 4320 free; 4322 held by 514
+startService(activity): threw — Activity surface is occupied by a process the clankie launcher does not own and is not healthy. Stop it, then retry.
+PRODUCER PORT: a listener on 4322 blocks the start, as it should.
+== 6. file credential broker
+600 root /state/credentials.json
+== 7. pairing + seat DM round trip, through the app's own client
+
+== 1. connectFromPairingUrl -> snapshot
+{
+  "phase": "access_review",
+  "host": {
+    "id": "mac",
+    "name": "d732f4e01481"
+  },
+  "offeredGrants": {
+    "chat": true,
+    "steer": true,
+    "terminalObserve": true,
+    "terminalControl": true
+  },
+  "grantedGrants": null,
+  "recovery": null
+}
+
+== 2. confirmAccess -> snapshot
+{
+  "phase": "connected",
+  "host": {
+    "id": "mac",
+    "name": "d732f4e01481"
+  },
+  "offeredGrants": {
+    "chat": true,
+    "steer": true,
+    "terminalObserve": true,
+    "terminalControl": true
+  },
+  "grantedGrants": {
+    "chat": true,
+    "steer": true,
+    "terminalObserve": true,
+    "terminalControl": true
+  },
+  "recovery": null
+}
+
+== 3. device credential (token never printed or stored)
+{
+  "deviceId": "device-6241e58a-514",
+  "deviceToken": "<in memory, 202 chars>",
+  "controlPlaneUrl": "http://127.0.0.1:14310",
+  "relayUrl": "http://127.0.0.1:14321",
+  "grants": {
+    "chat": true,
+    "steer": true,
+    "terminalObserve": true,
+    "terminalControl": true
+  },
+  "sessionExpiresAt": "2026-09-12T02:15:47.000Z"
+}
+   -> the container's advertised relay origin reached the device unchanged
+
+== 4. relay dispatch op=list
+{
+  "status": 200,
+  "json": {
+    "op": "list",
+    "schemaVersion": 1,
+    "conversations": [
+      {
+        "schemaVersion": 1,
+        "conversationId": "global-default",
+        "scope": {
+          "kind": "global"
+        },
+        "title": "Clankie",
+        "isDefault": true,
+        "createdAt": "2026-09-05T02:15:40.032Z",
+        "updatedAt": "2026-09-05T02:15:40.032Z",
+        "sessionState": "unbound",
+        "revision": 0
+      }
+    ]
+  }
+}
+
+== 5. relay dispatch op=send (the seat DM)
+{
+  "status": 200,
+  "json": {
+    "op": "send",
+    "schemaVersion": 1,
+    "result": {
+      "schemaVersion": 1,
+      "status": "accepted",
+      "conversationId": "global-default",
+      "runId": "run-2d660f2a-05f9-4ad7-86ad-caae4cefcb76",
+      "revision": 1,
+      "safeCursor": "000000000000"
+    }
+  }
+}
+
+== 6. replayed conversation (op=tail, waitMs 0)
+[
+  "[message] operator: Linux container spike: can you hear me?",
+  "[turn]    accepted",
+  "[message] captain: Yes - I hear you from inside the Linux container.",
+  "[turn]    completed"
+]
+
+== 7. round trip complete
+{
+  "runId": "run-2d660f2a-05f9-4ad7-86ad-caae4cefcb76",
+  "reply": "Yes - I hear you from inside the Linux container."
+}
+
+== done. container clankie-spike-3038 and image clankie-linux-spike:3038 are removed on exit.

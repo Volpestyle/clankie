@@ -1,0 +1,13 @@
+== 5b. VUH-1030: conflicts are scoped to this instance's own resources
+decoy pid 392 on 4399; 4320 free; 4322 free
+startService(activity): threw — Activity surface is occupied by a process the clankie launcher does not own and is not healthy. Stop it, then retry.
+OLD GUARD: blocked by the stranger's command shape, as expected. Decoy untouched.
+decoy pid 392 on 4399; 4320 free; 4322 free
+startService(activity): returned — state healthy
+NEW GUARD: start proceeded past the stranger. Decoy untouched.
+stopService(activity): returned
+NEW GUARD: stop proceeded past the stranger. Decoy untouched.
+decoy pid 392 on 4399; 4320 free; 4322 held by 523
+startService(activity): threw — Activity surface is occupied by a process the clankie launcher does not own and is not healthy. Stop it, then retry.
+PRODUCER PORT: a listener on 4322 blocks the start, as it should.
+== 6. file credential broker

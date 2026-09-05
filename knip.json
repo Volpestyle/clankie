@@ -3,7 +3,15 @@
   "ignore": ["docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs"],
   "workspaces": {
     ".": {
-      "entry": ["docs/testing/2026-09-04-astra-terra-comparison/flows/assert-suite.mjs"]
+      "entry": [
+        "docs/testing/2026-09-04-astra-terra-comparison/flows/assert-suite.mjs",
+        "docs/testing/2026-09-04-linux-service-spike/flows/pairing-and-seat-dm.ts",
+        "docs/testing/2026-09-04-linux-service-spike/flows/synthetic-provider.mjs",
+        "docs/testing/2026-09-04-linux-service-spike/flows/guard-proof.mjs"
+      ],
+      "paths": {
+        "/clankie/*": ["./*"]
+      }
     },
     "apps/clankie": {
       "entry": ["test/fixtures/browser-mcp-server.mjs"]

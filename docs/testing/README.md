@@ -27,4 +27,5 @@ all other capabilities from the files present.
 - [2026-08-16 PokeAgent performance](2026-08-16-pokeagent-performance/README.md)
 - [2026-08-18 PokeAgents trial run](2026-08-18-pokeagents-trial-run/README.md)
 - [2026-08-30 Hosted FireRed intro on current Clankie](2026-08-30-hosted-firered-intro/README.md)
+- [2026-09-04 Clankie boots in a Linux container](2026-09-04-linux-service-spike/README.md)
 - [2026-09-04 Astra/Terra comparison: case A](2026-09-04-astra-terra-comparison/README.md)

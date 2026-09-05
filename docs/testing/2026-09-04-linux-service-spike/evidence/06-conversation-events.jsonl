@@ -1,0 +1,15 @@
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000001","revision":1,"occurredAt":"2026-09-05T00:43:56.468Z","type":"message","role":"operator","text":"Linux container spike: can you hear me?","streaming":false}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000002","revision":1,"occurredAt":"2026-09-05T00:43:56.468Z","type":"turn","runId":"run-fb9dfeb6-bbfc-45af-846e-a270312f43c7","phase":"accepted"}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000003","revision":1,"occurredAt":"2026-09-05T00:43:56.553Z","type":"context","usage":{"tokens":114,"contextWindow":32768}}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000004","revision":1,"occurredAt":"2026-09-05T00:43:56.554Z","type":"activity","phase":"retrying"}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000005","revision":1,"occurredAt":"2026-09-05T00:43:58.565Z","type":"context","usage":{"tokens":114,"contextWindow":32768}}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000006","revision":1,"occurredAt":"2026-09-05T00:44:02.579Z","type":"context","usage":{"tokens":114,"contextWindow":32768}}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000007","revision":1,"occurredAt":"2026-09-05T00:44:10.591Z","type":"context","usage":{"tokens":114,"contextWindow":32768}}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000008","revision":1,"occurredAt":"2026-09-05T00:44:10.591Z","type":"activity","phase":"waiting"}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000009","revision":1,"occurredAt":"2026-09-05T00:44:10.593Z","type":"turn","runId":"run-fb9dfeb6-bbfc-45af-846e-a270312f43c7","phase":"completed"}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000010","revision":2,"occurredAt":"2026-09-05T00:47:24.835Z","type":"message","role":"operator","text":"Linux container spike round two: can you hear me?","streaming":false}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000011","revision":2,"occurredAt":"2026-09-05T00:47:24.835Z","type":"turn","runId":"run-899b4374-c47a-46ce-bca8-b4b95d71237a","phase":"accepted"}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000012","revision":2,"occurredAt":"2026-09-05T00:47:24.845Z","type":"activity","phase":"responding"}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000013","revision":2,"occurredAt":"2026-09-05T00:47:24.845Z","type":"message","role":"captain","text":"Yes - I hear you from inside the Linux container.","streaming":false}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000014","revision":2,"occurredAt":"2026-09-05T00:47:24.845Z","type":"context","usage":{"tokens":244,"contextWindow":32768}}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000015","revision":2,"occurredAt":"2026-09-05T00:47:24.846Z","type":"turn","runId":"run-899b4374-c47a-46ce-bca8-b4b95d71237a","phase":"completed"}

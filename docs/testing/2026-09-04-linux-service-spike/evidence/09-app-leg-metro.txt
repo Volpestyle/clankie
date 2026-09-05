@@ -1,0 +1,4 @@
+ INFO  CLANKIE_ADAPTERS native_input=registered markdown=registered image_picker=registered preferences=mmkv
+ INFO  CLANKIE_RUNTIME lane=simulator-live profile=development-live pairing=live
+ INFO  CLANKIE_ADAPTERS native_input=registered markdown=registered image_picker=registered preferences=mmkv
+ INFO  CLANKIE_RUNTIME lane=simulator-live profile=development-live pairing=live

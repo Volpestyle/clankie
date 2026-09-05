@@ -1,0 +1,7 @@
+clankie-app commit: 33e0ba9 (isolated clone, not the shared worktree)
+xcodebuild: 0 errors; result:
+** BUILD SUCCEEDED **
+artifact: Debug-iphonesimulator/Clankie.app  bundle io.clankie.dev
+simulator: VUH-1053-native-pP (iPhone 17 Pro, iOS 26.5) — created and deleted by this run
+metro: port 8091, isolated checkout, EXPO_PUBLIC_CLANKIE_CONTROL_PLANE_URL=http://127.0.0.1:14310
+ INFO  CLANKIE_RUNTIME lane=simulator-live profile=development-live pairing=live

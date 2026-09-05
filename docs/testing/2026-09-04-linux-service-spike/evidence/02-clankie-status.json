@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "status": "ready",
+  "host": "http://127.0.0.1:4310",
+  "owned": true,
+  "pid": 497,
+  "operatorCredential": { "present": true, "source": "store", "consistency": "store_only" },
+  "services": [
+    { "id": "clankie", "label": "Clankie", "state": "healthy", "owned": true, "pid": 497 },
+    {
+      "id": "relay",
+      "label": "App relay",
+      "state": "healthy",
+      "owned": true,
+      "detail": "devices on 127.0.0.1:4321",
+      "pid": 589
+    },
+    { "id": "discord-bridge", "label": "Discord bridge", "state": "unreachable", "owned": false },
+    {
+      "id": "discord-user-session",
+      "label": "Discord lab body",
+      "state": "healthy",
+      "owned": false,
+      "detail": "lab body off"
+    },
+    { "id": "activity", "label": "Activity surface", "state": "unreachable", "owned": false },
+    {
+      "id": "tunnel",
+      "label": "Activity tunnel",
+      "state": "healthy",
+      "owned": false,
+      "detail": "not configured; activity stays local"
+    }
+  ]
+}

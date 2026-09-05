@@ -1,0 +1,7 @@
+v24.20.0
+11.11.0
+    1 /sbin/docker-init -- docker-entrypoint.sh sleep infinity
+    7 sleep infinity
+   30 node /forward.mjs
+-rwxr-xr-x 1 root root 21796552 Sep  4 23:00 /clankie/.data/herdr/bin/herdr
+    1 docker-init

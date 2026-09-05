@@ -1,0 +1,6 @@
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000001","revision":1,"occurredAt":"2026-09-05T01:54:31.882Z","type":"message","role":"operator","text":"Native app on the Linux container: can you hear me?","streaming":false}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000002","revision":1,"occurredAt":"2026-09-05T01:54:31.882Z","type":"turn","runId":"run-b96b2edc-8cde-49c1-9a83-73147baa2d22","phase":"accepted"}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000003","revision":1,"occurredAt":"2026-09-05T01:54:32.147Z","type":"activity","phase":"responding"}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000004","revision":1,"occurredAt":"2026-09-05T01:54:32.148Z","type":"message","role":"captain","text":"Yes - I hear you from inside the Linux container.","streaming":false}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000005","revision":1,"occurredAt":"2026-09-05T01:54:32.149Z","type":"context","usage":{"tokens":130,"contextWindow":32768}}
+{"schemaVersion":1,"conversationId":"global-default","cursor":"000000000006","revision":1,"occurredAt":"2026-09-05T01:54:32.152Z","type":"turn","runId":"run-b96b2edc-8cde-49c1-9a83-73147baa2d22","phase":"completed"}
