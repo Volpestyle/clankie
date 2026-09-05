@@ -17,6 +17,9 @@ import {
 class StubSession {
   public isStreaming = false;
   public readonly calls: { text: string; behavior: string | undefined }[] = [];
+  public readonly state: {
+    messages: { role: string; stopReason?: string; errorMessage?: string }[];
+  } = { messages: [] };
   private readonly runs: { resolve: () => void; reject: (error: Error) => void }[] = [];
 
   public prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp" }): Promise<void> {
@@ -42,6 +45,20 @@ class StubSession {
   }
 
   public settleRun(): void {
+    this.runs.shift()?.resolve();
+  }
+
+  /**
+   * pi's own settlement shape (Agent.handleRunFailure): a run that failed
+   * resolves like any other and leaves only a terminal assistant message
+   * carrying the stop reason. An aborted run arrives the same way.
+   */
+  public settleRunAs(stopReason: string, errorMessage?: string): void {
+    this.state.messages.push({
+      role: "assistant",
+      stopReason,
+      ...(errorMessage === undefined ? {} : { errorMessage }),
+    });
     this.runs.shift()?.resolve();
   }
 
@@ -118,6 +135,68 @@ describe("runDurableTurn", () => {
     session.failRun(new Error("model unavailable"));
     await expect(first).rejects.toThrow("model unavailable");
     await expect(second).rejects.toThrow("steered into failed");
+  });
+
+  it("carries pi's own reason out of a run that resolved with stopReason error", async () => {
+    const session = new StubSession();
+    const lane = makeLane(session);
+
+    const turn = runDurableTurn(lane, "first", []);
+    await drain();
+
+    session.settleRunAs("error", "The usage limit has been reached");
+    await expect(turn).rejects.toThrow("The usage limit has been reached");
+  });
+
+  it("never tells absorbed turns the run succeeded when pi settled it in error", async () => {
+    const session = new StubSession();
+    const lane = makeLane(session);
+
+    const first = runDurableTurn(lane, "first", []);
+    // The fact absorbed turns wait on is settled with the run that owns it, so
+    // it has to be wrong here before any waiter resumes and re-reads the lane.
+    const shared = lane.running;
+    session.startStreaming();
+    const second = runDurableTurn(lane, "second", []);
+    await drain();
+
+    session.settleRunAs("error", "The usage limit has been reached");
+    await expect(first).rejects.toThrow("The usage limit has been reached");
+    await expect(second).rejects.toThrow("steered into failed");
+    await expect(shared).resolves.toBe(false);
+  });
+
+  it("fails a run pi errored without a reason rather than reporting a silent turn", async () => {
+    const session = new StubSession();
+    const lane = makeLane(session);
+
+    const turn = runDurableTurn(lane, "first", []);
+    await drain();
+
+    session.settleRunAs("error");
+    await expect(turn).rejects.toThrow("without a reason");
+  });
+
+  it("leaves a normal stop alone, so an answer with no tool calls still runs", async () => {
+    const session = new StubSession();
+    const lane = makeLane(session);
+
+    const turn = runDurableTurn(lane, "first", []);
+    await drain();
+
+    session.settleRunAs("stop");
+    await expect(turn).resolves.toBe("ran");
+  });
+
+  it("leaves an aborted run to the caller's own interrupt path", async () => {
+    const session = new StubSession();
+    const lane = makeLane(session);
+
+    const turn = runDurableTurn(lane, "first", []);
+    await drain();
+
+    session.settleRunAs("aborted", "This operation was aborted");
+    await expect(turn).resolves.toBe("ran");
   });
 
   it("waits on a preparing lane instead of starting a second prompt", async () => {

@@ -421,16 +421,42 @@ interface LaneSession {
 }
 
 /**
+ * The slice of pi's agent state a settled run is judged on. Kept structural so
+ * a turn only ever asks for the transcript it reads.
+ */
+interface PiRunState {
+  readonly messages: readonly {
+    readonly role: string;
+    readonly stopReason?: string | undefined;
+    readonly errorMessage?: string | undefined;
+  }[];
+}
+
+/**
+ * pi can resolve a failed prompt with a terminal assistant `stopReason: "error"`.
+ * Preserve its reason for the existing failure path. Aborts remain the caller's
+ * interrupt path.
+ */
+function piRunFailure(state: PiRunState): string | undefined {
+  const last = state.messages.at(-1);
+  if (last?.role !== "assistant" || last.stopReason !== "error") return undefined;
+  return last.errorMessage ?? "The model run failed without a reason.";
+}
+
+/**
  * One turn against a durable lane (ADR 0091). An idle lane starts the run and
  * carries the final reply. A lane already mid-run gets the message steered
  * into the live run — pi delivers it at the next turn boundary and keeps the
  * loop alive until the queue drains — and the caller reports "absorbed" once
  * the merged run settles: the runner's reply answers everything heard, so an
  * absorbed turn must stay silent rather than double-speak.
+ *
+ * A pi error fails both the owning turn and absorbed turns. The owner carries
+ * pi's reason; absorbed turns retain their existing failed-run error.
  */
 export async function runDurableTurn(
   lane: {
-    readonly session: Pick<AgentSession, "isStreaming" | "prompt">;
+    readonly session: Pick<AgentSession, "isStreaming" | "prompt"> & { readonly state: PiRunState };
     readonly capture: TurnContext;
     running?: Promise<boolean> | undefined;
     starting?: Promise<void> | undefined;
@@ -448,15 +474,22 @@ export async function runDurableTurn(
       // awaiting — so the state observed here is the state it acts on.
       lane.capture.media = undefined;
       const run = lane.session.prompt(prompt, { expandPromptTemplates, images });
-      lane.running = run
+      // A failed pi run resolves exactly like a good one, so the outcome has to
+      // be read out of the lane at this run's own settlement — before the fact
+      // is shared with absorbed turns, and while the state still describes this
+      // run rather than whatever a resumed waiter has since started.
+      const settlement = run.then(() => piRunFailure(lane.session.state));
+      lane.running = settlement
         .then(
-          () => true,
+          (failure) => failure === undefined,
           () => false,
         )
         .finally(() => {
           lane.running = undefined;
         });
       await run;
+      const failure = await settlement;
+      if (failure !== undefined) throw new Error(failure);
       return "ran";
     }
     if (lane.session.isStreaming) {

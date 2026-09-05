@@ -14,6 +14,10 @@ afterEach(async () => {
 class OperatorSteerSession {
   public isStreaming = false;
   public readonly calls: { text: string; behavior: string | undefined }[] = [];
+  /** Every run here settles clean; pi's failure shape is covered in captain-voice-steer. */
+  public readonly state: {
+    messages: { role: string; stopReason?: string; errorMessage?: string }[];
+  } = { messages: [] };
   private readonly runs: { resolve: () => void }[] = [];
 
   public prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp" }): Promise<void> {
