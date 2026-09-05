@@ -70,6 +70,13 @@ until a note is released or forgotten. `/memory` is the console browser.
 `clankie pair` and `/pair` start or reuse the local relay before minting a code;
 run pairing on the host that owns the relay.
 
+`clankie send --conversation ID "message"` steers Clankie's active Pi turn;
+add `--delivery queue` for a separate follow-up. Use `--stdin` instead of a
+quoted message to read a pipe while preserving interior newlines. Either starts
+a turn when idle. JSON stdout is an admission receipt, not a reply; observe the same
+conversation with `clankie --chat ID`. Channel rounds and external seats keep
+their own delivery behavior. Full contract: `{repoRoot}/docs/cli.md`.
+
 JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `operator-credential rotate` default to human text — pass `--json`.
 

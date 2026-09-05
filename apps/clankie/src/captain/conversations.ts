@@ -334,6 +334,7 @@ export class ConversationStore {
   private readonly runCounts = new Map<string, number>();
   /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
   private readonly internalRuns = new Map<string, number>();
+  private readonly activeInvocations = new Map<string, number>();
 
   private readonly root: string;
   private readonly runner: ConversationRunner;
@@ -1173,7 +1174,10 @@ export class ConversationStore {
       turn.herdrPaneId,
       true,
       meta.scope.kind === "channel" ? this.channelRound(true) : this.runner,
-      { surfaceClientId: turn.surfaceClientId },
+      {
+        surfaceClientId: turn.surfaceClientId,
+        ...(turn.delivery === undefined || meta.scope.kind === "channel" ? {} : { delivery: turn.delivery }),
+      },
     );
   }
 
@@ -1436,7 +1440,9 @@ export class ConversationStore {
     herdrPaneId: string | undefined,
     publishOperatorMessage: boolean,
     runner: ConversationRunner = this.runner,
-    provenance: Pick<ConversationTurnContext, "origin" | "surfaceClientId"> = {},
+    provenance: Pick<ConversationTurnContext, "origin" | "surfaceClientId"> & {
+      delivery?: SubmitOperatorConversationTurn["delivery"];
+    } = {},
   ): SubmitOperatorConversationTurnResult {
     const workspace = workspaceOf(meta.scope);
     const safeCursor = this.lastCursor(meta);
@@ -1454,15 +1460,22 @@ export class ConversationStore {
     this.runCounts.set(conversationId, (this.runCounts.get(conversationId) ?? 0) + 1);
     const controller = new AbortController();
     this.runControllers.set(runId, { conversationId, controller });
-    // Steer only while an autonomous invoke is in flight. A continuation still
-    // sitting on the FIFO must not open the lane — that let a later human send
-    // jump an in-flight human turn (ADR 0091 / ADR 0130).
-    const joinLiveInternal = publishOperatorMessage && (this.internalRuns.get(conversationId) ?? 0) > 0;
+    // Explicit steering joins the active invocation, including its Pi startup.
+    // An explicit queue always waits; older callers retain automatic steering
+    // into autonomous turns. Merely queued work never opens a live lane.
+    const joinLive =
+      publishOperatorMessage &&
+      (provenance.delivery === "steer"
+        ? (this.activeInvocations.get(conversationId) ?? 0) > 0
+        : provenance.delivery !== "queue" && (this.internalRuns.get(conversationId) ?? 0) > 0);
 
     const previous = this.chains.get(conversationId) ?? Promise.resolve();
+    let invoked = false;
     const invoke = (): Promise<void> => {
       // Cancelled while still queued: settle without ever invoking the runner.
       if (controller.signal.aborted) return Promise.resolve();
+      invoked = true;
+      this.activeInvocations.set(conversationId, (this.activeInvocations.get(conversationId) ?? 0) + 1);
       if (!publishOperatorMessage) {
         this.internalRuns.set(conversationId, (this.internalRuns.get(conversationId) ?? 0) + 1);
       }
@@ -1492,9 +1505,7 @@ export class ConversationStore {
         },
       );
     };
-    // A human send during an in-flight autonomous turn is admitted now so the
-    // captain can steer it into the live pi run (ADR 0091). Other pairs stay FIFO.
-    const work = joinLiveInternal ? invoke() : previous.then(invoke);
+    const work = joinLive ? invoke() : previous.then(invoke);
     const run = work
       .then(() => {
         const cancelled = this.cancelRequests.has(runId);
@@ -1542,7 +1553,12 @@ export class ConversationStore {
         // Nothing is typing here any more: a draft stranded by a failed or
         // interrupted turn comes down with the last run, not on the next one.
         if (remaining <= 0) this.setLiveDraft(conversationId, undefined);
-        if (!publishOperatorMessage) {
+        if (invoked) {
+          const active = (this.activeInvocations.get(conversationId) ?? 1) - 1;
+          if (active <= 0) this.activeInvocations.delete(conversationId);
+          else this.activeInvocations.set(conversationId, active);
+        }
+        if (invoked && !publishOperatorMessage) {
           const remainingInternal = (this.internalRuns.get(conversationId) ?? 1) - 1;
           if (remainingInternal <= 0) this.internalRuns.delete(conversationId);
           else this.internalRuns.set(conversationId, remainingInternal);
@@ -1551,7 +1567,7 @@ export class ConversationStore {
       });
     this.chains.set(
       conversationId,
-      joinLiveInternal
+      joinLive
         ? Promise.all([previous, run.then(() => undefined)]).then(() => undefined)
         : run.then(() => undefined),
     );

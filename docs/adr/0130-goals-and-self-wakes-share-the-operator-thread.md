@@ -4,11 +4,12 @@ Status: accepted (James, 2026-08-25). Extends
 [ADR 0111](0111-a-console-process-starts-one-conversation.md) and
 [ADR 0124](0124-one-self-has-many-local-threads.md).
 
-## Current status (2026-08-26)
+## Input admission
 
-A human send steers into an autonomous turn only while that turn's `invoke()`
-is in flight. A goal or wake merely queued on the FIFO stays FIFO with every
-other pair, including a later human send
+A human send with automatic delivery steers into an autonomous turn only while
+that turn's `invoke()` is in flight. A goal or wake merely queued on the FIFO
+does not open a live lane. Explicit `steer` also joins active human turns;
+explicit `queue` always waits for its own turn
 ([ADR 0091](0091-a-mid-turn-message-steers-the-turn.md)).
 
 ## Context

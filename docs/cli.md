@@ -47,6 +47,7 @@ device table, credential-rotate sentence). Everything else is already JSON.
 | `model …`, `effort …`, `image-model …`, `video-model …`                  | JSON                                                                                         |
 | `persona …`, `games …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                            | JSON                                                                                         |
+| `send --conversation ID …`                                               | JSON accepted-run receipt or refusal                                                         |
 | `play stop`                                                              | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
 | `prompt …`, `memory-card …`                                              | Plain text: the prompt or card itself, verbatim                                              |
 | `seat`                                                                   | Interactive (TTY); `seat --dry-run` is JSON                                                  |
@@ -489,6 +490,31 @@ home directory. `set` expands a leading `~` and stores the absolute path.
 JSON contains `workingDirectory` (the configured value or `null`),
 `effective` (what the captain runs in after a restart), `settingsFile`, and
 `"restart": "clankie restart captain"`.
+
+### `send --conversation ID [--delivery steer|queue] (MESSAGE | --stdin)`
+
+Send to an existing operator conversation through the shared service API.
+The default `steer` joins Clankie's active Pi turn at its next input boundary;
+`queue` waits for a separate turn after earlier queued work. Either starts a
+turn when idle. Channel rounds and external seats keep their own delivery
+behavior ([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)).
+
+```bash
+clankie send --conversation global-default "Focus on the failing test first"
+clankie send --conversation global-default --delivery queue "Then update the docs"
+cat notes.md | clankie send --conversation global-default --stdin
+```
+
+`--stdin` reads the message from standard input. Interior newlines are preserved;
+surrounding whitespace is trimmed by the shared message schema. Passing both
+`MESSAGE` and `--stdin` is refused.
+
+The command reads the current revision, submits once, and prints the JSON
+receipt including `runId`; it does not wait for a reply. Exit 0 means accepted.
+A revision conflict or offline seat returns its JSON refusal and exit 1;
+inspect the conversation before resubmitting. Observe replies with
+`clankie --chat ID` or the conversation API. The running service and a local
+captain credential are required.
 
 ### `prompt [--lane LANE] [--sections identity,persona,reach,address,model]`
 

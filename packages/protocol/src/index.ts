@@ -1092,6 +1092,8 @@ const SubmitOperatorConversationTurnBaseSchema = z.object({
 export const SubmitOperatorConversationTurnSchema = SubmitOperatorConversationTurnBaseSchema.extend({
   kind: z.literal("message"),
   message: z.string().trim().min(1).max(OPERATOR_CONVERSATION_MESSAGE_MAX),
+  /** Steer a live Clankie turn or wait for a separate turn. Omitted preserves automatic admission. */
+  delivery: z.enum(["steer", "queue"]).optional(),
 }).strict();
 export type SubmitOperatorConversationTurn = z.infer<typeof SubmitOperatorConversationTurnSchema>;
 

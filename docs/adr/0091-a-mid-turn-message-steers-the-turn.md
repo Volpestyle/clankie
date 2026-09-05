@@ -3,15 +3,37 @@
 Status: accepted (2026-08-15). Defines interruption semantics for durable
 Discord lanes.
 
-## Current status (2026-08-26)
+## Operator input delivery
 
-Operator conversations reuse this dispatch when a human message arrives while
-an autonomous goal or wake turn is streaming. The conversation store admits
-that send onto the live run instead of waiting behind it; in-flight tool calls
-still finish. FIFO remains for every other pair of operator turns
-([ADR 0130](0130-goals-and-self-wakes-share-the-operator-thread.md)). The
-owning run writes one `captain.turn.settled` metrics line; an absorbed steer
-does not write a second.
+Operator conversation sends accept an optional `delivery: "steer" | "queue"`.
+For Clankie's Pi conversations, `steer` admits the message alongside the active
+human or autonomous invocation; `queue` waits on the conversation FIFO for its
+own turn. Both start a turn when idle. A queued continuation alone does not
+open a live lane. Omitting delivery preserves automatic admission: human input
+steers an active autonomous invocation, and other pairs wait on the FIFO
+([ADR 0130](0130-goals-and-self-wakes-share-the-operator-thread.md)). Channel
+rounds and external seats retain their own delivery behavior.
+
+`clankie send --conversation ID --delivery steer|queue (MESSAGE | --stdin)`
+submits through this API and returns an admission receipt.
+
+Steering reuses Pi's live-input mechanism. Queuing uses the conversation FIFO
+instead of Pi's `followUp`, so each queued prompt owns a separate run receipt,
+reply, and cancellation target. In-flight tools finish before a steer takes
+effect. The owning run writes one `captain.turn.settled` metrics line; an
+absorbed steer does not write a second.
+
+```mermaid
+flowchart LR
+  Input[Operator message] --> Mode{Delivery}
+  Mode -->|steer, active Pi turn| Live[Admit to live turn]
+  Mode -->|queue or idle| FIFO[Conversation FIFO]
+  Live --> Pi[Pi steer]
+  Pi --> Merged[Owner replies once]
+  FIFO --> Next[Own turn and reply]
+  Merged --> Tail[Single conversation tail]
+  Next --> Tail
+```
 
 ## Context
 

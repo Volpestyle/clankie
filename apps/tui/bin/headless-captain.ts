@@ -18,6 +18,7 @@ import { runDevicesCommand } from "../src/command/devices.ts";
 import { runPlayCommand } from "../src/command/play.ts";
 import { runStanceCommand } from "../src/command/stance.ts";
 import { runPromptCommand } from "../src/command/prompt.ts";
+import { runSendCommand } from "../src/command/send.ts";
 import { runMemoryCardCommand } from "../src/command/memory-card.ts";
 import { runMemoryCommand } from "../src/command/memory.ts";
 import { runSeatCommand } from "../src/command/seat.ts";
@@ -154,6 +155,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "prompt") {
       return await runPromptCommand(rest, { ...options, stdout });
     }
+    if (command === "send") return await runSendCommand(rest, { ...options, stdout });
     if (command === "memory-card") {
       return await runMemoryCardCommand(rest, { ...options, stdout });
     }

@@ -167,8 +167,9 @@ clients instead of silently re-enabling autonomous work.
 An active goal queues host-authored continuation turns through the same
 conversation chain as operator messages, so every tool call and reply stays in
 the existing Pi session and public event log. A human message that arrives
-while that run is streaming is steered into it rather than waiting behind the
-whole turn; in-flight tool calls still finish
+while that run is streaming steers it by default; in-flight tool calls still
+finish. Explicit `delivery: "steer"` also joins a human-started Pi turn, while
+`delivery: "queue"` waits for a separate turn on the conversation FIFO
 ([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)). A
 token budget moves a goal to `budget_limited`; `/goal` owns activation,
 pause/resume, and clearing, while `/autonomy off` stops new continuations and

@@ -1,6 +1,13 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["send"],
+    lines: [
+      "  send --conversation ID [--delivery steer|queue] (MESSAGE | --stdin)",
+      "                           Steer the active turn or queue a follow-up (JSON receipt)",
+    ],
+  },
+  {
     nouns: ["health", "status"],
     lines: ["  health | status          Probe every launcher-owned service (JSON)"],
   },
