@@ -4618,6 +4618,14 @@ export const CaptainEpisodeSchema = z
     targetId: z.string().trim().min(1).max(512),
     summary: z.string().trim().min(1).max(CAPTAIN_EPISODE_SUMMARY_MAX),
     visibility: CaptainEpisodeVisibilitySchema,
+    /**
+     * Lifts this note out of the recent ring into the durable set, where newer
+     * episodes cannot evict it. Optional with a default, so every episode
+     * written before retention existed loads as an unretained recent one.
+     */
+    retained: z.boolean().default(false),
+    /** Set when a stale note was superseded in place; its source and date are never rewritten. */
+    correctedAt: z.string().datetime().optional(),
     provenance: z
       .object({
         characterId: z.string().trim().min(1).max(512),
@@ -4637,11 +4645,12 @@ export const CaptainEpisodeSchema = z
   .strict();
 export type CaptainEpisode = z.infer<typeof CaptainEpisodeSchema>;
 
-/** Owner curation may change the note or its reach, but never its room or provenance. */
+/** Owner curation may change the note, its reach, or whether it lasts — never its room or provenance. */
 export const CaptainEpisodeEditSchema = z
   .object({
     summary: z.string().trim().min(1).max(CAPTAIN_EPISODE_SUMMARY_MAX).optional(),
     visibility: CaptainEpisodeVisibilitySchema.optional(),
+    retained: z.boolean().optional(),
   })
   .strict()
   .refine((edit) => Object.keys(edit).length > 0, "an edit must change at least one field");
@@ -4660,6 +4669,14 @@ export const OperatorMemoryCatalogSchema = z
         .strict(),
     ),
     captainEpisodes: z.array(CaptainEpisodeSchema),
+    /** What the durable shelf holds and how much room is left before a retain is refused. */
+    retention: z
+      .object({
+        retained: z.number().int().nonnegative(),
+        capacity: z.number().int().positive(),
+        recentCapacity: z.number().int().positive(),
+      })
+      .strict(),
   })
   .strict();
 export type OperatorMemoryCatalog = z.infer<typeof OperatorMemoryCatalogSchema>;

@@ -52,7 +52,7 @@ import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
-import { createFileMemory, defaultMemoryDir } from "./memory.ts";
+import { MemoryCapacityError, createFileMemory, defaultMemoryDir } from "./memory.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
@@ -250,6 +250,21 @@ if (deviceSessionKey === undefined) {
 
 const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 
+/**
+ * A full durable shelf is a thing to tell him about, not a crash. Every other
+ * failure still throws — only capacity is an answer rather than a fault.
+ */
+function capacityAware<T>(
+  write: () => T,
+): { value: T; refusal?: undefined } | { value?: undefined; refusal: string } {
+  try {
+    return { value: write() };
+  } catch (error) {
+    if (error instanceof MemoryCapacityError) return { refusal: error.message };
+    throw error;
+  }
+}
+
 // Media he makes lands under the root the Discord attachment resolver already
 // serves (ADR 0085). The root is derived, never merely read, so the bridge
 // that serves the bytes back resolves the same directory this wrote them to.
@@ -403,26 +418,60 @@ const captain = createCaptain(
     },
     memory: {
       appendEpisode: (input) => {
-        memory.recordEpisode({
-          schemaVersion: 1,
-          episodeId: `ep-${crypto.randomUUID()}`,
-          lane: input.lane,
-          targetId: input.targetId,
-          summary: input.summary,
-          // What he remembers at the console stays at the console; the
-          // shareable/private gate in recall is only real if writes honor it.
-          visibility: input.visibility ?? (input.lane === "operator" ? "operator_private" : "shareable"),
-          provenance: {
-            characterId: "clankie",
-            sessionId: "captain",
-            selfAuthored: true,
-            rawTranscript: false,
-          },
-          occurredAt: new Date().toISOString(),
-        });
-        return Promise.resolve();
+        // A correction supersedes the note he named, if that note is one this
+        // lane can see. Naming an unreachable id is not a silent no-op: the new
+        // memory is still written, and the tool says it corrected nothing.
+        const corrects = input.corrects;
+        if (corrects !== undefined) {
+          const corrected = capacityAware(() =>
+            memory.correctEpisode({
+              lane: input.lane,
+              episodeId: corrects,
+              summary: input.summary,
+              ...(input.retained === undefined ? {} : { retained: input.retained }),
+            }),
+          );
+          if (corrected.refusal !== undefined) {
+            return Promise.resolve({
+              corrected: false,
+              retained: false,
+              retentionRefused: corrected.refusal,
+            });
+          }
+          if (corrected.value !== undefined) {
+            return Promise.resolve({ corrected: true, retained: corrected.value.retained });
+          }
+        }
+        const write = (retained: boolean) =>
+          memory.recordEpisode({
+            schemaVersion: 1,
+            episodeId: `ep-${crypto.randomUUID()}`,
+            lane: input.lane,
+            targetId: input.targetId,
+            summary: input.summary,
+            // What he remembers at the console stays at the console; the
+            // shareable/private gate in recall is only real if writes honor it.
+            visibility: input.visibility ?? (input.lane === "operator" ? "operator_private" : "shareable"),
+            retained,
+            provenance: {
+              characterId: "clankie",
+              sessionId: "captain",
+              selfAuthored: true,
+              rawTranscript: false,
+            },
+            occurredAt: new Date().toISOString(),
+          });
+        // A full shelf refuses the keeping, not the remembering: the note still
+        // lands in the recent window and he is told it was not kept.
+        const attempt = capacityAware(() => write(input.retained ?? false));
+        if (attempt.refusal === undefined) {
+          return Promise.resolve({ corrected: false, retained: attempt.value.retained });
+        }
+        write(false);
+        return Promise.resolve({ corrected: false, retained: false, retentionRefused: attempt.refusal });
       },
       recallEpisodeCard: (lane) => Promise.resolve(memory.episodeRecallCard({ lane })),
+      searchEpisodeCard: (lane, query) => Promise.resolve(memory.searchEpisodeCard({ lane, query })),
       recallDiscordPerson: (identity, options) => {
         const card = memory.recallDiscordPersonCard(identity, {
           channelId: options.channelId,

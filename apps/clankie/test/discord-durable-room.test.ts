@@ -56,8 +56,9 @@ describe("the moment a reply is underway", () => {
 
 const deps = {
   memory: {
-    appendEpisode: () => Promise.resolve(),
+    appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
     recallEpisodeCard: () => Promise.resolve(""),
+    searchEpisodeCard: () => Promise.resolve(""),
   },
 };
 

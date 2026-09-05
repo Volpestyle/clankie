@@ -135,7 +135,7 @@ import {
 } from "./device-session.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
-import type { MemoryStores } from "./memory.ts";
+import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { LocalVoiceChatSession } from "./local-voice-chat.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
@@ -1397,7 +1397,33 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!captain) return context.json({ error: "episode_authentication_required" }, 401);
     const episode = CaptainEpisodeSchema.safeParse(await readJson(context.req.raw));
     if (!episode.success) return context.json({ error: "invalid_captain_episode" }, 400);
-    const recorded = dependencies.memory.recordEpisode(episode.data);
+    // A Discord bearer writes the room it serves and nothing else. The body
+    // names its own lane, so without this a bridge could author an operator or
+    // gameplay memory — the same elevation `authenticateLane` exists to stop on
+    // the read side.
+    const bearerLane =
+      captain.steerSourceLane === "discord_text"
+        ? "discord_presence"
+        : captain.steerSourceLane === "discord_voice"
+          ? "discord_voice"
+          : undefined;
+    if (bearerLane !== undefined && episode.data.lane !== bearerLane) {
+      return context.json({ error: "captain_episode_lane_forbidden" }, 403);
+    }
+    let recorded;
+    try {
+      recorded = dependencies.memory.recordEpisode(episode.data);
+    } catch (error) {
+      if (error instanceof MemoryCapacityError) {
+        return context.json({ error: error.code, message: error.message, capacity: error.capacity }, 409);
+      }
+      // Recording never edits. An id the store already holds is a conflict, not
+      // an upsert, so the memory it names is still there afterwards.
+      if (error instanceof MemoryConflictError) {
+        return context.json({ error: error.code, message: error.message }, 409);
+      }
+      throw error;
+    }
     recordEvent(
       "captain.episode.recorded",
       CAPTAIN_EPISODE_STREAM_ID,
@@ -1432,6 +1458,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (discordBearer && lane.data === "operator") {
       return context.json({ error: "operator_lane_recall_forbidden" }, 403);
     }
+    // With a query this is on-demand recall over everything he kept; without
+    // one it stays the bounded recent card. Same route, same lane fence, and
+    // the same answer shape: a rendered card. Returning records instead would
+    // hand a social bearer the provenance ids the recall branch withholds —
+    // a second door to more fields on the lane it already reaches.
+    const query = context.req.query("query")?.trim();
+    if (query !== undefined && query.length > 0) {
+      const limit = z.coerce.number().int().positive().safeParse(context.req.query("limit"));
+      return context.json({
+        schemaVersion: 1,
+        lane: lane.data,
+        query,
+        recallCard: dependencies.memory.searchEpisodeCard({
+          lane: lane.data,
+          query,
+          ...(limit.success ? { limit: limit.data } : {}),
+        }),
+      });
+    }
     return context.json({
       schemaVersion: 1,
       lane: lane.data,
@@ -1452,7 +1497,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!lane.success || !episodeId.success || !edit.success) {
       return context.json({ error: "invalid_captain_episode_edit" }, 400);
     }
-    const episode = dependencies.memory.updateEpisode(lane.data, episodeId.data, edit.data);
+    let episode;
+    try {
+      episode = dependencies.memory.updateEpisode(lane.data, episodeId.data, edit.data);
+    } catch (error) {
+      if (error instanceof MemoryCapacityError) {
+        return context.json({ error: error.code, message: error.message, capacity: error.capacity }, 409);
+      }
+      throw error;
+    }
     if (episode === undefined) return context.json({ error: "captain_episode_not_found" }, 404);
     recordEvent("captain.episode.edited", CAPTAIN_EPISODE_STREAM_ID, clock().toISOString(), {
       episodeId: episode.episodeId,

@@ -57,6 +57,11 @@ index). Configure through the headless CLI:
 | Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                 |
 | Play session                          | `clankie play status` / `clankie play stop`                                           |
 
+`clankie memory status` reports episodes and retention usage. Use `memory search
+<terms...>`, `memory retain|release|forget <episodeId>`, or `memory correct
+<episodeId> --summary "…"` to curate them through the operator API. Retained
+notes survive the recent ring; a full retained store refuses another retain
+until a note is released or forgotten. `/memory` is the console browser.
 `clankie pair` and `/pair` start or reuse the local relay before minting a code;
 run pairing on the host that owns the relay.
 

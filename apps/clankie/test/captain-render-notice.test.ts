@@ -87,8 +87,9 @@ function mediaStub(asked: string[], renders: FinishedRender[]) {
 
 function memoryStub() {
   return {
-    appendEpisode: () => Promise.resolve(),
+    appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
     recallEpisodeCard: () => Promise.resolve(""),
+    searchEpisodeCard: () => Promise.resolve(""),
   };
 }
 

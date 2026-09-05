@@ -23,7 +23,7 @@ function deps(overrides: { email?: Partial<EmailPort> }): CaptainDeps {
     activity: { current: unused },
     streamWatch: { current: unused },
     presence: { listSessions: unused, listVoiceHistory: unused, listRecentVoiceSpeech: unused },
-    memory: { appendEpisode: unused, recallEpisodeCard: unused },
+    memory: { appendEpisode: unused, recallEpisodeCard: unused, searchEpisodeCard: unused },
   };
 }
 

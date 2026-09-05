@@ -113,6 +113,15 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["memory"],
+    lines: [
+      "  memory [status] | search <terms...>",
+      "  memory retain|release|forget <episodeId>",
+      "  memory correct <episodeId> --summary TEXT",
+      "                           Inspect and curate remembered episodes (JSON)",
+    ],
+  },
+  {
     nouns: ["seat"],
     lines: [
       "  seat [--resume] [--plugin-dir PATH] [--dry-run]",

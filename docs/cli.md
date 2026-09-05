@@ -433,6 +433,23 @@ Sections default to the four a session is built with, joined by one blank line:
 A seat that carries the identity some other way asks for the rest:
 `clankie prompt --sections persona,reach,address`.
 
+### `memory [status] | search <terms...> | retain|release|forget <episodeId> | correct <episodeId> --summary TEXT`
+
+Inspect and curate episodes through the operator API. Output is JSON; success
+exits 0 and failure exits 1. `status` shows retention usage and the newest 20
+episodes, including private notes. `search` matches all supplied terms against
+the note, source lane, and room, returning up to 20 newest matches and the total
+matched count. Quote a correction's summary as one shell argument.
+
+`retain` keeps an episode beyond the 128-entry recent ring; `release` returns it
+to that ring and may immediately age out an old episode. The retained store
+holds up to 1,024 episodes and refuses another retain when full. Release or
+forget an episode before retrying; existing retained notes are never evicted
+to make room. `correct` replaces the note while preserving its source and date.
+`forget` deletes the episode from both recent and retained recall. `/memory`
+exposes the same controls in the console. See [Memory](memory.md) for lane
+privacy and migration behavior.
+
 ### `memory-card [--lane LANE]`
 
 The memory card that lane's next run injects, printed verbatim as plain text.

@@ -12,11 +12,12 @@ describe("captain memory", () => {
     const handler = await beforeAgentStartHandler(
       captainMemoryExtension(
         {
-          appendEpisode: () => Promise.resolve(),
+          appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
           recallEpisodeCard: (lane) => {
             recalled.push(lane);
             return Promise.resolve("## recent\n- won the badge");
           },
+          searchEpisodeCard: () => Promise.resolve(""),
         },
         "discord_presence",
       ),
@@ -30,8 +31,9 @@ describe("captain memory", () => {
     const unavailable = await beforeAgentStartHandler(
       captainMemoryExtension(
         {
-          appendEpisode: () => Promise.resolve(),
+          appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
           recallEpisodeCard: () => Promise.reject(new Error("offline")),
+          searchEpisodeCard: () => Promise.resolve(""),
         },
         "operator",
       ),
@@ -42,7 +44,11 @@ describe("captain memory", () => {
   it("says the memory is empty rather than leaving it out of the prompt", async () => {
     const handler = await beforeAgentStartHandler(
       captainMemoryExtension(
-        { appendEpisode: () => Promise.resolve(), recallEpisodeCard: () => Promise.resolve("") },
+        {
+          appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
+          recallEpisodeCard: () => Promise.resolve(""),
+          searchEpisodeCard: () => Promise.resolve(""),
+        },
         "discord_presence",
       ),
     );
@@ -63,9 +69,10 @@ describe("captain memory", () => {
       memory: {
         appendEpisode: (input: Parameters<CaptainDeps["memory"]["appendEpisode"]>[0]) => {
           writes.push(input);
-          return Promise.resolve();
+          return Promise.resolve({ corrected: false, retained: input.retained ?? false });
         },
         recallEpisodeCard: () => Promise.resolve(""),
+        searchEpisodeCard: () => Promise.resolve(""),
       },
     } as unknown as CaptainDeps;
     const tool = captainTools(
@@ -92,6 +99,66 @@ describe("captain memory", () => {
         visibility: "shareable",
       },
     ]);
+  });
+
+  it("carries his retain and correct choices, and tells him what actually happened", async () => {
+    const writes: Parameters<CaptainDeps["memory"]["appendEpisode"]>[0][] = [];
+    const searched: string[] = [];
+    const deps = {
+      embodiment: {
+        submitIntent: () => Promise.reject(new Error("unused")),
+        getSession: () => Promise.reject(new Error("unused")),
+        getLiveSession: () => Promise.reject(new Error("unused")),
+      },
+      memory: {
+        appendEpisode: (input: Parameters<CaptainDeps["memory"]["appendEpisode"]>[0]) => {
+          writes.push(input);
+          // The full shelf answers rather than throwing: the note was written, unkept.
+          return Promise.resolve(
+            input.retained === true
+              ? { corrected: false, retained: false, retentionRefused: "Retained memory is full." }
+              : { corrected: input.corrects !== undefined, retained: false },
+          );
+        },
+        recallEpisodeCard: () => Promise.resolve(""),
+        searchEpisodeCard: (_lane: string, query: string) => {
+          searched.push(query);
+          return Promise.resolve('## What you remember about "gateway"\n- operator · self · 2026-08-01');
+        },
+      },
+    } as unknown as CaptainDeps;
+    const tools = captainTools(deps, { targetId: "global-default" }, {} as LaneLog, "operator");
+    const remember = tools.find((candidate) => candidate.name === "remember_episode");
+    const recall = tools.find((candidate) => candidate.name === "recall_episodes");
+    if (remember === undefined || recall === undefined) throw new Error("memory tools are missing");
+
+    const refused = await remember.execute(
+      "call-1",
+      { summary: "Keep this one.", retain: true },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(writes[0]).toMatchObject({ retained: true, summary: "Keep this one." });
+    expect(refused.details).toMatchObject({
+      remembered: true,
+      retained: false,
+      retentionRefused: "Retained memory is full.",
+    });
+
+    const corrected = await remember.execute(
+      "call-2",
+      { summary: "Actually 4321.", corrects: "decision-1" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(writes[1]).toMatchObject({ corrects: "decision-1" });
+    expect(corrected.details).toMatchObject({ remembered: true, corrected: true });
+
+    const found = await recall.execute("call-3", { query: "gateway" }, undefined, undefined, {} as never);
+    expect(searched).toEqual(["gateway"]);
+    expect((found.details as { card: string }).card).toContain("operator · self");
   });
 });
 

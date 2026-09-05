@@ -209,7 +209,11 @@ function bankDeps(): CaptainDeps {
       getSession: () => Promise.reject(new Error("unused")),
       getLiveSession: () => Promise.reject(new Error("unused")),
     },
-    memory: { appendEpisode: () => Promise.resolve(), recallEpisodeCard: () => Promise.resolve("") },
+    memory: {
+      appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
+      recallEpisodeCard: () => Promise.resolve(""),
+      searchEpisodeCard: () => Promise.resolve(""),
+    },
   } as unknown as CaptainDeps;
 }
 

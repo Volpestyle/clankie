@@ -44,8 +44,9 @@ describe("Discord context visuals", () => {
 
     const normalized = await normalizeDiscordTurn(request, {
       memory: {
-        appendEpisode: () => Promise.resolve(),
+        appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
         recallEpisodeCard: () => Promise.resolve(""),
+        searchEpisodeCard: () => Promise.resolve(""),
       },
       resolveDiscordAttachments: (attachments): Promise<readonly ResolvedAttachment[]> => {
         const resolved: ResolvedAttachment[] = [];

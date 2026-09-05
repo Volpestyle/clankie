@@ -18,6 +18,7 @@ const catalog: OperatorMemoryCatalog = {
       targetId: "self",
       summary: "Remembered the old thing",
       visibility: "operator_private",
+      retained: true,
       provenance: {
         characterId: "clankie",
         sessionId: "session-1",
@@ -27,6 +28,7 @@ const catalog: OperatorMemoryCatalog = {
       occurredAt: "2026-08-15T12:00:00.000Z",
     },
   ],
+  retention: { retained: 1, capacity: 1_024, recentCapacity: 128 },
   discordPeople: [
     {
       subject: { guildId: "guild-1", userId: "user-1" },

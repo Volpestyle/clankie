@@ -18,6 +18,7 @@ import { runPlayCommand } from "../src/command/play.ts";
 import { runStanceCommand } from "../src/command/stance.ts";
 import { runPromptCommand } from "../src/command/prompt.ts";
 import { runMemoryCardCommand } from "../src/command/memory-card.ts";
+import { runMemoryCommand } from "../src/command/memory.ts";
 import { runSeatCommand } from "../src/command/seat.ts";
 import { runMcpCommand } from "../src/command/mcp.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
@@ -152,6 +153,11 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "memory-card") {
       return await runMemoryCardCommand(rest, { ...options, stdout });
+    }
+    if (command === "memory") {
+      const result = await runMemoryCommand(rest, options);
+      outputJson(stdout, result);
+      return result.ok ? 0 : 1;
     }
     // The seat: Claude Code as Clankie (ADR 0152). `mcp` is its stdio side and
     // speaks JSON-RPC on stdout, so it never goes through outputJson.

@@ -55,10 +55,16 @@ export function buildMemoryCommands(services: MemoryCommandServices): FaceShellC
 }
 
 export function formatMemoryCatalog(catalog: OperatorMemoryCatalog): string {
-  const lines = [`Clankie's episodes (${String(catalog.captainEpisodes.length)})`];
+  const { capacity, recentCapacity, retained } = catalog.retention;
+  const lines = [
+    `Clankie's episodes (${String(catalog.captainEpisodes.length)})`,
+    `Kept ${String(retained)} of ${String(capacity)}; the rest age out past the newest ${String(recentCapacity)}.`,
+  ];
   for (const episode of newestEpisodes(catalog.captainEpisodes)) {
     lines.push(
-      `- ${episode.occurredAt} · ${episode.lane}/${episode.targetId} · ${episode.visibility} · ${episode.episodeId}`,
+      `- ${episode.occurredAt} · ${episode.lane}/${episode.targetId} · ${episode.visibility}${
+        episode.retained ? " · kept" : ""
+      }${episode.correctedAt === undefined ? "" : ` · corrected ${episode.correctedAt}`} · ${episode.episodeId}`,
       `  ${episode.summary}`,
     );
   }
@@ -92,8 +98,8 @@ async function runMemoryBrowser(
         {
           value: "episodes",
           label: "His episodes",
-          hint: `${String(catalog.captainEpisodes.length)} notes`,
-          description: "Things Clankie chose to remember doing.",
+          hint: `${String(catalog.captainEpisodes.length)} notes, ${String(catalog.retention.retained)} kept`,
+          description: "Things Clankie chose to remember doing. Kept ones outlive the recent window.",
         },
         {
           value: "people",
@@ -126,7 +132,7 @@ async function browseEpisodes(
     options: ordered.map((episode, index) => ({
       value: String(index),
       label: truncate(episode.summary),
-      hint: `${episode.lane} · ${episode.occurredAt.slice(0, 10)}`,
+      hint: `${episode.lane} · ${episode.occurredAt.slice(0, 10)}${episode.retained ? " · kept" : ""}`,
       description: `${episode.targetId} · ${episode.visibility} · ${episode.episodeId}`,
     })),
   });
@@ -136,12 +142,27 @@ async function browseEpisodes(
     message: truncate(episode.summary, 96),
     options: [
       { value: "edit", label: "Edit", hint: "note and visibility" },
+      episode.retained
+        ? { value: "release", label: "Stop keeping", hint: "let it age out with the rest" }
+        : { value: "retain", label: "Keep", hint: "outlives the recent window" },
       { value: "forget", label: "Forget", hint: "delete this episode" },
       { value: "back", label: "Back" },
     ],
   });
   if (action === "edit") await editEpisode(shell, client, episode);
-  else if (action === "forget" && (await confirmForget(shell, "episode"))) {
+  else if (action === "retain" || action === "release") {
+    // A full shelf answers here rather than throwing the console out: the
+    // operator's next move is to release something, and the message says so.
+    try {
+      await client.updateCaptainEpisode(episode.lane, episode.episodeId, {
+        retained: action === "retain",
+      });
+      shell.setupFlow.renderLine(action === "retain" ? "Keeping it." : "No longer keeping it.", "success");
+    } catch (error) {
+      shell.setupFlow.renderLine(error instanceof Error ? error.message : String(error), "error");
+    }
+  } else if (action === "forget" && (await confirmForget(shell, "episode"))) {
+    // One record per memory: forgetting reaches the recent and kept copy at once.
     await client.deleteCaptainEpisode(episode.lane, episode.episodeId);
     shell.setupFlow.renderLine("Forgot episode.", "success");
   }

@@ -760,6 +760,11 @@ paths:
       operationId: getCaptainEpisodes
       summary: Recall episodes for a lane
       security: [{ captainBearer: [] }]
+      description: >-
+        Without `query`, the bounded recent card. With one, on-demand search over
+        everything retained, filtered by what that lane may see. Both branches
+        answer with a rendered card and never with episode records, so no caller
+        reads another memory's provenance ids.
       parameters:
         - in: query
           name: lane
@@ -767,13 +772,28 @@ paths:
           schema:
             type: string
             enum: [operator, discord_voice, discord_presence, gameplay]
+        - in: query
+          name: query
+          required: false
+          description: Search terms; every term must appear in the note or the room it happened in.
+          schema: { type: string }
+        - in: query
+          name: limit
+          required: false
+          description: Matches to return (default 8, capped at 32).
+          schema: { type: integer, minimum: 1 }
       responses:
         "200":
-          description: Recall card
+          description: Recall card — the recent one, or the search's when a query was given
     post:
       tags: [Memory, Captain]
       operationId: postCaptainEpisode
       summary: Record a self-authored episode
+      description: >-
+        Recording only ever adds. An id the store already holds is a conflict, not
+        an update; a byte-identical retry returns the original. Editing an existing
+        note goes through PATCH. A Discord bearer may only write the lane it serves
+        (`discord_text` writes `discord_presence`, `discord_voice` writes its own).
       security: [{ captainBearer: [] }]
       requestBody:
         required: true
@@ -786,6 +806,7 @@ paths:
               targetId: self
               summary: Tried the HTTP API from Yaak.
               visibility: operator_private
+              retained: false
               provenance:
                 characterId: clankie
                 sessionId: captain
@@ -795,12 +816,18 @@ paths:
       responses:
         "200":
           description: Recorded id
+        "403":
+          description: The bearer's lane may not author an episode in that lane
+        "409":
+          description: >-
+            Retained memory is full, or the episode id already exists. Nothing was
+            changed in either case.
 
   /v1/memory/captain-episodes/{lane}/{episodeId}:
     patch:
       tags: [Memory, Operator]
       operationId: patchCaptainEpisode
-      summary: Edit one episode's note or visibility
+      summary: Edit one episode's note, visibility, or retention
       security: [{ operatorBearer: [] }]
       parameters:
         - in: path
@@ -820,11 +847,14 @@ paths:
             example:
               summary: Corrected note about what happened.
               visibility: operator_private
+              retained: true
       responses:
         "200":
           description: Updated episode
         "404":
           description: Episode not found
+        "409":
+          description: Retained memory is full; nothing was changed
     delete:
       tags: [Memory, Operator]
       operationId: deleteCaptainEpisode

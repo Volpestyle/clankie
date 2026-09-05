@@ -104,8 +104,19 @@ export interface CaptainDeps {
       readonly targetId: string;
       readonly summary: string;
       readonly visibility?: CaptainEpisodeVisibility;
-    }): Promise<void>;
+      /** Keep this one past the recent window, where newer notes cannot evict it. */
+      readonly retained?: boolean;
+      /** Supersede this episode's note in place instead of appending a new one. */
+      readonly corrects?: string;
+    }): Promise<{
+      readonly corrected: boolean;
+      readonly retained: boolean;
+      /** Set when the durable shelf was full: the note was still written, just not kept. */
+      readonly retentionRefused?: string;
+    }>;
     recallEpisodeCard(lane: CaptainSessionLaneV2): Promise<string>;
+    /** On-demand recall past the automatic card, scoped to what this lane may see. */
+    searchEpisodeCard(lane: CaptainSessionLaneV2, query: string): Promise<string>;
     recallDiscordPerson?(
       identity: DiscordPersonIdentity,
       options: { readonly channelId: string; readonly query: string },
