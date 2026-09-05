@@ -1,0 +1,19 @@
+diff --git a/.vuh-1115-brief.md b/.vuh-1115-brief.md
+new file mode 100644
+index 00000000..411fdaab
+--- /dev/null
++++ b/.vuh-1115-brief.md
+@@ -0,0 +1,13 @@
++# VUH-1115
++Work ONLY in /Users/james/.cb-astra/wt-astra. Do not read/change outside this worktree. No commits/pushes. Shared tree: respect lane ownership. No stub edits outside scope. Report files, checks, uncertainties when done.
++
++Requirements: every settled captain turn records execution {model,provider,effort} from actual execution (not stale config), including failed/interrupted turns and first idle turn after model selection changes in live conversation. Sum assistant-message usage.totalTokens across turn and count contributing reports. No reports => usage null, not zero. Context occupancy separate. No cost inference. Only store turn-settled.jsonl. Legacy rows read with execution:null usage:null. Preserve existing row fields. Expose bounded newest-first GET /v1/captain/turn-metrics operator authenticated, optional runId and limit default20 max100 -> {items:[...]}. clankie metrics [--run ID] [--limit N] emits one JSON document identical data. No transcripts/secrets/tool args. Tests cover selection change, multi-round usage, failure, interrupt, legacy, limits, unauthorized. Update docs/cli.md OpenAPI and CLI help. External tests seed rows against pristine baseline so no reliance on untracked runtime artifacts.
++
++## capture lane (w1:p2)
++Own apps/clankie/src/captain/turn-metrics.ts, captain.ts and execution runtime adapters as necessary, capture tests (including existing turn-metrics.test.ts). Implement schema execution and usage nullable default null for legacy, metrics capture and actual executing identity. Also own TurnSettledLog reader: expose read(options: {runId?:string,limit?:number} = {}): TurnSettledMetrics[] with latest rows first, filter runId, default20/max100 bounded; select validated safe fields. Communicate contract through this file if necessary. Surface lane will call this reader using stateDir. Tests must verify lifecycle issues, not merely collector. Done is code plus narrow passing tests and report; no commits.
++
++## surface lane (w1:p3)
++Own HTTP route/auth/wiring and headless CLI metrics command/help, docs/cli.md and OpenAPI, surface tests. Capture lane owns turn-metrics.ts incl read(options:{runId?:string,limit?:number}={}):TurnSettledMetrics[] on TurnSettledLog. Import turnSettledLogPath and instantiate log from existing stateDir; coordinate if architecture wants captain method instead (do not edit captain.ts without ownership coordination). Test seeded fixtures incl legacy/nulls/filter/newest order/bounds/auth. Do not modify capture tests. Done is code/docs plus narrow tests and report; no commits.
++
++## reviewer lane (w1:p4)
++Read-only independent review. First inspect current code and identify execution identity/usage lifecycle traps and surface integration pitfalls. Write preliminary findings to .vuh-1115-review.md then finish this pass; lead will re-dispatch final diff review after implementations land. Do not edit production/tests. Demand concrete evidence/repros not speculation. Final review must cover requirements and fixture/pristine baseline behavior. No commits.

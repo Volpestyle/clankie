@@ -10,7 +10,9 @@
     "test": "vitest run --passWithNoTests",
     "free-play-live": "tsx scripts/free-play-live.ts",
     "verify-model": "tsx scripts/verify-model-selection.ts",
-    "comparison-run": "tsx scripts/comparison-run.ts"
+    "comparison-run": "tsx scripts/comparison-run.ts",
+    "comparison-await-job": "tsx scripts/comparison-await-job.ts",
+    "comparison-check-loop": "tsx scripts/comparison-check-loop.ts"
   },
   "dependencies": {
     "@clankie/credential-broker": "workspace:*",

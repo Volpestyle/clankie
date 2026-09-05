@@ -1,0 +1,39 @@
+
+ ▐▛███▛█   Claude Code v2.1.261
+▝▜██████▀  Sonnet 5 with medium effort · Claude Max
+  ▝▝ ▝▝    ~/.cb-terra/wt-terra
+
+⚠ 2 MCP servers need authentication · run /mcp
+
+❯ Implement VUH-1115 capture/store core only: locate captain turn settlement and
+  turn-settled JSONL schema/reader. Record execution model/provider/effort actually
+  executing each settled turn including failed/interrupted and first idle after live
+  selection change; aggregate assistant usage.totalTokens reports + report count, null if
+  none; legacy rows explicitly normalize unknown/null. Own core service types/storage and
+  focused tests only; do not edit HTTP/CLI/docs. Work in this worktree, no commit/push. Done
+  = changed files plus narrow tests and a concise evidence summary.
+
+  Running grep -n "TurnMetrics\|turnSettled\|TurnSettledLog…
+  ⎿  apps/clankie/src/captain/captain.ts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+· Ideating… (11s · ↓ 530 tokens)
+
+─────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+─────────────────────────────────────────────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with C…
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt                               /rc

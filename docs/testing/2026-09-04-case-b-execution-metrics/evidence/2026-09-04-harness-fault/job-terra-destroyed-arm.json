@@ -1,0 +1,2179 @@
+{
+  "succeeded": true,
+  "quiescent": true,
+  "reason": "no registered watch, no busy worker, no run in flight, re-confirmed",
+  "captainRuns": [
+    {
+      "runId": "run-6a5b4b72-6edf-4303-acae-03031f0ec739",
+      "phases": [
+        {
+          "phase": "accepted",
+          "at": "2026-09-05T02:35:35.109Z"
+        },
+        {
+          "phase": "completed",
+          "at": "2026-09-05T02:36:37.412Z"
+        }
+      ]
+    },
+    {
+      "runId": "run-d3a1ef2f-9079-4425-a9c5-53ca18899d20",
+      "phases": [
+        {
+          "phase": "accepted",
+          "at": "2026-09-05T02:43:47.332Z"
+        },
+        {
+          "phase": "completed",
+          "at": "2026-09-05T02:44:12.645Z"
+        }
+      ]
+    },
+    {
+      "runId": "run-b76356f2-af70-442b-ac8f-3b5d67a95fe9",
+      "phases": [
+        {
+          "phase": "accepted",
+          "at": "2026-09-05T02:44:13.688Z"
+        },
+        {
+          "phase": "completed",
+          "at": "2026-09-05T02:44:39.509Z"
+        }
+      ]
+    },
+    {
+      "runId": "run-fcac6244-c914-47c2-a35b-2a5de4af0a51",
+      "phases": [
+        {
+          "phase": "accepted",
+          "at": "2026-09-05T02:48:30.213Z"
+        },
+        {
+          "phase": "completed",
+          "at": "2026-09-05T02:48:30.779Z"
+        }
+      ]
+    },
+    {
+      "runId": "run-90451896-15ac-420d-aa95-71c94810653c",
+      "phases": [
+        {
+          "phase": "accepted",
+          "at": "2026-09-05T02:49:06.266Z"
+        },
+        {
+          "phase": "completed",
+          "at": "2026-09-05T02:49:07.621Z"
+        }
+      ]
+    }
+  ],
+  "captainRunCount": 5,
+  "initialTurnLatencyMs": 62476,
+  "wholeJobLatencyMs": 817194,
+  "blockedWorkers": [],
+  "harvestEvidence": "quiescence plus green checks does not by itself prove the captain inspected each worker; read the transcript and the worker screens for that",
+  "finalWorkers": [
+    {
+      "name": "vuh1115_reviewer",
+      "paneId": "w1:p4",
+      "kind": "claude",
+      "status": "idle"
+    },
+    {
+      "name": "vuh1115_surfaces",
+      "paneId": "w1:p3",
+      "kind": "claude",
+      "status": "idle"
+    },
+    {
+      "name": "vuh1115_capture",
+      "paneId": "w1:p2",
+      "kind": "claude",
+      "status": "idle"
+    }
+  ],
+  "finalWatches": 0,
+  "samples": [
+    {
+      "at": "2026-09-05T02:36:38.519Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:36:48.530Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:36:58.541Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:37:08.553Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:37:18.562Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:37:28.572Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:37:38.582Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:37:48.593Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:37:58.605Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:38:08.616Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:38:18.634Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:38:28.644Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:38:38.654Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:38:48.662Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:38:58.741Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:39:08.764Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:39:18.796Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:39:28.843Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:39:38.907Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:39:48.949Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:39:59.020Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:40:09.043Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:40:19.064Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:40:29.192Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:40:39.226Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:40:49.262Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:40:59.338Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:41:09.354Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:41:19.368Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:41:29.379Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:41:39.394Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:41:49.411Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:41:59.427Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:42:09.437Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:42:19.446Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:42:29.455Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:42:39.469Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:42:49.477Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:42:59.508Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:43:09.521Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:43:19.533Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:43:29.624Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:43:39.640Z",
+      "watches": 3,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 3,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:43:49.654Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 2,
+      "runsInFlight": 1
+    },
+    {
+      "at": "2026-09-05T02:43:59.673Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 2,
+      "runsInFlight": 1
+    },
+    {
+      "at": "2026-09-05T02:44:09.687Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 2,
+      "runsInFlight": 1
+    },
+    {
+      "at": "2026-09-05T02:44:19.698Z",
+      "watches": 1,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "idle"
+        }
+      ],
+      "busyWorkers": 1,
+      "runsSeen": 3,
+      "runsInFlight": 1
+    },
+    {
+      "at": "2026-09-05T02:44:29.710Z",
+      "watches": 1,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 1
+    },
+    {
+      "at": "2026-09-05T02:44:39.725Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:44:49.739Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:44:59.774Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:45:09.790Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:45:19.806Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:45:29.821Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:45:39.837Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:45:49.850Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:45:59.861Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:46:09.871Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:46:19.882Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:46:29.896Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:46:39.913Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:46:49.928Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:46:59.952Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:47:09.963Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:47:19.978Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:47:29.989Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:47:39.998Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:47:50.006Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:48:00.015Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:48:10.024Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:48:20.042Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:48:30.051Z",
+      "watches": 2,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 3,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:48:40.061Z",
+      "watches": 1,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 1,
+      "runsSeen": 4,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:48:50.072Z",
+      "watches": 1,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 1,
+      "runsSeen": 4,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:49:00.094Z",
+      "watches": 1,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "working"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "working"
+        }
+      ],
+      "busyWorkers": 2,
+      "runsSeen": 4,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:49:10.111Z",
+      "watches": 0,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "idle"
+        }
+      ],
+      "busyWorkers": 0,
+      "runsSeen": 5,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:49:12.130Z",
+      "watches": 0,
+      "workers": [
+        {
+          "name": "vuh1115_reviewer",
+          "paneId": "w1:p4",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_surfaces",
+          "paneId": "w1:p3",
+          "kind": "claude",
+          "status": "idle"
+        },
+        {
+          "name": "vuh1115_capture",
+          "paneId": "w1:p2",
+          "kind": "claude",
+          "status": "idle"
+        }
+      ],
+      "busyWorkers": 0,
+      "runsSeen": 5,
+      "runsInFlight": 0
+    }
+  ]
+}

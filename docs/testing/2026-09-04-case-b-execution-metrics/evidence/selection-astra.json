@@ -1,0 +1,7 @@
+{
+  "ok": true,
+  "model": "openai-codex/gpt-6-astra",
+  "effort": "medium",
+  "providers": { "openai-codex": { "models": ["gpt-6-astra", "gpt-5.6-terra"] } },
+  "restart": "clankie restart captain"
+}

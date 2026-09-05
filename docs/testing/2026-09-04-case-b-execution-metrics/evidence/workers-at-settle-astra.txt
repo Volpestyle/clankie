@@ -1,0 +1,3 @@
+  worker reviewer pane=w1:p4 kind=claude status=working cwd=/Users/james/.cb-astra/wt-astra
+  worker surfaces pane=w1:p3 kind=claude status=working cwd=/Users/james/.cb-astra/wt-astra
+  worker capture pane=w1:p2 kind=claude status=working cwd=/Users/james/.cb-astra/wt-astra

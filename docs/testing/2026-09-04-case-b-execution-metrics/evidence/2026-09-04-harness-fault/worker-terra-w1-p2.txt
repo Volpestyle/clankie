@@ -1,0 +1,60 @@
+      229    }
+      230  }
+
+⏺ Now update my tests that reference reportCount:
+
+
+  Searched for 7 patterns, read 1 file, ran 6 shell commands
+
+› Message from @VUH-1115-read-surfac…: Read-surface lane is done:
+CaptainPort.readTurnMetrics() + GET /v1/captain/turn-metrics (operator-only) + ClankieApiCli…
+(ctrl+o to expand)
+
+  Searched for 1 pattern, ran 3 shell commands
+
+
+
+⏺ Both fixes verified. Acknowledging the sibling's message, then reporting back.
+  ⎿  “Confirmed reports rename, hoisted execution capture fix” → sent to VUH-1115
+     read-surface lane only — a session on another machine via Remote Control; your
+
+     session list was too long to check completely, so a same-named session beyond what
+     was searched would not have been seen
+  ⎿  Allowed by auto mode classifier
+
+⏺ Both blocking issues fixed and verified.
+
+  Fix 1 — usage shape: apps/clankie/src/captain/turn-metrics.ts TurnUsageSchema.reportCount →
+  reports; TurnMetrics.finish() emits { totalTokens, reports }. Tests updated (3 assertions in
+  test/turn-metrics.test.ts). Confirmed with the read-surface sibling — they'd independently
+  made the same rename in their protocol-level schema/docs/OpenAPI, so both sides now agree on
+  {totalTokens, reports}.
+
+  Fix 2 — missed execution capture: in runDiscordTurn (captain.ts), the
+  recordSelectionExecution(metrics, await syncModel(lane)) call was nested inside if
+  (normalized.durable), so one-shot Discord turns — which build a fresh session per turn and
+  are therefore always the idle case — never got their execution recorded at all. Hoisted the
+  call above the durable/one-shot branch, gated only on !live (matching the operator lane's
+  existing pattern), so it now fires for every owned turn — durable or one-shot,
+  completed/failed/interrupted alike — before either branch can throw or stall. Verified there
+  are only two new TurnMetrics(...) sites in the file (operator, Discord) and both now pair
+  unconditionally with recordSelectionExecution.
+
+  Checks run:
+  - cd apps/clankie && pnpm typecheck — clean.
+  - pnpm vitest run apps/clankie/test/turn-metrics.test.ts
+    apps/clankie/test/turn-metrics-api.test.ts apps/clankie/test/metrics-cli.test.ts
+    apps/clankie/test/captain-model.test.ts apps/clankie/test/captain-model-card.test.ts
+    apps/clankie/test/discord-turn-trail.test.ts — 30/30 pass (5 files resolved;
+    metrics-cli.test.ts doesn't exist at that path, it's p3's CLI-surface test elsewhere and
+    untouched by me).
+
+  No HTTP/CLI/docs surface files touched. No commits/pushes made.
+
+✻ Churned for 4m 36s · done 9:49 PM
+
+──────────────────────────────────────────────────────────────────────────────────────────────
+❯ run pnpm typecheck across the whole monorepo
+──────────────────────────────────────────────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with CL…
+  ⏵⏵ auto mode on (shift+tab to cycle)                                                   /rc

@@ -1,0 +1,39 @@
+
+ ▐▛███▛█   Claude Code v2.1.261
+▝▜██████▀  Sonnet 5 with medium effort · Claude Max
+  ▝▝ ▝▝    ~/.cb-terra/wt-terra
+
+⚠ 2 MCP servers need authentication · run /mcp
+
+❯ Implement VUH-1115 read surfaces only: inspect existing metric HTTP route/CLI/OpenAPI/docs
+  and add GET /v1/captain/turn-metrics plus clankie metrics [--run ID] [--limit N], shared
+  bounded most-recent-first behavior default 20/max 100, operator auth, safe item projection
+  including execution/usage; update OpenAPI CLI help docs/cli.md and focused surface tests.
+  Coordinate with existing types without editing turn-capture/storage internals. Worktree
+  only, no commit/push. Done = changed files plus narrow tests/evidence summary.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+✽ Forging… (12s · ↓ 543 tokens)
+
+──────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with CL…
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt                                /rc

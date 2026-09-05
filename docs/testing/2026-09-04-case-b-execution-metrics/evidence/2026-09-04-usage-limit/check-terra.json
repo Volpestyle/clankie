@@ -1,0 +1,76 @@
+{
+  "checks": 14,
+  "failed": 12,
+  "results": [
+    {
+      "id": "harness.tsx.resolved",
+      "ok": true,
+      "detail": "apps/tui/node_modules/.bin/tsx"
+    },
+    {
+      "id": "cli.default",
+      "ok": false,
+      "detail": "clankie metrics failed: clankie: the TUI requires a TTY Command failed: /Users/james/.cb4-terra/verify-terra/apps/tui/node_modules/.bin/tsx /Users/james/.cb4-terra/verify-terra/apps/tui/bin/clankie.ts metrics clankie: the TUI requires a TTY "
+    },
+    {
+      "id": "cli.limit.honoured",
+      "ok": false,
+      "detail": "clankie: the TUI requires a TTY Command failed: /Users/james/.cb4-terra/verify-terra/apps/tui/node_modules/.bin/tsx /Users/james/.cb4-terra/verify-terra/apps/tui/bin/clankie.ts metrics --limit 2 clankie: the TUI requires a TTY "
+    },
+    {
+      "id": "cli.limit.bounded",
+      "ok": false,
+      "detail": "cannot judge bounds: `clankie metrics` did not run at all"
+    },
+    {
+      "id": "cli.run.filter",
+      "ok": false,
+      "detail": "clankie: the TUI requires a TTY Command failed: /Users/james/.cb4-terra/verify-terra/apps/tui/node_modules/.bin/tsx /Users/james/.cb4-terra/verify-terra/apps/tui/bin/clankie.ts metrics --run run-no-usage clankie: the TUI requires a TTY "
+    },
+    {
+      "id": "legacy.execution.explicitly.unknown",
+      "ok": false,
+      "detail": "legacy execution was undefined, expected an explicit null"
+    },
+    {
+      "id": "legacy.usage.explicitly.unknown",
+      "ok": false,
+      "detail": "legacy usage was undefined, expected an explicit null"
+    },
+    {
+      "id": "modern.execution.reported",
+      "ok": false,
+      "detail": "execution was undefined"
+    },
+    {
+      "id": "modern.usage.reported",
+      "ok": false,
+      "detail": "usage was undefined"
+    },
+    {
+      "id": "usage.separate.from.context",
+      "ok": false,
+      "detail": "context occupancy and reported usage were not kept separate"
+    },
+    {
+      "id": "no.cost.inference",
+      "ok": false,
+      "detail": "an item carried an inferred cost field"
+    },
+    {
+      "id": "failed.turn.keeps.execution",
+      "ok": false,
+      "detail": "failed row execution was undefined"
+    },
+    {
+      "id": "no.report.is.unavailable.not.zero",
+      "ok": false,
+      "detail": "a turn with no reports showed usage undefined; expected null, never 0"
+    },
+    {
+      "id": "http.skipped",
+      "ok": true,
+      "detail": "no --base offered; CLI surface only"
+    }
+  ]
+}

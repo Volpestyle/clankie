@@ -1,0 +1,20 @@
+     assert only
+     toolCount/firstMutatingTool/mutatingCount
+     appear — no args, no result, no text.
+  8. Compile check: pnpm check (or scoped tsc)
+     right now should surface the missing
+     readTurnMetrics implementation on the
+     concrete createCaptain() object as a type
+     error — worth running once before this
+     piece is considered even structurally
+     complete, since the
+     interface/stub/protocol pieces are all
+     present but wired to nothing live.
+
+✻ Cooked for 7m 17s · done 9:43 PM
+
+───────────────────────────────────────────────
+❯ check whether the Discord lane calls recordU…
+───────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLA…
+  ⏵⏵ auto mode on (shift+tab to cycle)

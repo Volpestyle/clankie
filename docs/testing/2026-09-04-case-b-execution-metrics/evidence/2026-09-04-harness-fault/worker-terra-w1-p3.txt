@@ -1,0 +1,60 @@
+    command/registry.ts help
+  - docs/cli.md, apps/clankie/openapi.yaml —
+    new command/route docs
+
+  Tests: apps/clankie/test/turn-metrics.test.ts
+  (+6 readTurnSettledRows cases: ordering,
+
+  runId filter, default/max/clamp, torn-line
+  tolerance, legacy null normalization),
+  apps/clankie/test/turn-metrics-api.test.ts
+  (new: auth, limit bounds incl. max,
+  defaulting, runId passthrough),
+  apps/tui/test/metrics-cli.test.ts (new: arg
+  parsing, query passthrough,
+
+  missing-credential).
+
+  Checks run: tsc --noEmit clean in
+  packages/protocol, packages/api-client,
+
+  apps/clankie, apps/tui; vitest green —
+  turn-metrics.test.ts (25/25 combined with
+  turn-metrics-api.test.ts),
+  metrics-cli.test.ts (4/4), plus regression
+  pass on app-smoke, devices,
+  memory-capacity-api, captain-episodes,
+  discord-person-memory, model-cli, pairing
+  (all still green, 93 tests). No commit made
+  per instructions.
+
+✻ Brewed for 12m 0s · done 9:48 PM
+
+› Message from @VUH-1115-lane-captur…:
+Confirmed — `reports` is final on my side too
+(harvest review flagged the same rename). Also
+fixed a real gap: recordSe… (ctrl+o to expand)
+
+⏺ Acknowledged from the sibling — their
+  runDiscordTurn fix (hoisting
+  recordSelectionExecution/syncModel above the
+  durable/one-shot branch) doesn't touch
+  anything in my read-surface lane, and they
+  confirm everything's still green together
+  (30/30). No action needed on my end.
+
+  Ran 1 shell command
+
+⏺ Just confirming the tree still matches
+  expectations — nothing further to do here.
+  VUH-1115 read-surface lane stands as
+  reported: done, tested, untouched by the
+  sibling's discord-turn fix.
+
+✻ Worked for 6s · done 9:49 PM
+
+───────────────────────────────────────────────
+❯ run the full test suite together with their …
+───────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLA…
+  ⏵⏵ auto mode on (shift+tab to cycle)

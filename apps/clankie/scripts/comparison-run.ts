@@ -28,13 +28,12 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   createOperatorConversationServiceClient,
-  OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationServiceResultSchema,
   type OperatorConversationServiceDispatch,
-  type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
   type OperatorConversationStreamEvent,
 } from "@clankie/protocol";
+import { createHttpDispatch } from "./comparison-dispatch.ts";
 
 interface Options {
   readonly base: string;
@@ -74,29 +73,6 @@ function parseArgs(argv: readonly string[]): Options {
     timeoutMs: timeout,
     check: argv.includes("--check"),
     ...(conversationId === undefined || runId === undefined ? {} : { attach: { conversationId, runId } }),
-  };
-}
-
-/** The authenticated transport. The route answers `{op, schemaVersion, result}`. */
-function createHttpDispatch(input: {
-  readonly base: string;
-  readonly token: string;
-  readonly deadlineAt: number;
-}): OperatorConversationServiceDispatch {
-  return async (request: OperatorConversationServiceRequest) => {
-    // Bound every call by what is left of the run's deadline, never by a fresh
-    // window past it: a request started near the end must not outlive the run.
-    const remaining = input.deadlineAt - Date.now();
-    if (remaining <= 0) throw new Error("deadline exceeded before dispatch");
-    const response = await fetch(new URL(OPERATOR_CONVERSATION_DISPATCH_PATH, input.base), {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${input.token}` },
-      body: JSON.stringify(request),
-      redirect: "error",
-      signal: AbortSignal.timeout(remaining),
-    });
-    if (!response.ok) throw new Error(`dispatch ${String(response.status)}: ${await response.text()}`);
-    return OperatorConversationServiceResultSchema.parse(await response.json());
   };
 }
 

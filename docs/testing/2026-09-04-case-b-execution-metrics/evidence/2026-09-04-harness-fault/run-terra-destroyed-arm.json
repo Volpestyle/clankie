@@ -1,0 +1,665 @@
+{
+  "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+  "runId": "run-6a5b4b72-6edf-4303-acae-03031f0ec739",
+  "settled": {
+    "phase": "completed"
+  },
+  "elapsedMs": 63091,
+  "counts": {
+    "events": 59,
+    "toolEvents": 26,
+    "captainMessages": 1,
+    "inputRequested": 0
+  },
+  "events": [
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000001",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:35.109Z",
+      "type": "message",
+      "role": "operator",
+      "text": "Implement VUH-1115: execution identity and reported usage in the captain's turn metrics.\n\nToday `captain.turn.settled` records what a turn did but not what ran it, and it records no\nreported token usage at all. That makes any comparison between models reconstruct the model\nfrom outside, and makes usage unrecoverable after the fact.\n\n## What has to be true when you are done\n\n**Capture.** Every settled turn records the model, provider and effort that actually executed\nit — not a snapshot of configuration taken earlier. This must hold for failed and interrupted\nturns as well as completed ones, and for the first idle turn after the selection changes\nunder a live conversation.\n\n**Usage.** Sum the assistant-message `usage.totalTokens` actually reported across the turn,\nand separately count how many reports contributed. If nothing was reported, usage is\n*unavailable* — never zero. Context occupancy stays its own separate field. Infer no cost.\n\n**Store.** `turn-settled.jsonl` stays the only store. Rows written before this change must\nstill read, with their execution and usage reported explicitly as unknown rather than\nsilently absent or defaulted.\n\n**Read surfaces.** Both of these return the same bounded data, most recent first:\n\n- `GET /v1/captain/turn-metrics`, operator-authenticated, optional `runId` and `limit`\n  (default 20, maximum 100), answering `{ \"items\": [ … ] }`.\n- Headless `clankie metrics [--run ID] [--limit N]`, one JSON document on stdout.\n\nEach item keeps the fields it has today and adds:\n\n```jsonc\n{\n  \"execution\": { \"model\": \"…\", \"provider\": \"…\", \"effort\": \"…\" },  // null when unknown\n  \"usage\": { \"totalTokens\": 12345, \"reports\": 3 }                 // null when nothing reported\n}\n```\n\nNeither surface may expose transcripts, credentials or tool arguments.\n\n**Tests and docs.** Narrow regressions covering: the model changing mid-conversation; several\nreported usage rounds summing; a failed turn; an interrupted turn; legacy rows; the limit\nbounds; and unauthenticated access. Keep `docs/cli.md`, the OpenAPI document and the CLI help\ncurrent.\n\n## How you are checked\n\nAn external check runs against your source **applied to a pristine baseline**, exercising the\nCLI and HTTP surfaces above with seeded fixture rows. It does not read your tests and does not\ncare how you implement any of this — only that the surfaces behave as written above.\n\nThe job has a forty-five minute budget measured end to end, across however many turns your\nwork takes. It is judged when everything has gone quiet: no watch still registered, no worker\nstill running, no turn of yours in flight.\n\n## Your fleet\n\nLead this work; do not do it all yourself. In your own Herdr session, start **three** Claude\nCode workers and drive them:\n\n- two implementers and one reviewer\n- every one of them started as:\n  `herdr agent start <name> --kind claude --pane <paneId> -- --model claude-sonnet-5 --effort medium --permission-mode auto`\n- split panes from your own session for them and give each a clear scope\n- **harvest every worker's result before the job is done.** Use `herdr_watch` so their\n  settling wakes you; that is what it is for. Ending a turn after dispatching is fine and\n  expected — the job is not finished until you have inspected each worker's output, folded it\n  in, and left no delegated work running.\n\n## Ground rules\n\nWork only inside the worktree named below. Do not read or change anything outside it. Do not\ncommit or push. Run the narrowest relevant checks yourself before you finish.\n\nWorktree: /Users/james/.cb2-terra/wt-terra",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000002",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:35.109Z",
+      "type": "turn",
+      "runId": "run-6a5b4b72-6edf-4303-acae-03031f0ec739",
+      "phase": "accepted"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000003",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:40.616Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000004",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:41.234Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000005",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:41.557Z",
+      "type": "context",
+      "usage": {
+        "tokens": 43421,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000006",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:41.558Z",
+      "type": "tool",
+      "toolCallId": "call_IgBXAvLaooPVTfg4WnAVhz57|fc_05f15b5c2ecf128d016a9b7ffd2d1487d286fe65906bb682cc",
+      "name": "read",
+      "phase": "started",
+      "skillName": "herdr-lead",
+      "detail": "{\n  \"path\": \"/Users/james/.agents/skills/herdr-lead/SKILL.md\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000007",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:41.559Z",
+      "type": "tool",
+      "toolCallId": "call_IgBXAvLaooPVTfg4WnAVhz57|fc_05f15b5c2ecf128d016a9b7ffd2d1487d286fe65906bb682cc",
+      "name": "read",
+      "phase": "completed",
+      "skillName": "herdr-lead",
+      "detail": "---\nname: herdr-lead\ndescription: >-\n  Take the lead-agent role in a herdr session: census every workspace/tab/pane,\n  triage what each agent is doing, harvest finished work, detect duplicate or\n  colliding effort, and route new work to the right pane. Also Clankie's\n  companion fleet dashboard — open the board, read `herdr-lead state`, harvest,\n  route. Use when asked \"what is everything doing\", \"what's in flight\",\n  \"status of all agents\", \"who should do X\", \"harvest the done panes\",\n  \"plan across panes\", or when acting as the coordinator over a swarm.\n---\n\n# herdr-lead\n\nYou are the lead agent over a live herdr session. Your job is to hold the\npicture no single pane can: what every agent is doing, what finished and went\nunread, what is stuck on a human, and where the next piece of work belongs.\n\nWorks inside a herdr pane and from a socket-attached lead whose *face* is a\npane (Clankie: the operator console in this session). `herdr` talks to the\nlocal socket either way — `roster.ts` does not require `HERDR_ENV`. When\nthe turn names a pane as you, that pane is `HERDR_PANE_ID` even if the env\nvar is missing. A seated Clankie turn already carries a live agent census\nin `<herdr_session>`; refresh with `herdr-lead state` when worktrees or\nMRs matter. Load the `herdr` skill for the CLI, `herdr-handoff` for long\ncontext. This skill covers only the lead role. `herdr --skill` prints the CLI\nskill bundled with the *running* binary — version-exact, so prefer it over the\npackaged one.\n\n**Read-only by default.** Census, triage, and planning never need approval.\nDispatching — prompting another pane, spawning agents, closing panes — mutates\nsomeone else's agent session. Present the plan and wait, unless the user\nalready asked you to lead, dispatch, or harvest-and-continue — that prompt\nis the approval.\n\n## 1. Census\n\nOne call gets the whole session. Do not loop `workspace list` / `tab list` /\n`pane list` — `api snapshot` already contains all of it plus focus and layout.\n\n```bash\nnode ~/.claude/skills/herdr-lead/plugin/roster.ts\n```\n\nThat renders the snapshot as a compact roster (13 panes ≈ 20 lines) with a\nstatus summary, shared-cwd warnings, and your own pane marked. Raw\n`herdr api snapshot` is several hundred lines of JSON per dozen panes — only\nreach for it (`node ~/.claude/skills/herdr-lead/plugin/roster.ts --json`) when you need a field the roster drops.\n\nUseful filters: `--agents-only` (skip plain shells), `--status done`.\n\nAfter the roster (and recaps, if you took them), write `summaries.json` —\nsee **Agent summaries**. That file is what `i` on the board shows. You are\nthe agent who invoked this skill; writing it is part of the census, not a\nfollow-up.\n\n### Open the live board\n\nDo this first, before the text census — it gives the user a persistent view\nwhile you work, and it costs one call. Prefer the split:\n\n```bash\nherdr-lead split\n```\n\n`~/.local/bin/herdr-lead`, symlinked to `plugin/cli.ts`. `herdr-lead split`\nputs the board in a pane beside the target (Clankie's pane when the console\nopened it; otherwise the focused pane) and records that pane as the peer\n`ctrl+b shift+L` / `herdr-lead focus` returns to. `herdr-lead state` is the\ndigest below.\n\n**Never run bare `herdr-lead` from a tool call or a service.** It paints the\nTUI into the calling process — from an agent's Bash tool that means a TUI in\ncaptured stdout, which hangs or wastes the call and shows the user nothing.\nOnly a human typed into a shell should run it that way; use `herdr-lead split`.\n\n**One board per session.** Both forms are idempotent: if a pane labelled `Herd\nLead` is already up, they print its pane id and open nothing. So a second lead\nagent invoking this skill never spawns a duplicate board — it inherits the one\nthe user is already looking at. Tell the user where it is rather than trying to\nopen another.\n\nOne-time install and the `prefix+shift+l` keybinding: `reference/install.md`.\nBoard views, keys, scan roots, env vars, and what `r`/`R`/`p`/`P` do:\n`reference/board.md` — the board is the user's view and `?` inside it prints\nthe keymap, so you never recite it. Two things the board does *not* do: call\nDatadog or Linear (you write those caches — next section) or prompt an\nexisting agent (dispatch stays yours and needs approval).\n\n### The two agent-written caches\n\nThe board never calls Datadog or Linear — it has no credentials. The `datadog`\nview (key `6`) and the header's `+K no branch` ticket count both render caches\n**you** write, in `~/.local/state/herdr/plugins/herd-lead/`. `R` rereads them\nfrom disk; nothing but you ever rewrites them.\n\nThe view opens with a LINKS section — whatever dashboards and explorer urls are\nconfigured — and `enter` opens one in the browser. Links work with no cache at\nall; set them with `c` → datadog quick links, or\n`HERD_LEAD_DD_DASHBOARDS=\"label=url label=url\"` (URL-encode spaces — the list splits\non whitespace), or a `\"dashboards\"` array in the cache.\n\nRefresh them during a census when prod or ticket state matters, and whenever the\nboard shows them stale (the roll-up turns yellow past 30 minutes). Say the age\nwhenever you report from either — a clear board that is four hours old says\nnothing about now.\n\n**Before writing either file, read `reference/board-caches.md`** (next to this\nskill): exact JSON schema for both, which MCP calls fill them, and the traps —\n`No Data` is a resting state not a fault, a metric with no series means zero not\nmissing, and linear.json must be a superset or the board's join has nothing to\nwork with.\n\n### Agent summaries\n\nThe board's `i` on an agent row shows the summary **you** wrote — the agent\nwho invoked `/herdr-lead` or `$herdr-lead`. Write it during the census,\nand again when you harvest or re-read a pane.\n\n`~/.local/state/herdr/plugins/herd-lead/summaries.json`:\n\n```json\n{\n  \"at\": \"<ISO 8601 now>\",\n  \"agents\": {\n    \"w15:p8\": {\n      \"summary\": \"Inspecting the herdr census so seated turns carry the fleet.\",\n      \"next\": \"Show those summaries on i.\",\n      \"at\": \"<ISO 8601 now>\"\n    }\n  }\n}\n```\n\nOne line for `summary`, optional `next`. Your words, not a pasted title or\na raw `※ recap:`. Merge by pane id — read the file first, update the panes\nyou know about, leave the rest. Do not drop siblings. `r` / `R` reread the\nfile. A missing entry shows as `no summary yet`. The recap the board mines\nfrom a Claude pane is a fallback, not the summary.\n\n### Read the board's exact state\n\nThe board publishes the data it renders, so you can know exactly what the user\nis looking at instead of re-deriving it:\n\n```bash\nnode ~/.claude/skills/herdr-lead/plugin/digest.ts\n```\n\nA compact digest: agents with their correlated worktrees, open editors, every\nworktree with branch / dirty / ahead / behind / MR / attached panes, and the\nskill library. `--json` for the full structure, `--fresh` to force a rescan,\n`--all` to stop eliding.\n\n**The text digest lists only worktrees that are doing something** — dirty,\nahead, behind, with an MR, or with a pane attached — and ends the section with\n`… N clean/idle worktrees not listed`. Never conclude a repo is missing from\nthat output; it is almost certainly just clean. `--all` and `--json` are\ncomplete. It reads the same config as the board (settings.json, then\n`HERD_LEAD_*` env), so it works headless too.\n\nIt reads the board's live snapshot when the board is running (rewritten on every\nrefresh) and otherwise computes the same thing itself, so it works either way.\nPrefer it over `roster.ts` whenever worktree or MR state matters; `roster.ts` is\nstill the cheaper call when you only need pane status.\n\nTwo caveats before you report anything from it. Git state compares against local\nremote-tracking refs; the worktree detail labels them cached and shows the last\nfetch time. Refresh the selected repo from its menu before relying on origin\nstate. Library `vcs` state never fetches, so a skill merged upstream since the\nlast fetch can still read as off-main. And a branch whose prefix is not in the\nconfigured linear team keys (`c` on the board, or `HERD_LEAD_LINEAR_TEAMS` —\nthere is no default) gets no branch ticket at all, never a wrong one.\n\n## 2. Triage before reading anything\n\n`terminal_title_stripped` is the agent's own summary of its current task, and it\nis free — it arrives with the census. Combined with `agent_status` and `cwd` it\nis usually enough to route without reading a single pane. Reading N panes at 100\nlines each is what actually blows your context; spend those reads deliberately.\n\nSort every agent pane into five buckets:\n\n| Bucket | Meaning | Lead action |\n|---|---|---|\n| `blocked` | waiting on a human | **Surface to the user first.** This is the real bottleneck; no new dispatch fixes it. |\n| `done` | finished, and nobody has looked | Harvest queue — highest value. Read, summarize, decide follow-up. |\n| `working` | in flight | Do not interrupt. Record what it owns so you do not dispatch overlapping work. |\n| `idle` + trailing question | **asked the user something and is waiting** | Surface it. Never dispatch here — you would clobber a pending decision. |\n| `idle`, nothing pending | free capacity with warm context | Best dispatch target when its cwd/topic matches the new work. |\n| shell pane | free capacity, no context | Where a fresh agent goes. |\n\n`done` specifically means finished *and unread* — it is a queue of unharvested\nresults, not just \"not busy\". Treat a session with several `done` panes as\nhaving a backlog, and clear it before spawning anything new.\n\n**`idle` is the bucket that lies.** herdr's `blocked` means the TUI is showing a\npermission prompt. An agent that asked a *conversational* question — \"which do\nyou want?\", \"want me to file the ticket?\" — finished its turn and reports plain\n`idle`, indistinguishable in every metadata field from genuinely free capacity.\nIn practice this is common: expect a real fraction of idle agents to be awaiting\na decision. Always check before treating idle as available.\n\n`agent prompt` refuses a pane sitting at an approval or question dialog\n(`agent_blocked`) before sending any input, so the tool protects you from\nprompting a `blocked` pane — it cannot protect you from prompting a\nconversationally-idle one, which is exactly the case above.\n\nIt lies in the other direction too. A pane that asked a question, *got answered*,\nand did the work reports the same plain `idle` — and its recap can still be the\none from before the answer. Read that as a live request and you will hand an\nagent work it finished several turns ago. `idle` tells you a turn ended, never\nwhich turn.\n\n**Check for unsubmitted input too.** Text typed into an agent's box but never\nsent leaves the pane `idle` with a pending prompt one keystroke from running.\nNo metadata field exposes it. `roster.ts --recaps` flags it as\n`!! UNSUBMITTED INPUT`.\n\nClaude Code's dim suggested follow-up can trip that flag too. Inspect the\npane's ANSI styling when the distinction matters: an automatically suggested\nprompt is not text the operator entered and is not authorization to run it.\n\n## 3. Enrich cheaply, then deep-read only what is left\n\nClaude's TUI emits a `※ recap: <goal>. Next: <action>.` line — precisely what a\nlead needs, in one line instead of a transcript. Get every agent's recap plus an\nunsubmitted-input check in one call:\n\n```bash\nnode ~/.claude/skills/herdr-lead/plugin/roster.ts --recaps\n```\n\nThis is one `herdr agent read` per agent pane, but it returns ~1 line each\nrather than ~30. Reach for it before any manual reading. Best effort, not a\nguarantee: recaps are a Claude-TUI feature, users can disable them, and other\nagent kinds (codex, gemini) have no equivalent — an agent with no recap needs a\nreal read.\n\nRecaps also go stale. They describe the pane's last turn, which may be from\nhours ago; verify against a fresh read before acting on anything consequential.\n\nDeep-read only the shortlist that survives:\n\n```bash\nherdr agent read <pane> --source recent-unwrapped --lines 80\n```\n\nUse `recent-unwrapped` for reasoning over content — it rejoins soft wraps, so\npaths and commands are not split by pane width. `recent` is what the pane\nactually renders, `visible` is just the viewport, `detection` is what the status\nclassifier sees. Start at 60–80 lines and go back further only if the tail is\ninconclusive.\n\n**`recent`/`recent-unwrapped` can fail outright on a busy alternate-screen\nagent** — `\"alternate-screen history can only be captured by scrolling while\nidle\"`. That is a read failure, not an idle agent and not a broken pane: retry\nwhen it settles, or fall back to `--source visible` and accept the viewport.\n\n## 4. Route\n\nFour heuristics do most of the work:\n\n**Warm context beats cold.** An idle agent already in the right cwd, on a\nrelated topic, will outperform a fresh pane that has to rebuild understanding —\nprefer it even if a shell pane is technically free. Prefer a fresh pane when the\nnew work is unrelated to that agent's history, since stale context misleads.\n\n**Dedupe before dispatching.** Two agents editing one checkout is the failure\nmode that costs the most to unwind. Before assigning, confirm no `working` pane\nalready owns overlapping files. `roster.ts` flags checkouts with 2+ agents\nactively working. It groups by **git worktree root**, not by raw `cwd` — two\nagents sitting in different subdirectories of one repo are the collision you\nmost want caught, and raw-cwd grouping misses exactly that case. Separate\nworktrees resolve to separate roots and are genuinely safe to edit in parallel;\nseparate panes in one worktree are not.\n\n**The brief predicts quality more than the agent kind does.** An agent told\n*\"implement X\"* implements X competently and mentions problems in passing. The\nsame agent, same model, told *\"find what is wrong, be blunt, and tell me if my\nframing is bad\"* comes back with the thing that changes the plan. If you want a\ncritique, commission a critique — do not hope one falls out of an\nimplementation task.\n\nTwo corollaries worth building into a wave:\n\n- **Keep one pane whose only job is to attack.** Read-only, no implementation.\n  Three separate adversarial passes over one codebase each found new critical\n  bugs, including two that the previous pass had looked straight at. A review\n  that only re-reads the diff is not the same instrument.\n- **Demand reproduction, not suspicion.** \"This could race\" and \"here is the\n  journal showing `leave(frame 1)` then `act(frame 31)`, and the save was\n  overwritten after the body ended\" cost the same to ask for and are worth\n  wildly different amounts. Put it in the brief.\n\nAgent kinds and models drift release to release, so do not route on remembered\ntendencies — route on the brief. If you have watched a kind over-build process\nor surface in *this* session, split the wave accordingly: ask one agent to\nwrite it and a different one whether it should exist.\n\n## 5. Dispatch (after approval)\n\nRe-run the census immediately before dispatching. Statuses drift while you plan,\nand an agent that was idle two minutes ago may have been given work by the user.\n\n**A census is not enough on its own.** It returns `agent_status`, and `idle`\ncannot distinguish \"waiting on your decision\" from \"finished that decision two\nturns ago\" — the pane looks identical either way. So before any dispatch that\nacts on what a pane *said*, read its screen:\n\n```bash\nherdr agent read <pane> --source recent-unwrapped --lines 60\n```\n\nThe recap you triaged off may be several turns old. Dispatching from a stale one\ntells an agent to redo work it already finished, and the wasted turn is the good\noutcome — the bad one is that it re-applies changes on top of its own commits.\n\nCross-check against the world, not just the pane. If a recap says work is pending\nbut the worktree is clean, or holds two files where the recap implies twenty,\nbelieve git. A mismatch between what an agent last said and what its checkout\nactually contains means the recap is behind — resolve it before you prompt.\n\n**Prove the shared seam yourself, and commit it, before you brief anyone on it.**\nWhen two lanes build against one interface, dependency, or generated artifact,\nthat thing is the lead's — not lane A's to produce and lane B's to wait for.\nWrite it, make it typecheck, commit it to a base both worktrees share, and only\nthen dispatch. Lane B is then explicitly told to test against a fake, so neither\nlane's acceptance criterion \n… truncated"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000008",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:43.252Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000009",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:43.772Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000010",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:44.193Z",
+      "type": "context",
+      "usage": {
+        "tokens": 50864,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000011",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:44.193Z",
+      "type": "tool",
+      "toolCallId": "call_fYpBbWV9XSKOHWnOIpGeoWmX|fc_05f15b5c2ecf128d016a9b7fffbcf487d29406906964204872",
+      "name": "read",
+      "phase": "started",
+      "skillName": "herdr",
+      "detail": "{\n  \"path\": \"/Users/james/.agents/skills/herdr/SKILL.md\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000012",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:44.194Z",
+      "type": "tool",
+      "toolCallId": "call_fYpBbWV9XSKOHWnOIpGeoWmX|fc_05f15b5c2ecf128d016a9b7fffbcf487d29406906964204872",
+      "name": "read",
+      "phase": "completed",
+      "skillName": "herdr",
+      "detail": "---\nname: herdr\ndescription: \"Control Herdr, a terminal multiplexer for coding agents. Use only when the user explicitly mentions Herdr or asks to use Herdr to inspect or control panes, tabs, workspaces, commands, or another agent. Do not use merely because a task could benefit from a background terminal, delegation, or parallel work. Requires HERDR_ENV=1.\"\n---\n\n# Herdr\n\nHerdr organizes terminals into workspaces, tabs, and panes, recognizes coding agents running inside panes, and exposes the current session through the `herdr` CLI.\n\nBefore issuing any control command, verify that this agent is running inside a Herdr-managed pane:\n\n```bash\ntest \"${HERDR_ENV:-}\" = 1\n```\n\nIf the check fails, say that you are not running inside Herdr and stop. Do not inspect or control the focused Herdr session from outside Herdr.\n\nWhen the check passes, the `herdr` binary in `PATH` talks to the current session. Use it to inspect neighboring work, create terminal layout, start agents and commands, read output, and wait for state changes.\n\nThe CLI resolves its session from `HERDR_SOCKET_PATH` (injected into every managed pane), falling back to the default session's socket when unset. Subcommands take no `--session` flag; `herdr session list --json` enumerates every session — running or not — with its `socket_path`, which is how a program deliberately configured to target one specific session (not you, unless that is your explicit task) selects it via the env var.\n\nFor direct Unix-socket integrations, treat `session.snapshot` as a one-shot request: Herdr sends the response and closes that connection. Start `events.subscribe` on a fresh connection and use it only as an event stream; do not send later requests on it. `pane.agent_status_changed` subscriptions require a `pane_id`, so discover the live panes first and keep one status subscription per pane, adding and removing those streams with pane lifecycle events.\n\n## Learn the current CLI\n\nThe installed binary is the authority for command syntax. Start with:\n\n```bash\nherdr --help\n```\n\nThen print the relevant command group by running the group without a subcommand:\n\n```bash\nherdr agent\nherdr pane\nherdr workspace\nherdr tab\nherdr worktree\nherdr terminal\nherdr notification\nherdr integration\nherdr session\n```\n\nDo not run bare `herdr` for discovery; it launches or attaches the TUI. Do not probe a mutating nested command by omitting arguments. Commands such as `herdr workspace create` are valid with defaults and will execute.\n\nMost control commands return JSON. Read identifiers and state from those responses instead of predicting them.\n\n## Understand layout, panes, and agents\n\nChoose the primitive that matches the job:\n\n- Workspace, tab, and pane topology organize terminal locations.\n- Pane commands control raw terminals, shells, tests, servers, input, and output.\n- Agent commands control the recognized coding agent currently occupying a pane.\n\nA pane exists whether or not it contains an agent. `agent start` requires an existing available shell pane and never creates, splits, or moves layout. Use pane commands for ordinary processes. Use agent commands when Herdr must validate agent identity or interpret `idle`, `working`, `blocked`, `done`, and `unknown` lifecycle states.\n\nAgent commands accept either a unique live agent name or the pane ID currently hosting that agent. They do not accept terminal IDs or bare agent-kind labels. Names must match `[a-z][a-z0-9_-]{0,31}` and be unique among live agents. A name follows the current pane occupant and is cleared when that agent exits, is released, or is replaced.\n\n`agent list` exposes that operator-assigned identity as `.name`; an ad-hoc recognized agent can omit it. Do not substitute `.agent_session` for the name: the session tuple identifies the harness-native session and can rotate while a named managed agent remains the same logical subject.\n\n`idle` means the agent is ready for input and its tab has been seen in the focused Herdr UI. `done` is the same underlying idle state after unseen background work finishes. Focusing the tab or targeting the pane or agent with a focus command marks it seen. CLI reads do not mark it seen. `blocked` means Herdr recognized an approval or question UI. `unknown` means an agent is present but Herdr cannot classify it confidently; it does not prove completion.\n\n## Use IDs and caller context\n\nPublic IDs are opaque stable handles:\n\n- workspace: `w1`\n- tab: `w1:t1`\n- pane: `w1:p1`\n\nClosed tab and pane IDs are not reused. A pane moved into another workspace receives a new workspace-qualified pane ID. After `pane move`, continue with `.result.move_result.pane.pane_id` or the live agent name. The old value is reported as `.result.move_result.previous_pane_id`; only the moved process's inherited caller context keeps resolving that old ID, so do not use it as a general agent target.\n\nHerdr injects the caller's context into each managed pane:\n\n```bash\nprintf '%s\\n' \"$HERDR_WORKSPACE_ID\" \"$HERDR_TAB_ID\" \"$HERDR_PANE_ID\"\n```\n\nPrefer `--current` when a pane command should target the calling pane. Omitting a target may use the UI-focused pane, which can belong to the user or another client. For `pane neighbor`, pass the caller explicitly with `--pane \"$HERDR_PANE_ID\"`; the current CLI can resolve that command's `--current` to the UI-focused pane instead.\n\nDiscover live state with:\n\n```bash\nherdr workspace list\nherdr tab list --workspace \"$HERDR_WORKSPACE_ID\"\nherdr pane current --current\nherdr pane list --workspace \"$HERDR_WORKSPACE_ID\"\nherdr agent list\n```\n\nCreation responses expose the IDs to use next. `workspace create` returns `.result.workspace`, `.result.tab`, and `.result.root_pane`. `tab create` returns `.result.tab` and `.result.root_pane`. `pane split` returns the new pane as `.result.pane`.\n\n## Start and coordinate an agent\n\nDefault to a sibling pane in the current tab and the current working directory. Do not create a workspace, tab, worktree, or different cwd unless the user explicitly requests that topology or location.\n\nHonor a direction requested by the user. Otherwise inspect the caller pane:\n\n```bash\nherdr pane layout --pane \"$HERDR_PANE_ID\"\n```\n\nSplit a wide pane to the right and a narrow or tall pane down. Avoid repeated same-direction splits that create unusably narrow columns or short rows. Keep the user's focus in the calling pane and explicitly preserve the caller's working directory:\n\n```bash\nherdr pane split --current --direction right --cwd \"$PWD\" --no-focus\n```\n\nReplace `right` with `down` when appropriate. Read the new pane ID from `.result.pane.pane_id`.\n\nAn available shell pane must be at its interactive prompt, with the shell itself in the foreground and no foreground command, editor, or agent running. Start a supported agent in that pane with a useful unique name:\n\n```bash\nherdr agent start reviewer --kind codex --pane <returned-pane-id>\n```\n\nUse the kind requested by the user. Run `herdr agent` to inspect the installed kind list and options. Pass native agent arguments only after `--`:\n\n```bash\nherdr agent start reviewer --kind codex --pane <returned-pane-id> -- <agent-args...>\n```\n\nA successful `agent start` returns only after Herdr detects the expected agent in the same pane and considers it ready for interactive input. If the agent is blocked during startup, the command returns `agent_not_ready` immediately but keeps the name available for `agent read` and `agent send-keys`. Wait until the agent becomes idle before prompting it. Startup defaults to a 30-second timeout.\n\nSubmit work through the agent surface:\n\n```bash\nherdr agent prompt reviewer \"Review the current diff and report only actionable findings.\" --wait --timeout 120000\n```\n\n`agent prompt` honors the pane's live bracketed-paste mode and sends text followed by encoded Enter after a short delay. It rejects an agent already waiting at an approval or question dialog with `agent_blocked` before sending any input. Inspect the blocked UI and ask the user before answering it. For normal agent work, `--wait` is enough: it waits for the first settled `idle`, `done`, or `blocked` state. Do not repeat those defaults with `--until`.\n\nBefore prompting a settled agent, read the pane bottom. Text already sitting after the agent's input marker is an operator draft, not idle output; `agent prompt` can overwrite or combine with that buffer. Preserve it and resolve that instruction deliberately instead of injecting another prompt over it.\n\nA prompt sent from a non-working state must produce an observed lifecycle change within five seconds. Otherwise Herdr returns `agent_prompt_stalled` instead of waiting indefinitely. This wait tracks lifecycle state, not an individual turn; if the agent is already working, completion of the active turn may satisfy it.\n\nUse `--until` only for a state-specific workflow, such as waiting for an already-running agent to request input:\n\n```bash\nherdr agent wait reviewer --until blocked --timeout 120000\n```\n\nWithout `--until`, standalone `agent wait` uses the same settled-state defaults as `agent prompt --wait`.\n\nUse logical keys for interactive agent UI controls:\n\n```bash\nherdr agent send-keys reviewer esc\nherdr agent send-keys reviewer ctrl+c\n```\n\nHerdr validates all keys before writing any bytes. Read the result through the resolved agent:\n\n```bash\nherdr agent get reviewer\nherdr agent read reviewer --source recent-unwrapped --lines 120\n```\n\nIf a wait fails or returns `blocked`, inspect `agent get` and `agent read` before deciding what input to send. Use the pane surface only when raw terminal control is intentional.\n\n## Run an ordinary command in another pane\n\nCreate a sibling pane with the same geometry rule, preserve the caller's working directory, and keep user focus unchanged:\n\n```bash\nherdr pane split --current --direction right --cwd \"$PWD\" --no-focus\n```\n\nRead the new pane ID from `.result.pane.pane_id`, then run and inspect the command:\n\n```bash\nherdr pane run <returned-pane-id> \"just test\"\nherdr pane wait-output <returned-pane-id> --match \"test result\" --timeout 120000\nherdr pane read <returned-pane-id> --source recent-unwrapped --lines 120\n```\n\n`pane run` atomically sends command text and Enter. `pane wait-output` searches the selected snapshot immediately, so output that already exists can match. Use `--match <text>` for a literal substring or `--regex <pattern>` for a Rust regular expression. Omitting `--timeout` allows an indefinite wait.\n\nUse the read source that matches the task:\n\n- `visible`: the currently rendered viewport.\n- `recent`: recent rendered output, including soft wraps.\n- `recent-unwrapped`: recent output with soft wraps joined; prefer it for logs and transcripts.\n- `detection`: the plain-text bottom-buffer snapshot used for agent detection.\n\nUse `--format ansi` when colors and terminal styling are evidence. Otherwise use text.\n\n`--lines` asks Herdr for more rows from the pane's available screen and host scrollback. If increasing it does not reveal more of a completed response, the pane is probably running the agent on the terminal's alternate screen. Rows that leave the alternate screen do not enter Herdr's host scrollback, so a larger line count cannot recover them. After that failed idle read, ask the agent to write its complete response as Markdown in a temporary directory and reply only with the file path, then read the file directly. Use this only as a fallback; do not request file output in the initial prompt.\n\nAn explicit `agent read --lines N` that needs more rows than the viewport returns `agent_not_idle` while the agent is working, blocked, or unknown — alternate-screen history can only be scrolled when idle. Wait until idle and retry, or use `--source visible`. `pane read` of `recent` / `recent-unwrapped` stays passive and still returns whatever is already on screen plus host scrollback.\n\n## Safety and coordination rules\n\n- Use `--no-focus` for background work unless the user asked to switch context.\n- Use `--current`, an explicit pane ID, or a unique agent name. Do not rely on another client's focused pane.\n- Parse IDs from JSON responses. Do not derive them from sidebar order or examples.\n- Do not close workspaces, tabs, panes, or sessions you did not create unless the user explicitly asked.\n- Never run `herdr server stop` from an active session unless the user explicitly intends to stop the server and its pane processes.\n- Never kill the main Herdr process. Use named test sessions for experiments that need an isolated server.\n- CLI server errors are JSON on stderr with exit status 1. CLI syntax errors exit with status 2.\n- To reach a sibling agent pane that `ListAgents`/`SendMessage` cannot resolve (a truncated session list, or a Codex pane), `herdr agent prompt <pane-id> \"<note>\"` delivers the note as that agent's next message even while it is working; read the pane bottom first so you never paste over an operator draft.\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000013",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:47.337Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000014",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:48.626Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000015",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:48.804Z",
+      "type": "context",
+      "usage": {
+        "tokens": 53772,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000016",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:48.804Z",
+      "type": "tool",
+      "toolCallId": "call_YWijcUEc0hpYkkzPvspe887B|fc_05f15b5c2ecf128d016a9b800497a087d2a03a2497b4bb4590",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr --help && printf '\\\\n--- SNAPSHOT ---\\\\n' && herdr api snapshot\",\n  \"timeout\": 120000\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000017",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:48.818Z",
+      "type": "tool",
+      "toolCallId": "call_YWijcUEc0hpYkkzPvspe887B|fc_05f15b5c2ecf128d016a9b800497a087d2a03a2497b4bb4590",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "herdr — terminal workspace manager for AI coding agents\n\nUsage: herdr [options]\n       herdr --session <name> [options]\n       herdr --remote <ssh-target> [--session <name>]\n       herdr session attach <name>\n       herdr completion zsh\n       herdr update [--handoff]\n       herdr channel set <stable|preview>\n       herdr server stop\n       herdr server reload-config\n       herdr api <subcommand> ...\n       herdr completion <shell>\n       herdr config <subcommand> ...\n       herdr channel <subcommand> ...\n       herdr workspace <subcommand> ...\n       herdr worktree <subcommand> ...\n       herdr tab <subcommand> ...\n       herdr notification <subcommand> ...\n       herdr agent <subcommand> ...\n       herdr pane <subcommand> ...\n       herdr session <subcommand> ...\n       herdr integration <subcommand> ...\n\nCommon commands:\n  herdr                            Launch or attach to the persistent session\n  herdr status [server|client]     Show local client and running server status\n  herdr update                     Download and install the latest version\n  herdr completion zsh             Generate shell completions for zsh\n  herdr server stop                Stop the running server via the API socket\n  herdr channel set <stable|preview> Choose the stable or preview update channel\n  herdr server reload-config       Reload config.toml in the running server\n  herdr config reset-keys          Back up config.toml and remove custom keybindings\n  herdr channel <subcommand>       Manage the stable or preview update channel\n  herdr api <subcommand>           Inspect socket API metadata and live runtime state\n  herdr workspace <subcommand>     Workspace helpers over the socket API\n  herdr worktree <subcommand>      Git worktree helpers over the socket API\n  herdr tab <subcommand>           Tab helpers over the socket API\n  herdr notification <subcommand>  Notification helpers over the socket API\n  herdr agent <subcommand>         Agent/terminal helpers over the socket API\n  herdr pane <subcommand>          Pane control helpers over the socket API\n  herdr session <subcommand>       Manage named persistent sessions\n  herdr integration <subcommand>   Manage built-in agent integrations\n\nAdvanced commands:\n  herdr server                     Run as headless server\n\nOptions:\n  --no-session        Run monolithically (no server/client, escape hatch)\n  --session <name>    Use or create a named persistent session\n  --remote <target>   Attach through SSH to a remote Herdr server\n  --remote-keybindings <local|server>\n                      Keybindings for --remote app attach (default: local)\n  --handoff           Opt into live handoff for update or remote attach\n  --default-config    Print default configuration and exit\n  --skill             Print the agent skill file and exit\n  --version, -V       Print version and exit\n  --help, -h          Show this help\n\nConfig: /Users/james/.cb2-terra/config/herdr/config.toml\nLogs:   /Users/james/.cb2-terra/config/herdr/herdr.log (plus herdr-client.log, herdr-server.log)\nEnv:    HERDR_CONFIG_PATH overrides config file path\nHome:   https://herdr.dev\n\nAre you an AI? Use these resources ONLY IF your task specifically asks you to:\n  Help a human understand or set up Herdr for the first time:\n    https://herdr.dev/agent-guide.md\n  Debug or investigate a problem with Herdr:\n    https://herdr.dev/llms.txt\n  Control Herdr panes, agents, or workspaces:\n    SKIP if a Herdr skill is already in your context. Otherwise run: herdr --skill\n\n--- SNAPSHOT ---\n{\"id\":\"cli:api:snapshot\",\"result\":{\"snapshot\":{\"agents\":[],\"layouts\":[],\"panes\":[],\"protocol\":21,\"tabs\":[],\"version\":\"0.8.2\",\"workspaces\":[]},\"type\":\"session_snapshot\"}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000018",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:50.611Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000019",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:51.981Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000020",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:52.318Z",
+      "type": "context",
+      "usage": {
+        "tokens": 54735,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000021",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:52.318Z",
+      "type": "tool",
+      "toolCallId": "call_ftV4LKzNAh5f3Zqb6k6bA5f4|fc_05f15b5c2ecf128d016a9b8007f24c87d2b7046421feebf8bb",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr workspace && herdr pane && herdr agent\",\n  \"timeout\": 120000\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000022",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:52.326Z",
+      "type": "tool",
+      "toolCallId": "call_ftV4LKzNAh5f3Zqb6k6bA5f4|fc_05f15b5c2ecf128d016a9b8007f24c87d2b7046421feebf8bb",
+      "name": "bash",
+      "phase": "failed",
+      "detail": "herdr workspace commands:\n  herdr workspace list\n  herdr workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]\n  herdr workspace get <workspace_id>\n  herdr workspace focus <workspace_id>\n  herdr workspace rename <workspace_id> <label>\n  herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]\n  herdr workspace close <workspace_id> [--group]\n\n\nCommand exited with code 2"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000023",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:54.065Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000024",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:55.498Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000025",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:56.143Z",
+      "type": "context",
+      "usage": {
+        "tokens": 54984,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000026",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:56.144Z",
+      "type": "tool",
+      "toolCallId": "call_LJ0pDPkcqjjv5OGQd4wOeDhf|fc_05f15b5c2ecf128d016a9b800b76e887d2bbaefd4aafef0c7f",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr workspace create --cwd /Users/james/.cb2-terra/wt-terra --label 'VUH-1115' --no-focus\",\n  \"timeout\": 120000\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000027",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:56.170Z",
+      "type": "tool",
+      "toolCallId": "call_LJ0pDPkcqjjv5OGQd4wOeDhf|fc_05f15b5c2ecf128d016a9b800b76e887d2bbaefd4aafef0c7f",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:workspace:create\",\"result\":{\"root_pane\":{\"agent_status\":\"unknown\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":true,\"foreground_cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"pane_id\":\"w1:p1\",\"revision\":0,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":40},\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33e99aa4e1\",\"workspace_id\":\"w1\"},\"tab\":{\"agent_status\":\"unknown\",\"focused\":true,\"label\":\"1\",\"number\":1,\"pane_count\":1,\"tab_id\":\"w1:t1\",\"workspace_id\":\"w1\"},\"type\":\"workspace_created\",\"workspace\":{\"active_tab_id\":\"w1:t1\",\"agent_status\":\"unknown\",\"focused\":true,\"label\":\"VUH-1115\",\"number\":1,\"pane_count\":1,\"tab_count\":1,\"workspace_id\":\"w1\"}}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000028",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:57.652Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000029",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:58.627Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000030",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:59.632Z",
+      "type": "context",
+      "usage": {
+        "tokens": 55313,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000031",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:59.633Z",
+      "type": "tool",
+      "toolCallId": "call_mCtdNKhUkyJnYQnAFB52KUgy|fc_05f15b5c2ecf128d016a9b800e97e887d291a905ba1db8305b",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"set -e\\nfor direction in right down down; do herdr pane split w1:p1 --direction \\\"$direction\\\" --cwd /Users/james/.cb2-terra/wt-terra --no-focus; done\",\n  \"timeout\": 120000\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000032",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:35:59.666Z",
+      "type": "tool",
+      "toolCallId": "call_mCtdNKhUkyJnYQnAFB52KUgy|fc_05f15b5c2ecf128d016a9b800e97e887d291a905ba1db8305b",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:pane:split\",\"result\":{\"pane\":{\"agent_status\":\"unknown\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"pane_id\":\"w1:p2\",\"revision\":0,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":39},\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecec23d2\",\"workspace_id\":\"w1\"},\"type\":\"pane_info\"}}\n{\"id\":\"cli:pane:split\",\"result\":{\"pane\":{\"agent_status\":\"unknown\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"pane_id\":\"w1:p3\",\"revision\":0,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":39},\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecee5233\",\"workspace_id\":\"w1\"},\"type\":\"pane_info\"}}\n{\"id\":\"cli:pane:split\",\"result\":{\"pane\":{\"agent_status\":\"unknown\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"pane_id\":\"w1:p4\",\"revision\":0,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":20},\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecf04444\",\"workspace_id\":\"w1\"},\"type\":\"pane_info\"}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000033",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:01.453Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000034",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:03.336Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000035",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:05.396Z",
+      "type": "context",
+      "usage": {
+        "tokens": 55900,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000036",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:05.397Z",
+      "type": "tool",
+      "toolCallId": "call_gwDpRftQbVjkrCsHel1yPJ1e|fc_05f15b5c2ecf128d016a9b80134c6887d2b9f6b372ca27018d",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"set -e\\nherdr agent start vuh1115_capture --kind claude --pane w1:p2 -- --model claude-sonnet-5 --effort medium --permission-mode auto\\nherdr agent start vuh1115_surfaces --kind claude --pane w1:p3 -- --model claude-sonnet-5 --effort medium --permission-mode auto\\nherdr agent start vuh1115_reviewer --kind claude --pane w1:p4 -- --model claude-sonnet-5 --effort medium --permission-mode auto\",\n  \"timeout\": 120000\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000037",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:16.192Z",
+      "type": "tool",
+      "toolCallId": "call_gwDpRftQbVjkrCsHel1yPJ1e|fc_05f15b5c2ecf128d016a9b80134c6887d2b9f6b372ca27018d",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:agent:start\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"285a03c5-4146-42c4-9261-78cebec1fd58\"},\"agent_status\":\"idle\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/Library/Application Support/davinci-resolve-mcp\",\"interactive_ready\":true,\"name\":\"vuh1115_capture\",\"pane_id\":\"w1:p2\",\"revision\":3,\"state_change_seq\":1,\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecec23d2\",\"terminal_title\":\"✳ Claude Code\",\"terminal_title_stripped\":\"Claude Code\",\"workspace_id\":\"w1\"},\"argv\":[\"claude\",\"--model\",\"claude-sonnet-5\",\"--effort\",\"medium\",\"--permission-mode\",\"auto\"],\"type\":\"agent_started\"}}\n{\"id\":\"cli:agent:start\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"72981cfd-c745-4bfc-a4e5-8b552c7c08a4\"},\"agent_status\":\"idle\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/Library/Application Support/davinci-resolve-mcp\",\"interactive_ready\":true,\"name\":\"vuh1115_surfaces\",\"pane_id\":\"w1:p3\",\"revision\":3,\"state_change_seq\":2,\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecee5233\",\"terminal_title\":\"✳ Claude Code\",\"terminal_title_stripped\":\"Claude Code\",\"workspace_id\":\"w1\"},\"argv\":[\"claude\",\"--model\",\"claude-sonnet-5\",\"--effort\",\"medium\",\"--permission-mode\",\"auto\"],\"type\":\"agent_started\"}}\n{\"id\":\"cli:agent:start\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"554f3ea0-478d-490a-8edd-34ad68658ae9\"},\"agent_status\":\"idle\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/Library/Application Support/davinci-resolve-mcp\",\"interactive_ready\":true,\"name\":\"vuh1115_reviewer\",\"pane_id\":\"w1:p4\",\"revision\":3,\"state_change_seq\":3,\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecf04444\",\"terminal_title\":\"✳ Claude Code\",\"terminal_title_stripped\":\"Claude Code\",\"workspace_id\":\"w1\"},\"argv\":[\"claude\",\"--model\",\"claude-sonnet-5\",\"--effort\",\"medium\",\"--permission-mode\",\"auto\"],\"type\":\"agent_started\"}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000038",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:17.767Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000039",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:29.720Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000040",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:29.833Z",
+      "type": "context",
+      "usage": {
+        "tokens": 57228,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000041",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:29.833Z",
+      "type": "tool",
+      "toolCallId": "call_iicOclBtgbxXbgMRUsHwC4o7|fc_05f15b5c2ecf128d016a9b802dad9087d2a76a938cb91b1cd9",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr agent prompt vuh1115_capture 'Implement VUH-1115 capture/store lane only. Inspect existing captain turn metrics and turn-settled JSONL code. Make every settled event record actual execution {model,provider,effort} at execution time including failed/interrupted and first idle after live selection change; aggregate assistant-message usage.totalTokens across turn with report count, null when none; legacy reader rows must expose execution:null usage:null. Add focused capture/storage regressions. Do not modify HTTP/CLI/OpenAPI/docs read surfaces. Work only this worktree, do not commit/push. Done means implementation and focused tests pass; report exact files/checks.'\",\n  \"timeout\": 120000\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000042",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:29.833Z",
+      "type": "tool",
+      "toolCallId": "call_15ypkIqn4g0hbzIk57eQfhZD|fc_05f15b5c2ecf128d016a9b802dada087d29e5a162b624024db",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr agent prompt vuh1115_surfaces 'Implement VUH-1115 read-surface lane only. Inspect existing metrics reader/API/CLI/docs/OpenAPI. Add operator-authenticated GET /v1/captain/turn-metrics with optional runId limit default 20 max 100 returning newest-first bounded {items}; add headless clankie metrics [--run ID] [--limit N] emitting one JSON doc. Ensure surfaces return fields execution and usage from stored rows without transcript/credential/tool args. Update CLI help docs/cli.md OpenAPI and focused surface tests incl limits/auth/legacy fixture behavior. Do not modify captain execution instrumentation unless needed for types; coordinate by consuming existing reader shape. No commit/push. Done means narrow checks pass and exact files/checks reported.'\",\n  \"timeout\": 120000\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000043",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:29.834Z",
+      "type": "tool",
+      "toolCallId": "call_6RaeXZ88AUPjHQo0oV54EnPZ|fc_05f15b5c2ecf128d016a9b802dada887d2835cec34b2b99afb",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr agent prompt vuh1115_reviewer 'Act as VUH-1115 adversarial reviewer, read-only for now. Inspect current captain turn metrics architecture, fixtures and planned requirements. Identify exact hooks for actual execution identity, usage report aggregation, failure/interruption/idle selection change, JSONL backward compatibility, API/CLI auth/bounds. Do not edit code. Give concise evidence-backed risks, file paths, and a verification plan that catches likely external seeded-fixture checks.'\",\n  \"timeout\": 120000\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000044",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:29.844Z",
+      "type": "tool",
+      "toolCallId": "call_6RaeXZ88AUPjHQo0oV54EnPZ|fc_05f15b5c2ecf128d016a9b802dada887d2835cec34b2b99afb",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:agent:prompt\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"554f3ea0-478d-490a-8edd-34ad68658ae9\"},\"agent_status\":\"idle\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/Library/Application Support/davinci-resolve-mcp\",\"interactive_ready\":true,\"name\":\"vuh1115_reviewer\",\"pane_id\":\"w1:p4\",\"revision\":3,\"state_change_seq\":3,\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecf04444\",\"terminal_title\":\"✳ Claude Code\",\"terminal_title_stripped\":\"Claude Code\",\"workspace_id\":\"w1\"},\"type\":\"agent_prompted\"}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000045",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:29.845Z",
+      "type": "tool",
+      "toolCallId": "call_iicOclBtgbxXbgMRUsHwC4o7|fc_05f15b5c2ecf128d016a9b802dad9087d2a76a938cb91b1cd9",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:agent:prompt\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"285a03c5-4146-42c4-9261-78cebec1fd58\"},\"agent_status\":\"idle\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/Library/Application Support/davinci-resolve-mcp\",\"interactive_ready\":true,\"name\":\"vuh1115_capture\",\"pane_id\":\"w1:p2\",\"revision\":3,\"state_change_seq\":1,\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecec23d2\",\"terminal_title\":\"✳ Claude Code\",\"terminal_title_stripped\":\"Claude Code\",\"workspace_id\":\"w1\"},\"type\":\"agent_prompted\"}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000046",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:29.845Z",
+      "type": "tool",
+      "toolCallId": "call_15ypkIqn4g0hbzIk57eQfhZD|fc_05f15b5c2ecf128d016a9b802dada087d29e5a162b624024db",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:agent:prompt\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"72981cfd-c745-4bfc-a4e5-8b552c7c08a4\"},\"agent_status\":\"idle\",\"cwd\":\"/Users/james/.cb2-terra/wt-terra\",\"focused\":false,\"foreground_cwd\":\"/Users/james/Library/Application Support/davinci-resolve-mcp\",\"interactive_ready\":true,\"name\":\"vuh1115_surfaces\",\"pane_id\":\"w1:p3\",\"revision\":3,\"state_change_seq\":2,\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab33ecee5233\",\"terminal_title\":\"✳ Claude Code\",\"terminal_title_stripped\":\"Claude Code\",\"workspace_id\":\"w1\"},\"type\":\"agent_prompted\"}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000047",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:31.484Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000048",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:34.777Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000049",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:34.885Z",
+      "type": "context",
+      "usage": {
+        "tokens": 57996,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000050",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:34.886Z",
+      "type": "tool",
+      "toolCallId": "call_M2us2ftEHDbBS3OfxkHdrf6i|fc_05f15b5c2ecf128d016a9b8032b9d887d2810d70c24276243f",
+      "name": "herdr_watch",
+      "phase": "started",
+      "detail": "{\n  \"agent\": \"w1:p2\",\n  \"reason\": \"Harvest VUH-1115 capture/storage implementation; inspect diff and focused tests.\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000051",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:34.894Z",
+      "type": "tool",
+      "toolCallId": "call_M2us2ftEHDbBS3OfxkHdrf6i|fc_05f15b5c2ecf128d016a9b8032b9d887d2810d70c24276243f",
+      "name": "herdr_watch",
+      "phase": "completed",
+      "detail": "{\n  \"outcome\": \"watching\",\n  \"watchId\": \"db29e77a-5855-40e7-9a5d-47ae21190a43\",\n  \"target\": \"w1:p2\",\n  \"paneId\": \"w1:p2\",\n  \"terminalId\": \"term_65ab33ecec23d2\",\n  \"alreadyWatching\": false,\n  \"createdAt\": \"2026-09-05T02:36:34.893Z\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000052",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:34.895Z",
+      "type": "tool",
+      "toolCallId": "call_aOkOEUfdSKRWfqajzunlExlX|fc_05f15b5c2ecf128d016a9b8032b9ec87d2af062fcf4bd8f1c9",
+      "name": "herdr_watch",
+      "phase": "started",
+      "detail": "{\n  \"agent\": \"w1:p3\",\n  \"reason\": \"Harvest VUH-1115 HTTP/CLI/docs implementation; inspect diff and focused tests.\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000053",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:35.003Z",
+      "type": "tool",
+      "toolCallId": "call_aOkOEUfdSKRWfqajzunlExlX|fc_05f15b5c2ecf128d016a9b8032b9ec87d2af062fcf4bd8f1c9",
+      "name": "herdr_watch",
+      "phase": "completed",
+      "detail": "{\n  \"outcome\": \"watching\",\n  \"watchId\": \"3148e40a-5fbe-42d4-a675-4f5c8dd60a42\",\n  \"target\": \"w1:p3\",\n  \"paneId\": \"w1:p3\",\n  \"terminalId\": \"term_65ab33ecee5233\",\n  \"alreadyWatching\": false,\n  \"createdAt\": \"2026-09-05T02:36:35.002Z\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000054",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:35.003Z",
+      "type": "tool",
+      "toolCallId": "call_GsGppyx12ewhYHqvocMlNSLy|fc_05f15b5c2ecf128d016a9b8032b9f487d2a32a74d726648acc",
+      "name": "herdr_watch",
+      "phase": "started",
+      "detail": "{\n  \"agent\": \"w1:p4\",\n  \"reason\": \"Harvest VUH-1115 adversarial architecture review and apply findings.\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000055",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:35.010Z",
+      "type": "tool",
+      "toolCallId": "call_GsGppyx12ewhYHqvocMlNSLy|fc_05f15b5c2ecf128d016a9b8032b9f487d2a32a74d726648acc",
+      "name": "herdr_watch",
+      "phase": "completed",
+      "detail": "{\n  \"outcome\": \"watching\",\n  \"watchId\": \"1979d204-cf5a-402a-99e0-fb1fb187654a\",\n  \"target\": \"w1:p4\",\n  \"paneId\": \"w1:p4\",\n  \"terminalId\": \"term_65ab33ecf04444\",\n  \"alreadyWatching\": false,\n  \"createdAt\": \"2026-09-05T02:36:35.009Z\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000056",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:36.729Z",
+      "type": "activity",
+      "phase": "responding"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000057",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:37.410Z",
+      "type": "message",
+      "role": "captain",
+      "text": "Dispatched three Claude workers in `w1` (two implementation lanes plus an adversarial reviewer) and armed harvest watchers for each.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000058",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:37.410Z",
+      "type": "context",
+      "usage": {
+        "tokens": 58383,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-2da30b43-1126-494e-a307-83f4df2ba572",
+      "cursor": "000000000059",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:36:37.412Z",
+      "type": "turn",
+      "runId": "run-6a5b4b72-6edf-4303-acae-03031f0ec739",
+      "phase": "completed"
+    }
+  ]
+}

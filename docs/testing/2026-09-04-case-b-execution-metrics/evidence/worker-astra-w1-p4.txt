@@ -1,0 +1,20 @@
+▝▜██████▀  Claude Max
+  ▝▝ ▝▝    ~/.cb-astra/wt-astra
+
+⚠ 2 MCP servers need authentication · run /mcp
+
+❯ Read /Users/james/.cb-astra/wt-astra/.vuh-11
+  15-brief.md and execute reviewer preliminary
+  pass. Stay within named worktree, no
+  commits.
+
+⏺ Listing captain directory
+  ⎿  apps/clankie/src/captain/turn-metrics.ts
+
+✢ Nesting… (thinking with medium effort)
+
+───────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLA…
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc…

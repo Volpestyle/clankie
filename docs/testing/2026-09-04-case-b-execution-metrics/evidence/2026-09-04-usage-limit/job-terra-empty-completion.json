@@ -1,0 +1,45 @@
+{
+  "succeeded": true,
+  "quiescent": true,
+  "reason": "no registered watch, no busy worker, no run in flight, re-confirmed",
+  "captainRuns": [
+    {
+      "runId": "run-e4b93a53-ad7f-4805-876e-f3aa60b79f72",
+      "phases": [
+        {
+          "phase": "accepted",
+          "at": "2026-09-05T02:52:54.171Z"
+        },
+        {
+          "phase": "completed",
+          "at": "2026-09-05T02:53:01.332Z"
+        }
+      ]
+    }
+  ],
+  "captainRunCount": 1,
+  "initialTurnLatencyMs": 7448,
+  "wholeJobLatencyMs": 12840,
+  "blockedWorkers": [],
+  "harvestEvidence": "quiescence plus green checks does not by itself prove the captain inspected each worker; read the transcript and the worker screens for that",
+  "finalWorkers": [],
+  "finalWatches": 0,
+  "samples": [
+    {
+      "at": "2026-09-05T02:53:03.714Z",
+      "watches": 0,
+      "workers": [],
+      "busyWorkers": 0,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    },
+    {
+      "at": "2026-09-05T02:53:06.724Z",
+      "watches": 0,
+      "workers": [],
+      "busyWorkers": 0,
+      "runsSeen": 1,
+      "runsInFlight": 0
+    }
+  ]
+}

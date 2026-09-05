@@ -1,0 +1,59 @@
+{
+  "conversationId": "conv-d4bab12e-3807-4dc9-9c6d-d8eab50c48d1",
+  "runId": "run-e4b93a53-ad7f-4805-876e-f3aa60b79f72",
+  "settled": {
+    "phase": "completed"
+  },
+  "elapsedMs": 9092,
+  "counts": {
+    "events": 4,
+    "toolEvents": 0,
+    "captainMessages": 0,
+    "inputRequested": 0
+  },
+  "events": [
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-d4bab12e-3807-4dc9-9c6d-d8eab50c48d1",
+      "cursor": "000000000001",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:52:54.171Z",
+      "type": "message",
+      "role": "operator",
+      "text": "Implement VUH-1115: execution identity and reported usage in the captain's turn metrics.\n\nToday `captain.turn.settled` records what a turn did but not what ran it, and it records no\nreported token usage at all. That makes any comparison between models reconstruct the model\nfrom outside, and makes usage unrecoverable after the fact.\n\n## What has to be true when you are done\n\n**Capture.** Every settled turn records the model, provider and effort that actually executed\nit — not a snapshot of configuration taken earlier. This must hold for failed and interrupted\nturns as well as completed ones, and for the first idle turn after the selection changes\nunder a live conversation.\n\n**Usage.** Sum the assistant-message `usage.totalTokens` actually reported across the turn,\nand separately count how many reports contributed. If nothing was reported, usage is\n*unavailable* — never zero. Context occupancy stays its own separate field. Infer no cost.\n\n**Store.** `turn-settled.jsonl` stays the only store. Rows written before this change must\nstill read, with their execution and usage reported explicitly as unknown rather than\nsilently absent or defaulted.\n\n**Read surfaces.** Both of these return the same bounded data, most recent first:\n\n- `GET /v1/captain/turn-metrics`, operator-authenticated, optional `runId` and `limit`\n  (default 20, maximum 100), answering `{ \"items\": [ … ] }`.\n- Headless `clankie metrics [--run ID] [--limit N]`, one JSON document on stdout.\n\nEach item keeps the fields it has today and adds:\n\n```jsonc\n{\n  \"execution\": { \"model\": \"…\", \"provider\": \"…\", \"effort\": \"…\" },  // null when unknown\n  \"usage\": { \"totalTokens\": 12345, \"reports\": 3 }                 // null when nothing reported\n}\n```\n\nNeither surface may expose transcripts, credentials or tool arguments.\n\n**Tests and docs.** Narrow regressions covering: the model changing mid-conversation; several\nreported usage rounds summing; a failed turn; an interrupted turn; legacy rows; the limit\nbounds; and unauthenticated access. Keep `docs/cli.md`, the OpenAPI document and the CLI help\ncurrent.\n\n## How you are checked\n\nAn external check runs against your source **applied to a pristine baseline**, exercising the\nCLI and HTTP surfaces above with seeded fixture rows. It does not read your tests and does not\ncare how you implement any of this — only that the surfaces behave as written above.\n\nThe job has a forty-five minute budget measured end to end, across however many turns your\nwork takes. It is judged when everything has gone quiet: no watch still registered, no worker\nstill running, no turn of yours in flight.\n\n## Your fleet\n\nLead this work; do not do it all yourself. In your own Herdr session, start **three** Claude\nCode workers and drive them:\n\n- two implementers and one reviewer\n- every one of them started as:\n  `herdr agent start <name> --kind claude --pane <paneId> -- --model claude-sonnet-5 --effort medium --permission-mode auto`\n- split panes from your own session for them and give each a clear scope\n- **harvest every worker's result before the job is done.** Use `herdr_watch` so their\n  settling wakes you; that is what it is for. Ending a turn after dispatching is fine and\n  expected — the job is not finished until you have inspected each worker's output, folded it\n  in, and left no delegated work running.\n\n## Ground rules\n\nWork only inside the worktree named below. Do not read or change anything outside it. Do not\ncommit or push. Run the narrowest relevant checks yourself before you finish.\n\nWorktree: /Users/james/.cb4-terra/wt-terra",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-d4bab12e-3807-4dc9-9c6d-d8eab50c48d1",
+      "cursor": "000000000002",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:52:54.171Z",
+      "type": "turn",
+      "runId": "run-e4b93a53-ad7f-4805-876e-f3aa60b79f72",
+      "phase": "accepted"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-d4bab12e-3807-4dc9-9c6d-d8eab50c48d1",
+      "cursor": "000000000003",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:53:01.328Z",
+      "type": "context",
+      "usage": {
+        "tokens": 995,
+        "contextWindow": 272000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-d4bab12e-3807-4dc9-9c6d-d8eab50c48d1",
+      "cursor": "000000000004",
+      "revision": 1,
+      "occurredAt": "2026-09-05T02:53:01.332Z",
+      "type": "turn",
+      "runId": "run-e4b93a53-ad7f-4805-876e-f3aa60b79f72",
+      "phase": "completed"
+    }
+  ]
+}

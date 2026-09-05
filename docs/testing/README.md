@@ -29,3 +29,4 @@ all other capabilities from the files present.
 - [2026-08-30 Hosted FireRed intro on current Clankie](2026-08-30-hosted-firered-intro/README.md)
 - [2026-09-04 Clankie boots in a Linux container](2026-09-04-linux-service-spike/README.md)
 - [2026-09-04 Astra/Terra comparison: case A](2026-09-04-astra-terra-comparison/README.md)
+- [2026-09-04 Astra/Terra fleet comparison: case B and harness limits](2026-09-04-case-b-execution-metrics/README.md)

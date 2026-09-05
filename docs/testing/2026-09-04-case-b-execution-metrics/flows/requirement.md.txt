@@ -1,0 +1,73 @@
+Implement VUH-1115: execution identity and reported usage in the captain's turn metrics.
+
+Today `captain.turn.settled` records what a turn did but not what ran it, and it records no
+reported token usage at all. That makes any comparison between models reconstruct the model
+from outside, and makes usage unrecoverable after the fact.
+
+## What has to be true when you are done
+
+**Capture.** Every settled turn records the model, provider and effort that actually executed
+it — not a snapshot of configuration taken earlier. This must hold for failed and interrupted
+turns as well as completed ones, and for the first idle turn after the selection changes
+under a live conversation.
+
+**Usage.** Sum the assistant-message `usage.totalTokens` actually reported across the turn,
+and separately count how many reports contributed. If nothing was reported, usage is
+*unavailable* — never zero. Context occupancy stays its own separate field. Infer no cost.
+
+**Store.** `turn-settled.jsonl` stays the only store. Rows written before this change must
+still read, with their execution and usage reported explicitly as unknown rather than
+silently absent or defaulted.
+
+**Read surfaces.** Both of these return the same bounded data, most recent first:
+
+- `GET /v1/captain/turn-metrics`, operator-authenticated, optional `runId` and `limit`
+  (default 20, maximum 100), answering `{ "items": [ … ] }`.
+- Headless `clankie metrics [--run ID] [--limit N]`, one JSON document on stdout.
+
+Each item keeps the fields it has today and adds:
+
+```jsonc
+{
+  "execution": { "model": "…", "provider": "…", "effort": "…" },  // null when unknown
+  "usage": { "totalTokens": 12345, "reports": 3 }                 // null when nothing reported
+}
+```
+
+Neither surface may expose transcripts, credentials or tool arguments.
+
+**Tests and docs.** Narrow regressions covering: the model changing mid-conversation; several
+reported usage rounds summing; a failed turn; an interrupted turn; legacy rows; the limit
+bounds; and unauthenticated access. Keep `docs/cli.md`, the OpenAPI document and the CLI help
+current.
+
+## How you are checked
+
+An external check runs against your source **applied to a pristine baseline**, exercising the
+CLI and HTTP surfaces above with seeded fixture rows. It does not read your tests and does not
+care how you implement any of this — only that the surfaces behave as written above.
+
+The job has a forty-five minute budget measured end to end, across however many turns your
+work takes. It is judged when everything has gone quiet: no watch still registered, no worker
+still running, no turn of yours in flight.
+
+## Your fleet
+
+Lead this work; do not do it all yourself. In your own Herdr session, start **three** Claude
+Code workers and drive them:
+
+- two implementers and one reviewer
+- every one of them started as:
+  `herdr agent start <name> --kind claude --pane <paneId> -- --model claude-sonnet-5 --effort medium --permission-mode auto`
+- split panes from your own session for them and give each a clear scope
+- **harvest every worker's result before the job is done.** Use `herdr_watch` so their
+  settling wakes you; that is what it is for. Ending a turn after dispatching is fine and
+  expected — the job is not finished until you have inspected each worker's output, folded it
+  in, and left no delegated work running.
+
+## Ground rules
+
+Work only inside the worktree named below. Do not read or change anything outside it. Do not
+commit or push. Run the narrowest relevant checks yourself before you finish.
+
+Worktree: __WORKTREE__
