@@ -194,6 +194,9 @@ const CLANKIE: ManagedService = {
   id: "clankie",
   label: "Clankie",
   ...workspaceStart("@clankie/clankie", "apps/clankie/src/index.js"),
+  // Match the service's listen port, not a potentially remote probe URL.
+  conflictingPids: ({ env, matchingPids, listPortOwners }) =>
+    listPortOwners(Number(env.PORT ?? "4310")) ?? matchingPids,
   stopGraceMs: clankieStopGraceMs,
   /**
    * The presence runtime module is a repository path, not a preference, so the
@@ -242,6 +245,8 @@ const RELAY: ManagedService = {
   id: "relay",
   label: "App relay",
   ...workspaceStart("@clankie/relay", "apps/relay/src/index.js"),
+  conflictingPids: ({ env, matchingPids, listPortOwners }) =>
+    listPortOwners(Number(relayPort(env))) ?? matchingPids,
   restartsWith: ["clankie"],
   serviceEnv: ({ env, captainToken }) => ({
     ...env,
@@ -369,6 +374,10 @@ const ACTIVITY: ManagedService = {
   id: "activity",
   label: "Activity surface",
   ...workspaceStart("@clankie/discord-activity", "apps/discord-activity/src/index.js"),
+  conflictingPids: ({ env, matchingPids, listPortOwners }) => [
+    ...(listPortOwners(Number(env.CLANKIE_ACTIVITY_PORT ?? "4320")) ?? matchingPids),
+    ...(listPortOwners(Number(env.CLANKIE_ACTIVITY_PRODUCER_PORT ?? "4322")) ?? matchingPids),
+  ],
   probe: async ({ env, fetchImpl }) => {
     const port = env["CLANKIE_ACTIVITY_PORT"] ?? "4320";
     try {
@@ -418,6 +427,17 @@ const TUNNEL: ManagedService = {
   spawnArgs: (env) => ["tunnel", "run", tunnelName(env)],
   enabled: (env) => tunnelName(env).length > 0,
   commandMatches: (command) => command.includes("cloudflared") && command.includes("tunnel"),
+  conflictingPids: ({ env, matchingPids, readProcessCommand }) => {
+    const name = tunnelName(env);
+    if (name.length === 0) return [];
+    return matchingPids.filter((pid) => {
+      const command = readProcessCommand(pid);
+      const named = /\btunnel\b.*?\brun\s+(\S+)\s*$/u.exec(command)?.[1];
+      // Unknown/manual invocation shapes stay conservative. The registry's
+      // named form lets an unrelated tunnel coexist with this one.
+      return named === undefined || named.startsWith("-") || /\s/u.test(name) || named === name;
+    });
+  },
   probe: async ({ env, fetchImpl, matchingPids }) => {
     if (tunnelName(env).length === 0) {
       return { state: "healthy", detail: "not configured; activity stays local" };

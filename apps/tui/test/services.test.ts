@@ -13,6 +13,7 @@ import {
   startService,
   stopService,
   type ManagedService,
+  type ServiceCommandOptions,
   type ServiceId,
 } from "../bin/service-supervisor.ts";
 import {
@@ -342,6 +343,145 @@ describe("service supervisor", () => {
       env,
     });
     expect(status).toMatchObject({ id: "clankie", state: "unreachable", owned: false });
+  });
+});
+
+describe("instance occupancy", () => {
+  it.each([
+    {
+      id: "clankie" as const,
+      env: { PORT: "4390", CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:4390" },
+      port: 4390,
+    },
+    { id: "relay" as const, env: { CLANKIE_RELAY_PORT: "4391" }, port: 4391 },
+    { id: "activity" as const, env: { CLANKIE_ACTIVITY_PORT: "4392" }, port: 4392 },
+  ])(
+    "stops and restarts $id on its free port despite a foreign matching command",
+    async ({ id, env: config, port }) => {
+      const env = { ...(await stateEnv()), ...config };
+      const service = managedService(id);
+      let spawned = false;
+      const inspectedPorts: number[] = [];
+      const options: ServiceCommandOptions = {
+        repoRoot: "/repo",
+        env,
+        listProcessCommandsImpl: processList(
+          `pnpm --filter @clankie/${id === "activity" ? "discord-activity" : id} start`,
+        ),
+        listPortOwnersImpl: (candidate) => {
+          inspectedPorts.push(candidate);
+          return [];
+        },
+        processIsAliveImpl: () => spawned,
+        killImpl: () => {
+          throw new Error("must not signal the foreign instance");
+        },
+        fetchImpl: (async () => {
+          if (!spawned) throw new Error("connection refused");
+          return Response.json({ ok: true });
+        }) as typeof fetch,
+        spawnImpl: (() => {
+          spawned = true;
+          return runningChild(9_800);
+        }) as unknown as typeof spawn,
+      };
+      await expect(stopService(service, options)).resolves.toEqual({ stopped: true });
+      await expect(restartService(service, options)).resolves.toMatchObject({
+        state: "healthy",
+        owned: true,
+        pid: 9_800,
+      });
+      expect(inspectedPorts).toEqual(
+        id === "activity" ? [port, 4322, port, 4322, port, 4322] : [port, port, port],
+      );
+    },
+  );
+
+  it.each([
+    { label: "held by an unrelated listener", owners: [8_888] },
+    { label: "inspection unavailable", owners: undefined },
+  ])("refuses both start and stop when the port is $label", async ({ owners }) => {
+    const service = managedService("relay");
+    const options: ServiceCommandOptions = {
+      repoRoot: "/repo",
+      env: await stateEnv(),
+      listProcessCommandsImpl: processList("pnpm --filter @clankie/relay start"),
+      listPortOwnersImpl: () => owners,
+      fetchImpl: (async () => {
+        throw new Error("connection refused");
+      }) as typeof fetch,
+      spawnImpl: (() => {
+        throw new Error("must not start a duplicate");
+      }) as typeof spawn,
+      killImpl: () => {
+        throw new Error("must not signal an unowned listener");
+      },
+    };
+    await expect(stopService(service, options)).rejects.toThrow(/not started by the clankie launcher/u);
+    await expect(startService(service, options)).rejects.toThrow(/occupied by a process/u);
+  });
+
+  it.each([[8_888], undefined])(
+    "checks the activity producer port even when its main port is free: %j",
+    async (producerOwners) => {
+      const service = managedService("activity");
+      const options: ServiceCommandOptions = {
+        repoRoot: "/repo",
+        env: { ...(await stateEnv()), CLANKIE_ACTIVITY_PORT: "4392", CLANKIE_ACTIVITY_PRODUCER_PORT: "4393" },
+        listProcessCommandsImpl: processList("pnpm --filter @clankie/discord-activity start"),
+        listPortOwnersImpl: (port) => (port === 4393 ? producerOwners : []),
+        fetchImpl: (async () => {
+          throw new Error("connection refused");
+        }) as typeof fetch,
+        spawnImpl: (() => {
+          throw new Error("must not collide with the producer");
+        }) as typeof spawn,
+        killImpl: () => {
+          throw new Error("must not signal an unowned producer");
+        },
+      };
+      await expect(stopService(service, options)).rejects.toThrow(/not started by the clankie launcher/u);
+      await expect(startService(service, options)).rejects.toThrow(/occupied by a process/u);
+    },
+  );
+
+  it.each([
+    { command: "cloudflared tunnel run other-tunnel", conflicts: false },
+    { command: "cloudflared tunnel run clankie-activity", conflicts: true },
+    { command: "cloudflared tunnel run --token opaque", conflicts: true },
+    { command: "", conflicts: true },
+  ])("scopes a tunnel conflict using its live name: $command", async ({ command, conflicts }) => {
+    const service = managedService("tunnel");
+    let spawned = false;
+    const options: ServiceCommandOptions = {
+      repoRoot: "/repo",
+      env: {
+        ...(await stateEnv()),
+        CLANKIE_ACTIVITY_TUNNEL_NAME: "clankie-activity",
+        CLANKIE_ACTIVITY_TUNNEL_HOSTNAME: "clankie.example.com",
+      },
+      listProcessCommandsImpl: processList("cloudflared tunnel run other-tunnel"),
+      readProcessCommandImpl: () => command,
+      processIsAliveImpl: () => spawned,
+      killImpl: () => {
+        throw new Error("must not signal an unowned tunnel");
+      },
+      fetchImpl: (async () => new Response("", { status: spawned ? 200 : 503 })) as typeof fetch,
+      spawnImpl: (() => {
+        spawned = true;
+        return runningChild(9_801);
+      }) as unknown as typeof spawn,
+    };
+    if (conflicts) {
+      await expect(stopService(service, options)).rejects.toThrow(/not started by the clankie launcher/u);
+      await expect(startService(service, options)).rejects.toThrow(/occupied by a process/u);
+      expect(spawned).toBe(false);
+    } else {
+      await expect(restartService(service, options)).resolves.toMatchObject({
+        state: "healthy",
+        owned: true,
+      });
+    }
   });
 });
 
@@ -710,6 +850,7 @@ describe("service targets", () => {
       repoRoot: "/repo",
       env,
       listProcessCommandsImpl: noProcesses,
+      listPortOwnersImpl: () => [],
       processIsAliveImpl: () => true,
       fetchImpl: (async () => {
         throw new Error("connection refused");
@@ -737,6 +878,7 @@ describe("service targets", () => {
       // Explicit, so the result does not depend on what the developer running
       // the suite happens to have up on their own machine.
       listProcessCommandsImpl: noProcesses,
+      listPortOwnersImpl: () => [],
     });
 
     expect(outcomes.map((outcome) => outcome.id)).toEqual([
@@ -762,6 +904,7 @@ describe("service targets", () => {
         throw new Error("connection refused");
       }) as unknown as typeof fetch,
       listProcessCommandsImpl: processList("node pnpm.mjs --filter @clankie/clankie start"),
+      listPortOwnersImpl: (port) => (port === 4310 ? [9_900] : []),
     });
 
     expect(outcomes.map((outcome) => [outcome.id, outcome.ok])).toEqual([
@@ -833,6 +976,7 @@ describe("captain credential injection", () => {
       captainToken: "clankie_cap_test",
       processIsAliveImpl: () => true,
       listProcessCommandsImpl: noProcesses,
+      listPortOwnersImpl: () => [],
       fetchImpl: healthAfterStart(started),
     });
 
@@ -868,6 +1012,7 @@ describe("captain credential injection", () => {
       spawnImpl: captured.spawnImpl,
       processIsAliveImpl: () => true,
       listProcessCommandsImpl: noProcesses,
+      listPortOwnersImpl: () => [],
       fetchImpl: healthAfterStart(captured.started),
     });
 
@@ -892,6 +1037,7 @@ describe("captain credential injection", () => {
       processIsAliveImpl: () => true,
       listProcessCommandsImpl: noProcesses,
       fetchImpl: healthAfterStart(started),
+      listPortOwnersImpl: () => [],
     });
 
     expect(started()).toBe(true);

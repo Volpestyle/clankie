@@ -105,6 +105,14 @@ export interface ManagedService {
   readonly enabled?: (env: NodeJS.ProcessEnv) => boolean;
   /** Guards signalling: must recognise the live `ps` command of an owned pid. */
   readonly commandMatches: (command: string) => boolean;
+  /** Foreign processes that conflict with this instance, rather than just its command shape. */
+  readonly conflictingPids?: (input: {
+    readonly env: NodeJS.ProcessEnv;
+    readonly matchingPids: readonly number[];
+    /** Undefined means inspection failed; an empty array means the port is free. */
+    readonly listPortOwners: (port: number) => readonly number[] | undefined;
+    readonly readProcessCommand: (pid: number) => string;
+  }) => readonly number[];
   /**
    * Dependencies whose restart invalidates state this service is holding, so it
    * has to restart alongside them.
@@ -144,6 +152,7 @@ export interface ServiceCommandOptions {
   readonly readProcessCommandImpl?: (pid: number) => string;
   /** Test seam for the process-table scan behind `matchingPids`. */
   readonly listProcessCommandsImpl?: () => readonly (readonly [number, string])[];
+  readonly listPortOwnersImpl?: (port: number) => readonly number[] | undefined;
   readonly spawnImpl?: typeof spawn;
   readonly timeoutMs?: number;
 }
@@ -224,6 +233,44 @@ function findServiceProcessPids(
   return listImpl()
     .filter(([pid, command]) => pid !== process.pid && service.commandMatches(command))
     .map(([pid]) => pid);
+}
+
+/** A listener's pid can be a grandchild of the pnpm pid in the launcher record. */
+function listPortOwners(port: number): readonly number[] | undefined {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return undefined;
+  try {
+    const output = execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+      encoding: "utf8",
+      timeout: 2_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const pids = output.trim().length === 0 ? [] : output.trim().split(/\s+/u).map(Number);
+    return pids.every((pid) => Number.isSafeInteger(pid) && pid > 0) ? pids : undefined;
+  } catch (error) {
+    // lsof uses exit 1 for no matches. Diagnostics or another failure mean
+    // unknown, never permission to start over an uninspected listener.
+    const failed = error as { status?: number; stdout?: string; stderr?: string };
+    return failed.status === 1 && !failed.stdout?.trim() && !failed.stderr?.trim() ? [] : undefined;
+  }
+}
+
+function conflictingServicePids(
+  service: ManagedService,
+  env: NodeJS.ProcessEnv,
+  options: ServiceCommandOptions,
+): readonly number[] {
+  const matchingPids = findServiceProcessPids(
+    service,
+    options.listProcessCommandsImpl ?? listProcessCommands,
+  );
+  return (
+    service.conflictingPids?.({
+      env,
+      matchingPids,
+      listPortOwners: options.listPortOwnersImpl ?? listPortOwners,
+      readProcessCommand: options.readProcessCommandImpl ?? readProcessCommand,
+    }) ?? matchingPids
+  );
 }
 
 function readServiceRecord(
@@ -344,20 +391,10 @@ export async function stopService(
   const env = options.env ?? process.env;
   const record = readServiceRecord(service.id, env, options.processIsAliveImpl ?? processIsAlive);
   if (record === undefined) {
-    // Nothing owned is running. A foreign process is the caller's to resolve;
-    // reporting "stopped" here would let a restart silently start a duplicate.
-    //
-    // The question is whether a *process* exists, so ask the process table
-    // rather than a probe. Probes describe published state, and published state
-    // outlives the process that published it: the Discord bridge's `present`
-    // phase is durable and written only on transition, so a bridge killed
-    // without publishing `off` used to look alive here indefinitely and wedge
-    // every subsequent restart against a process that was long gone.
-    const matchingPids = findServiceProcessPids(
-      service,
-      options.listProcessCommandsImpl ?? listProcessCommands,
-    );
-    if (matchingPids.length > 0) {
+    // A foreign instance on another port has nothing here to stop. A conflict
+    // must be resolved by its owner; durable presence alone proves no process.
+    const occupyingPids = conflictingServicePids(service, env, options);
+    if (occupyingPids.length > 0) {
       throw new Error(
         `${service.label} is running but was not started by the clankie launcher. Stop its owning process, then retry.`,
       );
@@ -419,19 +456,10 @@ export async function startService(
 
   const existing = await inspectService(service, options);
   if (existing.state === "healthy") return existing;
-  // "Occupied" is a claim about a *process*, so ask the process table — the same
-  // correction `stopService` already carries. An unhealthy probe is not evidence
-  // that anything is squatting: the activity tunnel's probe asks a public
-  // hostname, and Cloudflare answers 530 for a tunnel whose origin is down,
-  // which this read as "someone else's process holds the port" and refused to
-  // start. That is backwards — an edge serving 5xx because cloudflared is not
-  // running is precisely when it must be started. On 2026-08-03 it left the
-  // tunnel unstartable through the launcher at the exact moment it was needed.
+  // An unhealthy edge or another instance's command is not occupancy. Use the
+  // same resource check as stop, since restart must pass both guards.
   if (!existing.owned) {
-    const occupyingPids = findServiceProcessPids(
-      service,
-      options.listProcessCommandsImpl ?? listProcessCommands,
-    );
+    const occupyingPids = conflictingServicePids(service, env, options);
     if (occupyingPids.length > 0) {
       throw new Error(
         `${service.label} is occupied by a process the clankie launcher does not own and is not healthy. Stop it, then retry.`,

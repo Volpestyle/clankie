@@ -28,6 +28,16 @@ Every managed process gets:
    unrelated process; and
 3. a service-specific health gate before start succeeds.
 
+Unowned conflicts are scoped to the resource the service uses: the configured
+TCP port for Clankie, relay and activity, or the configured activity tunnel
+name. A process command identifies the kind of service but cannot distinguish
+instances whose ports and state roots travel in environment variables.
+`lsof` supplies address-independent listener evidence; a bind probe cannot
+reliably detect wildcard versus loopback conflicts on macOS. Failed inspection
+falls back to the conservative command scan. Discord bodies keep the command
+scan because a separate local port does not establish a separate Discord identity.
+Health probes and the live-command check before signalling retain their own roles.
+
 The force-kill deadline is also service-specific. Generic services retain the
 launcher's ten-second grace. Clankie's outer grace is its configured play
 shutdown deadline plus two seconds, leaving its play host time to finish a

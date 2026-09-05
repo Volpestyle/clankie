@@ -92,6 +92,11 @@ existing wizards, or the credential broker — never flags.
 that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying
 you refused.
 
+Launcher conflicts for Clankie, relay and activity use their configured listen
+ports. Linux needs `lsof` for that inspection; without it, a matching process
+on another port may still block a start or restart. Never kill a scratch
+instance merely because its command resembles the live service.
+
 ## Authority
 
 The operator console always has a shell. Discord gets machine tools only for

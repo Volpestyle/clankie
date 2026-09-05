@@ -153,6 +153,15 @@ it. `clankie` (`captain`) also restarts `relay` and the Discord body, because
 those processes cache presence and bearer state from this service instance.
 Stopping is different: `down` names one service and stops only that service.
 
+Local HTTP services check listeners on their configured port (`PORT` for
+Clankie, `CLANKIE_RELAY_PORT` for the relay, and both `CLANKIE_ACTIVITY_PORT`
+and `CLANKIE_ACTIVITY_PRODUCER_PORT` for the activity). A scratch instance on
+other ports does not block them. This uses
+`lsof`, supplied by macOS and required in Linux installations for this check;
+if inspection fails, the launcher conservatively refuses matching unowned
+processes. Named activity tunnels check their configured tunnel name. Foreign
+processes are never signalled.
+
 When Clankie runs this from his own operator-turn bash, the launcher waits
 for that turn to settle. Stdout then reports `"status": "scheduled"` with
 `afterRun`, and stderr says the restart is deferred. That is success (exit 0),
