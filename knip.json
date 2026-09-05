@@ -8,7 +8,9 @@
         "docs/testing/2026-09-04-linux-service-spike/flows/pairing-and-seat-dm.ts",
         "docs/testing/2026-09-04-linux-service-spike/flows/synthetic-provider.mjs",
         "docs/testing/2026-09-04-linux-service-spike/flows/guard-proof.mjs",
-        "docs/testing/2026-09-04-case-b-execution-metrics/flows/check-arm.mjs"
+        "docs/testing/2026-09-04-case-b-execution-metrics/flows/check-arm.mjs",
+        "docs/testing/2026-09-05-push-delivery-boundary/flows/vitest.boundary.config.mjs",
+        "docs/testing/2026-09-05-push-delivery-boundary/flows/boundary.test.ts"
       ],
       "paths": {
         "/clankie/*": ["./*"]
@@ -23,5 +25,9 @@
     "packages/play": {
       "ignoreExportsUsedInFile": true
     }
+  },
+  "ignoreIssues": {
+    "docs/testing/2026-09-05-push-delivery-boundary/flows/harness.ts": ["unlisted"],
+    "docs/testing/2026-09-05-push-delivery-boundary/flows/vitest.boundary.config.mjs": ["unlisted"]
   }
 }

@@ -1,0 +1,13 @@
+clankie   b5d8f133
+clankie-app 0d7ddacc (pushDelivery.ts dirty)
+app root  /Users/james/dev/clankie-app
+
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  12:22:09
+   Duration  719ms (transform 68ms, setup 0ms, import 128ms, tests 548ms, environment 0ms)
+

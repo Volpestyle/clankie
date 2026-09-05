@@ -1,0 +1,53 @@
+clankie   d5227441 (gateway/protocol sources dirty)
+clankie-app b0b9043a (pushDelivery.ts dirty)
+app root  /Users/james/dev/clankie-app-vuh1052
+
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+GATEWAY_ACK_LOSS_OUTCOME {
+  "afterLossDesired": {
+    "op": "register",
+    "sequence": 1,
+    "hostId": "host_alpha_0123456789",
+    "prepared": {
+      "deviceToken": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "environment": "sandbox",
+      "hostId": "host_alpha_0123456789",
+      "deviceId": "device-1"
+    }
+  },
+  "afterLossSentToken": null,
+  "gatewayCommitted": true,
+  "status": {
+    "state": "on",
+    "permission": "granted"
+  },
+  "desired": null,
+  "active": {
+    "sequence": 2,
+    "deviceToken": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "environment": "sandbox",
+    "hostId": "host_alpha_0123456789",
+    "deviceId": "device-1"
+  },
+  "gatewayAtOldVersion": "superseded",
+  "gatewayStillHoldsFirstToken": true
+}
+SAME_HOST_REPAIR_OUTCOME {
+  "status": {
+    "state": "off",
+    "permission": "granted",
+    "problem": "This device paired with your Mac again. Turn notifications on again to use them."
+  },
+  "appActive": null,
+  "appDesired": null,
+  "gatewayForDevice1": "not_registered",
+  "gatewayForDevice2": "not_registered"
+}
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  11:56:42
+   Duration  506ms (transform 71ms, setup 0ms, import 140ms, tests 322ms, environment 0ms)
+
