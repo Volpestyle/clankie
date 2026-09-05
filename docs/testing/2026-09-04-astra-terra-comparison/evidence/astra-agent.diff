@@ -1,0 +1,124 @@
+diff --git a/apps/clankie/src/world/body.ts b/apps/clankie/src/world/body.ts
+index d512be6d..53d72930 100644
+--- a/apps/clankie/src/world/body.ts
++++ b/apps/clankie/src/world/body.ts
+@@ -432,6 +432,9 @@ class HostedWorldBody implements WorldBody {
+   private observation: Observation | undefined;
+   private observationSequence = 0;
+   private actionSequence = 0;
++  // A rejoin can retain the world's session and cached action receipts while
++  // this adapter's counter restarts. Namespace new intentions per adapter;
++  // WorldPlayerClient retains the same key when retrying a lost response.
+   private readonly actionKeyPrefix = `clankie-action-${randomUUID()}`;
+   private bodyGeneration: number;
+   private frame: Frame | undefined;
+diff --git a/apps/clankie/test/world-body.test.ts b/apps/clankie/test/world-body.test.ts
+index 9e2b1195..ea0dad2b 100644
+--- a/apps/clankie/test/world-body.test.ts
++++ b/apps/clankie/test/world-body.test.ts
+@@ -588,6 +588,89 @@ describe("hosted world body", () => {
+     await second.body.close();
+   });
+ 
++  it.each([1, 2])(
++    "executes fresh actions after rejoin at generation %i, but replays a lost response only once",
++    async (generation) => {
++      let current = observation({ frame: 10, x: 13 });
++      const receipts = new Map<string, ReturnType<typeof actRan>>();
++      let executions = 0;
++      let loseResponse = true;
++      const world = await fakeWorld(async (request) => {
++        switch (request.operation) {
++          case "world.join":
++            return joinResult();
++          case "play.observe":
++            return current;
++          case "play.act": {
++            const { idempotencyKey } = request.input as { idempotencyKey: string };
++            const previous = receipts.get(idempotencyKey);
++            if (previous !== undefined) return { ...previous, replayed: true };
++            executions += 1;
++            current = observation({
++              bodyGeneration: current.bodyGeneration,
++              frame: current.frame + 10,
++              x: 13 + executions,
++            });
++            const receipt = actRan(current);
++            receipts.set(idempotencyKey, receipt);
++            // The world applied the input, but the socket dies before its reply.
++            if (loseResponse) {
++              loseResponse = false;
++              throw new Error("response lost after execution");
++            }
++            return receipt;
++          }
++          case "play.frame":
++            return frame({
++              bodyGeneration: current.bodyGeneration,
++              frame: current.frame,
++              data: `screen-${String(executions)}`,
++            });
++          case "world.leave":
++            return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
++          default:
++            throw new Error(`unexpected operation ${request.operation}`);
++        }
++      });
++      const env = await provisionedEnv(world.stateDir);
++      const first = await joinWorld({ environmentId: "pokemon-firered", env });
++      if (first.outcome !== "joined") throw new Error("expected first join");
++      const action = { kind: "button_press", button: "right", holdFrames: 4 } as const;
++      await expect(first.body.io.act(action)).resolves.toMatchObject({
++        status: "completed",
++        outcome: { replayed: true },
++      });
++      expect(executions).toBe(1);
++      await expect(first.body.io.act(action)).resolves.toMatchObject({
++        status: "completed",
++        outcome: { replayed: false },
++      });
++
++      // The host retains the session and deduplication receipts while the
++      // adapter is replaced, with or without a body-generation change.
++      current = observation({ bodyGeneration: generation, frame: 30, x: 15 });
++      const second = await joinWorld({ environmentId: "pokemon-firered", env });
++      if (second.outcome !== "joined") throw new Error("expected rejoin");
++      expect(second.body.sessionSnapshot()).toEqual(first.body.sessionSnapshot());
++      for (const x of [16, 17]) {
++        await expect(second.body.io.act(action)).resolves.toMatchObject({
++          status: "completed",
++          outcome: { replayed: false, bodyGeneration: generation },
++        });
++        expect(second.body.io.observe("overworld")).toMatchObject({ data: { position: { x } } });
++      }
++      expect(executions).toBe(4);
++      const keys = world.requests
++        .filter((request) => request.operation === "play.act")
++        .map((request) => (request.input as { idempotencyKey: string }).idempotencyKey);
++      expect(keys).toHaveLength(5);
++      expect(keys[0]).toBe(keys[1]);
++      expect(new Set(keys).size).toBe(4);
++      await first.body.close();
++      await second.body.close();
++    },
++  );
++
+   it("polls latest frames at the hardware tick and rejects stale generations", async () => {
+     let currentGeneration = 1;
+     let currentFrame = 0;
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 3dc1fd0a..baddbcf3 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -281,6 +281,11 @@ address — no tool call, no guess, and silence if the selection cannot be resol
+   the world persists its own cartridge. `pokeagentMmoEnabled` is the owner
+   setting; with it off, or with no world reachable, the ask refuses out loud
+   rather than falling back. Frames flow to the Discord activity surface.
++  Action idempotency keys combine a random per-adapter UUID with a monotonic
++  counter: a recreated adapter can rejoin the same world session without
++  colliding with its cached receipts. Session id or body generation alone is
++  not a fresh-action namespace. Transport retries keep the original key via
++  `WorldPlayerClient`, so a lost reply does not execute the same input twice.
+   Every sitting carries a stable journey identity separate from its run id, the
+   bounded story spans that journey, and the next sitting receives the last
+   self-authored notes and objective while exact world state stays with the

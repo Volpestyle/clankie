@@ -1,0 +1,92 @@
+diff --git a/apps/clankie/src/world/body.ts b/apps/clankie/src/world/body.ts
+index d512be6d..7dfde2f7 100644
+--- a/apps/clankie/src/world/body.ts
++++ b/apps/clankie/src/world/body.ts
+@@ -432,6 +432,13 @@ class HostedWorldBody implements WorldBody {
+   private observation: Observation | undefined;
+   private observationSequence = 0;
+   private actionSequence = 0;
++  /**
++   * A joined session can be handed to a new body after a reconnect. Its local
++   * action counter restarts at one, so the counter alone would replay an old
++   * effect from the world's idempotency cache. The per-body nonce preserves
++   * retry identity within this body while making each new intended effect
++   * distinct across handoffs.
++   */
+   private readonly actionKeyPrefix = `clankie-action-${randomUUID()}`;
+   private bodyGeneration: number;
+   private frame: Frame | undefined;
+diff --git a/apps/clankie/test/world-body.test.ts b/apps/clankie/test/world-body.test.ts
+index 9e2b1195..64ce347c 100644
+--- a/apps/clankie/test/world-body.test.ts
++++ b/apps/clankie/test/world-body.test.ts
+@@ -551,16 +551,27 @@ describe("hosted world body", () => {
+     await result.body.close();
+   });
+ 
+-  it("does not reuse action keys when the world replays an existing join", async () => {
+-    const current = observation({ frame: 10 });
++  it("does not replay an old effect when a reconnected body resumes the same session", async () => {
++    let x = 13;
++    let current = observation({ frame: 10, x });
++    const resultsByKey = new Map<string, ReturnType<typeof actRan>>();
+     const world = await fakeWorld((request) => {
+       switch (request.operation) {
+         case "world.join":
++          // The host retains this session while the client body reconnects.
+           return joinResult();
+         case "play.observe":
+           return current;
+-        case "play.act":
+-          return actRan(current);
++        case "play.act": {
++          const key = (request.input as { idempotencyKey: string }).idempotencyKey;
++          const replay = resultsByKey.get(key);
++          if (replay !== undefined) return { ...replay, replayed: true };
++          x += 1;
++          current = observation({ frame: current.frame + 10, x });
++          const result = actRan(current);
++          resultsByKey.set(key, result);
++          return result;
++        }
+         case "play.frame":
+           return frame({ frame: current.frame, data: "rejoined" });
+         case "world.leave":
+@@ -571,13 +582,22 @@ describe("hosted world body", () => {
+     });
+     const env = await provisionedEnv(world.stateDir);
+     const first = await joinWorld({ environmentId: "pokemon-firered", env });
+-    const second = await joinWorld({ environmentId: "pokemon-firered", env });
+-    if (first.outcome !== "joined" || second.outcome !== "joined") {
+-      throw new Error("expected both world joins to succeed");
+-    }
++    if (first.outcome !== "joined") throw new Error("expected first world join");
++    await expect(
++      first.body.io.act({ kind: "button_press", button: "a", holdFrames: 4 }),
++    ).resolves.toMatchObject({
++      status: "completed",
++      outcome: { replayed: false },
++    });
+ 
+-    await first.body.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+-    await second.body.io.act({ kind: "button_press", button: "right", holdFrames: 4 });
++    // This is a replacement HostedWorldBody after the same server-side session
++    // was recovered; its local counter deliberately begins at one again.
++    const reconnected = await joinWorld({ environmentId: "pokemon-firered", env });
++    if (reconnected.outcome !== "joined") throw new Error("expected reconnected world join");
++    await expect(
++      reconnected.body.io.act({ kind: "button_press", button: "right", holdFrames: 4 }),
++    ).resolves.toMatchObject({ status: "completed", outcome: { replayed: false } });
++    expect(reconnected.body.io.observe("overworld")).toMatchObject({ data: { position: { x: 15 } } });
+ 
+     const keys = world.requests
+       .filter((request) => request.operation === "play.act")
+@@ -585,7 +605,7 @@ describe("hosted world body", () => {
+     expect(keys).toHaveLength(2);
+     expect(new Set(keys).size).toBe(2);
+     await first.body.close();
+-    await second.body.close();
++    await reconnected.body.close();
+   });
+ 
+   it("polls latest frames at the hardware tick and rejects stale generations", async () => {

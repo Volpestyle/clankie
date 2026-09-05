@@ -1,0 +1,1255 @@
+{
+  "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+  "runId": "run-430abfb5-3cd7-453b-a6a9-85c6c81e4546",
+  "settled": {
+    "phase": "completed"
+  },
+  "elapsedMs": 216371,
+  "counts": {
+    "events": 114,
+    "toolEvents": 44,
+    "captainMessages": 4,
+    "inputRequested": 0
+  },
+  "events": [
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000001",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:24.295Z",
+      "type": "message",
+      "role": "operator",
+      "text": "A bug report from hosted play.\n\nWhen Clankie is playing in the hosted PokeAgents world and the play session reconnects\npart-way through a playthrough \u2014 the connection drops and re-establishes, or the body is\ntaken over and handed back \u2014 the actions he takes after that reconnect sometimes do not\nhappen. The world answers as though the action succeeded, but nothing changes on screen.\nThe same actions work fine before the reconnect, and a session that never reconnects\nnever shows it.\n\nFind the cause, fix it, and verify your fix.\n\nWork only inside /Users/james/.clankie-case-a/wt-astra. That checkout is yours. Do not read or change anything\noutside it, and do not commit or push.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000002",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:24.295Z",
+      "type": "turn",
+      "runId": "run-430abfb5-3cd7-453b-a6a9-85c6c81e4546",
+      "phase": "accepted"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000003",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:27.796Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000004",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:29.112Z",
+      "type": "context",
+      "usage": {
+        "tokens": 42740,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000005",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:29.114Z",
+      "type": "tool",
+      "toolCallId": "call_ono0QYxRatRmwHAwY2CPyj2m|fc_0f0a7ee339ecb88c016a9b6b13bf0c87d2a4875b4394884c29",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"pwd; ls .agents; rg -n 'reconnect|sequence|actionId' packages/play | head -70\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000006",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:29.138Z",
+      "type": "tool",
+      "toolCallId": "call_ono0QYxRatRmwHAwY2CPyj2m|fc_0f0a7ee339ecb88c016a9b6b13bf0c87d2a4875b4394884c29",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "/Users/james/.clankie-case-a/wt-astra\ndev-skills\nskills\npackages/play/src/free-play.ts:1381:  // defect, so a boot sequence \u2014 where nothing decodes for minutes and then\npackages/play/src/free-play-progress.ts:502:    // needs two sides. On a screen that decodes to nothing \u2014 a boot sequence,\npackages/play/src/free-play-mind.ts:513:  // inferred from a refusal. A boot sequence decodes to nothing for minutes at a\npackages/play/test/free-play-evaluator.test.ts:88:              actionId: `action-${String(start)}`,\npackages/play/test/free-play-evaluator.test.ts:97:              actionId: `action-${String(start)}`,\npackages/play/test/free-play.test.ts:104:    actionId: \"11111111-1111-4111-8111-111111111111\",\npackages/play/test/free-play.test.ts:116:    actionId: \"22222222-2222-4222-8222-222222222222\",\npackages/play/test/free-play-journal.test.ts:59:      actionId: \"11111111-1111-4111-8111-111111111111\",\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000007",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:32.337Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000008",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:35.665Z",
+      "type": "activity",
+      "phase": "responding"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000009",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:35.786Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000010",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:36.502Z",
+      "type": "message",
+      "role": "captain",
+      "text": "I\u2019ll trace how hosted actions are identified across reconnects, reproduce the failure, then fix and test it. I\u2019ll stay inside this checkout and won\u2019t commit or push; the listed herdr-lead skill is outside your permitted boundary, so I won\u2019t read it.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000011",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:36.502Z",
+      "type": "context",
+      "usage": {
+        "tokens": 43143,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000012",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:36.503Z",
+      "type": "tool",
+      "toolCallId": "call_fwcdJEYCd0s81qBcpxQXAaq0|fc_0f0a7ee339ecb88c016a9b6b1bbadc87d28cbd5b37d0e6e1ca",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"rg -n 'idempot|reconnect|takeover' packages apps/clankie/src | head -100; cat package.json; ls .agents/dev-skills; herdr --help\",\n  \"timeout\": 10\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000013",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:36.540Z",
+      "type": "tool",
+      "toolCallId": "call_fwcdJEYCd0s81qBcpxQXAaq0|fc_0f0a7ee339ecb88c016a9b6b1bbadc87d28cbd5b37d0e6e1ca",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "packages/environment-runtime/src/runtime.ts:816:   * idempotent), oldest first, and every drop is counted on the record.\napps/clankie/src/embodiment.ts:298:      // update lands; stopping twice is idempotent.\napps/clankie/src/world/body.ts:22: *   takeover). `bodyGeneration` is how that is detected; everything cached\napps/clankie/src/world/body.ts:808:        idempotencyKey: `clankie-action-${String(this.actionSequence)}`,\npackages/environment-runtime/test/environment-runtime.test.ts:254:  it(\"makes action registration/cancellation, timeout, pause, and emergency stop idempotent\", async () => {\napps/clankie/src/lane-mcp.ts:64:  // anything is dropped and reconnects. A timer plus stream liveness is the\napps/clankie/src/lane-mcp.ts:65:  // upgrade if that reconnect is ever more than a hiccup.\napps/clankie/src/browser-host.ts:13: *   operator's screen mid-session. That is the takeover seam: accounts in this\napps/clankie/src/mcp-host.ts:323:        // the next attempt reconnects instead of writing to a closed pipe.\napps/clankie/src/app.ts:813:        // An idempotent acknowledgement proves durability, not liveness.\napps/clankie/src/app.ts:1046:    return withSerializedLock(discordPresenceLocks, write.idempotencyKey, async () => {\napps/clankie/src/app.ts:1048:      const previous = discordPresenceResults.get(write.idempotencyKey);\napps/clankie/src/app.ts:1051:          return context.json({ error: \"discord_presence_idempotency_conflict\" }, 409);\napps/clankie/src/app.ts:1097:        discordPresenceResults.set(write.idempotencyKey, {\napps/clankie/src/app.ts:1149:      return context.json({ error: \"captain_turn_idempotency_conflict\" }, 409);\npackages/discord-presence-core/src/presence-session.ts:191:    return this.transition(\"connecting\", \"gateway_reconnecting\", false);\napps/clankie/src/captain-presence.ts:267:    idempotencyKey?: string,\napps/clankie/src/captain-presence.ts:269:    const key = idempotencyKey ?? `${type}:${lease.generationId}:${lease.leaseId}:${lease.heartbeatAt}`;\npackages/rendered-surface-client/src/activity-frame-sink.ts:18: * disconnected would replay a stale playthrough on reconnect, so frames are\npackages/rendered-surface-client/src/activity-frame-sink.ts:31:  reconnectDelayMs?: number;\npackages/rendered-surface-client/src/activity-frame-sink.ts:83:  const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;\npackages/rendered-surface-client/src/activity-frame-sink.ts:100:        // Latest-only state stays retained for the next reconnect.\npackages/rendered-surface-client/src/activity-frame-sink.ts:105:      if (!closed) schedule(open, reconnectDelayMs);\npackages/discord-presence-core/src/external-voice.ts:369:   * the room kept hearing nothing. Dropping it here costs one reconnect and\npackages/api-client/test/api-client.test.ts:116:          idempotencyKey: \"message-1:reply\",\npackages/rendered-surface-client/test/activity-frame-sink.test.ts:100:    // A live surface must not replay a stale playthrough on reconnect.\npackages/rendered-surface-client/test/activity-frame-sink.test.ts:138:  it(\"reconnects after a drop but stops once closed\", () => {\npackages/discord-presence-core/src/elevenlabs-tts.ts:45: * longer idle gap costs one reconnect rather than a protocol keep-alive dance\npackages/discord-presence-core/src/voice-session.ts:175: * Listener reconnect backoff: 1 s doubling to a 30 s cap, forever while\npackages/discord-presence-core/src/voice-session.ts:385:  /** Timer seam shared with the realtime runtimes; drives decay ticks, the hold window, and reconnect backoff. */\npackages/discord-presence-core/src/voice-session.ts:541:  private readonly reconnectHandles = new Map<string, unknown>();\npackages/discord-presence-core/src/voice-session.ts:542:  private readonly reconnectDelays = new Map<string, number>();\npackages/discord-presence-core/src/voice-session.ts:544:  /** Bounded idempotency window for gateway MESSAGE_CREATE redelivery. */\npackages/discord-presence-core/src/voice-session.ts:803:    for (const handle of this.reconnectHandles.values()) this.timers.clearTimeout(handle);\npackages/discord-presence-core/src/voice-session.ts:804:    this.reconnectHandles.clear();\npackages/discord-presence-core/src/voice-session.ts:805:    this.reconnectDelays.clear();\npackages/discord-presence-core/src/voice-session.ts:822:        // Already closed; leaving is idempotent.\npackages/discord-presence-core/src/voice-session.ts:828:      // Already closed; leaving is idempotent.\npackages/discord-presence-core/src/voice-session.ts:2714:  // Speaker-bound dormant listeners: open, reconnect, never cross identities.\npackages/discord-presence-core/src/voice-session.ts:2771:    this.reconnectDelays.set(userId, RECONNECT_BACKOFF_INITIAL_MS);\npackages/discord-presence-core/src/voice-session.ts:2802:    if (this.reconnectHandles.has(userId)) return;\npackages/discord-presence-core/src/voice-session.ts:2804:    const delayMs = this.reconnectDelays.get(userId) ?? RECONNECT_BACKOFF_INITIAL_MS;\npackages/discord-presence-core/src/voice-session.ts:2805:    this.reconnectDelays.set(userId, Math.min(delayMs * 2, RECONNECT_BACKOFF_CAP_MS));\npackages/discord-presence-core/src/voice-session.ts:2807:      this.reconnectHandles.delete(userId);\npackages/discord-presence-core/src/voice-session.ts:2817:    this.reconnectHandles.set(userId, handle);\npackages/discord-presence-core/src/voice-session.ts:2823:    const reconnect = this.reconnectHandles.get(userId);\npackages/discord-presence-core/src/voice-session.ts:2824:    if (reconnect !== undefined) this.timers.clearTimeout(reconnect);\npackages/discord-presence-core/src/voice-session.ts:2825:    this.reconnectHandles.delete(userId);\npackages/discord-presence-core/src/voice-session.ts:2826:    this.reconnectDelays.delete(userId);\npackages/discord-presence-core/src/captain-action-control.ts:95:      idempotencyKey: `captain:${input.call.callId}:${input.call.action}`,\npackages/discord-presence-core/src/text-ingress.ts:578:      idempotencyKey: `${message.id}:reply`,\npackages/discord-presence-core/src/text-ingress.ts:640:        idempotencyKey: `${message.id}:typing:${String(sequence)}`,\npackages/interactive-environment/src/environment.ts:469:        \"gateway_reconnecting\",\napps/clankie/src/public-gateway-connector.ts:41:  readonly reconnectMinimumMs?: number;\napps/clankie/src/public-gateway-connector.ts:42:  readonly reconnectMaximumMs?: number;\napps/clankie/src/public-gateway-connector.ts:85:  private readonly reconnectMinimumMs: number;\napps/clankie/src/public-gateway-connector.ts:86:  private readonly reconnectMaximumMs: number;\napps/clankie/src/public-gateway-connector.ts:92:  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;\napps/clankie/src/public-gateway-connector.ts:94:  private reconnectDelayMs: number;\napps/clankie/src/public-gateway-connector.ts:116:    this.reconnectMinimumMs = options.reconnectMinimumMs ?? RECONNECT_MIN_MS;\napps/clankie/src/public-gateway-connector.ts:117:    this.reconnectMaximumMs = options.reconnectMaximumMs ?? RECONNECT_MAX_MS;\napps/clankie/src/public-gateway-connector.ts:118:    this.reconnectDelayMs = this.reconnectMinimumMs;\napps/clankie/src/public-gateway-connector.ts:181:    if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);\napps/clankie/src/public-gateway-connector.ts:183:    this.reconnectTimer = undefined;\napps/clankie/src/public-gateway-connector.ts:227:      this.reconnectDelayMs = this.reconnectMinimumMs;\napps/clankie/src/public-gateway-connector.ts:263:    if (!this.started || this.reconnectTimer !== undefined) return;\napps/clankie/src/public-gateway-connector.ts:264:    const delayMs = this.reconnectDelayMs;\napps/clankie/src/public-gateway-connector.ts:265:    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, this.reconnectMaximumMs);\napps/clankie/src/public-gateway-connector.ts:266:    this.reconnectTimer = setTimeout(() => {\napps/clankie/src/public-gateway-connector.ts:267:      this.reconnectTimer = undefined;\napps/clankie/src/public-gateway-connector.ts:270:    this.reconnectTimer.unref();\napps/clankie/src/public-gateway-connector.ts:271:    this.logger.warn({ hostId: this.hostId, reconnectInMs: delayMs }, \"public gateway disconnected\");\napps/clankie/src/captain/herdr-fleet-changes.ts:89:    readonly reconnectMs?: number;\napps/clankie/src/captain/herdr-fleet-changes.ts:93:  const reconnectMs = options.reconnectMs ?? 1_000;\napps/clankie/src/captain/herdr-fleet-changes.ts:97:  let reconnect: ReturnType<typeof setTimeout> | undefined;\napps/clankie/src/captain/herdr-fleet-changes.ts:202:      reconnect = setTimeout(connect, reconnectMs);\napps/clankie/src/captain/herdr-fleet-changes.ts:203:      reconnect.unref?.();\napps/clankie/src/captain/herdr-fleet-changes.ts:249:      reconnect = setTimeout(connect, reconnectMs);\napps/clankie/src/captain/herdr-fleet-changes.ts:250:      reconnect.unref?.();\napps/clankie/src/captain/herdr-fleet-changes.ts:266:    if (reconnect !== undefined) clearTimeout(reconnect);\npackages/interactive-environment/src/discord-presence.ts:255:  \"gateway_reconnecting\",\napps/clankie/src/captain/herdr-terminal.ts:157:      // pane itself is resized mid-observation; it heals on the next reconnect.\napps/clankie/src/captain/seat-outbox.ts:15:/** Longer than one bridge poll window (25s) plus a reconnect, shorter than a human notices. */\npackages/discord-presence-core/test/voice-session.test.ts:2664:describe(\"reconnect\", () => {\npackages/interactive-environment/test/interactive-environment.test.ts:93:  it(\"runs idempotent activity control on bot transport while voice is active\", () => {\npackages/discord-presence-core/test/text-ingress.test.ts:278:      id: write.idempotencyKey,\npackages/discord-presence-core/test/text-ingress.test.ts:649:        idempotencyKey: \"message-typing:typing:0\",\npackages/discord-presence-core/test/text-ingress.test.ts:711:        idempotencyKey: \"message-followup:typing:0\",\npackages/discord-presence-core/test/realtime-session.test.ts:560:  it(\"closes idempotently and reports the first reason only\", async () => {\npackages/discord-presence-core/test/elevenlabs-tts.test.ts:292:  it(\"enforces the session lifetime cap and closes idempotently with close_socket\", async () => {\npackages/discord-presence-core/test/presence-session.test.ts:344:    idempotencyKey: `write-${suffix}`,\npackages/play-voice/src/client.ts:26:  reconnectDelayMs?: number;\npackages/play-voice/src/client.ts:84:  const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;\npackages/play-voice/src/client.ts:116:      if (!closed) schedule(open, reconnectDelayMs);\npackages/play/src/free-play-journal.ts:13: * that record is the runtime's operational state (lease, idempotency,\npackages/discord-presence-core/test/presence-grant.test.ts:9:        idempotencyKey: \"write-1\",\npackages/protocol/src/index.ts:3043: * idempotency hash on the path.\npackages/protocol/src/index.ts:3372:    idempotencyKey: z.string().min(1),\npackages/play-voice/test/client.test.ts:220:  it(\"reconnects after a close instead of going permanently silent\", () => {\npackages/protocol/test/protocol.test.ts:669:      idempotencyKey: \"k1\",\n{\n  \"name\": \"clankie\",\n  \"version\": \"0.2.0\",\n  \"private\": true,\n  \"description\": \"Clankie: a persistent agent who codes, leads herdr fleets, plays games, and hangs out in Discord.\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"build\": \"turbo run build --filter=@clankie/menu-bar --filter=@clankie/vox\",\n    \"typecheck\": \"turbo run typecheck\",\n    \"test\": \"vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug\",\n    \"lint\": \"oxlint --deny-warnings . && pnpm --filter @clankie/vox lint\",\n    \"deadcode\": \"knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers\",\n    \"fmt\": \"oxfmt --write .\",\n    \"fmt:check\": \"oxfmt --check . && pnpm --filter @clankie/vox fmt:check\",\n    \"docs:public:build\": \"pnpm --filter @clankie/docs build\",\n    \"docs:public:check\": \"pnpm --filter @clankie/docs check\",\n    \"docs:check\": \"node scripts/check-doc-links.mjs && pnpm docs:public:check\",\n    \"infra:check\": \"infra/aws/accounts/check.sh && infra/aws/public-gateway/check.sh && infra/aws/public-docs/check.sh\",\n    \"testing:view\": \"node docs/testing/serve-archive.mjs\",\n    \"check\": \"pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test\",\n    \"doctor\": \"node scripts/doctor.mjs\",\n    \"cli:install\": \"node scripts/install-cli.mjs\",\n    \"release:build\": \"node scripts/build-release.mjs\",\n    \"release:smoke\": \"node scripts/smoke-release.mjs\",\n    \"herdr:build\": \"node scripts/build-herdr.mjs\",\n    \"herdr:smoke\": \"node scripts/smoke-herdr.mjs\",\n    \"herdr:linux:smoke\": \"docker build -f scripts/release/herdr-linux.Dockerfile -t clankie-herdr-linux:local . && docker run --rm --init clankie-herdr-linux:local\",\n    \"clean\": \"turbo run clean --filter=@clankie/menu-bar --filter=@clankie/vox && rm -rf .turbo .data\",\n    \"play:live\": \"pnpm --filter @clankie/clankie free-play-live\",\n    \"discord:readiness\": \"pnpm --filter @clankie/discord-bridge readiness\",\n    \"discord:voice-readiness\": \"pnpm --filter @clankie/discord-bridge voice-readiness\"\n  },\n  \"devDependencies\": {\n    \"esbuild\": \"0.28.1\",\n    \"knip\": \"6.32.2\",\n    \"oxfmt\": \"0.58.0\",\n    \"oxlint\": \"1.73.0\",\n    \"turbo\": \"2.10.4\",\n    \"vitest\": \"4.1.10\"\n  },\n  \"engines\": {\n    \"node\": \">=24\"\n  },\n  \"packageManager\": \"pnpm@11.11.0\"\n}\nrelease-clankie\nverify-clankie\nherdr \u2014 terminal workspace manager for AI coding agents\n\nUsage: herdr [options]\n       herdr --session <name> [options]\n       herdr --remote <ssh-target> [--session <name>]\n       herdr session attach <name>\n       herdr completion zsh\n       herdr update [--handoff]\n       herdr channel set <stable|preview>\n       herdr server stop\n       herdr server reload-config\n       herdr api <subcommand> ...\n       herdr completion <shell>\n       herdr config <subcommand> ...\n       herdr channel <subcommand> ...\n       herdr workspace <subcommand> ...\n       herdr worktree <subcommand> ...\n       herdr tab <subcommand> ...\n       herdr notification <subcommand> ...\n       herdr agent <subcommand> ...\n       herdr pane <subcommand> ...\n       herdr session <subcommand> ...\n       herdr integration <subcommand> ...\n\nCommon commands:\n  herdr                            Launch or attach to the persistent session\n  herdr status [server|client]     Show local client and running server status\n  herdr update                     Download and install the latest version\n  herdr completion zsh             Generate shell completions for zsh\n  herdr server stop                Stop the running server via the API socket\n  herdr channel set <stable|preview> Choose the stable or preview update channel\n  herdr server reload-config       Reload config.toml in the running server\n  herdr config reset-keys          Back up config.toml and remove custom keybindings\n  herdr channel <subcommand>       Manage the stable or preview update channel\n  herdr api <subcommand>           Inspect socket API metadata and live runtime state\n  herdr workspace <subcommand>     Workspace helpers over the socket API\n  herdr worktree <subcommand>      Git worktree helpers over the socket API\n  herdr tab <subcommand>           Tab helpers over the socket API\n  herdr notification <subcommand>  Notification helpers over the socket API\n  herdr agent <subcommand>         Agent/terminal helpers over the socket API\n  herdr pane <subcommand>          Pane control helpers over the socket API\n  herdr session <subcommand>       Manage named persistent sessions\n  herdr integration <subcommand>   Manage built-in agent integrations\n\nAdvanced commands:\n  herdr server                     Run as headless server\n\nOptions:\n  --no-session        Run monolithically (no server/client, escape hatch)\n  --session <name>    Use or create a named persistent session\n  --remote <target>   Attach through SSH to a remote Herdr server\n  --remote-keybindings <local|server>\n                      Keybindings for --remote app attach (default: local)\n  --handoff           Opt into live handoff for update or remote attach\n  --default-config    Print default configuration and exit\n  --skill             Print the agent skill file and exit\n  --version, -V       Print version \n\u2026 truncated"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000014",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:40.503Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000015",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:41.742Z",
+      "type": "context",
+      "usage": {
+        "tokens": 47575,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000016",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:41.743Z",
+      "type": "tool",
+      "toolCallId": "call_qHCkFI7tUIJLkXjanG7OdjkQ|fc_0f0a7ee339ecb88c016a9b6b20742c87d2ac6d4553aa7fa301",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"cat .agents/dev-skills/verify-clankie/SKILL.md; cat apps/clankie/src/world/body.ts\",\n  \"timeout\": 10\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000017",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:41.755Z",
+      "type": "tool",
+      "toolCallId": "call_qHCkFI7tUIJLkXjanG7OdjkQ|fc_0f0a7ee339ecb88c016a9b6b20742c87d2ac6d4553aa7fa301",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "pnpm --filter @clankie/discord-user-session watch-live-proof -- --wait=120\npnpm --filter @clankie/discord-user-session publish-live-proof\npnpm --filter @clankie/discord-user-session publish-live-proof -- --wait=120\n```\n\nBoth read `$XDG_STATE_HOME/clankie/discord-user-session-receipts.jsonl`,\ndefaulting to `~/.local/state/clankie/discord-user-session-receipts.jsonl`.\nAdd `--json` after `--` for machine-readable output.\n\nEvaluate one production play journal with lifecycle and receipt joins:\n\n```bash\npnpm --filter @clankie/play gameplay:evaluate-journal -- \\\n  ~/.local/state/clankie/gba-play/<run>.jsonl\n```\n\n`pnpm discord:voice-readiness` checks the selected TTS credential but skips\npaid ElevenLabs synthesis; its engaged probe settles on model text. A READY\nreport can therefore coexist with a broken mouth.\n/**\n * The world as a body (VUH-970 / VUH-1012).\n *\n * `runFreePlay` drives exactly one seam \u2014 `GbaDriverIo` \u2014 and everything above\n * it (the model mind, the voice, interjections, the journal, progress) never\n * learns where the body is. So playing in a hosted pokeagent-mmo world is not a\n * second play loop: it is a second implementation of that seam, plus a frame\n * source, composed by the same execution the local body already uses.\n *\n * Transport, session, retry, and frame-order accounting live in\n * `WorldPlayerClient`. This adapter maps world observations into the GBA\n * driver, publishes Activity media, and exposes granted multiplayer operations\n * to the gameplay mind.\n *\n * What is genuinely different, and must not be papered over:\n *\n * - **There is no pause.** One player cannot stop a shared world. `pause()`\n *   stops *him* acting; the world keeps running and other players keep moving.\n * - **The screen can change with no action of his.** Another player walks past,\n *   an NPC moves. A local body only advances when driven.\n * - **A body can be replaced under him** (a region crossing, an operator\n *   takeover). `bodyGeneration` is how that is detected; everything cached\n *   about the screen is stale when it moves.\n */\nimport { createHash } from \"node:crypto\";\nimport { resolveWorldCredential, WorldCredentialError } from \"@clankie/credential-broker\";\nimport { EnvironmentAdapterActionError } from \"@clankie/environment-runtime\";\nimport {\n  FREE_PLAY_HARD_FAILURE_LIMIT,\n  worldPlayJourneyId,\n  type FreePlayProvenance,\n  type GbaDriverIo,\n  type PlayJourneyId,\n} from \"@clankie/play\";\nimport {\n  GbaEmulatorObservationSchema,\n  INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,\n  type EnvironmentActionResult,\n  type GbaEmulatorAction,\n  type GbaEmulatorObservation,\n  type GbaEmulatorObservationKind,\n} from \"@clankie/interactive-environment\";\nimport type { EmbodimentEnvironmentId, WorldJoinRefusalReason } from \"@clankie/protocol\";\nimport {\n  ActionSchema,\n  findOperation,\n  isRefusal,\n  WORLD_PROTOCOL_VERSION,\n  type Action,\n  type ActionRefusal,\n  type Frame,\n  type Observation,\n  type Refusal,\n  type WorldOperationName,\n} from \"@pokeagents/world-protocol\";\nimport {\n  defaultWorldStateDir,\n  parseWorldAddress,\n  WorldPlayerClient,\n  WorldPlayerConfigError,\n  worldSocketPath,\n  type WorldPlayerTransport,\n} from \"@pokeagents/world-protocol/ipc\";\nimport { z } from \"zod\";\n\nexport interface WorldBody {\n  /** Stable authenticated player journey; never supplied by the model. */\n  readonly journeyId: PlayJourneyId;\n  /** The only seam `runFreePlay` touches. */\n  readonly io: GbaDriverIo;\n  /** Latest world frame as PNG bytes; null until the first frame arrives. */\n  readonly framePng: () => Uint8Array | null;\n  /**\n   * Watch the screen as the world paints it. Null detaches.\n   *\n   * Unlike the local body this needs no `pace` option \u2014 the world advances its\n   * own cores at hardware speed and publishes as it goes, so frames arrive\n   * paced already.\n   */\n  readonly observeFrames: (observer: (() => void) | null) => void;\n  /**\n   * Frames the world reported this subscriber missed, cumulative. The world\n   * drops rather than queues so a slow reader cannot stall the stream, and it\n   * reports the count so a consumer knows not to assume smooth motion.\n   */\n  readonly droppedFrameCount: () => number;\n  /** Native stereo PCM received since the last drain. */\n  readonly drainAudio: () => readonly WorldAudioPacket[];\n  /** Audio packets lost before they reached the activity sink. */\n  readonly droppedAudioPacketCount: () => number;\n  /** Causal identity sampled beside decision/pre-action/post-action state. */\n  readonly traceProvenance: () => FreePlayProvenance;\n  /** Safe join metadata; never includes the session bearer. */\n  readonly sessionSnapshot: () => WorldSessionSnapshot | undefined;\n  /** Operations the live session currently holds. */\n  readonly grantedOperationNames: () => readonly string[];\n  /** Invoke a granted world operation. The client retains the bearer. */\n  readonly callWorld: (name: string, input: Record<string, unknown>) => Promise<unknown>;\n  /** True after the world ended the session or this body closed. */\n  readonly ended: () => boolean;\n  /** Leaves the world and releases the body. Always call it. */\n  readonly close: () => Promise<void>;\n}\n\ninterface WorldSessionSnapshot {\n  readonly worldId: string;\n  readonly playerId: string;\n  readonly sessionId: string;\n  readonly gameId: string;\n}\n\n/**\n * Why a hosted join did not happen, in the vocabulary he says out loud. The\n * shared play host may refuse `play_session_active` before this body is opened;\n * this module produces the world-specific reasons.\n */\nexport type WorldJoinResult =\n  | { outcome: \"joined\"; body: WorldBody }\n  | { outcome: \"refused\"; reason: WorldJoinRefusalReason; detail?: string };\n\nexport interface WorldJoinOptions {\n  environmentId: EmbodimentEnvironmentId;\n  env?: NodeJS.ProcessEnv;\n  fetchImpl?: typeof fetch;\n  onAudioUnavailable?: (reason: string) => void;\n  /** Test injection; production uses the package transport. */\n  transport?: WorldPlayerTransport;\n}\n\ninterface WorldAudioPacket {\n  readonly bodyGeneration: number;\n  readonly frame: number;\n  readonly encoding: \"pcm_s16le\";\n  readonly sampleRate: number;\n  readonly channels: 2;\n  readonly frames: number;\n  readonly data: Uint8Array;\n  readonly capturedAt: string;\n}\n\n/**\n * Dial target for the hosted world.\n *\n * `WORLD_ADDRESS` is unix path, `tcp://host:port`, or `tls://host:port`. Absent,\n * the default is the world's unix socket under `WORLD_STATE_DIR`.\n */\nfunction resolveWorldTarget(env: NodeJS.ProcessEnv = process.env): string {\n  const configured = env[\"WORLD_ADDRESS\"]?.trim();\n  if (configured !== undefined && configured.length > 0) return configured;\n  return worldSocketPath(defaultWorldStateDir(env));\n}\n\n/**\n * Join the world and return a drivable body.\n *\n * The credential is resolved here from operator configuration and is **not** a\n * parameter, so no caller \u2014 and in particular no model \u2014 can name the principal\n * it joins as. Identity is provisioned, never asserted; a mind that could spell\n * another player's credential is the hole VUH-976 closed on the world side, and\n * a client that accepted one as an argument would reopen it from this side.\n *\n * Deny-by-default: with nothing provisioned this refuses `no_credential`.\n */\nexport async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinResult> {\n  const env = options.env ?? process.env;\n  let credential: string | undefined;\n  try {\n    credential = await resolveWorldCredential({ env });\n  } catch (error) {\n    return {\n      outcome: \"refused\",\n      reason: \"no_credential\",\n      detail:\n        error instanceof WorldCredentialError\n          ? error.message\n          : \"The hosted-world credential could not be read\",\n    };\n  }\n  if (credential === undefined) return { outcome: \"refused\", reason: \"no_credential\" };\n\n  let target: string;\n  try {\n    target = resolveWorldTarget(env);\n    parseWorldAddress(target);\n  } catch (error) {\n    return joinConfigRefusal(error);\n  }\n\n  const client = new WorldPlayerClient({\n    target,\n    credential,\n    ...(options.transport === undefined ? {} : { transport: options.transport }),\n  });\n  // `world.join` takes a game, not a region. Regions are reached afterwards\n  // through `world.travel`, gated on badges \u2014 so there is nothing to choose here.\n  const gameId = gameIdFor(options.environmentId);\n  let joined;\n  try {\n    joined = await client.call(\"world.join\", {\n      protocolVersion: WORLD_PROTOCOL_VERSION,\n      gameId,\n      displayName: \"Clankie\",\n      harness: \"clankie\",\n    });\n  } catch (error) {\n    return joinConfigRefusal(error);\n  }\n  if (isRefusal(joined)) return joinRefusal(joined);\n  const missing = REQUIRED_CAPABILITIES.filter((capability) => !client.capabilities.includes(capability));\n  if (missing.length > 0) {\n    await bestEffortLeave(client);\n    return {\n      outcome: \"refused\",\n      reason: \"world_refused\",\n      detail: `The world did not grant ${missing.join(\", \")}`,\n    };\n  }\n\n  let observation;\n  try {\n    observation = await client.call(\"play.observe\", {});\n  } catch (error) {\n    await bestEffortLeave(client);\n    return joinConfigRefusal(error);\n  }\n  if (isRefusal(observation) || observation.gameId !== joined.gameId) {\n    await bestEffortLeave(client);\n    return {\n      outcome: \"refused\",\n      reason: \"world_refused\",\n      detail: isRefusal(observation)\n        ? `${observation.code}: ${observation.message}`\n        : \"The world returned an invalid initial observation\",\n    };\n  }\n\n  const fetchImpl = options.fetchImpl ?? fetch;\n  const watchAudio = await openWatchAudio(client, fetchImpl, options.onAudioUnavailable);\n  return {\n    outcome: \"joined\",\n    body: new HostedWorldBody(client, observation, {\n      ...(watchAudio === undefined ? {} : { watchAudio }),\n      fetchImpl,\n      ...(options.onAudioUnavailable === undefined ? {} : { onAudioUnavailable: options.onAudioUnavailable }),\n    }),\n  };\n}\n\nconst REQUIRED_CAPABILITIES = [\"world.observe\", \"world.act\", \"world.frames\"] as const;\nconst AUDIO_POLL_MS = 80;\nconst AUDIO_QUEUE_MAX = 64;\nconst FRAME_CONSUME_RETRIES = 8;\nconst FRAME_CONSUME_BACKOFF_MS = 50;\nconst ALREADY_LEFT = new Set([\"session_ended\", \"not_your_session\", \"unauthenticated\"]);\nconst GOAL_VERSION = 1;\nconst CHARACTER_ID = \"clankie\";\n\nconst HostedFacingSchema = z.enum([\"north\", \"east\", \"south\", \"west\"]);\nconst HostedMapSizeSchema = z\n  .object({\n    width: z.number().int().positive().max(1_024),\n    height: z.number().int().positive().max(1_024),\n  })\n  .strict();\n\nconst FireRedStateSchema = z\n  .object({\n    overworld: z\n      .object({\n        mapId: z.string().min(1),\n        mapGroup: z.number().int().nonnegative(),\n        mapNum: z.number().int().nonnegative(),\n        x: z.number().int().nonnegative(),\n        y: z.number().int().nonnegative(),\n        facing: HostedFacingSchema,\n      })\n      .strict()\n      .nullable(),\n    party: z.array(\n      z\n        .object({\n          slot: z.number().int().min(0).max(5),\n          speciesId: z.number().int().positive(),\n          level: z.number().int().min(1).max(100),\n          currentHp: z.number().int().nonnegative(),\n          maxHp: z.number().int().positive(),\n          moveIds: z.array(z.number().int().positive()).min(1).max(4),\n        })\n        .strict(),\n    ),\n    fieldInputReady: z.boolean(),\n    /**\n     * Absent on a world older than this field; null when that world decoded no\n     * map to stand on. Both mean \"unknown\", which is not the same answer as\n     * \"nobody is standing here\" and must not be rendered as one.\n     */\n    npcs: z\n      .array(\n        z\n          .object({\n            localId: z.number().int().min(0).max(255),\n            graphicsId: z.number().int().min(0).max(255),\n            x: z.number().int().min(0).max(1_023),\n            y: z.number().int().min(0).max(1_023),\n            facing: z.enum([\"north\", \"east\", \"south\", \"west\"]).nullable(),\n          })\n          .strict(),\n      )\n      .max(31)\n      .nullish(),\n    /** Absent on a world older than this field; empty outside dialog. */\n    dialogLines: z.array(z.string().max(512)).max(8).nullish(),\n    menu: z\n      .object({\n        menuId: z.string().min(1).max(128),\n        cursor: z.number().int().nonnegative().max(63),\n        entries: z\n          .array(z.object({ id: z.string().min(1).max(128), label: z.string().min(1).max(256) }).strict())\n          .min(1)\n          .max(16),\n      })\n      .strict()\n      .nullable(),\n    /**\n     * Absent on a world older than this field; null when no map is loaded.\n     * Interior tile count, border excluded \u2014 the same number the local body\n     * publishes. Player coordinates still include the 7-tile border.\n     */\n    mapSize: HostedMapSizeSchema.nullish(),\n    /**\n     * Absent on a world older than this field; null when that world did not\n     * read the map header. Empty is a decoded indoor map with no edges.\n     */\n    connections: z\n      .array(\n        z\n          .object({\n            direction: z.enum([\"north\", \"south\", \"west\", \"east\"]),\n            destination: z.string().min(1).max(128),\n          })\n          .strict(),\n      )\n      .max(8)\n      .nullish(),\n  })\n  .strict();\ntype FireRedState = z.infer<typeof FireRedStateSchema>;\n\n/**\n * Verified Emerald adapter-v2 payload (VUH-987). Overworld, party, dialog, and\n * map size are real; NPCs, connections, and decoded menu entries are not, and\n * must not be inferred from FireRed.\n */\nconst EmeraldStateSchema = z\n  .object({\n    overworld: z\n      .object({\n        mapId: z.string().min(1).max(128),\n        mapGroup: z.number().int().min(0).max(255),\n        mapNum: z.number().int().min(0).max(255),\n        x: z.number().int().min(0).max(1_023),\n        y: z.number().int().min(0).max(1_023),\n        facing: HostedFacingSchema,\n      })\n      .strict(),\n    party: z.array(\n      z\n        .object({\n          slot: z.number().int().min(0).max(5),\n          speciesId: z.number().int().min(1).max(439),\n          level: z.number().int().min(1).max(100),\n          currentHp: z.number().int().min(0).max(9_999),\n          maxHp: z.number().int().min(1).max(9_999),\n          moveIds: z.array(z.number().int().min(1).max(354)).min(1).max(4),\n        })\n        .strict(),\n    ),\n    fieldInputReady: z.boolean(),\n    dialogLines: z.array(z.string().max(512)).max(8),\n    mapSize: HostedMapSizeSchema.nullable(),\n  })\n  .strict();\ntype EmeraldState = z.infer<typeof EmeraldStateSchema>;\n\ntype HostedSemanticState = ({ gameId: \"firered\" } & FireRedState) | ({ gameId: \"emerald\" } & EmeraldState);\n\nconst WatchAudioPacketSchema = z\n  .object({\n    bodyGeneration: z.number().int().positive(),\n    frame: z.number().int().nonnegative(),\n    encoding: z.literal(\"pcm_s16le\"),\n    sampleRate: z.number().int().min(8_000).max(192_000),\n    channels: z.literal(2),\n    frames: z.number().int().positive().max(16_384),\n    byteLength: z\n      .number()\n      .int()\n      .positive()\n      .max(64 * 1024),\n    data: z.string().min(1),\n    capturedAt: z.string().datetime(),\n  })\n  .strict()\n  .superRefine((packet, context) => {\n    const bytes = Buffer.from(packet.data, \"base64\").byteLength;\n    if (bytes !== packet.byteLength || bytes !== packet.frames * packet.channels * 2) {\n      context.addIssue({ code: \"custom\", path: [\"byteLength\"], message: \"invalid PCM length\" });\n    }\n  });\n\nconst WatchAudioBatchSchema = z\n  .object({\n    ok: z.literal(true),\n    bodyGeneration: z.number().int().nonnegative(),\n    cursor: z.number().int().nonnegative(),\n    dropped: z.number().int().nonnegative(),\n    packets: z.array(WatchAudioPacketSchema).max(256),\n  })\n  .strict();\n\ninterface WatchAudioSource {\n  readonly endpoint: URL;\n  readonly token: string;\n  readonly fetch: typeof fetch;\n}\n\nclass HostedWorldBody implements WorldBody {\n  public readonly journeyId: PlayJourneyId;\n  public readonly io: GbaDriverIo;\n\n  private readonly client: WorldPlayerClient;\n  private observation: Observation | undefined;\n  private observationSequence = 0;\n  private actionSequence = 0;\n  private bodyGeneration: number;\n  private frame: Frame | undefined;\n  private png: Uint8Array | null = null;\n  private droppedFrames = 0;\n  private watchAudio: WatchAudioSource | undefined;\n  private readonly fetchImpl: typeof fetch;\n  private readonly onAudioUnavailable: ((reason: string) => void) | undefined;\n  private watchRemintInFlight = false;\n  private readonly audioP\n\u2026 truncated"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000018",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:45.775Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000019",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:48.946Z",
+      "type": "context",
+      "usage": {
+        "tokens": 59519,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000020",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:48.947Z",
+      "type": "tool",
+      "toolCallId": "call_O5ebsPiUpnGCtPRKp9E1fwKT|fc_0f0a7ee339ecb88c016a9b6b25ba4887d2b672b038a844129f",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"git status --short; rg -n 'idempotency|WorldPlayerClient' apps/clankie/test/world* docs | head -60; ls apps/clankie/test/*world*; ls -ld node_modules apps/clankie/node_modules/@pokeagents/world-protocol; cat .agents/dev-skills/verify-clankie/SKILL.md | head -100; cat apps/clankie/test/world-body.test.ts | head -180\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000021",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:49.079Z",
+      "type": "tool",
+      "toolCallId": "call_O5ebsPiUpnGCtPRKp9E1fwKT|fc_0f0a7ee339ecb88c016a9b6b25ba4887d2b672b038a844129f",
+      "name": "bash",
+      "phase": "completed",
+      "detail": " M apps/clankie/src/world/body.ts\napps/clankie/test/world-body.test.ts:584:      .map((request) => (request.input as { idempotencyKey: string }).idempotencyKey);\napps/clankie/test/world-body.test.ts:803:  it(\"dials unix, tcp, and tls addresses through WorldPlayerClient\", async () => {\ndocs/credentials.md:164:`WorldPlayerClient`; the installed version is pinned in `apps/clankie/package.json`.\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:2:{\"kind\":\"act\",\"at\":\"2026-08-19T04:15:26.240Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-1\",\"action\":{\"kind\":\"button_press\",\"button\":\"a\",\"holdFrames\":16,\"repeat\":8},\"frame\":620,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:3:{\"kind\":\"act\",\"at\":\"2026-08-19T04:15:46.296Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-2\",\"action\":{\"kind\":\"button_press\",\"button\":\"a\",\"holdFrames\":16,\"repeat\":12},\"frame\":1780,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:4:{\"kind\":\"act\",\"at\":\"2026-08-19T04:15:58.527Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-3\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":2494,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:5:{\"kind\":\"act\",\"at\":\"2026-08-19T04:16:06.386Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-4\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":2948,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:6:{\"kind\":\"act\",\"at\":\"2026-08-19T04:16:14.364Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-5\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":3395,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:7:{\"kind\":\"act\",\"at\":\"2026-08-19T04:16:19.766Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-6\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":3704,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:8:{\"kind\":\"act\",\"at\":\"2026-08-19T04:16:28.652Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-7\",\"action\":{\"kind\":\"button_press\",\"button\":\"a\",\"holdFrames\":16},\"frame\":4204,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:9:{\"kind\":\"act\",\"at\":\"2026-08-19T04:16:37.412Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-8\",\"action\":{\"kind\":\"button_press\",\"button\":\"a\",\"holdFrames\":8,\"repeat\":8},\"frame\":4716,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:10:{\"kind\":\"act\",\"at\":\"2026-08-19T04:16:59.821Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-9\",\"action\":{\"kind\":\"enter_text\",\"text\":\"CLANKIE\"},\"frame\":6020,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:11:{\"kind\":\"act\",\"at\":\"2026-08-19T04:17:06.428Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-10\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":6390,\"outcome\":\"rejected\",\"refusal\":{\"reason\":\"dialog_not_open\"}}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:12:{\"kind\":\"act\",\"at\":\"2026-08-19T04:17:16.194Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-11\",\"action\":{\"kind\":\"select_menu_entry\",\"entry\":\"yes\"},\"frame\":6941,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:13:{\"kind\":\"act\",\"at\":\"2026-08-19T04:17:27.475Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-12\",\"action\":{\"kind\":\"frame_advance\",\"frames\":45},\"frame\":7576,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:14:{\"kind\":\"act\",\"at\":\"2026-08-19T04:17:38.087Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-13\",\"action\":{\"kind\":\"frame_advance\",\"frames\":1},\"frame\":8169,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:15:{\"kind\":\"act\",\"at\":\"2026-08-19T04:17:48.432Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-14\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":8764,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:16:{\"kind\":\"act\",\"at\":\"2026-08-19T04:17:55.725Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-15\",\"action\":{\"kind\":\"frame_advance\",\"frames\":20},\"frame\":9175,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:17:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:02.773Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-16\",\"action\":{\"kind\":\"select_menu_entry\",\"entry\":\"new-name\"},\"frame\":9573,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:18:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:06.841Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-17\",\"action\":{\"kind\":\"frame_advance\",\"frames\":30},\"frame\":9803,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:19:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:18.473Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-18\",\"action\":{\"kind\":\"enter_text\",\"text\":\"GARY\"},\"frame\":10474,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:20:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:25.915Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-19\",\"action\":{\"kind\":\"frame_advance\",\"frames\":40},\"frame\":10893,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:21:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:29.779Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-20\",\"action\":{\"kind\":\"select_menu_entry\",\"entry\":\"yes\"},\"frame\":11112,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:22:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:33.889Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-21\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":11343,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:23:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:37.739Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-22\",\"action\":{\"kind\":\"frame_advance\",\"frames\":40},\"frame\":11560,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:24:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:44.951Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-23\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":11980,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:25:{\"kind\":\"act\",\"at\":\"2026-08-19T04:18:49.520Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-24\",\"action\":{\"kind\":\"frame_advance\",\"frames\":40},\"frame\":12240,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:26:{\"kind\":\"act\",\"at\":\"2026-08-19T04:19:05.225Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-25\",\"action\":{\"kind\":\"walk_to\",\"x\":17,\"y\":9},\"frame\":13157,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:27:{\"kind\":\"act\",\"at\":\"2026-08-19T04:19:20.878Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-26\",\"action\":{\"kind\":\"walk_to\",\"x\":11,\"y\":15},\"frame\":14078,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:28:{\"kind\":\"act\",\"at\":\"2026-08-19T04:19:41.356Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-27\",\"action\":{\"kind\":\"walk_to\",\"x\":23,\"y\":20},\"frame\":15282,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:29:{\"kind\":\"act\",\"at\":\"2026-08-19T04:19:53.308Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-28\",\"action\":{\"kind\":\"walk_to\",\"x\":10,\"y\":19},\"frame\":15964,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:30:{\"kind\":\"act\",\"at\":\"2026-08-19T04:19:58.634Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-29\",\"action\":{\"kind\":\"button_press\",\"button\":\"up\",\"holdFrames\":4},\"frame\":16266,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:31:{\"kind\":\"act\",\"at\":\"2026-08-19T04:20:10.587Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-30\",\"action\":{\"kind\":\"button_press\",\"button\":\"a\",\"holdFrames\":16},\"frame\":16940,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:32:{\"kind\":\"act\",\"at\":\"2026-08-19T04:20:15.436Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-31\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":17215,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:33:{\"kind\":\"act\",\"at\":\"2026-08-19T04:20:30.567Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-32\",\"action\":{\"kind\":\"walk_to\",\"x\":9,\"y\":18},\"frame\":18067,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:34:{\"kind\":\"act\",\"at\":\"2026-08-19T04:20:47.750Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-33\",\"action\":{\"kind\":\"walk_to\",\"x\":9,\"y\":19},\"frame\":19036,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:35:{\"kind\":\"act\",\"at\":\"2026-08-19T04:20:57.919Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-34\",\"action\":{\"kind\":\"button_press\",\"button\":\"a\",\"holdFrames\":16},\"frame\":19609,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:36:{\"kind\":\"act\",\"at\":\"2026-08-19T04:21:11.431Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-35\",\"action\":{\"kind\":\"walk_to\",\"x\":9,\"y\":17},\"frame\":20373,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:37:{\"kind\":\"act\",\"at\":\"2026-08-19T04:21:23.931Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-36\",\"action\":{\"kind\":\"walk_to\",\"x\":11,\"y\":18},\"frame\":21079,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:38:{\"kind\":\"act\",\"at\":\"2026-08-19T04:21:36.280Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-37\",\"action\":{\"kind\":\"walk_to\",\"x\":11,\"y\":19},\"frame\":21775,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:39:{\"kind\":\"act\",\"at\":\"2026-08-19T04:21:46.889Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-38\",\"action\":{\"kind\":\"walk_to\",\"x\":10,\"y\":19},\"frame\":22373,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:40:{\"kind\":\"act\",\"at\":\"2026-08-19T04:21:53.930Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-39\",\"action\":{\"kind\":\"button_press\",\"button\":\"a\",\"holdFrames\":16},\"frame\":22770,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:41:{\"kind\":\"act\",\"at\":\"2026-08-19T04:22:09.702Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-40\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":23671,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:42:{\"kind\":\"act\",\"at\":\"2026-08-19T04:22:22.212Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-41\",\"action\":{\"kind\":\"walk_to\",\"x\":16,\"y\":12},\"frame\":24378,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:43:{\"kind\":\"act\",\"at\":\"2026-08-19T04:22:35.896Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-42\",\"action\":{\"kind\":\"walk_to\",\"x\":11,\"y\":17},\"frame\":25153,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:44:{\"kind\":\"act\",\"at\":\"2026-08-19T04:22:48.709Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-43\",\"action\":{\"kind\":\"walk_to\",\"x\":11,\"y\":16},\"frame\":25875,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:45:{\"kind\":\"act\",\"at\":\"2026-08-19T04:22:59.928Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-44\",\"action\":{\"kind\":\"button_press\",\"button\":\"right\",\"holdFrames\":16},\"frame\":26507,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:46:{\"kind\":\"act\",\"at\":\"2026-08-19T04:23:09.634Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-45\",\"action\":{\"kind\":\"walk_to\",\"x\":13,\"y\":19},\"frame\":27066,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:47:{\"kind\":\"act\",\"at\":\"2026-08-19T04:23:43.074Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-46\",\"action\":{\"kind\":\"walk_to\",\"x\":16,\"y\":10},\"frame\":28994,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:48:{\"kind\":\"act\",\"at\":\"2026-08-19T04:24:07.714Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-47\",\"action\":{\"kind\":\"walk_to\",\"x\":19,\"y\":7},\"frame\":30395,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:49:{\"kind\":\"act\",\"at\":\"2026-08-19T04:24:25.643Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-48\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":31454,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:50:{\"kind\":\"act\",\"at\":\"2026-08-19T04:24:33.288Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-49\",\"action\":{\"kind\":\"frame_advance\",\"frames\":45},\"frame\":31886,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:51:{\"kind\":\"act\",\"at\":\"2026-08-19T04:24:56.055Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-50\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":33221,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:52:{\"kind\":\"act\",\"at\":\"2026-08-19T04:25:00.909Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-51\",\"action\":{\"kind\":\"button_press\",\"button\":\"a\",\"holdFrames\":8},\"frame\":33496,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:53:{\"kind\":\"act\",\"at\":\"2026-08-19T04:25:09.309Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-52\",\"action\":{\"kind\":\"advance_dialog\"},\"frame\":33983,\"outcome\":\"ran\",\"replayed\":false}\ndocs/testing/2026-08-18-pokeagents-trial-run/evidence/05-world-action-journal.jsonl:54:{\"kind\":\"act\",\"at\":\"2026-08-19T04:25:16.151Z\",\"idempotencyKey\":\"clankie-action-84b227e8-36b2-45ef-88fb-e965e5667070-53\",\"action\":{\"kind\":\"walk_to\",\"x\":15,\"y\":11},\"frame\":34367,\"outcome\":\"rejected\",\"refusal\":{\"reason\":\"walk_target_impassabl\n\u2026 truncated"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000022",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:51.293Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000023",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:51.980Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000024",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:57.535Z",
+      "type": "context",
+      "usage": {
+        "tokens": 69363,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000025",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:57.536Z",
+      "type": "tool",
+      "toolCallId": "call_OIhzaZq00ox9cTqKLKI83LRv|fc_0f0a7ee339ecb88c016a9b6b2bee9087d28f2c5524a7337696",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"git diff -- apps/clankie/src/world/body.ts; stat -f '%Sm %N' -t '%Y-%m-%d %H:%M' apps/clankie/src/world/body.ts; sed -n '535,605p' apps/clankie/test/world-body.test.ts; cat apps/clankie/src/world/session.ts | head -120; rg -n 'idempotency|retry' apps/clankie/node_modules/@pokeagents/world-protocol/dist/* -g '*.js' | head -35; rg -n 'mkdtemp|tmpdir|function actRan|function fakeWorld' apps/clankie/test/world-body.test.ts; cat vitest.config.ts | head -55; rg -n 'WorldPlayerClient|retry|idempotency' docs/adr/0145* docs/*world*\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000026",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:06:57.591Z",
+      "type": "tool",
+      "toolCallId": "call_OIhzaZq00ox9cTqKLKI83LRv|fc_0f0a7ee339ecb88c016a9b6b2bee9087d28f2c5524a7337696",
+      "name": "bash",
+      "phase": "failed",
+      "detail": "diff --git a/apps/clankie/src/world/body.ts b/apps/clankie/src/world/body.ts\nindex d512be6d..e7db79a5 100644\n--- a/apps/clankie/src/world/body.ts\n+++ b/apps/clankie/src/world/body.ts\n@@ -22,7 +22,7 @@\n  *   takeover). `bodyGeneration` is how that is detected; everything cached\n  *   about the screen is stale when it moves.\n  */\n-import { createHash, randomUUID } from \"node:crypto\";\n+import { createHash } from \"node:crypto\";\n import { resolveWorldCredential, WorldCredentialError } from \"@clankie/credential-broker\";\n import { EnvironmentAdapterActionError } from \"@clankie/environment-runtime\";\n import {\n@@ -432,7 +432,6 @@ class HostedWorldBody implements WorldBody {\n   private observation: Observation | undefined;\n   private observationSequence = 0;\n   private actionSequence = 0;\n-  private readonly actionKeyPrefix = `clankie-action-${randomUUID()}`;\n   private bodyGeneration: number;\n   private frame: Frame | undefined;\n   private png: Uint8Array | null = null;\n@@ -806,7 +805,7 @@ class HostedWorldBody implements WorldBody {\n     try {\n       result = await this.client.call(\"play.act\", {\n         action: worldAction,\n-        idempotencyKey: `${this.actionKeyPrefix}-${String(this.actionSequence)}`,\n+        idempotencyKey: `clankie-action-${String(this.actionSequence)}`,\n       });\n     } catch (error) {\n       return this.failedAction(actionId, \"world_unreachable\", boundedError(error), true);\n2026-09-04 19:55 apps/clankie/src/world/body.ts\n          throw new Error(`unexpected operation ${request.operation}`);\n      }\n    });\n    const result = await joinWorld({\n      environmentId: \"pokemon-firered\",\n      env: await provisionedEnv(world.stateDir),\n    });\n    expect(result.outcome).toBe(\"joined\");\n    if (result.outcome !== \"joined\") return;\n\n    expect(result.body.io.observe(\"danger\")).toMatchObject({ data: { stateCertain: false } });\n    expect(result.body.io.observe(\"scene\")).toMatchObject({ data: { mode: \"unknown\", inputReady: false } });\n    expectAdapterError(() => result.body.io.observe(\"overworld\"), \"semantic_state_unavailable\");\n    await expect(\n      result.body.io.act({ kind: \"button_press\", button: \"a\", holdFrames: 4 }),\n    ).resolves.toMatchObject({ status: \"completed\" });\n    await result.body.close();\n  });\n\n  it(\"does not reuse action keys when the world replays an existing join\", async () => {\n    const current = observation({ frame: 10 });\n    const world = await fakeWorld((request) => {\n      switch (request.operation) {\n        case \"world.join\":\n          return joinResult();\n        case \"play.observe\":\n          return current;\n        case \"play.act\":\n          return actRan(current);\n        case \"play.frame\":\n          return frame({ frame: current.frame, data: \"rejoined\" });\n        case \"world.leave\":\n          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };\n        default:\n          throw new Error(`unexpected operation ${request.operation}`);\n      }\n    });\n    const env = await provisionedEnv(world.stateDir);\n    const first = await joinWorld({ environmentId: \"pokemon-firered\", env });\n    const second = await joinWorld({ environmentId: \"pokemon-firered\", env });\n    if (first.outcome !== \"joined\" || second.outcome !== \"joined\") {\n      throw new Error(\"expected both world joins to succeed\");\n    }\n\n    await first.body.io.act({ kind: \"button_press\", button: \"a\", holdFrames: 4 });\n    await second.body.io.act({ kind: \"button_press\", button: \"right\", holdFrames: 4 });\n\n    const keys = world.requests\n      .filter((request) => request.operation === \"play.act\")\n      .map((request) => (request.input as { idempotencyKey: string }).idempotencyKey);\n    expect(keys).toHaveLength(2);\n    expect(new Set(keys).size).toBe(2);\n    await first.body.close();\n    await second.body.close();\n  });\n\n  it(\"polls latest frames at the hardware tick and rejects stale generations\", async () => {\n    let currentGeneration = 1;\n    let currentFrame = 0;\n    let frameIndex = 0;\n    const frames = [\n      frame({ bodyGeneration: 1, frame: 1, data: \"generation-1-frame-1\" }),\n      frame({ bodyGeneration: 1, frame: 3, data: \"generation-1-frame-3\" }),\n      frame({ bodyGeneration: 1, frame: 2, data: \"stale-frame\" }),\n      frame({ bodyGeneration: 2, frame: 1, data: \"generation-2-frame-1\" }),\n      frame({ bodyGeneration: 1, frame: 99, data: \"stale-generation\" }),\n    ];\n    const world = await fakeWorld((request) => {\n      switch (request.operation) {\n        case \"world.join\":\n          return joinResult();\n/**\n * Live hosted-world operations the captain can invoke while a world body is\n * playing. Transport, grants, and the bearer stay inside WorldPlayerClient;\n * this is only the attach point.\n */\nimport { findOperation } from \"@pokeagents/world-protocol\";\nimport type { WorldBody } from \"./body.ts\";\nimport { HOSTED_WORLD_MIND_OPERATIONS } from \"./operations.ts\";\n\nconst MIND_OPERATIONS = new Set<string>(HOSTED_WORLD_MIND_OPERATIONS);\n\nexport type HostedWorldInvokeResult =\n  | { readonly outcome: \"ok\"; readonly result: unknown }\n  | {\n      readonly outcome: \"refused\";\n      readonly reason: \"not_playing\" | \"unknown_operation\" | \"capability_unavailable\" | \"world_unreachable\";\n      readonly detail?: string;\n      readonly result?: unknown;\n    };\n\nexport class HostedWorldSession {\n  private body: WorldBody | undefined;\n\n  public attach(body: WorldBody): void {\n    this.body = body;\n  }\n\n  public detach(body: WorldBody): void {\n    if (this.body === body) this.body = undefined;\n  }\n\n  public inspect():\n    | { readonly outcome: \"not_playing\" }\n    | {\n        readonly outcome: \"playing\";\n        readonly grantedOperations: readonly string[];\n        readonly session: ReturnType<WorldBody[\"sessionSnapshot\"]>;\n      } {\n    if (this.body === undefined || this.body.ended()) return { outcome: \"not_playing\" };\n    return {\n      outcome: \"playing\",\n      grantedOperations: this.body.grantedOperationNames().filter((name) => MIND_OPERATIONS.has(name)),\n      session: this.body.sessionSnapshot(),\n    };\n  }\n\n  public async invoke(name: string, input: Record<string, unknown> = {}): Promise<HostedWorldInvokeResult> {\n    if (this.body === undefined || this.body.ended()) return { outcome: \"refused\", reason: \"not_playing\" };\n    if (!MIND_OPERATIONS.has(name) || findOperation(name) === undefined) {\n      return { outcome: \"refused\", reason: \"unknown_operation\", detail: name };\n    }\n    if (!this.body.grantedOperationNames().includes(name)) {\n      return {\n        outcome: \"refused\",\n        reason: \"capability_unavailable\",\n        detail: `The world did not grant ${name}`,\n      };\n    }\n    try {\n      const result = await this.body.callWorld(name, input);\n      return { outcome: \"ok\", result };\n    } catch (error) {\n      return {\n        outcome: \"refused\",\n        reason: \"world_unreachable\",\n        detail: error instanceof Error ? error.message : String(error),\n      };\n    }\n  }\n}\nrg: apps/clankie/node_modules/@pokeagents/world-protocol/dist/*: IO error for operation on apps/clankie/node_modules/@pokeagents/world-protocol/dist/*: No such file or directory (os error 2)\n2:import { mkdtemp, rm } from \"node:fs/promises\";\n3:import { tmpdir } from \"node:os\";\n747:    const emptyDir = await mkdtemp(join(tmpdir(), \"clankie-world-empty-\"));\n777:    const stateDir = await mkdtemp(join(tmpdir(), \"clankie-world-config-\"));\n815:    const env = await provisionedEnv(await mkdtemp(join(tmpdir(), \"clankie-world-address-\")));\n908:async function fakeWorld(\n912:  const stateDir = await mkdtemp(join(tmpdir(), \"clankie-world-body-\"));\n1539:function actRan(current: ReturnType<typeof observation>, detail?: Record<string, unknown>) {\nimport { relative, resolve } from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\nimport { defineConfig } from \"vitest/config\";\n\nconst repoRoot = fileURLToPath(new URL(\".\", import.meta.url));\nconst packagePath = relative(repoRoot, resolve(process.cwd())).replaceAll(\"\\\\\", \"/\");\nconst packageTestPattern = /^(?:apps|integrations|packages)\\/[^/]+$/u.test(packagePath)\n  ? [`${packagePath}/test/**/*.test.ts`]\n  : [\"packages/*/test/**/*.test.ts\", \"apps/*/test/**/*.test.ts\", \"integrations/*/test/**/*.test.ts\"];\n\nexport default defineConfig({\n  root: repoRoot,\n  test: {\n    include: packageTestPattern,\n    exclude: [\"**/node_modules/**\", \"**/.turbo/**\", \"**/dist/**\", \"artifacts/**\"],\n    fileParallelism: false,\n    pool: \"threads\",\n    testTimeout: 30_000,\n    hookTimeout: 30_000,\n  },\n});\nrg: docs/*world*: No such file or directory (os error 2)\n\n\nCommand exited with code 2"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000027",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:01.887Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000028",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:06.296Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000029",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:08.528Z",
+      "type": "context",
+      "usage": {
+        "tokens": 71723,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000030",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:08.529Z",
+      "type": "tool",
+      "toolCallId": "call_JC82ddEKjg8PUgXpszeEH4Mz|fc_0f0a7ee339ecb88c016a9b6b3a3e1087d2b84f5e014fba4813",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"ls apps/clankie/node_modules/@pokeagents/world-protocol; rg -n 'idempotency|retry' apps/clankie/node_modules/@pokeagents/world-protocol/src | head -55; sed -n '908,985p' apps/clankie/test/world-body.test.ts; sed -n '1539,1568p' apps/clankie/test/world-body.test.ts; cat docs/adr/0145-the-world-is-the-only-body.md | head -85; mkdir -p .tmp; TMPDIR=\\\"$PWD/.tmp\\\" pnpm exec vitest run apps/clankie/test/world-body.test.ts -t 'does not reuse action keys' > .tmp/repro.log 2>&1; cat .tmp/repro.log\",\n  \"timeout\": 120\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000031",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:09.627Z",
+      "type": "tool",
+      "toolCallId": "call_JC82ddEKjg8PUgXpszeEH4Mz|fc_0f0a7ee339ecb88c016a9b6b3a3e1087d2b84f5e014fba4813",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "LICENSE\npackage.json\nREADME.md\nsrc\napps/clankie/node_modules/@pokeagents/world-protocol/src/ipc.ts:354:      } catch (retryError) {\napps/clankie/node_modules/@pokeagents/world-protocol/src/ipc.ts:355:        throw transportError(retryError);\napps/clankie/node_modules/@pokeagents/world-protocol/src/ipc.test.ts:364:  it(\"surfaces a lost response without retrying a non-idempotent request\", async () => {\napps/clankie/node_modules/@pokeagents/world-protocol/src/ipc.test.ts:538:        idempotencyKey: \"retry-action\",\napps/clankie/node_modules/@pokeagents/world-protocol/src/ipc.test.ts:544:  it(\"does not retry a non-idempotent operation\", async () => {\napps/clankie/node_modules/@pokeagents/world-protocol/src/contract.ts:122:    retryAfterMs: z.number().int().positive().max(600_000).optional(),\napps/clankie/node_modules/@pokeagents/world-protocol/src/contract.ts:323:    idempotencyKey: z.string().min(8).max(128),\nasync function fakeWorld(\n  respond: (request: WireRequest) => unknown | Promise<unknown>,\n  watch?: (request: WireRequest) => unknown | Promise<unknown>,\n): Promise<FakeWorld> {\n  const stateDir = await mkdtemp(join(tmpdir(), \"clankie-world-body-\"));\n  const socketPath = join(stateDir, \"host.sock\");\n  const requests: WireRequest[] = [];\n  const sockets = new Set<Socket>();\n  const server = createServer((socket) => {\n    sockets.add(socket);\n    socket.setEncoding(\"utf8\");\n    let buffer = \"\";\n    socket.on(\"data\", (chunk: string) => {\n      buffer += chunk;\n      const newline = buffer.indexOf(\"\\n\");\n      if (newline === -1) return;\n      const request = JSON.parse(buffer.slice(0, newline)) as WireRequest;\n      requests.push(request);\n      const outcome =\n        request.operation === \"play.watch\"\n          ? (watch?.(request) ?? { ok: false, code: \"not_supported\", message: \"watching is disabled\" })\n          : respond(request);\n      void Promise.resolve(outcome).then(\n        (outcome) => socket.end(`${JSON.stringify(outcome)}\\n`),\n        () => socket.destroy(),\n      );\n    });\n    socket.on(\"close\", () => sockets.delete(socket));\n  });\n  await listen(server, socketPath);\n  const close = async (): Promise<void> => {\n    for (const socket of sockets) socket.destroy();\n    await closeServer(server);\n    await rm(stateDir, { recursive: true, force: true });\n  };\n  cleanups.push(close);\n  return { stateDir, requests, close };\n}\n\nasync function provisionedEnv(stateDir: string): Promise<NodeJS.ProcessEnv> {\n  const credentialFile = join(stateDir, \"credentials.json\");\n  await new FileCredentialStore(credentialFile).set(WORLD_CREDENTIAL_PROVIDER_ID, {\n    type: \"api\",\n    key: CREDENTIAL,\n  });\n  return { WORLD_STATE_DIR: stateDir, CLANKIE_CREDENTIALS_FILE: credentialFile };\n}\n\nfunction memoryStore(): CredentialStore {\n  const entries = new Map<string, Awaited<ReturnType<CredentialStore[\"get\"]>>>();\n  return {\n    get: (id) => Promise.resolve(entries.get(id)),\n    set: (id, credential) => {\n      entries.set(id, credential);\n      return Promise.resolve();\n    },\n    delete: (id) => Promise.resolve(entries.delete(id)),\n    list: () => Promise.resolve({}),\n  };\n}\n\nfunction joinResult(gameId: \"firered\" | \"emerald\" = \"firered\") {\n  return {\n    ok: true,\n    // Read from the constant, not a literal: the pinned contract decides what a\n    // real world answers with, and a fake that disagrees fails the join rather\n    // than the thing under test.\n    protocolVersion: WORLD_PROTOCOL_VERSION,\n    worldId: WORLD_ID,\n    playerId: PLAYER_ID,\n    sessionId: SESSION_ID,\n    gameId,\n    token: TOKEN,\n    capabilities: CAPABILITIES,\n    limits: { maxInputsPerAction: 64, maxFramesPerAction: 1_800, stallTimeoutMs: 5_000 },\n  };\n}\n\nfunction actRan(current: ReturnType<typeof observation>, detail?: Record<string, unknown>) {\n  return {\n    ok: true,\n    sessionId: SESSION_ID,\n    bodyGeneration: current.bodyGeneration,\n    frame: current.frame,\n    replayed: false,\n    outcome: {\n      kind: \"ran\",\n      inputsSpent: typeof detail?.[\"presses\"] === \"number\" ? detail[\"presses\"] : 1,\n      framesSpent: 10,\n      screenChanged: true,\n      observation: current,\n      ...(detail === undefined ? {} : { detail }),\n    },\n  };\n}\n\nfunction actRejected(refusal: Record<string, unknown>, frameNumber: number, bodyGeneration = 1) {\n  return {\n    ok: true,\n    sessionId: SESSION_ID,\n    bodyGeneration,\n    frame: frameNumber,\n    replayed: false,\n    outcome: { kind: \"rejected\", refusal },\n  };\n}\n\nfunction frame(options: { frame: number; data: string; bodyGeneration?: number }) {\n# ADR 0145: The world is the only body\n\nStatus: accepted (James, 2026-08-30). Supersedes the local-body half of\n[ADR 0129](0129-each-player-owns-a-body.md) and retires\n[ADR 0039](0039-gba-emulator-embodiment-and-deterministic-core-boundary.md),\n[ADR 0040](0040-real-mgba-core-behind-the-emulator-seam.md), and\n[ADR 0075](0075-rewinding-is-a-play-choice.md). The identity boundary ADR 0129\ndrew \u2014 no process possesses Clankie \u2014 stands unchanged; what changes is that\nonly one body remains to draw it around.\n\n## Context\n\nClankie has carried two Pok\u00e9mon bodies. The local one booted an mGBA core in\nthe service process; the hosted one is his separately credentialed seat in a\nPokeAgents world. ADR 0129 kept both deliberately, because the hosted world\nwas young and a solo playthrough needed to work with nothing else running.\n\nThat reason has expired. PokeAgents now hosts real GBA cores server-side,\nships three derived front doors \u2014 MCP, CLI, and a harness skill, all generated\nfrom `WORLD_OPERATIONS` \u2014 and runs a local world over a unix socket with one\ncommand. `WORLD_PERSIST_PROGRESS=1` pairs the authenticated cartridge save with\nmGBA's exact volatile state, which is what the local checkpoint store was for.\n\nThe evidence says he agreed first. Every play journal carrying body provenance\n\u2014 all eleven, 2026-08-17 through 2026-08-19 \u2014 records `body: \"world\"`. There is\nno journal of a local session in the provenance era. The local checkpoint store\nlast wrote on 2026-08-15, and the service log holds no `embodiment boot refused`\nor `environment_unavailable` line, so the local body was not failing over. It\nwas simply never chosen.\n\nTwo bodies were not free. `@clankie/gba-emulator` was half emulator and half\nplay mind, so the hosted path imported a package named after the thing it does\nnot use. Every play decision carried a venue that always resolved one way. The\ncaptain offered `pokeagent_start_solo` and `pokeagent_join_mmo` as a choice\nClankie never had a reason to make, and the prompt told him about save states\nthat the world does not give him and a console that \"waits for you\" \u2014 which a\nhosted world does not do.\n\n## Decision\n\n**Clankie plays in a hosted PokeAgents world, and nowhere else.**\n\n- The local emulator is gone: `integrations/gba-emulator` loses its core\n  (mGBA, FireRed RAM maps, adapter, driver, scenarios, checkpoints, boot) and\n  becomes `packages/play` \u2014 the mind, journal, voice, story, and journey that\n  never depended on where the body was.\n- `apps/gba-mcp` is gone. It offered coding harnesses a private emulator over\n  MCP, which is what `@pokeagents/world-mcp` does properly, with real player\n  identity and a real world behind it. PokeAgents ADR 0001 is right that no\n  harness should get a private entrance, and that includes ours.\n- `GbaDriverIo` survives as `packages/play/src/body-seam.ts`: one interface the\n  world's seat implements, with no transport and no core behind it.\n- The embodiment venue is gone from the live path. `EmbodimentVenueSchema`\n  stays as the journal's record of which body ran, because journals on disk\n  carry both values and must keep parsing.\n- The captain has one play tool, `pokeagent_join_mmo`, gated by one owner\n  setting, `pokeagentMmoEnabled`.\n- Saving is the world's, through its own catalog and cartridge save. The loop\n  holds no save, load, or restart action, and the prompt no longer offers them.\n\n```mermaid\nflowchart LR\n  subgraph Clankie[Clankie]\n    Captain[captain + play host]\n    Mind[\"@clankie/play<br/>mind \u00b7 journal \u00b7 voice \u00b7 story\"]\n    Seam[GbaDriverIo]\n    Voice[\"@clankie/play-voice\"]\n    Discord[active Discord body]\n\n    Captain --> Mind --> Seam\n    Captain <--> Voice <--> Discord\n  end\n\n  subgraph World[PokeAgents hosted world]\n    Seat[his credentialed seat]\n    Host[world-server session<br/>core \u00b7 ROM \u00b7 cartridge save]\n    Seat --> Host\n  end\n\n  subgraph Others[Every other harness]\n    Any[\"Claude Code \u00b7 Codex \u00b7 pi\"]\n    Doors[\"@pokeagents/world-mcp<br/>world-cli \u00b7 pokeagent-mmo skill\"]\n    Any --> Doors --> OtherSeat[its own seat] --> Host\n  end\n\n\n RUN  v4.1.10 /Users/james/.clankie-case-a/wt-astra\n\n \u276f apps/clankie/test/world-body.test.ts (31 tests | 1 failed | 30 skipped) 17ms\n     \u00d7 does not reuse action keys when the world replays an existing join 16ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  apps/clankie/test/world-body.test.ts > hosted world body > does not reuse action keys when the world replays an existing join\nAssertionError: expected 1 to be 2 // Object.is equality\n\n- Expected\n+ Received\n\n- 2\n+ 1\n\n \u276f apps/clankie/test/world-body.test.ts:586:32\n    584|       .map((request) => (request.input as { idempotencyKey: string }).\u2026\n    585|     expect(keys).toHaveLength(2);\n    586|     expect(new Set(keys).size).toBe(2);\n       |                                ^\n    587|     await first.body.close();\n    588|     await second.body.close();\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 30 skipped (31)\n   Start at  20:07:09\n   Duration  298ms (transform 140ms, setup 0ms, import 240ms, tests 17ms, environment 0ms)\n\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000032",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:12.103Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000033",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:16.566Z",
+      "type": "activity",
+      "phase": "responding"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000034",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:17.283Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000035",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:20.430Z",
+      "type": "message",
+      "role": "captain",
+      "text": "The adapter restarts its action counter when recreated, producing keys like `clankie-action-1` again. That lets the world return an earlier action\u2019s cached success instead of executing the new action. The existing reconnect test fails on exactly this collision.\n\nThe checkout already contains a change removing the unique per-body key prefix. I\u2019ll restore that isolation and strengthen the tests to check actual simulated state advancement and lost-response retries.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000036",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:20.430Z",
+      "type": "context",
+      "usage": {
+        "tokens": 74618,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000037",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:20.430Z",
+      "type": "tool",
+      "toolCallId": "call_FjrKazNv30LjH18Tt5ynuHPc|fc_0f0a7ee339ecb88c016a9b6b453bd887d284ff1dbd29a54b45",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"sed -n '295,365p' apps/clankie/node_modules/@pokeagents/world-protocol/src/ipc.ts; sed -n '480,548p' apps/clankie/node_modules/@pokeagents/world-protocol/src/ipc.test.ts; rg -n 'retry|idempot' apps/clankie/node_modules/@pokeagents/world-protocol/README.md; cat .gitignore | tail -30; ls docs | head -35\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000038",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:20.449Z",
+      "type": "tool",
+      "toolCallId": "call_FjrKazNv30LjH18Tt5ynuHPc|fc_0f0a7ee339ecb88c016a9b6b453bd887d284ff1dbd29a54b45",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "  }\n\n  public get grantedOperations(): readonly WorldOperation[] {\n    return operationsFor(this.#capabilitiesValue);\n  }\n\n  public get grantedOperationNames(): readonly WorldOperationName[] {\n    return this.grantedOperations.map((operation) => operation.name);\n  }\n\n  public async call<Name extends WorldOperationName>(\n    name: Name,\n    input: WorldOperationInput<Name>,\n  ): Promise<WorldOperationResult<Name>> {\n    const operation = findOperation(name);\n    if (name === \"world.join\" && (this.#credential === undefined || this.#credential.length === 0)) {\n      throw new WorldPlayerConfigError(\"missing_credentials\", \"WORLD_CREDENTIAL is not set\");\n    }\n    if (\n      name === \"world.join\" &&\n      (typeof input !== \"object\" ||\n        input === null ||\n        !(\"protocolVersion\" in input) ||\n        input.protocolVersion !== WORLD_PROTOCOL_VERSION)\n    ) {\n      throw new WorldPlayerConfigError(\n        \"protocol_mismatch\",\n        `This client requires world protocol version ${String(WORLD_PROTOCOL_VERSION)}.`,\n      );\n    }\n    const parsedInput = operation.input.parse(input) as WorldOperationInput<Name>;\n    if (name !== \"world.join\" && this.#restoreProblem !== undefined) {\n      const kind = this.#restoreProblem.reason === \"legacy\" ? \"legacy token-only\" : \"corrupt\";\n      const refusal = outputOrRefusal(operation).parse({\n        ok: false,\n        code: \"unauthenticated\",\n        message: `Saved session state is ${kind}; run world join to rejoin.`,\n      }) as WorldOperationResult<Name>;\n      await this.#clearSession();\n      return refusal;\n    }\n    const request = {\n      operation: name,\n      input: parsedInput,\n      ...(name === \"world.join\"\n        ? this.#credential === undefined\n          ? {}\n          : { credential: this.#credential }\n        : this.#token === undefined\n          ? {}\n          : { token: this.#token }),\n    } as HostRequest;\n    let raw: unknown;\n    try {\n      raw = await this.#transport(this.address, request);\n    } catch (error) {\n      if (!operation.idempotent) throw transportError(error);\n      try {\n        raw = await this.#transport(this.address, request);\n      } catch (retryError) {\n        throw transportError(retryError);\n      }\n    }\n    if (\n      name === \"world.join\" &&\n      typeof raw === \"object\" &&\n      raw !== null &&\n      \"ok\" in raw &&\n      raw.ok === true &&\n      (!(\"protocolVersion\" in raw) || raw.protocolVersion !== WORLD_PROTOCOL_VERSION)\n    ) {\n    });\n    const client = new WorldPlayerClient({\n      target: \"/tmp/world.sock\",\n      credential: ASH_CREDENTIAL,\n      transport: refusalTransport,\n    });\n    await expect(client.call(\"world.join\", JOIN_INPUT)).resolves.toMatchObject({\n      ok: false,\n      code: \"protocol_version_mismatch\",\n    });\n    await expect(client.join(JOIN_INPUT)).rejects.toBeInstanceOf(WorldPlayerRefusalError);\n    expect(client.joined).toBe(false);\n  });\n\n  it(\"rejects a success from another protocol\", async () => {\n    const client = new WorldPlayerClient({\n      target: \"/tmp/world.sock\",\n      credential: ASH_CREDENTIAL,\n      transport: async () => ({\n        ok: true,\n        protocolVersion: WORLD_PROTOCOL_VERSION + 1,\n        worldId: \"kanto\",\n        playerId: \"player-ash\",\n        sessionId: \"session-ash\",\n        gameId: \"firered\",\n        token: \"session-token-ash-that-is-long-enough-to-be-valid\",\n        capabilities: [\"world.observe\"],\n        limits: { maxInputsPerAction: 16, maxFramesPerAction: 3_840, stallTimeoutMs: 30_000 },\n      }),\n    });\n    await expect(client.call(\"world.join\", JOIN_INPUT)).rejects.toMatchObject({\n      kind: \"protocol_mismatch\",\n    });\n    expect(client.joined).toBe(false);\n  });\n\n  it(\"retries one lost response for an idempotent action\", async () => {\n    let attempts = 0;\n    const client = new WorldPlayerClient({\n      target: \"/tmp/world.sock\",\n      transport: async () => {\n        attempts += 1;\n        if (attempts === 1) throw new Error(\"response lost\");\n        return {\n          ok: true,\n          sessionId: \"session-ash\",\n          bodyGeneration: 1,\n          frame: 12,\n          replayed: true,\n          outcome: { kind: \"rejected\", refusal: { reason: \"semantic_state_unavailable\" } },\n        };\n      },\n      sessionPersistence: { load: () => persistedAsh() },\n    });\n\n    await expect(\n      client.act({\n        action: { kind: \"button_press\", button: \"a\", holdFrames: 4 },\n        idempotencyKey: \"retry-action\",\n      }),\n    ).resolves.toMatchObject({ ok: true, replayed: true });\n    expect(attempts).toBe(2);\n  });\n\n  it(\"does not retry a non-idempotent operation\", async () => {\n    let attempts = 0;\n    const client = new WorldPlayerClient({\n      target: \"/tmp/world.sock\",\n      transport: async () => {\n79:client retries once only when the catalog marks the operation idempotent. Reads,\n81:`idempotencyKey` qualify; leave, travel, challenge, and challenge answers do not.\n83:failure. There is no backoff or open-ended retry loop.\n!/artifacts/evals/\n# Redaction doctrine: transcript- and log-bearing eval evidence stays untracked.\n/artifacts/evals/herdr-harness/\n/artifacts/evals/real-workers/\n/artifacts/evals/m1-exit-gate/\n/artifacts/evals/self-build/*\n# Bulk per-repetition evidence stays local; committed scorecards carry the gate.\n/artifacts/evals/experiment/**/repetitions/\n.env\n.env.local\n*.log\n!docs/testing/**/evidence/*.log\n.DS_Store\n*.xcworkspace/xcuserdata/\n*.xcodeproj/xcuserdata/\nios/Pods/\nmacos/Pods/\n.pnpm-store/\n.codebase-index/\nbuild/\n.gradle/\n.next/\n.output/\nDerivedData/\n*.xcuserstate\n.env.*\n\n# eve framework generated runtime and discovery artifacts\n**/.eve/\n**/.workflow-data/\nadr\narchitecture.md\ncli.md\ncredentials.md\ndiagrams\ndiscord-media.md\ndistribution.md\nmemory.md\npublic-gateway-launch.md\ntesting\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000039",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:22.862Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000040",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:27.467Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000041",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:55.193Z",
+      "type": "context",
+      "usage": {
+        "tokens": 77083,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000042",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:55.193Z",
+      "type": "tool",
+      "toolCallId": "call_TnktGGFg59dhfXgXQYyGh44m|fc_0f0a7ee339ecb88c016a9b6b4f6a5487d2b143e7323b68b8a1",
+      "name": "edit",
+      "phase": "started",
+      "detail": "{\n  \"path\": \"/Users/james/.clankie-case-a/wt-astra/apps/clankie/test/world-body.test.ts\",\n  \"edits\": [\n    {\n      \"oldText\": \"  it(\\\"polls latest frames at the hardware tick and rejects stale generations\\\", async () => {\",\n      \"newText\": \"  it.each([1, 2])(\\n    \\\"executes fresh actions after rejoin at generation %i, but replays a lost response only once\\\",\\n    async (generation) => {\\n      let current = observation({ frame: 10, x: 13 });\\n      const receipts = new Map<string, ReturnType<typeof actRan>>();\\n      let executions = 0;\\n      let loseResponse = true;\\n      const world = await fakeWorld(async (request) => {\\n        switch (request.operation) {\\n          case \\\"world.join\\\":\\n            return joinResult();\\n          case \\\"play.observe\\\":\\n            return current;\\n          case \\\"play.act\\\": {\\n            const { idempotencyKey } = request.input as { idempotencyKey: string };\\n            const previous = receipts.get(idempotencyKey);\\n            if (previous !== undefined) return { ...previous, replayed: true };\\n            executions += 1;\\n            current = observation({ bodyGeneration: current.bodyGeneration, frame: current.frame + 10, x: 13 + executions });\\n            const receipt = actRan(current);\\n            receipts.set(idempotencyKey, receipt);\\n            // The world applied the input, but the socket dies before its reply.\\n            if (loseResponse) {\\n              loseResponse = false;\\n              throw new Error(\\\"response lost after execution\\\");\\n            }\\n            return receipt;\\n          }\\n          case \\\"play.frame\\\":\\n            return frame({ bodyGeneration: current.bodyGeneration, frame: current.frame, data: `screen-${String(executions)}` });\\n          case \\\"world.leave\\\":\\n            return { ok: true, sessionId: SESSION_ID, endedAt: NOW };\\n          default:\\n            throw new Error(`unexpected operation ${request.operation}`);\\n        }\\n      });\\n      const env = await provisionedEnv(world.stateDir);\\n      const first = await joinWorld({ environmentId: \\\"pokemon-firered\\\", env });\\n      if (first.outcome !== \\\"joined\\\") throw new Error(\\\"expected first join\\\");\\n      cleanups.push(first.body.close);\\n      const action = { kind: \\\"button_press\\\", button: \\\"right\\\", holdFrames: 4 } as const;\\n      await expect(first.body.io.act(action)).resolves.toMatchObject({ status: \\\"completed\\\", outcome: { replayed: true } });\\n      expect(executions).toBe(1);\\n      await expect(first.body.io.act(action)).resolves.toMatchObject({ status: \\\"completed\\\", outcome: { replayed: false } });\\n\\n      // The host retains the session and deduplication receipts while the\\n      // adapter is replaced, with or without a body-generation change.\\n      current = observation({ bodyGeneration: generation, frame: 30, x: 15 });\\n      const second = await joinWorld({ environmentId: \\\"pokemon-firered\\\", env });\\n      if (second.outcome !== \\\"joined\\\") throw new Error(\\\"expected rejoin\\\");\\n      cleanups.push(second.body.close);\\n      expect(second.body.sessionSnapshot()).toEqual(first.body.sessionSnapshot());\\n      for (const x of [16, 17]) {\\n        await expect(second.body.io.act(action)).resolves.toMatchObject({ status: \\\"completed\\\", outcome: { replayed: false, bodyGeneration: generation } });\\n        expect(second.body.io.observe(\\\"overworld\\\")).toMatchObject({ data: { position: { x } } });\\n      }\\n      expect(executions).toBe(4);\\n      const keys = world.requests\\n        .filter((request) => request.operation === \\\"play.act\\\")\\n        .map((request) => (request.input as { idempotencyKey: string }).idempotencyKey);\\n      expect(keys).toHaveLength(5);\\n      expect(keys[0]).toBe(keys[1]);\\n      expect(new Set(keys).size).toBe(4);\\n      await first.body.close();\\n      await second.body.close();\\n    },\\n  );\\n\\n  it(\\\"polls latest frames at the hardware tick and rejects stale generations\\\", async () => {\"\n    }\n  ]\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000043",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:55.200Z",
+      "type": "tool",
+      "toolCallId": "call_TnktGGFg59dhfXgXQYyGh44m|fc_0f0a7ee339ecb88c016a9b6b4f6a5487d2b143e7323b68b8a1",
+      "name": "edit",
+      "phase": "completed",
+      "detail": "Successfully replaced 1 block(s) in /Users/james/.clankie-case-a/wt-astra/apps/clankie/test/world-body.test.ts."
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000044",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:07:57.155Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000045",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:01.018Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000046",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:01.321Z",
+      "type": "context",
+      "usage": {
+        "tokens": 77241,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000047",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:01.322Z",
+      "type": "tool",
+      "toolCallId": "call_G5d964rScLZGjBA0mqxW1huH|fc_0f0a7ee339ecb88c016a9b6b70f62487d2b477cdce8c3c4998",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"TMPDIR=\\\"$PWD/.tmp\\\" pnpm exec vitest run apps/clankie/test/world-body.test.ts -t 'executes fresh actions' > .tmp/regression-red.log 2>&1; cat .tmp/regression-red.log\",\n  \"timeout\": 120\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000048",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:02.417Z",
+      "type": "tool",
+      "toolCallId": "call_G5d964rScLZGjBA0mqxW1huH|fc_0f0a7ee339ecb88c016a9b6b70f62487d2b477cdce8c3c4998",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "\n RUN  v4.1.10 /Users/james/.clankie-case-a/wt-astra\n\n \u276f apps/clankie/test/world-body.test.ts (33 tests | 2 failed | 31 skipped) 42ms\n     \u00d7 executes fresh actions after rejoin at generation 1, but replays a lost response only once 24ms\n     \u00d7 executes fresh actions after rejoin at generation 2, but replays a lost response only once 16ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  apps/clankie/test/world-body.test.ts > hosted world body > executes fresh actions after rejoin at generation 1, but replays a lost response only once\nAssertionError: expected { schemaVersion: 1, \u2026(6) } to match object { status: 'completed', \u2026(1) }\n(9 matching properties omitted from actual)\n\n- Expected\n+ Received\n\n  {\n    \"outcome\": {\n      \"bodyGeneration\": 1,\n-     \"replayed\": false,\n+     \"replayed\": true,\n    },\n    \"status\": \"completed\",\n  }\n\n \u276f apps/clankie/test/world-body.test.ts:644:49\n    642|       expect(second.body.sessionSnapshot()).toEqual(first.body.session\u2026\n    643|       for (const x of [16, 17]) {\n    644|         await expect(second.body.io.act(action)).resolves.toMatchObjec\u2026\n       |                                                 ^\n    645|         expect(second.body.io.observe(\"overworld\")).toMatchObject({ da\u2026\n    646|       }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/4]\u23af\n\n FAIL  apps/clankie/test/world-body.test.ts > hosted world body > executes fresh actions after rejoin at generation 1, but replays a lost response only once\n FAIL  apps/clankie/test/world-body.test.ts > hosted world body > executes fresh actions after rejoin at generation 2, but replays a lost response only once\nWorldPlayerConfigError: The configured world is unreachable.\n \u276f transportError node_modules/.pnpm/@pokeagents+world-protocol@0.3.1/node_modules/@pokeagents/world-protocol/src/ipc.ts:241:10\n    239| function transportError(error: unknown): WorldPlayerConfigError | Worl\u2026\n    240|   if (error instanceof WorldPlayerConfigError || error instanceof Worl\u2026\n    241|   return new WorldPlayerConfigError(\"unreachable_address\", \"The config\u2026\n       |          ^\n    242| }\n    243|\n \u276f WorldPlayerClient.call node_modules/.pnpm/@pokeagents+world-protocol@0.3.1/node_modules/@pokeagents/world-protocol/src/ipc.ts:351:40\n \u276f apps/clankie/src/world/body.ts:567:23\n \u276f apps/clankie/test/world-body.test.ts:42:3\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/4]\u23af\n\n FAIL  apps/clankie/test/world-body.test.ts > hosted world body > executes fresh actions after rejoin at generation 2, but replays a lost response only once\nAssertionError: expected { schemaVersion: 1, \u2026(6) } to match object { status: 'completed', \u2026(1) }\n(9 matching properties omitted from actual)\n\n- Expected\n+ Received\n\n  {\n    \"outcome\": {\n-     \"bodyGeneration\": 2,\n-     \"replayed\": false,\n+     \"bodyGeneration\": 1,\n+     \"replayed\": true,\n    },\n    \"status\": \"completed\",\n  }\n\n \u276f apps/clankie/test/world-body.test.ts:644:49\n    642|       expect(second.body.sessionSnapshot()).toEqual(first.body.session\u2026\n    643|       for (const x of [16, 17]) {\n    644|         await expect(second.body.io.act(action)).resolves.toMatchObjec\u2026\n       |                                                 ^\n    645|         expect(second.body.io.observe(\"overworld\")).toMatchObject({ da\u2026\n    646|       }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/4]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  2 failed | 31 skipped (33)\n   Start at  20:08:02\n   Duration  337ms (transform 146ms, setup 0ms, import 252ms, tests 42ms, environment 0ms)\n\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000049",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:04.555Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000050",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:10.417Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000051",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:14.047Z",
+      "type": "context",
+      "usage": {
+        "tokens": 78739,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000052",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:14.048Z",
+      "type": "tool",
+      "toolCallId": "call_dxfb63CdBsd86fU085IBcufl|fc_0f0a7ee339ecb88c016a9b6b7a5c2487d29c3446151c42f005",
+      "name": "edit",
+      "phase": "started",
+      "detail": "{\n  \"path\": \"/Users/james/.clankie-case-a/wt-astra/apps/clankie/src/world/body.ts\",\n  \"edits\": [\n    {\n      \"oldText\": \"import { createHash } from \\\"node:crypto\\\";\",\n      \"newText\": \"import { createHash, randomUUID } from \\\"node:crypto\\\";\"\n    },\n    {\n      \"oldText\": \"  private actionSequence = 0;\\n  private bodyGeneration: number;\",\n      \"newText\": \"  private actionSequence = 0;\\n  // A rejoin can retain the world's session and cached action receipts while\\n  // this adapter's counter restarts. Namespace new intentions per adapter;\\n  // WorldPlayerClient retains the same key when retrying a lost response.\\n  private readonly actionKeyPrefix = `clankie-action-${randomUUID()}`;\\n  private bodyGeneration: number;\"\n    },\n    {\n      \"oldText\": \"idempotencyKey: `clankie-action-${String(this.actionSequence)}`,\",\n      \"newText\": \"idempotencyKey: `${this.actionKeyPrefix}-${String(this.actionSequence)}`,\"\n    }\n  ]\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000053",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:14.055Z",
+      "type": "tool",
+      "toolCallId": "call_dxfb63CdBsd86fU085IBcufl|fc_0f0a7ee339ecb88c016a9b6b7a5c2487d29c3446151c42f005",
+      "name": "edit",
+      "phase": "completed",
+      "detail": "Successfully replaced 3 block(s) in /Users/james/.clankie-case-a/wt-astra/apps/clankie/src/world/body.ts."
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000054",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:17.415Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000055",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:22.336Z",
+      "type": "context",
+      "usage": {
+        "tokens": 78951,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000056",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:22.336Z",
+      "type": "tool",
+      "toolCallId": "call_duZ5gZzOdXjhb5F972zUmrY8|fc_0f0a7ee339ecb88c016a9b6b813ff487d2a0ccabd5ab48df18",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"python3 - <<'PY'\\np='apps/clankie/test/world-body.test.ts'\\ns=open(p).read().replace('      cleanups.push(first.body.close);\\\\n','').replace('      cleanups.push(second.body.close);\\\\n','')\\nopen(p,'w').write(s)\\nPY\\npnpm exec oxfmt --write apps/clankie/src/world/body.ts apps/clankie/test/world-body.test.ts\\nTMPDIR=\\\"$PWD/.tmp\\\" pnpm exec vitest run apps/clankie/test/world-body.test.ts apps/clankie/test/world-parity.test.ts apps/clankie/test/play-world.test.ts > .tmp/green.log 2>&1; cat .tmp/green.log\",\n  \"timeout\": 120\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000057",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:25.694Z",
+      "type": "tool",
+      "toolCallId": "call_duZ5gZzOdXjhb5F972zUmrY8|fc_0f0a7ee339ecb88c016a9b6b813ff487d2a0ccabd5ab48df18",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "Finished in 20ms on 2 files using 18 threads.\n\n RUN  v4.1.10 /Users/james/.clankie-case-a/wt-astra\n\n\n Test Files  3 passed (3)\n      Tests  46 passed (46)\n   Start at  20:08:23\n   Duration  1.82s (transform 408ms, setup 0ms, import 884ms, tests 808ms, environment 0ms)\n\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000058",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:27.747Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000059",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:28.665Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000060",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:30.865Z",
+      "type": "context",
+      "usage": {
+        "tokens": 79163,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000061",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:30.866Z",
+      "type": "tool",
+      "toolCallId": "call_gVLzBp8KitT03sy44i7eZcWc|fc_0f0a7ee339ecb88c016a9b6b8c98c487d2b2fd0402d202aef8",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"rg -n 'hosted|WorldPlayer|world/body' docs/architecture.md | head -20; TMPDIR=\\\"$PWD/.tmp\\\" pnpm check > .tmp/check.log 2>&1; result=$?; tail -65 .tmp/check.log; exit \\\"$result\\\"\",\n  \"timeout\": 120\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000062",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:32.091Z",
+      "type": "tool",
+      "toolCallId": "call_gVLzBp8KitT03sy44i7eZcWc|fc_0f0a7ee339ecb88c016a9b6b8c98c487d2b2fd0402d202aef8",
+      "name": "bash",
+      "phase": "failed",
+      "detail": "26:  Service --> CaptainParent[\"captain is parent\"] --> PlayDriver[\"@clankie/play is driver\"] --> Contract[\"pinned @pokeagents/world-protocol\"] --> Seat[\"Clankie's hosted seat<br/>separate player identity\"]\n39:The public gateway is a doorway, not a hosted Clankie. It keeps only live host\n268:  credentialed seat in a PokeAgents world, reached through `WorldPlayerClient`\n272:  ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md),\n279:  hosted world cannot be paused, changes without him acting, and can replace\n306:  `WorldPlayerClient`. Every catalog operation is classified body or mind;\n327:  hosted world is a broker credential too \u2014 `pokeagent_mmo_world`, with the\n$ pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test\n$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check\nChecking formatting...\n\napps/docs/site/index.html (54ms)\napps/docs/site/network/index.html (20ms)\n\nFormat issues found in above 2 files. Run without `--check` to fix.\nFinished in 403ms on 798 files using 18 threads.\n[ELIFECYCLE] Command failed with exit code 1.\n[ELIFECYCLE] Command failed with exit code 1.\n\n\nCommand exited with code 1"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000063",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:34.619Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000064",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:39.596Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000065",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:39.825Z",
+      "type": "context",
+      "usage": {
+        "tokens": 79605,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000066",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:39.826Z",
+      "type": "tool",
+      "toolCallId": "call_bLzSFtAupdFIFT3eEnm8ITGZ|fc_0f0a7ee339ecb88c016a9b6b97803887d286e23ec0f92eb161",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"sed -n '262,286p' docs/architecture.md; cat apps/clankie/package.json | head -48; herdr agent --help\",\n  \"timeout\": 10\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000067",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:39.841Z",
+      "type": "tool",
+      "toolCallId": "call_bLzSFtAupdFIFT3eEnm8ITGZ|fc_0f0a7ee339ecb88c016a9b6b97803887d286e23ec0f92eb161",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "  ([ADR 0097](adr/0097-herdr-lead-is-the-companion-dashboard.md)). Agents\n  coordinate through herdr and plain files.\n- **His body.** `runFreePlay` drives one seam, `GbaDriverIo`\n  ([`packages/play`](../packages/play/README.md)); its mind, voice, progress,\n  learned transitions, and behavior loop hold no emulator and never learn what\n  implements the seam. One body implements it: Clankie's separately\n  credentialed seat in a PokeAgents world, reached through `WorldPlayerClient`\n  on `@pokeagents/world-protocol/ipc` (`WORLD_ADDRESS` unix, tcp, or tls \u2014\n  defaulting to the world's own socket under `WORLD_STATE_DIR`) and entered\n  with the `pokeagent_join_mmo` tool\n  ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md),\n  [ADR 0145](adr/0145-the-world-is-the-only-body.md)). The captain is the\n  parent of that sitting; `@clankie/play` is the driver \u2014 the same split other\n  harnesses get from an MCP Task, a subagent, or a CLI loop. That seam consumes\n  verified FireRed adapter-v2 and Emerald adapter-v2 payloads, selected by the\n  observation's `(gameId, adapterVersion)` pair; unknown pairs and\n  game-specific extras the selected schema does not verify fail closed. A\n  hosted world cannot be paused, changes without him acting, and can replace\n  his body under him, so the loop offers no save, load, or restart action \u2014\n  the world persists its own cartridge. `pokeagentMmoEnabled` is the owner\n  setting; with it off, or with no world reachable, the ask refuses out loud\n  rather than falling back. Frames flow to the Discord activity surface.\n  Every sitting carries a stable journey identity separate from its run id, the\n  bounded story spans that journey, and the next sitting receives the last\n  self-authored notes and objective while exact world state stays with the\n{\n  \"name\": \"@clankie/clankie\",\n  \"version\": \"0.2.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"tsx src/index.ts\",\n    \"start\": \"tsx src/index.ts\",\n    \"typecheck\": \"tsc --noEmit -p tsconfig.json\",\n    \"test\": \"vitest run --passWithNoTests\",\n    \"free-play-live\": \"tsx scripts/free-play-live.ts\",\n    \"verify-model\": \"tsx scripts/verify-model-selection.ts\"\n  },\n  \"dependencies\": {\n    \"@clankie/credential-broker\": \"workspace:*\",\n    \"@clankie/discord-presence-core\": \"workspace:*\",\n    \"@clankie/environment-runtime\": \"workspace:*\",\n    \"@clankie/interactive-environment\": \"workspace:*\",\n    \"@clankie/media-connector\": \"workspace:*\",\n    \"@clankie/model-provider\": \"workspace:*\",\n    \"@clankie/model-registry\": \"workspace:*\",\n    \"@clankie/observability\": \"workspace:*\",\n    \"@clankie/play\": \"workspace:*\",\n    \"@clankie/play-voice\": \"workspace:*\",\n    \"@clankie/protocol\": \"workspace:*\",\n    \"@clankie/rendered-surface-client\": \"workspace:*\",\n    \"@clankie/settings\": \"workspace:*\",\n    \"@earendil-works/pi-ai\": \"0.84.2\",\n    \"@earendil-works/pi-coding-agent\": \"0.84.2\",\n    \"@hono/node-server\": \"2.0.8\",\n    \"@modelcontextprotocol/sdk\": \"1.29.0\",\n    \"@pokeagents/world-protocol\": \"0.3.1\",\n    \"hono\": \"4.12.28\",\n    \"imapflow\": \"1.6.6\",\n    \"nodemailer\": \"7.0.11\",\n    \"typebox\": \"1.3.7\",\n    \"ws\": \"8.21.0\",\n    \"zod\": \"4.4.3\"\n  },\n  \"devDependencies\": {\n    \"@types/node\": \"24.12.4\",\n    \"@types/nodemailer\": \"7.0.4\",\n    \"@types/ws\": \"8.18.1\",\n    \"tsx\": \"4.23.0\",\n    \"typescript\": \"5.9.3\",\n    \"vitest\": \"4.1.10\"\n  }\n}\nControl and inspect agent panes\n\nUsage: herdr agent [COMMAND]\n\nCommands:\n  list       List agents\n  get        Show an agent\n  read       Read agent terminal output\n  send-keys  Send key presses to an agent\n  prompt     Submit a prompt to an agent\n  rename     Rename an agent\n  focus      Focus an agent\n  wait       Wait until an agent reaches one of the requested states\n  attach     Attach directly to an agent terminal\n  start      Start a supported interactive agent in an existing pane\n  explain    Explain agent detection state\n\nAre you an AI? Use these resources ONLY IF your task specifically asks you to:\n  Help a human understand or set up Herdr for the first time:\n    https://herdr.dev/agent-guide.md\n  Debug or investigate a problem with Herdr:\n    https://herdr.dev/llms.txt\n  Control Herdr panes, agents, or workspaces:\n    SKIP if a Herdr skill is already in your context. Otherwise run: herdr --skill\n\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000068",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:42.272Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000069",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:45.737Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000070",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:48.483Z",
+      "type": "context",
+      "usage": {
+        "tokens": 81012,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000071",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:48.484Z",
+      "type": "tool",
+      "toolCallId": "call_c0GyMZHEgkEddBmLUHdvp7uH|fc_0f0a7ee339ecb88c016a9b6b9daf3887d2a31fb2e66a62a6c5",
+      "name": "edit",
+      "phase": "started",
+      "detail": "{\n  \"path\": \"/Users/james/.clankie-case-a/wt-astra/docs/architecture.md\",\n  \"edits\": [\n    {\n      \"oldText\": \"  rather than falling back. Frames flow to the Discord activity surface.\\n  Every sitting carries\",\n      \"newText\": \"  rather than falling back. Frames flow to the Discord activity surface.\\n  Action idempotency keys combine a random per-adapter UUID with a monotonic\\n  counter: a recreated adapter can rejoin the same world session without\\n  colliding with its cached receipts. Session id or body generation alone is\\n  not a fresh-action namespace. Transport retries keep the original key via\\n  `WorldPlayerClient`, so a lost reply does not execute the same input twice.\\n  Every sitting carries\"\n    }\n  ]\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000072",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:48.487Z",
+      "type": "tool",
+      "toolCallId": "call_c0GyMZHEgkEddBmLUHdvp7uH|fc_0f0a7ee339ecb88c016a9b6b9daf3887d2a31fb2e66a62a6c5",
+      "name": "edit",
+      "phase": "completed",
+      "detail": "Successfully replaced 1 block(s) in /Users/james/.clankie-case-a/wt-astra/docs/architecture.md."
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000073",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:51.011Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000074",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:54.639Z",
+      "type": "context",
+      "usage": {
+        "tokens": 81175,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000075",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:08:54.639Z",
+      "type": "tool",
+      "toolCallId": "call_mGtb6QEwN2SGDgxNKqha14FL|fc_0f0a7ee339ecb88c016a9b6ba2f66c87d2877b058d2f19a20b",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"pnpm exec oxfmt --check apps/clankie/src/world/body.ts apps/clankie/test/world-body.test.ts docs/architecture.md; pnpm exec oxlint --deny-warnings apps/clankie/src/world/body.ts apps/clankie/test/world-body.test.ts; TMPDIR=\\\"$PWD/.tmp\\\" pnpm --filter @clankie/clankie typecheck > .tmp/typecheck.log 2>&1; result=$?; tail -35 .tmp/typecheck.log; exit \\\"$result\\\"\",\n  \"timeout\": 120\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000076",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:00.320Z",
+      "type": "tool",
+      "toolCallId": "call_mGtb6QEwN2SGDgxNKqha14FL|fc_0f0a7ee339ecb88c016a9b6ba2f66c87d2877b058d2f19a20b",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "Checking formatting...\n\nAll matched files use the correct format.\nFinished in 103ms on 3 files using 18 threads.\n$ tsc --noEmit -p tsconfig.json\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000077",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:02.849Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000078",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:08.326Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000079",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:08.599Z",
+      "type": "context",
+      "usage": {
+        "tokens": 81352,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000080",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:08.600Z",
+      "type": "tool",
+      "toolCallId": "call_Lvd5tqR683Pnxm8qR2dOHanB|fc_0f0a7ee339ecb88c016a9b6bb4414487d2aa1ef9948cbddfed",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr tab --help; herdr agent start --help\",\n  \"timeout\": 10\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000081",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:08.625Z",
+      "type": "tool",
+      "toolCallId": "call_Lvd5tqR683Pnxm8qR2dOHanB|fc_0f0a7ee339ecb88c016a9b6bb4414487d2aa1ef9948cbddfed",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "Manage tabs over the socket API\n\nUsage: herdr tab [COMMAND]\n\nCommands:\n  list    List tabs\n  create  Create a tab\n  get     Show a tab\n  focus   Focus a tab\n  rename  Rename a tab\n  close   Close a tab\n\nAre you an AI? Use these resources ONLY IF your task specifically asks you to:\n  Help a human understand or set up Herdr for the first time:\n    https://herdr.dev/agent-guide.md\n  Debug or investigate a problem with Herdr:\n    https://herdr.dev/llms.txt\n  Control Herdr panes, agents, or workspaces:\n    SKIP if a Herdr skill is already in your context. Otherwise run: herdr --skill\n\nStart a supported interactive agent in an existing pane\n\nUsage: herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]\n\nArguments:\n  <NAME>\n          \n\n  [AGENT_ARG]...\n          \n\nOptions:\n      --kind <KIND>\n          Supported agent kind and canonical executable\n          \n          [possible values: pi, claude, codex, gemini, cursor, devin, agy, cline, omp, mastracode, opencode, copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, qwen, maki, muse]\n\n      --pane <ID>\n          Existing pane at an interactive shell prompt\n\n      --timeout <MS>\n          Wait for interactive readiness (default: 30000; max: 300000)\n\nThe pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.\n\nnext: herdr agent prompt <TARGET> <TEXT> --wait\n\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000082",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:14.838Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000083",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:16.809Z",
+      "type": "activity",
+      "phase": "responding"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000084",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:18.023Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000085",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:18.824Z",
+      "type": "message",
+      "role": "captain",
+      "text": "The fix passes all 46 hosted-body/play tests, including new cases for reconnects with unchanged or replaced body generations. Lost-response retries still execute only once.\n\nService typechecking and changed-file lint/format checks pass. The full `pnpm check` stops at unrelated formatting failures in two docs HTML files. I\u2019m getting an independent review; live-world verification remains outside the checkout-only boundary.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000086",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:18.825Z",
+      "type": "context",
+      "usage": {
+        "tokens": 81876,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000087",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:18.826Z",
+      "type": "tool",
+      "toolCallId": "call_Q9np6LfYatyb2suG0Ikfy9Bg|fc_0f0a7ee339ecb88c016a9b6bbdf77087d2a156e3a45d134b30",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr tab create --help; herdr workspace list\",\n  \"timeout\": 10\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000088",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:18.851Z",
+      "type": "tool",
+      "toolCallId": "call_Q9np6LfYatyb2suG0Ikfy9Bg|fc_0f0a7ee339ecb88c016a9b6bbdf77087d2a156e3a45d134b30",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "Create a tab\n\nUsage: herdr tab create [OPTIONS]\n\nOptions:\n      --workspace <WORKSPACE_ID>\n          \n\n      --cwd <PATH>\n          \n\n      --label <TEXT>\n          \n\n      --env <KEY=VALUE>\n          Set an environment variable for the launched process\n\n      --focus\n          \n\n      --no-focus\n\n{\"id\":\"cli:workspace:list\",\"result\":{\"type\":\"workspace_list\",\"workspaces\":[]}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000089",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:20.675Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000090",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:23.293Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000091",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:23.493Z",
+      "type": "context",
+      "usage": {
+        "tokens": 82035,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000092",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:23.493Z",
+      "type": "tool",
+      "toolCallId": "call_ENXs6gSNefdIFrcL7KfKuKrW|fc_0f0a7ee339ecb88c016a9b6bc3332487d2b922a6a58dc591d3",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr workspace create --help; git diff --stat; git diff --check\",\n  \"timeout\": 10\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000093",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:23.539Z",
+      "type": "tool",
+      "toolCallId": "call_ENXs6gSNefdIFrcL7KfKuKrW|fc_0f0a7ee339ecb88c016a9b6bc3332487d2b922a6a58dc591d3",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "Create a workspace\n\nUsage: herdr workspace create [OPTIONS]\n\nOptions:\n      --cwd <PATH>\n          \n\n      --label <TEXT>\n          \n\n      --env <KEY=VALUE>\n          Set an environment variable for the launched process\n\n      --focus\n          \n\n      --no-focus\n\n apps/clankie/src/world/body.ts       |  3 ++\n apps/clankie/test/world-body.test.ts | 83 ++++++++++++++++++++++++++++++++++++\n docs/architecture.md                 |  5 +++\n 3 files changed, 91 insertions(+)\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000094",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:26.686Z",
+      "type": "activity",
+      "phase": "thinking"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000095",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:29.455Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000096",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:29.646Z",
+      "type": "context",
+      "usage": {
+        "tokens": 82243,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000097",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:29.646Z",
+      "type": "tool",
+      "toolCallId": "call_0HcbcDMbKcY19Uu7IjBax45R|fc_0f0a7ee339ecb88c016a9b6bc9664487d2b1c36f132d184c1f",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr workspace create --cwd \\\"$PWD\\\" --label hosted-action-review --no-focus\",\n  \"timeout\": 10\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000098",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:29.661Z",
+      "type": "tool",
+      "toolCallId": "call_0HcbcDMbKcY19Uu7IjBax45R|fc_0f0a7ee339ecb88c016a9b6bc9664487d2b1c36f132d184c1f",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:workspace:create\",\"result\":{\"root_pane\":{\"agent_status\":\"unknown\",\"cwd\":\"/Users/james/.clankie-case-a/wt-astra\",\"focused\":true,\"foreground_cwd\":\"/Users/james/.clankie-case-a/wt-astra\",\"pane_id\":\"w1:p1\",\"revision\":0,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":40},\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab20975d3f71\",\"workspace_id\":\"w1\"},\"tab\":{\"agent_status\":\"unknown\",\"focused\":true,\"label\":\"1\",\"number\":1,\"pane_count\":1,\"tab_id\":\"w1:t1\",\"workspace_id\":\"w1\"},\"type\":\"workspace_created\",\"workspace\":{\"active_tab_id\":\"w1:t1\",\"agent_status\":\"unknown\",\"focused\":true,\"label\":\"hosted-action-review\",\"number\":1,\"pane_count\":1,\"tab_count\":1,\"workspace_id\":\"w1\"}}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000099",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:31.817Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000100",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:32.796Z",
+      "type": "context",
+      "usage": {
+        "tokens": 82504,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000101",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:32.797Z",
+      "type": "tool",
+      "toolCallId": "call_S7woUC93NpJ3fvdpL6FP4nh7|fc_0f0a7ee339ecb88c016a9b6bcbc49087d2a5e9c453cf54648a",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr agent start hosted-action-review --kind codex --pane w1:p1\",\n  \"timeout\": 45\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000102",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:36.641Z",
+      "type": "tool",
+      "toolCallId": "call_S7woUC93NpJ3fvdpL6FP4nh7|fc_0f0a7ee339ecb88c016a9b6bcbc49087d2a5e9c453cf54648a",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:agent:start\",\"result\":{\"agent\":{\"agent\":\"codex\",\"agent_status\":\"idle\",\"cwd\":\"/Users/james/.clankie-case-a/wt-astra\",\"focused\":true,\"foreground_cwd\":\"/Users/james/.clankie-case-a/wt-astra\",\"interactive_ready\":true,\"name\":\"hosted-action-review\",\"pane_id\":\"w1:p1\",\"revision\":3,\"state_change_seq\":1,\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab20975d3f71\",\"terminal_title\":\"wt-astra\",\"terminal_title_stripped\":\"wt-astra\",\"workspace_id\":\"w1\"},\"argv\":[\"codex\"],\"type\":\"agent_started\"}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000103",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:38.897Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000104",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:48.465Z",
+      "type": "context",
+      "usage": {
+        "tokens": 82987,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000105",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:48.466Z",
+      "type": "tool",
+      "toolCallId": "call_F2ZbY2S56O9PYEiLoggzOJWH|fc_0f0a7ee339ecb88c016a9b6bd2d9a887d2af916e23c6ef0c55",
+      "name": "bash",
+      "phase": "started",
+      "detail": "{\n  \"command\": \"herdr agent prompt w1:p1 'Independent read-only review. Work ONLY inside /Users/james/.clankie-case-a/wt-astra; do not read or change anything outside it, do not commit/push. Do not load skills outside checkout. Review apps/clankie/src/world/body.ts action idempotency against apps/clankie/test/world-body.test.ts new regression cases and docs/architecture.md paragraph. Initial supplied bug was an uncommitted removal of randomUUID/actionKeyPrefix making keys clankie-action-N; fixed by restoring per-adapter UUID prefix plus comment. Thus git diff source shows only comment, inspect actual source. Existing reconnect test failed before fix; new deduplicating socket fake cases failed returning replayed:true for fresh actions after adapter recreation at generations 1 and 2. All 46 tests in world-body, world-parity, play-world now pass. pnpm --filter @clankie/clankie typecheck passed; changed lint/format pass. pnpm check fails existing formatting apps/docs/site/index.html and network/index.html. Check correctness, retry stability, realistic regression coverage; run narrow tests if useful with TMPDIR=$PWD/.tmp to keep temp files inside. No live world or external filesystem reads. Return concrete findings with file/line or no findings and verification limits. Write concise review to .tmp/independent-review.md inside checkout. Do not edit product/tests/docs. Done means actual source and tests reviewed, report written.'\",\n  \"timeout\": 10\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000106",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:48.483Z",
+      "type": "tool",
+      "toolCallId": "call_F2ZbY2S56O9PYEiLoggzOJWH|fc_0f0a7ee339ecb88c016a9b6bd2d9a887d2af916e23c6ef0c55",
+      "name": "bash",
+      "phase": "completed",
+      "detail": "{\"id\":\"cli:agent:prompt\",\"result\":{\"agent\":{\"agent\":\"codex\",\"agent_status\":\"idle\",\"cwd\":\"/Users/james/.clankie-case-a/wt-astra\",\"focused\":true,\"foreground_cwd\":\"/Users/james/.clankie-case-a/wt-astra\",\"interactive_ready\":true,\"name\":\"hosted-action-review\",\"pane_id\":\"w1:p1\",\"revision\":3,\"state_change_seq\":1,\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65ab20975d3f71\",\"terminal_title\":\"wt-astra\",\"terminal_title_stripped\":\"wt-astra\",\"workspace_id\":\"w1\"},\"type\":\"agent_prompted\"}}\n"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000107",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:51.378Z",
+      "type": "activity",
+      "phase": "preparing_tool"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000108",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:53.914Z",
+      "type": "context",
+      "usage": {
+        "tokens": 83233,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000109",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:53.915Z",
+      "type": "tool",
+      "toolCallId": "call_Aty4rPEpP4Up7PENuwZWv0bo|fc_0f0a7ee339ecb88c016a9b6bdf54ac87d297af84227ba9c40d",
+      "name": "herdr_watch",
+      "phase": "started",
+      "detail": "{\n  \"agent\": \"w1:p1\",\n  \"reason\": \"Harvest independent hosted action-idempotency review from .tmp/independent-review.md and pane; verify findings against source. Fix/tests/docs done, 46 targeted tests and service typecheck pass; full check blocked by unrelated docs HTML formatting. Only checkout access authorized, no commit/push. Finish handoff after adjudication.\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000110",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:53.930Z",
+      "type": "tool",
+      "toolCallId": "call_Aty4rPEpP4Up7PENuwZWv0bo|fc_0f0a7ee339ecb88c016a9b6bdf54ac87d297af84227ba9c40d",
+      "name": "herdr_watch",
+      "phase": "completed",
+      "detail": "{\n  \"outcome\": \"watching\",\n  \"watchId\": \"5bb0e82b-bfb2-4067-9f80-d0c3c1fdf66c\",\n  \"target\": \"w1:p1\",\n  \"paneId\": \"w1:p1\",\n  \"terminalId\": \"term_65ab20975d3f71\",\n  \"alreadyWatching\": false,\n  \"createdAt\": \"2026-09-05T01:09:53.928Z\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000111",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:09:58.113Z",
+      "type": "activity",
+      "phase": "responding"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000112",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:10:00.063Z",
+      "type": "message",
+      "role": "captain",
+      "text": "Fixed the reused action keys that caused cached successes after reconnect. All 46 targeted tests and service typechecking pass.\n\nIndependent review is running in `w1:p1`; I\u2019ll harvest it when finished. Full `pnpm check` is blocked by unrelated docs formatting. No commits or pushes.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000113",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:10:00.064Z",
+      "type": "context",
+      "usage": {
+        "tokens": 83419,
+        "contextWindow": 400000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-c57d92d8-91be-4d0a-ada4-abbaab7d93a0",
+      "cursor": "000000000114",
+      "revision": 1,
+      "occurredAt": "2026-09-05T01:10:00.068Z",
+      "type": "turn",
+      "runId": "run-430abfb5-3cd7-453b-a6a9-85c6c81e4546",
+      "phase": "completed"
+    }
+  ]
+}

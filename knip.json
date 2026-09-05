@@ -2,6 +2,9 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignore": ["docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs"],
   "workspaces": {
+    ".": {
+      "entry": ["docs/testing/2026-09-04-astra-terra-comparison/flows/assert-suite.mjs"]
+    },
     "apps/clankie": {
       "entry": ["test/fixtures/browser-mcp-server.mjs"]
     },

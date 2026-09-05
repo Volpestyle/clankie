@@ -1,0 +1,30 @@
+diff --git a/apps/clankie/src/world/body.ts b/apps/clankie/src/world/body.ts
+index 9282317b..e1487afe 100644
+--- a/apps/clankie/src/world/body.ts
++++ b/apps/clankie/src/world/body.ts
+@@ -23,7 +23,7 @@
+  *   takeover). `bodyGeneration` is how that is detected; everything cached
+  *   about the screen is stale when it moves.
+  */
+-import { createHash } from "node:crypto";
++import { createHash, randomUUID } from "node:crypto";
+ import { resolveWorldCredential, WorldCredentialError } from "@clankie/credential-broker";
+ import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
+ import type { GbaDriverIo } from "@clankie/gba-emulator";
+@@ -247,6 +247,7 @@ class HostedWorldBody implements WorldBody {
+   private observation: Observation | undefined;
+   private observationSequence = 0;
+   private actionSequence = 0;
++  private readonly actionKeyPrefix = `clankie-action-${randomUUID()}`;
+   private bodyGeneration: number;
+   private frame: Frame | undefined;
+   private png: Uint8Array | null = null;
+@@ -531,7 +532,7 @@ class HostedWorldBody implements WorldBody {
+       token: this.joined.token,
+       input: {
+         action: worldAction,
+-        idempotencyKey: `clankie-action-${String(this.actionSequence)}`,
++        idempotencyKey: `${this.actionKeyPrefix}-${String(this.actionSequence)}`,
+       },
+     } as const;
+ 

@@ -1,0 +1,30 @@
+diff --git a/apps/clankie/src/world/body.ts b/apps/clankie/src/world/body.ts
+index d512be6d..e7db79a5 100644
+--- a/apps/clankie/src/world/body.ts
++++ b/apps/clankie/src/world/body.ts
+@@ -22,7 +22,7 @@
+  *   takeover). `bodyGeneration` is how that is detected; everything cached
+  *   about the screen is stale when it moves.
+  */
+-import { createHash, randomUUID } from "node:crypto";
++import { createHash } from "node:crypto";
+ import { resolveWorldCredential, WorldCredentialError } from "@clankie/credential-broker";
+ import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
+ import {
+@@ -432,7 +432,6 @@ class HostedWorldBody implements WorldBody {
+   private observation: Observation | undefined;
+   private observationSequence = 0;
+   private actionSequence = 0;
+-  private readonly actionKeyPrefix = `clankie-action-${randomUUID()}`;
+   private bodyGeneration: number;
+   private frame: Frame | undefined;
+   private png: Uint8Array | null = null;
+@@ -806,7 +805,7 @@ class HostedWorldBody implements WorldBody {
+     try {
+       result = await this.client.call("play.act", {
+         action: worldAction,
+-        idempotencyKey: `${this.actionKeyPrefix}-${String(this.actionSequence)}`,
++        idempotencyKey: `clankie-action-${String(this.actionSequence)}`,
+       });
+     } catch (error) {
+       return this.failedAction(actionId, "world_unreachable", boundedError(error), true);

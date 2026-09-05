@@ -1,0 +1,18 @@
+diff --git a/apps/clankie/src/world/body.ts b/apps/clankie/src/world/body.ts
+index d512be6d..7dfde2f7 100644
+--- a/apps/clankie/src/world/body.ts
++++ b/apps/clankie/src/world/body.ts
+@@ -432,6 +432,13 @@ class HostedWorldBody implements WorldBody {
+   private observation: Observation | undefined;
+   private observationSequence = 0;
+   private actionSequence = 0;
++  /**
++   * A joined session can be handed to a new body after a reconnect. Its local
++   * action counter restarts at one, so the counter alone would replay an old
++   * effect from the world's idempotency cache. The per-body nonce preserves
++   * retry identity within this body while making each new intended effect
++   * distinct across handoffs.
++   */
+   private readonly actionKeyPrefix = `clankie-action-${randomUUID()}`;
+   private bodyGeneration: number;
+   private frame: Frame | undefined;

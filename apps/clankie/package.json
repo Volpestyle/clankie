@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "free-play-live": "tsx scripts/free-play-live.ts",
-    "verify-model": "tsx scripts/verify-model-selection.ts"
+    "verify-model": "tsx scripts/verify-model-selection.ts",
+    "comparison-run": "tsx scripts/comparison-run.ts"
   },
   "dependencies": {
     "@clankie/credential-broker": "workspace:*",

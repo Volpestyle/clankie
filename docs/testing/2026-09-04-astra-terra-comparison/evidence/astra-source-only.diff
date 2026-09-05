@@ -1,0 +1,14 @@
+diff --git a/apps/clankie/src/world/body.ts b/apps/clankie/src/world/body.ts
+index d512be6d..53d72930 100644
+--- a/apps/clankie/src/world/body.ts
++++ b/apps/clankie/src/world/body.ts
+@@ -432,6 +432,9 @@ class HostedWorldBody implements WorldBody {
+   private observation: Observation | undefined;
+   private observationSequence = 0;
+   private actionSequence = 0;
++  // A rejoin can retain the world's session and cached action receipts while
++  // this adapter's counter restarts. Namespace new intentions per adapter;
++  // WorldPlayerClient retains the same key when retrying a lost response.
+   private readonly actionKeyPrefix = `clankie-action-${randomUUID()}`;
+   private bodyGeneration: number;
+   private frame: Frame | undefined;
