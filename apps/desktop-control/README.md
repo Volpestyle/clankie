@@ -57,12 +57,17 @@ CoreGraphics window numbers. `diagnose` preserves the AXWindows error/count,
 app exposure attribute results, and the optional AXWindowNumber result beside
 WindowServer IDs. It never guesses a binding from similar titles or geometry. An application role
 returned in window inventory refuses with `invalid_root`; it never becomes an
-implicit application-tree fallback.
+implicit application-tree fallback. Root discovery refuses `incomplete_inventory`
+when AXWindows exceeds 32 or direct application children exceed 64. An omitted
+root cannot count as evidence of menu dismissal.
 
 `observe` binds one of those roots and traverses breadth first. `maxNodes`
-defaults to 400, with a hard limit of 2000; `maxDepth` defaults to 48, maximum 64. Each child read is capped at 250 and the traversal/validation budget is
-five seconds, checked between native calls. Individual native messaging
-timeouts are 150 ms. `incomplete` describes traversal coverage. Returned
+defaults to 400, with a hard limit of 2000; `maxDepth` defaults to 48, maximum 64. Each child read is capped at 250. One five-second monotonic deadline covers
+each operation, including root discovery, observation, validation, and the
+last check immediately before dispatch. Expiry returns `operation_timeout`
+and invalidates the snapshot. Native calls check that shared deadline between
+messages; a single in-flight message can overrun it, but cannot authorize a
+subsequent dispatch. Individual native messaging timeouts remain 150 ms. `incomplete` describes traversal coverage. Returned
 elements retain their actual native ancestry even when other branches are
 omitted; an incomplete result never proves a menu or row is absent.
 
@@ -77,9 +82,38 @@ bytes refuse instead of becoming truncated identity evidence. Native references
 are capped at 10000 per session. Start a new session on a limit; do not silently
 increase limits in a captain turn.
 
+The Python client's twelve-second deadline covers nonblocking writes and reads.
+It validates the response shape for the requested operation. Timeout, EOF,
+malformed JSON, unexpected framing/shape, or output failure permanently closes
+and reaps that transport; every subsequent request refuses before writing.
+`TransportError.action_may_have_dispatched` retains action uncertainty and
+`retry_safe` is false. Closing the process never dismisses a menu. A fresh
+session is only for separately chosen inspection, never automatic action replay.
+
+A well-framed native refusal remains a result for the caller to inspect with
+`success`, `code`, `actionDispatched`, and `retrySafe`; `require_success` raises
+on failure. An indeterminate action receipt can permit deliberate read-only
+inspection in the same healthy session, subject to the foreground latch. It
+never permits a second opening action. Read-proof stability flags and actual
+transport-label coverage must be checked separately from its aggregate read
+`success`; matching partial hashes cannot prove whole-library preservation.
+
 ## Menu actions and the no-focus contract
 
-Start a separately authorized session with `--allow-menu-actions`, or use
+Opening is not an assuredly reversible proof. Establish a discoverable,
+working `AXCancel` path for the matching menu in the relevant background context
+before opening. A not-yet-exposed menu may make that preflight impossible; in
+that case the first opening is a **controlled experiment requiring explicit
+authorization and a separately authorized recovery plan before dispatch**.
+The experiment may strand a menu. Inert tests are not live cancellation evidence.
+
+Even known cancellation can become unavailable after focus changes, transport
+failure, target changes, or incomplete discovery. The recovery plan must account
+for those outcomes. A latched focus violation refuses observation and AXCancel
+too; tearing down the helper does not undo the opening. No automatic Escape,
+popup toggle, focus restoration, or latch bypass exists.
+
+Within that authorization, start a session with `--allow-menu-actions`, or use
 `Desktop(binary, allow_menu_actions=True)`. Its request shape is:
 
 ```json
@@ -120,7 +154,8 @@ focus automatically or retry. Native errors after dispatch are indeterminate.
 
 Successful dispatch reports `effect: unverified`. Observe again and use fresh
 handles to verify a menu appears or disappears. If `AXCancel` is unadvertised,
-or a menu lies outside bounded evidence, report the gap. Do not send Escape,
+or a menu lies outside bounded evidence, report a stranded/indeterminate result
+under the prearranged recovery plan. Do not send Escape,
 choose an entry, synthesize a click, or focus the app as an automatic fallback.
 The helper does not promise Spotify supports background menu dismissal until
 that real interaction is independently demonstrated.
@@ -162,7 +197,9 @@ depth distinct from an inferred root cause.
 
 Swift tests exercise the session boundary with an inert native-driver fixture,
 including permission denial, PID reuse, identity/ancestry drift, stale snapshots,
-action admission, output limits, and focus changes. Python tests exercise the
+action admission, incomplete roots, shared deadlines, and focus changes. Menu
+lifecycle tests preserve unsupported cancellation and focus-latched cleanup
+refusal as acceptance limits. Python tests exercise the
 actual pipe client with temporary synthetic processes. They do not interact
 with user applications. The separate live read command exercises Spotify;
 menu-open/dismiss and Clankie's service shell remain explicit higher proof steps.

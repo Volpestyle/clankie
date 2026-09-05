@@ -33,7 +33,15 @@ not traversal. `diagnose` retains AXWindows errors, candidate count, optional
 window-number results, app exposure, and foreground identities. It does not
 enable accessibility, focus the app, or prompt for permissions.
 
-For an authorized menu task, start the session with `--allow-menu-actions`
+Before opening, establish that a matching menu has a discoverable, working
+`AXCancel` path in the relevant background context. If that cannot be
+preflighted, opening is a controlled experiment requiring explicit authorization
+and a separately authorized recovery plan; it is not assured reversible proof.
+A focus violation, transport failure, or incomplete discovery can strand even
+a cancel-capable menu. Closing the helper does not dismiss it. Do not invent
+Escape, a popup toggle, focus restoration, or a latch bypass as recovery.
+
+Within that authorization, start the session with `--allow-menu-actions`
 (`Desktop(binary, allow_menu_actions=True)`). Select exactly one fresh row or
 More options popup by its observed semantics, then send `menu` with the current
 snapshot, element ID, and an advertised action. Supported pairs are
@@ -45,14 +53,25 @@ after 30 seconds, or after another observation/inventory or a dispatch attempt.
 Window handles last until a new inventory or process exit, subject to live
 membership validation. Observe again after each action. The helper validates retained ancestry and process
 generation; an old label/ID is never a fallback. Bounded partial coverage does
-not prove a menu is absent. If cancellation is unadvertised, report the gap.
+not prove a menu is absent. `incomplete_inventory` refuses truncated root
+discovery; `operation_timeout` invalidates the snapshot. If cancellation is
+unadvertised, report the stranded/indeterminate result under the recovery plan.
 
 The session pins a distinct foreground process and monitors activation events.
 It never requests focus. `focus_changed` means background proof failed, even
-if the app caused it internally; stop and inspect. Do not restore focus, send
+if the app caused it internally; stop. The latched session refuses reads and
+cancellation too. Do not restore focus, send
 Escape, or replay an indeterminate action automatically. Successful dispatch
 is still `effect: unverified`. Current local evidence proves background reads;
 service execution and real menu open/dismiss require their own receipts.
+
+A client timeout, EOF, framing/shape, or output failure permanently closes the
+pipe. `TransportError.action_may_have_dispatched` preserves uncertainty; never
+reuse that instance or replay an action. A fresh session is only for deliberately
+chosen inspection. A well-framed native refusal can leave the existing transport
+usable for inspection if its focus contract still holds; check `success`,
+`actionDispatched`, `retrySafe`, and the requested result fields. Check stability
+flags and actual Play/Pause label coverage separately from read-proof `success`.
 
 These native handles are separate from Peekaboo snapshot/element IDs. Never
 pass one provider's IDs to the other.

@@ -64,9 +64,18 @@ One stdio session holds native AX root/element references. Before a menu action
 it revalidates process generation, native ancestry and identity, current action
 support, and the session's foreground state/history. Action admission requires
 the explicit `--allow-menu-actions` startup flag. Only advertised popup/row
-menu operations and menu cancellation are supported. If the app itself changes
-focus or does not support cancellation, record that gap; no automatic focus or
-keyboard fallback follows. Native handles and Peekaboo snapshots belong to
+menu operations and menu cancellation are supported. Before opening, require
+established cancellation/discoverability for the matching menu and context, or
+explicitly authorize a controlled experiment with a separate recovery plan. The
+first opening cannot be called assuredly reversible when cancellation cannot be
+preflighted. Focus failure also refuses observation and cancellation; closing
+the helper does not dismiss the menu. Record a stranded/indeterminate result
+under the recovery plan, with no automatic focus, Escape, or popup-toggle fallback.
+
+One deadline includes root discovery and final dispatch checks. Truncated root
+inventory refuses; it cannot prove dismissal. A pipe timeout, framing/shape, EOF,
+or output failure permanently closes the client and retains possible action
+dispatch. Subsequent writes refuse; a new session never implies action replay. Native handles and Peekaboo snapshots belong to
 different providers and are never interchangeable.
 
 ## Installation and permissions

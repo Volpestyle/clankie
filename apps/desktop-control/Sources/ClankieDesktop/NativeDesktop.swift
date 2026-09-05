@@ -57,14 +57,19 @@ final class NativeDesktop: DesktopDriver {
   }
   func settle() { RunLoop.current.run(until: Date().addingTimeInterval(0.04)) }
 
-  private func read(_ element: AXUIElement, _ name: String) -> (AXError, CFTypeRef?) {
+  private func read(_ element: AXUIElement, _ name: String, deadline: OperationDeadline) throws -> (
+    AXError, CFTypeRef?
+  ) {
+    try deadline.check()
     var value: CFTypeRef?
     let error = AXUIElementCopyAttributeValue(element, name as CFString, &value)
     return (error, value)
   }
 
-  private func text(_ element: AXUIElement, _ name: String) throws -> String {
-    let (error, value) = read(element, name)
+  private func text(_ element: AXUIElement, _ name: String, deadline: OperationDeadline) throws
+    -> String
+  {
+    let (error, value) = try read(element, name, deadline: deadline)
     guard [.success, .attributeUnsupported, .noValue].contains(error) else {
       throw Failure(code: "ax_read", message: "\(name) read failed: \(error.rawValue)")
     }
@@ -77,7 +82,8 @@ final class NativeDesktop: DesktopDriver {
     return string
   }
 
-  private func intern(_ element: AXUIElement) throws -> Int {
+  private func intern(_ element: AXUIElement, deadline: OperationDeadline) throws -> Int {
+    try deadline.check()
     let hash = CFHash(element)
     if let existing = hashBuckets[hash]?.first(where: { CFEqual(elements[$0], element) }) {
       return existing
@@ -92,7 +98,10 @@ final class NativeDesktop: DesktopDriver {
     return handle
   }
 
-  private func array(_ element: AXUIElement, _ name: String, limit: Int) throws -> ([Int], Bool) {
+  private func array(
+    _ element: AXUIElement, _ name: String, limit: Int, deadline: OperationDeadline
+  ) throws -> ([Int], Bool) {
+    try deadline.check()
     var count: CFIndex = 0
     let countError = AXUIElementGetAttributeValueCount(element, name as CFString, &count)
     if [.attributeUnsupported, .noValue].contains(countError) { return ([], false) }
@@ -101,26 +110,58 @@ final class NativeDesktop: DesktopDriver {
     }
     if count == 0 { return ([], false) }
     var values: CFArray?
+    try deadline.check()
     let error = AXUIElementCopyAttributeValues(
       element, name as CFString, 0, min(count, limit), &values)
     guard error == .success, let array = values as? [AXUIElement] else {
       throw Failure(code: "ax_read", message: "\(name) array failed: \(error.rawValue)")
     }
-    return (try array.map(intern), count > limit)
+    return (try array.map { try intern($0, deadline: deadline) }, count > limit)
   }
 
-  func windows() throws -> [Int] {
-    let (handles, incomplete) = try array(application, kAXWindowsAttribute, limit: 32)
-    guard !incomplete else { throw Failure(code: "window_limit", message: "AXWindows exceeds 32") }
-    let (appChildren, _) = try array(application, kAXChildrenAttribute, limit: 64)
-    let menus = try appChildren.filter { handle in
-      guard let element = elements[handle] else { return false }
-      return try text(element, kAXRoleAttribute) == "AXMenu"
+  func windows(deadline: OperationDeadline) throws -> [Int] {
+    try Self.discoverRoots(
+      deadline: deadline,
+      array: { try self.array(self.application, $0, limit: $1, deadline: deadline) },
+      role: { handle in
+        guard let element = self.elements[handle] else {
+          throw Failure(code: "stale", message: "Unknown root reference")
+        }
+        return try self.text(element, kAXRoleAttribute, deadline: deadline)
+      })
+  }
+
+  // The same discovery path runs with inert attribute readers in tests.
+  static func discoverRoots(
+    deadline: OperationDeadline,
+    array: (String, Int) throws -> ([Int], Bool), role: (Int) throws -> String
+  ) throws -> [Int] {
+    try deadline.check()
+    let (handles, incomplete) = try array(kAXWindowsAttribute, 32)
+    try deadline.check()
+    guard !incomplete else {
+      throw Failure(
+        code: "incomplete_inventory", message: "AXWindows exceeds 32; root inventory is incomplete")
     }
-    return handles + menus.filter { !handles.contains($0) }
+    let (appChildren, childrenIncomplete) = try array(kAXChildrenAttribute, 64)
+    try deadline.check()
+    guard !childrenIncomplete else {
+      throw Failure(
+        code: "incomplete_inventory",
+        message: "Application AXChildren exceeds 64; menus may be omitted")
+    }
+    var roots = handles
+    for child in appChildren {
+      try deadline.check()
+      let childRole = try role(child)
+      try deadline.check()
+      if childRole == "AXMenu", !roots.contains(child) { roots.append(child) }
+    }
+    return roots
   }
 
-  func node(_ handle: Int) throws -> Node {
+  func node(_ handle: Int, deadline: OperationDeadline) throws -> Node {
+    try deadline.check()
     guard let element = elements[handle] else {
       throw Failure(code: "stale", message: "Unknown native reference")
     }
@@ -129,11 +170,12 @@ final class NativeDesktop: DesktopDriver {
       throw Failure(
         code: "stale", message: "Native reference no longer belongs to the selected PID")
     }
-    let role = try text(element, kAXRoleAttribute)
+    let role = try text(element, kAXRoleAttribute, deadline: deadline)
     guard !role.isEmpty else {
       throw Failure(code: "stale", message: "Native element has no readable role")
     }
     var actions: CFArray?
+    try deadline.check()
     let actionError = AXUIElementCopyActionNames(element, &actions)
     guard [.success, .actionUnsupported, .notImplemented].contains(actionError) else {
       throw Failure(
@@ -143,17 +185,20 @@ final class NativeDesktop: DesktopDriver {
     guard names.count <= 32, names.allSatisfy({ $0.utf8.count <= 128 }) else {
       throw Failure(code: "action_limit", message: "AX action list exceeds bounds")
     }
-    let (children, incomplete) = try array(element, kAXChildrenAttribute, limit: 250)
-    let (enabledError, enabledValue) = read(element, kAXEnabledAttribute)
+    let (children, incomplete) = try array(
+      element, kAXChildrenAttribute, limit: 250, deadline: deadline)
+    let (enabledError, enabledValue) = try read(element, kAXEnabledAttribute, deadline: deadline)
     let enabled = enabledError == .success && (enabledValue as? Bool) == true
     return try Node(
-      role: role, title: text(element, kAXTitleAttribute),
-      label: text(element, kAXDescriptionAttribute),
-      identifier: text(element, kAXIdentifierAttribute), value: text(element, kAXValueAttribute),
+      role: role, title: text(element, kAXTitleAttribute, deadline: deadline),
+      label: text(element, kAXDescriptionAttribute, deadline: deadline),
+      identifier: text(element, kAXIdentifierAttribute, deadline: deadline),
+      value: text(element, kAXValueAttribute, deadline: deadline),
       actions: names, children: children, childrenIncomplete: incomplete, enabled: enabled)
   }
 
-  func perform(_ handle: Int, action: String) throws {
+  func perform(_ handle: Int, action: String, deadline: OperationDeadline) throws {
+    try deadline.check()
     guard let element = elements[handle] else {
       throw Failure(code: "stale", message: "Unknown native reference")
     }
@@ -165,6 +210,7 @@ final class NativeDesktop: DesktopDriver {
         code: "target_changed",
         message: "Target or permission changed immediately before native dispatch")
     }
+    try deadline.check()
     let error = AXUIElementPerformAction(element, action as CFString)
     guard error == .success else {
       throw Failure(
@@ -175,28 +221,32 @@ final class NativeDesktop: DesktopDriver {
 
   /// Public AX has no universal CGWindowID getter. Candidate geometry is diagnostic only.
   func diagnose() throws -> [String: Any] {
+    let deadline = OperationDeadline()
     settle()
     let before = foreground()
     let epoch = focusChanges
-    let (windowsError, rawWindows) = read(application, kAXWindowsAttribute)
+    let (windowsError, rawWindows) = try read(application, kAXWindowsAttribute, deadline: deadline)
     var candidateRows: [[String: Any]] = []
     let rawArray = rawWindows as? [AXUIElement] ?? []
     let cgWindows =
       (CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? [])
       .filter { ($0[kCGWindowOwnerPID as String] as? Int) == Int(target.pid) }
     for window in rawArray.prefix(32) {
+      try deadline.check()
       AXUIElementSetMessagingTimeout(window, 0.15)
-      let (numberError, number) = read(window, "AXWindowNumber")
+      let (numberError, number) = try read(window, "AXWindowNumber", deadline: deadline)
       candidateRows.append([
-        "role": try text(window, kAXRoleAttribute), "title": try text(window, kAXTitleAttribute),
+        "role": try text(window, kAXRoleAttribute, deadline: deadline),
+        "title": try text(window, kAXTitleAttribute, deadline: deadline),
         "windowNumberError": numberError.rawValue,
         "windowNumber": (number as? NSNumber) ?? NSNull(),
       ])
     }
     var exposure: [String: Any] = [:]
     for name in ["AXEnhancedUserInterface", "AXManualAccessibility"] {
-      let (error, value) = read(application, name)
+      let (error, value) = try read(application, name, deadline: deadline)
       var settable = DarwinBoolean(false)
+      try deadline.check()
       let setError = AXUIElementIsAttributeSettable(application, name as CFString, &settable)
       exposure[name] = [
         "error": error.rawValue, "value": (value as? NSNumber) ?? NSNull(),
@@ -204,6 +254,7 @@ final class NativeDesktop: DesktopDriver {
       ]
     }
     settle()
+    try deadline.check()
     return [
       "trusted": trusted(), "target": target.json, "targetUnchanged": currentTarget() == target,
       "foregroundBefore": before?.json ?? [:], "foregroundAfter": foreground()?.json ?? [:],

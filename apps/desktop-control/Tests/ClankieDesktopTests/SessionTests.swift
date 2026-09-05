@@ -14,6 +14,8 @@ final class FixtureDesktop: DesktopDriver {
   var calls: [(Int, String)] = []
   var onPerform: (() throws -> Void)?
   var onNode: (() -> Void)?
+  var onWindows: (() -> Void)?
+  var onTrust: (() -> Void)?
   var nodes: [Int: Node] = [
     1: makeNode("AXWindow", children: [2, 4]),
     2: makeNode("AXRow", label: "Song A", children: [3]),
@@ -22,16 +24,22 @@ final class FixtureDesktop: DesktopDriver {
     4: makeNode("AXMenu", actions: ["AXCancel"]),
   ]
   init() { liveTarget = target }
-  func trusted() -> Bool { permission }
+  func trusted() -> Bool {
+    onTrust?()
+    return permission
+  }
   func currentTarget() -> ProcessIdentity? { liveTarget }
   func foreground() -> ProcessIdentity? { front }
-  func windows() throws -> [Int] { windowList }
-  func node(_ handle: Int) throws -> Node {
+  func windows(deadline: OperationDeadline) throws -> [Int] {
+    onWindows?()
+    return windowList
+  }
+  func node(_ handle: Int, deadline: OperationDeadline) throws -> Node {
     onNode?()
     guard let node = nodes[handle] else { throw Failure(code: "stale", message: "Destroyed") }
     return node
   }
-  func perform(_ handle: Int, action: String) throws {
+  func perform(_ handle: Int, action: String, deadline: OperationDeadline) throws {
     calls.append((handle, action))
     try onPerform?()
   }
@@ -239,6 +247,172 @@ struct SessionTests {
     let window = try #require((inventory["windows"] as? [[String: Any]])?.first?["id"] as? String)
     driver.nodes[1] = makeNode("AXApplication", children: [2, 4])
     #expect(try refusal(session.respond(Request(op: "observe", window: window))) == "invalid_root")
+  }
+
+  @Test func openingWithoutCancellationCanLeaveAMenu() throws {
+    let driver = FixtureDesktop()
+    driver.nodes[1] = makeNode("AXWindow", children: [2])
+    driver.nodes.removeValue(forKey: 4)
+    let session = Session(driver: driver, allowMenuActions: true)
+    let open = try menuRequest(observe(session))
+    driver.onPerform = {
+      driver.nodes[1] = makeNode("AXWindow", children: [2, 4])
+      driver.nodes[4] = makeNode("AXMenu")
+    }
+    let opened = try session.handle(open)
+    #expect(opened["effect"] as? String == "unverified")
+    let cancel = try menuRequest(observe(session), role: "AXMenu", action: "AXCancel")
+    #expect(try refusal(session.respond(cancel)) == "unsupported_action")
+    #expect(driver.calls.count == 1)
+    #expect(driver.nodes[4] != nil)
+  }
+
+  @Test func activationAfterOpenRefusesObservationAndCleanup() throws {
+    let driver = FixtureDesktop()
+    driver.nodes[1] = makeNode("AXWindow", children: [2])
+    driver.nodes.removeValue(forKey: 4)
+    let session = Session(driver: driver, allowMenuActions: true)
+    let observation = try observe(session)
+    let open = try menuRequest(observation)
+    driver.onPerform = {
+      driver.nodes[1] = makeNode("AXWindow", children: [2, 4])
+      driver.nodes[4] = makeNode("AXMenu", actions: ["AXCancel"])
+      driver.focusChanges += 2
+    }
+    let opened = try #require(
+      JSONSerialization.jsonObject(with: session.respond(open)) as? [String: Any])
+    #expect(opened["code"] as? String == "focus_changed")
+    #expect(opened["actionDispatched"] as? Bool == true)
+    for request in [
+      Request(op: "windows"),
+      Request(op: "observe", window: observation["window"] as? String),
+      Request(op: "menu", action: "AXCancel"),
+    ] {
+      #expect(try refusal(session.respond(request)) == "focus_changed")
+    }
+    #expect(driver.calls.count == 1)
+    #expect(driver.nodes[4] != nil)
+  }
+
+  @Test func finalValidationReadCannotExceedDeadlineAndDispatch() throws {
+    let driver = FixtureDesktop()
+    var clock = 100.0
+    let session = Session(driver: driver, allowMenuActions: true, now: { clock })
+    let open = try menuRequest(observe(session))
+    var reads = 0
+    driver.onNode = {
+      reads += 1
+      if reads == 2 { clock += 2 }
+      if reads == 3 { clock += 2.99 }
+      if reads == 4 { clock += 0.15 }
+    }
+    #expect(try refusal(session.respond(open)) == "operation_timeout")
+    #expect(clock > 105)
+    #expect(driver.calls.isEmpty)
+    driver.onNode = nil
+    #expect(try refusal(session.respond(open)) == "stale")
+  }
+
+  @Test func deadlineAfterDispatchRetainsUncertainty() throws {
+    let driver = FixtureDesktop()
+    var clock = 100.0
+    let session = Session(driver: driver, allowMenuActions: true, now: { clock })
+    let open = try menuRequest(observe(session))
+    driver.onPerform = { clock += 5.1 }
+    let result = try #require(
+      JSONSerialization.jsonObject(with: session.respond(open)) as? [String: Any])
+    #expect(result["code"] as? String == "operation_timeout")
+    #expect(result["actionDispatched"] as? Bool == true)
+    #expect(result["retrySafe"] as? Bool == false)
+    #expect(driver.calls.count == 1)
+    #expect(try refusal(session.respond(open)) == "stale")
+  }
+
+  @Test func inventorySharesOneDeadlineAndReadsEachRootOnce() throws {
+    let driver = FixtureDesktop()
+    driver.windowList = Array(1...32)
+    for handle in driver.windowList { driver.nodes[handle] = makeNode("AXWindow") }
+    var clock = 100.0
+    var reads = 0
+    driver.onNode = {
+      clock += 0.3
+      reads += 1
+    }
+    let session = Session(driver: driver, now: { clock })
+    #expect(try refusal(session.respond(Request(op: "windows"))) == "operation_timeout")
+    #expect(clock < 105.31)
+    reads = 0
+    driver.onNode = { reads += 1 }
+    _ = try session.handle(Request(op: "windows"))
+    #expect(reads == 32)
+  }
+
+  @Test(arguments: ["windows", "observe", "menu"])
+  func rootDiscoveryConsumesEveryOperationDeadline(op: String) throws {
+    let driver = FixtureDesktop()
+    var clock = 100.0
+    let session = Session(driver: driver, allowMenuActions: true, now: { clock })
+    let observation = try observe(session)
+    let request =
+      op == "menu"
+      ? try menuRequest(observation)
+      : Request(op: op, window: observation["window"] as? String)
+    driver.onWindows = { clock += 5.1 }
+    #expect(try refusal(session.respond(request)) == "operation_timeout")
+    #expect(driver.calls.isEmpty)
+  }
+
+  @Test func deadlineIsCheckedAfterFinalPreflight() throws {
+    let driver = FixtureDesktop()
+    var clock = 100.0
+    let session = Session(driver: driver, allowMenuActions: true, now: { clock })
+    let open = try menuRequest(observe(session))
+    var checks = 0
+    driver.onTrust = {
+      checks += 1
+      if checks == 2 { clock += 5.1 }
+    }
+    #expect(try refusal(session.respond(open)) == "operation_timeout")
+    #expect(driver.calls.isEmpty)
+  }
+
+  @Test(arguments: [true, false])
+  func nativeDiscoveryRefusesIncompleteRoots(windowsTruncated: Bool) throws {
+    do {
+      _ = try NativeDesktop.discoverRoots(
+        deadline: OperationDeadline(now: { 100 }),
+        array: { name, limit in
+          let all =
+            name == "AXWindows" ? Array(100...(windowsTruncated ? 132 : 100)) : Array(1...65)
+          return (Array(all.prefix(limit)), all.count > limit)
+        }, role: { $0 == 65 ? "AXMenu" : "AXGroup" })
+      Issue.record("Incomplete inventory must not silently omit the menu at child 65")
+    } catch let failure as Failure {
+      #expect(failure.code == "incomplete_inventory")
+    }
+  }
+
+  @Test func nativeDiscoveryChecksDeadlineBetweenApplicationChildren() throws {
+    var clock = 100.0
+    let deadline = OperationDeadline(now: { clock })
+    do {
+      _ = try NativeDesktop.discoverRoots(
+        deadline: deadline,
+        array: { name, _ in (name == "AXWindows" ? [100] : Array(1...64), false) },
+        role: { _ in
+          clock += 0.3
+          return "AXGroup"
+        })
+      Issue.record("Root discovery must share the operation deadline")
+    } catch let failure as Failure {
+      #expect(failure.code == "operation_timeout")
+      #expect(clock < 105.31)
+    }
+    let roots = try NativeDesktop.discoverRoots(
+      deadline: OperationDeadline(now: { 100 }),
+      array: { name, _ in (name == "AXWindows" ? [100] : [100, 101, 102], false) },
+      role: { $0 == 102 ? "AXGroup" : "AXMenu" })
+    #expect(roots == [100, 101])
   }
 
   @Test func boundsWideAndCyclicNativeGraphs() throws {

@@ -28,6 +28,23 @@ struct Failure: Error {
   var dispatched = false
 }
 
+struct OperationDeadline {
+  let expires: TimeInterval
+  let now: () -> TimeInterval
+
+  init(now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    self.now = now
+    expires = now() + 5
+  }
+
+  func check() throws {
+    guard now() < expires else {
+      throw Failure(
+        code: "operation_timeout", message: "The five-second operation deadline expired")
+    }
+  }
+}
+
 @MainActor
 protocol DesktopDriver {
   var target: ProcessIdentity { get }
@@ -35,9 +52,9 @@ protocol DesktopDriver {
   func trusted() -> Bool
   func currentTarget() -> ProcessIdentity?
   func foreground() -> ProcessIdentity?
-  func windows() throws -> [Int]
-  func node(_ handle: Int) throws -> Node
-  func perform(_ handle: Int, action: String) throws
+  func windows(deadline: OperationDeadline) throws -> [Int]
+  func node(_ handle: Int, deadline: OperationDeadline) throws -> Node
+  func perform(_ handle: Int, action: String, deadline: OperationDeadline) throws
   func settle()
 }
 
@@ -106,34 +123,35 @@ final class Session {
   }
 
   func handle(_ request: Request) throws -> [String: Any] {
+    let deadline = OperationDeadline(now: now)
     driver.settle()
     let before = try preflight()
     let focusEpoch = driver.focusChanges
     var dispatched = false
     do {
+      try deadline.check()
       var result: [String: Any]
       switch request.op {
       case "windows":
         invalidate()
         windowHandles.removeAll()
-        let windows = try currentRoots()
+        let windows = try currentRoots(deadline: deadline)
         result = [
-          "windows": try windows.map { handle -> [String: Any] in
+          "windows": windows.map { handle, node -> [String: Any] in
             let id = UUID().uuidString
             windowHandles[id] = handle
-            let node = try driver.node(handle)
             return ["id": id, "role": node.role, "title": node.title]
           }
         ]
       case "observe":
-        result = try observe(request)
+        result = try observe(request, deadline: deadline)
       case "menu":
         guard allowMenuActions else {
           throw Failure(
             code: "actions_disabled", message: "Start with --allow-menu-actions after authorization"
           )
         }
-        let chain = try validate(request)
+        let chain = try validate(request, deadline: deadline)
         guard let (handle, node) = chain.last else {
           throw Failure(code: "stale", message: "Empty handle ancestry")
         }
@@ -150,9 +168,10 @@ final class Session {
         guard try preflight() == before, driver.focusChanges == focusEpoch else {
           throw Failure(code: "focus_changed", message: "Foreground changed before dispatch")
         }
+        try deadline.check()
         invalidate()
         do {
-          try driver.perform(handle, action: action)
+          try driver.perform(handle, action: action, deadline: deadline)
           dispatched = true
         } catch let failure as Failure {
           dispatched = failure.dispatched
@@ -183,6 +202,7 @@ final class Session {
           code: "focus_changed", message: "Foreground changed; session refuses further operations",
           dispatched: dispatched)
       }
+      try deadline.check()
       result["target"] = driver.target.json
       result["foregroundBefore"] = before.json
       result["foregroundAfter"] = after?.json
@@ -198,7 +218,7 @@ final class Session {
           message: "Foreground changed during a failed operation; inspect before continuing",
           dispatched: dispatched || failure.dispatched)
       }
-      if dispatched { invalidate() }
+      if dispatched || failure.code == "operation_timeout" { invalidate() }
       throw Failure(
         code: failure.code, message: failure.message, dispatched: dispatched || failure.dispatched)
     } catch {
@@ -249,24 +269,31 @@ final class Session {
     return foreground
   }
 
-  private func currentRoots() throws -> [Int] {
-    let roots = try driver.windows()
+  private func currentRoots(deadline: OperationDeadline) throws -> [(Int, Node)] {
+    try deadline.check()
+    let roots = try driver.windows(deadline: deadline)
+    try deadline.check()
     guard roots.count <= 32 else {
       throw Failure(code: "window_limit", message: "Too many AX roots")
     }
+    var result: [(Int, Node)] = []
     for root in roots {
-      let role = try driver.node(root).role
+      try deadline.check()
+      let node = try driver.node(root, deadline: deadline)
+      try deadline.check()
+      let role = node.role
       guard ["AXWindow", "AXMenu"].contains(role) else {
         invalidate()
         throw Failure(
           code: "invalid_root",
           message: "AX inventory returned \(role), not a native window or menu")
       }
+      result.append((root, node))
     }
-    return roots
+    return result
   }
 
-  private func observe(_ request: Request) throws -> [String: Any] {
+  private func observe(_ request: Request, deadline: OperationDeadline) throws -> [String: Any] {
     let maxNodes = request.maxNodes ?? 400
     let maxDepth = request.maxDepth ?? 48
     guard (1...2000).contains(maxNodes), (1...64).contains(maxDepth),
@@ -277,7 +304,7 @@ final class Session {
         message: "maxNodes must be 1...2000; maxDepth 1...64; at most 16 roles")
     }
     guard let window = request.window.flatMap({ windowHandles[$0] }),
-      try currentRoots().contains(window)
+      try currentRoots(deadline: deadline).contains(where: { $0.0 == window })
     else {
       throw Failure(
         code: "stale_window", message: "Choose a current native window handle from windows")
@@ -296,7 +323,8 @@ final class Session {
     while cursor < pending.count {
       let (handle, ancestry, depth) = pending[cursor]
       cursor += 1
-      guard visited < maxNodes, now() - snapshotTime < 5 else {
+      try deadline.check()
+      guard visited < maxNodes else {
         incomplete = true
         break
       }
@@ -304,7 +332,8 @@ final class Session {
         incomplete = true
         continue
       }
-      let node = try driver.node(handle)
+      let node = try driver.node(handle, deadline: deadline)
+      try deadline.check()
       visited += 1
       let chain = ancestry + [(handle, node)]
       let id = "e\(visited)"
@@ -333,11 +362,12 @@ final class Session {
     ]
   }
 
-  private func validate(_ request: Request) throws -> [(Int, Node)] {
+  private func validate(_ request: Request, deadline: OperationDeadline) throws -> [(Int, Node)] {
     guard let requested = request.snapshot, requested == snapshotID,
       now() - snapshotTime < 30, let element = request.element,
       let chain = entries[element], let window = snapshotWindow,
-      try currentRoots().contains(window), chain.first?.0 == window
+      try currentRoots(deadline: deadline).contains(where: { $0.0 == window }),
+      chain.first?.0 == window
     else {
       throw Failure(
         code: "stale",
@@ -348,13 +378,10 @@ final class Session {
         code: "stale_window", message: "Requested window contradicts the snapshot's native window")
     }
     var refreshed: [(Int, Node)] = []
-    let started = now()
     for (index, entry) in chain.enumerated() {
-      guard now() - started < 5 else {
-        throw Failure(
-          code: "validation_timeout", message: "Native ancestry validation exceeded its budget")
-      }
-      let live = try driver.node(entry.0)
+      try deadline.check()
+      let live = try driver.node(entry.0, deadline: deadline)
+      try deadline.check()
       guard live.fingerprint == entry.1.fingerprint,
         index == 0 || refreshed[index - 1].1.children.contains(entry.0)
       else {
@@ -364,6 +391,7 @@ final class Session {
       }
       refreshed.append((entry.0, live))
     }
+    try deadline.check()
     guard now() - snapshotTime < 30 else {
       throw Failure(code: "stale", message: "Snapshot expired during ancestry validation")
     }
