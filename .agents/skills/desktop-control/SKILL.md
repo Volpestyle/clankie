@@ -8,7 +8,8 @@ description: >-
 
 # Native desktop control
 
-Use the supported Peekaboo CLI through Clankie's existing machine-authorized
+Use the background AX helper for Spotify, or the supported Peekaboo CLI for
+general native desktop work, through Clankie's existing machine-authorized
 `bash` tool. The operator and authenticated Discord machine grants own that
 access; social rooms do not. Clankie supplies the reasoning, so call the native
 primitives directly rather than starting `peekaboo agent`.
@@ -16,6 +17,45 @@ primitives directly rather than starting `peekaboo agent`.
 Use the browser tools for web pages and a purpose-built API or CLI when it
 already covers the task. Spotify's AppleScript playback dictionary does not
 provide song-row or menu accessibility control.
+
+## Background Spotify AX
+
+```sh
+command -v clankie-desktop
+clankie-desktop diagnose
+```
+
+The [helper protocol and client](../../../apps/desktop-control/README.md) use
+one caller-owned stdio process. A Python script can hold `Desktop(binary)`
+while it requests `windows`, then `observe` on one returned native root handle.
+Use depth 48 and an explicit node budget; a `roles` filter limits presentation,
+not traversal. `diagnose` retains AXWindows errors, candidate count, optional
+window-number results, app exposure, and foreground identities. It does not
+enable accessibility, focus the app, or prompt for permissions.
+
+For an authorized menu task, start the session with `--allow-menu-actions`
+(`Desktop(binary, allow_menu_actions=True)`). Select exactly one fresh row or
+More options popup by its observed semantics, then send `menu` with the current
+snapshot, element ID, and an advertised action. Supported pairs are
+`AXShowMenu` on a row/popup, `AXPress` on a popup, and `AXCancel` on a menu.
+Never press a song's Play button or choose a menu entry for an open/dismiss proof.
+
+Keep the process alive: snapshots and element IDs expire on process exit,
+after 30 seconds, or after another observation/inventory or a dispatch attempt.
+Window handles last until a new inventory or process exit, subject to live
+membership validation. Observe again after each action. The helper validates retained ancestry and process
+generation; an old label/ID is never a fallback. Bounded partial coverage does
+not prove a menu is absent. If cancellation is unadvertised, report the gap.
+
+The session pins a distinct foreground process and monitors activation events.
+It never requests focus. `focus_changed` means background proof failed, even
+if the app caused it internally; stop and inspect. Do not restore focus, send
+Escape, or replay an indeterminate action automatically. Successful dispatch
+is still `effect: unverified`. Current local evidence proves background reads;
+service execution and real menu open/dismiss require their own receipts.
+
+These native handles are separate from Peekaboo snapshot/element IDs. Never
+pass one provider's IDs to the other.
 
 ## Discover and observe
 
@@ -47,6 +87,10 @@ scope, not just `success` or exit code: `application_partial`, a null
 debug logs does not override those result fields. Report incomplete AX reads;
 do not repeat an app-tree fallback the result says it already performed.
 
+For a proven depth-limit result on Spotify, use `--depth 48 --max-elements 1600`
+with `--max-children 250`. The ordinary depth 12 can stop before nested song
+rows. Raising depth does not repair `application_partial` window binding.
+
 For an authorized screenshot, pass an explicit temporary `--path` and read that
 image with the existing `read` tool. `--no-elements` produces pixel evidence,
 not an AX element map. Keep only the minimal requested receipt; do not archive
@@ -70,7 +114,7 @@ in-memory snapshots. If the owner expires or the target changes, observe again;
 do not recreate an old reference or replay an uncertain action.
 
 `action` invokes a named AX action; `set-value` writes a settable control.
-`action AXPress` and `action AXShowMenu` require `--foreground`. Treat that as
+`action AXPress`, `action AXShowMenu`, and `action AXCancel` require `--foreground`. Treat that as
 a visible interaction and obtain the appropriate task authorization, never as
 a retry flag for a refused read. Do not grant macOS permissions, manipulate
 TCC, remove quarantine, or change signing to make a command work. Report the

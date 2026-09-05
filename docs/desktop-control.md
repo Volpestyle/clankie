@@ -1,8 +1,10 @@
 # Native desktop control
 
-Clankie's native macOS desktop integration uses the standalone
-[Peekaboo CLI](https://github.com/openclaw/Peekaboo/releases/tag/v4.3.0) through
-his existing machine-authorized shell. The
+Clankie's native macOS desktop integration uses the
+[background AX helper](../apps/desktop-control/README.md) for Spotify native
+references and menu operations, plus the standalone
+[Peekaboo CLI](https://github.com/openclaw/Peekaboo/releases/tag/v4.3.0) for
+general desktop operations. Both run through his existing machine-authorized shell. The
 [desktop-control skill](../.agents/skills/desktop-control/SKILL.md) supplies
 discovery, exact-target observation, snapshot handling, and verification.
 Operator conversations have machine tools. Authenticated Discord machine
@@ -17,20 +19,55 @@ The local CLI is Peekaboo **4.3.0**, source
 and notarization checks pass. The selected snapshot host reports Screen
 Recording, Accessibility, and Event Synthesizing granted.
 
-Read-only Spotify observation is **partial**: the exact-window tree request
-returns nine application-level elements, zero interactable elements,
-`semantic_scope: application_partial`, `snapshot_id: null`,
-`snapshot_reusable: false`, and `mutation_targeting_available: false`. Its
-warning identifies an incomplete accessibility read, not a traversal budget
-limit. The pixel-only exact-window request refuses with `CAPTURE_FAILED`:
-the selected host reports incompatible process-lifetime ScreenCaptureKit
-ownership, with no capture dispatched. A granted permission and a successful
-partial response do not establish usable song-row or menu control.
+Background Spotify AX reads are **live in the local calling shell**. The native
+helper's two bounded reads expose song rows and More options controls while
+preserving Ghostty's PID/generation as foreground, with no observed activation
+events and stable returned semantics and Play/Pause labels. Its 2000-node cap
+marks the result incomplete; it does not claim the whole library was enumerated.
+The current Peekaboo exact-window read also succeeds: `--depth 48` reaches song
+rows behind Spotify's nested containers, while the default depth 12 does not.
+An `application_partial` result remains a distinct exact-window failure; raising
+depth is appropriate only when the result actually names a depth limit.
 
-These observations come from the installation shell. Clankie's service-shell
-path and Spotify interactions require independent proof. Full native desktop
-parity is unproven; no permission grant, focus change, playback command, or
-library modification is part of the installation proof.
+Background menu open/dismiss and the new helper's execution through Clankie's
+service require independent proof. Full native desktop parity remains unproven.
+The helper's action dispatch receipt reports an unverified effect, never menu
+success. Read proof performs no focus setter, exposure setter, playback command,
+library write, or menu action. In a `loginwindow` foreground state, Spotify can
+return an `AXApplication` in `AXWindows`; the helper refuses that result with
+`invalid_root`. A successful interactive-desktop receipt does not prove access
+in a different desktop session.
+
+Peekaboo pixel capture remains refused by its ScreenCaptureKit coordination
+guard. Its 4.3.0 startup scan identifies Claude Desktop as an uncoordinated
+potential host, removes the selected daemon's ownership capability, and emits
+a misleading old-host refusal. [Upstream #684](https://github.com/openclaw/Peekaboo/pull/684)
+separates readiness from implementation support. This capture issue is not a
+permission deficit or a prerequisite for native AX observation.
+
+## Background AX helper
+
+```sh
+python3 apps/desktop-control/install.py
+~/.local/bin/clankie-desktop diagnose
+python3 apps/desktop-control/client.py ~/.local/bin/clankie-desktop
+```
+
+The source, decision, stdio protocol, limits, and inert tests live in
+[apps/desktop-control](../apps/desktop-control/README.md). The separately installed
+local build occupies a binary-hash directory under
+`~/.local/share/clankie/desktop/`, with source hashes and signature evidence in
+`manifest.json`. It preserves the existing Peekaboo installation. The helper
+has no listener, autostart, synthetic input, capture, or model dependency.
+
+One stdio session holds native AX root/element references. Before a menu action
+it revalidates process generation, native ancestry and identity, current action
+support, and the session's foreground state/history. Action admission requires
+the explicit `--allow-menu-actions` startup flag. Only advertised popup/row
+menu operations and menu cancellation are supported. If the app itself changes
+focus or does not support cancellation, record that gap; no automatic focus or
+keyboard fallback follows. Native handles and Peekaboo snapshots belong to
+different providers and are never interchangeable.
 
 ## Installation and permissions
 
@@ -97,6 +134,8 @@ flowchart TD
   S[Social Discord turn] --> N[No machine shell]
   A --> B[Clankie bash tool]
   B --> C[Peekaboo CLI]
+  B --> L[Caller-owned background AX stdio helper]
+  L --> P
   C --> H[On-demand snapshot daemon or selected Bridge]
   H --> P[macOS permissions and target validation]
   P --> X[Native app accessibility or pixels]
@@ -109,7 +148,7 @@ is assigned from the returned inventory, never copied from an old receipt:
 
 ```sh
 peekaboo window list --app Spotify --json
-peekaboo see --app Spotify --window-id "$WINDOW_ID" --tree --no-screenshot --json
+peekaboo see --app Spotify --window-id "$WINDOW_ID" --tree --no-screenshot --depth 48 --max-elements 1600 --max-children 250 --json
 ```
 
 [Tree-only observation](https://github.com/openclaw/Peekaboo/blob/v4.3.0/docs/commands/see.md)
@@ -137,8 +176,10 @@ dumps and screenshots do not belong in this repository.
 An authorized interaction uses an element and reusable snapshot from fresh
 observation. [Click](https://github.com/openclaw/Peekaboo/blob/v4.3.0/docs/commands/click.md)
 and [named AX actions](https://github.com/openclaw/Peekaboo/blob/v4.3.0/docs/commands/action.md)
-have different foreground rules. In particular, `action AXPress` and
-`action AXShowMenu` require explicit foreground mode. Inspect the installed
+have different foreground rules. In particular, `action AXPress`,
+`action AXShowMenu`, and `action AXCancel` require explicit foreground mode.
+The dedicated AX helper expresses the measured background contract without
+changing Peekaboo's policy. Inspect the installed
 help and the task's authorization before choosing a route. Observe again
 after every action; a dispatched event does not prove a visible effect.
 
@@ -156,7 +197,8 @@ state; it remains a separate unit.
 Peekaboo's [MIT license](https://github.com/openclaw/Peekaboo/blob/v4.3.0/LICENSE)
 and public CLI support reuse without copying Codex's proprietary desktop
 plugin or helper. Pi's existing shell and skill mechanism supplies the
-integration; no extra model runtime or Spotify automation script is needed.
+integration; no extra model runtime is needed. The bounded native helper owns
+only the retained-reference and background menu contract described above.
 Use purpose-built interfaces for basic playback and browser tools for page
 content.
 
