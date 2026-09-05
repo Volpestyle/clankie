@@ -251,6 +251,7 @@ describe("headless clankie commands", () => {
         throw new Error("connection refused");
       }) as typeof fetch,
       listProcessCommandsImpl: () => [],
+      listPortOwnersImpl: () => [],
       processIsAliveImpl: () => true,
       spawnImpl: ((_command: string, args: string[]) => {
         spawned.push(args);

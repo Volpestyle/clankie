@@ -45,6 +45,7 @@ interface RelaySeams {
   readonly fetchImpl: typeof fetch;
   readonly spawnImpl: typeof spawn;
   readonly listProcessCommandsImpl: () => readonly (readonly [number, string])[];
+  readonly listPortOwnersImpl: (port: number) => readonly number[];
   readonly processIsAliveImpl: (pid: number) => boolean;
 }
 
@@ -77,6 +78,7 @@ function stoppedRelay(offerFetch: typeof fetch): {
         return exitingChild();
       }) as unknown as typeof spawn,
       listProcessCommandsImpl: () => [],
+      listPortOwnersImpl: () => [],
       processIsAliveImpl: () => false,
     },
   };

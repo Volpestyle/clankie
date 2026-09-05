@@ -43,6 +43,7 @@ export interface HeadlessCaptainCommandOptions {
    * status than CI does.
    */
   readonly listProcessCommandsImpl?: () => readonly (readonly [number, string])[];
+  readonly listPortOwnersImpl?: ServiceRegistryOptions["listPortOwnersImpl"];
   readonly repoRoot: string;
   readonly sleepImpl?: (ms: number) => Promise<void>;
   readonly spawnImpl?: ServiceRegistryOptions["spawnImpl"];

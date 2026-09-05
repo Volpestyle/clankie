@@ -488,6 +488,7 @@ export interface CreateServiceOptionsInput {
   readonly operatorCredentialStore?: CredentialStore;
   readonly captainCredentialStore?: CredentialStore;
   readonly listProcessCommandsImpl?: ServiceRegistryOptions["listProcessCommandsImpl"];
+  readonly listPortOwnersImpl?: ServiceRegistryOptions["listPortOwnersImpl"];
   readonly spawnImpl?: ServiceRegistryOptions["spawnImpl"];
   readonly killImpl?: ServiceRegistryOptions["killImpl"];
   readonly processIsAliveImpl?: ServiceRegistryOptions["processIsAliveImpl"];
@@ -530,6 +531,7 @@ export async function createServiceOptions(
     ...(input.listProcessCommandsImpl === undefined
       ? {}
       : { listProcessCommandsImpl: input.listProcessCommandsImpl }),
+    ...(input.listPortOwnersImpl === undefined ? {} : { listPortOwnersImpl: input.listPortOwnersImpl }),
     ...(input.spawnImpl === undefined ? {} : { spawnImpl: input.spawnImpl }),
     ...(input.killImpl === undefined ? {} : { killImpl: input.killImpl }),
     ...(input.processIsAliveImpl === undefined ? {} : { processIsAliveImpl: input.processIsAliveImpl }),
