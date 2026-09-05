@@ -13,6 +13,7 @@ final class FixtureDesktop: DesktopDriver {
   var windowList = [1]
   var calls: [(Int, String)] = []
   var onPerform: (() throws -> Void)?
+  var onBeforePerform: (() -> Void)?
   var onNode: (() -> Void)?
   var onWindows: (() -> Void)?
   var onTrust: (() -> Void)?
@@ -40,6 +41,8 @@ final class FixtureDesktop: DesktopDriver {
     return node
   }
   func perform(_ handle: Int, action: String, deadline: OperationDeadline) throws {
+    onBeforePerform?()
+    try deadline.check()
     calls.append((handle, action))
     try onPerform?()
   }
@@ -311,6 +314,50 @@ struct SessionTests {
     #expect(driver.calls.isEmpty)
     driver.onNode = nil
     #expect(try refusal(session.respond(open)) == "stale")
+  }
+
+  @Test(arguments: ["final_preflight", "native_dispatch"])
+  func snapshotExpiryLimitsImmediateDispatch(boundary: String) throws {
+    let driver = FixtureDesktop()
+    var clock = 100.0
+    let session = Session(driver: driver, allowMenuActions: true, now: { clock })
+    let open = try menuRequest(observe(session))
+    clock = 129.5
+    var preflights = 0
+    if boundary == "final_preflight" {
+      driver.onTrust = {
+        preflights += 1
+        if preflights == 2 { clock += 1 }
+      }
+    } else {
+      driver.onBeforePerform = { clock += 1 }
+    }
+    let result = try #require(
+      JSONSerialization.jsonObject(with: session.respond(open)) as? [String: Any])
+    #expect(result["code"] as? String == "stale")
+    #expect(result["actionDispatched"] as? Bool == false)
+    #expect(clock == 130.5)
+    #expect(driver.calls.isEmpty)
+    // Rewind only the virtual test clock to distinguish invalidation from an age check.
+    clock = 129.5
+    driver.onTrust = nil
+    driver.onBeforePerform = nil
+    #expect(try refusal(session.respond(open)) == "stale")
+    #expect(driver.calls.isEmpty)
+  }
+
+  @Test func earlierOperationExpiryStillIncludesDiscoveryAndValidation() throws {
+    let driver = FixtureDesktop()
+    var clock = 100.0
+    let session = Session(driver: driver, allowMenuActions: true, now: { clock })
+    let open = try menuRequest(observe(session))
+    driver.onWindows = { clock += 2.5 }
+    driver.onNode = { clock += 0.7 }
+    let result = try #require(
+      JSONSerialization.jsonObject(with: session.respond(open)) as? [String: Any])
+    #expect(result["code"] as? String == "operation_timeout")
+    #expect(result["actionDispatched"] as? Bool == false)
+    #expect(driver.calls.isEmpty)
   }
 
   @Test func deadlineAfterDispatchRetainsUncertainty() throws {

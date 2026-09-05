@@ -29,18 +29,30 @@ struct Failure: Error {
 }
 
 struct OperationDeadline {
-  let expires: TimeInterval
+  private(set) var expires: TimeInterval
   let now: () -> TimeInterval
+  private var snapshotLimited = false
 
   init(now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
     self.now = now
     expires = now() + 5
   }
 
+  func limitedBySnapshot(expiringAt snapshotExpiry: TimeInterval) -> Self {
+    guard snapshotExpiry <= expires else { return self }
+    var limited = self
+    limited.expires = snapshotExpiry
+    limited.snapshotLimited = true
+    return limited
+  }
+
   func check() throws {
     guard now() < expires else {
       throw Failure(
-        code: "operation_timeout", message: "The five-second operation deadline expired")
+        code: snapshotLimited ? "stale" : "operation_timeout",
+        message: snapshotLimited
+          ? "Snapshot expired before native dispatch"
+          : "The five-second operation deadline expired")
     }
   }
 }
@@ -151,7 +163,8 @@ final class Session {
             code: "actions_disabled", message: "Start with --allow-menu-actions after authorization"
           )
         }
-        let chain = try validate(request, deadline: deadline)
+        let actionDeadline = deadline.limitedBySnapshot(expiringAt: snapshotTime + 30)
+        let chain = try validate(request, deadline: actionDeadline)
         guard let (handle, node) = chain.last else {
           throw Failure(code: "stale", message: "Empty handle ancestry")
         }
@@ -168,10 +181,10 @@ final class Session {
         guard try preflight() == before, driver.focusChanges == focusEpoch else {
           throw Failure(code: "focus_changed", message: "Foreground changed before dispatch")
         }
-        try deadline.check()
+        try actionDeadline.check()
         invalidate()
         do {
-          try driver.perform(handle, action: action, deadline: deadline)
+          try driver.perform(handle, action: action, deadline: actionDeadline)
           dispatched = true
         } catch let failure as Failure {
           dispatched = failure.dispatched
@@ -218,7 +231,7 @@ final class Session {
           message: "Foreground changed during a failed operation; inspect before continuing",
           dispatched: dispatched || failure.dispatched)
       }
-      if dispatched || failure.code == "operation_timeout" { invalidate() }
+      if dispatched || ["operation_timeout", "stale"].contains(failure.code) { invalidate() }
       throw Failure(
         code: failure.code, message: failure.message, dispatched: dispatched || failure.dispatched)
     } catch {

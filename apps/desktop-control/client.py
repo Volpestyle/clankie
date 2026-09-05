@@ -16,10 +16,11 @@ MAX_OUTPUT = 512 * 1024
 
 
 class TransportError(RuntimeError):
-    def __init__(self, message, action_may_have_dispatched):
+    def __init__(self, message, action_may_have_dispatched, *, startup_refusal=None):
         super().__init__(message + "; transport closed permanently. Inspect separately; never replay an uncertain action.")
         self.action_may_have_dispatched = action_may_have_dispatched
         self.retry_safe = False
+        self.startup_refusal = startup_refusal
 
 
 def validate_response(request, result):
@@ -84,6 +85,7 @@ class Desktop:
         self.failure = None
         self.action_may_have_dispatched = False
         self.error_bytes = 0
+        self.started = False
 
     def __enter__(self):
         return self
@@ -122,12 +124,15 @@ class Desktop:
         written = 0
         output = bytearray()
         errors = bytearray()
+        startup_refusal = None
         try:
-            # No outstanding request exists here. Pending stdout cannot be its reply.
-            for key, _ in self.selector.select(0):
-                if key.data == "stdout":
-                    raise RuntimeError("Unexpected output or EOF before request")
-            self.selector.register(self.process.stdin, selectors.EVENT_WRITE, "stdin")
+            # Drain a first startup refusal within the ordinary bounds, without writing.
+            startup = any(key.data == "stdout" for key, _ in self.selector.select(0))
+            if startup and self.started:
+                raise RuntimeError("Unexpected output or EOF before request")
+            if not startup:
+                self.selector.register(self.process.stdin, selectors.EVENT_WRITE, "stdin")
+                self.started = True
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -160,9 +165,14 @@ class Desktop:
                         raise RuntimeError("Desktop response exceeds its bound")
                     if b"\n" in output:
                         line, _, rest = output.partition(b"\n")
-                        if rest or written != len(payload):
+                        if rest or (not startup and written != len(payload)):
                             raise RuntimeError("Unexpected desktop response framing")
                         result = validate_response(request, json.loads(line))
+                        if startup:
+                            if result["success"]:
+                                raise RuntimeError("Unsolicited success before request")
+                            startup_refusal = result
+                            raise RuntimeError("Desktop startup refusal: " + json.dumps(result, ensure_ascii=False, separators=(",", ":")))
                         if time.monotonic() >= deadline:
                             raise TimeoutError("Desktop request timed out during response validation")
                         if request["op"] == "menu":
@@ -170,7 +180,8 @@ class Desktop:
                         return result
         except Exception as error:
             self.action_may_have_dispatched |= request["op"] == "menu" and written > 0
-            self.failure = TransportError(str(error), self.action_may_have_dispatched)
+            self.failure = TransportError(str(error), self.action_may_have_dispatched,
+                                          startup_refusal=startup_refusal)
             self.close(failed=True)
             raise self.failure from error
 

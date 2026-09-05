@@ -72,7 +72,10 @@ elements retain their actual native ancestry even when other branches are
 omitted; an incomplete result never proves a menu or row is absent.
 
 The optional `roles` filter limits presentation, not traversal. A snapshot is
-valid for at most 30 seconds in this exact process. Another observation, window
+valid for at most 30 seconds in this exact process. Menu validation and the
+immediate native dispatch share the earlier of snapshot expiry and the operation
+deadline; either expiry invalidates the snapshot, including during final
+preflight. Another observation, window
 inventory, dispatch attempt, or process exit invalidates it. Root window handles
 last until a new inventory or process exit, subject to live membership checks.
 Never replay IDs from a prior process or invent an element ID.
@@ -87,7 +90,10 @@ It validates the response shape for the requested operation. Timeout, EOF,
 malformed JSON, unexpected framing/shape, or output failure permanently closes
 and reaps that transport; every subsequent request refuses before writing.
 `TransportError.action_may_have_dispatched` retains action uncertainty and
-`retry_safe` is false. Closing the process never dismisses a menu. A fresh
+`retry_safe` is false. A bounded, well-framed startup refusal is preserved in
+`TransportError.startup_refusal` and its message; it remains a terminal error
+even if the diagnostic receipt says `retrySafe: true`. Pending startup success
+is rejected. Closing the process never dismisses a menu. A fresh
 session is only for separately chosen inspection, never automatic action replay.
 
 A well-framed native refusal remains a result for the caller to inspect with

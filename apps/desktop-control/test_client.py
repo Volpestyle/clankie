@@ -6,7 +6,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from client import Desktop, TransportError, require_success
+from client import Desktop, TransportError, require_success, validate_response
 
 
 class ClientTests(unittest.TestCase):
@@ -32,6 +32,68 @@ common={'success':True,'target':identity,'foregroundBefore':identity,'foreground
             write.assert_not_called()
         self.assertIs(again.exception, error)
         self.assertFalse(error.retry_safe)
+
+    def test_startup_refusal_survives_poisoning_without_any_write(self):
+        refusal = {'success': False, 'code': 'permission_denied',
+                   'message': 'Synthetic host lacks accessibility', 'retrySafe': True}
+        for op in ('windows', 'menu'):
+            with self.subTest(op=op), Desktop(self.fixture(
+                'print(' + repr(json.dumps(refusal)) + ',flush=True)\n'
+            )) as desktop:
+                desktop.process.wait(timeout=2)
+                with patch('client.os.write') as write:
+                    with self.assertRaises(TransportError) as failed:
+                        desktop.request({'op': op})
+                    write.assert_not_called()
+                self.assertIn('permission_denied', str(failed.exception))
+                self.assertIn(refusal['message'], str(failed.exception))
+                self.assertEqual(failed.exception.startup_refusal, refusal)
+                self.assertFalse(failed.exception.action_may_have_dispatched)
+                self.assert_poisoned(desktop, failed.exception)
+
+    def test_startup_success_malformed_and_excess_output_stay_terminal(self):
+        for body in [
+            "print(json.dumps(dict(common,windows=[])),flush=True)\n",
+            "print('invalid',flush=True)\n",
+            "print('{}\\n{}',flush=True)\n",
+            "sys.stdout.write('x' * (600 * 1024));sys.stdout.flush()\n",
+        ]:
+            with self.subTest(body=body), Desktop(self.fixture(body)) as desktop:
+                self.assertTrue(desktop.selector.select(2))
+                with patch('client.os.write') as write:
+                    with self.assertRaises(TransportError) as failed:
+                        desktop.request({'op': 'windows'})
+                    write.assert_not_called()
+                self.assertIsNone(failed.exception.startup_refusal)
+                self.assertFalse(failed.exception.action_may_have_dispatched)
+                self.assert_poisoned(desktop, failed.exception)
+
+    def test_partial_startup_refusal_keeps_the_read_deadline(self):
+        binary = self.fixture("sys.stdout.write('{');sys.stdout.flush();time.sleep(10)\n")
+        with Desktop(binary) as desktop:
+            self.assertTrue(desktop.selector.select(2))
+            with patch('client.REQUEST_TIMEOUT', 0.1), patch('client.os.write') as write:
+                with self.assertRaises(TransportError) as failed:
+                    desktop.request({'op': 'menu'})
+                write.assert_not_called()
+            self.assertIsInstance(failed.exception.__cause__, TimeoutError)
+            self.assertIsNone(failed.exception.startup_refusal)
+            self.assertFalse(failed.exception.action_may_have_dispatched)
+            self.assert_poisoned(desktop, failed.exception)
+
+    def test_rereview_action_mismatch_and_malformed_shapes(self):
+        identity = {'pid': 1, 'generation': '1', 'bundle': 'synthetic.fixture'}
+        common = {'success': True, 'target': identity, 'foregroundBefore': identity,
+                  'foregroundAfter': identity, 'focusChangesDuringOperation': 0}
+        wrong_action = dict(common, actionDispatched=True, action='AXShowMenu',
+                            retrySafe=False, effect='unverified')
+        with self.assertRaises(ValueError):
+            validate_response({'op': 'menu', 'action': 'AXCancel'}, wrong_action)
+        valid = dict(common, snapshot='s', window='w', visited=0, incomplete=False, nodes=[])
+        for key, value in [('visited', True), ('incomplete', 0), ('nodes', {}), ('snapshot', '')]:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validate_response({'op': 'observe', 'window': 'w'}, dict(valid, **{key: value}))
+        self.assertEqual(validate_response({'op': 'windows'}, dict(common, windows=[]))['windows'], [])
 
     def test_round_trip_and_explicit_action_opt_in(self):
         binary = self.fixture("for line in sys.stdin:\n print(json.dumps(dict(common,windows=[],request=json.loads(line),args=sys.argv[1:])),flush=True)\n")
