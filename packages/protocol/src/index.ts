@@ -1649,7 +1649,11 @@ export const OPERATOR_HEAD_AGENT_NAME = "clankie";
 /** Long-polled by the seat's stdio bridge; each event becomes one channel notification. */
 export const OPERATOR_SEAT_EVENTS_PATH = "/v1/seat/events";
 export const OPERATOR_SEAT_EVENT_WAIT_MS_MAX = 30_000;
-export const OperatorSeatEventKindSchema = z.enum(["wake", "watch", "escalation"]);
+/**
+ * `message` is a fleet seat's kind: a DM or a room turn that would otherwise
+ * be typed into the pane. The head never receives one.
+ */
+export const OperatorSeatEventKindSchema = z.enum(["wake", "watch", "escalation", "message"]);
 export type OperatorSeatEventKind = z.infer<typeof OperatorSeatEventKindSchema>;
 export const OperatorSeatEventSchema = z
   .object({
@@ -1668,6 +1672,21 @@ export const OperatorSeatEventsPageSchema = z
   .object({ schemaVersion: z.literal(1), events: z.array(OperatorSeatEventSchema).max(64) })
   .strict();
 export type OperatorSeatEventsPage = z.infer<typeof OperatorSeatEventsPageSchema>;
+/**
+ * A fleet seat's mailbox: the same page shape, one per herdr pane, long-polled
+ * by `clankie mcp --seat` from inside that pane. The bridge names the pane it
+ * sits in (its `HERDR_PANE_ID`); the service resolves that to the seat it
+ * already messages. While a bridge is polling, a message to that seat rides
+ * this mailbox as a channel event instead of being typed into the pane's pty,
+ * so nothing the operator has half-typed there is appended to or submitted.
+ */
+export const FLEET_SEAT_EVENTS_PATH = "/v1/fleet/seats/:paneId/events";
+export function fleetSeatEventsPath(paneId: string): string {
+  return `/v1/fleet/seats/${encodeURIComponent(paneId)}/events`;
+}
+/** The MCP server name a fleet seat's harness loads the channel from (`server:` form of the channels flag). */
+export const FLEET_SEAT_MCP_SERVER = "clankie-seat";
+
 /** The seat's answer to one escalation; it lands in the conversation as his reply. */
 export const OperatorSeatReplySchema = z
   .object({ schemaVersion: z.literal(1), text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX) })
