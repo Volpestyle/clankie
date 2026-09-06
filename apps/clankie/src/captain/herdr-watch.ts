@@ -592,8 +592,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * settles. The registry drops entries it already holds, so a re-publish that
    * saw no new output costs nothing downstream.
    */
-  // ponytail: a fixed tail poll re-parses the whole session file; watch the
-  // harness path instead if a long session makes the re-parse show up.
+  // ponytail: the reader tails Codex and Grok by byte offset, so a poll costs the
+  // append rather than the session. Claude and Pi re-parse on change because an
+  // append can re-root the parent chain their transcripts are walked through;
+  // give them a checkpointed chain if a long seat on those shows up in a profile.
   private async followTranscript(
     seatId: string,
     current: HerdrAgentSnapshot,

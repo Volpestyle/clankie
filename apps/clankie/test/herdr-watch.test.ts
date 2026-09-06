@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OPERATOR_CONVERSATION_TEXT_MAX } from "@clankie/protocol";
+import { OPERATOR_CONVERSATION_TEXT_MAX, OPERATOR_CONVERSATION_TOOL_DETAIL_MAX } from "@clankie/protocol";
 import { parseHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import {
@@ -431,6 +431,27 @@ describe("harness-native seat transcripts", () => {
       },
       { type: "message", role: "agent", text: "Shipped." },
     ]);
+  });
+
+  it("redacts a secret whose delimiter sits past any truncation ceiling", () => {
+    // Redaction must see the whole field: the quoted-value branch swallows the
+    // secret, while a scan cut before the closing quote falls back to the first
+    // token and would emit the rest of the value verbatim.
+    const output = `password="start ${"PRIVATE_FRAGMENT ".repeat(3_000)}"`;
+    const entries = parseHerdrSeatTranscript(
+      "codex",
+      JSON.stringify({
+        timestamp: "2026-09-05T00:00:00Z",
+        type: "response_item",
+        payload: { id: "t1", type: "function_call_output", call_id: "c1", output },
+      }),
+    );
+    const tool = entries.find((entry) => entry.type === "tool");
+    const detail = tool?.type === "tool" ? tool.detail : undefined;
+
+    expect(detail).toBe("[REDACTED]");
+    expect(detail).not.toContain("PRIVATE_FRAGMENT");
+    expect(detail?.length).toBeLessThanOrEqual(OPERATOR_CONVERSATION_TOOL_DETAIL_MAX);
   });
 
   it("follows Claude and Pi's active trees with typed tool traffic", () => {

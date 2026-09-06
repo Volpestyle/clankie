@@ -160,6 +160,15 @@ projection_, built from signals the service already has:
   when it settles. Re-reading is idempotent, the subject binding keeps a
   replacement session on the durable persona, and the first native import
   replaces the old one-answer seed behind a typed cursor-recovery boundary.
+- The tail costs the append, not the session. Codex and Grok rollouts are
+  append-only logs whose records normalize independently of their neighbours, so
+  the reader remembers the byte offset of the last complete line and folds in only
+  the new bytes — carrying tool names, the dedupe set, and the positional id base
+  across chunks, which keeps a tailed read identical to a whole-file parse. Claude
+  and Pi transcripts are walked as a parent chain that an append can re-root, so
+  they rebuild from the whole file when it changes and do no work at all when it
+  has not. A shrunk file, a new inode, or a same-length rewrite in place is
+  rewritten history rather than an append, and resets the tail.
 - A harness without a native transcript normalizer retains the bounded
   summary/final-answer projection. Adding its normalizer upgrades the same
   conversation without changing the relay or app.

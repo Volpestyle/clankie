@@ -1,4 +1,13 @@
-import { existsSync, globSync, readFileSync, readdirSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  globSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { redactSensitiveText } from "@clankie/observability";
@@ -45,6 +54,50 @@ export interface HerdrSeatTranscript {
 
 // ponytail: the app replays at most 10k events; raise both ceilings together if real sessions exceed this.
 const MAX_ENTRIES = 9_000;
+// ponytail: one tail per watched seat; the fleet is panes, not thousands.
+const MAX_TAILED_TRANSCRIPTS = 32;
+
+/**
+ * Carried across an incremental read so appended records transform exactly as
+ * they would inside a whole-file parse: tool names resolve against calls seen in
+ * earlier chunks, the dedupe key stays global, and the positional fallback id
+ * keeps counting from where the previous chunk stopped.
+ */
+interface FlatTranscriptState {
+  readonly toolNames: Map<string, string>;
+  readonly seen: Set<string>;
+  index: number;
+}
+
+interface TailedTranscript {
+  /** Device and inode together: a same-size, same-mtime atomic replace is a new file. */
+  readonly device: number;
+  readonly inode: number;
+  size: number;
+  mtimeMs: number;
+  /** Byte offset just past the last complete line already folded into entries. */
+  parsedBytes: number;
+  entries: HerdrTranscriptEntry[];
+  state: FlatTranscriptState;
+}
+
+/**
+ * The seat tail re-reads every watched transcript once a second while a Codex or
+ * Grok session grows past a hundred megabytes, so a whole-file read and parse per
+ * tick costs a core for output that only ever gains a suffix. These transcripts
+ * are append-only JSONL, so remembering the byte offset and folding in just the
+ * new lines makes a tick cost the append rather than the history.
+ */
+const tails = new Map<string, TailedTranscript>();
+
+/** Codex and Grok map each record independently; Claude and Pi re-walk a parent chain. */
+function tailableAgent(agent: string): boolean {
+  return agent === "codex" || agent === "grok";
+}
+
+function freshState(): FlatTranscriptState {
+  return { toolNames: new Map(), seen: new Set(), index: 0 };
+}
 
 /** Read the harness-native session tree Herdr already identifies for resume. */
 export function readHerdrSeatTranscript(
@@ -56,16 +109,99 @@ export function readHerdrSeatTranscript(
   if (resolvedSession === undefined) return undefined;
   const path = transcriptPath(agent, resolvedSession);
   if (path === undefined) return undefined;
-  const entries = parseHerdrSeatTranscript(agent, readFileSync(path, "utf8"));
+  const stats = statSync(path, { throwIfNoEntry: false });
+  if (stats === undefined) return undefined;
+  const sessionKey = `${resolvedSession.source}:${resolvedSession.kind}:${resolvedSession.value}`;
+  const key = `${agent}\u0000${path}`;
+  const cached = tails.get(key);
+  const sameFile = cached !== undefined && cached.device === stats.dev && cached.inode === stats.ino;
+  if (sameFile && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs) {
+    return { sessionKey, entries: keep(key, cached).entries };
+  }
+
+  // Only strict growth on the same file is an append; a shrunk file, a new inode,
+  // or a same-length rewrite in place is history we have to read again.
+  const tail =
+    sameFile && tailableAgent(agent) && stats.size > cached.size
+      ? cached
+      : {
+          device: stats.dev,
+          inode: stats.ino,
+          size: 0,
+          mtimeMs: 0,
+          parsedBytes: 0,
+          entries: [] as HerdrTranscriptEntry[],
+          state: freshState(),
+        };
+
+  if (tailableAgent(agent)) {
+    const chunk = readRecordsFrom(path, tail.parsedBytes, stats.size);
+    tail.entries = [...tail.entries, ...flatEntries(agent, chunk.records, tail.state)].slice(-MAX_ENTRIES);
+    tail.state.index += chunk.records.length;
+    tail.parsedBytes += chunk.consumed;
+  } else {
+    // ponytail: Claude and Pi re-walk a parent chain that an append can re-root,
+    // so they re-parse on change; give them a checkpointed chain to tail too if
+    // a long seat on those starts costing real CPU here.
+    tail.entries = parseHerdrSeatTranscript(agent, readFileSync(path, "utf8")).slice(-MAX_ENTRIES);
+    tail.parsedBytes = stats.size;
+  }
+  tail.size = stats.size;
+  tail.mtimeMs = stats.mtimeMs;
+  return { sessionKey, entries: keep(key, tail).entries };
+}
+
+/** Most-recently-read stays resident; the fleet turns panes over. */
+function keep(key: string, tail: TailedTranscript): TailedTranscript {
+  tails.delete(key);
+  tails.set(key, tail);
+  for (const stale of [...tails.keys()].slice(0, Math.max(0, tails.size - MAX_TAILED_TRANSCRIPTS))) {
+    tails.delete(stale);
+  }
+  return tail;
+}
+
+/**
+ * Decode whole lines only. A newline byte never appears inside a multi-byte
+ * UTF-8 sequence, so cutting at the last one keeps the decode boundary clean and
+ * leaves a half-written record for the next tick rather than dropping it.
+ */
+function readRecordsFrom(
+  path: string,
+  from: number,
+  to: number,
+): { records: Record<string, unknown>[]; consumed: number } {
+  if (to <= from) return { records: [], consumed: 0 };
+  const buffer = Buffer.allocUnsafe(to - from);
+  const fd = openSync(path, "r");
+  let read: number;
+  try {
+    read = readSync(fd, buffer, 0, buffer.length, from);
+  } finally {
+    closeSync(fd);
+  }
+  if (read <= 0) return { records: [], consumed: 0 };
+  // Bound the search to the bytes actually read: allocUnsafe leaves the rest of
+  // the buffer holding whatever was in memory, newlines included.
+  const complete = buffer.subarray(0, read).lastIndexOf(0x0a);
+  if (complete < 0) return { records: [], consumed: 0 };
   return {
-    sessionKey: `${resolvedSession.source}:${resolvedSession.kind}:${resolvedSession.value}`,
-    entries: entries.slice(-MAX_ENTRIES),
+    records: parseRecords(buffer.toString("utf8", 0, complete + 1)),
+    consumed: complete + 1,
   };
 }
 
 /** Normalize the words and expandable tool executions the harness TUI renders. */
 export function parseHerdrSeatTranscript(agent: string, jsonl: string): HerdrTranscriptEntry[] {
-  const entries = jsonl
+  const records = parseRecords(jsonl);
+  if (tailableAgent(agent)) return flatEntries(agent, records, freshState());
+  if (agent === "claude") return claudeEntries(records);
+  if (agent === "pi") return piEntries(records);
+  return [];
+}
+
+function parseRecords(jsonl: string): Record<string, unknown>[] {
+  return jsonl
     .split("\n")
     .filter(Boolean)
     .flatMap((line) => {
@@ -76,11 +212,15 @@ export function parseHerdrSeatTranscript(agent: string, jsonl: string): HerdrTra
         return [];
       }
     });
-  if (agent === "codex") return codexEntries(entries);
-  if (agent === "claude") return claudeEntries(entries);
-  if (agent === "pi") return piEntries(entries);
-  if (agent === "grok") return grokEntries(entries);
-  return [];
+}
+
+/** Transform records that depend only on their own position, so a tail can append. */
+function flatEntries(
+  agent: string,
+  records: readonly Record<string, unknown>[],
+  state: FlatTranscriptState,
+): HerdrTranscriptEntry[] {
+  return agent === "codex" ? codexEntries(records, state) : grokEntries(records, state);
 }
 
 function transcriptPath(agent: string, session: HerdrAgentSession): string | undefined {
@@ -126,10 +266,14 @@ function grokSessionForProcess(processId: number | undefined): HerdrAgentSession
   }
 }
 
-function codexEntries(entries: readonly Record<string, unknown>[]): HerdrTranscriptEntry[] {
-  const toolNames = new Map<string, string>();
+function codexEntries(
+  entries: readonly Record<string, unknown>[],
+  state: FlatTranscriptState,
+): HerdrTranscriptEntry[] {
+  const { toolNames } = state;
   return dedupeTools(
-    entries.flatMap<HerdrTranscriptEntry>((entry, index) => {
+    entries.flatMap<HerdrTranscriptEntry>((entry, offset) => {
+      const index = state.index + offset;
       if (entry.type !== "response_item") return [];
       const payload = record(entry.payload);
       if (payload === undefined) return [];
@@ -192,6 +336,7 @@ function codexEntries(entries: readonly Record<string, unknown>[]): HerdrTranscr
           };
       return [transcriptTool(`codex:${nativeId}`, callId, name, phase, detail, at)];
     }),
+    state.seen,
   );
 }
 
@@ -327,10 +472,14 @@ function piEntries(entries: readonly Record<string, unknown>[]): HerdrTranscript
   );
 }
 
-function grokEntries(entries: readonly Record<string, unknown>[]): HerdrTranscriptEntry[] {
-  const toolNames = new Map<string, string>();
+function grokEntries(
+  entries: readonly Record<string, unknown>[],
+  state: FlatTranscriptState,
+): HerdrTranscriptEntry[] {
+  const { toolNames } = state;
   return dedupeTools(
-    entries.flatMap<HerdrTranscriptEntry>((entry, index) => {
+    entries.flatMap<HerdrTranscriptEntry>((entry, offset) => {
+      const index = state.index + offset;
       const at = timestamp(entry);
       if (entry.type === "user") {
         if (typeof entry.prompt_index !== "number") return [];
@@ -396,6 +545,7 @@ function grokEntries(entries: readonly Record<string, unknown>[]): HerdrTranscri
         ),
       ];
     }),
+    state.seen,
   );
 }
 
@@ -461,8 +611,10 @@ function transcriptTool(
 }
 
 /** One invocation can appear in both the model item and a harness backend item. */
-function dedupeTools(entries: readonly HerdrTranscriptEntry[]): HerdrTranscriptEntry[] {
-  const seen = new Set<string>();
+function dedupeTools(
+  entries: readonly HerdrTranscriptEntry[],
+  seen: Set<string> = new Set(),
+): HerdrTranscriptEntry[] {
   return entries.filter((entry) => {
     if (entry.type !== "tool") return true;
     const key = `${entry.toolCallId}\u0000${entry.phase}`;
