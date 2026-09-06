@@ -861,9 +861,7 @@ describe("hiring a seat", () => {
   });
 
   it("skips claude mcp add when the seat server is already registered", async () => {
-    const getClaudeMcp = vi.fn(() =>
-      Promise.resolve({ status: 0, stdout: "clankie-seat", stderr: "" }),
-    );
+    const getClaudeMcp = vi.fn(() => Promise.resolve({ status: 0, stdout: "clankie-seat", stderr: "" }));
     const addClaudeMcp = vi.fn(() => Promise.resolve());
     const claudeHired: HerdrAgentSnapshot = {
       ...hired,
