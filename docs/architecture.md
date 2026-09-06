@@ -135,7 +135,12 @@ persona rather than a fleet contact and projects its transcript into the
 conversation the app pins. While a seat is bound, self-wakes, herdr completion
 watches, and room escalations reach it as channel events pushed by `clankie
 mcp`; with no seat open they run the TUI operator lane on pi as before. Social
-lanes never sit in the seat: the owner's plan carries only the owner.
+lanes never sit in the seat: the owner's plan carries only the owner. Every
+fleet seat has a mailbox of its own, and a Claude Code seat launched with the
+channel runs `clankie mcp --seat`, a channel-only bridge that polls it: a DM or
+room turn then lands as a channel event instead of keystrokes typed into the
+pane's pty, so nothing the operator is drafting there is touched
+([ADR 0161](adr/0161-a-fleet-seat-reads-its-mail-instead-of-its-keyboard.md)).
 
 A TUI process creates a fresh captain conversation unless `--chat` explicitly
 resumes one. A captain conversation and its Pi session are one lifetime: bounded

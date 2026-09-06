@@ -122,9 +122,11 @@ listening to.
 
 `create` with a persona scope is idempotent per persona, like the default global
 conversation. `send` to a persona conversation resolves its current seat and
-pipes the text to that pane (`herdr pane send-text` + Enter) — a direct lane,
-no captain model turn. A persona with no live seat rejects the send with a
-typed failure; the thread stays readable.
+hands the text to that seat's mailbox when a channel bridge is polling it, and
+otherwise pipes it to the pane (`herdr pane send-text` + Enter)
+([ADR 0161](0161-a-fleet-seat-reads-its-mail-instead-of-its-keyboard.md)) — a
+direct lane, no captain model turn. A persona with no live seat rejects the
+send with a typed failure; the thread stays readable.
 
 `composer_catalog` resolves through the same address. A Clankie conversation
 reports the Pi resources its captain session loads. A persona conversation
