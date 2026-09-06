@@ -719,11 +719,14 @@ still work and the events are dropped.
 A fleet pane's stdio MCP server: no tools, only the channel. A message to that
 agent (a DM from the app, or a group-chat turn) arrives as
 `<channel source="clankie" kind="message" conversation="…" event_id="…">`
-instead of being typed into the pane. Claude Code binds that channel when the
-server is in the harness MCP config (`claude mcp add clankie-seat -- clankie mcp
---seat`) and the session is started with `--dangerously-load-development-channels
-server:clankie-seat`. `--mcp-config` alone starts the process but does not bind
-`server:`. The service's hire path persists the server and passes the channels
+instead of being typed into the pane. The bridge polls only when the parent
+`claude` argv loaded `server:clankie-seat` as a channel; otherwise it serves
+empty and does not bind. Claude Code binds that channel when the server is in
+the harness MCP config (`claude mcp add clankie-seat -- clankie mcp --seat`) and
+the session is started with `--dangerously-load-development-channels
+server:clankie-seat`. `--channels server:clankie-seat` starts without the
+development-channels dialog but then rejects `server:` as not on the approved
+allowlist. The service's hire path persists the server and passes the dangerous
 flag for a claude seat.
 
 ### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`

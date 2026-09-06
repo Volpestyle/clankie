@@ -69,11 +69,28 @@ flowchart LR
   the harness, so `unknown_seat` is retried quietly rather than treated as a
   failure.
 - **The hire path loads the channel.** Channels are a per-launch opt-in with
-  no persistent setting, and the `server:` form of the flag loads a bare
-  `--mcp-config` server, so a seat hired from the app for the `claude` harness
-  is started with the config and the flag. A pane the operator opens by hand
-  gets the mailbox only if launched the same way; otherwise it keeps the pty
-  lane.
+  no persistent setting, and the `server:` form of the flag binds only a server
+  in Claude Code's persisted config, never one handed over with `--mcp-config`
+  (probed 2026-09-06: the harness starts the process but reports `no MCP server
+  configured with that name`). So a seat hired from the app for the `claude`
+  harness gets `clankie-seat` registered once at user scope
+  (`claude mcp add -s user clankie-seat -- clankie mcp --seat`) and is started
+  with `--dangerously-load-development-channels server:clankie-seat`. That
+  flag stops every launch at a "Loading development channels" dialog before
+  the TUI is usable; the hire path reads the pane, recognizes that dialog and
+  nothing else, confirms its preselected "local development" option, and waits
+  for the agent to settle. The approved form, `--channels server:clankie-seat`,
+  starts without the dialog but then rejects a `server:` entry as not on the
+  allowlist, so the development flag is the one that binds. A pane the
+  operator opens by hand gets the mailbox only if launched with the flag;
+  otherwise it keeps the pty lane.
+- **The bridge polls only when the channel is bound.** A user-scope
+  registration means every Claude Code session on the machine spawns the
+  bridge, including ones started without the flag, whose harness would drop
+  each notification on the floor while the mailbox read as bound — a black
+  hole with no pty fallback. The bridge therefore reads its parent process's
+  argv and polls only when that launch named `server:clankie-seat` to a
+  channels flag; otherwise it serves an empty channel and never binds.
 
 ## Consequences
 

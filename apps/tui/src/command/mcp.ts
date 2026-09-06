@@ -11,13 +11,17 @@
  * the seat as his head. A `reply` tool answers an escalating room.
  *
  * `--seat` is a fleet pane's mailbox: no tools, no `/v1/mcp` client, only the
- * channel. Identity is `HERDR_PANE_ID`. Without it the process serves an empty
- * channel and does not poll; with it, the bridge long-polls that pane's fleet
- * mailbox and pushes each operator or group-chat message as a channel event
- * instead of typing it into the pane's pty.
+ * channel. Identity is `HERDR_PANE_ID`. The bridge polls only when that pane
+ * id is set *and* the parent `claude` argv loaded this server as a channel
+ * (`--dangerously-load-development-channels` or `--channels` plus
+ * `server:clankie-seat`). Otherwise it serves an empty channel and does not
+ * poll, so a user-scoped registration cannot bind the mailbox in a session
+ * that will drop the notifications.
  *
  * stdout is the wire. Nothing here may print to it except JSON-RPC.
  */
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -44,7 +48,9 @@ import {
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
+const execFileAsync = promisify(execFileCallback);
 const MCP_USAGE = "Usage: clankie mcp [--lane operator | --seat]";
+const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
 const OUTBOX_POLL_WAIT_MS = 25_000;
@@ -99,6 +105,8 @@ export interface McpCommandOptions {
   readonly pollWaitMs?: number;
   /** Test seam: override the failed-poll retry delay. */
   readonly pollRetryMs?: number;
+  /** Test seam: the parent `claude` argv instead of `ps` on `process.ppid`. */
+  readonly readParentArgv?: () => Promise<string | undefined>;
 }
 
 export type McpArgs = { readonly lane: CaptainSessionLaneV2 } | { readonly seat: true };
@@ -126,6 +134,41 @@ export function parseMcpArgs(args: readonly string[]): McpArgs {
   if (seat && lane !== undefined) throw new Error(MCP_USAGE);
   if (seat) return { seat: true };
   return { lane: lane ?? "operator" };
+}
+
+/**
+ * Whether a parent `claude` command line loaded this fleet server as a
+ * channel. A `ps` miss, a missing ppid, or an argv without the flag naming
+ * `server:clankie-seat` after it all mean do not poll.
+ */
+export function parentArgvLoadsFleetChannel(argv: string | undefined): boolean {
+  if (argv === undefined) return false;
+  const tokens = argv
+    .trim()
+    .split(/\s+/u)
+    .filter((token) => token.length > 0);
+  if (tokens.length === 0) return false;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const flag = tokens[index];
+    if (flag !== "--dangerously-load-development-channels" && flag !== "--channels") continue;
+    if (tokens.slice(index + 1).includes(FLEET_CHANNEL_SERVER)) return true;
+  }
+  return false;
+}
+
+async function defaultReadParentArgv(): Promise<string | undefined> {
+  const ppid = process.ppid;
+  if (!Number.isInteger(ppid) || ppid <= 1) return undefined;
+  try {
+    const { stdout } = await execFileAsync("ps", ["-o", "args=", "-p", String(ppid)], {
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+    const argv = String(stdout).trim();
+    return argv.length === 0 ? undefined : argv;
+  } catch {
+    return undefined;
+  }
 }
 
 const REPLY_TOOL: Tool = {
@@ -383,6 +426,19 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   if (paneId.length === 0) {
     await server.connect(transport);
     stderr.write("clankie mcp: --seat needs HERDR_PANE_ID; serving an empty channel\n");
+    await closed;
+    return 0;
+  }
+
+  let parentArgv: string | undefined;
+  try {
+    parentArgv = await (options.readParentArgv ?? defaultReadParentArgv)();
+  } catch {
+    parentArgv = undefined;
+  }
+  if (!parentArgvLoadsFleetChannel(parentArgv)) {
+    await server.connect(transport);
+    stderr.write("clankie mcp: channel not loaded for this session; not polling\n");
     await closed;
     return 0;
   }

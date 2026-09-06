@@ -8,6 +8,7 @@ import {
   CHANNEL_NOTIFICATION_METHOD,
   createFleetSeatBridge,
   createSeatBridge,
+  parentArgvLoadsFleetChannel,
   parseMcpArgs,
   pumpSeatEvents,
   runMcpCommand,
@@ -95,6 +96,25 @@ describe("clankie mcp", () => {
     expect(() => parseMcpArgs(["--seat", "--lane", "operator"])).toThrow("Usage: clankie mcp");
     expect(() => parseMcpArgs(["--lane", "operator", "--seat"])).toThrow("Usage: clankie mcp");
     expect(() => parseMcpArgs(["--seat", "--lane"])).toThrow("Usage: clankie mcp");
+  });
+
+  it("polls the fleet mailbox only when the parent argv loaded this server as a channel", () => {
+    expect(
+      parentArgvLoadsFleetChannel("claude --dangerously-load-development-channels server:clankie-seat"),
+    ).toBe(true);
+    expect(
+      parentArgvLoadsFleetChannel(
+        "claude --mcp-config {} --dangerously-load-development-channels server:other --name x",
+      ),
+    ).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude --channels server:clankie-seat")).toBe(true);
+    expect(parentArgvLoadsFleetChannel("claude --channels server:other server:clankie-seat")).toBe(true);
+    expect(
+      parentArgvLoadsFleetChannel("claude server:clankie-seat --dangerously-load-development-channels"),
+    ).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude")).toBe(false);
+    expect(parentArgvLoadsFleetChannel(undefined)).toBe(false);
+    expect(parentArgvLoadsFleetChannel("")).toBe(false);
   });
 
   it("re-serves the lane bank over stdio with the channel capability and a reply tool", async () => {
@@ -257,6 +277,29 @@ describe("clankie mcp", () => {
     await server.close();
   });
 
+  it("does not poll when the parent argv did not load this server as a channel", async () => {
+    let polled = false;
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    let written = "";
+    const running = runMcpCommand(["--seat"], {
+      env: { HERDR_PANE_ID: "w1:p9" },
+      readParentArgv: async () => "claude",
+      connectSeatUpstream: async () => {
+        polled = true;
+        return { pollEvents: async () => [], close: async () => undefined };
+      },
+      transport: serverTransport,
+      stderr: { write: (chunk: string) => void (written += chunk) },
+    });
+    const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
+    await client.connect(clientTransport);
+    expect((await client.listTools()).tools).toEqual([]);
+    await client.close();
+    await expect(running).resolves.toBe(0);
+    expect(polled).toBe(false);
+    expect(written).toContain("channel not loaded for this session; not polling");
+  });
+
   it("retries a 404 fleet mailbox without throwing", async () => {
     let polls = 0;
     let closed = false;
@@ -264,6 +307,7 @@ describe("clankie mcp", () => {
     let written = "";
     const running = runMcpCommand(["--seat"], {
       env: { HERDR_PANE_ID: "w1:p9" },
+      readParentArgv: async () => "claude --dangerously-load-development-channels server:clankie-seat",
       connectSeatUpstream: async () => ({
         pollEvents: async () => {
           polls += 1;
