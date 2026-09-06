@@ -6,6 +6,7 @@ import { statusCommand } from "../src/command/status.ts";
 import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
 import { runGamesCommand } from "../src/command/games.ts";
+import { runFleetCommand } from "../src/command/fleet.ts";
 import { runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 import { runEffortCommand } from "../src/command/effort.ts";
@@ -134,6 +135,11 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "games") {
       const result = await runGamesCommand(rest, options);
+      outputJson(stdout, result);
+      return 0;
+    }
+    if (command === "fleet") {
+      const result = await runFleetCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }

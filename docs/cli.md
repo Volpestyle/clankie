@@ -41,21 +41,21 @@ starts the clankie service if needed and attaches the fullscreen face.
 `--json` is required only where the default is human-readable (pairing QR,
 device table, credential-rotate sentence). Everything else is already JSON.
 
-| Command                                                                  | stdout                                                                                       |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`           | JSON                                                                                         |
-| `model …`, `effort …`, `image-model …`, `video-model …`                  | JSON                                                                                         |
-| `persona …`, `games …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
-| `play status`                                                            | JSON                                                                                         |
-| `send --conversation ID …`                                               | JSON accepted-run receipt or refusal                                                         |
-| `memory …`, `metrics …`                                                  | JSON                                                                                         |
-| `play stop`                                                              | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
-| `prompt …`, `memory-card …`                                              | Plain text: the prompt or card itself, verbatim                                              |
-| `seat`                                                                   | Interactive (TTY); `seat --dry-run` is JSON                                                  |
-| `mcp`                                                                    | JSON-RPC for a harness, never for people                                                     |
-| `pair`, `devices`, `operator-credential rotate`                          | Human text; pass `--json`                                                                    |
-| `help`                                                                   | This index (plain text)                                                                      |
-| `--version`                                                              | `clankie <version>`                                                                          |
+| Command                                                                             | stdout                                                                                       |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`                      | JSON                                                                                         |
+| `model …`, `effort …`, `image-model …`, `video-model …`                             | JSON                                                                                         |
+| `persona …`, `games …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
+| `play status`                                                                       | JSON                                                                                         |
+| `send --conversation ID …`                                                          | JSON accepted-run receipt or refusal                                                         |
+| `memory …`, `metrics …`                                                             | JSON                                                                                         |
+| `play stop`                                                                         | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
+| `prompt …`, `memory-card …`                                                         | Plain text: the prompt or card itself, verbatim                                              |
+| `seat`                                                                              | Interactive (TTY); `seat --dry-run` is JSON                                                  |
+| `mcp`                                                                               | JSON-RPC for a harness, never for people                                                     |
+| `pair`, `devices`, `operator-credential rotate`                                     | Human text; pass `--json`                                                                    |
+| `help`                                                                              | This index (plain text)                                                                      |
+| `--version`                                                                         | `clankie <version>`                                                                          |
 
 Do not edit `~/.config/clankie/clankie.json`,
 `~/.config/clankie/settings.json`, or Keychain entries by hand.
@@ -447,6 +447,34 @@ Read or set whether the PokeAgent MMO body is available. JSON contains the
 `"restart": "clankie restart captain"`. The TUI `/games` command calls this
 same writer.
 
+### `fleet [status]` / `fleet set --notes TEXT` / `fleet clear`
+
+Read, set, or clear how the owner wants work routed across the agents Clankie
+leads — which harness is the workhorse, which one reviews, what never goes to
+which. Up to 4,000 characters of free text.
+
+**The default is empty**, and empty means he picks a harness per job on his own.
+Nothing here ships with an opinion; this is where you add one.
+
+It is free text rather than a table of roles because an enum of
+`reviewer`/`implementer` only covers the situations someone enumerated, and the
+useful ones are conditional ("never codex on Swift", "grok for a hostile read on
+work that already passed review"). The thing reading it is a model.
+
+The notes reach him as the `fleet` prompt section, and only on lanes that hold a
+shell — a room that cannot dispatch would carry the section for nothing. They are
+preference, not authority: the section says plainly that he still reads the work
+and decides, and a note here can no more widen his reach than a warmer persona
+can. Unset renders no section at all.
+
+JSON contains `{ "ok": true, "fleet": { "notes": "…" }, "settingsFile": "…", "restart": "clankie restart captain" }`.
+The TUI `/fleet` command opens the same editor and `/fleet status` prints the
+same values.
+
+```bash
+clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
+```
+
 ### `herdr [status|open]` / `herdr set --runtime auto|bundled|external` / `herdr set --session NAME`
 
 Clankie saves one worker-runtime binding at service startup
@@ -517,7 +545,7 @@ inspect the conversation before resubmitting. Observe replies with
 `clankie --chat ID` or the conversation API. The running service and a local
 captain credential are required.
 
-### `prompt [--lane LANE] [--sections identity,persona,reach,address,model]`
+### `prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model]`
 
 The system prompt that lane's session starts from, printed verbatim as plain
 text. The intended consumer is a seat launcher in another harness, which reads
@@ -527,13 +555,14 @@ it once at startup so the seat begins from the same words the service lanes do.
 `gameplay`, and must be the lane the bearer speaks for. The operator bearer
 comes from the credential broker, so this reads the operator lane.
 
-Sections default to the four a session is built with, joined by one blank line:
+Sections default to the five a session is built with, joined by one blank line:
 
 | Section    | What it is                                                              |
 | ---------- | ----------------------------------------------------------------------- |
 | `identity` | `instructions.md` — who he is and how he works                          |
 | `persona`  | The owner-authored character configuration                              |
 | `reach`    | The machine-access or this-room paragraph for that lane                 |
+| `fleet`    | Owner-authored routing preference; shell-holding lanes only, when set   |
 | `address`  | His own mailbox, when one is connected                                  |
 | `model`    | The card naming the model the service lanes run on (ask for it by name) |
 

@@ -16,11 +16,11 @@ import type { DurableMessageNotice } from "./conversations.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
- * `reach`, and `address` are what a pi session starts with; `model` is the
- * card a hidden extension refreshes per run. A seat that carries the identity
- * some other way (a Claude Code output style) asks for the rest by name.
+ * `reach`, `fleet`, and `address` are what a pi session starts with; `model` is
+ * the card a hidden extension refreshes per run. A seat that carries the
+ * identity some other way (a Claude Code output style) asks for the rest by name.
  */
-export const CAPTAIN_PROMPT_SECTIONS = ["identity", "persona", "reach", "address", "model"] as const;
+export const CAPTAIN_PROMPT_SECTIONS = ["identity", "persona", "reach", "fleet", "address", "model"] as const;
 export type CaptainPromptSection = (typeof CAPTAIN_PROMPT_SECTIONS)[number];
 
 /**

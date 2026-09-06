@@ -38,6 +38,26 @@ describe("lane prompt assembly", () => {
     expect(prompt).not.toContain("# Your address");
   });
 
+  it("carries the owner's routing preference only where a fleet can actually be reached", () => {
+    const withFleet = ClankieSettingsSchema.parse({
+      schemaVersion: 1,
+      fleet: { notes: "codex is the workhorse. never codex on Swift." },
+      email: { fromAddress: "clankie@example.test" },
+    });
+    const operator = assembleLanePrompt("operator", true, withFleet);
+    expect(operator).toContain("# Your fleet");
+    expect(operator).toContain("never codex on Swift.");
+    // Preference, not a router: he is told he still decides.
+    expect(operator).toContain("not a rule you execute");
+    expect(operator.indexOf("# Machine access")).toBeLessThan(operator.indexOf("# Your fleet"));
+    expect(operator.indexOf("# Your fleet")).toBeLessThan(operator.indexOf("# Your address"));
+    expect(operator).not.toMatch(/\n\n\n/u);
+    // A room with no shell cannot dispatch, so the section is dead weight there.
+    expect(assembleLanePrompt("discord_presence", false, withFleet)).not.toContain("# Your fleet");
+    // Unset renders nothing rather than an empty heading.
+    expect(assembleLanePrompt("operator", true, settings)).not.toContain("# Your fleet");
+  });
+
   it("renders only the named sections, so a seat can skip the identity its output style already carries", () => {
     const prompt = assembleLanePrompt("operator", true, settings, ["persona", "reach", "address", "model"], {
       model: "## The model you are running on\nstub",

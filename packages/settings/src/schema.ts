@@ -360,6 +360,27 @@ export const GameplaySettingsSchema = z
   .strict();
 export type GameplaySettings = z.infer<typeof GameplaySettingsSchema>;
 
+/**
+ * How the owner wants work routed across the agents Clankie leads.
+ *
+ * Free text, and deliberately not a table of roles: an enum of `reviewer` /
+ * `implementer` only ever covers the situations someone enumerated, and the
+ * interesting ones are conditional — a harness for a language, a second opinion
+ * on work that already passed review, a mix that avoids shared blind spots.
+ * The thing reading this is a model, so prose costs less than a matcher and
+ * says more.
+ *
+ * Preferences, never authority. This says who he should reach for, not what he
+ * is permitted to do: a note here can no more widen his reach than a warmer
+ * persona can.
+ */
+export const FleetSettingsSchema = z
+  .object({
+    notes: z.string().max(4_000).default(""),
+  })
+  .strict();
+export type FleetSettings = z.infer<typeof FleetSettingsSchema>;
+
 /** Server ids prefix every tool name they contribute, so keep them identifier-shaped. */
 const McpServerIdSchema = z
   .string()
@@ -490,6 +511,7 @@ export const ClankieSettingsSchema = z
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
+    fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
     mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),

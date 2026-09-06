@@ -212,7 +212,13 @@ export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: Capt
 }
 
 /** The sections a pi session is built with; the model card is refreshed per run instead. */
-const SESSION_PROMPT_SECTIONS: readonly CaptainPromptSection[] = ["identity", "persona", "reach", "address"];
+const SESSION_PROMPT_SECTIONS: readonly CaptainPromptSection[] = [
+  "identity",
+  "persona",
+  "reach",
+  "fleet",
+  "address",
+];
 
 /**
  * The prompt a lane starts from, one section per concern. The pi session and a
@@ -239,6 +245,22 @@ export function assembleLanePrompt(
         "# This room",
         "You do not have a shell or filesystem tools in this room. If someone asks you to inspect herdr, run a command, or read a file, say you cannot from here. Do not imply you chose not to look.",
       ].join("\n");
+  // Owner-authored routing preference, and only where a fleet can be reached: a
+  // room with no shell cannot dispatch, so the section would be dead weight
+  // there. Unset renders nothing rather than an empty heading. Stated as
+  // preference on purpose — he is handed the context and decides, the way he
+  // does with every other thing his person tells him.
+  const fleetNotes = currentSettings.fleet.notes.trim();
+  const fleet =
+    systemTools && fleetNotes.length > 0
+      ? [
+          "# Your fleet",
+          "",
+          "How your person wants work spread across the agents you lead. Their preference, not a rule you execute — you still read the work and decide, and you say so when you go another way.",
+          "",
+          fleetNotes,
+        ].join("\n")
+      : "";
   // His own address is a fact he should be able to say without calling a tool
   // for it, and it belongs to whichever mailbox is actually connected — so it
   // is derived from settings rather than written into the persona a second
@@ -256,6 +278,7 @@ export function assembleLanePrompt(
     identity,
     persona,
     reach,
+    fleet,
     address,
     ...extra,
   };

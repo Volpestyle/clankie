@@ -25,6 +25,7 @@ import { buildProviderCommands, createProviderServices, formatModelBanner } from
 import { buildConnectCommands } from "./connect-commands.ts";
 import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
+import { buildFleetCommands } from "./fleet-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
 import { buildMemoryCommands } from "./memory-commands.ts";
 import { buildPairCommands } from "./pair-commands.ts";
@@ -344,6 +345,7 @@ const commands = [
   }),
   ...buildDiscordCommands(brokeredCommands),
   ...buildPersonaCommands({ settings: settingsStore }),
+  ...buildFleetCommands({ settings: settingsStore }),
   ...buildVoiceCommands(brokeredCommands),
   ...buildMemoryCommands(operatorClient === undefined ? {} : { client: operatorClient }),
 ];

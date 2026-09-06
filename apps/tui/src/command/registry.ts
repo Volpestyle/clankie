@@ -85,6 +85,10 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
+    nouns: ["fleet"],
+    lines: ["  fleet status|set --notes TEXT|clear  Read or set how he routes work across his agents"],
+  },
+  {
     nouns: ["herdr"],
     lines: [
       "  herdr [status|open] | set --runtime auto|bundled|external | set --session NAME",
@@ -109,7 +113,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["prompt"],
     lines: [
-      "  prompt [--lane LANE] [--sections identity,persona,reach,address,model]",
+      "  prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model]",
       "                           The system prompt that lane's session starts from (plain text)",
     ],
   },
