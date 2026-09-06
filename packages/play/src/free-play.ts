@@ -365,6 +365,42 @@ export const FreePlayTurnSchema = z
   .strict();
 export type FreePlayTurn = z.infer<typeof FreePlayTurnSchema>;
 
+/**
+ * An action a journal legitimately holds that the live loop can no longer take.
+ *
+ * The action vocabulary moves: [ADR 0145](../../../docs/adr/0145-the-world-is-the-only-body.md)
+ * retired the local body's checkpoint actions with the emulator itself. The
+ * journal is an archive, not a projection of today's catalog, so validating a
+ * historical line against the living union made every retirement silently
+ * destroy history — one 2026-08-11 run holding `load_checkpoint` threw for the
+ * whole file, and `parseFreePlayJournal` throws per file, so that run vanished
+ * from evaluation, journey continuity, and the operator's own trail read.
+ *
+ * Deliberately open rather than an enumeration of what has been retired so far:
+ * a list would have to be edited by whoever next retires an action, which is
+ * exactly the step that was missed. Reading is tolerant; writing is not — every
+ * written turn is validated against `FreePlayTurnSchema` first, so a retired
+ * kind can be read back but never recorded.
+ */
+const FreePlayRetiredActionSchema = z.object({ kind: z.string().min(1).max(64) }).catchall(z.unknown());
+const FreePlayJournaledActionSchema = z.union([FreePlayActionSchema, FreePlayRetiredActionSchema]);
+export type FreePlayJournaledAction = z.infer<typeof FreePlayJournaledActionSchema>;
+
+/** A turn as an archive holds it: today's fields, any historically valid action. */
+export const FreePlayJournaledTurnSchema = FreePlayTurnSchema.extend({
+  action: FreePlayJournaledActionSchema.nullable(),
+});
+
+/**
+ * The recorded action as the current loop understands it, or null when the
+ * vocabulary has moved past it. Null is "unknown", never "did nothing".
+ */
+export function liveFreePlayAction(action: FreePlayJournaledAction | null): FreePlayAction | null {
+  if (action === null) return null;
+  const parsed = FreePlayActionSchema.safeParse(action);
+  return parsed.success ? parsed.data : null;
+}
+
 interface FreePlayVolition {
   /** Turns where he could have spoken — every turn. */
   offered: number;

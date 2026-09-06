@@ -24,6 +24,7 @@ An archive only needs its normal `README.md`, `evidence/`, and `flows/`
 contents. The viewer derives its title from the README heading and discovers
 all other capabilities from the files present.
 
+- [2026-09-05 PokeAgent evidence sweep: every journal this machine has kept](2026-09-05-pokeagent-evidence-sweep/README.md)
 - [2026-09-05 The push delivery boundary, proved against the real gateway](2026-09-05-push-delivery-boundary/README.md)
 - [2026-08-16 PokeAgent performance](2026-08-16-pokeagent-performance/README.md)
 - [2026-08-18 PokeAgents trial run](2026-08-18-pokeagents-trial-run/README.md)

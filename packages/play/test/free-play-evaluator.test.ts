@@ -323,6 +323,25 @@ describe("free-play evaluator", () => {
     expect(report.aggregate.movementEffectiveness).toEqual({ unknown: 1 });
   });
 
+  it("reads a retired action as unknown rather than as a turn that did nothing", () => {
+    const retired = turn(0, "accepted", "delivery-retired");
+    const report = evaluateFreePlayJournal({
+      journal: journal({ ...retired, turn: { ...retired.turn, action: { kind: "load_checkpoint" } } }),
+    });
+
+    expect(report.turns[0]?.decision).toMatchObject({
+      action: { kind: "load_checkpoint" },
+      actionRetired: true,
+    });
+    expect(report.turns[0]?.verdicts).toMatchObject({
+      intentToAction: "unknown",
+      goalToAction: "unknown",
+      sceneActionAppropriateness: "unknown",
+      movementEffectiveness: "not_applicable",
+    });
+    expect(report.aggregate.retiredActionTurns).toBe(1);
+  });
+
   it("uses the canonical state-root defaults for lifecycle and voice joins", async () => {
     const root = await tempDir();
     const stateRoot = join(root, "state");

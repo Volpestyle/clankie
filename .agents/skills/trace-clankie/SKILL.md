@@ -50,6 +50,12 @@ without storing message bodies or media.
   commit. Compare process/restart and commit times, then use fields actually
   present in the journal to prove capabilities; a process may also have started
   from uncommitted source, so do not infer an exact commit from timing alone.
+- **A journal turn may name an action this build can no longer take.** The
+  archive is read against its own history, not today's catalog (ADR 0160), so a
+  run from before an action was retired still parses — `load_checkpoint` in the
+  2026-08-11 runs, for one. The evaluator marks those turns `actionRetired` and
+  counts them in `aggregate.retiredActionTurns`; their verdicts read `unknown`,
+  which means the vocabulary is gone, never that the turn did nothing.
 - **A screenshot reference is evidence only when its bytes match.** Resolve its
   relative `.screenshots/...` path from the journal directory and verify both
   `byteLength` and `sha256`; missing or mismatched bytes are a broken artifact,

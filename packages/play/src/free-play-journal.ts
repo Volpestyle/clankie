@@ -21,8 +21,8 @@ import path from "node:path";
 import { EmbodimentEnvironmentIdSchema, EmbodimentVenueSchema } from "@clankie/protocol";
 import { z } from "zod";
 import {
+  FreePlayJournaledTurnSchema,
   FreePlayTurnEvidenceSchema,
-  FreePlayTurnSchema,
   type FreePlayResult,
   type FreePlayTurn,
   type FreePlayTurnEvidence,
@@ -100,7 +100,12 @@ const FreePlayJournalTurnV1Schema = z
     schemaVersion: z.literal(1),
     /** When the turn settled. The turn record itself is deliberately clock-free. */
     at: z.string().datetime(),
-    turn: FreePlayTurnSchema,
+    /**
+     * Archival, not live: a turn recorded before an action was retired still
+     * parses. Writers hand this a `FreePlayTurn` the loop already validated
+     * against the live catalog, so nothing new is written with a dead kind.
+     */
+    turn: FreePlayJournaledTurnSchema,
     /**
      * Join key for the play-voice delivery of this turn's room report.
      * Absent when the turn was not worth reporting. Same id as the voice
