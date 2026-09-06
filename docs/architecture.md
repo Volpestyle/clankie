@@ -149,7 +149,16 @@ parent events that arrived meanwhile
 Conversations are files under `~/.clankie/captain/`. Each settled operator or
 Discord captain turn also appends one metrics line to
 `~/.clankie/captain/turn-settled.jsonl`: tool-name counts, first mutating tool,
-and context-token occupancy. The file sits beside `autonomy.json`, outside the
+context-token occupancy, the model/provider/effort that actually executed the
+turn, and the provider-reported `totalTokens` summed over the turn with the
+number of reports that contributed. Execution identity is read off the live pi
+session as the turn executes, so a `/model` or `/effort` change under a live
+conversation lands on the next turn to execute rather than being reconstructed
+from a settings snapshot afterwards. Unknown is said out loud: a row from before
+the capture, or a provider that reported nothing, reads back as `null` — never
+zero, and context occupancy is never treated as usage or a charge.
+`GET /v1/captain/turn-metrics` and `clankie metrics` return the same bounded
+rows, newest first. The file sits beside `autonomy.json`, outside the
 conversation directory the retention pass deletes. It is not `~/.clankie/events.jsonl` —
 that log already uses `captain.turn.settled` for presence idle/waiting_user, and
 the captain does not write domain events. An absorbed steer

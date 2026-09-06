@@ -44,6 +44,7 @@ import {
   MEDIA_IMAGE_GENERATION_PATH,
   MEDIA_VIDEO_GENERATION_PATH,
   CAPTAIN_LANE_OBSERVATION_PATH,
+  CAPTAIN_TURN_METRICS_PATH,
   DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX,
   DISCORD_VOICE_TRANSCRIPTS_PATH,
   DiscordVoiceTranscriptCursorSchema,
@@ -2299,6 +2300,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
     return context.json({ schemaVersion: 1 as const, lanes: await dependencies.captain.observeLanes() });
+  });
+
+  /**
+   * Recent settled-turn metrics (VUH-1115): what ran each turn, what it did, and
+   * what the provider reported. Bounded on read; `limit` is clamped rather than
+   * refused so a caller can never ask for the whole log.
+   */
+  app.get(CAPTAIN_TURN_METRICS_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const requested = context.req.query("limit");
+    const limit = requested === undefined || requested.length === 0 ? Number.NaN : Number(requested);
+    const runId = context.req.query("runId");
+    const items = await dependencies.captain.readTurnMetrics({
+      ...(Number.isFinite(limit) ? { limit } : {}),
+      ...(runId === undefined || runId.length === 0 ? {} : { runId }),
+    });
+    return context.json({ schemaVersion: 1 as const, items });
   });
 
   /**

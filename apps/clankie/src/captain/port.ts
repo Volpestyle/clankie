@@ -3,6 +3,7 @@ import type {
   CaptainLaneObservationEntry,
   CaptainSessionLaneV2,
   CaptainTurnMedia,
+  CaptainTurnSettledMetrics,
   DiscordChannelProjectionMessage,
   DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
@@ -72,6 +73,15 @@ export interface CaptainPort {
   ): Promise<OperatorConversationServiceResult>;
   /** Lane transcript snapshots for the TUI lanes view. */
   observeLanes(): Promise<readonly ObservableCaptainLane[]>;
+  /**
+   * Recent settled-turn metrics, newest first, from the durable JSONL the
+   * captain already appends (VUH-1115). Counters and execution identity only —
+   * no transcript, tool arguments, or credentials.
+   */
+  readTurnMetrics(query: {
+    readonly limit?: number;
+    readonly runId?: string;
+  }): Promise<readonly CaptainTurnSettledMetrics[]>;
   /** Prompt fragment describing the voice lane, for the realtime voice briefing. */
   voiceLaneInstructions(): string;
   /**
@@ -133,6 +143,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       throw new Error("stub captain: serveOperatorConversation not overridden");
     },
     observeLanes: async () => [],
+    readTurnMetrics: async () => [],
     voiceLaneInstructions: () => "You are in a voice room.",
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
     laneMemoryCard: async () => "",

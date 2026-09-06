@@ -21,6 +21,7 @@ import { runPromptCommand } from "../src/command/prompt.ts";
 import { runSendCommand } from "../src/command/send.ts";
 import { runMemoryCardCommand } from "../src/command/memory-card.ts";
 import { runMemoryCommand } from "../src/command/memory.ts";
+import { runMetricsCommand } from "../src/command/metrics.ts";
 import { runSeatCommand } from "../src/command/seat.ts";
 import { runMcpCommand } from "../src/command/mcp.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
@@ -161,6 +162,11 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "memory") {
       const result = await runMemoryCommand(rest, options);
+      outputJson(stdout, result);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "metrics") {
+      const result = await runMetricsCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }

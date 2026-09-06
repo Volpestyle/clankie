@@ -15,7 +15,10 @@
  * in `@clankie/protocol`, the same client the TUI drives; this file only adds
  * the authenticated transport, a deadline and a receipt. It resolves no models,
  * scores no output, and keeps no state: the evidence is the durable
- * conversation log and `turn-settled.jsonl` the service already writes.
+ * conversation log and `turn-settled.jsonl` the service already writes. The
+ * receipt names the `runId`, so `clankie metrics --run <runId>` reads back what
+ * actually ran the turn and what it reported, instead of reconstructing either
+ * from an external snapshot (VUH-1115).
  *
  * `--base` is required. Defaulting it would point a comparison at whatever
  * service owns the default port, which is normally the owner's live one.

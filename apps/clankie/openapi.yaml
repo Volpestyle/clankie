@@ -492,6 +492,40 @@ paths:
         "200":
           description: Lane listing
 
+  /v1/captain/turn-metrics:
+    get:
+      tags: [Captain, Operator]
+      operationId: getCaptainTurnMetrics
+      summary: Recent settled captain turns
+      description: |
+        Counters, execution identity and reported usage for recent settled
+        operator and Discord turns, newest first, from the durable
+        `turn-settled.jsonl` the captain appends. Never a transcript, tool
+        argument, tool output or credential.
+
+        `execution` is the model, provider and effort that actually ran the turn,
+        captured as it executed rather than read back from configuration.
+        `usage` is `totalTokens` summed over the assistant messages the provider
+        reported plus `reports`, the number that contributed. Both are `null`
+        when unknown — a turn settled before the capture existed, or a provider
+        that reported nothing. Null never means zero, and `contextTokensStart` /
+        `contextTokensEnd` are context occupancy, never usage or a charge.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: query
+          name: limit
+          description: 1–100; clamped, never refused. Defaults to 20.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: runId
+          description: Narrow to one run.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Bounded settled-turn metrics, newest first
+        "401":
+          description: Operator authentication required
+
   /v1/captain/prompt:
     get:
       tags: [Captain, Operator]

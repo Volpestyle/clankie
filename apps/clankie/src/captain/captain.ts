@@ -72,11 +72,13 @@ import { planDiscordTurnSession } from "./system-authority.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
 import {
   contextTokenCount,
-  recordPiToolStart,
+  recordPiTurnEvent,
+  sessionExecutionIdentity,
   tryAppendTurnSettled,
   TurnMetrics,
   TurnSettledLog,
   turnSettledLogPath,
+  type TurnMetricsQuery,
   type TurnSettledOutcome,
 } from "./turn-metrics.ts";
 
@@ -830,6 +832,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const unsubscribe = live
         ? () => undefined
         : lane.session.subscribe((event) => {
+            if (metrics !== undefined) recordPiTurnEvent(metrics, event);
             if (event.type === "message_update") {
               if (
                 event.assistantMessageEvent.type === "thinking_start" ||
@@ -850,7 +853,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               }
             } else if (event.type === "tool_execution_start") {
               activity = undefined;
-              if (metrics !== undefined) recordPiToolStart(metrics, event);
               const skillName = operatorSkillName(event.toolName, event.args);
               if (skillName !== undefined) skillCalls.set(event.toolCallId, skillName);
               publish({
@@ -909,6 +911,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       let settled: TurnSettledOutcome | undefined;
       try {
         if (!live) await syncModel(lane);
+        // After the sync, so a `/model` or `/effort` change made under a live
+        // conversation is attributed to this turn — the first one to execute it.
+        metrics?.recordExecution(sessionExecutionIdentity(lane.session));
         await laneLog.append("operator", conversationId, {
           at: new Date().toISOString(),
           kind: "heard",
@@ -1216,7 +1221,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       metrics === undefined && toolProgress === undefined && typing === undefined
         ? () => undefined
         : lane.session.subscribe((event) => {
-            if (metrics !== undefined) recordPiToolStart(metrics, event);
+            if (metrics !== undefined) recordPiTurnEvent(metrics, event);
             if (event.type === "tool_execution_start") {
               toolProgress?.toolStarted(event.toolCallId, event.toolName);
             } else if (event.type === "tool_execution_end") {
@@ -1236,6 +1241,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     try {
       if (normalized.durable) {
         if (lane.running === undefined && !lane.session.isStreaming) await syncModel(lane);
+        metrics?.recordExecution(sessionExecutionIdentity(lane.session));
         const outcome = await runTurnWithStallWatchdog(lane.session, () =>
           runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent)),
         );
@@ -1251,6 +1257,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           role = outcome.value;
         }
       } else {
+        // A one-shot session was built with the current selection moments ago;
+        // read it off that session rather than resolving the config a second time.
+        metrics?.recordExecution(sessionExecutionIdentity(lane.session));
         const completed = await runOneShotDiscordTurn(
           lane.session,
           normalized.prompt,
@@ -1601,6 +1610,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async observeLanes(): Promise<readonly ObservableCaptainLane[]> {
       return laneLog.list();
+    },
+
+    async readTurnMetrics(query: TurnMetricsQuery) {
+      return turnSettled.read(query);
     },
 
     voiceLaneInstructions(): string {
