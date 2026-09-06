@@ -131,6 +131,10 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
   function handleSubmit(text: string): boolean {
     const trimmed = text.trim();
     if (trimmed !== "/cancel") return false;
+    // Only swallow it while something is actually waiting. Idle, it falls
+    // through to the `/cancel` command, which says so, instead of flashing a
+    // "cancelled" status for a flow that was never running.
+    if (cancelActivePrompt === undefined && interruptResolvers.size === 0) return false;
     cancelPrompt();
     return true;
   }

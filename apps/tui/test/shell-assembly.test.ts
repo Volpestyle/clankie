@@ -70,6 +70,35 @@ describe("shell assembly", () => {
     expect(shell.headerVisible).toBe(true);
   });
 
+  it("resolves /cancel whether or not a flow is waiting", async () => {
+    const shell = new ClankieFaceShell({
+      commands: buildConsoleCommands({}),
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+    });
+    const internals = shell as unknown as {
+      editor: { onSubmit(text: string): void };
+      chat: { render(width: number): string[] };
+    };
+    // oxlint-disable-next-line no-control-regex -- intentionally strips ANSI escape sequences
+    const ansiPattern = /\x1b\[[0-9;]*m/gu;
+    const transcript = (): string => internals.chat.render(80).join("\n").replace(ansiPattern, "");
+
+    // Idle: the token still resolves, so the hint the flows print never
+    // reports itself as an unknown command.
+    internals.editor.onSubmit("/cancel");
+    await vi.waitFor(() => expect(transcript()).toContain("Nothing to cancel."));
+    expect(transcript()).not.toContain("Unknown command");
+
+    // Waiting: the fast path aborts the flow before dispatch.
+    const interrupt = shell.setupFlow.waitForInterrupt();
+    expect(shell.setupFlow.isWaitingForInput()).toBe(true);
+    internals.editor.onSubmit("/cancel");
+    await interrupt.promise;
+    expect(shell.setupFlow.isWaitingForInput()).toBe(false);
+  });
+
   it("settles a streamed message into the block it was typed in", () => {
     const shell = new ClankieFaceShell({
       commands: buildConsoleCommands({}),

@@ -575,6 +575,22 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "cancel",
+      aliases: [],
+      description: "Abort the setup flow or sign-in that is waiting",
+      takesArgument: false,
+      run(_argument, shell): void {
+        // The flows print "(/cancel to abort)", so the token has to resolve
+        // here too: the shell's fast path handles it mid-flow, and this entry
+        // is what puts it in /help and the typeahead and answers when idle.
+        if (shell.setupFlow.isWaitingForInput()) {
+          shell.setupFlow.handleSubmit("/cancel");
+          return;
+        }
+        shell.insertCommandResult("/cancel", "Nothing to cancel.", "error");
+      },
+    },
+    {
       name: "activity",
       aliases: ["watch"],
       description: "Show Clankie's current activity and live watch surface",
