@@ -48,6 +48,7 @@ import {
 } from "./herdr-census.ts";
 import { deliverFleetSeatMessage, fleetSeatMailbox } from "./fleet-seat.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
+import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { createStanceStore } from "./stances.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
 import { HerdrTerminalStore } from "./herdr-terminal.ts";
@@ -622,12 +623,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"));
   const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir));
+  const seatLedger: SeatLedger = createSeatLedger(seatLedgerPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
   const settingsStore = options.settings ?? new SettingsStore();
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
   const seatByPersona = new Map<string, string>();
   const stances = createStanceStore();
+  /**
+   * What each fleet seat's pane status was last seen as. The watcher publishes
+   * only changes, so this is the other half of a transition — and holding it
+   * here rather than reaching into the watcher keeps the ledger's rule in one
+   * place (ADR 0161).
+   */
+  const seatStatuses = new Map<string, string>();
   const fleetChanges = new FleetChangeClock();
   const stopFleetChanges = watchHerdrFleetChanges(fleetChanges);
   let modelRuntime: Promise<CaptainModelRuntime> | undefined;
@@ -1032,6 +1041,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         message,
         context,
       );
+      // What a seat has been asked to do today is a fact about the seat, so the
+      // roster's cursor moves for it the way it moves for a stance (ADR 0150).
+      if (sent) {
+        seatLedger.promptSent(seatId);
+        fleetChanges.touch();
+      }
       return sent;
     },
     undefined,
@@ -1104,10 +1119,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // A lapsed stance simply is not here, so no surface has to reason about
       // how old the thing it is drawing is (ADR 0148).
       const stance = stances.read(seat.seatId);
+      // The ledger is the authority for what a seat has earned; the room reads
+      // this and never keeps a score of its own (app ADR 0030).
+      const lastOutcome = seatLedger.lastOutcome(seat.seatId);
       return {
         ...seat,
         conversationId: conversations.conversationIdForPersona(seat.personaId),
         ...(stance === undefined ? {} : { stance }),
+        ...(lastOutcome === undefined ? {} : { lastOutcome }),
       };
     });
   }
@@ -1129,6 +1148,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           seats: [...seats],
           personas: [...personas.all(seats, (personaId) => conversations.conversationForPersona(personaId))],
           channels: [...channelsResult.channels],
+          // Bounded by the roster it is read against, so the day's counts can
+          // never outnumber the seats the snapshot carries.
+          tallies: [...seatLedger.tallies(seats.map((seat) => seat.seatId))],
         },
       };
     }
@@ -1176,6 +1198,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           });
         }
         return;
+      }
+      if (projection.kind === "status") {
+        // A pane that was working and has stopped is this seat's run, and the
+        // status it stopped at is the only thing the host knows about how it
+        // went (ADR 0161). Recorded before the persona lookup: the ledger is
+        // keyed by seat, and a seat with no bound character still ran.
+        const previous = seatStatuses.get(seatId);
+        seatStatuses.set(seatId, projection.status);
+        const result = runResultForSeatStatus(previous, projection.status);
+        if (result !== undefined) {
+          seatLedger.runSettled(seatId, result);
+          fleetChanges.touch();
+        }
       }
       const personaId = liveSeats.find((seat) => seat.seatId === seatId)?.personaId;
       if (personaId === undefined) return;
@@ -1545,7 +1580,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             result: { outcome: "unseated", herdrPaneId: request.stance.herdrPaneId },
           };
         }
+        const standing = stances.read(seat.seatId);
         const stance = stances.state(seat.seatId, request.stance);
+        // The ship is the moment it says it landed something, not the whole
+        // time the statement stands: restating a standing celebration is the
+        // same landing, and counting it twice would be the host inflating it.
+        if (stance.pose === "celebrate" && standing?.pose !== "celebrate") {
+          seatLedger.shipped(seat.seatId);
+        }
         fleetChanges.touch();
         const expires = setTimeout(
           () => fleetChanges.touch(),

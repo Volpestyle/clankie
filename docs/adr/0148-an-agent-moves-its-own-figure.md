@@ -2,9 +2,11 @@
 
 Status: accepted (James, 2026-08-30). Builds on
 [ADR 0135](0135-a-herdr-seat-is-a-conversation.md) and
-[ADR 0147](0147-an-agent-persona-outlives-its-herdr-seat.md). The app-side half
-is clankie-app's ADR 0025 (the agent drives its own figure), which this ADR is
-the host contract for.
+[ADR 0147](0147-an-agent-persona-outlives-its-herdr-seat.md). Amended by
+[ADR 0161](0161-the-host-keeps-the-seats-ledger.md), which adds `celebrate` to
+the pose vocabulary on the same op and the same expiry. The app-side half is
+clankie-app's ADR 0025 (the agent drives its own figure), which this ADR is the
+host contract for.
 
 ## Context
 
