@@ -1,4 +1,9 @@
-import { intentMatchesAction, type FreePlayAction, type FreePlayTurnEvidence } from "./free-play.ts";
+import {
+  intentMatchesAction,
+  liveFreePlayAction,
+  type FreePlayAction,
+  type FreePlayTurnEvidence,
+} from "./free-play.ts";
 import { parseFreePlayJournal, type FreePlayJournalLine } from "./free-play-journal.ts";
 import { positionOf } from "./free-play-progress.ts";
 
@@ -39,7 +44,12 @@ export function evaluateFreePlayJournal(input: EvaluateFreePlayJournalInput) {
     const evidence = line.schemaVersion === 2 ? line.evidence : null;
     const start = evidence?.immediatePreAction ? positionOf(evidence.immediatePreAction.observations) : null;
     const end = evidence?.postAction ? positionOf(evidence.postAction.observations) : null;
-    const movement = movementEvidence(line.turn.action, line.turn.outcome, start, end);
+    // A turn from before an action was retired is evidence, not corruption. Its
+    // verdicts read `unknown` because this evaluator cannot reason about a
+    // vocabulary it no longer has, which is a different answer from "he did
+    // nothing" — `actionRetired` says which one the reader is looking at.
+    const action = liveFreePlayAction(line.turn.action);
+    const movement = movementEvidence(action, line.turn.outcome, start, end);
     return {
       turn: line.turn.turn,
       at: line.at,
@@ -50,6 +60,7 @@ export function evaluateFreePlayJournal(input: EvaluateFreePlayJournalInput) {
         intent: line.turn.intent,
         notes: line.turn.notes,
         action: line.turn.action,
+        actionRetired: line.turn.action !== null && action === null,
         outcome: line.turn.outcome,
         effect: line.turn.effect,
         effectAdvice: line.turn.effectAdvice,
@@ -65,10 +76,10 @@ export function evaluateFreePlayJournal(input: EvaluateFreePlayJournalInput) {
             : matchingReceiptTypes(line.speechDeliveryId, voiceReceipts),
       },
       verdicts: {
-        intentToAction: intentAlignment(line.turn.intent, line.turn.action),
-        goalToAction: goalAlignment(line.turn.objective, line.turn.action),
+        intentToAction: intentAlignment(line.turn.intent, action),
+        goalToAction: goalAlignment(line.turn.objective, action),
         planContinuity: planContinuity(previous, line),
-        sceneActionAppropriateness: sceneAppropriateness(line),
+        sceneActionAppropriateness: sceneAppropriateness(line, action),
         movementEffectiveness: movement.effectiveness,
         rejectionRecovery: rejectionRecovery(line, next),
         narration: narrationVerdict(line, voiceReceipts),
@@ -119,6 +130,8 @@ export function evaluateFreePlayJournal(input: EvaluateFreePlayJournalInput) {
     aggregate: {
       turns: turns.length,
       outcomes: countValues(turns.map((line) => line.turn.outcome)),
+      /** Turns whose action this build can no longer interpret, so its verdicts are unknown. */
+      retiredActionTurns: perTurn.filter((turn) => turn.decision.actionRetired).length,
       timing: aggregateTiming(perTurn.map((turn) => turn.timing)),
       intentToAction: countValues(perTurn.map((turn) => turn.verdicts.intentToAction)),
       goalToAction: countValues(perTurn.map((turn) => turn.verdicts.goalToAction)),
@@ -189,13 +202,15 @@ function planContinuity(
   return previous.turn.objective === current.turn.objective ? "continued" : "changed";
 }
 
-function sceneAppropriateness(line: Extract<FreePlayJournalLine, { kind: "turn" }>): AppropriatenessVerdict {
-  if (line.schemaVersion !== 2 || line.turn.action === null) return "unknown";
+function sceneAppropriateness(
+  line: Extract<FreePlayJournalLine, { kind: "turn" }>,
+  action: FreePlayAction | null,
+): AppropriatenessVerdict {
+  if (line.schemaVersion !== 2 || action === null) return "unknown";
   const scene = line.evidence.decision.observations.find((observation) => observation.kind === "scene") as
     | { data?: { mode?: string; inputReady?: boolean; waitingForDialogAdvance?: boolean } }
     | undefined;
   const mode = scene?.data?.mode;
-  const action = line.turn.action;
   if (mode === undefined) return "unknown";
   if (action.kind === "walk_to")
     return mode === "overworld" && scene?.data?.inputReady === true ? "appropriate" : "inappropriate";

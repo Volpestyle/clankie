@@ -1,0 +1,2666 @@
+{
+  "sweptAt": "2026-09-06T02:20:53.504Z",
+  "journalDir": "/Users/james/.local/state/clankie/gba-play",
+  "journals": 40,
+  "readable": 40,
+  "unreadable": 0,
+  "terminalSources": {
+    "summary": 25,
+    "unknown": 3,
+    "lifecycle": 12
+  },
+  "turns": 2438,
+  "turnsWithCausalEvidence": 1305,
+  "retiredActionTurns": 10,
+  "runs": [
+    {
+      "journal": "2026-07-27T04-16-09-833Z-embodiment-593641ab-9266-4e4a-912e-c8fc247a81e4.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-07-27T04:16:09.833Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-07-27T04:31:38.447Z",
+        "summaryPresent": true,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 80,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 59,
+        "rejected_by_adapter": 21
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 80,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 80,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 60,
+        "unknown": 20
+      },
+      "intentToAction": {
+        "aligned": 51,
+        "misaligned": 29
+      },
+      "goalToAction": {
+        "unknown": 78,
+        "aligned": 2
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 80
+      },
+      "rejectionRecovery": {
+        "not_applicable": 59,
+        "repeated": 10,
+        "recovered": 10,
+        "unknown": 1
+      },
+      "narration": {
+        "model_silent": 49,
+        "suppressed": 31
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-07-27T04-33-15-249Z-embodiment-6e8892e1-91de-453f-85ef-3e71aa9634a1.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-07-27T04:33:15.249Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-07-27T04:45:03.324Z",
+        "summaryPresent": true,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 85,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "rejected_by_adapter": 29,
+        "accepted": 56
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 85,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 85,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 85
+      },
+      "intentToAction": {
+        "misaligned": 29,
+        "aligned": 56
+      },
+      "goalToAction": {
+        "unknown": 85
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 85
+      },
+      "rejectionRecovery": {
+        "repeated": 18,
+        "recovered": 11,
+        "not_applicable": 56
+      },
+      "narration": {
+        "model_silent": 65,
+        "suppressed": 20
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-02T01-57-21-466Z-embodiment-e825fc9b-8909-4c50-ac62-c3029ec09a6b.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-02T01:57:21.466Z",
+      "terminal": {
+        "source": "unknown",
+        "outcome": null,
+        "at": null,
+        "summaryPresent": false,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 13,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 13
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 13,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 13,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 13
+      },
+      "intentToAction": {
+        "misaligned": 5,
+        "aligned": 8
+      },
+      "goalToAction": {
+        "unknown": 13
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 13
+      },
+      "rejectionRecovery": {
+        "not_applicable": 13
+      },
+      "narration": {
+        "model_silent": 12,
+        "suppressed": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-02T17-35-26-547Z-embodiment-755677ea-af9c-4885-bb70-e84367db1b7b.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-02T17:35:26.547Z",
+      "terminal": {
+        "source": "unknown",
+        "outcome": null,
+        "at": null,
+        "summaryPresent": false,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 0,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {},
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 0,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 0,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {},
+      "intentToAction": {},
+      "goalToAction": {},
+      "sceneActionAppropriateness": {},
+      "rejectionRecovery": {},
+      "narration": {},
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-03T02-02-43-223Z-embodiment-66a130b3-c761-4b8e-aceb-b4ab1390ce35.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-03T02:02:43.223Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-03T02:20:17.139Z",
+        "summaryPresent": true,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 109,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 96,
+        "rejected_by_adapter": 13
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 109,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 109,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 74,
+        "unknown": 35
+      },
+      "intentToAction": {
+        "misaligned": 21,
+        "aligned": 88
+      },
+      "goalToAction": {
+        "unknown": 82,
+        "aligned": 27
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 109
+      },
+      "rejectionRecovery": {
+        "not_applicable": 96,
+        "recovered": 11,
+        "repeated": 1,
+        "changed_without_success": 1
+      },
+      "narration": {
+        "model_silent": 69,
+        "suppressed": 40
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-03T02-22-57-518Z-embodiment-d5010c45-59ad-4be2-95d4-3f0e267a4893.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-03T02:22:57.518Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-03T02:23:41.821Z",
+        "summaryPresent": true,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 5,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 5
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 5,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 5,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 3,
+        "unknown": 2
+      },
+      "intentToAction": {
+        "aligned": 4,
+        "misaligned": 1
+      },
+      "goalToAction": {
+        "unknown": 4,
+        "aligned": 1
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 5
+      },
+      "rejectionRecovery": {
+        "not_applicable": 5
+      },
+      "narration": {
+        "model_silent": 5
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-03T03-46-24-139Z-embodiment-1e0cfc2a-331a-46ea-af38-d88b469a4eae.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-03T03:46:24.139Z",
+      "terminal": {
+        "source": "unknown",
+        "outcome": null,
+        "at": null,
+        "summaryPresent": false,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 6,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "rejected_by_adapter": 1,
+        "accepted": 5
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 6,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 6,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "unknown": 6
+      },
+      "intentToAction": {
+        "aligned": 5,
+        "misaligned": 1
+      },
+      "goalToAction": {
+        "unknown": 6
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 6
+      },
+      "rejectionRecovery": {
+        "recovered": 1,
+        "not_applicable": 5
+      },
+      "narration": {
+        "model_silent": 3,
+        "no_attempt": 3
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-11T04-33-57-505Z-embodiment-fd8d058e-6d31-4001-a453-1440fa089df0.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-11T04:33:57.505Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-11T04:52:15.990Z",
+        "summaryPresent": true,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 129,
+      "retiredActionTurns": 10,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "rejected_by_adapter": 37,
+        "accepted": 92
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 129,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 129,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "unknown": 36,
+        "not_applicable": 93
+      },
+      "intentToAction": {
+        "aligned": 89,
+        "misaligned": 30,
+        "unknown": 10
+      },
+      "goalToAction": {
+        "unknown": 122,
+        "aligned": 7
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 129
+      },
+      "rejectionRecovery": {
+        "changed_without_success": 25,
+        "recovered": 9,
+        "not_applicable": 92,
+        "repeated": 3
+      },
+      "narration": {
+        "no_attempt": 100,
+        "suppressed": 1,
+        "model_silent": 28
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-11T05-24-33-913Z-embodiment-2363630b-aa5d-4c3b-b7b2-1090e116f00e.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-11T05:24:33.913Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-11T05:26:15.837Z",
+        "summaryPresent": true,
+        "lifecycleEventType": null,
+        "lifecycleConsistent": null
+      },
+      "turns": 11,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 11
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 11,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 11,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 11
+      },
+      "intentToAction": {
+        "aligned": 6,
+        "misaligned": 5
+      },
+      "goalToAction": {
+        "unknown": 11
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 11
+      },
+      "rejectionRecovery": {
+        "not_applicable": 11
+      },
+      "narration": {
+        "no_attempt": 3,
+        "model_silent": 6,
+        "suppressed": 2
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-15T20-44-17-104Z-embodiment-879ed32a-1ead-4f10-9637-98989fc50705.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-15T20:44:17.104Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-15T21:18:42.603Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 206,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "rejected_by_adapter": 7,
+        "accepted": 199
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 206,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 206,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "unknown": 107,
+        "not_applicable": 99
+      },
+      "intentToAction": {
+        "aligned": 159,
+        "misaligned": 47
+      },
+      "goalToAction": {
+        "aligned": 20,
+        "unknown": 186
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 206
+      },
+      "rejectionRecovery": {
+        "recovered": 7,
+        "not_applicable": 199
+      },
+      "narration": {
+        "no_attempt": 97,
+        "model_silent": 109
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-15T21-19-34-032Z-embodiment-b448a1c3-415e-4085-b8fb-5848b80e3e87.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-15T21:19:34.032Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-15T21:31:31.093Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 76,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 74,
+        "rejected_by_adapter": 2
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 76,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 76,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 39,
+        "unknown": 37
+      },
+      "intentToAction": {
+        "misaligned": 21,
+        "aligned": 55
+      },
+      "goalToAction": {
+        "unknown": 59,
+        "aligned": 17
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 76
+      },
+      "rejectionRecovery": {
+        "not_applicable": 74,
+        "recovered": 2
+      },
+      "narration": {
+        "played": 16,
+        "model_silent": 8,
+        "suppressed": 31,
+        "attempted_no_receipt": 21
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-15T21-34-02-603Z-embodiment-ec887776-83c5-410e-8d1d-b4c19d36f88c.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-15T21:34:02.603Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-15T21:36:36.104Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 12,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 11,
+        "rejected_by_adapter": 1
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 12,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 12,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 9,
+        "unknown": 3
+      },
+      "intentToAction": {
+        "misaligned": 3,
+        "aligned": 9
+      },
+      "goalToAction": {
+        "unknown": 8,
+        "aligned": 4
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 12
+      },
+      "rejectionRecovery": {
+        "not_applicable": 11,
+        "recovered": 1
+      },
+      "narration": {
+        "attempted_no_receipt": 3,
+        "model_silent": 4,
+        "played": 2,
+        "suppressed": 3
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-15T21-49-11-999Z-embodiment-f3893b21-5afa-4629-ba0b-4c9fdfc60f8d.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-15T21:49:11.999Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-15T21:55:48.770Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 14,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 10,
+        "rejected_by_adapter": 3,
+        "mind_failed": 1
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 14,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 14,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 14
+      },
+      "intentToAction": {
+        "aligned": 12,
+        "misaligned": 1,
+        "unknown": 1
+      },
+      "goalToAction": {
+        "unknown": 14
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 14
+      },
+      "rejectionRecovery": {
+        "not_applicable": 11,
+        "recovered": 3
+      },
+      "narration": {
+        "played": 7,
+        "model_silent": 3,
+        "attempted_no_receipt": 3,
+        "no_attempt": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-15T21-57-16-059Z-embodiment-16a4f258-ca2c-44d7-9794-0f91796fdbba.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-15T21:57:16.059Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-15T22:04:38.864Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 12,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 9,
+        "rejected_by_adapter": 1,
+        "mind_failed": 2
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 12,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 12,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 11,
+        "unknown": 1
+      },
+      "intentToAction": {
+        "misaligned": 6,
+        "aligned": 4,
+        "unknown": 2
+      },
+      "goalToAction": {
+        "unknown": 11,
+        "aligned": 1
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 12
+      },
+      "rejectionRecovery": {
+        "not_applicable": 11,
+        "recovered": 1
+      },
+      "narration": {
+        "model_silent": 9,
+        "no_attempt": 2,
+        "attempted_no_receipt": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-15T22-05-08-936Z-embodiment-31a8f51a-1d38-4178-915a-9738913a56da.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-15T22:05:08.936Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-15T22:25:53.079Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 35,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 28,
+        "mind_failed": 7
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 35,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 35,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 31,
+        "unknown": 4
+      },
+      "intentToAction": {
+        "aligned": 15,
+        "misaligned": 13,
+        "unknown": 7
+      },
+      "goalToAction": {
+        "aligned": 4,
+        "unknown": 31
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 35
+      },
+      "rejectionRecovery": {
+        "not_applicable": 35
+      },
+      "narration": {
+        "played": 13,
+        "model_silent": 8,
+        "no_attempt": 7,
+        "attempted_no_receipt": 7
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-15T22-28-20-199Z-embodiment-9352b455-12af-4b23-a80d-5319eb1691ff.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "firered-bedroom-route",
+      "startedAt": "2026-08-15T22:28:20.199Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-15T22:45:19.719Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 14,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 14
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 14,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 14,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 14
+      },
+      "intentToAction": {
+        "aligned": 8,
+        "misaligned": 6
+      },
+      "goalToAction": {
+        "aligned": 3,
+        "unknown": 11
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 14
+      },
+      "rejectionRecovery": {
+        "not_applicable": 14
+      },
+      "narration": {
+        "model_silent": 6,
+        "played": 6,
+        "attempted_no_receipt": 2
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-16T13-37-54-544Z-embodiment-5bc3bc68-5be0-441a-97d2-c4c178a3bd5d.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-16T13:37:54.544Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-16T13:39:37.989Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 3,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 1,
+        "rejected_by_adapter": 2
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 3,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 3,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 3
+      },
+      "intentToAction": {
+        "misaligned": 1,
+        "aligned": 2
+      },
+      "goalToAction": {
+        "unknown": 2,
+        "aligned": 1
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 3
+      },
+      "rejectionRecovery": {
+        "not_applicable": 1,
+        "changed_without_success": 1,
+        "unknown": 1
+      },
+      "narration": {
+        "model_silent": 3
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-16T13-56-20-731Z-embodiment-687680aa-fd8e-4de4-8ffd-38b23f45f81e.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-16T13:56:20.731Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-16T14:07:27.741Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 18,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 17,
+        "rejected_by_adapter": 1
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 18,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 18,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 16,
+        "unknown": 2
+      },
+      "intentToAction": {
+        "aligned": 11,
+        "misaligned": 7
+      },
+      "goalToAction": {
+        "aligned": 1,
+        "unknown": 17
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 18
+      },
+      "rejectionRecovery": {
+        "not_applicable": 17,
+        "recovered": 1
+      },
+      "narration": {
+        "model_silent": 3,
+        "played": 12,
+        "unspoken": 3
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-16T15-33-55-208Z-embodiment-3fc7a9dc-6435-4968-9f02-39bad70729c5.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-16T15:33:55.208Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-16T15:43:24.632Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 21,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 21
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 21,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 21,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 21
+      },
+      "intentToAction": {
+        "misaligned": 6,
+        "aligned": 15
+      },
+      "goalToAction": {
+        "unknown": 14,
+        "aligned": 7
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 21
+      },
+      "rejectionRecovery": {
+        "not_applicable": 21
+      },
+      "narration": {
+        "played": 11,
+        "unspoken": 6,
+        "suppressed": 1,
+        "model_silent": 3
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-16T23-00-30-233Z-embodiment-ccc9086e-04fb-4cbe-b307-d0c9c18e81e0.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-16T23:00:30.233Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-16T23:45:09.121Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 69,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 64,
+        "rejected_by_adapter": 5
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 69,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 69,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 45,
+        "unknown": 24
+      },
+      "intentToAction": {
+        "aligned": 51,
+        "misaligned": 18
+      },
+      "goalToAction": {
+        "unknown": 49,
+        "aligned": 20
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 69
+      },
+      "rejectionRecovery": {
+        "not_applicable": 64,
+        "recovered": 5
+      },
+      "narration": {
+        "model_silent": 59,
+        "attempted_no_receipt": 10
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-16T23-53-47-842Z-embodiment-8e72467b-f36b-43c8-9d41-f7d8c947264e.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-16T23:53:47.842Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-16T23:58:41.196Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 5,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "rejected_by_adapter": 5
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 5,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 5,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "unknown": 5
+      },
+      "intentToAction": {
+        "aligned": 4,
+        "misaligned": 1
+      },
+      "goalToAction": {
+        "unknown": 5
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 5
+      },
+      "rejectionRecovery": {
+        "repeated": 1,
+        "changed_without_success": 3,
+        "unknown": 1
+      },
+      "narration": {
+        "played": 4,
+        "model_silent": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-17T00-03-29-866Z-embodiment-6847439e-05ed-4321-be72-6534c44f35a9.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-17T00:03:29.866Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-17T00:06:57.466Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 4,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 4
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 4,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 4,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "unknown": 4
+      },
+      "intentToAction": {
+        "aligned": 4
+      },
+      "goalToAction": {
+        "unknown": 4
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 4
+      },
+      "rejectionRecovery": {
+        "not_applicable": 4
+      },
+      "narration": {
+        "model_silent": 4
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-17T00-07-18-972Z-embodiment-054607f3-0037-4adf-b2d0-ab3938a14abf.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-17T00:07:18.972Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-17T00:28:09.224Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 40,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 38,
+        "rejected_by_adapter": 2
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 40,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 40,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 36,
+        "unknown": 4
+      },
+      "intentToAction": {
+        "misaligned": 18,
+        "aligned": 22
+      },
+      "goalToAction": {
+        "unknown": 33,
+        "aligned": 7
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 40
+      },
+      "rejectionRecovery": {
+        "not_applicable": 38,
+        "recovered": 2
+      },
+      "narration": {
+        "model_silent": 29,
+        "attempted_no_receipt": 11
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-17T00-37-16-982Z-embodiment-49d14e6c-6fe2-4f0b-a8e4-13b2a128af9d.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-17T00:37:16.982Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-17T01:06:34.992Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 53,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 49,
+        "rejected_by_adapter": 3,
+        "mind_failed": 1
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 53,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 53,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 43,
+        "unknown": 10
+      },
+      "intentToAction": {
+        "aligned": 40,
+        "misaligned": 12,
+        "unknown": 1
+      },
+      "goalToAction": {
+        "aligned": 29,
+        "unknown": 24
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 53
+      },
+      "rejectionRecovery": {
+        "not_applicable": 50,
+        "recovered": 3
+      },
+      "narration": {
+        "model_silent": 22,
+        "played": 20,
+        "unspoken": 10,
+        "no_attempt": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-17T02-53-05-559Z-embodiment-c837e345-14f6-4841-91d5-b9ce940a16f0.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-17T02:53:05.559Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-17T02:57:59.086Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 13,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 12,
+        "rejected_by_adapter": 1
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 13,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 13,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 13
+      },
+      "intentToAction": {
+        "aligned": 12,
+        "misaligned": 1
+      },
+      "goalToAction": {
+        "aligned": 9,
+        "unknown": 4
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 13
+      },
+      "rejectionRecovery": {
+        "not_applicable": 12,
+        "recovered": 1
+      },
+      "narration": {
+        "played": 6,
+        "model_silent": 3,
+        "suppressed": 1,
+        "unspoken": 3
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-17T03-22-21-319Z-embodiment-f9c39d68-c379-48a1-91c0-a41637d998fd.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-17T03:22:21.319Z",
+      "terminal": {
+        "source": "lifecycle",
+        "outcome": "lease_lapsed",
+        "at": "2026-08-17T03:37:35.363Z",
+        "summaryPresent": false,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": null
+      },
+      "turns": 35,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 32,
+        "rejected_by_adapter": 3
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 35,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 35,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 31,
+        "unknown": 4
+      },
+      "intentToAction": {
+        "aligned": 17,
+        "misaligned": 18
+      },
+      "goalToAction": {
+        "unknown": 29,
+        "aligned": 6
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 35
+      },
+      "rejectionRecovery": {
+        "not_applicable": 32,
+        "recovered": 3
+      },
+      "narration": {
+        "played": 13,
+        "model_silent": 19,
+        "unspoken": 3
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-17T03-38-07-549Z-embodiment-a6d4a5e7-3170-4b51-9595-795116b7e626.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 1,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-17T03:38:07.549Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-17T03:48:59.722Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 65,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 0,
+      "outcomes": {
+        "accepted": 54,
+        "rejected_by_adapter": 10,
+        "invalid_decision": 1
+      },
+      "timing": {
+        "decision": {
+          "known": 0,
+          "unknown": 65,
+          "totalMs": null,
+          "averageMs": null
+        },
+        "action": {
+          "known": 0,
+          "unknown": 65,
+          "totalMs": null,
+          "averageMs": null
+        }
+      },
+      "movementEffectiveness": {
+        "unknown": 57,
+        "not_applicable": 8
+      },
+      "intentToAction": {
+        "aligned": 60,
+        "misaligned": 4,
+        "unknown": 1
+      },
+      "goalToAction": {
+        "unknown": 33,
+        "aligned": 32
+      },
+      "sceneActionAppropriateness": {
+        "unknown": 65
+      },
+      "rejectionRecovery": {
+        "not_applicable": 55,
+        "changed_without_success": 4,
+        "recovered": 6
+      },
+      "narration": {
+        "played": 8,
+        "model_silent": 50,
+        "unspoken": 4,
+        "suppressed": 2,
+        "no_attempt": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": null,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": null
+      }
+    },
+    {
+      "journal": "2026-08-17T23-14-33-667Z-embodiment-871c3dfe-4f04-420b-b989-ec34d7f09bc9.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-17T23:14:33.667Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-17T23:21:20.715Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 45,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 45,
+      "outcomes": {
+        "accepted": 25,
+        "rejected_by_adapter": 20
+      },
+      "timing": {
+        "decision": {
+          "known": 45,
+          "unknown": 0,
+          "totalMs": 336223,
+          "averageMs": 7471.622222222222
+        },
+        "action": {
+          "known": 45,
+          "unknown": 0,
+          "totalMs": 70750,
+          "averageMs": 1572.2222222222222
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 24,
+        "effective": 1,
+        "ineffective": 20
+      },
+      "intentToAction": {
+        "aligned": 37,
+        "misaligned": 8
+      },
+      "goalToAction": {
+        "unknown": 44,
+        "aligned": 1
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 35,
+        "unknown": 10
+      },
+      "rejectionRecovery": {
+        "not_applicable": 25,
+        "repeated": 19,
+        "unknown": 1
+      },
+      "narration": {
+        "played": 7,
+        "model_silent": 27,
+        "suppressed": 7,
+        "unspoken": 3,
+        "attempted_no_receipt": 1
+      },
+      "stalls": {
+        "signalledTurns": 8,
+        "maxTurnsSinceNewTile": 23,
+        "maxRepeatedTurns": 19,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-18T01-07-39-988Z-embodiment-55c559a6-5238-46b4-9d75-583b54bf11d7.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-18T01:07:39.988Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-18T01:13:32.862Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 52,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 52,
+      "outcomes": {
+        "accepted": 22,
+        "rejected_by_adapter": 30
+      },
+      "timing": {
+        "decision": {
+          "known": 52,
+          "unknown": 0,
+          "totalMs": 280052,
+          "averageMs": 5385.615384615385
+        },
+        "action": {
+          "known": 52,
+          "unknown": 0,
+          "totalMs": 69864,
+          "averageMs": 1343.5384615384614
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 22,
+        "effective": 1,
+        "ineffective": 29
+      },
+      "intentToAction": {
+        "aligned": 45,
+        "misaligned": 7
+      },
+      "goalToAction": {
+        "unknown": 51,
+        "aligned": 1
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 42,
+        "unknown": 10
+      },
+      "rejectionRecovery": {
+        "not_applicable": 22,
+        "recovered": 1,
+        "repeated": 28,
+        "unknown": 1
+      },
+      "narration": {
+        "model_silent": 30,
+        "played": 7,
+        "suppressed": 8,
+        "unspoken": 7
+      },
+      "stalls": {
+        "signalledTurns": 17,
+        "maxTurnsSinceNewTile": 28,
+        "maxRepeatedTurns": 28,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-18T03-56-56-165Z-embodiment-678955b0-b0cf-4232-aea5-d5ad235acf32.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-18T03:56:56.165Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-18T04:20:13.251Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 107,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 107,
+      "outcomes": {
+        "accepted": 103,
+        "rejected_by_adapter": 4
+      },
+      "timing": {
+        "decision": {
+          "known": 107,
+          "unknown": 0,
+          "totalMs": 846832,
+          "averageMs": 7914.317757009346
+        },
+        "action": {
+          "known": 107,
+          "unknown": 0,
+          "totalMs": 550036,
+          "averageMs": 5140.523364485981
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 58,
+        "effective": 32,
+        "ineffective": 17
+      },
+      "intentToAction": {
+        "aligned": 85,
+        "misaligned": 22
+      },
+      "goalToAction": {
+        "unknown": 90,
+        "aligned": 17
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 68,
+        "unknown": 38,
+        "inappropriate": 1
+      },
+      "rejectionRecovery": {
+        "not_applicable": 103,
+        "recovered": 4
+      },
+      "narration": {
+        "model_silent": 81,
+        "played": 15,
+        "suppressed": 5,
+        "unspoken": 6
+      },
+      "stalls": {
+        "signalledTurns": 9,
+        "maxTurnsSinceNewTile": 20,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-18T04-52-19-838Z-embodiment-1c616f42-d1fc-4236-8325-395cf0e9e9f5.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-18T04:52:19.838Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-18T04:54:32.995Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 18,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 18,
+      "outcomes": {
+        "accepted": 16,
+        "rejected_by_adapter": 2
+      },
+      "timing": {
+        "decision": {
+          "known": 18,
+          "unknown": 0,
+          "totalMs": 83611,
+          "averageMs": 4645.055555555556
+        },
+        "action": {
+          "known": 18,
+          "unknown": 0,
+          "totalMs": 49503,
+          "averageMs": 2750.1666666666665
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 18
+      },
+      "intentToAction": {
+        "aligned": 9,
+        "misaligned": 9
+      },
+      "goalToAction": {
+        "unknown": 17,
+        "aligned": 1
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 13,
+        "unknown": 5
+      },
+      "rejectionRecovery": {
+        "not_applicable": 16,
+        "recovered": 2
+      },
+      "narration": {
+        "model_silent": 13,
+        "unspoken": 4,
+        "attempted_no_receipt": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": 17,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-18T05-20-13-717Z-embodiment-5f4a6d59-ae0b-4e10-9cfe-9679991bf138.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-18T05:20:13.717Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-18T05:26:49.366Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 47,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 47,
+      "outcomes": {
+        "accepted": 44,
+        "rejected_by_adapter": 3
+      },
+      "timing": {
+        "decision": {
+          "known": 47,
+          "unknown": 0,
+          "totalMs": 267960,
+          "averageMs": 5701.276595744681
+        },
+        "action": {
+          "known": 47,
+          "unknown": 0,
+          "totalMs": 127573,
+          "averageMs": 2714.31914893617
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 33,
+        "effective": 12,
+        "ineffective": 2
+      },
+      "intentToAction": {
+        "aligned": 33,
+        "misaligned": 14
+      },
+      "goalToAction": {
+        "unknown": 41,
+        "aligned": 6
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 29,
+        "unknown": 18
+      },
+      "rejectionRecovery": {
+        "not_applicable": 44,
+        "recovered": 3
+      },
+      "narration": {
+        "model_silent": 38,
+        "played": 8,
+        "suppressed": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": 24,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-19T01-22-40-565Z-embodiment-721c8d1b-6f30-4e89-8d2e-1dbf83fdfddb.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-19T01:22:40.565Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-19T01:32:40.083Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.failed",
+        "lifecycleConsistent": false
+      },
+      "turns": 58,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 58,
+      "outcomes": {
+        "accepted": 53,
+        "rejected_by_adapter": 5
+      },
+      "timing": {
+        "decision": {
+          "known": 58,
+          "unknown": 0,
+          "totalMs": 451023,
+          "averageMs": 7776.258620689655
+        },
+        "action": {
+          "known": 58,
+          "unknown": 0,
+          "totalMs": 148405,
+          "averageMs": 2558.706896551724
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 32,
+        "effective": 18,
+        "ineffective": 8
+      },
+      "intentToAction": {
+        "aligned": 39,
+        "misaligned": 19
+      },
+      "goalToAction": {
+        "unknown": 54,
+        "aligned": 4
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 39,
+        "unknown": 18,
+        "inappropriate": 1
+      },
+      "rejectionRecovery": {
+        "not_applicable": 53,
+        "recovered": 4,
+        "unknown": 1
+      },
+      "narration": {
+        "model_silent": 48,
+        "played": 10
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": 22,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-19T02-07-45-194Z-embodiment-5142c91a-636f-4bc9-9d6d-417269e6938c.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-19T02:07:45.194Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-19T02:19:01.428Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 56,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 56,
+      "outcomes": {
+        "accepted": 54,
+        "rejected_by_adapter": 2
+      },
+      "timing": {
+        "decision": {
+          "known": 56,
+          "unknown": 0,
+          "totalMs": 362497,
+          "averageMs": 6473.160714285715
+        },
+        "action": {
+          "known": 56,
+          "unknown": 0,
+          "totalMs": 313635,
+          "averageMs": 5600.625
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 42,
+        "effective": 10,
+        "ineffective": 4
+      },
+      "intentToAction": {
+        "aligned": 38,
+        "misaligned": 18
+      },
+      "goalToAction": {
+        "unknown": 45,
+        "aligned": 11
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 34,
+        "unknown": 21,
+        "inappropriate": 1
+      },
+      "rejectionRecovery": {
+        "not_applicable": 54,
+        "recovered": 2
+      },
+      "narration": {
+        "model_silent": 43,
+        "played": 12,
+        "suppressed": 1
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": 24,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-19T02-50-07-809Z-embodiment-0c6940f3-7ef5-4bd5-806e-bf93ff6aaf7f.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-19T02:50:07.809Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-19T03:22:37.663Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 209,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 209,
+      "outcomes": {
+        "accepted": 142,
+        "rejected_by_adapter": 67
+      },
+      "timing": {
+        "decision": {
+          "known": 209,
+          "unknown": 0,
+          "totalMs": 1453469,
+          "averageMs": 6954.397129186603
+        },
+        "action": {
+          "known": 209,
+          "unknown": 0,
+          "totalMs": 495967,
+          "averageMs": 2373.0478468899523
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 168,
+        "effective": 26,
+        "ineffective": 12,
+        "unknown": 3
+      },
+      "intentToAction": {
+        "aligned": 112,
+        "misaligned": 97
+      },
+      "goalToAction": {
+        "unknown": 170,
+        "aligned": 39
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 128,
+        "unknown": 81
+      },
+      "rejectionRecovery": {
+        "not_applicable": 142,
+        "recovered": 28,
+        "changed_without_success": 1,
+        "repeated": 37,
+        "unknown": 1
+      },
+      "narration": {
+        "suppressed": 12,
+        "model_silent": 172,
+        "played": 24,
+        "unspoken": 1
+      },
+      "stalls": {
+        "signalledTurns": 13,
+        "maxTurnsSinceNewTile": 77,
+        "maxRepeatedTurns": 7,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-19T03-48-47-493Z-embodiment-919af622-b2fc-40b4-aad7-aec660b12cfc.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-19T03:48:47.493Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-19T04:06:36.984Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 93,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 93,
+      "outcomes": {
+        "accepted": 89,
+        "rejected_by_adapter": 4
+      },
+      "timing": {
+        "decision": {
+          "known": 93,
+          "unknown": 0,
+          "totalMs": 631272,
+          "averageMs": 6787.870967741936
+        },
+        "action": {
+          "known": 93,
+          "unknown": 0,
+          "totalMs": 438036,
+          "averageMs": 4710.064516129032
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 59,
+        "effective": 27,
+        "ineffective": 7
+      },
+      "intentToAction": {
+        "aligned": 62,
+        "misaligned": 31
+      },
+      "goalToAction": {
+        "unknown": 83,
+        "aligned": 10
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 64,
+        "unknown": 29
+      },
+      "rejectionRecovery": {
+        "not_applicable": 89,
+        "recovered": 4
+      },
+      "narration": {
+        "played": 17,
+        "model_silent": 73,
+        "suppressed": 3
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": 21,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-19T04-15-15-707Z-embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-19T04:15:15.707Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-19T05:20:27.894Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 315,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 315,
+      "outcomes": {
+        "accepted": 290,
+        "rejected_by_adapter": 24,
+        "invalid_decision": 1
+      },
+      "timing": {
+        "decision": {
+          "known": 315,
+          "unknown": 0,
+          "totalMs": 2878121,
+          "averageMs": 9136.892063492063
+        },
+        "action": {
+          "known": 314,
+          "unknown": 1,
+          "totalMs": 1032626,
+          "averageMs": 3288.6178343949045
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 153,
+        "effective": 99,
+        "ineffective": 57,
+        "unknown": 6
+      },
+      "intentToAction": {
+        "aligned": 238,
+        "misaligned": 76,
+        "unknown": 1
+      },
+      "goalToAction": {
+        "unknown": 277,
+        "aligned": 38
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 199,
+        "unknown": 114,
+        "inappropriate": 2
+      },
+      "rejectionRecovery": {
+        "not_applicable": 291,
+        "recovered": 20,
+        "repeated": 2,
+        "changed_without_success": 1,
+        "unknown": 1
+      },
+      "narration": {
+        "model_silent": 267,
+        "played": 37,
+        "suppressed": 9,
+        "unspoken": 1,
+        "no_attempt": 1
+      },
+      "stalls": {
+        "signalledTurns": 31,
+        "maxTurnsSinceNewTile": 39,
+        "maxRepeatedTurns": 6,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-19T17-01-46-632Z-embodiment-17d5cd1e-ebdd-407a-9573-8f414085e389.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 2,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-19T17:01:46.632Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-19T17:56:15.857Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 232,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 232,
+      "outcomes": {
+        "accepted": 214,
+        "rejected_by_adapter": 18
+      },
+      "timing": {
+        "decision": {
+          "known": 232,
+          "unknown": 0,
+          "totalMs": 1900062,
+          "averageMs": 8189.922413793103
+        },
+        "action": {
+          "known": 232,
+          "unknown": 0,
+          "totalMs": 1368791,
+          "averageMs": 5899.961206896552
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 130,
+        "effective": 65,
+        "ineffective": 35,
+        "unknown": 2
+      },
+      "intentToAction": {
+        "aligned": 165,
+        "misaligned": 67
+      },
+      "goalToAction": {
+        "unknown": 198,
+        "aligned": 34
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 148,
+        "unknown": 82,
+        "inappropriate": 2
+      },
+      "rejectionRecovery": {
+        "not_applicable": 214,
+        "recovered": 17,
+        "changed_without_success": 1
+      },
+      "narration": {
+        "model_silent": 190,
+        "played": 35,
+        "suppressed": 7
+      },
+      "stalls": {
+        "signalledTurns": 29,
+        "maxTurnsSinceNewTile": 39,
+        "maxRepeatedTurns": 3,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-30T18-14-36-847Z-embodiment-7c0493bc-d431-413c-b919-d15f5243c510.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 3,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-30T18:14:36.847Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-30T18:17:10.528Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 12,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 12,
+      "outcomes": {
+        "accepted": 11,
+        "rejected_by_adapter": 1
+      },
+      "timing": {
+        "decision": {
+          "known": 12,
+          "unknown": 0,
+          "totalMs": 72500,
+          "averageMs": 6041.666666666667
+        },
+        "action": {
+          "known": 12,
+          "unknown": 0,
+          "totalMs": 47746,
+          "averageMs": 3978.8333333333335
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 12
+      },
+      "intentToAction": {
+        "aligned": 6,
+        "misaligned": 6
+      },
+      "goalToAction": {
+        "unknown": 12
+      },
+      "sceneActionAppropriateness": {
+        "appropriate": 8,
+        "unknown": 4
+      },
+      "rejectionRecovery": {
+        "not_applicable": 11,
+        "recovered": 1
+      },
+      "narration": {
+        "model_silent": 7,
+        "no_attempt": 3,
+        "suppressed": 2
+      },
+      "stalls": {
+        "signalledTurns": 0,
+        "maxTurnsSinceNewTile": 11,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": 12
+      }
+    },
+    {
+      "journal": "2026-08-30T18-23-53-942Z-embodiment-c5f4fa29-15c4-46e4-9f22-f23deffb7f23.jsonl",
+      "readable": true,
+      "journalSchemaVersion": 3,
+      "scenarioId": "world:pokemon-firered",
+      "startedAt": "2026-08-30T18:23:53.942Z",
+      "terminal": {
+        "source": "summary",
+        "outcome": "stopped",
+        "at": "2026-08-30T18:41:43.932Z",
+        "summaryPresent": true,
+        "lifecycleEventType": "embodiment.session.stopped",
+        "lifecycleConsistent": true
+      },
+      "turns": 61,
+      "retiredActionTurns": 0,
+      "evidenceTurns": 61,
+      "outcomes": {
+        "rejected_by_adapter": 4,
+        "accepted": 57
+      },
+      "timing": {
+        "decision": {
+          "known": 61,
+          "unknown": 0,
+          "totalMs": 482778,
+          "averageMs": 7914.393442622951
+        },
+        "action": {
+          "known": 61,
+          "unknown": 0,
+          "totalMs": 412353,
+          "averageMs": 6759.88524590164
+        }
+      },
+      "movementEffectiveness": {
+        "not_applicable": 35,
+        "effective": 16,
+        "ineffective": 10
+      },
+      "intentToAction": {
+        "aligned": 43,
+        "misaligned": 18
+      },
+      "goalToAction": {
+        "unknown": 54,
+        "aligned": 7
+      },
+      "sceneActionAppropriateness": {
+        "inappropriate": 1,
+        "unknown": 18,
+        "appropriate": 42
+      },
+      "rejectionRecovery": {
+        "recovered": 4,
+        "not_applicable": 57
+      },
+      "narration": {
+        "no_attempt": 11,
+        "model_silent": 46,
+        "suppressed": 4
+      },
+      "stalls": {
+        "signalledTurns": 1,
+        "maxTurnsSinceNewTile": 18,
+        "maxRepeatedTurns": null,
+        "maxRecurringTurns": 12
+      }
+    }
+  ]
+}

@@ -181,7 +181,7 @@ guessed from prose or digests.
 ## Rerun
 
 ```bash
-pnpm --filter @clankie/gba-emulator gameplay:evaluate-journal -- \
+pnpm --filter @clankie/play gameplay:evaluate-journal -- \
   ~/.local/state/clankie/gba-play/<run>.jsonl \
   --events ~/.clankie/events.jsonl \
   --voice-receipts ~/.local/state/clankie/discord-live-receipts.jsonl

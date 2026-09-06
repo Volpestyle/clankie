@@ -214,7 +214,7 @@ evaluator:
 node docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs \
   ~/.local/state/clankie/gba-play/2026-08-19T04-15-15-707Z-embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e.jsonl
 
-pnpm --filter @clankie/gba-emulator gameplay:evaluate-journal -- \
+pnpm --filter @clankie/play gameplay:evaluate-journal -- \
   ../../docs/testing/2026-08-18-pokeagents-trial-run/evidence/01-play-journal.jsonl \
   --events ../../docs/testing/2026-08-18-pokeagents-trial-run/evidence/02-lifecycle-events.jsonl \
   --voice-receipts ../../docs/testing/2026-08-18-pokeagents-trial-run/evidence/03-voice-receipts.jsonl

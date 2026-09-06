@@ -273,6 +273,34 @@ describe("free-play journal", () => {
     expect("evidence" in (lines[1] ?? {})).toBe(false);
   });
 
+  // The real 2026-08-11 run below stopped parsing the day ADR 0145 retired the
+  // local body's checkpoint actions, taking the whole file — and so that run's
+  // evaluation, journey continuity, and operator trail read — with it.
+  it("keeps a journal readable after its action was retired from the live catalog", () => {
+    const lines = parseFreePlayJournal(
+      [
+        JSON.stringify({
+          kind: "header",
+          schemaVersion: 1,
+          runId: "embodiment-fd8d058e",
+          environmentSessionId: "gba-free-play:firered-bedroom-route:v1",
+          scenarioId: "firered-bedroom-route",
+          startedAt: "2026-08-11T04:33:57.505Z",
+          resumedFromCheckpointId: "2026-08-03T02-23-41-816Z-asked-play",
+        }),
+        JSON.stringify({
+          kind: "turn",
+          schemaVersion: 1,
+          at: "2026-08-11T04:43:30.676Z",
+          turn: { ...turn(59), action: { kind: "load_checkpoint" } },
+        }),
+      ].join("\n"),
+    );
+
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatchObject({ turn: { action: { kind: "load_checkpoint" } } });
+  });
+
   it("keeps V2 overworld evidence readable from before exit actionability", () => {
     const oldEvidence = evidence();
     if (oldEvidence.postAction === null) throw new Error("expected post-action evidence");

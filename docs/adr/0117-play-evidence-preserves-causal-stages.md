@@ -2,7 +2,9 @@
 
 Status: accepted (James, 2026-08-17). Amends
 [ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md) and
-[ADR 0068](0068-a-playthrough-leaves-a-durable-trail.md).
+[ADR 0068](0068-a-playthrough-leaves-a-durable-trail.md). Amended by
+[ADR 0160](0160-a-play-journal-is-read-against-its-own-history.md), which reads
+a retired action as archival evidence rather than a corrupt line.
 
 ## Context
 
@@ -42,7 +44,7 @@ actually generated and heard remain unknown by policy. A delivery id is a join
 key, not delivery proof; only a matching played, suppressed, or refused receipt
 settles that question.
 
-The offline evaluator reads V1 and V2 journals. V1 evidence remains `unknown`.
+The offline evaluator reads every journal version. V1 evidence remains `unknown`.
 It may join the service's canonical `CLANKIE_EVENT_LOG`/`CLANKIE_STATE` event
 trail for terminal lifecycle and the canonical `DISCORD_BRIDGE_RECEIPT_PATH`
 receipt trail for narration delivery. A missing summary is terminal only when a
