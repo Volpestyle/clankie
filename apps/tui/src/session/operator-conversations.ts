@@ -143,8 +143,16 @@ export class OperatorConversationSelection {
     return this.selectedId;
   }
 
+  /**
+   * The console switcher is his own session list, the way `/resume` is. Persona,
+   * seat, and channel conversations belong to a counterpart who is not him
+   * (ADR 0135) — the roster reads those, and `--chat <id>` still opens one
+   * deliberately.
+   */
   public async conversations(): Promise<readonly OperatorConversation[]> {
-    return await this.client.list();
+    return (await this.client.list()).filter(
+      (conversation) => conversation.scope.kind === "global" || conversation.scope.kind === "workspace",
+    );
   }
 
   public async select(conversationId: string): Promise<OperatorConversation> {

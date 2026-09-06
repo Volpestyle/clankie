@@ -211,6 +211,30 @@ describe("TUI operator conversation selection", () => {
     );
   });
 
+  it("lists only his own threads, never a counterpart's", async () => {
+    const agent: OperatorConversation = {
+      ...DEFAULT,
+      conversationId: "persona-1",
+      title: "dev1",
+      isDefault: false,
+      scope: { kind: "persona", personaId: "persona-1" },
+    };
+    const room: OperatorConversation = {
+      ...DEFAULT,
+      conversationId: "channel-1",
+      title: "the fleet",
+      isDefault: false,
+      scope: { kind: "channel", channelId: "channel-1" },
+    };
+    const selection = new OperatorConversationSelection(client([WORKSPACE, agent, room]));
+    expect((await selection.conversations()).map((item) => item.conversationId)).toEqual([
+      "global-default",
+      "workspace-1",
+    ]);
+    // The deliberate address still opens one; only the switcher stops offering it.
+    expect((await selection.select("persona-1")).conversationId).toBe("persona-1");
+  });
+
   it("supports the stable direct --chat form without inventing a conversation", () => {
     expect(parseDirectConversation(["--chat", "workspace-chat"])).toEqual({
       conversationId: "workspace-chat",

@@ -120,8 +120,11 @@ credential holder.
   separate follow-up after the current turn and any earlier queued prompts.
   The console keeps observing until all accepted inputs settle; Esc interrupts
   the current turn. These choices also apply to `/skill-name` prompts.
-- `/conversation` opens a searchable dialog for retained conversations;
-  `/conversation <name-or-path>` switches directly. `/chat` remains an alias.
+- `/conversation` opens a searchable dialog for his own retained conversations
+  — the global and workspace threads this console holds, never a fleet agent's
+  DM thread or a channel; `/conversation <name-or-path>` switches directly, and
+  `--chat <conversationId>` still addresses any conversation by id. `/chat`
+  remains an alias.
   Press `x` to close the highlighted inactive conversation; active and default
   conversations stay protected. Switching rebuilds the visible transcript from
   the retained conversation log, then continues from the console's bounded
