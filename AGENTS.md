@@ -32,7 +32,11 @@ service (`apps/clankie`) plus the surfaces that reach it.
   product skills (ADR 0152). `clankie seat` launches it; it carries only what
   a plugin can uniquely declare, like the herdr plugin.
 - `.agents/skills` — product skills shipped with every install (`this-machine`,
-  `trace-clankie`). Checkout-only skills live in `.agents/dev-skills`.
+  `trace-clankie`). Checkout-only skills live in `.agents/dev-skills`. He also
+  reads the workspace's own `.agents/skills`, Pi's agent directory, and
+  `~/.agents/skills`, the roots he shares with every other agent on the
+  machine; `clankieSkillRoots` in `@clankie/settings` is the one list, so what
+  the composer offers is what a session can load.
 - `packages/play` — his play mind above one body seam; the body itself is his
   seat in a hosted PokeAgents world (ADR 0145). No emulator lives in this repo.
 - `packages/` — shared contracts and adapters; `protocol` depends on nothing.

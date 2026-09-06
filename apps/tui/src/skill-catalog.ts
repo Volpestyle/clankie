@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
+import { clankieSkillRoots } from "@clankie/settings";
 import type { ClankieAutocompleteSkill } from "./face/clankie-autocomplete.ts";
 
 /** Complete only the appendable part of a leading slash skill token. */
@@ -41,13 +42,7 @@ export async function discoverClankieSkills(
   const piAgentDir = env.PI_CODING_AGENT_DIR?.trim() || join(home, ".pi", "agent");
   const skills = new Map<string, ClankieAutocompleteSkill>();
 
-  for (const root of [
-    join(repoRoot, ".pi", "skills"),
-    join(repoRoot, ".agents", "skills"),
-    join(repoRoot, ".agents", "dev-skills"),
-    join(piAgentDir, "skills"),
-    join(home, ".agents", "skills"),
-  ]) {
+  for (const root of clankieSkillRoots({ repoRoot, agentDir: piAgentDir, home })) {
     const loaded = loadSkills({
       cwd: repoRoot,
       agentDir: piAgentDir,

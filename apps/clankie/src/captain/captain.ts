@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import {
+  clankieSkillRoots,
   personaInstructions,
   resolveDiscordSettings,
   SettingsStore,
@@ -229,11 +230,11 @@ export function assembleLanePrompt(
 ): string {
   const identity = readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
   const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
+  // Machine access says only whether this room has a shell. The herdr contract —
+  // joining, the census, the bare-`herdr-lead` hang — is identity, stated once in
+  // instructions.md, and every lane that gets this section gets that one too.
   const reach = systemTools
-    ? [
-        "# Machine access",
-        "You have shell and filesystem tools in this authorized context. `herdr` talks to the local socket from this service. When a turn names your herdr pane, you have joined that session: the agents in `<herdr_session>` are yours to lead, route, and harvest. When it names none, you are on the socket only. Never run bare `herdr-lead` from this shell — that starts a TUI in-process and hangs.",
-      ].join("\n")
+    ? ["# Machine access", "You have shell and filesystem tools in this authorized context."].join("\n")
     : [
         "# This room",
         "You do not have a shell or filesystem tools in this room. If someone asks you to inspect herdr, run a command, or read a file, say you cannot from here. Do not imply you chose not to look.",
@@ -656,10 +657,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         mcpExtension(deps, lane),
       ],
       noPromptTemplates: true,
-      additionalSkillPaths: [
-        join(options.repoRoot, ".agents", "skills"),
-        join(options.repoRoot, ".agents", "dev-skills"),
-      ].filter((path) => existsSync(path)),
+      // Every root explicitly: the loader is given in-memory settings and
+      // resolves no defaults of its own, so a path absent here is a skill he
+      // cannot load however plainly it is named.
+      additionalSkillPaths: clankieSkillRoots({
+        repoRoot: options.repoRoot,
+        agentDir: getAgentDir(),
+        home: homedir(),
+        cwd,
+      }).filter((path) => existsSync(path)),
       settingsManager: piSettings,
     });
     await loader.reload();
