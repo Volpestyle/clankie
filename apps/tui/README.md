@@ -116,6 +116,10 @@ credential holder.
 
 ## Operator behavior
 
+- Enter sends a prompt or steers Clankie's active Pi turn. Alt+Enter queues a
+  separate follow-up after the current turn and any earlier queued prompts.
+  The console keeps observing until all accepted inputs settle; Esc interrupts
+  the current turn. These choices also apply to `/skill-name` prompts.
 - `/conversation` opens a searchable dialog for retained conversations;
   `/conversation <name-or-path>` switches directly. `/chat` remains an alias.
   Press `x` to close the highlighted inactive conversation; active and default

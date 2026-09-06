@@ -14,8 +14,9 @@ steers an active autonomous invocation, and other pairs wait on the FIFO
 ([ADR 0130](0130-goals-and-self-wakes-share-the-operator-thread.md)). Channel
 rounds and external seats retain their own delivery behavior.
 
-`clankie send --conversation ID --delivery steer|queue (MESSAGE | --stdin)`
-submits through this API and returns an admission receipt.
+The console uses Enter to steer and Alt+Enter to queue. One tail observes all
+accepted inputs until they settle, including prompts submitted during startup.
+The headless equivalent is `clankie send --conversation ID --delivery steer|queue MESSAGE`.
 
 Steering reuses Pi's live-input mechanism. Queuing uses the conversation FIFO
 instead of Pi's `followUp`, so each queued prompt owns a separate run receipt,

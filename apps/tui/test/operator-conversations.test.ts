@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mintCaptainToken, type CredentialStore } from "@clankie/credential-broker";
+import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
 import type {
   OperatorConversation,
   OperatorConversationRecovery,
@@ -393,7 +394,161 @@ describe("TUI operator conversation selection", () => {
   });
 });
 
+describe("headless conversation input", () => {
+  it.each([undefined, "queue"])(
+    "submits %s delivery with the current revision and prints the receipt",
+    async (delivery) => {
+      const requests: Array<Record<string, unknown>> = [];
+      const output: string[] = [];
+      const exitCode = await runHeadlessCaptainCommand(
+        [
+          "send",
+          "--conversation",
+          DEFAULT.conversationId,
+          ...(delivery === undefined ? [] : ["--delivery", delivery]),
+          "hello",
+          "Clankie",
+        ],
+        {
+          repoRoot: "/unused",
+          env: { CLANKIE_CAPTAIN_TOKEN: "test-captain" },
+          stdout: {
+            write: (chunk) => {
+              output.push(chunk);
+            },
+          },
+          fetchImpl: (async (_url, init) => {
+            expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-captain");
+            const request = JSON.parse(String(init?.body));
+            requests.push(request);
+            return Response.json(
+              request.op === "get"
+                ? { op: "get", schemaVersion: 1, conversation: DEFAULT }
+                : { op: "send", schemaVersion: 1, result: await client().send(request.turn) },
+            );
+          }) as typeof fetch,
+        },
+      );
+      expect(exitCode).toBe(0);
+      expect(requests[1]).toMatchObject({
+        op: "send",
+        turn: {
+          conversationId: DEFAULT.conversationId,
+          expectedRevision: DEFAULT.revision,
+          message: "hello Clankie",
+          delivery: delivery ?? "steer",
+        },
+      });
+      expect(JSON.parse(output.join(""))).toMatchObject({ status: "accepted", runId: "run:test" });
+    },
+  );
+
+  it("rejects invalid delivery before reaching the service", async () => {
+    const fetchImpl = vi.fn();
+    const errors: string[] = [];
+    expect(
+      await runHeadlessCaptainCommand(
+        ["send", "--conversation", DEFAULT.conversationId, "--delivery", "typo", "hello"],
+        {
+          repoRoot: "/unused",
+          env: {},
+          fetchImpl,
+          stderr: {
+            write: (chunk) => {
+              errors.push(chunk);
+            },
+          },
+        },
+      ),
+    ).toBe(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(errors.join("")).toContain("Usage: clankie send");
+  });
+});
+
 describe("TUI selected-conversation prompt path", () => {
+  it("admits startup input in order and observes queued replies through one interruptible tail", async () => {
+    const { store } = await tempTailStore();
+    let firstReceipt!: () => void;
+    const firstReceiptPromise = new Promise<void>((resolve) => {
+      firstReceipt = resolve;
+    });
+    let finish!: () => void;
+    const finishPromise = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let queuedActive!: () => void;
+    const queuedActivePromise = new Promise<void>((resolve) => {
+      queuedActive = resolve;
+    });
+    const submitted: Array<[string, string | undefined]> = [];
+    const cancelled: string[] = [];
+    let revision = DEFAULT.revision;
+    let tails = 0;
+    const routed: OperatorConversationClient = {
+      ...client(),
+      get: async () => ({ ...DEFAULT, revision }),
+      send: async (turn) => {
+        expect(turn.expectedRevision).toBe(revision);
+        submitted.push([turn.message, turn.delivery]);
+        const runId = `run-${submitted.length}`;
+        if (submitted.length === 1) await firstReceiptPromise;
+        return { ...(await client().send(turn)), revision: ++revision, runId };
+      },
+      cancel: async (_id, runId) => {
+        cancelled.push(runId);
+        return true;
+      },
+      tail: async function* () {
+        tails++;
+        for (const n of [1, 2])
+          yield {
+            kind: "event" as const,
+            event: streamEvent("global-default", `done-${n}`, {
+              type: "turn",
+              runId: `run-${n}`,
+              phase: "completed",
+            }),
+          };
+        queuedActive();
+        await finishPromise;
+        yield {
+          kind: "event" as const,
+          event: streamEvent("global-default", "done-3", {
+            type: "turn",
+            runId: "run-3",
+            phase: "completed",
+          }),
+        };
+      },
+    };
+    const selection = new OperatorConversationSelection(routed);
+    await selection.selectDefault();
+    const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
+    await session.initialize();
+    let settled = false;
+    const running = session.prompt("first", recordingSink().sink).then(() => {
+      settled = true;
+    });
+    const steer = session.submit("correction", "steer");
+    const queue = session.submit("later", "queue");
+    await vi.waitFor(() => expect(submitted).toEqual([["first", "steer"]]));
+    firstReceipt();
+    await Promise.all([steer, queue, queuedActivePromise]);
+    expect(submitted).toEqual([
+      ["first", "steer"],
+      ["correction", "steer"],
+      ["later", "queue"],
+    ]);
+    expect(settled).toBe(false);
+    expect(await session.interruptActive()).toBe(true);
+    expect(cancelled).toEqual(["run-3"]);
+    finish();
+    await running;
+    expect(tails).toBe(1);
+    expect(await session.interruptActive()).toBe(false);
+  });
+
   it("renders phone turns and replies while no local prompt is active", async () => {
     const { store } = await tempTailStore();
     const selection = new OperatorConversationSelection(client());

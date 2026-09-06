@@ -8,6 +8,56 @@ import { buildConsoleCommands } from "../src/commands.ts";
 import { ClankieFaceShell, clickedTranscriptBlock } from "../src/shell/shell.ts";
 
 describe("shell assembly", () => {
+  it("steers on Enter and queues on Alt+Enter without replacing the active turn", async () => {
+    let finish!: () => void;
+    const finishPromise = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const admitted: Array<[string, string]> = [];
+    const shell = new ClankieFaceShell({
+      commands: [],
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+      onPrompt: () => finishPromise,
+      onPendingPrompt: async (text, delivery) => {
+        admitted.push([text, delivery]);
+      },
+    });
+    const internals = shell as unknown as {
+      editor: {
+        setText(text: string): void;
+        onSubmit(text: string): void;
+        handleInput(data: string): void;
+        getText(): string;
+      };
+      activeTurn: unknown;
+      routeInput(data: string): { consume?: boolean } | undefined;
+    };
+    const running = shell.submitUserPrompt("first");
+    const active = internals.activeTurn;
+    try {
+      internals.editor.onSubmit("correction");
+      internals.editor.setText("next task");
+      expect(internals.routeInput("\x1b\r")).toEqual({ consume: true });
+      await vi.waitFor(() =>
+        expect(admitted).toEqual([
+          ["correction", "steer"],
+          ["next task", "queue"],
+        ]),
+      );
+      const pasted = "a long queued prompt ".repeat(60).trim();
+      internals.editor.handleInput(`\x1b[200~${pasted}\x1b[201~`);
+      expect(internals.editor.getText()).toContain("[paste #");
+      internals.routeInput("\x1b\r");
+      await vi.waitFor(() => expect(admitted.at(-1)).toEqual([pasted, "queue"]));
+      expect(internals.activeTurn).toBe(active);
+    } finally {
+      finish();
+      await running;
+    }
+  });
+
   it("wires the face shell without starting it", () => {
     const commands = buildConsoleCommands({});
     const shell = new ClankieFaceShell({
@@ -430,13 +480,23 @@ describe("shell assembly", () => {
 
     // First Esc interrupts server-side; observation keeps streaming.
     expect(internals.routeInput("\x1b")).toEqual({ consume: true });
-    await Promise.resolve();
     expect(interrupts).toHaveLength(1);
     expect(controller.signal.aborted).toBe(false);
 
     // A second Esc while the interrupt is pending falls back to detaching.
     expect(internals.routeInput("\x1b")).toEqual({ consume: true });
     expect(controller.signal.aborted).toBe(true);
+    await Promise.resolve();
+
+    // After a successful acknowledgement, queued work stays interruptible.
+    const queued = new AbortController();
+    internals.activeTurn = { controller: queued };
+    internals.routeInput("\x1b");
+    await Promise.resolve();
+    internals.routeInput("\x1b");
+    await Promise.resolve();
+    expect(interrupts).toHaveLength(3);
+    expect(queued.signal.aborted).toBe(false);
 
     // A failed cancel detaches on its own so Esc never strands the console.
     interruptResult = false;

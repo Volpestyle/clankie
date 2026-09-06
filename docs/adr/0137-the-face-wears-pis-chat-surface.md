@@ -62,8 +62,10 @@ with live loaders.
 The selected conversation keeps exactly one cursor-backed tail attached. While
 the editor is idle, that tail renders operator turns and Clankie replies from
 phone, desktop, or another surface immediately. A local prompt briefly takes
-over the same cursor until its run settles, then idle observation resumes; the
-two modes never tail concurrently.
+over the same cursor until its run and all locally steered or queued inputs
+settle, then idle observation resumes; the two modes never tail concurrently.
+Enter steers the active Pi turn; Alt+Enter queues a separate follow-up
+([ADR 0091](0091-a-mid-turn-message-steers-the-turn.md)).
 
 Clankie's chrome stays Clankie's — the banner (name and rule only — the model
 and workspace moved to the footer), the slash-command typeahead panel, the

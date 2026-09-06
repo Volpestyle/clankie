@@ -18,6 +18,7 @@ import {
   type OperatorConversationServiceClient,
   type OperatorConversationServiceDispatch,
   type OperatorConversationStreamEvent,
+  type SubmitOperatorConversationTurn,
 } from "@clankie/protocol";
 
 /**
@@ -395,12 +396,17 @@ export interface OperatorConversationEventSink {
   live(draft: OperatorConversationLiveDraft | undefined): void;
 }
 
+interface ObservedPromptRuns {
+  readonly conversationId: string;
+  readonly runIds: Set<string>;
+  admissions: Promise<void>;
+}
+
 /**
  * Production prompt and observation adapter. One cursor follows the selected
- * conversation whether the console is idle or awaiting its own turn; the face
+ * conversation both while idle and while submitted turns are active; the face
  * hands observation between those two modes so only one tail owns it at once.
- * No direct/default local session exists in this path, and aborting observation
- * never cancels an already accepted turn.
+ * Aborting observation never cancels an already accepted turn.
  */
 export class OperatorConversationPromptSession {
   private readonly client: OperatorConversationClient;
@@ -408,8 +414,8 @@ export class OperatorConversationPromptSession {
   private readonly tails: OperatorConversationTailStore;
   private readonly herdrPaneId: () => string | undefined;
   private readonly restores = new Map<string, Promise<boolean>>();
-  /** The accepted run the console is currently observing, if any. */
-  private activeRun: { readonly conversationId: string; readonly runId: string } | undefined;
+  /** One tail observes the original turn and every input admitted alongside it. */
+  private activeRun: ObservedPromptRuns | undefined;
 
   public constructor(input: {
     readonly client: OperatorConversationClient;
@@ -496,15 +502,56 @@ export class OperatorConversationPromptSession {
     message: string,
     sink: OperatorConversationEventSink,
     signal?: AbortSignal,
+    delivery: SubmitOperatorConversationTurn["delivery"] = "steer",
   ): Promise<void> {
     // Snapshot selection once. A concurrent /conversation switch affects only
     // the next prompt; it can never retarget an already submitted turn.
     const conversationId = this.requiredConversationId();
-    if (!(await this.restoreConversation(conversationId, sink))) {
-      throw new OperatorConversationClientError(
-        "Conversation history requires an explicit recovery before sending",
-      );
+    const active: ObservedPromptRuns = { conversationId, runIds: new Set(), admissions: Promise.resolve() };
+    this.activeRun = active;
+    try {
+      await this.admit(active, message, delivery, sink);
+      await this.observeTail(conversationId, sink, signal, active);
+    } finally {
+      if (this.activeRun === active) this.activeRun = undefined;
     }
+  }
+
+  /** Admission only: the original prompt keeps the single tail and interrupt target. */
+  public async submit(message: string, delivery: "steer" | "queue"): Promise<void> {
+    const active = this.activeRun;
+    if (active === undefined)
+      throw new OperatorConversationClientError("No prompt is being observed; send a new prompt");
+    await this.admit(active, message, delivery);
+  }
+
+  private admit(
+    active: ObservedPromptRuns,
+    message: string,
+    delivery: SubmitOperatorConversationTurn["delivery"],
+    sink?: OperatorConversationEventSink,
+  ): Promise<void> {
+    // Serialize revision reads and sends, including inputs typed during startup.
+    const admission = active.admissions.then(async () => {
+      if (this.activeRun !== active)
+        throw new OperatorConversationClientError("The observed prompt ended; send a new prompt");
+      if (sink !== undefined && !(await this.restoreConversation(active.conversationId, sink))) {
+        throw new OperatorConversationClientError(
+          "Conversation history requires an explicit recovery before sending",
+        );
+      }
+      const runId = await this.send(active.conversationId, message, delivery);
+      active.runIds.add(runId);
+    });
+    active.admissions = admission.catch(() => undefined);
+    return admission;
+  }
+
+  private async send(
+    conversationId: string,
+    message: string,
+    delivery: SubmitOperatorConversationTurn["delivery"],
+  ): Promise<string> {
     const conversation = await this.client.get(conversationId);
     if (conversation === undefined) {
       throw new OperatorConversationClientError("Selected operator conversation no longer exists");
@@ -517,6 +564,7 @@ export class OperatorConversationPromptSession {
       surfaceClientId: this.tails.surfaceClientId,
       expectedRevision: conversation.revision,
       message,
+      ...(delivery === undefined ? {} : { delivery }),
       ...(herdrPaneId === undefined ? {} : { herdrPaneId }),
     });
     if (accepted.status === "revision_conflict") {
@@ -525,12 +573,7 @@ export class OperatorConversationPromptSession {
     if (accepted.status === "seat_offline") {
       throw new OperatorConversationClientError("That agent is offline; retry when its pane is live");
     }
-    this.activeRun = { conversationId, runId: accepted.runId };
-    try {
-      await this.observeTail(conversationId, sink, signal, accepted.runId);
-    } finally {
-      if (this.activeRun?.runId === accepted.runId) this.activeRun = undefined;
-    }
+    return accepted.runId;
   }
 
   /**
@@ -543,8 +586,11 @@ export class OperatorConversationPromptSession {
   public async interruptActive(): Promise<boolean> {
     const active = this.activeRun;
     if (active === undefined) return false;
+    await active.admissions;
+    const runId = active.runIds.values().next().value;
+    if (runId === undefined) return false;
     try {
-      return await this.client.cancel(active.conversationId, active.runId);
+      return await this.client.cancel(active.conversationId, runId);
     } catch {
       return false;
     }
@@ -554,7 +600,7 @@ export class OperatorConversationPromptSession {
     conversationId: string,
     sink: OperatorConversationEventSink,
     signal?: AbortSignal,
-    runId?: string,
+    active?: ObservedPromptRuns,
   ): Promise<void> {
     tail: while (!isAborted(signal)) {
       const cursor = this.tails.cursor(conversationId);
@@ -584,12 +630,19 @@ export class OperatorConversationPromptSession {
           sink.event(item.event);
           await this.tails.writeCursor(conversationId, item.event.cursor);
           if (
-            runId !== undefined &&
+            active !== undefined &&
             item.event.type === "turn" &&
-            item.event.runId === runId &&
             ["completed", "failed", "cancelled"].includes(item.event.phase)
           ) {
-            return;
+            // A receipt can race this event; finish in-flight admissions before
+            // deciding whether the whole group has settled.
+            let admissions: Promise<void>;
+            do {
+              admissions = active.admissions;
+              await admissions;
+            } while (admissions !== active.admissions);
+            active.runIds.delete(item.event.runId);
+            if (active.runIds.size === 0) return;
           }
         }
         return;

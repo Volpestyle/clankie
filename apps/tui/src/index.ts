@@ -140,6 +140,7 @@ const conversationPrompt = new OperatorConversationPromptSession({
   tails: new OperatorConversationTailStore(join(tuiStateRoot, "operator-conversation-tail.json")),
   herdrPaneId: () => herdrPaneIdFromEnv(),
 });
+let promptReady = Promise.resolve();
 await conversationPrompt.initialize();
 let conversationObservation:
   | { readonly controller: AbortController; readonly done: Promise<void> }
@@ -367,11 +368,15 @@ const shell = new ClankieFaceShell({
     formatCaptainPresenceStatus(presence.snapshot),
   ],
   // The selected server-owned conversation is the only production prompt path.
-  onPrompt: async (prompt, activeShell, signal) => {
-    await stopConversationObservation();
-    await reportHerdrAgent("working", { source: "clankie", agent: "clankie", message: "turn" });
+  onPrompt: async (prompt, activeShell, signal, delivery) => {
+    let ready!: () => void;
+    promptReady = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
     try {
-      await conversationPrompt.prompt(
+      await stopConversationObservation();
+      await reportHerdrAgent("working", { source: "clankie", agent: "clankie", message: "turn" });
+      const running = conversationPrompt.prompt(
         prompt,
         createOperatorConversationShellSink(activeShell, {
           localEchoText: prompt,
@@ -381,11 +386,19 @@ const shell = new ClankieFaceShell({
           },
         }),
         signal,
+        delivery,
       );
+      ready();
+      await running;
     } finally {
+      ready();
       startConversationObservation();
       await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
     }
+  },
+  onPendingPrompt: async (prompt, delivery) => {
+    await promptReady;
+    await conversationPrompt.submit(prompt, delivery);
   },
   // Esc while a turn streams: cancel the run server-side (Clankie stops); the
   // tail settles on the durable `cancelled` event. Detach remains the fallback.

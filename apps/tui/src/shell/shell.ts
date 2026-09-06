@@ -113,7 +113,14 @@ export interface FaceShellOptions {
   /** Captain-authenticated page of retained Discord voice transcripts (ADR 0121). */
   readonly voiceTranscripts?: DiscordVoiceTranscriptClient;
   /** Handles a plain prompt (not a slash command, not `!`). */
-  readonly onPrompt?: (prompt: string, shell: ClankieFaceShell, signal: AbortSignal) => Promise<void>;
+  readonly onPrompt?: (
+    prompt: string,
+    shell: ClankieFaceShell,
+    signal: AbortSignal,
+    delivery: "steer" | "queue",
+  ) => Promise<void>;
+  /** Admit input while the original prompt keeps observing the conversation. */
+  readonly onPendingPrompt?: (prompt: string, delivery: "steer" | "queue") => Promise<void>;
   /**
    * Interrupts the in-flight turn server-side (Esc). Resolves false when the
    * turn could not be cancelled, in which case the shell detaches observation
@@ -360,22 +367,24 @@ export class ClankieFaceShell {
     this.editor.onChange = (text) => {
       this.refreshCommandSurface(text);
     };
-    this.editor.onSubmit = (submitted) => {
-      this.refreshCommandSurface("");
-      if (this.setupFlow.handleSubmit(submitted)) return;
-      // Capture before submitting: anything entered while a turn is already
-      // streaming is a concurrent slash command (or a deferred prompt) and must
-      // not clobber the tracked in-flight turn.
-      const concurrent = this.respondingState;
-      const submission = this.submitEditorText(submitted).catch((error: unknown) => {
-        this.insertMarkdown(`**Error**\n\n${formatError(error)}`);
-      });
-      if (concurrent) return;
-      const tracked: Promise<void> = submission.finally(() => {
-        if (this.runningTurn === tracked) this.runningTurn = undefined;
-      });
-      this.runningTurn = tracked;
-    };
+    this.editor.onSubmit = (submitted) => this.submitEditorInput(submitted);
+  }
+
+  private submitEditorInput(submitted: string, delivery: "steer" | "queue" = "steer"): void {
+    this.refreshCommandSurface("");
+    if (this.setupFlow.handleSubmit(submitted)) return;
+    // Capture before submitting: anything entered while a turn is already
+    // streaming is a concurrent command or prompt admission and must
+    // not clobber the tracked in-flight turn.
+    const concurrent = this.respondingState;
+    const submission = this.submitEditorText(submitted, delivery).catch((error: unknown) => {
+      this.insertMarkdown(`**Error**\n\n${formatError(error)}`);
+    });
+    if (concurrent) return;
+    const tracked: Promise<void> = submission.finally(() => {
+      if (this.runningTurn === tracked) this.runningTurn = undefined;
+    });
+    this.runningTurn = tracked;
   }
 
   // --- lifecycle ---
@@ -840,12 +849,23 @@ export class ClankieFaceShell {
   }
 
   private loaderText(message: string): string {
-    return `${message} (esc to interrupt)`;
+    return `${message} (enter to steer · alt+enter to queue · esc to interrupt)`;
   }
 
   // --- input routing ---
 
   private routeInput(data: string): { consume?: boolean; data?: string } | undefined {
+    if (
+      matchesKey(data, Key.alt("enter")) &&
+      !this.setupFlow.isWaitingForInput() &&
+      !this.bashMode &&
+      !this.tui.hasOverlay()
+    ) {
+      const text = this.editor.getExpandedText();
+      this.editor.setText("");
+      this.submitEditorInput(text, "queue");
+      return { consume: true };
+    }
     if (matchesKey(data, Key.ctrl("/")) || data === "\x1f") {
       if (this.setupFlow.isWaitingForInput()) return undefined;
       this.openCommandPalette();
@@ -1070,7 +1090,7 @@ export class ClankieFaceShell {
 
   // --- prompt submission ---
 
-  private async submitEditorText(rawPrompt: string): Promise<void> {
+  private async submitEditorText(rawPrompt: string, delivery: "steer" | "queue" = "steer"): Promise<void> {
     const prompt = rawPrompt.trim();
     if (prompt.length === 0) return;
     // Inline shell escape: either bash mode is active or the line is `!`-prefixed
@@ -1083,24 +1103,18 @@ export class ClankieFaceShell {
       await this.handleBashPrompt(command);
       return;
     }
-    // Slash commands stay usable while a turn streams, so they are never gated on
-    // respondingState. A second plain prompt would collide with the active turn, so
-    // restore the text rather than dropping what the user typed.
+    // Local slash commands stay usable while a turn streams. Prompts and skills
+    // use the same server admission path, including while he is working.
     if (prompt.startsWith("/")) {
       this.rememberPrompt(prompt);
-      await this.handleSlashPrompt(prompt);
-      return;
-    }
-    if (this.respondingState) {
-      this.editor.setText(rawPrompt);
-      this.refreshCommandSurface(rawPrompt);
+      await this.handleSlashPrompt(prompt, delivery);
       return;
     }
     this.rememberPrompt(prompt);
-    await this.submitUserPrompt(prompt);
+    await this.submitUserPrompt(prompt, delivery);
   }
 
-  private async handleSlashPrompt(prompt: string): Promise<void> {
+  private async handleSlashPrompt(prompt: string, delivery: "steer" | "queue"): Promise<void> {
     const withoutSlash = prompt.slice(1);
     const token = (withoutSlash.split(/\s+/u)[0] ?? "").toLowerCase();
     const command = resolveClankieCommand(this.options.commands, token)?.command;
@@ -1110,12 +1124,7 @@ export class ClankieFaceShell {
           this.insertCommandResult(prompt, "Skills are unavailable inside /btw.", "error");
           return;
         }
-        if (this.respondingState) {
-          this.editor.setText(prompt);
-          this.refreshCommandSurface(prompt);
-          return;
-        }
-        await this.submitUserPrompt(prompt);
+        await this.submitUserPrompt(prompt, delivery);
         return;
       }
       this.insertCommandResult(prompt, `Unknown command /${token}. Run /help for the command list.`, "error");
@@ -1137,7 +1146,26 @@ export class ClankieFaceShell {
     }
   }
 
-  async submitUserPrompt(prompt: string): Promise<void> {
+  async submitUserPrompt(prompt: string, delivery: "steer" | "queue" = "steer"): Promise<void> {
+    if (this.respondingState) {
+      try {
+        if (this.options.onPendingPrompt === undefined)
+          throw new Error("This connection cannot accept input while working");
+        await this.options.onPendingPrompt(prompt, delivery);
+        this.refreshStatus(delivery === "queue" ? "follow-up queued" : "steering sent");
+      } catch (error) {
+        // Preserve an unsent prompt without overwriting text typed while the send
+        // was in flight. Accepted inputs are echoed once by the existing tail.
+        if (this.editor.getText().length === 0) {
+          this.editor.setText(prompt);
+          this.refreshCommandSurface(prompt);
+        } else {
+          this.insertMarkdown(`**Unsent prompt**\n\n${prompt}`);
+        }
+        this.insertMarkdown(`**Error**\n\n${formatError(error)}`);
+      }
+      return;
+    }
     const onPrompt = this.options.onPrompt;
     if (onPrompt === undefined) {
       this.insertMarkdown("**Notice**\n\nNo Clankie session is connected; prompts go nowhere yet.");
@@ -1149,7 +1177,7 @@ export class ClankieFaceShell {
     this.activeTurn = turn;
     this.startTurnLoader();
     try {
-      await onPrompt(prompt, this, controller.signal);
+      await onPrompt(prompt, this, controller.signal, delivery);
     } catch (error) {
       if (!controller.signal.aborted) this.insertMarkdown(`**Error**\n\n${formatError(error)}`);
     } finally {
@@ -1177,7 +1205,12 @@ export class ClankieFaceShell {
     turn.loader?.setMessage("Interrupting...");
     this.refreshStatus("interrupting");
     void onInterrupt().then((cancelled) => {
-      if (cancelled || this.activeTurn !== turn || turn.controller.signal.aborted) return;
+      if (this.activeTurn !== turn || turn.controller.signal.aborted) return;
+      if (cancelled) {
+        // The same observer may go on to a queued turn, which stays interruptible.
+        turn.interrupting = false;
+        return;
+      }
       // The service could not cancel this run; fall back to detaching.
       turn.loader?.setMessage("Detaching — Clankie continues...");
       this.refreshStatus("detaching — Clankie continues");

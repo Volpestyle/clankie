@@ -74,8 +74,9 @@ run pairing on the host that owns the relay.
 add `--delivery queue` for a separate follow-up. Use `--stdin` instead of a
 quoted message to read a pipe while preserving interior newlines. Either starts
 a turn when idle. JSON stdout is an admission receipt, not a reply; observe the same
-conversation with `clankie --chat ID`. Channel rounds and external seats keep
-their own delivery behavior. Full contract: `{repoRoot}/docs/cli.md`.
+conversation with `clankie --chat ID`. In the console, Enter steers and
+Alt+Enter queues. Channel rounds and external seats keep their own delivery
+behavior. Full contract: `{repoRoot}/docs/cli.md`.
 
 JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `operator-credential rotate` default to human text — pass `--json`.
