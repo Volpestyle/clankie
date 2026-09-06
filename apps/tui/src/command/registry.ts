@@ -130,6 +130,14 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["metrics"],
+    lines: [
+      "  metrics [--run ID] [--limit N]",
+      "                           Recent settled captain turns: execution identity, tool shape,",
+      "                           reported usage (JSON; newest first, limit 1-100, default 20)",
+    ],
+  },
+  {
     nouns: ["seat"],
     lines: [
       "  seat [--resume] [--plugin-dir PATH] [--dry-run]",

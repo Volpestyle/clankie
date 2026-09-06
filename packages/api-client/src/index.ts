@@ -11,7 +11,10 @@ import {
   DiscordUserSessionOptInRequestSchema,
   DiscordUserSessionOptInSchema,
   DISCORD_STREAM_WATCH_PATH,
+  CAPTAIN_TURN_METRICS_PATH,
+  CaptainTurnMetricsPageSchema,
   type CaptainChannelTurnResult,
+  type CaptainTurnMetricsPage,
   type DiscordChannelProjectionMessage,
   type DiscordChannelProjectionMessageResult,
   type DiscordPresenceWrite,
@@ -329,6 +332,20 @@ export class ClankieApiClient {
 
   public inspectMemory(): Promise<OperatorMemoryCatalog> {
     return this.request("/v1/memory", { headers: this.operatorHeaders() });
+  }
+
+  /** Recent settled captain turns, newest first. Counters only — no transcript. */
+  public async readCaptainTurnMetrics(
+    query: { readonly limit?: number; readonly runId?: string } = {},
+  ): Promise<CaptainTurnMetricsPage> {
+    const search = new URLSearchParams();
+    if (query.limit !== undefined) search.set("limit", String(query.limit));
+    if (query.runId !== undefined) search.set("runId", query.runId);
+    const suffix = search.size === 0 ? "" : `?${search.toString()}`;
+    const body = await this.request<unknown>(`${CAPTAIN_TURN_METRICS_PATH}${suffix}`, {
+      headers: this.operatorHeaders(),
+    });
+    return CaptainTurnMetricsPageSchema.parse(body);
   }
 
   public updateDiscordPersonMemoryFact(

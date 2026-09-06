@@ -1,59 +1,30 @@
 import { appendFileSync, mkdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { CaptainSessionLaneV2Schema, type CaptainSessionLaneV2 } from "@clankie/protocol";
-import { z } from "zod";
+import {
+  CAPTAIN_TURN_METRICS_LIMIT_DEFAULT,
+  CAPTAIN_TURN_METRICS_LIMIT_MAX,
+  CaptainTurnSettledMetricsSchema,
+  type CaptainSessionLaneV2,
+  type CaptainTurnExecution,
+  type CaptainTurnSettledMetrics,
+  type CaptainTurnSettledOutcome,
+} from "@clankie/protocol";
 
 const TURN_SETTLED_LOG_NAME = "turn-settled.jsonl";
 const TURN_SETTLED_METRICS_TYPE = "captain.turn.settled" as const;
 
-const TurnSettledOutcomeSchema = z.enum(["completed", "failed", "interrupted"]);
-export type TurnSettledOutcome = z.infer<typeof TurnSettledOutcomeSchema>;
+export type TurnSettledOutcome = CaptainTurnSettledOutcome;
+export type TurnSettledMetrics = CaptainTurnSettledMetrics;
+export type TurnExecutionIdentity = CaptainTurnExecution;
 
 /**
  * One JSONL line per settled operator or Discord captain turn. Counters and
  * names only — never Pi trees, tool arguments, tool outputs, or message text.
+ * The row shape is the public contract in `@clankie/protocol`, so what the log
+ * writes and what the read surfaces answer are the same record.
  */
-export const TurnSettledMetricsSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    type: z.literal(TURN_SETTLED_METRICS_TYPE),
-    conversationId: z.string().min(1),
-    lane: CaptainSessionLaneV2Schema,
-    runId: z.string().min(1),
-    acceptedAt: z.string().datetime(),
-    completedAt: z.string().datetime().optional(),
-    failedAt: z.string().datetime().optional(),
-    outcome: TurnSettledOutcomeSchema,
-    toolCount: z.record(z.string(), z.number().int().nonnegative()),
-    firstMutatingAt: z.string().datetime().optional(),
-    firstMutatingTool: z.string().min(1).optional(),
-    mutatingCount: z.number().int().nonnegative(),
-    surveyToolCountBeforeFirstMutation: z.number().int().nonnegative().optional(),
-    contextTokensStart: z.number().int().nonnegative().optional(),
-    contextTokensEnd: z.number().int().nonnegative().optional(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.outcome === "completed") {
-      if (value.completedAt === undefined) {
-        context.addIssue({ code: "custom", message: "completed turns need completedAt" });
-      }
-      if (value.failedAt !== undefined) {
-        context.addIssue({ code: "custom", message: "completed turns must not set failedAt" });
-      }
-    } else {
-      if (value.failedAt === undefined) {
-        context.addIssue({ code: "custom", message: "failed and interrupted turns need failedAt" });
-      }
-      if (value.completedAt !== undefined) {
-        context.addIssue({
-          code: "custom",
-          message: "failed and interrupted turns must not set completedAt",
-        });
-      }
-    }
-  });
-export type TurnSettledMetrics = z.infer<typeof TurnSettledMetricsSchema>;
+export const TurnSettledMetricsSchema = CaptainTurnSettledMetricsSchema;
 
 const GIT_INSPECTION_SUBCOMMANDS = new Set([
   "status",
@@ -112,6 +83,25 @@ export function contextTokenCount(
   return typeof usage?.tokens === "number" ? usage.tokens : undefined;
 }
 
+/**
+ * What is about to run this turn, read off the live session at the moment it
+ * executes. A `/model` or `/effort` switch under a live conversation has already
+ * landed on the session by then, so it lands on the next executing turn instead
+ * of being reconstructed from a settings snapshot after the fact.
+ */
+export function sessionExecutionIdentity(session: {
+  readonly model?: { readonly id?: unknown; readonly provider?: unknown } | undefined;
+  readonly thinkingLevel?: unknown;
+}): TurnExecutionIdentity | undefined {
+  const model = session.model;
+  if (typeof model?.id !== "string" || typeof model.provider !== "string") return undefined;
+  const effort = typeof session.thinkingLevel === "string" ? session.thinkingLevel : undefined;
+  if (model.id.length === 0 || model.provider.length === 0 || effort === undefined || effort.length === 0) {
+    return undefined;
+  }
+  return { model: model.id, provider: model.provider, effort };
+}
+
 export interface TurnMetricsStart {
   readonly conversationId: string;
   readonly lane: CaptainSessionLaneV2;
@@ -132,6 +122,9 @@ export class TurnMetrics {
   private toolsBeforeFirstMutation = 0;
   private firstMutatingAt: string | undefined;
   private firstMutatingTool: string | undefined;
+  private execution: TurnExecutionIdentity | undefined;
+  private reportedTotalTokens = 0;
+  private usageReports = 0;
 
   public constructor(start: TurnMetricsStart) {
     this.conversationId = start.conversationId;
@@ -139,6 +132,11 @@ export class TurnMetrics {
     this.runId = start.runId;
     this.acceptedAt = start.acceptedAt;
     this.contextTokensStart = start.contextTokensStart;
+  }
+
+  /** Called as the turn executes, so a failed or interrupted turn still names what ran it. */
+  public recordExecution(execution: TurnExecutionIdentity | undefined): void {
+    if (execution !== undefined) this.execution = execution;
   }
 
   public recordTool(name: string, at: Date, args?: unknown): void {
@@ -150,6 +148,18 @@ export class TurnMetrics {
       this.firstMutatingTool = name;
     }
     this.mutatingCount += 1;
+  }
+
+  /**
+   * One assistant message's reported total. A multi-round turn reports once per
+   * round; the sum and the number of reports are both kept, because a sum with
+   * no count cannot say whether a low number is a cheap turn or a silent
+   * provider.
+   */
+  public recordReportedUsage(totalTokens: number): void {
+    if (!Number.isFinite(totalTokens) || totalTokens < 0) return;
+    this.reportedTotalTokens += Math.trunc(totalTokens);
+    this.usageReports += 1;
   }
 
   public finish(outcome: TurnSettledOutcome, at: Date, contextTokensEnd?: number): TurnSettledMetrics {
@@ -175,6 +185,12 @@ export class TurnMetrics {
       mutatingCount: this.mutatingCount,
       ...(this.contextTokensStart === undefined ? {} : { contextTokensStart: this.contextTokensStart }),
       ...(contextTokensEnd === undefined ? {} : { contextTokensEnd }),
+      ...(this.execution === undefined ? {} : { execution: this.execution }),
+      // Nothing reported is unavailable, not zero: an omitted field says so and
+      // a zero would read as a free turn.
+      ...(this.usageReports === 0
+        ? {}
+        : { usage: { totalTokens: this.reportedTotalTokens, reports: this.usageReports } }),
     });
   }
 }
@@ -185,12 +201,28 @@ function totalToolCount(counts: Map<string, number>): number {
   return total;
 }
 
-/** Count a Pi tool invocation by name; arguments are used only to classify bash. */
-export function recordPiToolStart(
+/**
+ * Count what a Pi session event contributes: a tool invocation by name (its
+ * arguments are used only to classify bash), and a finished assistant message's
+ * reported usage. One entry point so every lane that subscribes counts the same
+ * things — a lane that only forwarded tool starts would lose every usage report.
+ */
+export function recordPiTurnEvent(
   metrics: TurnMetrics,
-  event: { readonly type: string; readonly toolName?: string; readonly args?: unknown },
+  event: {
+    readonly type: string;
+    readonly toolName?: string;
+    readonly args?: unknown;
+    readonly message?: { readonly role?: unknown; readonly usage?: { readonly totalTokens?: unknown } };
+  },
   at: Date = new Date(),
 ): void {
+  if (event.type === "message_end") {
+    if (event.message?.role !== "assistant") return;
+    const totalTokens = event.message.usage?.totalTokens;
+    if (typeof totalTokens === "number") metrics.recordReportedUsage(totalTokens);
+    return;
+  }
   if (event.type !== "tool_execution_start") return;
   if (typeof event.toolName !== "string" || event.toolName.length === 0) return;
   metrics.recordTool(event.toolName, at, event.args);
@@ -212,6 +244,59 @@ export class TurnSettledLog {
     mkdirSync(dirname(this.path), { recursive: true });
     appendFileSync(this.path, `${JSON.stringify(TurnSettledMetricsSchema.parse(line))}\n`, "utf8");
   }
+
+  /**
+   * Recent rows, newest first, bounded by `limit` and optionally narrowed to one
+   * run. Rows written before VUH-1115 come back with `execution` and `usage`
+   * explicitly null rather than missing, so a reader never has to guess whether
+   * an absent field means unknown or zero.
+   *
+   * ponytail: reads the whole file and scans backwards, like LaneLog. Rotate or
+   * index it if the log ever outgrows a read.
+   */
+  public async read(query: TurnMetricsQuery = {}): Promise<readonly TurnSettledMetrics[]> {
+    const limit = boundedLimit(query.limit);
+    let raw: string;
+    try {
+      raw = await readFile(this.path, "utf8");
+    } catch {
+      return [];
+    }
+    const lines = raw.split("\n");
+    const items: TurnSettledMetrics[] = [];
+    for (let index = lines.length - 1; index >= 0 && items.length < limit; index -= 1) {
+      const line = lines[index];
+      if (line === undefined || line.length === 0) continue;
+      const row = parseTurnSettledLine(line);
+      if (row === undefined) continue;
+      if (query.runId !== undefined && row.runId !== query.runId) continue;
+      items.push(row);
+    }
+    return items;
+  }
+}
+
+export interface TurnMetricsQuery {
+  /** Clamped into 1…CAPTAIN_TURN_METRICS_LIMIT_MAX; absent means the default. */
+  readonly limit?: number;
+  readonly runId?: string;
+}
+
+function boundedLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) return CAPTAIN_TURN_METRICS_LIMIT_DEFAULT;
+  return Math.min(Math.max(Math.trunc(limit), 1), CAPTAIN_TURN_METRICS_LIMIT_MAX);
+}
+
+function parseTurnSettledLine(line: string): TurnSettledMetrics | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const row = TurnSettledMetricsSchema.safeParse(parsed);
+  if (!row.success) return undefined;
+  return { ...row.data, execution: row.data.execution ?? null, usage: row.data.usage ?? null };
 }
 
 /** An absorbed steer has no collector; a metrics write must not fail the turn. */

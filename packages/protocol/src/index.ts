@@ -86,6 +86,109 @@ export const CaptainLaneListingSchema = z
 export type CaptainLaneListing = z.infer<typeof CaptainLaneListingSchema>;
 
 // ---------------------------------------------------------------------------
+// Captain turn metrics (VUH-1022, extended by VUH-1115).
+//
+// One record per settled operator or Discord captain turn: counters, names and
+// reported totals only — never Pi trees, tool arguments, tool outputs, message
+// text or credentials. This is both the durable JSONL row the service appends
+// and the item its read surfaces return, so writer and reader cannot drift.
+// `execution` and `usage` are nullish on purpose: a row written before VUH-1115
+// omits them, a read surface answers them as explicit `null`, and neither ever
+// stands for zero.
+// ---------------------------------------------------------------------------
+
+/** The operator route that lists recent settled turns. */
+export const CAPTAIN_TURN_METRICS_PATH = "/v1/captain/turn-metrics";
+export const CAPTAIN_TURN_METRICS_LIMIT_DEFAULT = 20;
+export const CAPTAIN_TURN_METRICS_LIMIT_MAX = 100;
+
+export const CaptainTurnSettledOutcomeSchema = z.enum(["completed", "failed", "interrupted"]);
+export type CaptainTurnSettledOutcome = z.infer<typeof CaptainTurnSettledOutcomeSchema>;
+
+/**
+ * What actually ran the turn, captured as the turn executes rather than read
+ * back from configuration at settle time: a `/model` or `/effort` switch under a
+ * live conversation belongs to the next executing turn, not to this one.
+ */
+export const CaptainTurnExecutionSchema = z
+  .object({
+    /** Pi model id, e.g. `gpt-6-astra`. */
+    model: z.string().min(1).max(256),
+    /** Pi provider id, e.g. `openai-codex`. */
+    provider: z.string().min(1).max(256),
+    /** The thinking level Pi sent, e.g. `high`. */
+    effort: z.string().min(1).max(64),
+  })
+  .strict();
+export type CaptainTurnExecution = z.infer<typeof CaptainTurnExecutionSchema>;
+
+/**
+ * Provider-reported usage summed across the turn's assistant messages, with the
+ * number of reports that contributed. Absent or null means nothing was reported
+ * — never zero, and never inferred from context occupancy or a dollar figure.
+ */
+export const CaptainTurnReportedUsageSchema = z
+  .object({
+    totalTokens: z.number().int().nonnegative(),
+    reports: z.number().int().positive(),
+  })
+  .strict();
+export type CaptainTurnReportedUsage = z.infer<typeof CaptainTurnReportedUsageSchema>;
+
+export const CaptainTurnSettledMetricsSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    type: z.literal("captain.turn.settled"),
+    conversationId: z.string().min(1),
+    lane: CaptainSessionLaneV2Schema,
+    runId: z.string().min(1),
+    acceptedAt: z.string().datetime(),
+    completedAt: z.string().datetime().optional(),
+    failedAt: z.string().datetime().optional(),
+    outcome: CaptainTurnSettledOutcomeSchema,
+    toolCount: z.record(z.string(), z.number().int().nonnegative()),
+    firstMutatingAt: z.string().datetime().optional(),
+    firstMutatingTool: z.string().min(1).optional(),
+    mutatingCount: z.number().int().nonnegative(),
+    surveyToolCountBeforeFirstMutation: z.number().int().nonnegative().optional(),
+    /** Context occupancy. Neither usage nor a charge; never read as either. */
+    contextTokensStart: z.number().int().nonnegative().optional(),
+    contextTokensEnd: z.number().int().nonnegative().optional(),
+    execution: CaptainTurnExecutionSchema.nullish(),
+    usage: CaptainTurnReportedUsageSchema.nullish(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.outcome === "completed") {
+      if (value.completedAt === undefined) {
+        context.addIssue({ code: "custom", message: "completed turns need completedAt" });
+      }
+      if (value.failedAt !== undefined) {
+        context.addIssue({ code: "custom", message: "completed turns must not set failedAt" });
+      }
+    } else {
+      if (value.failedAt === undefined) {
+        context.addIssue({ code: "custom", message: "failed and interrupted turns need failedAt" });
+      }
+      if (value.completedAt !== undefined) {
+        context.addIssue({
+          code: "custom",
+          message: "failed and interrupted turns must not set completedAt",
+        });
+      }
+    }
+  });
+export type CaptainTurnSettledMetrics = z.infer<typeof CaptainTurnSettledMetricsSchema>;
+
+export const CaptainTurnMetricsPageSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    items: z.array(CaptainTurnSettledMetricsSchema).max(CAPTAIN_TURN_METRICS_LIMIT_MAX),
+  })
+  .strict();
+export type CaptainTurnMetricsPage = z.infer<typeof CaptainTurnMetricsPageSchema>;
+
+// ---------------------------------------------------------------------------
 // Operator conversations (ADR 0032, VUH-769).
 //
 // Every schema below is a STRICT, provider-neutral, bounded public boundary

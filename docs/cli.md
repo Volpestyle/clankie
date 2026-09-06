@@ -48,6 +48,7 @@ device table, credential-rotate sentence). Everything else is already JSON.
 | `persona …`, `games …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                            | JSON                                                                                         |
 | `send --conversation ID …`                                               | JSON accepted-run receipt or refusal                                                         |
+| `memory …`, `metrics …`                                                  | JSON                                                                                         |
 | `play stop`                                                              | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
 | `prompt …`, `memory-card …`                                              | Plain text: the prompt or card itself, verbatim                                              |
 | `seat`                                                                   | Interactive (TTY); `seat --dry-run` is JSON                                                  |
@@ -555,6 +556,54 @@ to make room. `correct` replaces the note while preserving its source and date.
 `forget` deletes the episode from both recent and retained recall. `/memory`
 exposes the same controls in the console. See [Memory](memory.md) for lane
 privacy and migration behavior.
+
+### `metrics [--run ID] [--limit N]`
+
+Recent settled captain turns, newest first, from the durable
+`~/.clankie/captain/turn-settled.jsonl` the service already appends. Reads
+through the operator API (`GET /v1/captain/turn-metrics`), so the CLI and the
+route answer the same rows. `--limit` is 1–100 and defaults to 20; `--run`
+narrows to one run id.
+
+Each item carries the turn's counters — outcome, per-tool counts, first mutating
+tool, context occupancy — plus:
+
+- `execution`: the `model`, `provider`, and `effort` that actually ran the turn,
+  captured as it executed. A `/model` or `/effort` change under a live
+  conversation belongs to the next turn to execute, not to the one in flight.
+- `usage`: `totalTokens` summed over the assistant messages the provider
+  reported for this turn, and `reports`, how many reports contributed.
+
+Both are `null` when unknown, and unknown is said out loud rather than defaulted.
+`execution` is null for turns settled before the capture existed or when the
+session had no model bound; `usage` is null when nothing was reported — never
+zero, which would read as a free turn. `contextTokensStart`/`contextTokensEnd`
+are context occupancy, not usage and not a charge; no dollar figure is inferred
+anywhere.
+
+No transcript, tool argument, tool output, or credential appears in the output.
+
+```json
+{
+  "ok": true,
+  "items": [
+    {
+      "schemaVersion": 1,
+      "type": "captain.turn.settled",
+      "conversationId": "…",
+      "lane": "operator",
+      "runId": "…",
+      "outcome": "completed",
+      "toolCount": { "bash": 6, "read": 2 },
+      "mutatingCount": 1,
+      "contextTokensStart": 21000,
+      "contextTokensEnd": 48000,
+      "execution": { "model": "gpt-6-astra", "provider": "openai-codex", "effort": "high" },
+      "usage": { "totalTokens": 41200, "reports": 3 }
+    }
+  ]
+}
+```
 
 ### `memory-card [--lane LANE]`
 
