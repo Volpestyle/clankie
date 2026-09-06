@@ -76,7 +76,7 @@ Before submission or adding an invited user:
 - Lightsail CPU and `docker stats` memory have headroom during the complete
   journey;
 - privacy policy, privacy manifest, App Store privacy labels, and actual runtime
-  behavior agree;
+  behavior agree, against the inventory in [app privacy](app-privacy.md);
 - the Guideline 4.2.7 contingency keeps remote chat and agent surfaces while
   selecting local transport for terminal observation/control if Apple requires
   it.
@@ -117,5 +117,7 @@ unrelated customers share the service. Obtain SES production access before
 inviting an address that is not a verified sandbox recipient. Digital
 features or subscriptions sold in the iOS app use StoreKit and App Store
 Connect products. App privacy labels, the privacy policy, review notes, account
-support, and actual data handling must agree before submission. An external
+support, and actual data handling must agree before submission; the verified
+inventory and the questionnaire answers are in [app privacy](app-privacy.md).
+An external
 connection broker arrives only when horizontal scale is measured.
