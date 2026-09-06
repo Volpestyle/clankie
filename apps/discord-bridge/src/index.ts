@@ -84,6 +84,7 @@ import {
   renderVoiceStatusReply,
 } from "./voice-composition.ts";
 import { executeVoicePresenceIntent } from "./voice-presence.ts";
+import { threadContextWindow } from "./inbound-context.ts";
 import { sanitizeDiscordText } from "./text.ts";
 import { shutdownDiscordBridge } from "./shutdown.ts";
 import { DiscordVoxGatewayBridge } from "./vox-gateway.ts";
@@ -1442,19 +1443,30 @@ async function readDiscordContext(
 ): Promise<readonly DiscordInboundContextMessage[]> {
   if (limit === 0) return [];
   const messages = await message.channel.messages.fetch({ before: message.id, limit });
-  return [...messages.values()]
-    .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
-    .map((candidate) => {
-      const selection = selectDiscordMessageImages(candidate);
-      return {
-        id: candidate.id,
-        authorId: candidate.author.id,
-        body: candidate.content,
-        createdAt: candidate.createdAt.toISOString(),
-        attachments: selection.attachments,
-        ...(selection.omitted === 0 ? {} : { attachmentsOmitted: selection.omitted }),
-      };
-    });
+  const ordered = [...messages.values()].sort(
+    (left, right) => left.createdTimestamp - right.createdTimestamp,
+  );
+  const channel = message.channel;
+  // A thread's opening post lives in the parent channel, so the fetch above
+  // never returns it (see `threadContextWindow`). The id check only spares the
+  // round trip where the thread already carries it; the window owns the rest.
+  const starter =
+    channel.isThread() && !ordered.some((candidate) => candidate.id === channel.id)
+      ? // Never fatal: a deleted or unreadable opening post costs him that
+        // picture, not the conversation.
+        await channel.fetchStarterMessage().catch(() => null)
+      : null;
+  return threadContextWindow(ordered, starter, limit).map((candidate) => {
+    const selection = selectDiscordMessageImages(candidate);
+    return {
+      id: candidate.id,
+      authorId: candidate.author.id,
+      body: candidate.content,
+      createdAt: candidate.createdAt.toISOString(),
+      attachments: selection.attachments,
+      ...(selection.omitted === 0 ? {} : { attachmentsOmitted: selection.omitted }),
+    };
+  });
 }
 
 function selectDiscordMessageImages(message: Message) {
