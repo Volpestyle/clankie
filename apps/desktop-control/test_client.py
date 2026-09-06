@@ -6,10 +6,27 @@ import time
 import unittest
 from unittest.mock import patch
 
-from client import Desktop, TransportError, require_success, validate_response
+from client import Desktop, TransportError, require_success, single_window, validate_response
 
 
 class ClientTests(unittest.TestCase):
+    def test_single_window_uses_native_identity_with_dynamic_or_empty_title(self):
+        for title in ('Spotify Premium', 'Artist - Track', ''):
+            with self.subTest(title=title):
+                window = {'id': 'current-native-window', 'role': 'AXWindow', 'title': title}
+                self.assertIs(single_window({'success': True, 'windows': [window]}), window)
+
+    def test_single_window_refuses_missing_ambiguous_and_existing_menu(self):
+        window = {'id': 'w1', 'role': 'AXWindow', 'title': 'Spotify Premium'}
+        other = {'id': 'w2', 'role': 'AXWindow', 'title': 'Another title'}
+        menu = {'id': 'm1', 'role': 'AXMenu', 'title': ''}
+        for roots, message in [([], 'found 0'), ([window, other], 'found 2'),
+                               ([window, menu], 'Existing native menu'), ([menu], 'Existing native menu')]:
+            with self.subTest(roots=roots), self.assertRaisesRegex(RuntimeError, message):
+                single_window({'success': True, 'windows': roots})
+        with self.assertRaises(RuntimeError):
+            single_window({'success': False, 'code': 'incomplete_inventory'})
+
     def fixture(self, body):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

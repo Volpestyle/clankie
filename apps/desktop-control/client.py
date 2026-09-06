@@ -192,14 +192,23 @@ def require_success(result):
     return result
 
 
+def single_window(inventory):
+    """Select one native window by inventory identity, independent of its changing title."""
+    roots = require_success(inventory)["windows"]
+    if any(root["role"] == "AXMenu" for root in roots):
+        raise RuntimeError("Existing native menu; inspect before starting a new menu trial")
+    windows = [root for root in roots if root["role"] == "AXWindow"]
+    if len(windows) != 1:
+        raise RuntimeError(f"Expected exactly one native Spotify window; found {len(windows)}")
+    return windows[0]
+
+
 def read_proof(binary):
     """Two observations through the real public stdio interface, with no action opt-in."""
     with Desktop(binary) as desktop:
         inventory = require_success(desktop.request({"op": "windows"}))
-        windows = inventory["windows"]
-        if len(windows) != 1 or windows[0]["role"] != "AXWindow":
-            raise RuntimeError("Read proof requires exactly one native Spotify window; inspect inventory explicitly")
-        request = {"op": "observe", "window": windows[0]["id"], "maxNodes": 2000,
+        window = single_window(inventory)
+        request = {"op": "observe", "window": window["id"], "maxNodes": 2000,
                    "roles": ["AXRow", "AXPopUpButton", "AXButton", "AXMenu"]}
         receipts = []
         for _ in range(2):

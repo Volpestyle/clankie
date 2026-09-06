@@ -29,6 +29,11 @@ rows behind Spotify's nested containers, while the default depth 12 does not.
 An `application_partial` result remains a distinct exact-window failure; raising
 depth is appropriate only when the result actually names a depth limit.
 
+Exposure is state-dependent: a current background window can return only
+16–17 native frame/group nodes and no song controls even at depth 48. The read
+proof reports failure for that state. `incomplete: false` means the returned AX
+graph was traversed within its bounds, not that Spotify exposed its content.
+
 Background menu open/dismiss and the new helper's execution through Clankie's
 service require independent proof. Full native desktop parity remains unproven.
 The helper's action dispatch receipt reports an unverified effect, never menu
@@ -71,6 +76,15 @@ first opening cannot be called assuredly reversible when cancellation cannot be
 preflighted. Focus failure also refuses observation and cancellation; closing
 the helper does not dismiss the menu. Record a stranded/indeterminate result
 under the recovery plan, with no automatic focus, Escape, or popup-toggle fallback.
+
+Root discovery combines `AXWindows`, `AXMainWindow`, `AXFocusedWindow`, and
+direct application-child windows/menus by native identity. A background Spotify
+window can remain accessible through its main/focused reference when `AXWindows`
+is empty. `diagnose` reports the raw window count and combined `discoveredRoots`
+separately. Selection uses one current native window, not a fixed title such as
+`Spotify Premium`; titles can name the current song. All sources share the same
+bounds and live revalidation. Their union does not certify that every off-screen
+menu is exposed, so inventory alone cannot establish menu dismissal.
 
 One deadline includes root discovery and final dispatch checks. Truncated root
 inventory refuses; it cannot prove dismissal. A pipe timeout, framing/shape, EOF,

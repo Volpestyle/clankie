@@ -84,6 +84,10 @@ final class NativeDesktop: DesktopDriver {
 
   private func intern(_ element: AXUIElement, deadline: OperationDeadline) throws -> Int {
     try deadline.check()
+    var pid: pid_t = 0
+    guard AXUIElementGetPid(element, &pid) == .success, pid == target.pid else {
+      throw Failure(code: "stale", message: "Native reference does not belong to the selected PID")
+    }
     let hash = CFHash(element)
     if let existing = hashBuckets[hash]?.first(where: { CFEqual(elements[$0], element) }) {
       return existing
@@ -119,10 +123,21 @@ final class NativeDesktop: DesktopDriver {
     return (try array.map { try intern($0, deadline: deadline) }, count > limit)
   }
 
+  private func windowReference(_ name: String, deadline: OperationDeadline) throws -> Int? {
+    let (error, value) = try read(application, name, deadline: deadline)
+    try deadline.check()
+    if [.attributeUnsupported, .noValue].contains(error) { return nil }
+    guard error == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+      throw Failure(code: "ax_read", message: "\(name) reference read failed: \(error.rawValue)")
+    }
+    return try intern(value as! AXUIElement, deadline: deadline)
+  }
+
   func windows(deadline: OperationDeadline) throws -> [Int] {
     try Self.discoverRoots(
       deadline: deadline,
       array: { try self.array(self.application, $0, limit: $1, deadline: deadline) },
+      windowReference: { try self.windowReference($0, deadline: deadline) },
       role: { handle in
         guard let element = self.elements[handle] else {
           throw Failure(code: "stale", message: "Unknown root reference")
@@ -134,7 +149,8 @@ final class NativeDesktop: DesktopDriver {
   // The same discovery path runs with inert attribute readers in tests.
   static func discoverRoots(
     deadline: OperationDeadline,
-    array: (String, Int) throws -> ([Int], Bool), role: (Int) throws -> String
+    array: (String, Int) throws -> ([Int], Bool), windowReference: (String) throws -> Int?,
+    role: (Int) throws -> String
   ) throws -> [Int] {
     try deadline.check()
     let (handles, incomplete) = try array(kAXWindowsAttribute, 32)
@@ -151,11 +167,27 @@ final class NativeDesktop: DesktopDriver {
         message: "Application AXChildren exceeds 64; menus may be omitted")
     }
     var roots = handles
+    // Spotify can expose these references while AXWindows is empty off screen.
+    // Union native identities; a main/focused hint never substitutes for inventory.
+    for name in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
+      try deadline.check()
+      let window = try windowReference(name)
+      try deadline.check()
+      if let window {
+        let windowRole = try role(window)
+        try deadline.check()
+        guard windowRole == "AXWindow" else {
+          throw Failure(
+            code: "invalid_root", message: "\(name) returned \(windowRole), not AXWindow")
+        }
+        if !roots.contains(window) { roots.append(window) }
+      }
+    }
     for child in appChildren {
       try deadline.check()
       let childRole = try role(child)
       try deadline.check()
-      if childRole == "AXMenu", !roots.contains(child) { roots.append(child) }
+      if ["AXWindow", "AXMenu"].contains(childRole), !roots.contains(child) { roots.append(child) }
     }
     return roots
   }
@@ -253,6 +285,10 @@ final class NativeDesktop: DesktopDriver {
         "settableError": setError.rawValue, "settable": settable.boolValue,
       ]
     }
+    let discoveredRoots = try windows(deadline: deadline).map { handle in
+      let root = try node(handle, deadline: deadline)
+      return ["role": root.role, "title": root.title]
+    }
     settle()
     try deadline.check()
     return [
@@ -261,8 +297,9 @@ final class NativeDesktop: DesktopDriver {
       "focusChangesDuringOperation": focusChanges - epoch,
       "AXWindowsError": windowsError.rawValue, "AXWindowCount": rawArray.count,
       "windows": candidateRows, "exposure": exposure,
+      "discoveredRoots": discoveredRoots,
       "windowIDResolution":
-        "AXWindowNumber is queried but never guessed from geometry; actions bind retained AXWindows references",
+        "AXWindowNumber is queried but never guessed from geometry; actions bind retained native AX references",
       "cgWindowIDs": cgWindows.prefix(32).compactMap { $0[kCGWindowNumber as String] as? Int },
     ]
   }

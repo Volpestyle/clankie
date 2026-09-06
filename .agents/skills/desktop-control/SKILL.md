@@ -29,8 +29,13 @@ The [helper protocol and client](../../../apps/desktop-control/README.md) use
 one caller-owned stdio process. A Python script can hold `Desktop(binary)`
 while it requests `windows`, then `observe` on one returned native root handle.
 Use depth 48 and an explicit node budget; a `roles` filter limits presentation,
-not traversal. `diagnose` retains AXWindows errors, candidate count, optional
-window-number results, app exposure, and foreground identities. It does not
+not traversal. Window discovery unions `AXWindows`, main/focused window
+references, and direct child windows/menus, deduplicating native identities.
+An empty `AXWindows` alone does not mean no window is accessible. Use the
+client's `single_window(inventory)` for a unique window with no root menu;
+never assume the title is `Spotify Premium` because it can name the current song.
+`diagnose` retains AXWindows errors, candidate count, combined `discoveredRoots`,
+optional window-number results, app exposure, and foreground identities. It does not
 enable accessibility, focus the app, or prompt for permissions.
 
 Before opening, establish that a matching menu has a discoverable, working
@@ -54,7 +59,8 @@ Window handles last until a new inventory or process exit, subject to live
 membership validation. Observe again after each action. The helper validates retained ancestry and process
 generation; an old label/ID is never a fallback. Bounded partial coverage does
 not prove a menu is absent. `incomplete_inventory` refuses truncated root
-discovery; `operation_timeout` invalidates the snapshot. If cancellation is
+discovery; successful inventory does not certify every off-screen menu is exposed.
+`operation_timeout` invalidates the snapshot. If cancellation is
 unadvertised, report the stranded/indeterminate result under the recovery plan.
 
 The session pins a distinct foreground process and monitors activation events.

@@ -11,6 +11,7 @@ final class FixtureDesktop: DesktopDriver {
   var permission = true
   var focusChanges = 0
   var windowList = [1]
+  var discover: ((OperationDeadline) throws -> [Int])?
   var calls: [(Int, String)] = []
   var onPerform: (() throws -> Void)?
   var onBeforePerform: (() -> Void)?
@@ -33,7 +34,7 @@ final class FixtureDesktop: DesktopDriver {
   func foreground() -> ProcessIdentity? { front }
   func windows(deadline: OperationDeadline) throws -> [Int] {
     onWindows?()
-    return windowList
+    return try discover?(deadline) ?? windowList
   }
   func node(_ handle: Int, deadline: OperationDeadline) throws -> Node {
     onNode?()
@@ -432,7 +433,7 @@ struct SessionTests {
           let all =
             name == "AXWindows" ? Array(100...(windowsTruncated ? 132 : 100)) : Array(1...65)
           return (Array(all.prefix(limit)), all.count > limit)
-        }, role: { $0 == 65 ? "AXMenu" : "AXGroup" })
+        }, windowReference: { _ in nil }, role: { $0 == 65 ? "AXMenu" : "AXGroup" })
       Issue.record("Incomplete inventory must not silently omit the menu at child 65")
     } catch let failure as Failure {
       #expect(failure.code == "incomplete_inventory")
@@ -446,6 +447,7 @@ struct SessionTests {
       _ = try NativeDesktop.discoverRoots(
         deadline: deadline,
         array: { name, _ in (name == "AXWindows" ? [100] : Array(1...64), false) },
+        windowReference: { _ in nil },
         role: { _ in
           clock += 0.3
           return "AXGroup"
@@ -458,8 +460,81 @@ struct SessionTests {
     let roots = try NativeDesktop.discoverRoots(
       deadline: OperationDeadline(now: { 100 }),
       array: { name, _ in (name == "AXWindows" ? [100] : [100, 101, 102], false) },
+      windowReference: { _ in nil },
       role: { $0 == 102 ? "AXGroup" : "AXMenu" })
     #expect(roots == [100, 101])
+  }
+
+  @Test(arguments: ["AXMainWindow", "AXFocusedWindow", "AXChildren", "both"])
+  func discoversAndRevalidatesWindowOutsideAXWindows(source: String) throws {
+    let driver = FixtureDesktop()
+    var present = true
+    driver.discover = { deadline in
+      try NativeDesktop.discoverRoots(
+        deadline: deadline,
+        array: { name, _ in
+          (name == "AXChildren" ? (present && source == name ? [9, 1] : [9]) : [], false)
+        },
+        windowReference: { present && ($0 == source || source == "both") ? 1 : nil },
+        role: { $0 == 9 ? "AXMenuBar" : "AXWindow" })
+    }
+    let session = Session(driver: driver, allowMenuActions: true)
+    let observation = try observe(session)
+    let open = try menuRequest(observation)
+    #expect(try session.handle(open)["actionDispatched"] as? Bool == true)
+    #expect(driver.calls.count == 1)
+    let next = try observe(session)
+    present = false
+    #expect(try refusal(session.respond(menuRequest(next))) == "stale")
+    #expect(
+      try refusal(session.respond(Request(op: "observe", window: next["window"] as? String)))
+        == "stale_window")
+    #expect(driver.calls.count == 1)
+  }
+
+  @Test func nativeDiscoveryUnionsAndDeduplicatesAllRootSources() throws {
+    let roots = try NativeDesktop.discoverRoots(
+      deadline: OperationDeadline(now: { 100 }),
+      array: { name, _ in (name == "AXWindows" ? [1] : [1, 2, 3, 4, 9], false) },
+      windowReference: { $0 == "AXMainWindow" ? 1 : 2 },
+      role: { $0 == 9 ? "AXMenuBar" : ($0 == 4 ? "AXMenu" : "AXWindow") })
+    #expect(roots == [1, 2, 3, 4])
+  }
+
+  @Test(arguments: ["reference", "role", "invalid", "error"])
+  func nativeWindowHintsRefuseExpiredOrInvalidReads(stage: String) throws {
+    var clock = 100.0
+    let deadline = OperationDeadline(now: { clock })
+    do {
+      _ = try NativeDesktop.discoverRoots(
+        deadline: deadline, array: { _, _ in ([], false) },
+        windowReference: { _ in
+          if stage == "reference" { clock += 5.1 }
+          if stage == "error" { throw Failure(code: "ax_read", message: "Synthetic failed read") }
+          return 1
+        },
+        role: { _ in
+          if stage == "role" { clock += 5.1 }
+          return stage == "invalid" ? "AXApplication" : "AXWindow"
+        })
+      Issue.record("Unusable window hints must refuse")
+    } catch let failure as Failure {
+      #expect(
+        failure.code
+          == (stage == "invalid"
+            ? "invalid_root" : (stage == "error" ? "ax_read" : "operation_timeout")))
+    }
+  }
+
+  @Test func windowHintsCannotBypassCombinedRootLimit() throws {
+    let driver = FixtureDesktop()
+    driver.discover = { deadline in
+      try NativeDesktop.discoverRoots(
+        deadline: deadline, array: { name, _ in (name == "AXWindows" ? Array(1...32) : [], false) },
+        windowReference: { _ in 33 }, role: { _ in "AXWindow" })
+    }
+    #expect(try refusal(Session(driver: driver).respond(Request(op: "windows"))) == "window_limit")
+    #expect(driver.calls.isEmpty)
   }
 
   @Test func boundsWideAndCyclicNativeGraphs() throws {

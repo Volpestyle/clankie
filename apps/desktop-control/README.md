@@ -38,12 +38,11 @@ manager for shell scripts; keep that context alive throughout a sequence. Run
 the following Python example from `apps/desktop-control`.
 
 ```python
-from client import Desktop, require_success
+from client import Desktop, require_success, single_window
 
 with Desktop("/Users/james/.local/bin/clankie-desktop") as desktop:
     inventory = require_success(desktop.request({"op": "windows"}))
-    assert len(inventory["windows"]) == 1
-    window = inventory["windows"][0]["id"]
+    window = single_window(inventory)["id"]
     observation = require_success(desktop.request({
         "op": "observe", "window": window, "maxNodes": 2000,
         "roles": ["AXRow", "AXPopUpButton", "AXMenu"],
@@ -51,15 +50,27 @@ with Desktop("/Users/james/.local/bin/clankie-desktop") as desktop:
     print(observation)
 ```
 
-`windows` returns fresh handles for the selected process's AX windows and
-direct application-level AX menus. These are **native reference handles**, not
+`windows` unions `AXWindows`, `AXMainWindow`, `AXFocusedWindow`, and direct
+application-child windows/menus, deduplicating retained native identities.
+Spotify can expose a real main/focused window while `AXWindows` is empty.
+The same discovery runs again for observation and action membership checks;
+references must belong to the selected PID and expose a valid root role.
+These are **native reference handles**, not
 CoreGraphics window numbers. `diagnose` preserves the AXWindows error/count,
-app exposure attribute results, and the optional AXWindowNumber result beside
-WindowServer IDs. It never guesses a binding from similar titles or geometry. An application role
+app exposure attribute results, the combined `discoveredRoots`, and the optional
+AXWindowNumber result beside WindowServer IDs. It never guesses a binding from
+similar titles or geometry. An application role
 returned in window inventory refuses with `invalid_root`; it never becomes an
 implicit application-tree fallback. Root discovery refuses `incomplete_inventory`
 when AXWindows exceeds 32 or direct application children exceed 64. An omitted
-root cannot count as evidence of menu dismissal.
+root cannot count as evidence of menu dismissal. The combined root limit is 32.
+This inventory covers the queried attributes; it does not certify that an app
+exposes every off-screen menu through them.
+
+`single_window` selects exactly one native window and refuses an empty or
+ambiguous inventory or an existing root menu. It does not assume a window title:
+Spotify may use the current song rather than `Spotify Premium`. Subsequent
+identity/ancestry validation still compares the freshly observed semantics.
 
 `observe` binds one of those roots and traverses breadth first. `maxNodes`
 defaults to 400, with a hard limit of 2000; `maxDepth` defaults to 48, maximum 64. Each child read is capped at 250. One five-second monotonic deadline covers
