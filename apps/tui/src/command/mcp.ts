@@ -1,17 +1,20 @@
 /**
- * `clankie mcp --lane operator` — the stdio side of the seat
- * ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
+ * `clankie mcp --lane operator` and `clankie mcp --seat` — stdio MCP for a
+ * seated harness ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
  *
- * A harness that takes the seat speaks MCP over stdio to whatever its config
- * names. This is that process: it resolves the lane's bearer from the broker,
+ * `--lane` is the operator seat: it resolves the lane's bearer from the broker,
  * opens the service's lane tool bank at `/v1/mcp` as a streamable-HTTP client,
  * and re-serves the same tools over stdin/stdout. No secret lands in a config
- * file, and the harness never learns the bearer.
+ * file, and the harness never learns the bearer. It is also his channel: while
+ * it runs it long-polls the seat's outbox and pushes each wake, watch, or
+ * escalation into the session as a channel event; that polling is what binds
+ * the seat as his head. A `reply` tool answers an escalating room.
  *
- * It is also his channel. While it runs it long-polls the seat's outbox and
- * pushes each wake, watch, or escalation into the session as a channel event;
- * that polling is what binds the seat as his head. A `reply` tool answers an
- * escalating room.
+ * `--seat` is a fleet pane's mailbox: no tools, no `/v1/mcp` client, only the
+ * channel. Identity is `HERDR_PANE_ID`. Without it the process serves an empty
+ * channel and does not poll; with it, the bridge long-polls that pane's fleet
+ * mailbox and pushes each operator or group-chat message as a channel event
+ * instead of typing it into the pane's pty.
  *
  * stdout is the wire. Nothing here may print to it except JSON-RPC.
  */
@@ -32,14 +35,16 @@ import {
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
   CaptainSessionLaneV2Schema,
+  FLEET_SEAT_MCP_SERVER,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorSeatEventsPageSchema,
+  fleetSeatEventsPath,
   type CaptainSessionLaneV2,
   type OperatorSeatEvent,
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
-const MCP_USAGE = "Usage: clankie mcp [--lane operator]";
+const MCP_USAGE = "Usage: clankie mcp [--lane operator | --seat]";
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
 const OUTBOX_POLL_WAIT_MS = 25_000;
@@ -52,6 +57,11 @@ const CHANNEL_INSTRUCTIONS =
   `Events tagged <channel source="clankie" kind="wake|watch|escalation" conversation="…" event_id="…"> are your own: ` +
   "a self-wake you scheduled, a herdr completion watch you armed, or a room handing you work. " +
   `Answer an escalation with the ${REPLY_TOOL_NAME} tool and its event_id; a wake or watch needs no reply.`;
+
+const FLEET_CHANNEL_INSTRUCTIONS =
+  `Events tagged <channel source="clankie" kind="message" conversation="…" event_id="…"> ` +
+  "are a message from the operator or a group chat addressed to this agent. " +
+  "Answer it in the normal reply as if it had been typed into the pane. There is no tool to call.";
 
 /** The Claude Code channel event, typed so the server can send it. */
 interface ChannelNotification extends Notification {
@@ -71,28 +81,51 @@ export interface LaneToolUpstream {
   close(): Promise<void>;
 }
 
+/** The fleet mailbox as the seat bridge sees it: poll and close, no tools. */
+export type FleetMailboxUpstream = Pick<LaneToolUpstream, "pollEvents" | "close">;
+
 export interface McpCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly host?: string;
   readonly operatorCredentialStore?: CredentialStore;
   /** Test seam: the upstream to bridge instead of the live service. */
   readonly connectUpstream?: (input: { readonly lane: CaptainSessionLaneV2 }) => Promise<LaneToolUpstream>;
+  /** Test seam: the fleet mailbox to poll instead of the live service. */
+  readonly connectSeatUpstream?: (input: { readonly paneId: string }) => Promise<FleetMailboxUpstream>;
   /** Test seam: the transport to serve instead of stdio. */
   readonly transport?: Transport;
   readonly stderr?: { write(chunk: string): unknown };
+  /** Test seam: override the outbox long-poll window. */
+  readonly pollWaitMs?: number;
+  /** Test seam: override the failed-poll retry delay. */
+  readonly pollRetryMs?: number;
 }
 
-export function parseMcpArgs(args: readonly string[]): { readonly lane: CaptainSessionLaneV2 } {
-  let lane: CaptainSessionLaneV2 = "operator";
-  for (let index = 0; index < args.length; index += 2) {
+export type McpArgs = { readonly lane: CaptainSessionLaneV2 } | { readonly seat: true };
+
+export function parseMcpArgs(args: readonly string[]): McpArgs {
+  let seat = false;
+  let lane: CaptainSessionLaneV2 | undefined;
+  for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
-    const value = args[index + 1];
-    if (flag !== "--lane" || value === undefined) throw new Error(MCP_USAGE);
-    const parsed = CaptainSessionLaneV2Schema.safeParse(value);
-    if (!parsed.success) throw new Error(MCP_USAGE);
-    lane = parsed.data;
+    if (flag === "--seat") {
+      seat = true;
+      continue;
+    }
+    if (flag === "--lane") {
+      const value = args[index + 1];
+      if (value === undefined) throw new Error(MCP_USAGE);
+      const parsed = CaptainSessionLaneV2Schema.safeParse(value);
+      if (!parsed.success) throw new Error(MCP_USAGE);
+      lane = parsed.data;
+      index += 1;
+      continue;
+    }
+    throw new Error(MCP_USAGE);
   }
-  return { lane };
+  if (seat && lane !== undefined) throw new Error(MCP_USAGE);
+  if (seat) return { seat: true };
+  return { lane: lane ?? "operator" };
 }
 
 const REPLY_TOOL: Tool = {
@@ -272,12 +305,125 @@ async function connectLaneUpstream(input: {
   };
 }
 
+/**
+ * A fleet pane's channel: no tools, no reply, no lane bank. Events tagged
+ * `kind="message"` are answered in the normal reply.
+ */
+export function createFleetSeatBridge(): Server<Request, ChannelNotification, Result> {
+  const server = new Server<Request, ChannelNotification, Result>(
+    { name: FLEET_SEAT_MCP_SERVER, version: "0.2.0" },
+    {
+      capabilities: { tools: {}, experimental: { "claude/channel": {} } },
+      instructions: FLEET_CHANNEL_INSTRUCTIONS,
+    },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
+  return server;
+}
+
+/** Long-poll one pane's fleet mailbox; a 404 is a failed poll the pump retries. */
+function connectFleetMailbox(input: {
+  readonly host: string;
+  readonly bearer: string;
+  readonly paneId: string;
+  readonly fetchImpl?: typeof fetch;
+}): FleetMailboxUpstream {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const headers = { authorization: `Bearer ${input.bearer}` };
+  return {
+    async pollEvents(waitMs, signal) {
+      const deadline = AbortSignal.timeout(waitMs + 10_000);
+      const response = await fetchImpl(
+        new URL(`${fleetSeatEventsPath(input.paneId)}?wait=${String(waitMs)}`, input.host),
+        { headers, signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]) },
+      );
+      if (!response.ok) throw new Error(`fleet mailbox answered ${String(response.status)}`);
+      return OperatorSeatEventsPageSchema.parse(await response.json()).events;
+    },
+    close: async () => undefined,
+  };
+}
+
+function pollCadence(options: McpCommandOptions) {
+  return {
+    ...(options.pollWaitMs === undefined ? {} : { waitMs: options.pollWaitMs }),
+    ...(options.pollRetryMs === undefined ? {} : { retryMs: options.pollRetryMs }),
+  };
+}
+
+function fleetMailboxOnError(stderr: { write(chunk: string): unknown }): (error: unknown) => void {
+  let warnedUnknownSeat = false;
+  return (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("404")) {
+      if (!warnedUnknownSeat) {
+        warnedUnknownSeat = true;
+        stderr.write("clankie mcp: fleet mailbox not ready yet (unknown_seat); retrying\n");
+      }
+      return;
+    }
+    stderr.write(`clankie mcp: fleet mailbox poll failed (${message}); retrying\n`);
+  };
+}
+
+async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
+  const env = options.env ?? process.env;
+  const stderr = options.stderr ?? process.stderr;
+  const paneId = env.HERDR_PANE_ID?.trim() ?? "";
+  const server = createFleetSeatBridge();
+  const transport = options.transport ?? new StdioServerTransport();
+  const closing = new AbortController();
+  const closed = new Promise<void>((resolve) => {
+    server.onclose = () => {
+      closing.abort();
+      resolve();
+    };
+  });
+
+  if (paneId.length === 0) {
+    await server.connect(transport);
+    stderr.write("clankie mcp: --seat needs HERDR_PANE_ID; serving an empty channel\n");
+    await closed;
+    return 0;
+  }
+
+  const upstream = await (options.connectSeatUpstream ?? defaultSeatUpstream)({ paneId });
+  await server.connect(transport);
+  stderr.write(`clankie mcp: serving the fleet seat channel for pane ${paneId}\n`);
+  const pump = pumpSeatEvents(server, upstream, closing.signal, {
+    ...pollCadence(options),
+    onError: fleetMailboxOnError(stderr),
+  }).catch(() => undefined);
+  await closed;
+  await pump;
+  await upstream.close().catch(() => undefined);
+  return 0;
+
+  async function defaultSeatUpstream(input: { readonly paneId: string }): Promise<FleetMailboxUpstream> {
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (credential === undefined) {
+      throw new Error("No operator credential is available; start the clankie service once first.");
+    }
+    return connectFleetMailbox({
+      host: commandHost({ ...options, env }),
+      bearer: credential.token,
+      paneId: input.paneId,
+    });
+  }
+}
+
 export async function runMcpCommand(
   args: readonly string[],
   options: McpCommandOptions = {},
 ): Promise<number> {
+  const parsed = parseMcpArgs(args);
+  if ("seat" in parsed) return runFleetSeatMcp(options);
+
   const env = options.env ?? process.env;
-  const { lane } = parseMcpArgs(args);
+  const { lane } = parsed;
   const stderr = options.stderr ?? process.stderr;
   const upstream = await (options.connectUpstream ?? defaultUpstream)({ lane });
   const server = createSeatBridge(upstream, lane);
@@ -294,6 +440,7 @@ export async function runMcpCommand(
   const pump =
     lane === "operator"
       ? pumpSeatEvents(server, upstream, closing.signal, {
+          ...pollCadence(options),
           onError: (error) => {
             stderr.write(
               `clankie mcp: outbox poll failed (${error instanceof Error ? error.message : String(error)}); retrying\n`,

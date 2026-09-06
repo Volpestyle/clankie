@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   CHANNEL_NOTIFICATION_METHOD,
+  createFleetSeatBridge,
   createSeatBridge,
   parseMcpArgs,
   pumpSeatEvents,
@@ -27,6 +28,18 @@ function wakeEvent(id = "seat-1"): OperatorSeatEvent {
     source: "service",
     content: "This is a self-wake you scheduled. Reason you recorded: check the build.",
     createdAt: "2026-09-01T20:00:00.000Z",
+  };
+}
+
+function messageEvent(id = "msg-1"): OperatorSeatEvent {
+  return {
+    schemaVersion: 1,
+    id,
+    kind: "message",
+    conversationId: "app-dm-7",
+    source: "app",
+    content: "look at the failing test",
+    createdAt: "2026-09-06T23:00:00.000Z",
   };
 }
 
@@ -76,8 +89,12 @@ describe("clankie mcp", () => {
   it("parses the lane and refuses other flags", () => {
     expect(parseMcpArgs([])).toEqual({ lane: "operator" });
     expect(parseMcpArgs(["--lane", "discord_voice"])).toEqual({ lane: "discord_voice" });
+    expect(parseMcpArgs(["--seat"])).toEqual({ seat: true });
     expect(() => parseMcpArgs(["--lane", "kitchen"])).toThrow("Usage: clankie mcp");
     expect(() => parseMcpArgs(["--verbose"])).toThrow("Usage: clankie mcp");
+    expect(() => parseMcpArgs(["--seat", "--lane", "operator"])).toThrow("Usage: clankie mcp");
+    expect(() => parseMcpArgs(["--lane", "operator", "--seat"])).toThrow("Usage: clankie mcp");
+    expect(() => parseMcpArgs(["--seat", "--lane"])).toThrow("Usage: clankie mcp");
   });
 
   it("re-serves the lane bank over stdio with the channel capability and a reply tool", async () => {
@@ -181,5 +198,93 @@ describe("clankie mcp", () => {
     await expect(running).resolves.toBe(0);
     expect(upstream.closed).toBe(true);
     expect(written).toContain("serving the operator lane over stdio");
+  });
+
+  it("in seat mode serves the channel with no tools", async () => {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    let written = "";
+    let polled = false;
+    const running = runMcpCommand(["--seat"], {
+      env: {},
+      connectSeatUpstream: async () => {
+        polled = true;
+        return { pollEvents: async () => [], close: async () => undefined };
+      },
+      transport: serverTransport,
+      stderr: { write: (chunk: string) => void (written += chunk) },
+    });
+    const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
+    await client.connect(clientTransport);
+    expect(client.getServerCapabilities()?.experimental).toEqual({ "claude/channel": {} });
+    expect(client.getServerCapabilities()?.tools).toEqual({});
+    expect((await client.listTools()).tools).toEqual([]);
+    expect(client.getInstructions()).toContain('<channel source="clankie" kind="message"');
+    expect(client.getInstructions()).toContain("There is no tool to call.");
+    await client.close();
+    await expect(running).resolves.toBe(0);
+    expect(polled).toBe(false);
+    expect(written).toContain("HERDR_PANE_ID");
+  });
+
+  it("pushes a fleet message into the session as a channel notification", async () => {
+    const upstream = fakeUpstream({ events: [[messageEvent()]] });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createFleetSeatBridge();
+    const received: z.infer<typeof ChannelEventSchema>[] = [];
+    const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
+    const arrived = new Promise<void>((resolve) => {
+      client.setNotificationHandler(ChannelEventSchema, (notification) => {
+        received.push(notification);
+        resolve();
+      });
+    });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const stop = new AbortController();
+    const pump = pumpSeatEvents(server, upstream, stop.signal, { waitMs: 10 });
+    await arrived;
+    stop.abort();
+    await pump;
+    expect(received[0]?.params.content).toBe("look at the failing test");
+    expect(received[0]?.params.meta).toEqual({
+      kind: "message",
+      conversation: "app-dm-7",
+      source: "app",
+      event_id: "msg-1",
+      created_at: "2026-09-06T23:00:00.000Z",
+    });
+    await client.close();
+    await server.close();
+  });
+
+  it("retries a 404 fleet mailbox without throwing", async () => {
+    let polls = 0;
+    let closed = false;
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    let written = "";
+    const running = runMcpCommand(["--seat"], {
+      env: { HERDR_PANE_ID: "w1:p9" },
+      connectSeatUpstream: async () => ({
+        pollEvents: async () => {
+          polls += 1;
+          throw new Error("fleet mailbox answered 404");
+        },
+        close: async () => {
+          closed = true;
+        },
+      }),
+      transport: serverTransport,
+      stderr: { write: (chunk: string) => void (written += chunk) },
+      pollWaitMs: 1,
+      pollRetryMs: 1,
+    });
+    const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
+    await client.connect(clientTransport);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await client.close();
+    await expect(running).resolves.toBe(0);
+    expect(polls).toBeGreaterThan(1);
+    expect(closed).toBe(true);
+    expect(written.match(/unknown_seat/g)).toEqual(["unknown_seat"]);
   });
 });

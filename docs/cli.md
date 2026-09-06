@@ -714,6 +714,18 @@ escalating conversation as his own message. Claude Code loads the channel
 only when `clankie seat` passes its development flag; without it the tools
 still work and the events are dropped.
 
+### `mcp --seat`
+
+A fleet pane's stdio MCP server: no tools, only the channel. A message to that
+agent (a DM from the app, or a group-chat turn) arrives as
+`<channel source="clankie" kind="message" conversation="…" event_id="…">`
+instead of being typed into the pane. Claude Code binds that channel when the
+server is in the harness MCP config (`claude mcp add clankie-seat -- clankie mcp
+--seat`) and the session is started with `--dangerously-load-development-channels
+server:clankie-seat`. `--mcp-config` alone starts the process but does not bind
+`server:`. The service's hire path persists the server and passes the channels
+flag for a claude seat.
+
 ### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
 
 For agents, not for people ([ADR 0148](adr/0148-an-agent-moves-its-own-figure.md)).
