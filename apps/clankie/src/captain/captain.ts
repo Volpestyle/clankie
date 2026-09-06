@@ -1113,9 +1113,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           schemaVersion: 1,
           cursor,
           seats: [...seats],
-          personas: [
-            ...personas.all(seats, (personaId) => conversations.conversationIdForPersona(personaId)),
-          ],
+          personas: [...personas.all(seats, (personaId) => conversations.conversationForPersona(personaId))],
           channels: [...channelsResult.channels],
         },
       };
@@ -1557,7 +1555,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           op: "personas",
           schemaVersion: 1,
           personas: [
-            ...personas.all(liveSeats, (personaId) => conversations.conversationIdForPersona(personaId)),
+            ...personas.all(liveSeats, (personaId) => conversations.conversationForPersona(personaId)),
           ],
         };
       }

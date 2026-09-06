@@ -8,6 +8,7 @@ import {
   OperatorAgentPersonaSchema,
   UpdateOperatorAgentPersonaSchema,
   type OperatorAgentPersona,
+  type OperatorConversation,
   type OperatorFleetSeat,
   type UpdateOperatorAgentPersona,
 } from "@clankie/protocol";
@@ -127,22 +128,39 @@ export class PersonaStore {
     return seat;
   }
 
+  /**
+   * Every character, the ones that spoke most recently first.
+   *
+   * An inbox is read from the top, so the thread with something new in it is
+   * the one that belongs there — the same order the registry already lists
+   * conversations and channels in. A character with no thread yet has nothing
+   * to be recent about and sits after the ones that do, alphabetically, which
+   * is also the whole order before anybody has said anything.
+   */
   public all(
     seats: readonly OperatorFleetSeat[],
-    conversationIdForPersona: (personaId: string) => string | undefined,
+    conversationForPersona: (personaId: string) => OperatorConversation | undefined,
   ): readonly OperatorAgentPersona[] {
     const active = new Map(seats.map((seat) => [seat.personaId, seat.seatId]));
     return [...this.records.values()]
       .map((persona) => {
         const activeSeatId = active.get(persona.personaId);
-        const conversationId = conversationIdForPersona(persona.personaId);
+        const conversation = conversationForPersona(persona.personaId);
         return {
-          ...persona,
-          ...(activeSeatId === undefined ? {} : { activeSeatId }),
-          ...(conversationId === undefined ? {} : { conversationId }),
+          persona: {
+            ...persona,
+            ...(activeSeatId === undefined ? {} : { activeSeatId }),
+            ...(conversation === undefined ? {} : { conversationId: conversation.conversationId }),
+          },
+          lastActivityAt: conversation?.updatedAt ?? "",
         };
       })
-      .sort((left, right) => left.name.localeCompare(right.name));
+      .sort(
+        (left, right) =>
+          right.lastActivityAt.localeCompare(left.lastActivityAt) ||
+          left.persona.name.localeCompare(right.persona.name),
+      )
+      .map(({ persona }) => persona);
   }
 
   public update(input: UpdateOperatorAgentPersona): OperatorAgentPersona {

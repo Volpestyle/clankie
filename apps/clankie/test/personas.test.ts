@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { OperatorConversation } from "@clankie/protocol";
 import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
 import { PersonaStore } from "../src/captain/personas.ts";
 
@@ -19,6 +20,21 @@ function observed(seatId: string, occupantId = OCCUPANT_ONE, subject = "atlas-ab
     harness: "codex",
     status: "working",
     title: "Build grove",
+  };
+}
+
+/** Just enough of a registry record to stand in for a persona's thread. */
+function conversation(conversationId: string, updatedAt = "2026-01-01T00:00:00.000Z"): OperatorConversation {
+  return {
+    schemaVersion: 1,
+    conversationId,
+    scope: { kind: "persona", personaId: "whoever" },
+    title: conversationId,
+    isDefault: false,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt,
+    sessionState: "active",
+    revision: 1,
   };
 }
 
@@ -104,7 +120,7 @@ describe("PersonaStore", () => {
     const replacement = restarted.reconcile([observed("term-9", OCCUPANT_TWO)])[0]!;
     expect(replacement.personaId).toBe(first.personaId);
     expect(replacement.occupantId).toBe(OCCUPANT_TWO);
-    expect(restarted.all([replacement], () => "conversation-1")).toMatchObject([
+    expect(restarted.all([replacement], () => conversation("conversation-1"))).toMatchObject([
       {
         personaId: first.personaId,
         name: "Atlas",
@@ -165,5 +181,24 @@ describe("PersonaStore", () => {
       schemaVersion: 2,
       bindings: [{ subject: "atlas-ab12", personaId: legacyPersonaId, occupantId: OCCUPANT_ONE }],
     });
+  });
+
+  it("lists the character that spoke most recently first, and the silent ones last by name", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const seats = store.reconcile([
+      { ...observed("term-1", OCCUPANT_ONE, "atlas-ab12"), title: "Atlas" },
+      { ...observed("term-2", OCCUPANT_TWO, "zed-cd34"), title: "Zed" },
+      { ...observed("term-3", `session-${"c".repeat(64)}`, "mute-ef56"), title: "Mute" },
+    ]);
+    const byName = new Map(seats.map((seat) => [seat.personaId, seat.title]));
+    // Alphabetically this is Atlas, Mute, Zed. Zed spoke last and Mute never has.
+    const threads = new Map([
+      ["Atlas", conversation("c-atlas", "2026-03-01T00:00:00.000Z")],
+      ["Zed", conversation("c-zed", "2026-03-02T00:00:00.000Z")],
+    ]);
+    const listed = store.all(seats, (personaId) => threads.get(byName.get(personaId) ?? ""));
+    expect(listed.map((persona) => persona.name)).toEqual(["Zed", "Atlas", "Mute"]);
   });
 });

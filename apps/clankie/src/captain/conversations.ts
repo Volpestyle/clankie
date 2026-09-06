@@ -639,10 +639,25 @@ export class ConversationStore {
       ?.conversationId;
   }
 
-  public conversationIdForPersona(personaId: string): string | undefined {
+  private metaForPersona(personaId: string): ConversationMeta | undefined {
     return [...this.metas.values()].find(
       (meta) => meta.scope.kind === "persona" && meta.scope.personaId === personaId,
-    )?.conversationId;
+    );
+  }
+
+  public conversationIdForPersona(personaId: string): string | undefined {
+    return this.metaForPersona(personaId)?.conversationId;
+  }
+
+  /**
+   * The persona's durable thread, for surfaces that order an inbox by what
+   * happened last. `updatedAt` is the whole record's last activity — an
+   * operator turn, a run settling, or a folded seat transcript all move it —
+   * so it says when this thread last had something to show.
+   */
+  public conversationForPersona(personaId: string): OperatorConversation | undefined {
+    const meta = this.metaForPersona(personaId);
+    return meta === undefined ? undefined : publicConversation(meta);
   }
 
   public renamePersona(personaId: string, title: string): void {
