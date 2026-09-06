@@ -777,7 +777,10 @@ function conversationHint(conversation: {
     case "channel":
       return "channel";
     case "global":
-      return conversation.isDefault ? "global · default" : "global";
+      // The default global room is the head (ADR 0152) — the same thread the
+      // app pins as Clankie. Name it that here too, so one room does not read
+      // as two things depending on which face you opened.
+      return conversation.isDefault ? "head" : "global";
   }
 }
 

@@ -320,7 +320,7 @@ describe("shell assembly", () => {
       initialValue: "conv-dev",
       options: [
         { label: "dev", hint: "workspace", description: "/Users/james/dev" },
-        { label: "Clankie", hint: "global · default" },
+        { label: "Clankie", hint: "head" },
       ],
     });
     expect(selected).toEqual(["global-default", "conv-dev"]);
