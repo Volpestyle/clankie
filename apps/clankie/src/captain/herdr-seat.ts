@@ -7,6 +7,12 @@ import type { HerdrSessionCensus } from "./herdr-census.ts";
  * leads the same session without a pane, so long as it is actually up; a turn
  * with no live session carries no herdr preamble at all. The shell runs in the
  * service either way, so the seat and census ride the prompt, not process env.
+ *
+ * This preamble carries only what changes per turn: which pane is him, and the
+ * census itself. What leading means — the agents are his to route and harvest,
+ * which skill to load, that bare `herdr-lead` hangs the shell — is identity,
+ * stated once in instructions.md. Restating it here would repeat those words in
+ * conversation history on every single turn instead of once in a cached prefix.
  */
 export function operatorPromptWithHerdrSeat(
   message: string,
@@ -24,8 +30,6 @@ export function operatorPromptWithHerdrSeat(
     herdrPaneId === undefined
       ? "You lead this herdr session from your service body; no pane is you this turn."
       : `You have joined this herdr session as pane ${herdrPaneId}. That pane is you.`,
-    "The agents below are in the same session. You can lead them, route work to them, and harvest what they finish.",
-    "Use `herdr --help` for the CLI contract. Load the herdr-lead skill when available. Never run bare `herdr-lead` from this shell.",
     "",
     "<herdr_session>",
     session,

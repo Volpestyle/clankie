@@ -305,7 +305,10 @@ describe("operatorPromptWithHerdrSeat", () => {
       text: census,
     });
     expect(prompt).toContain("You have joined this herdr session as pane w15:p6");
-    expect(prompt).toContain("lead them, route work to them");
+    // What leading means is identity, stated once in instructions.md. Repeating it
+    // here would cost those words in conversation history on every seated turn.
+    expect(prompt).not.toContain("lead them, route work to them");
+    expect(prompt).not.toContain("herdr-lead");
     expect(prompt).toContain("<herdr_session>");
     expect(prompt).toContain("w15:pQ  claude  done");
     expect(prompt.endsWith("harvest the done panes")).toBe(true);
