@@ -1,155 +1,108 @@
 ---
 name: desktop-control
 description: >-
-  Use when Clankie needs to observe or interact with native macOS apps through
-  accessibility trees, element IDs, menus, or screenshots. Not for browser page
-  automation or Spotify's basic AppleScript playback controls.
+  Use when Clankie needs general native macOS computer use: screenshots,
+  accessibility inspection, clicking, typing, scrolling, dragging, or menus.
+  Use browser tools for web pages and purpose-built APIs when they cover the task.
 ---
 
-# Native desktop control
+# Native computer use
 
-Use the background AX helper for Spotify, or the supported Peekaboo CLI for
-general native desktop work, through Clankie's existing machine-authorized
-`bash` tool. The operator and authenticated Discord machine grants own that
-access; social rooms do not. Clankie supplies the reasoning, so call the native
-primitives directly rather than starting `peekaboo agent`.
+Use the installed Peekaboo CLI through the existing machine-authorized `bash`
+tool. Read its screenshots with the existing image-capable `read` tool. Clankie
+chooses each action from the latest observation; call Peekaboo's primitives
+directly. `peekaboo agent` and `--analyze` start separate model reasoning and are
+unnecessary for this workflow. Operator and authenticated Discord machine grants
+own machine access; social rooms do not.
 
-Use the browser tools for web pages and a purpose-built API or CLI when it
-already covers the task. Spotify's AppleScript playback dictionary does not
-provide song-row or menu accessibility control.
-
-## Background Spotify AX
-
-```sh
-command -v clankie-desktop
-clankie-desktop diagnose
-```
-
-The [helper protocol and client](../../../apps/desktop-control/README.md) use
-one caller-owned stdio process. A Python script can hold `Desktop(binary)`
-while it requests `windows`, then `observe` on one returned native root handle.
-Use depth 48 and an explicit node budget; a `roles` filter limits presentation,
-not traversal. Window discovery unions `AXWindows`, main/focused window
-references, and direct child windows/menus, deduplicating native identities.
-An empty `AXWindows` alone does not mean no window is accessible. Use the
-client's `single_window(inventory)` for a unique window with no root menu;
-never assume the title is `Spotify Premium` because it can name the current song.
-`diagnose` retains AXWindows errors, candidate count, combined `discoveredRoots`,
-optional window-number results, app exposure, and foreground identities. It does not
-enable accessibility, focus the app, or prompt for permissions.
-
-Before opening, establish that a matching menu has a discoverable, working
-`AXCancel` path in the relevant background context. If that cannot be
-preflighted, opening is a controlled experiment requiring explicit authorization
-and a separately authorized recovery plan; it is not assured reversible proof.
-A focus violation, transport failure, or incomplete discovery can strand even
-a cancel-capable menu. Closing the helper does not dismiss it. Do not invent
-Escape, a popup toggle, focus restoration, or a latch bypass as recovery.
-
-Within that authorization, start the session with `--allow-menu-actions`
-(`Desktop(binary, allow_menu_actions=True)`). Select exactly one fresh row or
-More options popup by its observed semantics, then send `menu` with the current
-snapshot, element ID, and an advertised action. Supported pairs are
-`AXShowMenu` on a row/popup, `AXPress` on a popup, and `AXCancel` on a menu.
-Never press a song's Play button or choose a menu entry for an open/dismiss proof.
-
-Keep the process alive: snapshots and element IDs expire on process exit,
-after 30 seconds, or after another observation/inventory or a dispatch attempt.
-Window handles last until a new inventory or process exit, subject to live
-membership validation. Observe again after each action. The helper validates retained ancestry and process
-generation; an old label/ID is never a fallback. Bounded partial coverage does
-not prove a menu is absent. `incomplete_inventory` refuses truncated root
-discovery; successful inventory does not certify every off-screen menu is exposed.
-`operation_timeout` invalidates the snapshot. If cancellation is
-unadvertised, report the stranded/indeterminate result under the recovery plan.
-
-The session pins a distinct foreground process and monitors activation events.
-It never requests focus. `focus_changed` means background proof failed, even
-if the app caused it internally; stop. The latched session refuses reads and
-cancellation too. Do not restore focus, send
-Escape, or replay an indeterminate action automatically. Successful dispatch
-is still `effect: unverified`. Current local evidence proves background reads;
-service execution and real menu open/dismiss require their own receipts.
-
-A client timeout, EOF, framing/shape, or output failure permanently closes the
-pipe. `TransportError.action_may_have_dispatched` preserves uncertainty; never
-reuse that instance or replay an action. A fresh session is only for deliberately
-chosen inspection. A well-framed native refusal can leave the existing transport
-usable for inspection if its focus contract still holds; check `success`,
-`actionDispatched`, `retrySafe`, and the requested result fields. Check stability
-flags and actual Play/Pause label coverage separately from read-proof `success`.
-
-These native handles are separate from Peekaboo snapshot/element IDs. Never
-pass one provider's IDs to the other.
-
-## Discover and observe
+## Discover the target
 
 ```sh
 command -v peekaboo
 peekaboo --version --json
 peekaboo permissions status --all-sources --json
-peekaboo window list --app Spotify --json
+peekaboo window list --app "$APP" --json
 ```
 
-Read the installed command's `--help` before using unfamiliar flags. The current
-installation is documented in [desktop control](../../../docs/desktop-control.md).
-If the service cannot find the executable, use the verified absolute path from
-that installation. Do not install a replacement or change config to hide a
-missing command.
+`APP` comes from the task or app inventory. Select the intended current window
+from the result and assign its exact ID to `WINDOW_ID`. Titles can change and
+an app may have several windows; do not assume a fixed title or first window.
+Read the installed command's `--help` before using unfamiliar flags. Installation
+and host details live in [desktop control](../../../docs/desktop-control.md).
 
-Take the exact application and window ID from inventory. For example, with
-`APP` and `WINDOW_ID` assigned to those observed values:
+## Observe, inspect the image, then decide
+
+Assign `IMAGE_PATH` to a caller-owned temporary PNG path, then capture:
+
+```sh
+peekaboo see --app "$APP" --window-id "$WINDOW_ID" --path "$IMAGE_PATH" --json
+```
+
+Check the receipt and **read the actual image at the returned path** with `read`.
+A shell response containing a filename does not show the image to the model.
+Use screenshot evidence when AX omits content; a sparse tree does not establish
+that the window is empty. For text-only inspection:
 
 ```sh
 peekaboo see --app "$APP" --window-id "$WINDOW_ID" --tree --no-screenshot --json
 ```
 
-This observation does not focus the target. Leave `--web-focus` off unless
-focus-changing discovery is explicitly authorized. Check warnings and semantic
-scope, not just `success` or exit code: `application_partial`, a null
-`snapshot_id`, `snapshot_reusable: false`, or
-`mutation_targeting_available: false` cannot support element actions. An ID in
-debug logs does not override those result fields. Report incomplete AX reads;
-do not repeat an app-tree fallback the result says it already performed.
+For a depth-limit result, use `--depth 48 --max-elements 1600 --max-children 250`.
+Depth cannot repair a missing exact-window binding. Check `semantic_scope`,
+`snapshot_reusable`, `mutation_targeting_available`, warnings, and the actual
+content. `application_partial` and a null snapshot cannot support element actions.
+An ID in debug output does not override the receipt's authority fields.
 
-For a proven depth-limit result on Spotify, use `--depth 48 --max-elements 1600`
-with `--max-children 250`. The ordinary depth 12 can stop before nested song
-rows. Raising depth does not repair `application_partial` window binding.
+Observation is read-only with respect to focus. Leave `--web-focus` off unless
+focus-changing discovery is authorized. Keep private screenshots outside the repo.
 
-For an authorized screenshot, pass an explicit temporary `--path` and read that
-image with the existing `read` tool. `--no-elements` produces pixel evidence,
-not an AX element map. Keep only the minimal requested receipt; do not archive
-library contents or screenshots in the repository.
+## Capture host and the classic engine
 
-## Target continuity and actions
+Peekaboo 4.3.0 can refuse remote capture with a misleading “predates safe
+process-lifetime ScreenCaptureKit ownership” error even when permissions are
+granted. Inspect the selected/local permission results and the exact refusal.
+Do not kill a host, change permissions/signing, or edit ownership state to clear it.
 
-Copy opaque element IDs and the reusable snapshot ID exactly from a fresh
-successful observation. Never guess IDs, infer a role from their spelling, or
-use OCR text as an accessibility action target. For an authorized click:
+For authorized **read-only pixels**, the documented caller-local classic path
+works independently of ScreenCaptureKit ownership:
+
+```sh
+peekaboo see --app "$APP" --window-id "$WINDOW_ID" --no-elements \
+  --no-remote --capture-engine classic --path "$IMAGE_PATH" --json
+```
+
+This requires permission in the actual calling context; it is not a remedy for
+permission or app-access denial. Read the resulting image. Its `snapshot_id`
+belongs to that short-lived local process and is not reusable by another CLI
+process after exit. Treat it as visual observation, not an action-ready snapshot.
+
+## Act and observe again
+
+For an authorized element click, copy both IDs from a fresh, reusable observation:
 
 ```sh
 peekaboo click --on "$ELEMENT_ID" --snapshot "$SNAPSHOT_ID" --json
 ```
 
-Normal CLI discovery uses an on-demand snapshot daemon. Snapshot references
-belong to their live producer and route later calls back to it. If using an
-explicit `--bridge-socket`, keep the same socket for permission checks,
-observations, and actions. Separate `--no-remote` processes do not share
-in-memory snapshots. If the owner expires or the target changes, observe again;
-do not recreate an old reference or replay an uncertain action.
+Peekaboo also provides `type`, `press`, `scroll`, `drag`, `set-value`, `action`,
+and menu commands. Select the primitive that matches the intended effect and
+read its help. Use coordinate input only with a fresh screenshot and a valid
+live producer receipt; map through `coordinate_context` instead of treating
+image pixels as desktop points. OCR text is context, not an actionable AX node.
 
-`action` invokes a named AX action; `set-value` writes a settable control.
-`action AXPress`, `action AXShowMenu`, and `action AXCancel` require `--foreground`. Treat that as
-a visible interaction and obtain the appropriate task authorization, never as
-a retry flag for a refused read. Do not grant macOS permissions, manipulate
-TCC, remove quarantine, or change signing to make a command work. Report the
-selected host and its exact missing permission or runtime refusal.
+Normal CLI snapshots belong to an on-demand host and route later calls back to
+that producer. If explicitly selecting a `--bridge-socket`, keep that host for
+observation and action. Separate `--no-remote` processes do not share snapshots.
+Never invent or transplant references, or reuse one after its producer exits.
 
-After each action, run `see` again against the same target and derive fresh
-IDs. A dispatch receipt is not proof of the intended effect. Use `verify` for
-bounded state polling when appropriate; `unknown` is not success. On an
-indeterminate result, inspect before deciding whether another action is safe.
+Respect task restrictions on foreground changes and input. A command requiring
+`--foreground` is not a background substitute. Do not add it or use `--web-focus`
+to get around a no-focus constraint. Named AX actions must be advertised by the
+observed element; do not guess them.
 
-For Spotify, distinguish the song row, its Play button, and its More options
-control. Do not press Return with uncertain focus: it can affect playback.
-Read-only proof excludes clicks, focus changes, playback, and library edits.
+After each action, observe the same target again and inspect the new image/state
+before deciding the next action. Dispatch alone does not prove the intended
+result. Inspect indeterminate results before considering another action; do not
+blindly replay clicks or keys. Report capture, inspection, and interaction proof
+separately. An unavailable action path is a provider limitation to resolve,
+not a reason to build an app-specific desktop driver.
