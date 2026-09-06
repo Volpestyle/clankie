@@ -120,6 +120,11 @@ It does not change the remote host or its safety checks.
 Its returned snapshot expires with the local process, so this observation does
 not qualify subsequent coordinate input from another CLI invocation.
 
-This verifies capture and image attachment construction. A successful Clankie
-model turn and persistent action-host interaction still require live proof.
-No completed menu operation or no-focus parity is claimed from read-only evidence.
+The live TUI path verifies Clankie discovering a window, invoking capture,
+reading the PNG as an image attachment, and describing its visible contents.
+However, two classic captures returned identical PNG bytes despite different
+window titles. Pixel freshness remains unverified; a new capture receipt does
+not establish that the app has repainted its contents.
+
+Persistent action-host interaction still requires live proof. No completed
+menu operation or no-focus parity is claimed from read-only evidence.
