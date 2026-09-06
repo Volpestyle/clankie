@@ -827,6 +827,171 @@ describe("hiring a seat", () => {
     store.close();
   });
 
+  it("registers clankie-seat at user scope when claude mcp get says it is missing", async () => {
+    const getClaudeMcp = vi.fn(() => Promise.resolve({ status: 1, stdout: "", stderr: "not found" }));
+    const addClaudeMcp = vi.fn(() => Promise.resolve());
+    const startAgent = vi.fn(() => Promise.resolve());
+    const claudeHired: HerdrAgentSnapshot = {
+      ...hired,
+      agent: "claude",
+      session: { source: "herdr:claude", kind: "id", value: "session-claude" },
+    };
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(claudeHired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(claudeHired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent,
+      getClaudeMcp,
+      addClaudeMcp,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "claude",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+
+    expect(getClaudeMcp).toHaveBeenCalledWith("clankie-seat");
+    expect(addClaudeMcp).toHaveBeenCalledWith("clankie-seat");
+    expect(startAgent).toHaveBeenCalledOnce();
+    store.close();
+  });
+
+  it("skips claude mcp add when the seat server is already registered", async () => {
+    const getClaudeMcp = vi.fn(() =>
+      Promise.resolve({ status: 0, stdout: "clankie-seat", stderr: "" }),
+    );
+    const addClaudeMcp = vi.fn(() => Promise.resolve());
+    const claudeHired: HerdrAgentSnapshot = {
+      ...hired,
+      agent: "claude",
+      session: { source: "herdr:claude", kind: "id", value: "session-claude" },
+    };
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(claudeHired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(claudeHired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent: vi.fn(() => Promise.resolve()),
+      getClaudeMcp,
+      addClaudeMcp,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "claude",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+
+    expect(getClaudeMcp).toHaveBeenCalledWith("clankie-seat");
+    expect(addClaudeMcp).not.toHaveBeenCalled();
+    store.close();
+  });
+
+  it("clears the development-channels dialog and proceeds as if start succeeded", async () => {
+    const claudeHired: HerdrAgentSnapshot = {
+      ...hired,
+      agent: "claude",
+      status: "idle",
+      session: { source: "herdr:claude", kind: "id", value: "session-claude" },
+    };
+    const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
+    const read = vi.fn(() =>
+      Promise.resolve("WARNING: Loading development channels\n❯ 1. I am using this for local development"),
+    );
+    const sendKeys = vi.fn(() => Promise.resolve());
+    const waitUntilIdle = vi.fn(() => Promise.resolve(claudeHired));
+    const closePane = vi.fn(() => Promise.resolve());
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(claudeHired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(claudeHired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      waitUntilIdle,
+      read,
+      sendKeys,
+      closePane,
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "claude",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+
+    expect(result).toMatchObject({ outcome: "spawned", seat: { seatId: "term-hired", harness: "claude" } });
+    expect(read).toHaveBeenCalledWith("w1C:p9", "claude", "visible");
+    expect(sendKeys).toHaveBeenCalledWith("w1C:p9", "enter");
+    expect(waitUntilIdle).toHaveBeenCalledWith("w1C:p9", expect.any(AbortSignal));
+    expect(closePane).not.toHaveBeenCalled();
+    store.close();
+  });
+
+  it("leaves a different blocked dialog as a failed hire and closes the pane", async () => {
+    const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
+    const read = vi.fn(() => Promise.resolve("Do you trust the files in this folder?"));
+    const sendKeys = vi.fn(() => Promise.resolve());
+    const closePane = vi.fn(() => Promise.resolve());
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(hired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(hired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      read,
+      sendKeys,
+      closePane,
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "claude",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+
+    expect(result).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(closePane).toHaveBeenCalledWith("w1C:p9");
+    store.close();
+  });
+
+  it("names a missing claude binary as harness_unavailable instead of throwing", async () => {
+    const closePane = vi.fn(() => Promise.resolve());
+    const startAgent = vi.fn(() => Promise.resolve());
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(hired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(hired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent,
+      closePane,
+      getClaudeMcp: vi.fn(() => Promise.reject(new Error("claude: command not found"))),
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "claude",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+
+    expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    expect(startAgent).not.toHaveBeenCalled();
+    expect(closePane).toHaveBeenCalledWith("w1C:p9");
+    store.close();
+  });
+
   it("waits out the gap between the harness taking input and its session appearing", async () => {
     // pi is ready before it has written its session file; the hire is good.
     const { session: _unset, ...rest } = hired;

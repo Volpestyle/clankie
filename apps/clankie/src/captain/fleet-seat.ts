@@ -13,23 +13,23 @@ export interface FleetSeatMessageContext {
 
 /**
  * The extra argv a hired Claude Code pane gets after `herdr agent start … --`.
- * One JSON object for `--mcp-config` (execFile, so no shell quoting) and the
- * `server:` channels flag that loads it. Other harnesses get nothing.
+ * `server:` binds a server already in the persisted harness config, not one
+ * passed as `--mcp-config`. Other harnesses get nothing.
  */
 export function fleetSeatClaudeStartArgs(): readonly string[] {
-  return [
-    "--mcp-config",
-    JSON.stringify({
-      mcpServers: {
-        [FLEET_SEAT_MCP_SERVER]: {
-          command: "clankie",
-          args: ["mcp", "--seat"],
-        },
-      },
-    }),
-    "--dangerously-load-development-channels",
-    `server:${FLEET_SEAT_MCP_SERVER}`,
-  ];
+  return ["--dangerously-load-development-channels", `server:${FLEET_SEAT_MCP_SERVER}`];
+}
+
+/** `claude mcp get` as the hire path sees it: non-zero means the server is missing. */
+export interface ClaudeMcpGetResult {
+  readonly status: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Register `clankie-seat` at user scope only when `claude mcp get` says it is missing. */
+export function fleetSeatMcpNeedsRegister(result: ClaudeMcpGetResult): boolean {
+  return result.status !== 0;
 }
 
 /** Create the seat's outbox on first poll (or any other first use). */

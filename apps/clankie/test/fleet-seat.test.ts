@@ -4,24 +4,21 @@ import {
   deliverFleetSeatMessage,
   fleetSeatClaudeStartArgs,
   fleetSeatMailbox,
+  fleetSeatMcpNeedsRegister,
 } from "../src/captain/fleet-seat.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 
 describe("fleet seat mailbox", () => {
-  it("builds the Claude Code channel argv as one JSON element plus the flag", () => {
+  it("starts a Claude Code hire with the development-channels flag and no --mcp-config", () => {
     expect(fleetSeatClaudeStartArgs()).toEqual([
-      "--mcp-config",
-      JSON.stringify({
-        mcpServers: {
-          [FLEET_SEAT_MCP_SERVER]: { command: "clankie", args: ["mcp", "--seat"] },
-        },
-      }),
       "--dangerously-load-development-channels",
       `server:${FLEET_SEAT_MCP_SERVER}`,
     ]);
-    expect(fleetSeatClaudeStartArgs()[1]).toBe(
-      '{"mcpServers":{"clankie-seat":{"command":"clankie","args":["mcp","--seat"]}}}',
-    );
+  });
+
+  it("registers the seat MCP only when claude mcp get exits non-zero", () => {
+    expect(fleetSeatMcpNeedsRegister({ status: 1, stdout: "", stderr: "not found" })).toBe(true);
+    expect(fleetSeatMcpNeedsRegister({ status: 0, stdout: "clankie-seat", stderr: "" })).toBe(false);
   });
 
   it("a bound mailbox takes the message and leaves the pty alone", async () => {
