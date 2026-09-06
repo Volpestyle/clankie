@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CredentialStore, ProviderCredential, RedactedCredential } from "@clankie/credential-broker";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { createMcpHost, type McpConnection } from "../src/mcp-host.ts";
@@ -45,6 +45,36 @@ function fakeConnection(tools: readonly string[]): McpConnection & { calls: stri
 }
 
 describe("mcp host", () => {
+  it("says once when a curated server goes missing for want of a credential, and again when it returns", async () => {
+    const warnings: Record<string, unknown>[] = [];
+    const notices: Record<string, unknown>[] = [];
+    const stored: Record<string, ProviderCredential> = {};
+    const credentials = credentialStore(stored);
+    const curated = [
+      server({ id: "linear", credential: "linear", transport: "http", url: "https://example" }),
+    ];
+    const host = createMcpHost({
+      credentials,
+      settings: settingsStore([]),
+      logger: {
+        info: (context) => void notices.push(context),
+        warn: (context) => void warnings.push(context),
+      },
+      curated,
+      connect: async () => fakeConnection(["search"]),
+    });
+
+    expect(await host.catalog("operator")).toEqual([]);
+    expect(warnings.filter((entry) => entry.event === "mcp.host.credential_missing")).toHaveLength(1);
+
+    stored["linear"] = { type: "api", key: "k" };
+    // Past the resolved-server memo, so the next catalog re-reads the store.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_010);
+    expect(await host.catalog("operator")).toHaveLength(1);
+    expect(notices.filter((entry) => entry.event === "mcp.host.credential_restored")).toHaveLength(1);
+    vi.restoreAllMocks();
+  });
+
   it("keeps an operator-lane server out of a Discord room, by catalog and by name", async () => {
     const connection = fakeConnection(["read_note"]);
     const host = createMcpHost({

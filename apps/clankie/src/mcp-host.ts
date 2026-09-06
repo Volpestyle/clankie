@@ -144,6 +144,8 @@ interface ServerState {
   connecting?: Promise<McpConnection>;
   tools?: readonly McpToolDescriptor[];
   failure?: { reason: string; at: number };
+  /** Whether the last resolve hid this curated server for a missing credential. */
+  credentialMissing?: boolean;
 }
 
 /** Whether a server declared for `lane` may be reached from this room. */
@@ -185,7 +187,32 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       if (authoredIds.has(server.id)) continue;
       if (server.credential !== undefined) {
         const stored = await options.credentials.get(server.credential);
-        if (stored === undefined) continue;
+        // A curated connector with no credential is not an error — it is the
+        // un-connected state, and most of them are un-connected most of the
+        // time. But a credential that goes missing after being used reads from
+        // the inside as the server never having existed: its tools vanish from
+        // the catalog with nothing said, and he answers as though the service
+        // were not one of his. Say it once per transition so the disappearance
+        // leaves a trace without a line per resolve.
+        if (stored === undefined) {
+          const state = stateFor(server.id);
+          if (state.credentialMissing !== true) {
+            state.credentialMissing = true;
+            options.logger.warn(
+              { event: "mcp.host.credential_missing", server: server.id, credential: server.credential },
+              "mcp server hidden: no stored credential",
+            );
+          }
+          continue;
+        }
+        const state = stateFor(server.id);
+        if (state.credentialMissing === true) {
+          state.credentialMissing = false;
+          options.logger.info(
+            { event: "mcp.host.credential_restored", server: server.id, credential: server.credential },
+            "mcp server credential restored",
+          );
+        }
       }
       available.push(server);
     }
