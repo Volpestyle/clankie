@@ -54,6 +54,17 @@ agent status is not proof that the work is correct. General Herdr leadership
 remains CLI-and-skill based. `schedule_wake` remains the primitive for work
 that genuinely depends on wall-clock time.
 
+Harvesting includes cleanup of temporary workers Clankie creates. He records
+pane ownership in the handoff, verifies and saves the results outside the
+terminal, then closes the finished worker's pane through `herdr pane close`
+and confirms it is gone. Concrete follow-up or an operator request to keep
+the pane postpones cleanup. A fresh read protects running work, operator
+drafts, and panes repurposed by the operator; existing agents he merely leads
+or watches remain outside this cleanup authority.
+
+The captain makes that decision after verification. The watcher does not close
+panes on a `done` event: that event establishes neither ownership nor success.
+
 ## Alternatives considered
 
 - Restore the retired Clanky supervisor and its `clanky watch` executable.

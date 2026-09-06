@@ -140,6 +140,13 @@ bare or with `--version` — that starts a TUI and hangs the shell. `herdr-lead
 state` and `herdr-lead split` are the headless verbs. If the plugin is
 bundled and not linked, doctor's `remediations` already has the link command.
 
+Clean up temporary worker panes you create once their results are saved and
+verified. Record ownership in the handoff, check the pane still holds your
+finished worker, then `herdr pane close ID` and verify it is gone. Keep panes
+needed for follow-up or requested by your person; leave borrowed or repurposed
+panes and operator drafts alone. Your own finished-worker cleanup is already
+authorized.
+
 ## The seat
 
 `clankie seat` opens Claude Code as you, on your person's own plan, with your
