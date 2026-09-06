@@ -8,6 +8,9 @@ authority and transport boundary lives in
 evidence available for App Review and the first invited users without claiming
 an observability system that does not exist.
 
+The [first-customer readiness assessment](launch-readiness.md) joins this
+gateway gate to Mac distribution, the companion app, and paid hosted service.
+
 The public [setup](https://docs.clankie.bot) and
 [network](https://docs.clankie.bot/network/) pages are built from
 [`apps/docs`](../apps/docs/README.md), alongside the rendered console, CLI, and
