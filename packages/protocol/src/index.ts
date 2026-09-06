@@ -572,7 +572,7 @@ export const OperatorAgentPoseSchema = z.enum([
   "stuck",
   "hauling",
   "resting",
-  /** Just landed something (ADR 0161) — the agent-stated half of a reward. */
+  /** Just landed something (ADR 0162) — the agent-stated half of a reward. */
   "celebrate",
 ]);
 export type OperatorAgentPose = z.infer<typeof OperatorAgentPoseSchema>;
@@ -634,7 +634,7 @@ export const OPERATOR_AGENT_PERSONA_LIST_MAX = 1_000;
 /** Bounded fleet roster entry: one herdr seat as a messageable contact (ADR 0135). */
 export const OPERATOR_FLEET_ROSTER_MAX = 48;
 /**
- * What the host saw a seat's last run come to (ADR 0161). `passed` is a pane
+ * What the host saw a seat's last run come to (ADR 0162). `passed` is a pane
  * that worked and then settled ready for the next thing; `failed` is one that
  * settled blocked. Nothing here is a judgement about the work — it is what the
  * pane's own agent status said when the run ended.
@@ -680,7 +680,7 @@ export const OperatorFleetSeatSchema = z
      */
     stance: OperatorAgentStanceSchema.optional(),
     /**
-     * How this seat's last run came out, while the host holds one (ADR 0161).
+     * How this seat's last run came out, while the host holds one (ADR 0162).
      * Absent is the third answer — no settled run — so a surface reads the
      * ledger rather than inferring an outcome from a quiet seat.
      */
@@ -690,7 +690,7 @@ export const OperatorFleetSeatSchema = z
 export type OperatorFleetSeat = z.infer<typeof OperatorFleetSeatSchema>;
 
 /**
- * One seat's counts for the calendar day the host is in (ADR 0161). The host
+ * One seat's counts for the calendar day the host is in (ADR 0162). The host
  * is the authority for what a seat has earned; a surface renders these and
  * keeps no score of its own. A seat with nothing yet today is absent from the
  * array rather than carrying zeroes.
@@ -722,7 +722,7 @@ export const OperatorFleetSnapshotSchema = z
     personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),
     channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
     /**
-     * Today's counts for the seats that have any (ADR 0161). Optional so a
+     * Today's counts for the seats that have any (ADR 0162). Optional so a
      * surface written before the ledger keeps reading snapshots unchanged.
      */
     tallies: z.array(OperatorSeatDayTallySchema).max(OPERATOR_FLEET_ROSTER_MAX).optional(),

@@ -1,5 +1,5 @@
 /**
- * What each seat has earned (ADR 0161).
+ * What each seat has earned (ADR 0162).
  *
  * The commons renders rewards and keeps no score of its own, so the host has to
  * be the one that can say what a seat's last run came to and what it has done

@@ -634,7 +634,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * What each fleet seat's pane status was last seen as. The watcher publishes
    * only changes, so this is the other half of a transition — and holding it
    * here rather than reaching into the watcher keeps the ledger's rule in one
-   * place (ADR 0161).
+   * place (ADR 0162).
    */
   const seatStatuses = new Map<string, string>();
   const fleetChanges = new FleetChangeClock();
@@ -1202,7 +1202,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (projection.kind === "status") {
         // A pane that was working and has stopped is this seat's run, and the
         // status it stopped at is the only thing the host knows about how it
-        // went (ADR 0161). Recorded before the persona lookup: the ledger is
+        // went (ADR 0162). Recorded before the persona lookup: the ledger is
         // keyed by seat, and a seat with no bound character still ran.
         const previous = seatStatuses.get(seatId);
         seatStatuses.set(seatId, projection.status);

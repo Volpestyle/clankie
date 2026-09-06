@@ -1,4 +1,4 @@
-# ADR 0161: The host keeps the seat's ledger
+# ADR 0162: The host keeps the seat's ledger
 
 Status: accepted (James, 2026-09-06). Builds on
 [ADR 0148](0148-an-agent-moves-its-own-figure.md), whose stance vocabulary this
