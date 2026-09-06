@@ -271,7 +271,15 @@ export class PersonaStore {
       }
     }
 
-    const { subject: _subject, renamed: _renamed, ...seat } = observed;
+    // Pane ids are the captain's join to Herdr's edges, not part of the seat
+    // contract; the wire carries seat ids only.
+    const {
+      subject: _subject,
+      renamed: _renamed,
+      paneId: _paneId,
+      parentPaneId: _parentPaneId,
+      ...seat
+    } = observed;
     return { seat: { ...seat, personaId: binding.personaId }, changed };
   }
 

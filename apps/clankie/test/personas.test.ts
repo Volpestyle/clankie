@@ -15,6 +15,7 @@ const PNG_BASE64 =
 function observed(seatId: string, occupantId = OCCUPANT_ONE, subject = "atlas-ab12"): ObservedFleetSeat {
   return {
     seatId,
+    paneId: `w1:p${seatId}`,
     subject,
     occupantId,
     harness: "codex",

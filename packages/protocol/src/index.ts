@@ -685,6 +685,12 @@ export const OperatorFleetSeatSchema = z
      * ledger rather than inferring an outcome from a quiet seat.
      */
     lastOutcome: OperatorSeatLastOutcomeSchema.optional(),
+    /**
+     * The seat whose pane started this one, for as long as both are seated.
+     * Read from the live census, never remembered: a seat whose parent left
+     * the roster simply stops carrying one (ADR 0163).
+     */
+    parentSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
   })
   .strict();
 export type OperatorFleetSeat = z.infer<typeof OperatorFleetSeatSchema>;
@@ -712,6 +718,30 @@ export const OperatorSeatDayTallySchema = z
   .strict();
 export type OperatorSeatDayTally = z.infer<typeof OperatorSeatDayTallySchema>;
 
+/**
+ * One directed relationship between two seated agents (ADR 0163). A `spawn`
+ * edge runs from the parent that started the child and stands for the life of
+ * the child; a `prompt` edge runs from the sender to the agent it prompted and
+ * stands only while it is inside the captain's recent window. Both ends are
+ * live seats: an edge touching a seat that left the roster is not carried.
+ */
+export const OperatorFleetEdgeSchema = z
+  .object({
+    kind: z.enum(["prompt", "spawn"]),
+    fromSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    toSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    at: z.string().datetime(),
+  })
+  .strict();
+export type OperatorFleetEdge = z.infer<typeof OperatorFleetEdgeSchema>;
+
+/**
+ * Spawn edges are bounded by the roster; prompt edges by the captain's window.
+ * The ceiling holds both with room to spare, so a busy fleet is truncated by
+ * the window rather than by the wire.
+ */
+export const OPERATOR_FLEET_EDGE_MAX = 128;
+
 /** A full live-fleet read plus the cursor that wakes its next long poll. */
 export const OPERATOR_FLEET_WAIT_MS_MAX = 30_000;
 export const OperatorFleetSnapshotSchema = z
@@ -726,6 +756,12 @@ export const OperatorFleetSnapshotSchema = z
      * surface written before the ledger keeps reading snapshots unchanged.
      */
     tallies: z.array(OperatorSeatDayTallySchema).max(OPERATOR_FLEET_ROSTER_MAX).optional(),
+    /**
+     * Who prompted whom recently and who spawned whom, derived on every read
+     * (ADR 0163). Absent from a host that does not yet publish edges; empty on
+     * a quiet fleet.
+     */
+    edges: z.array(OperatorFleetEdgeSchema).max(OPERATOR_FLEET_EDGE_MAX).optional(),
   })
   .strict();
 export type OperatorFleetSnapshot = z.infer<typeof OperatorFleetSnapshotSchema>;

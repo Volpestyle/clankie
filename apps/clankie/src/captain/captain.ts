@@ -55,6 +55,7 @@ import { HerdrTerminalStore } from "./herdr-terminal.ts";
 import { HerdrTerminalControlStore } from "./herdr-terminal-control.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
+import { deriveFleetEdges, parentSeatIds, PromptEdgeWindow, type EdgeSeat } from "./fleet-edges.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import { PersonaStore } from "./personas.ts";
@@ -638,7 +639,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    */
   const seatStatuses = new Map<string, string>();
   const fleetChanges = new FleetChangeClock();
-  const stopFleetChanges = watchHerdrFleetChanges(fleetChanges);
+  // The one fleet fact Herdr does not keep (ADR 0163): bounded, process-local,
+  // never persisted. Spawn edges need no window; they are read off the census.
+  const promptEdges = new PromptEdgeWindow();
+  const stopFleetChanges = watchHerdrFleetChanges(fleetChanges, {
+    onPromptEdge: (edge) => promptEdges.record(edge),
+  });
+  /** Pane join for the current roster, rebuilt with it on every census. */
+  let liveEdgeSeats: readonly EdgeSeat[] = [];
   let modelRuntime: Promise<CaptainModelRuntime> | undefined;
   // The seat (ADR 0152): the herdr pane holding his name, and the outbox its
   // bridge polls. The head conversation is always the default global one.
@@ -1105,6 +1113,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const fleet = await readFleet();
     bindHeadSeat(fleet.head);
     const seats = personas.reconcile(fleet.seats);
+    liveEdgeSeats = fleet.seats.map((observed) => ({
+      seatId: observed.seatId,
+      paneId: observed.paneId,
+      ...(observed.parentPaneId === undefined ? {} : { parentPaneId: observed.parentPaneId }),
+    }));
+    const parents = parentSeatIds(liveEdgeSeats);
     const names = new Map(
       personas.all(seats, () => undefined).map((persona) => [persona.personaId, persona.name]),
     );
@@ -1122,11 +1136,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // The ledger is the authority for what a seat has earned; the room reads
       // this and never keeps a score of its own (app ADR 0030).
       const lastOutcome = seatLedger.lastOutcome(seat.seatId);
+      const parentSeatId = parents.get(seat.seatId);
       return {
         ...seat,
         conversationId: conversations.conversationIdForPersona(seat.personaId),
         ...(stance === undefined ? {} : { stance }),
         ...(lastOutcome === undefined ? {} : { lastOutcome }),
+        ...(parentSeatId === undefined ? {} : { parentSeatId }),
       };
     });
   }
@@ -1151,6 +1167,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // Bounded by the roster it is read against, so the day's counts can
           // never outnumber the seats the snapshot carries.
           tallies: [...seatLedger.tallies(seats.map((seat) => seat.seatId))],
+          edges: [...deriveFleetEdges(liveEdgeSeats, promptEdges.recent())],
         },
       };
     }

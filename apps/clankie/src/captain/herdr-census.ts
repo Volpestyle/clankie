@@ -20,6 +20,8 @@ export interface HerdrCensusAgent {
   readonly title: string;
   /** Stable terminal address for this pane; not the occupying agent's identity. */
   readonly terminalId?: string;
+  /** Pane that ran `agent start` for this agent, when Herdr recorded one. */
+  readonly parentPaneId?: string;
   /** Absolute path the agent runs in; the commons district key (ADR 0022). */
   readonly cwd?: string;
   /** Harness-native session identity, independent of the pane holding it. */
@@ -73,6 +75,14 @@ function subjectForHerdrName(name: string): string | undefined {
 
 export interface ObservedFleetSeat {
   readonly seatId: string;
+  /**
+   * The Herdr pane holding this seat, and the pane that started it. Herdr keys
+   * its agent edges by pane, seats are keyed by terminal, and these two fields
+   * are the join between them. They stay internal to the captain: the wire
+   * carries seat ids only.
+   */
+  readonly paneId: string;
+  readonly parentPaneId?: string;
   /** Managed-agent name, or pane-derived fallback, used to recover the persona binding. */
   readonly subject: string;
   /**
@@ -131,6 +141,9 @@ export function parseHerdrAgentList(stdout: string): HerdrCensusAgent[] {
       title: titleOf(pane),
       ...(typeof pane.terminal_id === "string" && pane.terminal_id.length > 0
         ? { terminalId: pane.terminal_id }
+        : {}),
+      ...(typeof pane.parent_pane_id === "string" && pane.parent_pane_id.length > 0
+        ? { parentPaneId: pane.parent_pane_id }
         : {}),
       ...(typeof pane.cwd === "string" && pane.cwd.length > 0 ? { cwd: pane.cwd } : {}),
       ...(typeof session?.source === "string" &&
@@ -401,6 +414,8 @@ export async function readFleet(
         const named = entry.name === undefined ? undefined : subjectForHerdrName(entry.name);
         return {
           seatId: entry.terminalId,
+          paneId: entry.paneId,
+          ...(entry.parentPaneId === undefined ? {} : { parentPaneId: entry.parentPaneId }),
           // The owner-selected session is the fleet boundary (ADR 0149).
           // Named agents rebind across panes; an ad-hoc one remains stable for
           // its pane and never borrows identity from a rotating harness session.

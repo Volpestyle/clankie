@@ -772,6 +772,7 @@ describe("hiring a seat", () => {
       outcome: "spawned",
       seat: {
         seatId: "term-hired",
+        paneId: "w1C:p9",
         subject: expect.stringMatching(/^release-prep-[a-f0-9]{4}$/u),
         occupantId: occupantIdForHerdrSession(hired.session!),
         harness: "codex",

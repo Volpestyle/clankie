@@ -23,6 +23,10 @@ const FLEET_SUBSCRIPTIONS = [
   "pane.moved",
   "pane.exited",
   "pane.agent_detected",
+  // Agent-to-agent edges (ADR 0163). Subscribing advances the cursor on both,
+  // so a prompt or a hire refreshes every fleet surface like any other change.
+  "agent.prompted",
+  "agent.spawned",
 ] as const;
 
 interface FleetWaiter {
@@ -87,6 +91,16 @@ export function watchHerdrFleetChanges(
     readonly socketPath?: string;
     readonly summariesPath?: string;
     readonly reconnectMs?: number;
+    /**
+     * Called for each `agent.prompted` event. Herdr keeps no prompt history, so
+     * this is the captain's only chance to see one (ADR 0163). A prompt from
+     * outside a pane has no sender and is not an edge, so it is not reported.
+     */
+    readonly onPromptEdge?: (edge: {
+      readonly fromPaneId: string;
+      readonly toPaneId: string;
+      readonly at: number;
+    }) => void;
   } = {},
 ): () => void {
   const socketPath = options.socketPath ?? process.env.HERDR_SOCKET_PATH;
@@ -171,8 +185,22 @@ export function watchHerdrFleetChanges(
                 ? (message.data as {
                     readonly pane?: { readonly pane_id?: unknown };
                     readonly pane_id?: unknown;
+                    readonly from_pane_id?: unknown;
+                    readonly to_pane_id?: unknown;
+                    readonly timestamp_ms?: unknown;
                   })
                 : undefined;
+            if (
+              message.event === "agent_prompted" &&
+              typeof data?.from_pane_id === "string" &&
+              typeof data.to_pane_id === "string"
+            ) {
+              options.onPromptEdge?.({
+                fromPaneId: data.from_pane_id,
+                toPaneId: data.to_pane_id,
+                at: typeof data.timestamp_ms === "number" ? data.timestamp_ms : Date.now(),
+              });
+            }
             const paneId =
               typeof data?.pane?.pane_id === "string"
                 ? data.pane.pane_id

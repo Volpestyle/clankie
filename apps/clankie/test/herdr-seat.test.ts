@@ -107,6 +107,7 @@ describe("herdr session census", () => {
     ).resolves.toEqual([
       {
         seatId: "term-worker",
+        paneId: "w15:p8",
         subject: "release-prep-ab12",
         renamed: { name: "release-prep-ab12", from: expect.stringMatching(/^adhoc-[a-f0-9]{20}$/u) },
         occupantId: occupantIdForHerdrSession(session),
@@ -116,6 +117,7 @@ describe("herdr session census", () => {
       },
       {
         seatId: "term-unmanaged",
+        paneId: "w15:p7",
         subject: expect.stringMatching(/^adhoc-[a-f0-9]{20}$/u),
         occupantId: occupantIdForHerdrSession({
           source: "herdr:claude",

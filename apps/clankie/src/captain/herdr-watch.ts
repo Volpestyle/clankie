@@ -502,6 +502,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         outcome: "spawned",
         seat: {
           seatId: agent.terminalId,
+          paneId,
           subject,
           occupantId: occupantIdForHerdrSession(agent.session),
           harness: agent.agent,
