@@ -180,9 +180,14 @@ intentionally account-wide.
 
 Apply OS security updates with `sudo dnf upgrade -y` and reboot during a small
 maintenance window. Docker restarts both containers; the Mac reconnects. Caddy
-certificate state lives in the `clankie-caddy-data` Docker volume. The gateway
-holds no durable user state, so the stack and release assets recreate the host
-if the instance is lost.
+certificate state lives in the `clankie-caddy-data` Docker volume. The stack and
+release assets recreate the host if the instance is lost. The gateway holds no
+conversations, grants, or device sessions; when push is configured its one
+durable table is the delivery registrations in
+`/var/lib/clankie-gateway/push.sqlite`, which holds APNs device tokens and is
+covered in the [gateway guide](../../../apps/gateway/README.md). Losing it costs
+each phone one re-registration, and restoring a stale copy is worse than losing
+it.
 
 ## Deliberate ceiling
 
