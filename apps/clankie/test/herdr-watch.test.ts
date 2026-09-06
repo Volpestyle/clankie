@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OPERATOR_CONVERSATION_TEXT_MAX, OPERATOR_CONVERSATION_TOOL_DETAIL_MAX } from "@clankie/protocol";
 import { parseHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { fleetSeatClaudeStartArgs } from "../src/captain/fleet-seat.ts";
 import {
   distillHerdrSeatReply,
   herdrAgentName,
@@ -66,6 +67,27 @@ describe("HerdrWatchStore", () => {
     );
     expect(wake.mock.calls[0]?.[1]).toContain("agent status done");
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ schemaVersion: 1, watches: [] });
+    store.close();
+  });
+
+  it("resolves a messageable pane to its seat id and not a shell", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-pane-seat-"));
+    roots.push(root);
+    const runner: HerdrWatchRunner = {
+      get: vi.fn((paneId: string) => {
+        if (paneId === "w18:p1") return Promise.resolve(working);
+        if (paneId === "w18:p2") {
+          return Promise.resolve({ ...working, paneId, agent: "shell", status: "idle" });
+        }
+        return Promise.reject(new Error("no such pane"));
+      }),
+      resolveTerminal: vi.fn(() => Promise.resolve(working)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+    };
+    const store = new HerdrWatchStore(join(root, "herdr-watches.json"), { runner });
+    await expect(store.seatIdForPane("w18:p1")).resolves.toBe("term-potato");
+    await expect(store.seatIdForPane("w18:p2")).resolves.toBeUndefined();
+    await expect(store.seatIdForPane("missing")).resolves.toBeUndefined();
     store.close();
   });
 
@@ -763,6 +785,45 @@ describe("hiring a seat", () => {
     if (result.outcome === "spawned") {
       expect(startAgent.mock.calls[0]?.[0].name).toBe(result.seat.subject);
     }
+    store.close();
+  });
+
+  it("starts a claude hire with the seat channel and a codex hire without", async () => {
+    const startAgent = vi.fn(
+      (_options: { name: string; kind: string; paneId: string; args?: readonly string[] }) =>
+        Promise.resolve(),
+    );
+    const claudeHired: HerdrAgentSnapshot = {
+      ...hired,
+      agent: "claude",
+      session: { source: "herdr:claude", kind: "id", value: "session-claude" },
+    };
+    let agent = claudeHired;
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(agent)),
+      resolveTerminal: vi.fn(() => Promise.resolve(agent)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "claude",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+    expect(startAgent.mock.calls[0]?.[0].args).toEqual(fleetSeatClaudeStartArgs());
+
+    agent = hired;
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "codex",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+    expect(startAgent.mock.calls[1]?.[0].args).toBeUndefined();
     store.close();
   });
 

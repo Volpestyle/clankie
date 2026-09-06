@@ -100,6 +100,17 @@ export interface CaptainPort {
    * head, long-polled by its bridge. Polling is what binds the head.
    */
   pollSeatEvents(waitMs: number, signal?: AbortSignal): Promise<readonly OperatorSeatEvent[]>;
+  /**
+   * A fleet seat's mailbox (ADR 0161): a DM or room turn for the agent in that
+   * pane, long-polled by `clankie mcp --seat`. `undefined` when no messageable
+   * agent is in the pane — a normal early state the bridge retries. Polling is
+   * what binds the mailbox.
+   */
+  pollFleetSeatEvents(
+    paneId: string,
+    waitMs: number,
+    signal?: AbortSignal,
+  ): Promise<readonly OperatorSeatEvent[] | undefined>;
   /** The seat's answer to an escalation; false when nothing waits on that id. */
   replySeatEvent(eventId: string, text: string): Promise<boolean>;
   /**
@@ -148,6 +159,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
     laneMemoryCard: async () => "",
     pollSeatEvents: async () => [],
+    pollFleetSeatEvents: async () => undefined,
     replySeatEvent: async () => false,
     laneToolBank: async (lane) => ({ lane, tools: [] }),
     // A stub writes no transcripts, so it has nothing to announce. A test that

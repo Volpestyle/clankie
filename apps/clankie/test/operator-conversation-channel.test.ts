@@ -32,17 +32,19 @@ describe("channel conversations", () => {
     const prompts: { readonly seatId: string; readonly text: string }[] = [];
     const captainRunner = vi.fn(() => Promise.resolve());
     let store: ConversationStore;
-    const sendToSeat = vi.fn((seatId: string, text: string) => {
-      prompts.push({ seatId, text });
-      const reply = replies.get(seatId);
-      if (reply === undefined) return Promise.resolve(false);
-      // A macrotask, so the round has registered its waiter before the seat
-      // answers — the same ordering a real pane produces.
-      setTimeout(() => {
-        store.publishSeatEvent(seatId, { type: "message", role: "agent", text: reply, streaming: false });
-      }, 0);
-      return Promise.resolve(true);
-    });
+    const sendToSeat = vi.fn(
+      (seatId: string, text: string, _context: { conversationId: string; source: string }) => {
+        prompts.push({ seatId, text });
+        const reply = replies.get(seatId);
+        if (reply === undefined) return Promise.resolve(false);
+        // A macrotask, so the round has registered its waiter before the seat
+        // answers — the same ordering a real pane produces.
+        setTimeout(() => {
+          store.publishSeatEvent(seatId, { type: "message", role: "agent", text: reply, streaming: false });
+        }, 0);
+        return Promise.resolve(true);
+      },
+    );
     store = new ConversationStore(root, captainRunner, undefined, sendToSeat);
 
     const created = await store.serve({
@@ -82,6 +84,10 @@ describe("channel conversations", () => {
     expect(captainRunner).not.toHaveBeenCalled();
     // Every member is offered exactly one turn, in position order.
     expect(prompts.map((prompt) => prompt.seatId)).toEqual(["atlas", "dev", "greenhouse", "quiet"]);
+    expect(sendToSeat.mock.calls[0]?.[2]).toEqual({
+      conversationId: created.conversation.conversationId,
+      source: "room",
+    });
     // Each member sees the transcript as it stands at that moment, so a member
     // later in the order can find its point already made and stay quiet.
     expect(prompts[0]!.text).toContain("why is the atlas slow?");

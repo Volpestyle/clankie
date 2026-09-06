@@ -20,6 +20,7 @@ import {
 } from "@clankie/protocol";
 import { z } from "zod";
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
+import { fleetSeatClaudeStartArgs } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import {
   readHerdrSeatTranscript,
@@ -75,6 +76,8 @@ export interface HerdrWatchRunner {
     readonly name: string;
     readonly kind: string;
     readonly paneId: string;
+    /** Extra argv after `--` on `herdr agent start` (the seat channel for claude). */
+    readonly args?: readonly string[];
   }): Promise<void>;
 }
 
@@ -247,10 +250,19 @@ function defaultRunner(): HerdrWatchRunner {
     closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
     createTab: async ({ cwd, label }) =>
       parseHerdrRootPaneId(await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus"])),
-    startAgent: ({ name, kind, paneId }) =>
+    startAgent: ({ name, kind, paneId, args }) =>
       // Returns only once herdr has detected the harness and considers it ready
       // for input, so a resolved call means the seat can actually be messaged.
-      runHerdr(["agent", "start", name, "--kind", kind, "--pane", paneId]).then(() => undefined),
+      runHerdr([
+        "agent",
+        "start",
+        name,
+        "--kind",
+        kind,
+        "--pane",
+        paneId,
+        ...(args === undefined || args.length === 0 ? [] : ["--", ...args]),
+      ]).then(() => undefined),
   };
 }
 
@@ -342,6 +354,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
     for (const watch of this.state.watches) this.launch(watch);
   }
 
+  /**
+   * The seat id a `clankie mcp --seat` bridge should poll, given the pane it
+   * sits in (`HERDR_PANE_ID`). Herdr accepts a moved pane's old id as an alias.
+   * `undefined` until the pane holds a messageable agent.
+   */
+  public async seatIdForPane(paneId: string): Promise<string | undefined> {
+    if (this.closed) return undefined;
+    try {
+      const agent = await this.runner.get(paneId);
+      return isMessageableSeat(agent) ? agent.terminalId : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   public async sendToSeat(seatId: string, text: string): Promise<boolean> {
     if (this.closed || this.runner.sendText === undefined || this.runner.pressEnter === undefined)
       return false;
@@ -385,7 +412,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     try {
       const subject = herdrAgentName(input.title);
-      await startAgent({ name: subject, kind: input.harness, paneId });
+      await startAgent({
+        name: subject,
+        kind: input.harness,
+        paneId,
+        ...(input.harness === "claude" ? { args: fleetSeatClaudeStartArgs() } : {}),
+      });
       const agent = await this.agentWithSession(paneId);
       if (agent.session === undefined)
         throw new Error("Herdr started an agent without a durable session identity");

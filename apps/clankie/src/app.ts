@@ -50,6 +50,7 @@ import {
   DiscordVoiceTranscriptCursorSchema,
   LOCAL_VOICE_CHAT_PATH,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  FLEET_SEAT_EVENTS_PATH,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorConversationServiceRequestSchema,
@@ -664,6 +665,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return replied
       ? context.json({ schemaVersion: 1 as const, replied: true as const })
       : context.json({ error: "unknown_event" }, 404);
+  });
+
+  // A fleet seat's mailbox (ADR 0161). Same door as the head outbox — operator
+  // lane only — keyed by the pane the bridge sits in. 404 is the pane before
+  // herdr has classified the harness; the bridge retries.
+  app.get(FLEET_SEAT_EVENTS_PATH, async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const wait = Number(context.req.query("wait") ?? 0);
+    const waitMs = Number.isFinite(wait)
+      ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
+      : 0;
+    const events = await dependencies.captain.pollFleetSeatEvents(
+      context.req.param("paneId"),
+      waitMs,
+      context.req.raw.signal,
+    );
+    if (events === undefined) return context.json({ error: "unknown_seat" }, 404);
+    const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
+    return context.json(page);
   });
 
   app.get("/v1/captain/memory-card", async (context) => {

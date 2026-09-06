@@ -696,6 +696,47 @@ paths:
         "404":
           description: Nothing is waiting on that event
 
+  /v1/fleet/seats/{paneId}/events:
+    get:
+      tags: [Captain, Operator]
+      operationId: pollFleetSeatEvents
+      summary: Long-poll a fleet seat's mailbox
+      description: |
+        A DM or room turn queued for a bound fleet seat (ADR 0161). Polling is
+        what binds the mailbox: `clankie mcp --seat` asks again the moment a
+        poll returns and pushes each event into the session as a channel
+        notification. Operator bearer only; a Discord bridge bearer is 403.
+        `wait` is capped at 30000 ms. `unknown_seat` (404) is the pane before
+        herdr has classified the harness; the bridge retries.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: wait
+          schema: { type: integer, minimum: 0, maximum: 30000, default: 0 }
+      responses:
+        "200":
+          description: Events taken from the mailbox, possibly none
+          content:
+            application/json:
+              example:
+                schemaVersion: 1
+                events:
+                  - schemaVersion: 1
+                    id: seat-1
+                    kind: message
+                    conversationId: conv-potato
+                    source: operator
+                    content: "Please finish the tests"
+                    createdAt: "2026-09-06T20:00:00.000Z"
+        "403":
+          description: Not the operator lane
+        "404":
+          description: No messageable agent in that pane
+
   /v1/memory:
     get:
       tags: [Memory, Operator]

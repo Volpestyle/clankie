@@ -194,7 +194,11 @@ export type ConversationRunner = (
   context: ConversationTurnContext,
 ) => Promise<void>;
 
-type SeatSender = (seatId: string, message: string) => Promise<boolean>;
+type SeatSender = (
+  seatId: string,
+  message: string,
+  context: { readonly conversationId: string; readonly source: string },
+) => Promise<boolean>;
 type PersonaSeatResolver = (personaId: string) => string | undefined;
 type PersonaPresentation = (personaId: string) => Promise<{
   readonly username: string;
@@ -1277,7 +1281,9 @@ export class ConversationStore {
         // stalling on a pane that is not there to answer.
         const personaId = channelMemberPersonaId(member);
         const seatId = this.seatForPersona === undefined ? personaId : this.seatForPersona(personaId);
-        const asked = seatId !== undefined && (await this.sendToSeat?.(seatId, prompt)) === true;
+        const asked =
+          seatId !== undefined &&
+          (await this.sendToSeat?.(seatId, prompt, { conversationId, source: "room" })) === true;
         const reply = asked ? await this.awaitSeatReply(seatId, context.signal) : undefined;
         const spokenText = channelTurnReply(reply);
         if (spokenText === undefined) {
@@ -1421,7 +1427,13 @@ export class ConversationStore {
         safeCursor,
       };
     }
-    if (seatId === undefined || !(await this.sendToSeat?.(seatId, turn.message))) {
+    if (
+      seatId === undefined ||
+      !(await this.sendToSeat?.(seatId, turn.message, {
+        conversationId: meta.conversationId,
+        source: "operator",
+      }))
+    ) {
       return {
         schemaVersion: 1,
         status: "seat_offline",

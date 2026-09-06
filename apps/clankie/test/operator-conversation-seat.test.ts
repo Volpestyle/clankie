@@ -105,7 +105,10 @@ describe("seat conversations", () => {
       status: "accepted",
       revision: 1,
     });
-    expect(sendToSeat).toHaveBeenLastCalledWith("term-potato", "Please finish the tests");
+    expect(sendToSeat).toHaveBeenLastCalledWith("term-potato", "Please finish the tests", {
+      conversationId: first.conversation.conversationId,
+      source: "operator",
+    });
     expect(runner).not.toHaveBeenCalled();
     const current = await store.serve({
       op: "get",

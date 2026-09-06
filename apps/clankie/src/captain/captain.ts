@@ -46,6 +46,7 @@ import {
   type HerdrSessionCensus,
   type ObservedHeadSeat,
 } from "./herdr-census.ts";
+import { deliverFleetSeatMessage, fleetSeatMailbox } from "./fleet-seat.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import { createStanceStore } from "./stances.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
@@ -633,6 +634,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // The seat (ADR 0152): the herdr pane holding his name, and the outbox its
   // bridge polls. The head conversation is always the default global one.
   const seatOutbox = new SeatOutbox();
+  // Fleet seats (ADR 0161): one mailbox per herdr terminal id, created when
+  // that pane's bridge first polls. A bound mailbox takes a DM or room turn
+  // as a channel event; an unbound one still types into the pty.
+  const fleetMailboxes = new Map<string, SeatOutbox>();
   let headSeat: ObservedHeadSeat | undefined;
 
   const settings = (): Promise<ClankieSettings> => settingsStore.load();
@@ -1019,7 +1024,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       sessions.delete(key);
       void pending?.then((lane) => lane.session.dispose()).catch(() => undefined);
     },
-    (seatId, message) => herdrWatches.sendToSeat(seatId, message),
+    async (seatId, message, context) => {
+      const sent = await deliverFleetSeatMessage(
+        fleetMailboxes,
+        (id, text) => herdrWatches.sendToSeat(id, text),
+        seatId,
+        message,
+        context,
+      );
+      return sent;
+    },
     undefined,
     async ({ parentConversationId, conversationId, workspace }) => {
       const cwd = workspace ?? workingDirectory;
@@ -1701,6 +1715,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return seatOutbox.poll(waitMs, signal);
     },
 
+    async pollFleetSeatEvents(paneId, waitMs, signal) {
+      const seatId = await herdrWatches.seatIdForPane(paneId);
+      if (seatId === undefined) return undefined;
+      return fleetSeatMailbox(fleetMailboxes, seatId).poll(waitMs, signal);
+    },
+
     replySeatEvent(eventId, text) {
       return Promise.resolve(seatOutbox.reply(eventId, text));
     },
@@ -1710,6 +1730,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async close(): Promise<void> {
+      for (const mailbox of fleetMailboxes.values()) mailbox.close();
+      fleetMailboxes.clear();
       seatOutbox.close();
       herdrTerminals.close();
       herdrTerminalControls.close();
