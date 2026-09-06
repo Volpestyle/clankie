@@ -88,7 +88,7 @@ export interface LaneToolUpstream {
 }
 
 /** The fleet mailbox as the seat bridge sees it: poll and close, no tools. */
-export type FleetMailboxUpstream = Pick<LaneToolUpstream, "pollEvents" | "close">;
+type FleetMailboxUpstream = Pick<LaneToolUpstream, "pollEvents" | "close">;
 
 export interface McpCommandOptions {
   readonly env?: NodeJS.ProcessEnv;

@@ -72,7 +72,7 @@ flowchart LR
   no persistent setting, and the `server:` form of the flag binds only a server
   in Claude Code's persisted config, never one handed over with `--mcp-config`
   (probed 2026-09-06: the harness starts the process but reports `no MCP server
-  configured with that name`). So a seat hired from the app for the `claude`
+configured with that name`). So a seat hired from the app for the `claude`
   harness gets `clankie-seat` registered once at user scope
   (`claude mcp add -s user clankie-seat -- clankie mcp --seat`) and is started
   with `--dangerously-load-development-channels server:clankie-seat`. That
