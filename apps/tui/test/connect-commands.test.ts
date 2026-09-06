@@ -4,6 +4,7 @@ import {
   formatConnectStatus,
   normalizeConnectArgument,
   probeLinearKey,
+  probeLinearMcp,
 } from "../src/connect-commands.ts";
 import { DISCORD_BOT_INVITE_PERMISSIONS, discordBotInviteUrl } from "../src/discord-commands.ts";
 
@@ -68,6 +69,31 @@ describe("linear probe", () => {
       Response.json({ errors: [{ message: "invalid key" }] }),
     );
     expect(failed).toEqual({ ok: false, detail: "invalid key" });
+  });
+});
+
+describe("linear MCP probe", () => {
+  it("accepts a token the MCP server answers and carries its refusal otherwise", async () => {
+    const seen: { url: string; auth: string | undefined }[] = [];
+    const ok: typeof fetch = async (input, init) => {
+      seen.push({ url: String(input), auth: new Headers(init?.headers).get("authorization") ?? undefined });
+      return Response.json({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18" } });
+    };
+    await expect(probeLinearMcp("mcp-token", ok)).resolves.toEqual({ ok: true });
+    expect(seen).toEqual([{ url: "https://mcp.linear.app/mcp", auth: "Bearer mcp-token" }]);
+
+    const refused: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({ error: "invalid_token", error_description: "Missing or invalid access token" }),
+        {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    await expect(probeLinearMcp("stale", refused)).resolves.toEqual({
+      ok: false,
+      detail: "Missing or invalid access token",
+    });
   });
 });
 

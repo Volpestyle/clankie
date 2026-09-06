@@ -10,6 +10,7 @@ import {
   linearOauthNeedsRefresh,
   refreshLinearOauth,
   registerLinearOauthClient,
+  runLinearBrowserLogin,
 } from "../src/linear-oauth.ts";
 
 describe("linear MCP OAuth", () => {
@@ -73,6 +74,55 @@ describe("linear MCP OAuth", () => {
       clientId: "dyn-client",
     });
     expect(seen.map((entry) => entry.url)).toEqual([LINEAR_REGISTER_ENDPOINT, LINEAR_TOKEN_ENDPOINT]);
+  });
+
+  it("carries Linear's own reason out of a rejected exchange", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: "invalid_grant",
+          error_description: "Invalid or expired authorization grant",
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    await expect(
+      exchangeLinearAuthorizationCode({
+        code: "stale-code",
+        redirectUri: "http://127.0.0.1:9/auth/callback",
+        verifier: "verifier",
+        clientId: "dyn-client",
+        fetchImpl,
+      }),
+    ).rejects.toThrow("invalid_grant: Invalid or expired authorization grant");
+  });
+
+  it("tells the browser the sign-in failed instead of rendering success before the exchange", async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      if (String(input) === LINEAR_REGISTER_ENDPOINT) return Response.json({ client_id: "dyn-client" });
+      return new Response(
+        JSON.stringify({
+          error: "invalid_grant",
+          error_description: "Invalid or expired authorization grant",
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    };
+    let page: Promise<string> | undefined;
+    const login = runLinearBrowserLogin({
+      fetchImpl,
+      openUrl: (url) => {
+        const redirect = new URL(url).searchParams.get("redirect_uri") ?? "";
+        const state = new URL(url).searchParams.get("state") ?? "";
+        page = fetch(`${redirect}?code=auth-code&state=${encodeURIComponent(state)}`).then((response) =>
+          response.text(),
+        );
+      },
+    });
+
+    await expect(login).rejects.toThrow("Invalid or expired authorization grant");
+    const rendered = await page;
+    expect(rendered).toContain("Linear sign-in failed");
+    expect(rendered).not.toContain("Linear connected");
   });
 
   it("refreshes and keeps the previous refresh token when Linear omits a new one", async () => {

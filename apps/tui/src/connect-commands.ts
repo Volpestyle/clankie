@@ -4,7 +4,11 @@
  * public identifiers go to settings.json — the same split `/discord` uses.
  */
 import { SettingsStore, type EmailSettings } from "@clankie/settings";
-import type { ProviderCredential, RedactedCredential } from "@clankie/credential-broker";
+import {
+  LINEAR_MCP_RESOURCE,
+  type ProviderCredential,
+  type RedactedCredential,
+} from "@clankie/credential-broker";
 import { describeRedactedCredential, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
@@ -56,6 +60,7 @@ export interface ConnectCommandServices {
   showDiscordInvite: typeof showDiscordInvite;
   runLinearOauth: () => Promise<ProviderCredential>;
   probeLinear?: typeof probeLinearKey;
+  probeLinearMcp?: typeof probeLinearMcp;
 }
 
 export function buildConnectCommands(services: ConnectCommandServices): FaceShellCommand[] {
@@ -100,6 +105,59 @@ export function normalizeConnectArgument(argument: string): string {
   if (words[0] === "auth" || words[0] === "install") return words[1] ?? "";
   if (words[0] === "mcp") return normalizeConnectArgument(words.slice(1).join(" "));
   return words[0] ?? "";
+}
+
+/**
+ * Whether an OAuth credential works, asked of the service it was minted for.
+ *
+ * The browser flow requests its token with `resource:
+ * https://mcp.linear.app/mcp` — RFC 8707 audience restriction — so Linear
+ * issues one that is valid at the MCP server and nowhere else. Checking it
+ * against `api.linear.app/graphql` therefore fails on a perfectly good
+ * sign-in, with GraphQL's "Authentication required, not authenticated", and
+ * the credential is discarded before it is ever stored. An API key is a
+ * GraphQL credential and still probes there; this one asks MCP.
+ *
+ * MCP has no viewer to name, so a successful sign-in reports no account.
+ */
+export async function probeLinearMcp(
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true } | { ok: false; detail: string }> {
+  try {
+    const response = await fetchImpl(LINEAR_MCP_RESOURCE, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        // Streamable HTTP may answer either way; both are a working token.
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "clankie", version: "0.2.0" },
+        },
+      }),
+    });
+    if (response.ok) return { ok: true };
+    const body = await response.text().catch(() => "");
+    const described = ((): string | undefined => {
+      try {
+        const parsed = JSON.parse(body) as { error_description?: string; error?: string };
+        return parsed.error_description ?? parsed.error;
+      } catch {
+        return undefined;
+      }
+    })();
+    return { ok: false, detail: described ?? `Linear MCP HTTP ${String(response.status)}` };
+  } catch (error) {
+    return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export async function probeLinearKey(
@@ -315,26 +373,30 @@ async function connectLinearOauth(shell: ClankieFaceShell, services: ConnectComm
       flow.renderLine("Linear sign-in did not return an OAuth credential.", "error");
       return;
     }
-    const result = await (services.probeLinear ?? probeLinearKey)(credential.access);
+    const result = await (services.probeLinearMcp ?? probeLinearMcp)(credential.access);
     if (!result.ok) {
       flow.renderLine(
-        `Signed in, but Linear GraphQL rejected the token (${result.detail}). Nothing was stored.`,
+        `Signed in, but Linear MCP rejected the token (${result.detail}). Nothing was stored.`,
         "error",
       );
       return;
     }
-    await services.storeProviderCredential(LINEAR_PROVIDER_ID, {
-      ...credential,
-      accountId: result.viewer,
-    });
-    flow.renderLine(`Connected as ${result.viewer}.`, "success");
+    await services.storeProviderCredential(LINEAR_PROVIDER_ID, credential);
+    flow.renderLine("Connected to Linear.", "success");
     shell.insertCommandResult(
       "/connect linear",
-      `Linear connected as ${result.viewer} via OAuth. Search and file issues from any room.`,
+      "Linear connected via OAuth. Search and file issues from any room.",
       "success",
     );
-  } catch {
-    flow.renderLine("Linear sign-in failed. Nothing was stored; retry or paste an API key.", "error");
+  } catch (cause) {
+    // Say which of the several ways this fails actually happened. Linear's own
+    // `error_description` reaches here through the exchange; swallowing it left
+    // a stale code, a rejected client and a dead network as one sentence.
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    flow.renderLine(
+      `Linear sign-in failed: ${detail}. Nothing was stored; retry or paste an API key.`,
+      "error",
+    );
   } finally {
     interrupt.dispose();
   }

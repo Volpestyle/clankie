@@ -2,8 +2,11 @@
  * Linear MCP OAuth 2.1 (authorization code + PKCE + dynamic client registration).
  *
  * This is the same authorization server Claude Code / Codex talk to at
- * `https://mcp.linear.app`. Tokens are Bearer credentials Linear also accepts
- * on `api.linear.app/graphql`.
+ * `https://mcp.linear.app`. The token is requested for the `resource`
+ * `https://mcp.linear.app/mcp`, so Linear audience-restricts it (RFC 8707) to
+ * the MCP server: it is a Bearer credential there and nowhere else.
+ * `api.linear.app/graphql` rejects it with "Authentication required", which is
+ * correct — a personal API key is the credential for that one.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
@@ -22,12 +25,19 @@ export const LINEAR_OAUTH_SCOPES = "read write";
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
 const TOKEN_LIFETIME_FALLBACK_SECONDS = 3600;
 const PKCE_VERIFIER_LENGTH = 64;
+/** Linear's error text is short; this only stops a surprise page becoming the message. */
+const MAX_TOKEN_ERROR_CHARACTERS = 300;
 
 const TokenResponseSchema = z.object({
   access_token: z.string(),
   refresh_token: z.string().optional(),
   expires_in: z.number().optional(),
   token_type: z.string().optional(),
+});
+
+const TokenErrorSchema = z.object({
+  error: z.string().optional(),
+  error_description: z.string().optional(),
 });
 
 const RegistrationSchema = z.object({
@@ -194,6 +204,17 @@ export async function runLinearBrowserLogin(
     let clientId = "";
     let clientSecret: string | undefined;
     let settled = false;
+    /**
+     * Whether a code has already been taken from a callback.
+     *
+     * The success page is written before the exchange finishes, so a reload —
+     * or a browser that fetches the callback twice — arrives with the same
+     * code while the first exchange is still in flight. An authorization code
+     * is single-use: the second exchange comes back `invalid_grant`, and
+     * whichever settles first decides whether a correct sign-in reports
+     * success or "Invalid or expired authorization grant". One claim.
+     */
+    let claimed = false;
 
     const finish = (settle: () => void): void => {
       if (settled) return;
@@ -244,12 +265,20 @@ export async function runLinearBrowserLogin(
         fail(new Error("Invalid OAuth state"));
         return;
       }
-      respond(
-        response,
-        200,
-        "text/html; charset=utf-8",
-        loginResultPage("Linear connected", "You can close this window and return to Clankie."),
-      );
+      if (claimed) {
+        respond(
+          response,
+          200,
+          "text/html; charset=utf-8",
+          loginResultPage("Linear sign-in", "Already handled — return to Clankie for the result."),
+        );
+        return;
+      }
+      claimed = true;
+      // Exchange before answering the browser. Writing "Linear connected" first
+      // made the page a claim about the redirect, not about the sign-in: a
+      // failed exchange still rendered success, so a run that stored nothing
+      // looked like a run that worked, and only the console disagreed.
       void exchangeLinearAuthorizationCode({
         code,
         redirectUri,
@@ -258,8 +287,25 @@ export async function runLinearBrowserLogin(
         ...(clientSecret === undefined ? {} : { clientSecret }),
         fetchImpl,
       })
-        .then(succeed)
-        .catch((cause: unknown) => fail(toError(cause)));
+        .then((credential) => {
+          respond(
+            response,
+            200,
+            "text/html; charset=utf-8",
+            loginResultPage("Linear connected", "You can close this window and return to Clankie."),
+          );
+          succeed(credential);
+        })
+        .catch((cause: unknown) => {
+          const error = toError(cause);
+          respond(
+            response,
+            200,
+            "text/html; charset=utf-8",
+            loginResultPage("Linear sign-in failed", escapeHtml(error.message)),
+          );
+          fail(error);
+        });
     });
 
     const timer = setTimeout(() => fail(new Error("Linear sign-in timed out")), timeoutMs);
@@ -289,8 +335,43 @@ async function requestLinearTokens(
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body: new URLSearchParams(body).toString(),
   });
-  if (!response.ok) throw new Error(`${failure}: HTTP ${String(response.status)}`);
+  if (!response.ok) {
+    const detail = await tokenErrorDetail(response);
+    throw new Error(
+      `${failure}: HTTP ${String(response.status)}${detail === undefined ? "" : ` — ${detail}`}`,
+    );
+  }
   return TokenResponseSchema.parse(await response.json());
+}
+
+/**
+ * What Linear said, not just that it said no.
+ *
+ * A bare "HTTP 400" is the same sentence for a stale code, a mismatched
+ * verifier and a client it no longer knows, which leaves a failed sign-in with
+ * nothing to act on. The body carries OAuth's own `error` and
+ * `error_description`; it is a short machine-authored string, capped here and
+ * carried verbatim so nobody has to guess which of those three happened.
+ */
+async function tokenErrorDetail(response: Response): Promise<string | undefined> {
+  const raw = await response.text().catch(() => "");
+  if (raw.length === 0) return undefined;
+  const parsed = ((): unknown => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  })();
+  const fields = TokenErrorSchema.safeParse(parsed);
+  const described = fields.success
+    ? [fields.data.error, fields.data.error_description].filter((part) => part !== undefined).join(": ")
+    : raw;
+  const trimmed = described.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.length > MAX_TOKEN_ERROR_CHARACTERS
+    ? `${trimmed.slice(0, MAX_TOKEN_ERROR_CHARACTERS)}…`
+    : trimmed;
 }
 
 function openWithDefaultBrowser(url: string): void {
