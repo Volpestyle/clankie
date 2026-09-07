@@ -7,6 +7,11 @@ CLI. His happy seat is a herdr pane in the same session as that fleet; the
 herdr-lead board is the companion dashboard. This repo is his body: one
 service (`apps/clankie`) plus the surfaces that reach it.
 
+## Neighbor repos
+
+`~/dev/clankie-app` holds the React Native app built on top of Clankie's
+foundation.
+
 ## Map
 
 - `apps/clankie` — the service: pi-based captain (sessions, tools, persona),
