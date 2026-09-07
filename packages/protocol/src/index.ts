@@ -2372,6 +2372,11 @@ export interface OperatorConversationServiceClient {
    * back typed rather than thrown.
    */
   spawnSeat?(input: SpawnOperatorSeat): Promise<OperatorSeatSpawnResult>;
+  /**
+   * Close a seat and hire it again in another working directory under the
+   * same persona name (ADR 0166). Absent on older injected clients.
+   */
+  moveSeat?(input: MoveOperatorSeat): Promise<OperatorSeatMoveResult>;
   get(conversationId: string): Promise<OperatorConversation | undefined>;
   create(input: {
     readonly scope: OperatorConversationScope;
@@ -2518,6 +2523,11 @@ export function createOperatorConversationServiceClient(
     async spawnSeat(input) {
       const result = await dispatch({ op: "spawn_seat", schemaVersion: 1, seat: input });
       if (result.op !== "spawn_seat") throw new Error(`Unexpected ${result.op} result for spawn_seat`);
+      return result.result;
+    },
+    async moveSeat(input) {
+      const result = await dispatch({ op: "move_seat", schemaVersion: 1, move: input });
+      if (result.op !== "move_seat") throw new Error(`Unexpected ${result.op} result for move_seat`);
       return result.result;
     },
     async channel(input) {
