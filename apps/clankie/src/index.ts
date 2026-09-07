@@ -635,6 +635,9 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
       process.exit(1);
     }
     logger.info({ signal, exitCode, playShutdown: result.status }, "clankie shutdown settled");
+    // What is still holding the event loop open once everything has closed:
+    // the launcher escalates to SIGKILL after 10s, and this names the culprit.
+    logger.info({ signal, handles: process.getActiveResourcesInfo() }, "clankie shutdown handles");
   })();
 }
 process.on("SIGINT", () => requestShutdown("SIGINT"));
