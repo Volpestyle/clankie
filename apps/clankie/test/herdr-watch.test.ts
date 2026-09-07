@@ -220,6 +220,148 @@ describe("HerdrWatchStore", () => {
     store.close();
   });
 
+  it("a Codex seat with a resolvable session queues and never types", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-codex-queue-"));
+    roots.push(root);
+    const codex: HerdrAgentSnapshot = {
+      paneId: "w18:p2",
+      terminalId: "term-codex",
+      agent: "codex",
+      status: "idle",
+      title: "Codex seat",
+    };
+    const paneProcesses = vi.fn(() =>
+      Promise.resolve([{ pid: 21290, name: "codex", argv0: "codex", argv: ["codex"] }]),
+    );
+    const openFiles = vi.fn(() =>
+      Promise.resolve(
+        "n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-01a0740e-ea76-7aa2-8795-524c00368e71.jsonl\n",
+      ),
+    );
+    const codexQueue = vi.fn(() => Promise.resolve(true));
+    const sendText = vi.fn(() => Promise.resolve());
+    const pressEnter = vi.fn(() => Promise.resolve());
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: {
+        get: () => Promise.resolve(codex),
+        resolveTerminal: () => Promise.resolve(codex),
+        wait: () => new Promise<HerdrAgentSnapshot>(() => undefined),
+        paneProcesses,
+        openFiles,
+        codexQueue,
+        sendText,
+        pressEnter,
+      },
+    });
+
+    await expect(store.sendToSeat("term-codex", "please ship it")).resolves.toBe(true);
+    expect(paneProcesses).toHaveBeenCalledWith("w18:p2");
+    expect(openFiles).toHaveBeenCalledWith(21290);
+    expect(codexQueue).toHaveBeenCalledWith("01a0740e-ea76-7aa2-8795-524c00368e71", "please ship it");
+    expect(sendText).not.toHaveBeenCalled();
+    expect(pressEnter).not.toHaveBeenCalled();
+    store.close();
+  });
+
+  it("a Codex seat with no rollout falls back to the pty", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-codex-no-rollout-"));
+    roots.push(root);
+    const codex: HerdrAgentSnapshot = {
+      paneId: "w18:p2",
+      terminalId: "term-codex",
+      agent: "codex",
+      status: "idle",
+      title: "Codex seat",
+    };
+    const paneProcesses = vi.fn(() => Promise.resolve([{ pid: 21290, name: "codex", argv0: "codex" }]));
+    const openFiles = vi.fn(() => Promise.resolve("p21290\nfcwd\nn/Users/james\n"));
+    const codexQueue = vi.fn(() => Promise.resolve(true));
+    const sendText = vi.fn(() => Promise.resolve());
+    const pressEnter = vi.fn(() => Promise.resolve());
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: {
+        get: () => Promise.resolve(codex),
+        resolveTerminal: () => Promise.resolve(codex),
+        wait: () => new Promise<HerdrAgentSnapshot>(() => undefined),
+        paneProcesses,
+        openFiles,
+        codexQueue,
+        sendText,
+        pressEnter,
+      },
+    });
+
+    await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(true);
+    expect(codexQueue).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenCalledWith("w18:p2", "hello");
+    expect(pressEnter).toHaveBeenCalledWith("w18:p2");
+    store.close();
+  });
+
+  it("a Codex queue failure falls back to the pty", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-codex-queue-fail-"));
+    roots.push(root);
+    const codex: HerdrAgentSnapshot = {
+      paneId: "w18:p2",
+      terminalId: "term-codex",
+      agent: "codex",
+      status: "idle",
+      title: "Codex seat",
+    };
+    const sendText = vi.fn(() => Promise.resolve());
+    const pressEnter = vi.fn(() => Promise.resolve());
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: {
+        get: () => Promise.resolve(codex),
+        resolveTerminal: () => Promise.resolve(codex),
+        wait: () => new Promise<HerdrAgentSnapshot>(() => undefined),
+        paneProcesses: () => Promise.resolve([{ pid: 21290, name: "codex", argv0: "codex" }]),
+        openFiles: () =>
+          Promise.resolve(
+            "n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-01a0740e-ea76-7aa2-8795-524c00368e71.jsonl\n",
+          ),
+        codexQueue: vi.fn(() => Promise.resolve(false)),
+        sendText,
+        pressEnter,
+      },
+    });
+
+    await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(true);
+    expect(sendText).toHaveBeenCalledWith("w18:p2", "hello");
+    expect(pressEnter).toHaveBeenCalledWith("w18:p2");
+    store.close();
+  });
+
+  it("a Claude seat never calls the Codex hooks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-claude-no-codex-"));
+    roots.push(root);
+    const paneProcesses = vi.fn(() => Promise.resolve([]));
+    const openFiles = vi.fn(() => Promise.resolve(""));
+    const codexQueue = vi.fn(() => Promise.resolve(true));
+    const sendText = vi.fn(() => Promise.resolve());
+    const pressEnter = vi.fn(() => Promise.resolve());
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: {
+        get: () => Promise.resolve(working),
+        resolveTerminal: () => Promise.resolve({ ...working, status: "idle" }),
+        wait: () => new Promise<HerdrAgentSnapshot>(() => undefined),
+        paneProcesses,
+        openFiles,
+        codexQueue,
+        sendText,
+        pressEnter,
+      },
+    });
+
+    await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(true);
+    expect(paneProcesses).not.toHaveBeenCalled();
+    expect(openFiles).not.toHaveBeenCalled();
+    expect(codexQueue).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenCalledWith("w18:p1", "hello");
+    expect(pressEnter).toHaveBeenCalledWith("w18:p1");
+    store.close();
+  });
+
   it("seeds a tracked seat that is already settled with its last distilled answer", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-seat-seed-"));
     roots.push(root);

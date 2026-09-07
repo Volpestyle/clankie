@@ -20,6 +20,12 @@ import {
   type SpawnOperatorSeat,
 } from "@clankie/protocol";
 import { z } from "zod";
+import {
+  codexProcess,
+  parseHerdrForegroundProcesses,
+  resolveCodexSessionId,
+  type HerdrForegroundProcess,
+} from "./codex-seat.ts";
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
 import {
   fleetSeatClaudeStartArgs,
@@ -75,6 +81,15 @@ export interface HerdrWatchRunner {
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
   sendText?(target: string, text: string): Promise<void>;
   pressEnter?(target: string): Promise<void>;
+  /** `herdr pane process-info --pane` → `foreground_processes`. */
+  paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
+  /** `lsof -p <pid> -Fn` via execFile (no shell). */
+  openFiles?(pid: number): Promise<string>;
+  /**
+   * `codex queue --thread <id> --message <text>`. False on a non-zero exit or
+   * "No active session".
+   */
+  codexQueue?(sessionId: string, text: string): Promise<boolean>;
   closePane?(target: string): Promise<void>;
   /** Open a tab in a working directory; resolves with its root pane id. */
   createTab?(options: { readonly cwd: string; readonly label: string }): Promise<string>;
@@ -252,6 +267,30 @@ function runHerdr(args: readonly string[], signal?: AbortSignal): Promise<string
   });
 }
 
+function runExecFile(
+  command: string,
+  args: readonly string[],
+): Promise<{ readonly status: number; readonly stdout: string; readonly stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      command,
+      [...args],
+      { maxBuffer: 1024 * 1024, timeout: HERDR_COMMAND_TIMEOUT_MS },
+      (error, stdout, stderr) => {
+        if (error !== null && error.code === "ENOENT") {
+          reject(new Error(`${command}: command not found`));
+          return;
+        }
+        resolve({
+          status: error === null ? 0 : typeof error.code === "number" ? error.code : 1,
+          stdout: String(stdout),
+          stderr: String(stderr),
+        });
+      },
+    );
+  });
+}
+
 function defaultRunner(): HerdrWatchRunner {
   return {
     get: async (target) => parseHerdrAgentResult(await runHerdr(["agent", "get", target])),
@@ -299,6 +338,20 @@ function defaultRunner(): HerdrWatchRunner {
       ]),
     sendText: (target, text) => runHerdr(["pane", "send-text", target, text]).then(() => undefined),
     pressEnter: (target) => runHerdr(["pane", "send-keys", target, "Enter"]).then(() => undefined),
+    paneProcesses: async (paneId) =>
+      parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
+    openFiles: async (pid) => {
+      const result = await runExecFile("lsof", ["-p", String(pid), "-Fn"]);
+      if (result.status !== 0) {
+        throw new Error(result.stderr.trim() || `lsof -p ${String(pid)} failed`);
+      }
+      return result.stdout;
+    },
+    codexQueue: async (sessionId, text) => {
+      const result = await runExecFile("codex", ["queue", "--thread", sessionId, "--message", text]);
+      if (result.status !== 0) return false;
+      return !/no active session/iu.test(`${result.stdout}\n${result.stderr}`);
+    },
     sendKeys: async (target, key) => {
       try {
         await runHerdr(["agent", "send-keys", target, key]);
@@ -436,16 +489,36 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   public async sendToSeat(seatId: string, text: string): Promise<boolean> {
-    if (this.closed || this.runner.sendText === undefined || this.runner.pressEnter === undefined)
-      return false;
+    if (this.closed) return false;
     try {
       const current = await this.runner.resolveTerminal(seatId);
       if (!isMessageableSeat(current)) return false;
+      if (current.agent === "codex" && (await this.deliverCodexQueue(current, text))) return true;
+      if (this.runner.sendText === undefined || this.runner.pressEnter === undefined) return false;
       await this.runner.sendText(current.paneId, text);
       const submitted = await this.runner.resolveTerminal(seatId);
       if (!isMessageableSeat(submitted)) return false;
       await this.runner.pressEnter(submitted.paneId);
       return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * ponytail: lsof of the open Codex rollout file is the session id; herdr
+   * `report-agent-session` for Codex would replace it.
+   */
+  private async deliverCodexQueue(agent: HerdrAgentSnapshot, text: string): Promise<boolean> {
+    const { paneProcesses, openFiles, codexQueue } = this.runner;
+    if (paneProcesses === undefined || openFiles === undefined || codexQueue === undefined) return false;
+    try {
+      const processes = await paneProcesses(agent.paneId);
+      const process = codexProcess(processes);
+      if (process === undefined) return false;
+      const sessionId = resolveCodexSessionId(processes, await openFiles(process.pid));
+      if (sessionId === undefined) return false;
+      return await codexQueue(sessionId, text);
     } catch {
       return false;
     }

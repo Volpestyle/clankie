@@ -101,5 +101,12 @@ configured with that name`). So a seat hired from the app for the `claude`
   a mailbox event can say where it came from.
 - A moved pane keeps its mailbox: herdr resolves the old pane id as an alias
   and the mailbox is keyed by the seat id underneath, not the pane id.
-- Codex and pi seats still take keystrokes. Extending the mailbox to them
-  waits on those harnesses growing an out-of-band input.
+- A Codex seat takes its message through `codex queue --thread <session>`,
+  which the harness runs as its own user turn with the composer untouched
+  (probed 2026-09-06). Herdr reports no session for Codex, so the service
+  reads it off the rollout file the running `codex` process holds open,
+  `rollout-<timestamp>-<uuid>.jsonl`, via the pane's foreground process and
+  `lsof`. A pane that has never spoken has no rollout yet and keeps the pty
+  lane; so does any failure to resolve or queue.
+- pi and Grok seats still take keystrokes. Extending delivery to them waits
+  on those harnesses growing an out-of-band input.
