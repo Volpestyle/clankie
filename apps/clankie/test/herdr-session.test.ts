@@ -18,10 +18,20 @@ describe("the service's first Herdr binding", () => {
     expect(await resolveHerdrBinding(binding, current(), run)).toEqual(binding);
   });
 
-  it("adopts the actual socket once and scrubs the launching pane's identity", async () => {
+  it("never adopts the session it is launched inside (ADR 0164)", async () => {
     const env: NodeJS.ProcessEnv = current();
     const binding = await resolveHerdrBinding(settings, env, run);
-    expect(binding).toEqual({ runtime: "external", session: "default", socketPath: "/tmp/current.sock" });
+    expect(binding).toEqual({ runtime: "bundled", session: "default" });
+    expect(await resolveHerdrBinding(settings, { HERDR_ENV: "1", HERDR_SESSION: "chosen" }, run)).toEqual({
+      runtime: "bundled",
+      session: "default",
+    });
+  });
+
+  it("goes external only for a session the owner named, and scrubs the launching pane's identity", async () => {
+    const env: NodeJS.ProcessEnv = current();
+    const binding = await resolveHerdrBinding({ ...settings, session: "chosen" }, env, run);
+    expect(binding).toEqual({ runtime: "external", session: "chosen", socketPath: "/tmp/chosen.sock" });
     expect(env.HERDR_PANE_ID).toBeUndefined();
     expect(env.HERDR_SOCKET_PATH).toBe(binding.socketPath);
     const other = { ...current(), HERDR_SOCKET_PATH: "/tmp/other.sock" };
@@ -29,29 +39,20 @@ describe("the service's first Herdr binding", () => {
     expect(other.HERDR_SOCKET_PATH).toBe(binding.socketPath);
   });
 
-  it("resolves a named surrounding session and preserves an older explicit named setting", async () => {
-    const env = { HERDR_ENV: "1", HERDR_SESSION: "chosen" };
-    expect(await resolveHerdrBinding(settings, env, run)).toEqual({
-      runtime: "external",
-      session: "chosen",
-      socketPath: "/tmp/chosen.sock",
-    });
-    expect(await resolveHerdrBinding({ ...settings, session: "chosen" }, current(), run)).toEqual({
-      runtime: "external",
-      session: "chosen",
-      socketPath: "/tmp/chosen.sock",
-    });
-  });
-
   it("refuses missing, malformed, and dead external sessions instead of switching fleets", async () => {
     await expect(
       resolveHerdrBinding({ ...settings, runtime: "external", session: "missing" }, {}, run),
     ).rejects.toThrow("no usable socket");
+    const named = { ...settings, session: "chosen" };
     await expect(
-      resolveHerdrBinding(settings, current(), async () => ({ stdout: '{"error":{}}' })),
+      resolveHerdrBinding(named, current(), async (_command, args) =>
+        args[0] === "session"
+          ? { stdout: JSON.stringify({ sessions: [{ name: "chosen", socket_path: "/tmp/chosen.sock" }] }) }
+          : { stdout: '{"error":{}}' },
+      ),
     ).rejects.toThrow("unavailable");
     await expect(
-      resolveHerdrBinding(settings, current(), async () => {
+      resolveHerdrBinding(named, current(), async () => {
         throw new Error("connection refused");
       }),
     ).rejects.toThrow("connection refused");

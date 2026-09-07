@@ -325,7 +325,7 @@ export type PublicGatewaySettings = z.infer<typeof PublicGatewaySettingsSchema>;
  */
 export const HerdrSettingsSchema = z
   .object({
-    /** First startup adopts its surrounding Herdr session, otherwise bundles. */
+    /** `auto` bundles his own session unless a session or socket is named (ADR 0164). */
     runtime: z.enum(["auto", "bundled", "external"]).default("auto"),
     /** Named herdr session he leads; `default` is herdr's own default session. */
     session: z

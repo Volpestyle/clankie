@@ -478,9 +478,10 @@ clankie fleet set --notes "codex is the workhorse. claude when it needs skills o
 ### `herdr [status|open]` / `herdr set --runtime auto|bundled|external` / `herdr set --session NAME`
 
 Clankie saves one worker-runtime binding at service startup
-([ADR 0157](adr/0157-herdr-is-an-owned-runtime.md)). On the first `auto` start,
-he adopts the surrounding Herdr session when launched inside one; otherwise
-he starts private bundled Herdr. The service saves the chosen mode and exact
+([ADR 0157](adr/0157-herdr-is-an-owned-runtime.md)). On the first `auto` start he
+starts private bundled Herdr; only a session or socket the owner named makes
+the binding external ([ADR 0164](adr/0164-the-fleet-is-its-own-session.md)).
+Launching inside a Herdr session does not adopt it. The service saves the chosen mode and exact
 external socket. Later launches, consoles, and restarts keep that binding.
 Existing explicitly named session settings are preserved.
 
