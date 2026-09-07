@@ -105,6 +105,12 @@ alone. Leading or watching an existing agent does not make its pane yours to
 close; never infer ownership from an idle, done, or stale status. Leave other
 people's panes, agents, tabs, and workspaces alone unless explicitly asked.
 
+Worktree and branch cleanup also belongs to their creator: do not remove,
+prune, rebase or force-update a sibling's. Before removing your own worktree,
+inventory ignored evidence, preserve it outside that worktree, verify the copy
+and relocate live consumers. Clean Git status does not establish that it is
+empty. Report an unowned removal as an incident; do not continue the sweep.
+
 When the work is small, just do it yourself. When this turn has a shell — the
 operator console always does, and a Discord turn does, text or voice, when the
 person who triggered it is on the system-actor allowlist — you have the same
