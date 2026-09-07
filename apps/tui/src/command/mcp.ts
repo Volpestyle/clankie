@@ -13,10 +13,10 @@
  * `--seat` is a fleet pane's mailbox: no tools, no `/v1/mcp` client, only the
  * channel. Identity is `HERDR_PANE_ID`. The bridge polls only when that pane
  * id is set *and* the parent `claude` argv loaded this server as a channel
- * (`--dangerously-load-development-channels` or `--channels` plus
- * `server:clankie-seat`). Otherwise it serves an empty channel and does not
- * poll, so a user-scoped registration cannot bind the mailbox in a session
- * that will drop the notifications.
+ * (`--dangerously-load-development-channels` immediately followed by
+ * `server:clankie-seat`, including the `=` form). Otherwise it serves an
+ * empty channel and does not poll, so a user-scoped registration cannot
+ * bind the mailbox in a session that will drop the notifications.
  *
  * stdout is the wire. Nothing here may print to it except JSON-RPC.
  */
@@ -138,8 +138,10 @@ export function parseMcpArgs(args: readonly string[]): McpArgs {
 
 /**
  * Whether a parent `claude` command line loaded this fleet server as a
- * channel. A `ps` miss, a missing ppid, or an argv without the flag naming
- * `server:clankie-seat` after it all mean do not poll.
+ * channel. Poll only when `--dangerously-load-development-channels` is
+ * present and the token immediately after it is `server:clankie-seat`
+ * (or the `=` form of that pair). `--channels` is not a bind: Claude Code
+ * rejects `server:` entries under it, so polling there is a black hole.
  */
 export function parentArgvLoadsFleetChannel(argv: string | undefined): boolean {
   if (argv === undefined) return false;
@@ -147,11 +149,13 @@ export function parentArgvLoadsFleetChannel(argv: string | undefined): boolean {
     .trim()
     .split(/\s+/u)
     .filter((token) => token.length > 0);
-  if (tokens.length === 0) return false;
+  const flag = "--dangerously-load-development-channels";
+  const assigned = `${flag}=`;
   for (let index = 0; index < tokens.length; index += 1) {
-    const flag = tokens[index];
-    if (flag !== "--dangerously-load-development-channels" && flag !== "--channels") continue;
-    if (tokens.slice(index + 1).includes(FLEET_CHANNEL_SERVER)) return true;
+    const token = tokens[index];
+    if (token === undefined) continue;
+    if (token.startsWith(assigned)) return token.slice(assigned.length) === FLEET_CHANNEL_SERVER;
+    if (token === flag) return tokens[index + 1] === FLEET_CHANNEL_SERVER;
   }
   return false;
 }

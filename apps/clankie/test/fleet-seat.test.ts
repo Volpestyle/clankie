@@ -4,7 +4,7 @@ import {
   deliverFleetSeatMessage,
   fleetSeatClaudeStartArgs,
   fleetSeatMailbox,
-  fleetSeatMcpNeedsRegister,
+  fleetSeatMcpAddSucceeded,
 } from "../src/captain/fleet-seat.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 
@@ -16,9 +16,24 @@ describe("fleet seat mailbox", () => {
     ]);
   });
 
-  it("registers the seat MCP only when claude mcp get exits non-zero", () => {
-    expect(fleetSeatMcpNeedsRegister({ status: 1, stdout: "", stderr: "not found" })).toBe(true);
-    expect(fleetSeatMcpNeedsRegister({ status: 0, stdout: "clankie-seat", stderr: "" })).toBe(false);
+  it("treats a second user-scope add as success when the server already exists", () => {
+    expect(
+      fleetSeatMcpAddSucceeded({
+        status: 0,
+        stdout: "Added stdio MCP server clankie-seat with command: clankie mcp --seat  to user config",
+        stderr: "",
+      }),
+    ).toBe(true);
+    expect(
+      fleetSeatMcpAddSucceeded({
+        status: 1,
+        stdout: "",
+        stderr: "MCP server clankie-seat already exists in user config",
+      }),
+    ).toBe(true);
+    expect(fleetSeatMcpAddSucceeded({ status: 1, stdout: "", stderr: "claude: command not found" })).toBe(
+      false,
+    );
   });
 
   it("a bound mailbox takes the message and leaves the pty alone", async () => {
@@ -26,13 +41,10 @@ describe("fleet seat mailbox", () => {
     const mailbox = fleetSeatMailbox(mailboxes, "term-potato");
     const pty = vi.fn(() => Promise.resolve(true));
     const parked = mailbox.poll(5_000);
-    await expect(
-      deliverFleetSeatMessage(mailboxes, pty, "term-potato", "Please finish the tests", {
-        conversationId: "conv-potato",
-        source: "operator",
-      }),
-    ).resolves.toBe(true);
-    expect(pty).not.toHaveBeenCalled();
+    const sending = deliverFleetSeatMessage(mailboxes, pty, "term-potato", "Please finish the tests", {
+      conversationId: "conv-potato",
+      source: "operator",
+    });
     const [event] = await parked;
     expect(event).toMatchObject({
       kind: "message",
@@ -40,6 +52,10 @@ describe("fleet seat mailbox", () => {
       source: "operator",
       content: "Please finish the tests",
     });
+    // Take is acked on the next poll, not at dequeue.
+    void mailbox.poll(0);
+    await expect(sending).resolves.toBe(true);
+    expect(pty).not.toHaveBeenCalled();
   });
 
   it("an unbound mailbox falls through to the pty sender", async () => {

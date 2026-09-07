@@ -49,9 +49,12 @@ flowchart LR
 
 - **One mailbox per seat.** The service keeps a `SeatOutbox` per seat id (the
   herdr terminal id `sendToSeat` already takes), created on first use. The
-  outbox is the head's type unchanged: `bound()` while a bridge is polling or
-  polled within the last window, `deliver` resolves `delivered` once taken and
-  `unbound` at once when nobody is polling.
+  outbox is the head's type, with bound meaning what it says: a poller is
+  parked, or one returned within a two-second grace that covers the bridge's
+  re-poll gap. A taken event is `delivered` only when the bridge comes back
+  for more; a bridge that never returns within the grace settles it `unbound`
+  and the caller runs the pty. A newer parked poll supersedes an older one, so
+  a resumed session cannot have its mail taken by a stale one.
 - **The pty is the fallback.** The seat sender tries the mailbox first and
   types into the pane only when no bridge is bound. A Codex or pi seat, or a
   Claude Code pane launched without the channel, behaves exactly as before.
@@ -99,8 +102,25 @@ configured with that name`). So a seat hired from the app for the `claude`
   harvest are unchanged.
 - The fleet-wide `SeatSender` contract carries the conversation and source, so
   a mailbox event can say where it came from.
-- A moved pane keeps its mailbox: herdr resolves the old pane id as an alias
-  and the mailbox is keyed by the seat id underneath, not the pane id.
+- A pane moved across workspaces loses its mailbox until the harness is
+  relaunched: herdr stamps `HERDR_PANE_ID` at spawn and a public pane id is
+  per workspace, so the bridge keeps polling an id herdr no longer resolves
+  and the seat falls back to the pty. Polling by the stable terminal id is the
+  follow-up.
+- The route is a new power on the operator bearer: any process holding it can
+  dequeue any seat's mailbox, where ADR 0135 only let it send. Every such
+  process is the owner's on the owner's machine, which is why the head outbox
+  accepted the same bearer; a per-seat poll token minted at hire is the
+  follow-up that closes it.
+- A message queued but not yet taken when the service restarts is typed into
+  the pty by the fallback, the one window where the draft is still at risk.
+- Room harvest is unchanged and unchanged means the pre-existing weakness
+  stays: `awaitSeatReply` takes the seat's next agent sentence from any thread,
+  so a preamble before a tool call, or a concurrent DM reply, can be read as
+  the room's answer. Correlating the waiter to the mailbox event is the
+  follow-up.
+- Herdr reports a Codex session after the pane's first turn, so reading the
+  rollout file is the interim; the session herdr reports is its replacement.
 - A Codex seat takes its message through `codex queue --thread <session>`,
   which the harness runs as its own user turn with the composer untouched
   (probed 2026-09-06). Herdr reports no session for Codex, so the service

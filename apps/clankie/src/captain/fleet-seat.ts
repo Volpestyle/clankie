@@ -20,16 +20,20 @@ export function fleetSeatClaudeStartArgs(): readonly string[] {
   return ["--dangerously-load-development-channels", `server:${FLEET_SEAT_MCP_SERVER}`];
 }
 
-/** `claude mcp get` as the hire path sees it: non-zero means the server is missing. */
-export interface ClaudeMcpGetResult {
+/** `claude mcp add -s user` as the hire path sees it. */
+export interface ClaudeMcpResult {
   readonly status: number;
   readonly stdout: string;
   readonly stderr: string;
 }
 
-/** Register `clankie-seat` at user scope only when `claude mcp get` says it is missing. */
-export function fleetSeatMcpNeedsRegister(result: ClaudeMcpGetResult): boolean {
-  return result.status !== 0;
+/**
+ * A second `claude mcp add -s user` exits 1 with "already exists in user
+ * config" on stderr; that is success, not a failed hire.
+ */
+export function fleetSeatMcpAddSucceeded(result: ClaudeMcpResult): boolean {
+  if (result.status === 0) return true;
+  return /already exists in user config/iu.test(`${result.stdout}\n${result.stderr}`);
 }
 
 /** Create the seat's outbox on first poll (or any other first use). */

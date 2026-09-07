@@ -722,7 +722,7 @@ agent (a DM from the app, or a group-chat turn) arrives as
 instead of being typed into the pane. The bridge polls only when the parent
 `claude` argv loaded `server:clankie-seat` as a channel; otherwise it serves
 empty and does not bind. Claude Code binds that channel when the server is in
-the harness MCP config (`claude mcp add clankie-seat -- clankie mcp --seat`) and
+the harness MCP config (`claude mcp add -s user clankie-seat -- clankie mcp --seat`) and
 the session is started with `--dangerously-load-development-channels
 server:clankie-seat`. `--channels server:clankie-seat` starts without the
 development-channels dialog but then rejects `server:` as not on the approved

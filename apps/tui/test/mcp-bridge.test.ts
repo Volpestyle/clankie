@@ -103,12 +103,20 @@ describe("clankie mcp", () => {
       parentArgvLoadsFleetChannel("claude --dangerously-load-development-channels server:clankie-seat"),
     ).toBe(true);
     expect(
+      parentArgvLoadsFleetChannel("claude --dangerously-load-development-channels=server:clankie-seat"),
+    ).toBe(true);
+    expect(
       parentArgvLoadsFleetChannel(
         "claude --mcp-config {} --dangerously-load-development-channels server:other --name x",
       ),
     ).toBe(false);
-    expect(parentArgvLoadsFleetChannel("claude --channels server:clankie-seat")).toBe(true);
-    expect(parentArgvLoadsFleetChannel("claude --channels server:other server:clankie-seat")).toBe(true);
+    expect(
+      parentArgvLoadsFleetChannel(
+        "claude --dangerously-load-development-channels server:other server:clankie-seat",
+      ),
+    ).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude --channels server:clankie-seat")).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude --channels server:other server:clankie-seat")).toBe(false);
     expect(
       parentArgvLoadsFleetChannel("claude server:clankie-seat --dangerously-load-development-channels"),
     ).toBe(false);

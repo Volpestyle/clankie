@@ -27,11 +27,7 @@ import {
   type HerdrForegroundProcess,
 } from "./codex-seat.ts";
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
-import {
-  fleetSeatClaudeStartArgs,
-  fleetSeatMcpNeedsRegister,
-  type ClaudeMcpGetResult,
-} from "./fleet-seat.ts";
+import { fleetSeatClaudeStartArgs, fleetSeatMcpAddSucceeded, type ClaudeMcpResult } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import {
   readHerdrSeatTranscript,
@@ -75,7 +71,10 @@ export interface HerdrWatchRunner {
   resolveTerminal(terminalId: string): Promise<HerdrAgentSnapshot | undefined>;
   wait(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   waitForChange?(target: string, currentStatus: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
-  /** `herdr agent wait --until idle --timeout 30000` after the channels dialog. */
+  /**
+   * `herdr agent wait --until idle --until working --until done --timeout 30000`
+   * after the channels dialog. A working pane is a live hire.
+   */
   waitUntilIdle?(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   transcript?(agent: HerdrAgentSnapshot): Promise<HerdrSeatTranscript | undefined>;
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
@@ -101,9 +100,7 @@ export interface HerdrWatchRunner {
     /** Extra argv after `--` on `herdr agent start` (the seat channel for claude). */
     readonly args?: readonly string[];
   }): Promise<void>;
-  /** `claude mcp get <name>`: non-zero status means the server is not registered. */
-  getClaudeMcp?(name: string): Promise<ClaudeMcpGetResult>;
-  /** `claude mcp add -s user <name> -- clankie mcp --seat`. */
+  /** `claude mcp add -s user <name> -- clankie mcp --seat`. Already-exists is success. */
   addClaudeMcp?(name: string): Promise<void>;
   /**
    * `herdr agent send-keys`, falling back to `herdr pane send-keys` when the
@@ -154,6 +151,7 @@ const SPAWN_SESSION_POLL_MS = 250;
 const SPAWN_CHANNEL_DIALOG_WAIT_MS = 30_000;
 const CLAUDE_MCP_TIMEOUT_MS = 10_000;
 const CHANNEL_DIALOG_MARKER = "Loading development channels";
+const CHANNEL_DIALOG_SELECTED = /^\s*❯\s*1\. I am using this for local development\s*$/u;
 const PI_ZONE_START = "\u001B]133;A\u0007";
 const PI_ZONE_END = "\u001B]133;B\u0007\u001B]133;C\u0007";
 
@@ -222,7 +220,7 @@ function claudeMcpStatus(error: ExecFileException | null): number {
   return typeof error.code === "number" ? error.code : 1;
 }
 
-function runClaude(args: readonly string[]): Promise<ClaudeMcpGetResult> {
+function runClaude(args: readonly string[]): Promise<ClaudeMcpResult> {
   return new Promise((resolve, reject) => {
     execFile(
       "claude",
@@ -300,7 +298,19 @@ function defaultRunner(): HerdrWatchRunner {
     waitUntilIdle: async (target, signal) =>
       parseHerdrAgentResult(
         await runHerdr(
-          ["agent", "wait", target, "--until", "idle", "--timeout", String(SPAWN_CHANNEL_DIALOG_WAIT_MS)],
+          [
+            "agent",
+            "wait",
+            target,
+            "--until",
+            "idle",
+            "--until",
+            "working",
+            "--until",
+            "done",
+            "--timeout",
+            String(SPAWN_CHANNEL_DIALOG_WAIT_MS),
+          ],
           signal,
         ),
       ),
@@ -360,10 +370,9 @@ function defaultRunner(): HerdrWatchRunner {
       }
     },
     closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
-    getClaudeMcp: (name) => runClaude(["mcp", "get", name]),
     addClaudeMcp: async (name) => {
       const result = await runClaude(["mcp", "add", "-s", "user", name, "--", "clankie", "mcp", "--seat"]);
-      if (result.status !== 0) {
+      if (!fleetSeatMcpAddSucceeded(result)) {
         throw new Error(result.stderr.trim() || `claude mcp add ${name} failed`);
       }
     },
@@ -593,10 +602,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   /** Persist `clankie-seat` at user scope so `server:` can bind it on launch. */
   private async ensureClaudeSeatMcp(): Promise<void> {
-    const get = this.runner.getClaudeMcp;
-    if (get === undefined) return;
-    const result = await get(FLEET_SEAT_MCP_SERVER);
-    if (!fleetSeatMcpNeedsRegister(result)) return;
     await this.runner.addClaudeMcp?.(FLEET_SEAT_MCP_SERVER);
   }
 
@@ -613,7 +618,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch {
       return false;
     }
-    if (!visible.includes(CHANNEL_DIALOG_MARKER)) return false;
+    if (!isClaudeDevelopmentChannelsDialog(visible)) return false;
     try {
       if (this.runner.sendKeys !== undefined) {
         await this.runner.sendKeys(paneId, "enter");
@@ -622,25 +627,32 @@ export class HerdrWatchStore implements HerdrWatchPort {
       } else {
         return false;
       }
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), SPAWN_CHANNEL_DIALOG_WAIT_MS);
-      timer.unref?.();
-      try {
-        // Bare `agent wait` matches blocked too, and the pane is already
-        // blocked on the dialog, so it would return before Enter lands.
-        if (this.runner.waitUntilIdle !== undefined) {
-          await this.runner.waitUntilIdle(paneId, controller.signal);
-        } else if (this.runner.waitForChange !== undefined) {
-          await this.runner.waitForChange(paneId, "blocked", controller.signal);
-        } else {
-          await this.runner.wait(paneId, controller.signal);
-        }
-      } finally {
-        clearTimeout(timer);
+    } catch {
+      return false;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SPAWN_CHANNEL_DIALOG_WAIT_MS);
+    timer.unref?.();
+    try {
+      // Bare `agent wait` matches blocked too, and the pane is already
+      // blocked on the dialog, so it would return before Enter lands.
+      if (this.runner.waitUntilIdle !== undefined) {
+        await this.runner.waitUntilIdle(paneId, controller.signal);
+      } else if (this.runner.waitForChange !== undefined) {
+        await this.runner.waitForChange(paneId, "blocked", controller.signal);
+      } else {
+        await this.runner.wait(paneId, controller.signal);
       }
       return true;
     } catch {
-      return false;
+      try {
+        const current = await this.runner.get(paneId);
+        return current.agent === "claude" && current.status !== "blocked";
+      } catch {
+        return false;
+      }
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -1084,6 +1096,11 @@ function piReply(transcript: string): string | undefined {
 
 function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
   return agent !== undefined && agent.agent !== "shell" && agent.agent !== "unknown";
+}
+
+function isClaudeDevelopmentChannelsDialog(visible: string): boolean {
+  if (!visible.includes(CHANNEL_DIALOG_MARKER)) return false;
+  return visible.split(/\r?\n/u).some((line) => CHANNEL_DIALOG_SELECTED.test(line));
 }
 
 function delay(ms: number): Promise<void> {
