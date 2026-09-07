@@ -15,6 +15,7 @@ import {
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
+import { isHerdrWorkspaceMissing } from "../src/captain/herdr-watch.ts";
 
 const roots: string[] = [];
 const working: HerdrAgentSnapshot = {
@@ -1346,5 +1347,17 @@ describe("hiring a seat", () => {
     // Leading non-letters are illegal in a herdr name, not just unusual.
     expect(herdrAgentName("2026 audit", "ab12")).toBe("audit-ab12");
     expect(herdrAgentName("x".repeat(80), "ab12")).toHaveLength(32);
+  });
+});
+
+describe("founding a workspace on a fresh owned session", () => {
+  it("recognizes herdr's workspace_not_found and nothing else", () => {
+    expect(
+      isHerdrWorkspaceMissing(
+        new Error('{"error":{"code":"workspace_not_found","message":"no active workspace"}}'),
+      ),
+    ).toBe(true);
+    expect(isHerdrWorkspaceMissing(new Error("connection refused"))).toBe(false);
+    expect(isHerdrWorkspaceMissing("workspace_not_found")).toBe(false);
   });
 });
