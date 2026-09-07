@@ -211,6 +211,59 @@ describe("shell assembly", () => {
     expect(text).not.toContain("side answer");
   });
 
+  it("opens /btw on a clean boundary view and swaps back to the parent on Ctrl+T", async () => {
+    const commands = buildConsoleCommands({
+      conversations: {
+        conversationId: "main",
+        conversations: async () => [],
+        select: async (conversationId) => ({ conversationId, title: "Main" }),
+        fork: async () => ({ conversationId: "side", title: "BTW" }),
+      },
+    });
+    let shell!: ClankieFaceShell;
+    shell = new ClankieFaceShell({
+      commands,
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+      onPrompt: async () => shell.insertAssistantMarkdown("side answer"),
+      onSideExit: async () => shell.endSideConversation(),
+      onSideToggle: async () => shell.swapSideTranscript(),
+    });
+    shell.insertAssistantMarkdown("parent answer");
+    const internals = shell as unknown as {
+      routeInput(data: string): { consume?: boolean } | undefined;
+      chat: { render(width: number): string[] };
+    };
+    // oxlint-disable-next-line no-control-regex -- intentionally strips ANSI escape sequences
+    const ansiPattern = /\x1b\[[0-9;]*m/gu;
+    const rendered = (): string => internals.chat.render(80).join("\n").replace(ansiPattern, "");
+
+    const btw = commands.find((command) => command.name === "btw");
+    if (btw === undefined) throw new Error("btw command not found");
+    await btw.run("side question", shell);
+
+    // The fork starts at its boundary: inherited history is context, not screen.
+    expect(shell.sideConversationVisible).toBe(true);
+    expect(rendered()).not.toContain("parent answer");
+    expect(rendered()).toContain("side answer");
+
+    // The switch runs off a promise, so let it settle before pressing again.
+    const settle = async (): Promise<void> => await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(internals.routeInput("\x18")).toEqual({ consume: true });
+    await settle();
+    expect(shell.sideConversationVisible).toBe(false);
+    expect(shell.sideConversationActive).toBe(true);
+    expect(rendered()).toContain("parent answer");
+    expect(rendered()).not.toContain("side answer");
+
+    expect(internals.routeInput("\x18")).toEqual({ consume: true });
+    await settle();
+    expect(shell.sideConversationVisible).toBe(true);
+    expect(rendered()).toContain("side answer");
+  });
+
   it("renders conversation content through pi's chat components", () => {
     const shell = new ClankieFaceShell({
       commands: buildConsoleCommands({}),

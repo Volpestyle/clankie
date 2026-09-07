@@ -148,9 +148,10 @@ resumes one. A captain conversation and its Pi session are one lifetime: bounded
 retention removes their shared directory, while public event logs rotate with
 typed cursor recovery ([ADR 0111](adr/0111-a-console-process-starts-one-conversation.md)).
 `/btw` temporarily selects an ephemeral child made with Pi's native current-leaf
-fork. A hidden boundary makes the inherited branch reference-only; Ctrl+C
-cancels and deletes the child, restores the parent transcript, and replays any
-parent events that arrived meanwhile
+fork, opening it on a clean screen at that boundary. A hidden boundary makes the
+inherited branch reference-only; Ctrl+X swaps between the child and its parent
+without discarding either, and Ctrl+C cancels and deletes the child, restores
+the parent transcript, and replays any parent events that arrived meanwhile
 ([ADR 0143](adr/0143-btw-is-an-ephemeral-pi-fork.md)).
 Conversations are files under `~/.clankie/captain/`. Each settled operator or
 Discord captain turn also appends one metrics line to

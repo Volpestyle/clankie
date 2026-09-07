@@ -12,7 +12,9 @@ his server-owned conversation and console lifecycles.
 ## Decision
 
 `/btw [question]` (alias `/side`) creates and selects one ephemeral child of the
-current non-seat operator conversation. The captain opens the parent's Pi JSONL
+current non-seat operator conversation, and opens it on a clean screen at the
+fork boundary: inherited history stays context for the model, not chrome for the
+operator. The captain opens the parent's Pi JSONL
 tree in the child's session directory and calls Pi's native
 `createBranchedSession` at the current leaf. It appends one hidden custom message
 that marks all inherited history as reference-only, and the child system prompt
@@ -27,11 +29,17 @@ sequenceDiagram
     Store->>Pi: createBranchedSession(current leaf)
     Pi-->>Store: child JSONL tree
     Store-->>TUI: ephemeral child conversation
-    TUI->>TUI: keep parent transcript; append side turns
+    TUI->>TUI: stash parent view; open on the boundary
+    TUI->>TUI: Ctrl+X → swap views, replay what arrived
     TUI->>Store: Ctrl+C → close(child)
     Store->>Pi: abort active child turn, dispose child
     TUI->>TUI: restore parent transcript and unread events
 ```
+
+Ctrl+X swaps which of the pair is on screen without discarding either: the
+thread leaving the screen keeps its server-side turn running, and the one
+arriving replays the events that landed while it was away. The footer names the
+side conversation, where it forked from, and both exits.
 
 The child has its own revision, public event log, and Pi session, but no durable
 resume promise. Only one child may be open from a parent, nested side forks are
@@ -52,7 +60,8 @@ lifecycle.
   its first completed response.
 - Only read-only/status slash commands remain available inside the side
   conversation; configuration, navigation, skills, and fleet controls stay on
-  the main thread.
+  the main thread. Switching back to the parent with Ctrl+X restores the full
+  command set, because the main thread is the visible one again.
 
 Creating a normal retained conversation and copying messages through the public
 event log are rejected: both duplicate Pi's branching semantics and either keep

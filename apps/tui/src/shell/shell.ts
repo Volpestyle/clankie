@@ -130,8 +130,21 @@ export interface FaceShellOptions {
   readonly onInterrupt?: () => Promise<boolean>;
   /** Discards the ephemeral `/btw` fork and selects its parent. */
   readonly onSideExit?: () => Promise<void>;
+  /** Switches between the `/btw` fork and its parent without discarding either. */
+  readonly onSideToggle?: () => Promise<void>;
   readonly onExit?: () => Promise<void> | void;
 }
+
+/** Everything the chat surface needs to put one thread's view back on screen. */
+type ClankieTranscriptSnapshot = {
+  readonly children: readonly Component[];
+  readonly activeToolBlocks: ReadonlyMap<string, ToolExecutionComponent>;
+  readonly expandableBlocks: ReadonlyMap<
+    Component,
+    { expanded: boolean; setExpanded(expanded: boolean): void }
+  >;
+  readonly liveAssistantBlock?: Container;
+};
 
 type ActivePromptTurn = {
   readonly controller: AbortController;
@@ -258,17 +271,11 @@ export class ClankieFaceShell {
   private activeLoader: Loader | undefined;
   private runningTurn: Promise<void> | undefined;
   private returningFromSideConversation = false;
-  private parentTranscript:
-    | {
-        readonly children: readonly Component[];
-        readonly activeToolBlocks: ReadonlyMap<string, ToolExecutionComponent>;
-        readonly expandableBlocks: ReadonlyMap<
-          Component,
-          { expanded: boolean; setExpanded(expanded: boolean): void }
-        >;
-        readonly liveAssistantBlock?: Container;
-      }
-    | undefined;
+  private switchingSideConversation = false;
+  /** The transcript of whichever thread is off screen while `/btw` is open. */
+  private stashedTranscript: ClankieTranscriptSnapshot | undefined;
+  /** Which of the two threads the console shows while `/btw` is open. */
+  private sideView: "side" | "parent" | undefined;
 
   /** Live tool executions keyed by toolCallId until their result lands. */
   private readonly activeToolBlocks = new Map<string, ToolExecutionComponent>();
@@ -635,8 +642,14 @@ export class ClankieFaceShell {
     this.tui.requestRender();
   }
 
+  /** True while an ephemeral `/btw` fork exists, whichever thread is on screen. */
   get sideConversationActive(): boolean {
-    return this.parentTranscript !== undefined;
+    return this.sideView !== undefined;
+  }
+
+  /** True only while the side conversation itself is the visible thread. */
+  get sideConversationVisible(): boolean {
+    return this.sideView === "side";
   }
 
   /** Stop drawing the active parent tail; its server-side turn keeps running and replays on return. */
@@ -646,31 +659,53 @@ export class ClankieFaceShell {
     await this.runningTurn;
   }
 
-  /** Keep the parent transcript on screen while side-conversation blocks append beneath it. */
+  /** Stash the parent's view so the side conversation opens on the fork boundary. */
   beginSideConversation(): void {
-    if (this.parentTranscript !== undefined) throw new Error("A side conversation is already open");
-    this.parentTranscript = {
+    if (this.sideView !== undefined) throw new Error("A side conversation is already open");
+    this.stashedTranscript = this.captureTranscript();
+    this.sideView = "side";
+    this.clearTranscript();
+  }
+
+  /** Swap the on-screen view with the stashed one, keeping both threads alive. */
+  swapSideTranscript(): void {
+    const stashed = this.stashedTranscript;
+    if (stashed === undefined || this.sideView === undefined) return;
+    this.stashedTranscript = this.captureTranscript();
+    this.restoreTranscript(stashed);
+    this.sideView = this.sideView === "side" ? "parent" : "side";
+  }
+
+  /** Restore the exact parent UI snapshot after its ephemeral child is discarded. */
+  endSideConversation(): void {
+    if (this.sideView === undefined) return;
+    if (this.sideView === "side" && this.stashedTranscript !== undefined) {
+      this.restoreTranscript(this.stashedTranscript);
+    }
+    this.stashedTranscript = undefined;
+    this.sideView = undefined;
+    this.returningFromSideConversation = false;
+    this.switchingSideConversation = false;
+    this.tui.requestRender();
+  }
+
+  private captureTranscript(): ClankieTranscriptSnapshot {
+    return {
       children: [...this.chat.children],
       activeToolBlocks: new Map(this.activeToolBlocks),
       expandableBlocks: new Map(this.expandableBlocks),
       ...(this.liveAssistantBlock === undefined ? {} : { liveAssistantBlock: this.liveAssistantBlock }),
     };
-    this.tui.requestRender();
   }
 
-  /** Restore the exact parent UI snapshot after its ephemeral child is discarded. */
-  endSideConversation(): void {
-    const parent = this.parentTranscript;
-    if (parent === undefined) return;
+  private restoreTranscript(snapshot: ClankieTranscriptSnapshot): void {
     this.chat.clear();
-    for (const child of parent.children) this.chat.addChild(child);
+    for (const child of snapshot.children) this.chat.addChild(child);
     this.activeToolBlocks.clear();
-    for (const [id, block] of parent.activeToolBlocks) this.activeToolBlocks.set(id, block);
+    for (const [id, block] of snapshot.activeToolBlocks) this.activeToolBlocks.set(id, block);
     this.expandableBlocks.clear();
-    for (const [block, state] of parent.expandableBlocks) this.expandableBlocks.set(block, state);
-    this.liveAssistantBlock = parent.liveAssistantBlock;
-    this.parentTranscript = undefined;
-    this.returningFromSideConversation = false;
+    for (const [block, state] of snapshot.expandableBlocks) this.expandableBlocks.set(block, state);
+    this.liveAssistantBlock = snapshot.liveAssistantBlock;
     this.tui.requestRender();
   }
 
@@ -872,6 +907,25 @@ export class ClankieFaceShell {
       this.openCommandPalette();
       return { consume: true };
     }
+    // Ctrl+X switches between an open `/btw` fork and its parent; the thread left
+    // behind keeps running server-side and replays when it comes back on screen.
+    if ((matchesKey(data, Key.ctrl("x")) || data === "\x18") && this.sideView !== undefined) {
+      const toggle = this.options.onSideToggle;
+      if (toggle === undefined || this.returningFromSideConversation) return { consume: true };
+      if (this.switchingSideConversation) return { consume: true };
+      this.switchingSideConversation = true;
+      this.refreshStatus(this.sideView === "side" ? "returning to main conversation" : "switching to side");
+      void toggle()
+        .catch((error: unknown) => {
+          this.insertCommandResult("/btw", formatError(error), "error");
+          this.refreshStatus("side conversation switch failed");
+        })
+        .finally(() => {
+          this.switchingSideConversation = false;
+          this.refreshStatusView();
+        });
+      return { consume: true };
+    }
     if (matchesKey(data, Key.ctrlShift("v")) && !this.setupFlow.isWaitingForInput()) {
       this.toggleVoiceTranscripts();
       return { consume: true };
@@ -898,7 +952,7 @@ export class ClankieFaceShell {
         this.setupFlow.handleSubmit("/cancel");
         return { consume: true };
       }
-      if (this.parentTranscript !== undefined && this.options.onSideExit !== undefined) {
+      if (this.sideView === "side" && this.options.onSideExit !== undefined) {
         if (this.returningFromSideConversation) return { consume: true };
         this.returningFromSideConversation = true;
         this.activeTurn?.controller.abort();
@@ -1121,7 +1175,7 @@ export class ClankieFaceShell {
     const command = resolveClankieCommand(this.options.commands, token)?.command;
     if (command === undefined) {
       if (resolveClankieSlashSkill(prompt, this.options.skills ?? []) !== undefined) {
-        if (this.parentTranscript !== undefined) {
+        if (this.sideView === "side") {
           this.insertCommandResult(prompt, "Skills are unavailable inside /btw.", "error");
           return;
         }
@@ -1132,7 +1186,7 @@ export class ClankieFaceShell {
       return;
     }
     const argument = withoutSlash.slice(token.length).trim();
-    if (this.parentTranscript !== undefined && command.availableInSideConversation !== true) {
+    if (this.sideView === "side" && command.availableInSideConversation !== true) {
       this.insertCommandResult(prompt, `/${command.name} is unavailable inside /btw.`, "error");
       return;
     }

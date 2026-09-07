@@ -210,6 +210,9 @@ const conversationsContext = {
     return await conversationClient.autonomy(conversationId, command);
   },
   select: async (conversationId: string) => {
+    // Navigating anywhere else ends an open `/btw` fork: it has no console to
+    // resume its UI lifecycle once its parent leaves the screen.
+    if (conversationId !== conversationSelection.conversationId) await discardOpenSideConversation();
     await shell.detachActiveTurn();
     await stopConversationObservation();
     try {
@@ -399,10 +402,7 @@ const shell = new ClankieFaceShell({
     model: currentModelDisplay,
     title: currentConversationTitle,
   }),
-  statusExtras: () => [
-    ...(sideConversation === undefined ? [] : ["side · ctrl+c to return"]),
-    formatCaptainPresenceStatus(presence.snapshot),
-  ],
+  statusExtras: () => [...sideConversationStatus(), formatCaptainPresenceStatus(presence.snapshot)],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal, delivery) => {
     let ready!: () => void;
@@ -440,6 +440,7 @@ const shell = new ClankieFaceShell({
   // tail settles on the durable `cancelled` event. Detach remains the fallback.
   onInterrupt: () => conversationPrompt.interruptActive(),
   onSideExit: returnFromSideConversation,
+  onSideToggle: toggleSideConversation,
   onExit: async () => {
     await stopConversationObservation();
     presence.stop();
@@ -451,6 +452,50 @@ const shell = new ClankieFaceShell({
     await reportSeatPresence("idle");
   },
 });
+
+/** Close an open `/btw` fork in place, without restoring its parent's view. */
+async function discardOpenSideConversation(): Promise<void> {
+  const side = sideConversation;
+  if (side === undefined) return;
+  if (!(await conversationClient.close(side.conversationId))) {
+    throw new Error("The side conversation could not be closed");
+  }
+  sideConversation = undefined;
+  shell.endSideConversation();
+}
+
+/**
+ * The `/btw` footer badge: where the side conversation came from while it is on
+ * screen, and the way back to it while its parent is.
+ */
+function sideConversationStatus(): readonly string[] {
+  if (sideConversation === undefined) return [];
+  if (!shell.sideConversationVisible) return ["ctrl+x for side"];
+  return ["side · from main thread · ctrl+x to switch · ctrl+c to close"];
+}
+
+/**
+ * Ctrl+X: show the other half of an open `/btw` pair. The thread leaving the
+ * screen keeps its server-side turn running, and the one arriving replays the
+ * events that landed while it was away.
+ */
+async function toggleSideConversation(): Promise<void> {
+  const side = sideConversation;
+  if (side === undefined) return;
+  const target = shell.sideConversationVisible ? side.parentConversationId : side.conversationId;
+  await shell.detachActiveTurn();
+  await stopConversationObservation();
+  try {
+    await selectConversation(target);
+  } catch (error) {
+    startConversationObservation();
+    throw error;
+  }
+  shell.swapSideTranscript();
+  await conversationPrompt.restore(conversationShellSink());
+  startConversationObservation();
+  shell.refreshStatus("ready");
+}
 
 async function returnFromSideConversation(): Promise<void> {
   const side = sideConversation;

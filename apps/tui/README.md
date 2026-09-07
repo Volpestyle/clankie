@@ -133,8 +133,10 @@ credential holder.
   the current workspace. The previous conversation remains available through
   `/conversation`.
 - `/btw [question]` (alias `/side`) opens an ephemeral side conversation from
-  the current Pi branch. Its inherited history is reference-only; Ctrl+C
-  discards the fork and restores the main transcript.
+  the current Pi branch on a clean screen at the fork boundary. Its inherited
+  history is reference-only. Ctrl+X switches between the fork and the main
+  thread while both stay alive; Ctrl+C discards the fork and restores the main
+  transcript. The footer names the open side conversation from either side.
 - `/goal` shows the selected conversation's durable goal. `/goal <objective>`
   starts one; `--tokens <n>` gives it a hard model-token budget, and
   `pause|resume|clear` remain owner controls. Clankie proposes goals in chat;

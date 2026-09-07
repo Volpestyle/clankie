@@ -320,13 +320,23 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         if (shell.sideConversationActive) {
-          shell.insertCommandResult("/btw", "A side conversation is already open.", "error");
+          shell.insertCommandResult(
+            "/btw",
+            shell.sideConversationVisible
+              ? "A side conversation is already open. Press ctrl+c to return before starting another."
+              : "A side conversation is already open. Press ctrl+x to go back to it.",
+            "error",
+          );
           return;
         }
         await conversations.fork();
         await shell.detachActiveTurn();
         shell.beginSideConversation();
-        shell.insertCommandResult("/btw", "Side conversation · Ctrl+C to discard and return.", "success");
+        shell.insertCommandResult(
+          "/btw",
+          "Side conversation · inherited history is reference only · ctrl+x to switch · ctrl+c to close.",
+          "success",
+        );
         const question = argument.trim();
         if (question.length > 0) await shell.submitUserPrompt(question);
       },
