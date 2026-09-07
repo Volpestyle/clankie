@@ -72,6 +72,16 @@ flowchart LR
   they sit in is the fleet's session, checked by socket. Opened inside any
   other Herdr they run as ordinary consoles: no pane is him, no pane is
   renamed there, and the turn leads the fleet from the service body.
+- **The fleet outlives the service.** Restarting Clankie must not close the
+  panes its agents are working in, and a restart is the documented answer to
+  every settings change. So the server runs in its own process group, where the
+  launcher's group-wide stop of Clankie cannot reap it; losing the supervisor's
+  channel, including to the SIGKILL the launcher escalates to, detaches instead
+  of stopping; and a start that finds a live server still answering adopts it
+  rather than refusing the socket. Stopping the fleet is explicit, through
+  `herdr server stop` on its own socket. This reverses ADR 0157's
+  close-on-disconnect: an orphaned server is a fleet still working, and the
+  socket is the lock that keeps there being exactly one.
 - The bundled runtime's private `XDG_STATE_HOME` isolates that Herdr's own
   config, logs, and sessions, and Herdr hands its environment to every pane it
   opens. `CLANKIE_STATE_HOME` is set alongside it and points at the owner's

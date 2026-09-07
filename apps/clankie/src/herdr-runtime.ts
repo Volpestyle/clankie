@@ -40,7 +40,20 @@ export async function startHerdrRuntime(input: {
   }
   await mkdir(root, { recursive: true, mode: 0o700 });
   await chmod(root, 0o700);
-  if (await socketListening(socketPath)) throw new Error(`Herdr runtime already has an owner: ${socketPath}`);
+  // The fleet outlives the service (ADR 0164): a live server from a previous
+  // run that still answers is adopted rather than refused, so restarting
+  // Clankie does not close the panes its agents are working in.
+  const listening = await socketListening(socketPath);
+  const adopt =
+    listening &&
+    (await runtimeAnswers(input.binary, {
+      ...input.env,
+      XDG_CONFIG_HOME: root,
+      XDG_STATE_HOME: root,
+      XDG_RUNTIME_DIR: root,
+      HERDR_SOCKET_PATH: socketPath,
+    }));
+  if (listening && !adopt) throw new Error(`Herdr runtime already has an owner: ${socketPath}`);
   await mkdir(join(root, "herdr"), { recursive: true, mode: 0o700 });
   await writeFile(
     join(root, "herdr/config.toml"),
@@ -68,7 +81,7 @@ export async function startHerdrRuntime(input: {
   const compiled = join(input.repoRoot, "apps/clankie/src/herdr-runtime.js");
   const child = fork(
     existsSync(compiled) ? compiled : compiled.replace(/\.js$/u, ".ts"),
-    ["--supervise-herdr", input.binary],
+    ["--supervise-herdr", input.binary, ...(adopt ? ["--adopt"] : [])],
     {
       execArgv: [],
       env: { ...input.env, XDG_CONFIG_HOME: root, XDG_STATE_HOME: root, XDG_RUNTIME_DIR: root },
@@ -105,6 +118,21 @@ export async function startHerdrRuntime(input: {
   return { status: () => state, close };
 }
 
+/** Whether a server already on the socket answers, which is what makes it adoptable. */
+async function runtimeAnswers(binary: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  try {
+    const { stdout } = await exec(binary, ["api", "snapshot"], {
+      env,
+      timeout: 5_000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    const snapshot = JSON.parse(stdout) as { result?: unknown; error?: unknown };
+    return snapshot.error === undefined && snapshot.result !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 async function socketListening(path: string): Promise<boolean> {
   return await new Promise((done) => {
     const socket = createConnection(path);
@@ -131,32 +159,45 @@ async function stop(child: ChildProcess): Promise<void> {
   }
 }
 
-async function supervise(binary: string): Promise<void> {
+async function supervise(binary: string, adopt: boolean): Promise<void> {
   let closing = false;
+  // Clankie going away is not the fleet going away (ADR 0164): losing the IPC
+  // channel, including to a SIGKILL, leaves the server running for the next
+  // service to adopt. Only a signal aimed at the supervisor itself stops it.
+  let detaching = false;
   let child: ChildProcess | undefined;
   const shutdown = () => {
     closing = true;
     void (child === undefined ? Promise.resolve() : stop(child));
   };
-  process.once("disconnect", shutdown);
+  process.once("disconnect", () => {
+    detaching = true;
+  });
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
   let backoff = 250;
   let booted = false;
-  while (!closing) {
+  let adopting = adopt;
+  while (!closing && !detaching) {
     let exited = false;
     const started = Date.now();
-    child = spawn(binary, ["server"], { stdio: ["ignore", "ignore", "inherit"] });
-    child.once("exit", () => {
+    // The server gets its own process group so the launcher's group-wide stop
+    // of Clankie cannot reap the fleet, and its own log file is its stderr.
+    child = adopting
+      ? undefined
+      : spawn(binary, ["server"], { stdio: ["ignore", "ignore", "ignore"], detached: true });
+    child?.unref();
+    adopting = false;
+    child?.once("exit", () => {
       exited = true;
     });
-    child.once("error", (error) => {
+    child?.once("error", (error) => {
       exited = true;
       process.stderr.write(`herdr: ${error.message}\n`);
     });
     let healthy = false;
     let failures = 0;
-    while (!closing && !exited) {
+    while (!closing && !detaching && !exited) {
       try {
         const { stdout } = await exec(binary, ["api", "snapshot"], {
           timeout: 2_000,
@@ -175,16 +216,18 @@ async function supervise(binary: string): Promise<void> {
       }
       // Short sleeps let shutdown interrupt backoff and health polling promptly.
       const until = Date.now() + (healthy ? 5_000 : 100);
-      while (!closing && !exited && Date.now() < until) await sleep(100);
+      while (!closing && !detaching && !exited && Date.now() < until) await sleep(100);
     }
-    await stop(child);
+    // Detaching leaves the server exactly as it is; only a real stop reaps it.
+    if (detaching) break;
+    if (child !== undefined) await stop(child);
     if (closing) break;
     if (!booted) throw new Error("Herdr did not become ready within 30 seconds");
     if (process.connected) process.send?.("recovering");
     process.stderr.write("herdr: runtime unavailable; restarting\n");
     if (Date.now() - started > 30_000) backoff = 250;
     const until = Date.now() + backoff;
-    while (!closing && Date.now() < until) await sleep(100);
+    while (!closing && !detaching && Date.now() < until) await sleep(100);
     backoff = Math.min(backoff * 2, 30_000);
   }
 }
@@ -194,7 +237,7 @@ if (process.argv[2] === "--supervise-herdr") {
   if (binary === undefined || process.send === undefined)
     throw new Error("Herdr supervisor requires its Clankie parent");
   try {
-    await supervise(binary);
+    await supervise(binary, process.argv.includes("--adopt"));
   } finally {
     if (process.connected) process.disconnect();
   }

@@ -38,8 +38,8 @@ attach / detach only"] --> fleet
 
 The service starts its supervisor before accepting requests. The supervisor
 checks `herdr api snapshot`, retries crashed or unresponsive servers with bounded
-backoff, and closes the native process when Clankie disconnects, including after
-Clankie's abrupt death. A live socket blocks a second owner. Runtime health is
+backoff, and — since [ADR 0164](0164-the-fleet-is-its-own-session.md) — leaves
+the server running when Clankie disconnects, rather than closing it. A live socket blocks a second owner. Runtime health is
 part of `/health`; it returns 503 while bundled Herdr is unavailable.
 
 Herdr's sockets, configuration, session files, and logs live under
