@@ -501,7 +501,7 @@ export const EmailSettingsSchema = z
 export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
 
 /**
- * Signed Linear webhook ingest (ADR 0164). The signing secret is a credential
+ * Signed Linear webhook ingest (ADR 0165). The signing secret is a credential
  * and lives in the broker under `linear-webhook`; only the non-secret question
  * of whose comments count belongs here.
  */

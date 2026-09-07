@@ -183,7 +183,7 @@ const FEATURED_SERVICE_PROVIDERS: readonly MenuOption[] = [
     value: LINEAR_WEBHOOK_PROVIDER_ID,
     label: "Linear webhook secret",
     description:
-      "Signs inbound Linear comments (ADR 0164). Linear shows it once when you create the webhook; separate from /connect linear.",
+      "Signs inbound Linear comments (ADR 0165). Linear shows it once when you create the webhook; separate from /connect linear.",
   },
 ];
 

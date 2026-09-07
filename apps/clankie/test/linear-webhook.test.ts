@@ -12,7 +12,7 @@ import {
 } from "../src/linear-webhook.ts";
 
 /**
- * Signed Linear comment ingest (ADR 0164). Every case drives the real route so
+ * Signed Linear comment ingest (ADR 0165). Every case drives the real route so
  * the raw-body reading is exercised: a test that hands the verifier an object
  * would pass while the live hook rejects everything Linear sends.
  */

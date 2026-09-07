@@ -17,7 +17,7 @@ import type { ProviderCredential } from "./credential-store.ts";
 export const LINEAR_PROVIDER_ID = "linear";
 /**
  * The Linear webhook signing secret, kept apart from the MCP token above
- * (ADR 0164). Linear shows it once on the webhook's detail page and the owner
+ * (ADR 0165). Linear shows it once on the webhook's detail page and the owner
  * pastes it; nothing here can mint it, because creating a webhook needs an
  * `admin`-scoped credential this OAuth flow deliberately never asks for.
  */

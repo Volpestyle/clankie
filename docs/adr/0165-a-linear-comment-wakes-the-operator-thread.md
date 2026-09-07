@@ -1,4 +1,4 @@
-# ADR 0164: A Linear comment wakes the operator thread
+# ADR 0165: A Linear comment wakes the operator thread
 
 Status: accepted (James, 2026-09-07, operator console). Rides the routing built
 in [ADR 0151](0151-the-public-doorway-routes-home.md) and the wake seam built in

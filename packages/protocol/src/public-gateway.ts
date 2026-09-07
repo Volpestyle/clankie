@@ -18,7 +18,7 @@ export const PUBLIC_GATEWAY_IN_FLIGHT_MAX = 128;
 /** The gateway's route window; defined beside the review-offer cap it shares (ADR 0154). */
 export { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./index.ts";
 
-/** Linear's signed comment webhook (ADR 0164); the owner pastes this path into Linear. */
+/** Linear's signed comment webhook (ADR 0165); the owner pastes this path into Linear. */
 export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
 
 export const PUBLIC_GATEWAY_ROUTES = [
@@ -44,7 +44,7 @@ export const PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST: readonly string[] = [
   "authorization",
   "content-type",
   // Linear signs the raw body and names the delivery, event, and signing time
-  // in its own headers (ADR 0164); the hook cannot verify without them.
+  // in its own headers (ADR 0165); the hook cannot verify without them.
   "linear-signature",
   "linear-delivery",
   "linear-event",

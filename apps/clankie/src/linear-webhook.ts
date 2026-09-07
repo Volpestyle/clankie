@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
-// Signed Linear comment ingest for ADR 0164. A comment is not a prompt: this
+// Signed Linear comment ingest for ADR 0165. A comment is not a prompt: this
 // module's whole job is to decide whether a POST is really Linear, really
 // James, and really new, and to say so. Deciding what to do about it belongs to
 // the operator thread, and dispatching to a pane belongs to a later slice.

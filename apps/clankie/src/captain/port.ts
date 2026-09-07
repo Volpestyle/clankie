@@ -129,7 +129,7 @@ export interface CaptainPort {
    */
   observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void;
   /**
-   * Wake the operator thread about a verified Linear comment (ADR 0164). The
+   * Wake the operator thread about a verified Linear comment (ADR 0165). The
    * app has already proved the delivery is Linear's and James's; the captain
    * owns the thread it lands in, the live fleet a pane is suggested from, and
    * the decision of what — if anything — to do about it.

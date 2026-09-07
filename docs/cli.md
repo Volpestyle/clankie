@@ -275,7 +275,7 @@ local verification. It never accepts a secret as a flag.
 ### Linear comment ingress
 
 Signed Linear `Comment.create` webhooks wake Clankie's operator thread with the
-comment quoted (ADR 0164). He looks; he does not dispatch a pane.
+comment quoted (ADR 0165). He looks; he does not dispatch a pane.
 
 Set it up from the console with `/connect linear` → **Wake me on my comments**,
 once the doorway is configured. That flow prints the URL to register, takes the

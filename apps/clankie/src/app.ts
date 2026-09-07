@@ -352,7 +352,7 @@ export interface ClankieAppDependencies {
    */
   pushWake?: PushWakeSender;
   /**
-   * The broker-held Linear webhook signing secret (ADR 0164). Absent means no
+   * The broker-held Linear webhook signing secret (ADR 0165). Absent means no
    * webhook is configured and the route reports itself unavailable; the wake it
    * leads to belongs to the captain.
    */
@@ -1914,7 +1914,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ session });
   });
 
-  // Signed Linear comment ingest (ADR 0164). Public, because Linear posts here
+  // Signed Linear comment ingest (ADR 0165). Public, because Linear posts here
   // from its own servers with no bearer of ours; the HMAC over the raw body is
   // the whole authentication. Everything Linear signed but we do not act on
   // still answers 200 — a 4xx would put the delivery into a six-hour retry for

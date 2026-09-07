@@ -66,7 +66,7 @@ export interface ConnectCommandServices {
   probeLinearMcp?: typeof probeLinearMcp;
   /**
    * The doorway this Mac answers on, for the webhook URL an owner pastes into
-   * Linear (ADR 0164). Absent means remote access is not configured yet, which
+   * Linear (ADR 0165). Absent means remote access is not configured yet, which
    * the comment-wake flow reports rather than printing an address that 404s.
    */
   gatewayHook?: () => Promise<{ readonly url: string; readonly hostId: string } | undefined>;
@@ -384,7 +384,7 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
  * the signing secret, and whose comments count. The webhook itself is made in
  * Linear's own UI — creating one needs an `admin` credential Clankie never asks
  * for — so this flow's job is to hand over the address and take back what
- * Linear shows once (ADR 0164).
+ * Linear shows once (ADR 0165).
  */
 async function runLinearCommentWakeFlow(
   shell: ClankieFaceShell,
@@ -520,7 +520,7 @@ async function connectLinearOauth(shell: ClankieFaceShell, services: ConnectComm
       [
         "Linear connected via OAuth. Search and file issues from any room.",
         // This token cannot sign webhooks, and this is where an owner comes
-        // looking for everything Linear (ADR 0164).
+        // looking for everything Linear (ADR 0165).
         "Waking on his Linear comments is a separate credential: /auth → Linear webhook secret.",
       ].join("\n"),
       "success",
