@@ -79,7 +79,7 @@ flowchart LR
   channel, including to the SIGKILL the launcher escalates to, detaches instead
   of stopping; and a start that finds a live server still answering adopts it
   rather than refusing the socket. Stopping the fleet is explicit, through
-  `herdr server stop` on its own socket. This reverses ADR 0157's
+  `clankie-herdr server stop`. This reverses ADR 0157's
   close-on-disconnect: an orphaned server is a fleet still working, and the
   socket is the lock that keeps there being exactly one.
 - The bundled runtime's private `XDG_STATE_HOME` isolates that Herdr's own

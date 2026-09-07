@@ -1,4 +1,4 @@
-import { openHerdr } from "../src/session/herdr-connection.ts";
+import { openHerdr, runFleetHerdr } from "../src/session/herdr-connection.ts";
 import { type CredentialStore } from "@clankie/credential-broker";
 import { type ServiceRegistryOptions } from "./services.ts";
 import { doctorCommand, type ExecFileImpl } from "../src/command/doctor.ts";
@@ -7,7 +7,7 @@ import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
 import { runGamesCommand } from "../src/command/games.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
-import { runHerdrCommand } from "../src/command/herdr.ts";
+import { forwardsToFleetHerdr, runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 import { runEffortCommand } from "../src/command/effort.ts";
 import { runImageModelCommand } from "../src/command/image-model.ts";
@@ -145,6 +145,7 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "herdr") {
       if (rest.length === 1 && rest[0] === "open") return await openHerdr(options);
+      if (forwardsToFleetHerdr(rest)) return await runFleetHerdr(rest, options);
       const result = await runHerdrCommand(rest, options);
       outputJson(stdout, result);
       return 0;

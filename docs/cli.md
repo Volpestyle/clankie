@@ -517,8 +517,15 @@ operator endpoint `GET /v1/herdr` returns the running binding; pending settings
 do not redirect clients. `/health` includes owned Herdr's state and returns 503
 during recovery.
 
-`clankie-herdr` is the shortcut for `clankie herdr open`. It attaches a native
-viewer to the selected, already-running local server. Use **Ctrl+B, then Q**
+`clankie-herdr` with no arguments is the shortcut for `clankie herdr open`. It
+attaches a native viewer to the selected, already-running local server. With
+arguments it is the fleet's own Herdr CLI: `status`, `set`, and `open` stay
+Clankie's, and every other verb is forwarded to the runtime he is bound to,
+with its binary, its socket, and its configuration. So `clankie-herdr pane
+list` reads the fleet, and `clankie-herdr server stop` ends a bundled fleet
+that outlives the service (ADR 0164). Running a bare `herdr` instead reaches
+whatever build is on PATH, which for a bundled fleet answers a protocol
+mismatch on a socket it cannot see. Use **Ctrl+B, then Q**
 to detach with the default bindings. Closing the viewer leaves Clankie and his
 workers running. The TUI's `/herdr open` opens the same viewer and returns to
 the conversation after detach. Native viewing requires a local service.

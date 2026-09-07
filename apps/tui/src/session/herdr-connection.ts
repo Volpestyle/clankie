@@ -63,6 +63,26 @@ export function herdrConnection(binding: HerdrBinding, options: HerdrConnectionO
 }
 
 /** Attach only: `client` cannot start or stop the service's Herdr server. */
+/**
+ * Run a Herdr command against the fleet's own runtime: its binary, its socket,
+ * its private configuration ([ADR 0164](../../../../docs/adr/0164-the-fleet-is-its-own-session.md)).
+ * A bundled fleet is a different build from whatever `herdr` sits on the
+ * caller's PATH, which answers a protocol mismatch, and it listens on a socket
+ * that PATH knows nothing about. Pane identity rides along only when the caller
+ * is already sitting in that session, which `herdrConnection` decides.
+ */
+export async function runFleetHerdr(
+  args: readonly string[],
+  options: HerdrConnectionOptions,
+): Promise<number> {
+  const { command, env } = herdrConnection(await readHerdrBinding(options), options);
+  return await new Promise<number>((resolve, reject) => {
+    const child = spawn(command, [...args], { env, stdio: "inherit" });
+    child.once("error", reject);
+    child.once("exit", (code) => resolve(code ?? 1));
+  });
+}
+
 export async function openHerdr(options: HerdrConnectionOptions): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("The Herdr viewer requires a TTY");
   const { command, env } = herdrConnection(await readHerdrBinding(options), options);

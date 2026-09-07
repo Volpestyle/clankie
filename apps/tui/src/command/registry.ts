@@ -93,6 +93,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  herdr [status|open] | set --runtime auto|bundled|external | set --session NAME",
       "                           Bundled runtime or an external Herdr session",
+      "  herdr <herdr command>    Run it against the fleet's own runtime (clankie-herdr …)",
     ],
   },
   {

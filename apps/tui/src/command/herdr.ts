@@ -66,6 +66,15 @@ async function herdrSet(
   };
 }
 
+/**
+ * `status`, `set`, and `open` are Clankie's own; anything else is a Herdr
+ * command meant for the fleet's runtime and is forwarded there (ADR 0164).
+ */
+export function forwardsToFleetHerdr(args: readonly string[]): boolean {
+  const verb = args[0];
+  return verb !== undefined && verb !== "status" && verb !== "set" && verb !== "open";
+}
+
 export async function runHerdrCommand(
   args: readonly string[],
   options: HerdrCommandOptions = {},

@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { HERDR_SOCKET_HEADER } from "@clankie/protocol";
 import { herdrConnection, readHerdrBinding } from "../src/session/herdr-connection.ts";
+import { forwardsToFleetHerdr } from "../src/command/herdr.ts";
 import { clankieStateHome } from "../src/state-home.ts";
 import { herdrPaneIdFromEnv, jumpToHerdrAgent, sourceHerdrSocket } from "../src/session/herdr-report.ts";
 import { ensureHerdLeadCompanion } from "../src/observation/herd-lead-companion.ts";
@@ -93,4 +94,18 @@ it("resolves the owner's state home inside a fleet pane, where Herdr's own XDG i
   expect(clankieStateHome(inFleetPane)).toBe("/Users/j/.local/state");
   expect(clankieStateHome({ XDG_STATE_HOME: "/custom/state" })).toBe("/custom/state");
   expect(clankieStateHome({ HOME: "/Users/j" })).toBe("/Users/j/.local/state");
+});
+
+it("keeps Clankie's own herdr verbs local and forwards the rest to the fleet (ADR 0164)", () => {
+  for (const local of [["status"], ["set", "--runtime", "auto"], ["open"], []]) {
+    expect(forwardsToFleetHerdr(local)).toBe(false);
+  }
+  for (const forwarded of [
+    ["server", "stop"],
+    ["pane", "list"],
+    ["agent", "list"],
+    ["api", "snapshot"],
+  ]) {
+    expect(forwardsToFleetHerdr(forwarded)).toBe(true);
+  }
 });
