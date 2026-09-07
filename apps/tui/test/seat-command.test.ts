@@ -157,7 +157,11 @@ describe("clankie seat", () => {
   });
 
   it("launches, names the herdr pane clankie, records the session, and resumes it", async () => {
-    const env = await stateEnv({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p2" });
+    const env = await stateEnv({
+      HERDR_ENV: "1",
+      HERDR_PANE_ID: "w1:p2",
+      HERDR_SOCKET_PATH: "/tmp/fleet.sock",
+    });
     const calls: string[][] = [];
     const spawned: { args: readonly string[]; cwd: string }[] = [];
     const stderr = outputBuffer();
@@ -165,6 +169,7 @@ describe("clankie seat", () => {
       repoRoot,
       env,
       execFileImpl: fakeExec({ paneAgent: "claude", calls }),
+      fleetSocketPath: async () => "/tmp/fleet.sock",
       spawnImpl: async (_command, args, cwd) => {
         spawned.push({ args, cwd });
         return 0;
@@ -196,11 +201,16 @@ describe("clankie seat", () => {
   });
 
   it("stays an ordinary fleet agent when another pane already holds the name", async () => {
-    const env = await stateEnv({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p3" });
+    const env = await stateEnv({
+      HERDR_ENV: "1",
+      HERDR_PANE_ID: "w1:p3",
+      HERDR_SOCKET_PATH: "/tmp/fleet.sock",
+    });
     const stderr = outputBuffer();
     const exit = await runSeatCommand([], {
       repoRoot,
       env,
+      fleetSocketPath: async () => "/tmp/fleet.sock",
       execFileImpl: fakeExec({ paneAgent: "claude", renameFails: "agent name clankie is already in use" }),
       spawnImpl: async () => 0,
       sleepImpl: async () => undefined,
@@ -210,6 +220,29 @@ describe("clankie seat", () => {
     expect(exit).toBe(0);
     expect(stderr.text()).toContain("another pane already holds the clankie seat");
     expect(stderr.text()).toContain("agent name clankie is already in use");
+  });
+
+  it("names no pane when the seat is opened outside the fleet the service leads (ADR 0164)", async () => {
+    const env = await stateEnv({
+      HERDR_ENV: "1",
+      HERDR_PANE_ID: "w1Z:p6",
+      HERDR_SOCKET_PATH: "/tmp/personal.sock",
+    });
+    const calls: string[][] = [];
+    const stdout = outputBuffer();
+    const exit = await runSeatCommand(["--dry-run"], {
+      repoRoot,
+      env,
+      fleetSocketPath: async () => "/tmp/fleet.sock",
+      execFileImpl: fakeExec({ paneAgent: "claude", calls }),
+      spawnImpl: async () => 0,
+      sleepImpl: async () => undefined,
+      stdout: stdout.stream,
+      stderr: outputBuffer().stream,
+    });
+    expect(exit).toBe(0);
+    expect(JSON.parse(stdout.text())).not.toHaveProperty("herdrPaneId");
+    expect(calls.some((call) => call.includes("rename"))).toBe(false);
   });
 
   it("refuses --resume with no seat recorded", async () => {

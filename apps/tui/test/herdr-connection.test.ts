@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { HERDR_SOCKET_HEADER } from "@clankie/protocol";
 import { herdrConnection, readHerdrBinding } from "../src/session/herdr-connection.ts";
-import { jumpToHerdrAgent, sourceHerdrSocket } from "../src/session/herdr-report.ts";
+import { herdrPaneIdFromEnv, jumpToHerdrAgent, sourceHerdrSocket } from "../src/session/herdr-report.ts";
 import { ensureHerdLeadCompanion } from "../src/observation/herd-lead-companion.ts";
 import { createCaptainRouteClient } from "../src/session/operator-conversations.ts";
 
@@ -72,4 +72,14 @@ it("qualifies caller pane IDs with the caller's session, even when Herdr supplie
       return Response.json({});
     }) as typeof fetch,
   }).fetch("/test");
+});
+
+it("claims a seat only when the console sits in the session the service leads (ADR 0164)", () => {
+  const binding = { runtime: "bundled" as const, session: "default", socketPath: "/tmp/fleet/herdr.sock" };
+  const inFleet = { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p2", HERDR_SOCKET_PATH: "/tmp/fleet/herdr.sock" };
+  const elsewhere = { HERDR_ENV: "1", HERDR_PANE_ID: "w1Z:p6", HERDR_SOCKET_PATH: "/tmp/other/herdr.sock" };
+  expect(herdrPaneIdFromEnv(herdrConnection(binding, { env: inFleet, repoRoot: "/repo" }).env)).toBe("w1:p2");
+  expect(
+    herdrPaneIdFromEnv(herdrConnection(binding, { env: elsewhere, repoRoot: "/repo" }).env),
+  ).toBeUndefined();
 });

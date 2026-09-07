@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { readHerdrBinding } from "../session/herdr-connection.ts";
 import { outputJson, type Writable } from "./io.ts";
 
 const execFileAsync = promisify(execFileCallback);
@@ -62,6 +63,8 @@ export interface SeatCommandOptions {
   ) => Promise<{ readonly stdout: string; readonly stderr: string }>;
   readonly spawnImpl?: (command: string, args: readonly string[], cwd: string) => Promise<number>;
   readonly sleepImpl?: (ms: number) => Promise<void>;
+  /** Test seam: the socket of the session the service leads; undefined when it cannot be read. */
+  readonly fleetSocketPath?: () => Promise<string | undefined>;
   readonly stdout?: Writable;
   readonly stderr?: Writable;
 }
@@ -211,7 +214,17 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     ...(channel ? ["--dangerously-load-development-channels", `plugin:${SEAT_PLUGIN_ID}`] : []),
     ...(previous === undefined ? ["--session-id", sessionId] : ["--resume", sessionId]),
   ];
-  const herdrPaneId = env.HERDR_ENV === "1" ? env.HERDR_PANE_ID?.trim() : undefined;
+  // This pane is his head only inside the fleet the service leads (ADR 0164):
+  // a seat opened in any other Herdr session names no pane there.
+  const paneId = env.HERDR_ENV === "1" ? env.HERDR_PANE_ID?.trim() : undefined;
+  const fleetSocket =
+    paneId === undefined || paneId.length === 0
+      ? undefined
+      : await (
+          options.fleetSocketPath ??
+          (() => readHerdrBinding({ repoRoot: options.repoRoot, env }).then((binding) => binding.socketPath))
+        )().catch(() => undefined);
+  const herdrPaneId = fleetSocket !== undefined && env.HERDR_SOCKET_PATH === fleetSocket ? paneId : undefined;
   return {
     command: "claude",
     args,

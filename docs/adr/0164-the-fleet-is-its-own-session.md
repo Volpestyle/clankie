@@ -68,6 +68,10 @@ flowchart LR
   upstream pull. The cost is paid for in fleet features the plugin API cannot
   provide, and it is why a herdr change is the last resort after a service-side
   one.
+- The console and `clankie seat` claim a pane as his only when the terminal
+  they sit in is the fleet's session, checked by socket. Opened inside any
+  other Herdr they run as ordinary consoles: no pane is him, no pane is
+  renamed there, and the turn leads the fleet from the service body.
 - An owner already bound to an external session keeps that binding; the
   service saves it once and `auto` only runs again after
   `clankie herdr set --runtime auto`.

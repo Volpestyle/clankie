@@ -136,11 +136,17 @@ const voiceTranscripts = createDiscordVoiceTranscriptClient(captainRouteClient);
 const conversationSelection = new OperatorConversationSelection(conversationClient);
 let currentContextUsage: OperatorConversationContextUsage | undefined;
 let sideConversation: { readonly parentConversationId: string; readonly conversationId: string } | undefined;
+// The console is a seat only inside the fleet the service leads (ADR 0164):
+// `herdrConnection` keeps this pane's identity only when the terminal it sits
+// in is that session, so a console opened in any other Herdr claims no pane.
+const seatPaneId = await fleetEnvironment()
+  .then((env) => herdrPaneIdFromEnv(env))
+  .catch(() => undefined);
 const conversationPrompt = new OperatorConversationPromptSession({
   client: conversationClient,
   selection: conversationSelection,
   tails: new OperatorConversationTailStore(join(tuiStateRoot, "operator-conversation-tail.json")),
-  herdrPaneId: () => herdrPaneIdFromEnv(),
+  herdrPaneId: () => seatPaneId,
 });
 let promptReady = Promise.resolve();
 await conversationPrompt.initialize();
