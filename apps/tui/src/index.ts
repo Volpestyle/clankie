@@ -139,9 +139,28 @@ let sideConversation: { readonly parentConversationId: string; readonly conversa
 // The console is a seat only inside the fleet the service leads (ADR 0164):
 // `herdrConnection` keeps this pane's identity only when the terminal it sits
 // in is that session, so a console opened in any other Herdr claims no pane.
-const seatPaneId = await fleetEnvironment()
-  .then((env) => herdrPaneIdFromEnv(env))
-  .catch(() => undefined);
+const seatEnv = await fleetEnvironment().catch(() => undefined);
+const seatPaneId = seatEnv === undefined ? undefined : herdrPaneIdFromEnv(seatEnv);
+/**
+ * Presence belongs to the fleet's own session (ADR 0164), so it is reported
+ * against that binding's herdr — never whichever `herdr` happens to be on the
+ * caller's PATH, which on a bundled fleet is a different build refusing the
+ * protocol. A console holding no fleet pane reports nothing, and a failed
+ * report is swallowed: presence is a status line, not the conversation.
+ */
+async function reportSeatPresence(state: "idle" | "working", message?: string): Promise<void> {
+  if (seatEnv === undefined || seatPaneId === undefined) return;
+  try {
+    await reportHerdrAgent(state, {
+      source: "clankie",
+      agent: "clankie",
+      env: seatEnv,
+      ...(message === undefined ? {} : { message }),
+    });
+  } catch {
+    // A pane that cannot hear about presence still runs the conversation.
+  }
+}
 const conversationPrompt = new OperatorConversationPromptSession({
   client: conversationClient,
   selection: conversationSelection,
@@ -392,7 +411,7 @@ const shell = new ClankieFaceShell({
     });
     try {
       await stopConversationObservation();
-      await reportHerdrAgent("working", { source: "clankie", agent: "clankie", message: "turn" });
+      await reportSeatPresence("working", "turn");
       const running = conversationPrompt.prompt(
         prompt,
         createOperatorConversationShellSink(activeShell, {
@@ -410,7 +429,7 @@ const shell = new ClankieFaceShell({
     } finally {
       ready();
       startConversationObservation();
-      await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
+      await reportSeatPresence("idle");
     }
   },
   onPendingPrompt: async (prompt, delivery) => {
@@ -429,7 +448,7 @@ const shell = new ClankieFaceShell({
       await conversationClient.close(sideConversation.conversationId);
       sideConversation = undefined;
     }
-    await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
+    await reportSeatPresence("idle");
   },
 });
 
@@ -490,8 +509,15 @@ process.on("unhandledRejection", (reason) => {
 });
 
 shell.start();
-void reportHerdrMetadata({ source: "clankie", agent: "clankie", title: "Clankie" });
-void reportHerdrAgent("idle", { source: "clankie", agent: "clankie", message: "Clankie TUI" });
+if (seatEnv !== undefined && seatPaneId !== undefined) {
+  void reportHerdrMetadata({
+    source: "clankie",
+    agent: "clankie",
+    title: "Clankie",
+    env: seatEnv,
+  }).catch(() => undefined);
+}
+void reportSeatPresence("idle", "Clankie TUI");
 herdrRoster.start(() => {
   shell.requestRender();
 });

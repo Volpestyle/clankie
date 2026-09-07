@@ -72,6 +72,10 @@ flowchart LR
   they sit in is the fleet's session, checked by socket. Opened inside any
   other Herdr they run as ordinary consoles: no pane is him, no pane is
   renamed there, and the turn leads the fleet from the service body.
+- Presence is reported against the binding's own herdr rather than whichever
+  `herdr` sits on the caller's PATH, which for a bundled fleet is a different
+  build that refuses the protocol. A report that fails is dropped: presence is
+  a status line, and it may never take the console down with it.
 - An owner already bound to an external session keeps that binding; the
   service saves it once and `auto` only runs again after
   `clankie herdr set --runtime auto`.
