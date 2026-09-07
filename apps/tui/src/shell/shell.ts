@@ -43,6 +43,7 @@ import {
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { ClankieBannerComponent, type BannerFields } from "../face/clankie-banner.ts";
 import { isClankieLeftMouseButton, parseClankieSgrMouse } from "../face/clankie-sgr-mouse.ts";
+import { genericToolRenderer } from "./tool-render.ts";
 import {
   formatHerdrJumpResult,
   herdrPaneRefAtColumn,
@@ -567,7 +568,7 @@ export class ClankieFaceShell {
         toolCallId,
         parseToolArguments(argumentsDetail),
         {},
-        undefined,
+        genericToolRenderer(name),
         this.tui,
         this.cwdValue,
       );
@@ -592,7 +593,7 @@ export class ClankieFaceShell {
         toolCallId,
         undefined,
         {},
-        undefined,
+        genericToolRenderer(name),
         this.tui,
         this.cwdValue,
       );
