@@ -19,10 +19,10 @@ macOS input-isolation primitives.
 
 ## Two different target models
 
-| Target | What ownership provides | Limit to establish |
-| --- | --- | --- |
-| Existing windows in the operator's macOS session | Exact-window capture, semantic AX actions, PID/window-routed events, a logical cursor per agent, and app-local focus where it works | Another Space is window organization, not an independent input session. Opaque controls, app activation, same-process windows, hidden rendering, and concurrent operator typing need real proof. |
-| Apps in Clankie's separate desktop session | A session/VM-owned display, pointer, keyboard focus, clipboard, and app instances; foreground interaction inside that session does not require taking the operator's desktop | These are separate app instances and logins. It does not control the operator's already-open native windows. |
+| Target                                           | What ownership provides                                                                                                                                                      | Limit to establish                                                                                                                                                                               |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Existing windows in the operator's macOS session | Exact-window capture, semantic AX actions, PID/window-routed events, a logical cursor per agent, and app-local focus where it works                                          | Another Space is window organization, not an independent input session. Opaque controls, app activation, same-process windows, hidden rendering, and concurrent operator typing need real proof. |
+| Apps in Clankie's separate desktop session       | A session/VM-owned display, pointer, keyboard focus, clipboard, and app instances; foreground interaction inside that session does not require taking the operator's desktop | These are separate app instances and logins. It does not control the operator's already-open native windows.                                                                                     |
 
 The operator preference between these models is pending. A VM is not silently
 substituted for existing-window control. The isolated model is the stronger
