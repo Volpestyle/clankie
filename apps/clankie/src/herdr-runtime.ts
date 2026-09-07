@@ -18,6 +18,11 @@ export function bundledHerdrBinary(repoRoot: string, settings: HerdrSettings): s
   return checkout;
 }
 
+/** Env a running harness stamps on its children; none of it belongs to a fresh seat. */
+export function isHarnessSessionMarker(name: string): boolean {
+  return name === "CLAUDECODE" || name === "CLAUDE_PID" || name.startsWith("CLAUDE_CODE_");
+}
+
 /** A child supervisor loses its IPC channel even if Clankie is killed with SIGKILL. */
 export async function startHerdrRuntime(input: {
   binary: string;
@@ -45,6 +50,10 @@ export async function startHerdrRuntime(input: {
   });
   for (const name of Object.keys(input.env)) {
     if (name.startsWith("HERDR_")) delete input.env[name];
+    // A harness session marker inherited from whoever restarted the service
+    // would make every hire believe it is that session's child (Claude Code
+    // then stops saving transcripts). The owned runtime starts clean.
+    if (isHarnessSessionMarker(name)) delete input.env[name];
   }
   input.env.HERDR_SOCKET_PATH = socketPath;
   delete input.env.HERD_LEAD_SUMMARIES_CACHE;

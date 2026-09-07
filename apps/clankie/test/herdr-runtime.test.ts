@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { bundledHerdrBinary, startHerdrRuntime } from "../src/herdr-runtime.ts";
+import { isHarnessSessionMarker } from "../src/herdr-runtime.ts";
 
 const roots: string[] = [];
 async function temporary() {
@@ -44,4 +45,15 @@ it("refuses to take over an occupied runtime socket", async () => {
   } finally {
     await new Promise<void>((done) => server.close(() => done()));
   }
+});
+
+describe("the owned runtime's environment", () => {
+  it("drops the markers a running harness stamps on its children", () => {
+    for (const name of ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID"]) {
+      expect(isHarnessSessionMarker(name)).toBe(true);
+    }
+    for (const name of ["PATH", "HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) {
+      expect(isHarnessSessionMarker(name)).toBe(false);
+    }
+  });
 });
