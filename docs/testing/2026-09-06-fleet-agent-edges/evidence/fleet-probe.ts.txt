@@ -1,0 +1,124 @@
+/**
+ * Live check for VUH-1212: drive the captain's real fleet-edge path against a
+ * real Herdr session and print the snapshot it derives.
+ *
+ * Imports the shipped modules from clankie main - nothing here reimplements the
+ * derivation. Also tees the raw socket frames so the evidence shows what Herdr
+ * actually put on the wire.
+ */
+import { appendFileSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
+import { randomUUID } from "node:crypto";
+
+import { OperatorFleetSnapshotSchema } from "@clankie/protocol";
+import { readFleet } from "./src/captain/herdr-census.ts";
+import { FleetChangeClock, watchHerdrFleetChanges } from "./src/captain/herdr-fleet-changes.ts";
+import {
+  deriveFleetEdges,
+  parentSeatIds,
+  PromptEdgeWindow,
+  type EdgeSeat,
+} from "./src/captain/fleet-edges.ts";
+
+const socketPath = process.env.HERDR_SOCKET_PATH;
+if (socketPath === undefined) throw new Error("HERDR_SOCKET_PATH is required");
+const rawLog = process.argv[2] ?? "/tmp/raw-frames.log";
+const outFile = process.argv[3] ?? "/tmp/snapshot.json";
+const runSeconds = Number(process.argv[4] ?? "45");
+
+writeFileSync(rawLog, "");
+
+// A second subscription purely to record what Herdr really emits, so the
+// evidence is the wire itself rather than the captain's reading of it.
+const tee = createConnection(socketPath);
+tee.setEncoding("utf8");
+let teeBuffer = "";
+tee.on("connect", () => {
+  tee.write(
+    `${JSON.stringify({
+      id: `probe-${randomUUID()}`,
+      method: "events.subscribe",
+      params: { subscriptions: [{ type: "agent.prompted" }, { type: "agent.spawned" }] },
+    })}\n`,
+  );
+});
+tee.on("data", (chunk: string) => {
+  teeBuffer += chunk;
+  const lines = teeBuffer.split("\n");
+  teeBuffer = lines.pop() ?? "";
+  for (const line of lines) {
+    if (line.trim().length === 0) continue;
+    appendFileSync(rawLog, `${line}\n`);
+  }
+});
+tee.on("error", (error) => appendFileSync(rawLog, `TEE ERROR ${String(error)}\n`));
+
+// The captain's own path, unmodified.
+const clock = new FleetChangeClock();
+const promptEdges = new PromptEdgeWindow();
+let cursorTicks = 0;
+const stop = watchHerdrFleetChanges(clock, {
+  socketPath,
+  summariesPath: "/nonexistent/summaries.json",
+  onPromptEdge: (edge) => {
+    promptEdges.record(edge);
+    appendFileSync(rawLog, `CAPTAIN RECORDED ${JSON.stringify(edge)}\n`);
+  },
+});
+const countTicks = (): void => {
+  cursorTicks += 1;
+  void clock.wait(clock.current(), 60_000).then(countTicks);
+};
+void clock.wait(clock.current(), 60_000).then(countTicks);
+
+process.stdout.write(`probe watching ${socketPath} for ${String(runSeconds)}s\n`);
+
+setTimeout(() => {
+  void (async () => {
+    const fleet = await readFleet();
+    const edgeSeats: EdgeSeat[] = fleet.seats.map((seat) => ({
+      seatId: seat.seatId,
+      paneId: seat.paneId,
+      ...(seat.parentPaneId === undefined ? {} : { parentPaneId: seat.parentPaneId }),
+    }));
+    const parents = parentSeatIds(edgeSeats);
+    const recent = promptEdges.recent();
+    const snapshot = {
+      schemaVersion: 1 as const,
+      cursor: clock.current(),
+      seats: fleet.seats.map((seat) => ({
+        seatId: seat.seatId,
+        occupantId: seat.occupantId,
+        personaId: `agent-${seat.subject}`,
+        harness: seat.harness,
+        status: seat.status,
+        title: seat.title,
+        ...(seat.workingDirectory === undefined ? {} : { workingDirectory: seat.workingDirectory }),
+        ...(parents.get(seat.seatId) === undefined ? {} : { parentSeatId: parents.get(seat.seatId)! }),
+      })),
+      personas: [],
+      channels: [],
+      edges: deriveFleetEdges(edgeSeats, recent),
+    };
+    // The wire contract is the judge: a snapshot that does not parse is not a
+    // snapshot, whatever it looks like printed.
+    const parsed = OperatorFleetSnapshotSchema.parse(snapshot);
+    writeFileSync(
+      outFile,
+      `${JSON.stringify(
+        {
+          cursorTicks,
+          observedPromptEdges: recent,
+          censusPaneJoin: edgeSeats,
+          snapshot: parsed,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    process.stdout.write(`probe wrote ${outFile}\n`);
+    stop();
+    tee.destroy();
+    process.exit(0);
+  })();
+}, runSeconds * 1_000).unref?.();

@@ -1,0 +1,4 @@
+{"id":"probe-f9788c02-43b3-42e1-a579-707a1db09d3b","result":{"type":"subscription_started"}}
+{"data":{"child_pane_id":"w5:p3","parent_pane_id":"w5:p2","timestamp_ms":1788739601549,"type":"agent_spawned"},"event":"agent_spawned"}
+{"data":{"from_pane_id":"w5:p2","timestamp_ms":1788739614864,"to_pane_id":"w5:p3","type":"agent_prompted"},"event":"agent_prompted"}
+CAPTAIN RECORDED {"fromPaneId":"w5:p2","toPaneId":"w5:p3","at":1788739614864}

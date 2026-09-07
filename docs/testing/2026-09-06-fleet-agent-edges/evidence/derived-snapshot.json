@@ -1,0 +1,63 @@
+{
+  "cursorTicks": 9,
+  "observedPromptEdges": [
+    {
+      "fromPaneId": "w5:p2",
+      "toPaneId": "w5:p3",
+      "at": 1788739614864
+    }
+  ],
+  "censusPaneJoin": [
+    {
+      "seatId": "term_65ad960027fd44",
+      "paneId": "w5:p3",
+      "parentPaneId": "w5:p2"
+    },
+    {
+      "seatId": "term_65ad959f423963",
+      "paneId": "w5:p2",
+      "parentPaneId": "w1Z:p7"
+    }
+  ],
+  "snapshot": {
+    "schemaVersion": 1,
+    "cursor": "5e3de551-808c-4297-ab8f-2c55c5128626:10",
+    "seats": [
+      {
+        "seatId": "term_65ad960027fd44",
+        "occupantId": "session-6240012a652b7e2a6a1fffe2eb6663ffa3b128646ad4093ac600d5d5dc2e21f1",
+        "personaId": "agent-beta",
+        "harness": "claude",
+        "status": "idle",
+        "title": "Session naming",
+        "workingDirectory": "/private/tmp/claude-501/-Users-james-dev-clankie-app/394c3f38-17e3-47e8-9193-c58d224c4d7e/scratchpad/live",
+        "parentSeatId": "term_65ad959f423963"
+      },
+      {
+        "seatId": "term_65ad959f423963",
+        "occupantId": "session-27657078ad2d3d7049003c48e5cc83aeba39c9916982a6c5ce423a8b5ca88e7d",
+        "personaId": "agent-alpha",
+        "harness": "claude",
+        "status": "idle",
+        "title": "Claude Code",
+        "workingDirectory": "/private/tmp/claude-501/-Users-james-dev-clankie-app/394c3f38-17e3-47e8-9193-c58d224c4d7e/scratchpad/live"
+      }
+    ],
+    "personas": [],
+    "channels": [],
+    "edges": [
+      {
+        "kind": "prompt",
+        "fromSeatId": "term_65ad959f423963",
+        "toSeatId": "term_65ad960027fd44",
+        "at": "2026-09-07T00:06:54.864Z"
+      },
+      {
+        "kind": "spawn",
+        "fromSeatId": "term_65ad959f423963",
+        "toSeatId": "term_65ad960027fd44",
+        "at": "2026-09-07T00:07:29.914Z"
+      }
+    ]
+  }
+}
