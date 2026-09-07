@@ -55,6 +55,11 @@ foundation.
   `pnpm check` before handoff.
 - Build every feature API- and CLI-first, expose any settings it needs in the
   TUI, and update the relevant agent-facing skill and human-facing docs.
+- Reusable lessons about how Clankie works belong in
+  `apps/clankie/src/captain/instructions.md` or the relevant shipped skill;
+  regenerate the Claude seat with `node integrations/claude-plugin/build.mjs`
+  after instruction changes. Episode memory preserves experiences, not standing
+  operating instructions. Keep project-specific procedures in that project's repo.
 - The repository is Apache-2.0 except `apps/vox`, which retains its own
   AGPL-3.0-or-later license and provenance record.
 - The credential broker (Keychain on macOS) is the canonical secret store.

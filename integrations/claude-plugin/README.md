@@ -25,6 +25,13 @@ and run `node integrations/claude-plugin/build.mjs`. `node
 integrations/claude-plugin/build.mjs --check` fails when the file is stale, and
 the launcher's tests run that check.
 
+This source also carries durable operating lessons, including delivery before
+harness work, bounded fleet review, and acceptance-driven Linear updates.
+The service prompt and this generated seat share them; episode memories are
+ambient recollections, not a substitute. New checkout sessions consume the
+updated files. Copied release or marketplace installs need their normal update
+before new sessions receive the change.
+
 ## Launch
 
 ```bash
