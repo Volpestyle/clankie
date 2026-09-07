@@ -722,15 +722,24 @@ export type OperatorSeatDayTally = z.infer<typeof OperatorSeatDayTallySchema>;
  * One directed relationship between two seated agents (ADR 0163). A `spawn`
  * edge runs from the parent that started the child and stands for the life of
  * the child; a `prompt` edge runs from the sender to the agent it prompted and
- * stands only while it is inside the captain's recent window. Both ends are
- * live seats: an edge touching a seat that left the roster is not carried.
+ * a `reply` edge back from the one that answered, both standing only while
+ * they are inside the captain's recent window. Both ends are live seats: an
+ * edge touching a seat that left the roster is not carried.
  */
 export const OperatorFleetEdgeSchema = z
   .object({
-    kind: z.enum(["prompt", "spawn"]),
+    kind: z.enum(["prompt", "spawn", "reply"]),
     fromSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     toSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     at: z.string().datetime(),
+    /**
+     * The thread this edge happened in, and the entry in it that was said,
+     * when the captain can name them. A message it delivered itself it can
+     * always name; one typed into a pane by `herdr agent prompt` it never saw,
+     * so a surface that wants the words has to be ready for their absence.
+     */
+    conversationId: OperatorConversationIdSchema.optional(),
+    entryId: OperatorConversationCursorSchema.optional(),
   })
   .strict();
 export type OperatorFleetEdge = z.infer<typeof OperatorFleetEdgeSchema>;

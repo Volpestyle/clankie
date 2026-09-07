@@ -56,7 +56,13 @@ import { HerdrTerminalStore } from "./herdr-terminal.ts";
 import { HerdrTerminalControlStore } from "./herdr-terminal-control.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
-import { deriveFleetEdges, parentSeatIds, PromptEdgeWindow, type EdgeSeat } from "./fleet-edges.ts";
+import {
+  deriveFleetEdges,
+  parentSeatIds,
+  PromptEdgeWindow,
+  SeatMessageWindow,
+  type EdgeSeat,
+} from "./fleet-edges.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import { PersonaStore } from "./personas.ts";
@@ -664,6 +670,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // The one fleet fact Herdr does not keep (ADR 0163): bounded, process-local,
   // never persisted. Spawn edges need no window; they are read off the census.
   const promptEdges = new PromptEdgeWindow();
+  // Messages the captain carried between seats itself, and the replies they
+  // drew. Same bounds and the same volatility as the prompt ring (ADR 0163).
+  const seatMessages = new SeatMessageWindow();
   const stopFleetChanges = watchHerdrFleetChanges(fleetChanges, {
     onPromptEdge: (edge) => promptEdges.record(edge),
   });
@@ -1106,6 +1115,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }),
     (personaId) => seatByPersona.get(personaId),
     async (personaId) => personas.presentation(personaId, (await settings()).discord.activityTunnelHostname),
+    (event) => {
+      // A message between two seats, and the turn that may answer it. Either
+      // way the fleet moved, so the cursor moves with it (ADR 0150).
+      if (event.type === "message") {
+        seatMessages.record({
+          kind: "prompt",
+          fromSeatId: event.fromSeatId,
+          toSeatId: event.toSeatId,
+          conversationId: event.conversationId,
+          entryId: event.entryId,
+          at: Date.now(),
+        });
+        fleetChanges.touch();
+        return;
+      }
+      const reply = seatMessages.observeTurn({
+        seatId: event.seatId,
+        conversationId: event.conversationId,
+        entryId: event.entryId,
+        at: Date.now(),
+      });
+      if (reply !== null) fleetChanges.touch();
+    },
   );
 
   /**
@@ -1179,7 +1211,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // Bounded by the roster it is read against, so the day's counts can
           // never outnumber the seats the snapshot carries.
           tallies: [...seatLedger.tallies(seats.map((seat) => seat.seatId))],
-          edges: [...deriveFleetEdges(liveEdgeSeats, promptEdges.recent())],
+          edges: [...deriveFleetEdges(liveEdgeSeats, promptEdges.recent(), seatMessages.recent())],
         },
       };
     }

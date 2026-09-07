@@ -205,6 +205,26 @@ type SeatSender = (
   context: { readonly conversationId: string; readonly source: string },
 ) => Promise<boolean>;
 type PersonaSeatResolver = (personaId: string) => string | undefined;
+/**
+ * What one seat said to another, as it happens (ADR 0163). The store reports;
+ * the captain decides what to do with it, and holds the window.
+ */
+export type SeatEdgeReporter = (
+  event:
+    | {
+        readonly type: "message";
+        readonly fromSeatId: string;
+        readonly toSeatId: string;
+        readonly conversationId: string;
+        readonly entryId: string;
+      }
+    | {
+        readonly type: "turn";
+        readonly seatId: string;
+        readonly conversationId: string;
+        readonly entryId: string;
+      },
+) => void;
 type PersonaPresentation = (personaId: string) => Promise<{
   readonly username: string;
   readonly avatarUrl?: string;
@@ -349,6 +369,7 @@ export class ConversationStore {
   private readonly runner: ConversationRunner;
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
   private readonly sendToSeat: SeatSender | undefined;
+  private readonly reportSeatEdge: SeatEdgeReporter | undefined;
   private readonly forkConversation: ConversationForker | undefined;
   private readonly projection: ChannelProjection | undefined;
   private readonly seatForPersona: PersonaSeatResolver | undefined;
@@ -371,6 +392,7 @@ export class ConversationStore {
     projection?: ChannelProjection,
     seatForPersona?: PersonaSeatResolver,
     personaPresentation?: PersonaPresentation,
+    reportSeatEdge?: SeatEdgeReporter,
   ) {
     this.root = root;
     this.runner = runner;
@@ -381,6 +403,7 @@ export class ConversationStore {
     this.projection = projection;
     this.seatForPersona = seatForPersona;
     this.personaPresentation = personaPresentation;
+    this.reportSeatEdge = reportSeatEdge;
     mkdirSync(root, { recursive: true });
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -1286,9 +1309,28 @@ export class ConversationStore {
         // stalling on a pane that is not there to answer.
         const personaId = channelMemberPersonaId(member);
         const seatId = this.seatForPersona === undefined ? personaId : this.seatForPersona(personaId);
+        // Whoever spoke last in the room is who this turn answers, so the edge
+        // is drawn from them — captured before the send, because the send is
+        // what makes it the previous line.
+        const answering = this.lastSeatEntry(conversationId);
         const asked =
           seatId !== undefined &&
           (await this.sendToSeat?.(seatId, prompt, { conversationId, source: "room" })) === true;
+        if (asked && seatId !== undefined && answering !== undefined) {
+          const fromSeatId =
+            this.seatForPersona === undefined
+              ? answering.personaId
+              : this.seatForPersona(answering.personaId);
+          if (fromSeatId !== undefined && fromSeatId !== seatId) {
+            this.reportSeatEdge?.({
+              type: "message",
+              fromSeatId,
+              toSeatId: seatId,
+              conversationId,
+              entryId: answering.entryId,
+            });
+          }
+        }
         const reply = asked ? await this.awaitSeatReply(seatId, context.signal) : undefined;
         const spokenText = channelTurnReply(reply);
         if (spokenText === undefined) {
@@ -1297,6 +1339,16 @@ export class ConversationStore {
           continue;
         }
         publish({ type: "message", role: "agent", text: spokenText, streaming: false, personaId });
+        // Published synchronously, so the newest cursor is this line's. Whether
+        // it answers anything is the window's to decide.
+        if (seatId !== undefined) {
+          this.reportSeatEdge?.({
+            type: "turn",
+            seatId,
+            conversationId,
+            entryId: this.lastCursor(meta),
+          });
+        }
         spoke += 1;
         taken.push({ personaId, outcome: "spoke" });
         await this.projectChannelMessage(meta, personaId, spokenText);
@@ -1343,6 +1395,29 @@ export class ConversationStore {
   }
 
   /** The shared transcript as a member sees it: who said what, oldest first. */
+  /**
+   * The last thing a fleet character said in this thread, and which entry it
+   * was. A room turn hands the reader everything said so far, so this is the
+   * line the next member is answering — and the one an edge is about.
+   *
+   * `role` decides authorship: only `agent` is a seat speaking. The operator's
+   * own message and the captain's are messages from outside the fleet, and a
+   * turn that follows one is nobody's reply.
+   */
+  private lastSeatEntry(
+    conversationId: string,
+  ): { readonly personaId: string; readonly entryId: string } | undefined {
+    const events = this.readEvents(conversationId);
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]!;
+      if (event.type !== "message" || event.role !== "agent") continue;
+      const personaId = event.personaId ?? event.seatId;
+      if (personaId === undefined) continue;
+      return { personaId, entryId: event.cursor };
+    }
+    return undefined;
+  }
+
   private channelEntries(conversationId: string): readonly ChannelTranscriptEntry[] {
     return this.readEvents(conversationId).flatMap((event) => {
       if (event.type !== "message" || event.text.trim().length === 0) return [];

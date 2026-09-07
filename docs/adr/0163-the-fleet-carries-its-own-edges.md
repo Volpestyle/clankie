@@ -99,6 +99,48 @@ Messages row. Both new facts have one:
 Both lines are rendered from the snapshot and forgotten, exactly like status and
 stance. Neither is stored by the app.
 
+## Amendment: edges carry the message, the reply, and the mailbox path
+
+Accepted 2026-09-07 with [VUH-1233](https://linear.app/vuhlp/issue/VUH-1233).
+A walk across the room is not an exchange until the room can say what was said
+and whether it was answered. Three additions, under the rules already above —
+same ring bounds, same derived-never-stored rule, all optional on the wire.
+
+**An edge can name what was said.** A `prompt` edge carries `conversationId`
+and `entryId` when the captain can resolve the transcript entry it corresponds
+to. It can whenever it carried the message itself, because it appended the
+entry. It cannot for a prompt typed into a pane by `herdr agent prompt`: that
+text never passed through the captain, and guessing which entry it became by
+matching timestamps would be inference dressed as a host fact. Those edges
+carry no reference, and a surface that wants the words is built to expect its
+absence.
+
+**A reply is its own edge.** `kind: "reply"` runs from the recipient back to
+the sender, carrying the entry the answer was. It is emitted when the
+recipient's next turn lands in that same conversation within **three minutes**
+of the message. Longer than an agent turn with tools in it, which is why it is
+not the ring's five; short enough that a seat speaking much later is starting
+something rather than answering. A matched reply still has two minutes of ring
+left to be drawn in, and nothing came back in time simply means no edge — the
+room ends the exchange without one rather than inventing a conclusion.
+
+**The mailbox path draws the same edges.** A room turn (ADR 0161) reaches a
+seat through its mailbox, or the pty when no bridge is bound, and never touches
+Herdr's prompt event. The captain emits the edge itself: the turn handed to a
+member carries the room's transcript, so its author is whoever spoke last in
+that room, and that is the edge's `from`. Authorship is decided by the entry's
+`role` — only `agent` is a seat speaking. A turn that follows the operator's
+own message, or the captain's, follows no seat, and draws nothing. Both
+transports therefore animate identically, which was the point.
+
+### What the row says
+
+The seat's Messages row gains one line, on the same terms as the others: the
+newest `reply` edge from the seat reads `Replied to <name>`, and to the seat
+reads `<name> replied`, with the edge's `at` as the row's existing relative
+time. Absent when the window holds no reply for that seat, and gone on its own
+when the ring drops it.
+
 ## Rejected alternatives
 
 - **Persist prompt edges.** A durable edge log is the garden's mistake with a
@@ -107,6 +149,10 @@ stance. Neither is stored by the app.
 - **Have Herdr keep the history.** Herdr is ridden vanilla
   ([ADR 0139](0139-clankie-rides-vanilla-herdr.md)); a retention window is a
   product opinion of Clankie's, not a terminal multiplexer's.
+- **Resolve a Herdr prompt to an entry by matching timestamps.** It would fill
+  the field far more often, and it would be a guess: the captain would be
+  asserting which line the operator's CLI call became. An absent reference is
+  the honest answer, and the room is built for it.
 - **Key edges by pane.** Panes are Herdr's address and seats are the fleet's.
   Publishing pane ids would put a second identity on the wire for surfaces to
   join incorrectly; the captain does the join once, where it already knows both.
