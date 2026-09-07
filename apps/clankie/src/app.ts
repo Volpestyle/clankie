@@ -101,6 +101,7 @@ import {
   type PairingCompleteResponse,
   type PairingRedeemResponse,
 } from "@clankie/protocol";
+import { LINEAR_WEBHOOK_PATH } from "@clankie/protocol/public-gateway";
 import { personaInstructions, SettingsStore, type ClankieSettings } from "@clankie/settings";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
@@ -1920,7 +1921,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // a comment we have already decided is not his.
   const linearDeliveries = new LinearDeliveryMemory();
 
-  app.post("/v1/hooks/linear", async (context) => {
+  app.post(LINEAR_WEBHOOK_PATH, async (context) => {
     const hook = dependencies.linearWebhook;
     if (hook === undefined) return context.json({ error: "linear_webhook_unavailable" }, 503);
     const secret = await hook.secret();

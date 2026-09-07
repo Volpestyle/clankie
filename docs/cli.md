@@ -277,19 +277,19 @@ local verification. It never accepts a secret as a flag.
 Signed Linear `Comment.create` webhooks wake Clankie's operator thread with the
 comment quoted (ADR 0164). He looks; he does not dispatch a pane.
 
-Setup is two owner steps, once the doorway is configured:
+Set it up from the console with `/connect linear` → **Wake me on my comments**,
+once the doorway is configured. That flow prints the URL to register, takes the
+signing secret into the broker (`linear-webhook`), and records which author's
+comments count — no provider id typed by hand and no settings file edited.
 
-1. In Linear's API settings, create a webhook for **Comments** pointing at
-   `https://api.clankie.bot/h/{hostId}/v1/hooks/linear`. `gateway status` prints
-   the `hostId`.
-2. Paste the signing secret Linear shows on the webhook's detail page into
-   `/auth` → **Linear webhook secret** (broker id `linear-webhook`). This is a
-   second, separate credential: the `/connect linear` MCP token is
-   audience-restricted and cannot sign or create webhooks.
+Creating the webhook itself stays a step in Linear's own UI: point it at the
+printed URL with **Comments** events. Clankie cannot create it, because
+`webhookCreate` needs an `admin` credential the `/connect linear` MCP token is
+audience-restricted away from — it can neither create nor sign webhooks.
 
-Then set `linearWebhook.actorEmail` in settings to the Linear account whose
-comments should wake him. Until it is set every verified comment is dropped, so
-an agent commenting on his issue can never wake the thread that wrote it.
+The author is required, not optional. Until one is set every verified comment is
+dropped, so an agent commenting on his issue can never wake the thread that
+wrote it.
 
 ### `operator-credential rotate [--json]`
 

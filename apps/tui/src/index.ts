@@ -1,3 +1,4 @@
+import { gatewayStatus } from "./command/gateway.ts";
 import { readHerdrBinding, herdrConnection } from "./session/herdr-connection.ts";
 import {
   ensureHerdLeadCompanion,
@@ -289,6 +290,14 @@ const settingsStore = new SettingsStore();
 const brokeredCommands = {
   settings: settingsStore,
   listCredentials: () => services.store.list(),
+  // The doorway the Linear webhook is registered against (ADR 0164); the
+  // credential store is already open here, so the wizard needs no second one.
+  gatewayHook: async () => {
+    const status = await gatewayStatus({ settings: settingsStore, credentials: services.store });
+    return status.hostId === undefined || status.publicGateway.url === undefined
+      ? undefined
+      : { url: status.publicGateway.url, hostId: status.hostId };
+  },
   setCredential: (providerId: string, key: string) => services.store.set(providerId, { type: "api", key }),
   storeProviderCredential: (providerId: string, credential: ProviderCredential) =>
     services.store.set(providerId, credential),

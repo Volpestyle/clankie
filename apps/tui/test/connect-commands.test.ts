@@ -1,4 +1,11 @@
+import { emptySettings, type ClankieSettings, type SettingsStore } from "@clankie/settings";
 import { describe, expect, it } from "vitest";
+import {
+  buildConnectCommands,
+  type ConnectCommandServices as ConnectServices,
+} from "../src/connect-commands.ts";
+import type { ClankieFaceShell } from "../src/shell/shell.ts";
+import type { SetupFlow } from "../src/shell/setup-flow.ts";
 import {
   EMAIL_PRESETS,
   formatConnectStatus,
@@ -107,5 +114,93 @@ describe("discord invite URL", () => {
     // constant must be written as a number, not a shift.
     expect(DISCORD_BOT_INVITE_PERMISSIONS).toBeGreaterThan(0);
     expect(DISCORD_BOT_INVITE_PERMISSIONS).toBe(2_721_172_560);
+  });
+});
+
+describe("linear comment wake setup", () => {
+  function harness(options: {
+    readonly selections: readonly string[];
+    readonly secret?: string | undefined;
+    readonly email?: string | undefined;
+    readonly stored?: Record<string, unknown>;
+    readonly gatewayHook?: ConnectServices["gatewayHook"];
+  }) {
+    let settings: ClankieSettings = emptySettings();
+    const selections = [...options.selections];
+    const stored = new Map<string, string>();
+    const removed: string[] = [];
+    const lines: string[] = [];
+    const results: string[] = [];
+    const flow = {
+      begin: () => undefined,
+      end: () => undefined,
+      readSelect: async () => selections.shift(),
+      readSecret: async () => options.secret,
+      readText: async () => options.email,
+      renderLine: (line: string) => lines.push(line),
+    } as unknown as SetupFlow;
+    const shell = {
+      setupFlow: flow,
+      insertCommandResult: (_prompt: string, message: string) => results.push(message),
+    } as unknown as ClankieFaceShell;
+    const commands = buildConnectCommands({
+      settings: {
+        path: "/tmp/settings.json",
+        load: async () => settings,
+        update: async (mutate: (current: ClankieSettings) => ClankieSettings) => {
+          settings = mutate(settings);
+          return settings;
+        },
+      } as unknown as SettingsStore,
+      listCredentials: async () => (options.stored ?? {}) as never,
+      setCredential: async (providerId: string, key: string) => {
+        stored.set(providerId, key);
+      },
+      storeProviderCredential: async () => undefined,
+      removeCredential: async (providerId: string) => {
+        removed.push(providerId);
+        return true;
+      },
+      runDiscordWizard: (async () => undefined) as never,
+      showDiscordInvite: (() => undefined) as never,
+      runLinearOauth: async () => ({ type: "api", key: "unused" }) as never,
+      gatewayHook:
+        options.gatewayHook ?? (async () => ({ url: "https://api.clankie.bot", hostId: "host-abc" })),
+    });
+    const connect = commands.find((command) => command.name === "connect")!;
+    return { connect, shell, stored, removed, lines, results, settings: () => settings };
+  }
+
+  it("takes the secret and the author without either being typed by hand", async () => {
+    const h = harness({ selections: ["comments"], secret: "sec-1234567890", email: "me@example.com" });
+
+    await h.connect.run("linear", h.shell);
+
+    // The two things an owner would otherwise hand-edit: a provider id typed
+    // into /auth, and a settings key.
+    expect(h.stored.get("linear-webhook")).toBe("sec-1234567890");
+    expect(h.settings().linearWebhook.actorEmail).toBe("me@example.com");
+    expect(h.lines.join("\n")).toContain("https://api.clankie.bot/h/host-abc/v1/hooks/linear");
+  });
+
+  it("says what is wrong instead of printing an address Linear cannot reach", async () => {
+    const h = harness({ selections: ["comments"], gatewayHook: async () => undefined });
+
+    await h.connect.run("linear", h.shell);
+
+    expect(h.results.join("\n")).toContain("/gateway");
+    expect(h.stored.size).toBe(0);
+  });
+
+  it("removes the secret when he asks, and keeps it when he does not", async () => {
+    const stored = { "linear-webhook": { type: "api", redacted: "sec…" } };
+    const removeRun = harness({ selections: ["comments", "remove"], stored });
+    await removeRun.connect.run("linear", removeRun.shell);
+    expect(removeRun.removed).toEqual(["linear-webhook"]);
+
+    const keepRun = harness({ selections: ["comments", "keep"], stored, email: "me@example.com" });
+    await keepRun.connect.run("linear", keepRun.shell);
+    expect(keepRun.removed).toEqual([]);
+    expect(keepRun.settings().linearWebhook.actorEmail).toBe("me@example.com");
   });
 });

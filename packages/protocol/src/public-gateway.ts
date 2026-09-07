@@ -18,13 +18,16 @@ export const PUBLIC_GATEWAY_IN_FLIGHT_MAX = 128;
 /** The gateway's route window; defined beside the review-offer cap it shares (ADR 0154). */
 export { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./index.ts";
 
+/** Linear's signed comment webhook (ADR 0164); the owner pastes this path into Linear. */
+export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
+
 export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/pairing/redeem", target: "control" },
   { method: "POST", path: "/v1/pairing/complete", target: "control" },
   { method: "GET", path: "/v1/devices/self", target: "control" },
   { method: "POST", path: DEVICE_PUSH_PATH, target: "control" },
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
-  { method: "POST", path: "/v1/hooks/linear", target: "control" },
+  { method: "POST", path: LINEAR_WEBHOOK_PATH, target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
   { method: "POST", path: "/operator/v1/terminal-tail", target: "relay" },

@@ -58,6 +58,11 @@ deliberately never asks for. James creates the webhook in Linear's settings and
 pastes the signing secret, which is stored in the broker under `linear-webhook`.
 Only the non-secret question of whose comments count lives in settings.
 
+Both halves are one console flow — `/connect linear` → _Wake me on my comments_
+— which prints the URL to register, takes the secret, and records the author.
+Setup that requires typing a provider id or editing a settings file is setup
+that gets done wrong once and then debugged as a broken webhook.
+
 **Only his comments, and only new ones.** A verified delivery whose author is
 not the configured owner is dropped, as is any type or action other than
 `Comment` / `create`, and any delivery id already seen. An unset owner drops
@@ -134,9 +139,8 @@ the exact framing that makes quoted text read as instruction.
 
 - Clankie learns about a comment seconds after it is written, without anyone
   asking him to go and look.
-- James does two things once: create the webhook in Linear's API settings
-  against the printed URL, and paste the signing secret. `clankie gateway status`
-  prints the `hostId` the URL needs.
+- James does one thing outside Clankie: create the webhook in Linear's API
+  settings against the URL the flow prints. Everything else is that flow.
 - The gateway's request headers are one shared list. Adding a header for a future
   signed hook is one edit, and the two sides cannot drift apart.
 - Duplicate suppression is in-memory and bounded, so a process restart can admit
