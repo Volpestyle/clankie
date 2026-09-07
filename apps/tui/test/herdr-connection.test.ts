@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { HERDR_SOCKET_HEADER } from "@clankie/protocol";
 import { herdrConnection, readHerdrBinding } from "../src/session/herdr-connection.ts";
+import { clankieStateHome } from "../src/state-home.ts";
 import { herdrPaneIdFromEnv, jumpToHerdrAgent, sourceHerdrSocket } from "../src/session/herdr-report.ts";
 import { ensureHerdLeadCompanion } from "../src/observation/herd-lead-companion.ts";
 import { createCaptainRouteClient } from "../src/session/operator-conversations.ts";
@@ -82,4 +83,14 @@ it("claims a seat only when the console sits in the session the service leads (A
   expect(
     herdrPaneIdFromEnv(herdrConnection(binding, { env: elsewhere, repoRoot: "/repo" }).env),
   ).toBeUndefined();
+});
+
+it("resolves the owner's state home inside a fleet pane, where Herdr's own XDG is private (ADR 0164)", () => {
+  const inFleetPane = {
+    CLANKIE_STATE_HOME: "/Users/j/.local/state",
+    XDG_STATE_HOME: "/Users/j/.clankie/herdr",
+  };
+  expect(clankieStateHome(inFleetPane)).toBe("/Users/j/.local/state");
+  expect(clankieStateHome({ XDG_STATE_HOME: "/custom/state" })).toBe("/custom/state");
+  expect(clankieStateHome({ HOME: "/Users/j" })).toBe("/Users/j/.local/state");
 });

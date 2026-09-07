@@ -72,6 +72,12 @@ flowchart LR
   they sit in is the fleet's session, checked by socket. Opened inside any
   other Herdr they run as ordinary consoles: no pane is him, no pane is
   renamed there, and the turn leads the fleet from the service body.
+- The bundled runtime's private `XDG_STATE_HOME` isolates that Herdr's own
+  config, logs, and sessions, and Herdr hands its environment to every pane it
+  opens. `CLANKIE_STATE_HOME` is set alongside it and points at the owner's
+  real state home, so a console, seat, or launcher running inside the fleet
+  resolves Clankie's own records rather than a directory that holds none.
+  Without it the launcher reads its own healthy services as foreign.
 - Presence is reported against the binding's own herdr rather than whichever
   `herdr` sits on the caller's PATH, which for a bundled fleet is a different
   build that refuses the protocol. A report that fails is dropped: presence is

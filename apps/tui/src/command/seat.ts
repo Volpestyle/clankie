@@ -11,10 +11,10 @@
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { readHerdrBinding } from "../session/herdr-connection.ts";
+import { clankieStateHome } from "../state-home.ts";
 import { outputJson, type Writable } from "./io.ts";
 
 const execFileAsync = promisify(execFileCallback);
@@ -94,8 +94,7 @@ export function parseSeatArgs(args: readonly string[]): SeatFlags {
 }
 
 function seatRecordPath(env: NodeJS.ProcessEnv): string {
-  const stateHome = env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
-  return join(stateHome, "clankie", "seat.json");
+  return join(clankieStateHome(env), "clankie", "seat.json");
 }
 
 function readSeatRecord(env: NodeJS.ProcessEnv): SeatRecord | undefined {

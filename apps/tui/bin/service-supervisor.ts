@@ -10,9 +10,9 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { clankieStateHome } from "../src/state-home.ts";
 
 /**
  * Generic supervision for the long-lived local services the operator launcher
@@ -170,7 +170,7 @@ const DEFAULT_SERVICE_STARTUP_TIMEOUT_MS = 60_000;
 const STOP_GRACE_MS = 10_000;
 
 function clankieStateDirectory(env: NodeJS.ProcessEnv = process.env): string {
-  return join(env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "clankie");
+  return join(clankieStateHome(env), "clankie");
 }
 
 export function serviceStatePath(id: ServiceId, env: NodeJS.ProcessEnv = process.env): string {

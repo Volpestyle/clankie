@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type ExecFileImpl } from "../install-doctor.ts";
+import { clankieStateHome } from "../state-home.ts";
 
 // `clankie autostart`: a user LaunchAgent that runs this install's launcher at
 // login. launchd only launches it once (RunAtLoad, no KeepAlive); the launcher's
@@ -15,7 +16,7 @@ const AUTOSTART_USAGE = "Usage: clankie autostart enable|disable|status";
 /** The launcher's dependency-ordered start: the service plus everything that restarts with it. */
 const AUTOSTART_SERVICE_ARGS = ["restart", "clankie"] as const;
 /** launchd starts jobs with a bare environment; carry the shell's view of these when set. */
-const CARRIED_ENVIRONMENT = ["PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME"] as const;
+const CARRIED_ENVIRONMENT = ["PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "CLANKIE_STATE_HOME"] as const;
 const LAUNCHCTL_TIMEOUT_MS = 10_000;
 
 const execFileAsync = promisify(execFileCallback);
@@ -115,7 +116,7 @@ async function autostartContext(options: AutostartCommandOptions): Promise<Autos
   if (uid === undefined)
     throw new Error("clankie autostart needs a login user id for the launchd gui domain.");
   const home = env.HOME?.trim() || homedir();
-  const stateHome = env.XDG_STATE_HOME?.trim() || join(home, ".local", "state");
+  const stateHome = clankieStateHome(env);
   return {
     env,
     exec: options.execFileImpl ?? defaultExecFile,

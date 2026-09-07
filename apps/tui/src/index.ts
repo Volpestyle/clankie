@@ -10,7 +10,6 @@ import {
  * connected to the single clankie service on port 4310.
  */
 import { join, resolve } from "node:path";
-import { homedir } from "node:os";
 import { ClankieApiClient } from "@clankie/api-client";
 import {
   resolveOperatorCredential,
@@ -62,9 +61,10 @@ import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
 import { doctorCommand } from "./command/doctor.ts";
 import { createServiceOptions, restartTarget } from "../bin/services.ts";
+import { clankieStateHome } from "./state-home.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
-const stateHome = process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
+const stateHome = clankieStateHome();
 const tuiStateRoot = process.env.CLANKIE_INSTALL_ROOT
   ? join(stateHome, "clankie", "tui")
   : join(repoRoot, ".data", "tui");

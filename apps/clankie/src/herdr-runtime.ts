@@ -1,5 +1,6 @@
 import { execFile, fork, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -59,6 +60,11 @@ export async function startHerdrRuntime(input: {
   delete input.env.HERD_LEAD_SUMMARIES_CACHE;
   input.env.HERDR_PLUGIN_STATE_DIR = join(root, "herdr/plugins/herd-lead");
   input.env.PATH = `${dirname(input.binary)}${delimiter}${input.env.PATH ?? ""}`;
+  // Herdr hands this environment to every pane it opens, and the XDG override
+  // below is its own isolation, not the owner's. This pointer is what keeps a
+  // pane inside the fleet resolving Clankie's real state home (ADR 0164).
+  input.env.CLANKIE_STATE_HOME ??=
+    input.env.XDG_STATE_HOME?.trim() || join(input.env.HOME?.trim() || homedir(), ".local", "state");
   const compiled = join(input.repoRoot, "apps/clankie/src/herdr-runtime.js");
   const child = fork(
     existsSync(compiled) ? compiled : compiled.replace(/\.js$/u, ".ts"),
