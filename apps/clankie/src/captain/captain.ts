@@ -14,6 +14,7 @@ import {
 import {
   CAPTAIN_SILENT_REPLY_SENTINEL,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
+  OPERATOR_SEAT_HARNESSES,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
   type DiscordPresenceChannelTurnRequest,
@@ -658,6 +659,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
   const seatByPersona = new Map<string, string>();
+  const seatSubjects = new Map<string, string>();
   const stances = createStanceStore();
   /**
    * What each fleet seat's pane status was last seen as. The watcher publishes
@@ -1162,6 +1164,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       paneId: observed.paneId,
       ...(observed.parentPaneId === undefined ? {} : { parentPaneId: observed.parentPaneId }),
     }));
+    // The agent name a seat is sitting under. It is the persona's binding key,
+    // so a move has to hire under the same one (ADR 0164).
+    seatSubjects.clear();
+    for (const observed of fleet.seats) seatSubjects.set(observed.seatId, observed.subject);
     const parents = parentSeatIds(liveEdgeSeats);
     const names = new Map(
       personas.all(seats, () => undefined).map((persona) => [persona.personaId, persona.name]),
@@ -1730,6 +1736,63 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           return { op: "spawn_seat", schemaVersion: 1, result: { outcome: "spawned", seat } };
         }
         return { op: "spawn_seat", schemaVersion: 1, result };
+      }
+      if (request.op === "move_seat") {
+        const seat = liveSeats.find((current) => current.seatId === request.move.seatId);
+        const subject = seatSubjects.get(request.move.seatId);
+        if (seat === undefined || subject === undefined) {
+          return {
+            op: "move_seat",
+            schemaVersion: 1,
+            result: { outcome: "failed", reason: "unknown_seat", detail: request.move.seatId },
+          };
+        }
+        // What the seat is saying about itself outlives the chair: the move is
+        // the operator relocating a worker, not the worker changing its mind,
+        // so the statement is carried with whatever life it had left.
+        // The roster reports whatever harness herdr recognised; hiring only
+        // accepts the ones it can start. A seat outside that list cannot be
+        // rehired anywhere, and saying so beats a cast that pretends it can.
+        const harness = OPERATOR_SEAT_HARNESSES.find((candidate) => candidate === seat.harness);
+        if (harness === undefined) {
+          return {
+            op: "move_seat",
+            schemaVersion: 1,
+            result: { outcome: "failed", reason: "harness_unavailable", detail: seat.harness },
+          };
+        }
+        const standing = stances.read(seat.seatId);
+        const remainingMs = standing === undefined ? 0 : Date.parse(standing.expiresAt) - Date.now();
+        const moved = await herdrWatches.moveSeat({
+          seatId: seat.seatId,
+          subject,
+          harness,
+          title: seat.title,
+          workingDirectory: request.move.workingDirectory,
+        });
+        if (moved.outcome !== "spawned") {
+          liveSeats = liveSeats.filter((current) => current.seatId !== seat.seatId);
+          fleetChanges.touch();
+          return { op: "move_seat", schemaVersion: 1, result: moved };
+        }
+        const rehired = personas.adoptSpawn(moved.seat, seat.title);
+        conversations.bindPersona(rehired.personaId, rehired.seatId, seat.title);
+        liveSeats = [...liveSeats.filter((current) => current.personaId !== rehired.personaId), rehired];
+        seatByPersona.set(rehired.personaId, rehired.seatId);
+        seatSubjects.delete(seat.seatId);
+        seatSubjects.set(rehired.seatId, subject);
+        herdrWatches.trackSeat(rehired.seatId);
+        rehired.conversationId = conversations.conversationIdForPersona(rehired.personaId);
+        if (standing !== undefined && remainingMs > 0) {
+          stances.state(rehired.seatId, {
+            herdrPaneId: moved.seat.paneId,
+            pose: standing.pose,
+            ...(standing.note === undefined ? {} : { note: standing.note }),
+            ttlMs: remainingMs,
+          });
+        }
+        fleetChanges.touch();
+        return { op: "move_seat", schemaVersion: 1, result: { outcome: "moved", seat: rehired } };
       }
       const result = await conversations.serve(request);
       if (request.op === "create" && request.scope.kind === "seat") {

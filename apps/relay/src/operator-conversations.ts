@@ -90,12 +90,15 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           ? "terminalControl"
           : serviceRequest.op === "close_seat" ||
               serviceRequest.op === "spawn_seat" ||
+              serviceRequest.op === "move_seat" ||
               serviceRequest.op === "channel" ||
               serviceRequest.op === "update_persona" ||
               serviceRequest.op === "discord_rooms"
             ? // Hiring is at least as consequential as closing: it starts a
-              // process on the operator's machine. Listing the home guild's rooms
-              // rides the same grant as the projection it is picked for, so a
+              // process on the operator's machine. Moving is both at once — it
+              // closes a pane and starts a process — so it rides the same grant
+              // rather than falling through to chat. Listing the home guild's
+              // rooms rides the grant of the projection it is picked for, so a
               // chat-only device never enumerates the owner's server.
               "steer"
             : "chat";

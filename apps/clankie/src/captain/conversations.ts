@@ -62,6 +62,7 @@ type ConversationServiceRequest = Exclude<
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "spawn_seat" }
+  | { op: "move_seat" }
   | { op: "terminal_tail" }
   | { op: "terminal_control" }
   | { op: "terminal_input" }
@@ -78,6 +79,7 @@ type ConversationServiceResult = Exclude<
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "spawn_seat" }
+  | { op: "move_seat" }
   | { op: "terminal_tail" }
   | { op: "terminal_control" }
   | { op: "terminal_input" }

@@ -842,6 +842,45 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
 ]);
 export type OperatorSeatSpawnResult = z.infer<typeof OperatorSeatSpawnResultSchema>;
 
+/**
+ * Sending a live seat to another working directory (ADR 0166). A seat is named
+ * by the chair it is sitting in now; where it lands is a district like any
+ * other, so this takes the same absolute path hiring does.
+ */
+export const MoveOperatorSeatSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    /** Absolute path it moves to — the district it joins (ADR 0022). */
+    workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX),
+  })
+  .strict();
+export type MoveOperatorSeat = z.infer<typeof MoveOperatorSeatSchema>;
+
+/**
+ * Moving restarts the harness in the new directory, so it fails the same ways
+ * hiring does, plus one of its own: the seat may be gone by the time the move
+ * is asked for. `moved` carries the seat in its new chair — a new seat id,
+ * because it is a new terminal, wearing the same persona.
+ */
+export const OperatorSeatMoveResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("moved"), seat: OperatorFleetSeatSchema }).strict(),
+  z
+    .object({
+      outcome: z.literal("failed"),
+      reason: z.enum([
+        "unknown_seat",
+        "unknown_directory",
+        "harness_unavailable",
+        "not_ready",
+        "herdr_unreachable",
+      ]),
+      detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+    })
+    .strict(),
+]);
+export type OperatorSeatMoveResult = z.infer<typeof OperatorSeatMoveResultSchema>;
+
 /** One message-scope slash command a conversation endpoint can actually accept. */
 export const OperatorComposerCommandSchema = z
   .object({
@@ -2035,6 +2074,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
+      op: z.literal("move_seat"),
+      schemaVersion: z.literal(1),
+      move: MoveOperatorSeatSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("terminal_tail"),
       schemaVersion: z.literal(1),
       observation: OperatorTerminalObservationRequestSchema,
@@ -2226,6 +2272,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("spawn_seat"),
       schemaVersion: z.literal(1),
       result: OperatorSeatSpawnResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("move_seat"),
+      schemaVersion: z.literal(1),
+      result: OperatorSeatMoveResultSchema,
     })
     .strict(),
   z

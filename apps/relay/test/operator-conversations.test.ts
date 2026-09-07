@@ -247,6 +247,31 @@ describe("authenticated operator conversation relay", () => {
     expect(await response.json()).toEqual({ error: "steer_grant_required" });
   });
 
+  it("requires the steer grant to move a seat", async () => {
+    // Moving closes a pane and starts a process, so it is at least as
+    // consequential as either half; a chat-only device must not reach it.
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, steer: false } },
+        }),
+      },
+      dispatch: async () => ({
+        op: "move_seat",
+        schemaVersion: 1,
+        result: { outcome: "failed", reason: "unknown_seat" },
+      }),
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "move_seat",
+      schemaVersion: 1,
+      move: { schemaVersion: 1, seatId: "term-worker", workingDirectory: "/tmp" },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "steer_grant_required" });
+  });
+
   it("requires the steer grant to change a channel roster, but not to read or react", async () => {
     // Membership is a fan-out decision (ADR 0146): a chat-only device may talk
     // in a room and react in it, and may not decide who else is in it.

@@ -382,7 +382,7 @@ function defaultRunner(): HerdrWatchRunner {
           await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus"]),
         );
       } catch (caught) {
-        // A fresh owned session has no workspace yet (ADR 0164): the first hire
+        // A fresh owned session has no workspace yet (ADR 0166): the first hire
         // founds one, and its root pane is the hire's pane.
         if (!isHerdrWorkspaceMissing(caught)) throw caught;
         return parseHerdrRootPaneId(
@@ -558,7 +558,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * A start that fails leaves no stray tab behind: the pane opened for it is
    * closed on the way out, so a retry does not accumulate empty shells.
    */
-  public async spawnSeat(input: SpawnOperatorSeat): Promise<HerdrSeatSpawnResult> {
+  /**
+   * Hire a seat. `subject` is the herdr agent name, which is also the key the
+   * persona binding hangs on — a move passes the old one so the character
+   * comes with it instead of a stranger arriving in the new district.
+   */
+  public async spawnSeat(input: SpawnOperatorSeat, subjectOverride?: string): Promise<HerdrSeatSpawnResult> {
     const { createTab, startAgent } = this.runner;
     if (this.closed || createTab === undefined || startAgent === undefined) {
       return { outcome: "failed", reason: "herdr_unreachable" };
@@ -577,7 +582,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     try {
       if (input.harness === "claude") await this.ensureClaudeSeatMcp();
-      const subject = herdrAgentName(input.title);
+      const subject = subjectOverride ?? herdrAgentName(input.title);
       try {
         await startAgent({
           name: subject,
@@ -699,6 +704,45 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Send a seat to another working directory (ADR 0166).
+   *
+   * A process cannot be moved: its directory is fixed when it is executed. So
+   * the seat is closed and hired again where it is going, under the same agent
+   * name — which is the persona's binding key, so the character, its thread,
+   * and everything hanging off them come with it. The chair is new; the worker
+   * in it is not.
+   *
+   * The old pane closes first. A hire that then fails leaves the seat gone
+   * rather than duplicated, which is the failure the operator can see and act
+   * on; a second live pane wearing the same name is one they cannot.
+   */
+  public async moveSeat(input: {
+    readonly seatId: string;
+    readonly subject: string;
+    readonly harness: SpawnOperatorSeat["harness"];
+    readonly title: SpawnOperatorSeat["title"];
+    readonly workingDirectory: string;
+  }): Promise<HerdrSeatSpawnResult> {
+    if (this.closed) return { outcome: "failed", reason: "herdr_unreachable" };
+    if (!existsSync(input.workingDirectory)) {
+      return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
+    }
+    if (!(await this.closeSeat(input.seatId))) {
+      return { outcome: "failed", reason: "herdr_unreachable", detail: input.seatId };
+    }
+    this.untrackSeat(input.seatId);
+    return this.spawnSeat(
+      {
+        schemaVersion: 1,
+        harness: input.harness,
+        title: input.title,
+        workingDirectory: input.workingDirectory,
+      },
+      input.subject,
+    );
   }
 
   public trackSeat(seatId: string): void {

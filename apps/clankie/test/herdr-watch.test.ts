@@ -932,6 +932,77 @@ describe("hiring a seat", () => {
     store.close();
   });
 
+  it("moves a seat by closing its chair and hiring it again under the same name", async () => {
+    const moved: HerdrAgentSnapshot = { ...hired, paneId: "w1C:pA", terminalId: "term-moved" };
+    const closePane = vi.fn(() => Promise.resolve());
+    const createTab = vi.fn((_options: { cwd: string; label: string }) => Promise.resolve("w1C:pA"));
+    const startAgent = vi.fn((_options: { name: string; kind: string; paneId: string }) => Promise.resolve());
+    let agent = hired;
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(agent)),
+      resolveTerminal: vi.fn(() => Promise.resolve(agent)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      closePane,
+      createTab,
+      startAgent,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    createTab.mockImplementation((_options) => {
+      agent = moved;
+      return Promise.resolve("w1C:pA");
+    });
+    const result = await store.moveSeat({
+      seatId: "term-hired",
+      subject: "release-prep-ab12",
+      harness: "codex",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+    });
+
+    // The old chair goes first, so a hire that fails leaves one seat, not two.
+    expect(closePane).toHaveBeenCalledWith("w1C:p9");
+    expect(createTab).toHaveBeenCalledWith({ cwd: tmpdir(), label: "Release prep" });
+    // Hired under the name it already had: that name is the persona's binding
+    // key, so the same character sits down in the new district.
+    expect(startAgent.mock.calls[0]?.[0]).toMatchObject({
+      name: "release-prep-ab12",
+      kind: "codex",
+      paneId: "w1C:pA",
+    });
+    expect(result).toMatchObject({
+      outcome: "spawned",
+      seat: { seatId: "term-moved", paneId: "w1C:pA", subject: "release-prep-ab12" },
+    });
+    store.close();
+  });
+
+  it("refuses a move to a directory that is not there, without closing the seat", async () => {
+    const closePane = vi.fn(() => Promise.resolve());
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(hired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(hired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      closePane,
+      createTab: vi.fn(() => Promise.resolve("w1C:pA")),
+      startAgent: vi.fn(() => Promise.resolve()),
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    const result = await store.moveSeat({
+      seatId: "term-hired",
+      subject: "release-prep-ab12",
+      harness: "codex",
+      title: "Release prep",
+      workingDirectory: join(tmpdir(), "clankie-not-a-directory-1227"),
+    });
+
+    expect(result).toMatchObject({ outcome: "failed", reason: "unknown_directory" });
+    // The seat it could not move is still sitting where it was.
+    expect(closePane).not.toHaveBeenCalled();
+    store.close();
+  });
+
   it("starts a claude hire with the seat channel and a codex hire without", async () => {
     const startAgent = vi.fn(
       (_options: { name: string; kind: string; paneId: string; args?: readonly string[] }) =>
