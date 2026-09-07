@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { OperatorFleetSnapshotSchema } from "@clankie/protocol";
+import { OPERATOR_FLEET_EDGE_MAX, OperatorFleetSnapshotSchema } from "@clankie/protocol";
 import {
   deriveFleetEdges,
   parentSeatIds,
@@ -85,7 +85,7 @@ describe("deriveFleetEdges", () => {
     expect(deriveFleetEdges([PARENT], [{ fromPaneId: "w1:p1", toPaneId: "w1:p1", at }])).toEqual([]);
   });
 
-  it("collapses repeated prompts between the same two seats", () => {
+  it("carries every prompt between a pair, because how often is the point", () => {
     const first = Date.parse("2026-09-06T23:30:00.000Z");
     const edges = deriveFleetEdges(
       [PARENT, ORPHAN],
@@ -94,10 +94,34 @@ describe("deriveFleetEdges", () => {
         { fromPaneId: "w1:p1", toPaneId: "w1:p2", at: first },
       ],
     );
-    // Newest first in, so the surviving edge is the most recent counterpart.
+    // Two prompts are two edges: a surface weights a wire by how many it sees,
+    // and a pair collapsed to its newest prompt cannot say anything about that.
     expect(edges).toEqual([
       { kind: "prompt", fromSeatId: "t-parent", toSeatId: "t-child", at: "2026-09-06T23:30:01.000Z" },
+      { kind: "prompt", fromSeatId: "t-parent", toSeatId: "t-child", at: "2026-09-06T23:30:00.000Z" },
     ]);
+  });
+
+  it("still drops the very same prompt reported twice", () => {
+    const at = Date.parse("2026-09-06T23:30:00.000Z");
+    const edges = deriveFleetEdges(
+      [PARENT, ORPHAN],
+      [
+        { fromPaneId: "w1:p1", toPaneId: "w1:p2", at },
+        { fromPaneId: "w1:p1", toPaneId: "w1:p2", at },
+      ],
+    );
+    expect(edges).toHaveLength(1);
+  });
+
+  it("stops at the wire's ceiling rather than sending an unbounded list", () => {
+    const at = Date.parse("2026-09-06T23:30:00.000Z");
+    const many = Array.from({ length: OPERATOR_FLEET_EDGE_MAX + 20 }, (_unused, index) => ({
+      fromPaneId: "w1:p1",
+      toPaneId: "w1:p2",
+      at: at + index,
+    }));
+    expect(deriveFleetEdges([PARENT, ORPHAN], many)).toHaveLength(OPERATOR_FLEET_EDGE_MAX);
   });
 
   it("produces edges the snapshot contract accepts", () => {

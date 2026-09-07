@@ -376,8 +376,20 @@ function defaultRunner(): HerdrWatchRunner {
         throw new Error(result.stderr.trim() || `claude mcp add ${name} failed`);
       }
     },
-    createTab: async ({ cwd, label }) =>
-      parseHerdrRootPaneId(await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus"])),
+    createTab: async ({ cwd, label }) => {
+      try {
+        return parseHerdrRootPaneId(
+          await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus"]),
+        );
+      } catch (caught) {
+        // A fresh owned session has no workspace yet (ADR 0164): the first hire
+        // founds one, and its root pane is the hire's pane.
+        if (!isHerdrWorkspaceMissing(caught)) throw caught;
+        return parseHerdrRootPaneId(
+          await runHerdr(["workspace", "create", "--cwd", cwd, "--label", label, "--no-focus"]),
+        );
+      }
+    },
     startAgent: ({ name, kind, paneId, args }) =>
       // Returns only once herdr has detected the harness and considers it ready
       // for input, so a resolved call means the seat can actually be messaged.
@@ -407,6 +419,11 @@ function spawnFailureReason(detail: string): "harness_unavailable" | "not_ready"
   return /not found|no such file|unsupported|not installed|unknown kind/iu.test(detail)
     ? "harness_unavailable"
     : "not_ready";
+}
+
+/** `tab create` on a server with no workspace: herdr answers `workspace_not_found`. */
+export function isHerdrWorkspaceMissing(caught: unknown): boolean {
+  return caught instanceof Error && /workspace_not_found/u.test(caught.message);
 }
 
 function parseHerdrRootPaneId(stdout: string): string {

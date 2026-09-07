@@ -45,12 +45,13 @@ list row can reach it without walking the edge array.
 fact the host must hold, and it is held under the narrowest terms that still
 work:
 
-|          |                                                                                               |
-| -------- | --------------------------------------------------------------------------------------------- |
-| Bound    | the newest **64** edges, and nothing older than **5 minutes** — whichever drops an edge first |
-| Lifetime | process-local; it starts empty on restart and is never written to disk                        |
-| Scope    | an edge whose sender or recipient has left the roster is not carried                          |
-| Identity | a prompt with no sender — the operator's own shell, or a service — is not an edge at all      |
+|          |                                                                                                                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Bound    | the newest **64** edges, and nothing older than **5 minutes** — whichever drops an edge first                                                                                        |
+| Lifetime | process-local; it starts empty on restart and is never written to disk                                                                                                               |
+| Scope    | an edge whose sender or recipient has left the roster is not carried                                                                                                                 |
+| Identity | a prompt with no sender — the operator's own shell, or a service — is not an edge at all                                                                                             |
+| Volume   | every prompt in the window, not one per pair: how often two seats talk is the fact a wire's weight and a worn path are drawn from, and only the identical event twice is a duplicate |
 
 This is a window, not a projection. It accumulates nothing: an edge enters when
 Herdr reports it and leaves on a clock, so the structure has a fixed ceiling and

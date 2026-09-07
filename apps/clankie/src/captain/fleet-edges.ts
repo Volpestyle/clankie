@@ -53,6 +53,12 @@ export interface EdgeSeat {
  * recent prompt window. Every edge names two seats that are both on the roster
  * right now: a pane that has left, or one that never held a seat, yields no
  * edge at all rather than a dangling half of one.
+ *
+ * Every prompt in the window is carried, not one per pair. How often two seats
+ * talk is the fact a surface draws with — a thicker wire, a worn path — and
+ * collapsing a pair to its newest prompt destroys exactly that. The volume is
+ * already bounded twice over, by the window that feeds this and by the wire's
+ * own ceiling, so there is nothing left for a per-pair cap to protect.
  */
 export function deriveFleetEdges(
   seats: readonly EdgeSeat[],
@@ -65,7 +71,9 @@ export function deriveFleetEdges(
     // A seat never relates to itself: an agent prompting its own pane is a
     // person typing, not a relationship between two fleet members.
     if (fromSeatId === toSeatId || edges.length >= OPERATOR_FLEET_EDGE_MAX) return;
-    const key = `${kind} ${fromSeatId} ${toSeatId}`;
+    // Only the same event twice is a duplicate. Two prompts between one pair
+    // are two prompts, and the snapshot says so.
+    const key = [kind, fromSeatId, toSeatId, at].join("|");
     if (seen.has(key)) return;
     seen.add(key);
     edges.push({ kind, fromSeatId, toSeatId, at });

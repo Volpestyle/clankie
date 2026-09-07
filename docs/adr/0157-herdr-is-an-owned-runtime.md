@@ -21,10 +21,10 @@ of the build; local commits and working-tree edits are not release inputs.
 
 ```mermaid
 flowchart TD
-    start["First service start · auto"] --> inside{"Inside Herdr?"}
-    inside -->|yes| external["Adopt exact external socket
+    start["First service start · auto"] --> named{"Session or socket named?"}
+    named -->|yes| external["Exact external socket
 owner retains server lifetime"]
-    inside -->|no| owned["Private bundled Herdr
+    named -->|no| owned["Private bundled Herdr
 supervisor owns server lifetime"]
     external --> saved["Save binding in owner settings"]
     owned --> saved
@@ -52,8 +52,9 @@ CLI on PATH and the private socket, but keeps his existing settings and memory
 locations. No Herdr socket is exposed through the gateway or relay.
 
 `herdr.runtime` selects `auto`, `bundled`, or `external`. Auto selects once:
-inside Herdr it adopts the actual surrounding socket; otherwise it selects
-bundled mode. The service saves that resolved binding in settings after the
+bundled mode, unless the owner has named a session or socket, which selects
+external ([ADR 0164](0164-the-fleet-is-its-own-session.md) retired the
+adopt-the-surrounding-session rule this decision first shipped with). The service saves that resolved binding in settings after the
 runtime is reachable. Source checkouts require `pnpm herdr:build` for bundled
 mode. Existing explicitly named session preferences remain external. Explicit
 `set --session NAME` selects external mode; `set --runtime auto` requests fresh

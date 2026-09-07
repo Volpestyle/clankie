@@ -28,13 +28,14 @@ export async function resolveHerdrBinding(
   run: HerdrSessionRunner = (command, args, childEnv) =>
     exec(command, [...args], { env: childEnv, timeout: 5_000, maxBuffer: 8 * 1024 * 1024 }),
 ): Promise<HerdrSettings> {
-  // Preserve an explicitly named session from settings written before runtime selection existed.
-  const adopt = settings.runtime === "auto" && settings.session === "default" && !settings.socketPath;
-  const external =
-    settings.runtime === "external" || (settings.runtime === "auto" && (!adopt || env.HERDR_ENV === "1"));
+  // Clankie's fleet is his own session (ADR 0164): `auto` never adopts the
+  // session the service happens to be launched inside. Only a session or socket
+  // the owner named makes the binding external.
+  const explicit = settings.session !== "default" || Boolean(settings.socketPath);
+  const external = settings.runtime === "external" || (settings.runtime === "auto" && explicit);
   if (!external) return { runtime: "bundled", session: settings.session };
-  const session = adopt ? env.HERDR_SESSION?.trim() || "default" : settings.session;
-  let socketPath = adopt ? env.HERDR_SOCKET_PATH?.trim() : settings.socketPath;
+  const session = settings.session;
+  let socketPath = settings.socketPath;
   if (!socketPath) {
     const { stdout } = await run("herdr", ["session", "list", "--json"], env);
     socketPath = parseHerdrSessionSocket(stdout, session);
