@@ -24,10 +24,29 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: "/v1/devices/self", target: "control" },
   { method: "POST", path: DEVICE_PUSH_PATH, target: "control" },
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
+  { method: "POST", path: "/v1/hooks/linear", target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
   { method: "POST", path: "/operator/v1/terminal-tail", target: "relay" },
 ] as const;
+
+/**
+ * Request headers the doorway carries to the host. One list so the cloud side
+ * and the Mac side cannot drift: a header dropped on either end is a signature
+ * that never arrives, which reads as a forged request rather than a bug.
+ * Bounded by the frame's own header cap.
+ */
+export const PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST: readonly string[] = [
+  "accept",
+  "authorization",
+  "content-type",
+  // Linear signs the raw body and names the delivery, event, and signing time
+  // in its own headers (ADR 0164); the hook cannot verify without them.
+  "linear-signature",
+  "linear-delivery",
+  "linear-event",
+  "linear-timestamp",
+];
 
 const PUBLIC_GATEWAY_HEADER_VALUE_MAX = 8 * 1024;
 

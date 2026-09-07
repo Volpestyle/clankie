@@ -16,6 +16,7 @@ import {
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
+  LINEAR_WEBHOOK_PROVIDER_ID,
   createClankieAccountTokenProvider,
   derivePublicGatewayHostId,
   ensureDiscordBridgeCredential,
@@ -551,6 +552,14 @@ const clankie = await createClankieApp({
     },
   }),
   eventLogPath,
+  // Read per delivery rather than cached at boot: the owner pastes this secret
+  // after the URL exists, and rotating it in Linear should not need a restart.
+  linearWebhook: {
+    secret: async () => {
+      const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
+      return credential?.type === "api" ? credential.key : undefined;
+    },
+  },
 });
 clankieRef = clankie;
 

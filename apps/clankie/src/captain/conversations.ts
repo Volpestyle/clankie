@@ -167,8 +167,13 @@ export interface ConversationTurnContext {
   readonly workspace?: string;
   readonly seat?: ConversationTurnSeat;
   readonly internal?: true;
-  /** What queued an internal turn: a goal continuation, a due self-wake, or a settled herdr watch. */
-  readonly origin?: "goal" | "wake" | "watch";
+  /**
+   * What queued an internal turn: a goal continuation, a due self-wake, a
+   * settled herdr watch, or a signed inbound hook. A hook is its own origin
+   * rather than another wake because the turn it opens is about something that
+   * happened outside this machine, and the prompt says so.
+   */
+  readonly origin?: "goal" | "wake" | "watch" | "hook";
   /** The surface a human send arrived from, as it named itself. */
   readonly surfaceClientId?: string;
   /** Side conversations inherit a Pi branch but never continue their parent's active task. */

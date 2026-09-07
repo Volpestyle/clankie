@@ -10,6 +10,7 @@ import {
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_USER_SESSION_PROVIDER_ID,
   LINEAR_PROVIDER_ID,
+  LINEAR_WEBHOOK_PROVIDER_ID,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
   type CredentialStore,
   type RedactedCredential,
@@ -178,6 +179,12 @@ const FEATURED_SERVICE_PROVIDERS: readonly MenuOption[] = [
     label: "ElevenLabs",
     description: "Voice TTS for Discord (ADR 0070); pick the voice itself with /voice.",
   },
+  {
+    value: LINEAR_WEBHOOK_PROVIDER_ID,
+    label: "Linear webhook secret",
+    description:
+      "Signs inbound Linear comments (ADR 0164). Linear shows it once when you create the webhook; separate from /connect linear.",
+  },
 ];
 
 /** Owner-authored non-LLM credentials that share the broker with /auth. */
@@ -187,6 +194,7 @@ const SERVICE_CREDENTIAL_IDS = new Set([
   "elevenlabs",
   "email",
   LINEAR_PROVIDER_ID,
+  LINEAR_WEBHOOK_PROVIDER_ID,
   CLANKIE_ACCOUNT_PROVIDER_ID,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
 ]);

@@ -36,7 +36,8 @@ import {
   type AgentSession,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import { ConversationStore } from "./conversations.ts";
+import { ConversationStore, type ConversationTurnContext } from "./conversations.ts";
+import { linearCommentWakePrompt, suggestSeatForIssue } from "../linear-webhook.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
   readFleet,
@@ -613,6 +614,27 @@ export async function runOneShotDiscordTurn(
  * 0107). The persona still comes from owner-authored settings, never from the
  * caller.
  */
+/**
+ * What a turn is to a bound seat, or nothing when pi runs it. Wakes, watches,
+ * and signed hooks go to the seat from any conversation; a human send goes only
+ * when it lands in the head conversation, where the seat is the one answering.
+ * A goal continuation stays with its pi loop: the seat has no turn boundary the
+ * autonomy runner could wait on, so handing it over would spin.
+ *
+ * A hook rides the existing wake kind rather than widening the wire — what
+ * makes it a Linear comment is the prompt, which already says so.
+ */
+export function seatEventKindFor(
+  context: Pick<ConversationTurnContext, "internal" | "origin">,
+  isHeadConversation: boolean,
+): OperatorSeatEventKind | undefined {
+  if (context.internal === true) {
+    if (context.origin === "wake" || context.origin === "watch") return context.origin;
+    return context.origin === "hook" ? "wake" : undefined;
+  }
+  return isHeadConversation ? "escalation" : undefined;
+}
+
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const workingDirectory = options.workingDirectory ?? homedir();
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
@@ -790,22 +812,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return created;
   }
 
-  /**
-   * What a turn is to a bound seat, or nothing when pi runs it. Wakes and
-   * watches go to the seat from any conversation; a human send goes only when
-   * it lands in the head conversation, where the seat is the one answering.
-   * A goal continuation stays with its pi loop: the seat has no turn boundary
-   * the autonomy runner could wait on, so handing it over would spin.
-   */
   function seatEventKind(
     conversationId: string,
-    context: { readonly internal?: true; readonly origin?: "goal" | "wake" | "watch" },
+    context: Pick<ConversationTurnContext, "internal" | "origin">,
   ): OperatorSeatEventKind | undefined {
     if (!seatOutbox.bound()) return undefined;
-    if (context.internal === true) {
-      return context.origin === "wake" || context.origin === "watch" ? context.origin : undefined;
-    }
-    return conversationId === conversations.defaultGlobalConversationId() ? "escalation" : undefined;
+    return seatEventKindFor(context, conversationId === conversations.defaultGlobalConversationId());
   }
 
   const conversations = new ConversationStore(
@@ -1786,6 +1798,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     observeDurableMessages(listener) {
       return conversations.observeDurableMessages(listener);
+    },
+
+    wakeFromLinearComment(comment) {
+      // The suggestion is read off the seats the fleet already refreshed, never
+      // a census of its own: this runs on Linear's five-second clock.
+      const prompt = linearCommentWakePrompt(
+        comment,
+        suggestSeatForIssue(comment.issueIdentifier, liveSeats),
+      );
+      const conversationId = conversations.defaultGlobalConversationId();
+      if (!conversations.runsCaptainTurns(conversationId)) return;
+      // Enqueued and left to run, the way a settled watch is: the doorway has
+      // already answered Linear by the time the turn starts.
+      const result = conversations.submitInternal(conversationId, prompt, "hook");
+      if (result.status !== "accepted") throw new Error("Linear comment wake was not accepted");
     },
 
     async close(): Promise<void> {

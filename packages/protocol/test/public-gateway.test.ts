@@ -9,6 +9,7 @@ import {
   PublicGatewayRequestFrameSchema,
   PublicGatewayResponseChunkFrameSchema,
   PublicGatewayTunnelFrameSchema,
+  PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
   publicGatewayTargetFor,
 } from "../src/public-gateway.ts";
 
@@ -50,7 +51,27 @@ describe("public gateway protocol", () => {
   it("keeps one shared allowlist for cloud and Mac routing", () => {
     expect(publicGatewayTargetFor("POST", "/v1/pairing/complete")).toBe("control");
     expect(publicGatewayTargetFor("POST", "/operator/v1/terminal-tail")).toBe("relay");
+    expect(publicGatewayTargetFor("POST", "/v1/hooks/linear")).toBe("control");
     expect(publicGatewayTargetFor("GET", "/v1/private")).toBeUndefined();
+  });
+
+  it("carries a signed hook's own headers, within the frame's header budget", () => {
+    // Dropping any of these on either side turns a real delivery into a
+    // signature that never arrives, which reads as forgery rather than a bug.
+    for (const header of ["linear-signature", "linear-delivery", "linear-event", "linear-timestamp"]) {
+      expect(PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST).toContain(header);
+    }
+    expect(
+      PublicGatewayTunnelFrameSchema.safeParse({
+        schemaVersion: 1,
+        kind: "request",
+        requestId: "r".repeat(16),
+        target: "control",
+        method: "POST",
+        path: "/v1/hooks/linear",
+        headers: PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST.map((name) => ({ name, value: "x" })),
+      }).success,
+    ).toBe(true);
   });
 
   it("carries the host-scoped base without accepting credential-bearing URLs", () => {

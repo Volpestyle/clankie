@@ -272,6 +272,25 @@ out and removes its installation binding.
 `set --url URL --host-id ID` remains only for legacy static-bearer migration and
 local verification. It never accepts a secret as a flag.
 
+### Linear comment ingress
+
+Signed Linear `Comment.create` webhooks wake Clankie's operator thread with the
+comment quoted (ADR 0164). He looks; he does not dispatch a pane.
+
+Setup is two owner steps, once the doorway is configured:
+
+1. In Linear's API settings, create a webhook for **Comments** pointing at
+   `https://api.clankie.bot/h/{hostId}/v1/hooks/linear`. `gateway status` prints
+   the `hostId`.
+2. Paste the signing secret Linear shows on the webhook's detail page into
+   `/auth` → **Linear webhook secret** (broker id `linear-webhook`). This is a
+   second, separate credential: the `/connect linear` MCP token is
+   audience-restricted and cannot sign or create webhooks.
+
+Then set `linearWebhook.actorEmail` in settings to the Linear account whose
+comments should wake him. Until it is set every verified comment is dropped, so
+an agent commenting on his issue can never wake the thread that wrote it.
+
 ### `operator-credential rotate [--json]`
 
 Mint a new local operator bearer. Existing operator sessions are invalid
@@ -824,7 +843,8 @@ Unknown names fail closed without signalling any process.
 These carry secrets, external consent, or live session chrome, so entry stays
 interactive in the console. The capability exists — only the flag does not:
 
-- `/auth` and `/connect` secret entry — provider keys, OAuth, Linear, and email
+- `/auth` and `/connect` secret entry — provider keys, OAuth, Linear (MCP token
+  and webhook signing secret), and email
 - `/discord` secret entry and lab-user ToS opt-in — Discord tokens never become flags
 - `/voice` — realtime/TTS provider and brokered credentials
 - `/btw`, `/board`, `/jump`, `/conversation`, `/goal`, `/layout` — live console state

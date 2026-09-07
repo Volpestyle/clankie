@@ -385,7 +385,12 @@ async function connectLinearOauth(shell: ClankieFaceShell, services: ConnectComm
     flow.renderLine("Connected to Linear.", "success");
     shell.insertCommandResult(
       "/connect linear",
-      "Linear connected via OAuth. Search and file issues from any room.",
+      [
+        "Linear connected via OAuth. Search and file issues from any room.",
+        // This token cannot sign webhooks, and this is where an owner comes
+        // looking for everything Linear (ADR 0164).
+        "Waking on his Linear comments is a separate credential: /auth → Linear webhook secret.",
+      ].join("\n"),
       "success",
     );
   } catch (cause) {

@@ -141,6 +141,7 @@ import {
   mintDeviceSessionClaims,
 } from "./device-session.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
+import { LinearDeliveryMemory, classifyLinearDelivery } from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { LocalVoiceChatSession } from "./local-voice-chat.ts";
@@ -349,6 +350,12 @@ export interface ClankieAppDependencies {
    * a sleeping device simply catches up when it next opens.
    */
   pushWake?: PushWakeSender;
+  /**
+   * The broker-held Linear webhook signing secret (ADR 0164). Absent means no
+   * webhook is configured and the route reports itself unavailable; the wake it
+   * leads to belongs to the captain.
+   */
+  linearWebhook?: { secret(): Promise<string | undefined> };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;
@@ -1904,6 +1911,53 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const session = embodiment.getSession(context.req.param("id"));
     if (session === undefined) return context.json({ error: "embodiment_session_not_found" }, 404);
     return context.json({ session });
+  });
+
+  // Signed Linear comment ingest (ADR 0164). Public, because Linear posts here
+  // from its own servers with no bearer of ours; the HMAC over the raw body is
+  // the whole authentication. Everything Linear signed but we do not act on
+  // still answers 200 — a 4xx would put the delivery into a six-hour retry for
+  // a comment we have already decided is not his.
+  const linearDeliveries = new LinearDeliveryMemory();
+
+  app.post("/v1/hooks/linear", async (context) => {
+    const hook = dependencies.linearWebhook;
+    if (hook === undefined) return context.json({ error: "linear_webhook_unavailable" }, 503);
+    const secret = await hook.secret();
+    if (secret === undefined || secret.length === 0) {
+      return context.json({ error: "linear_webhook_unavailable" }, 503);
+    }
+    // The raw bytes, before any parse: the signature covers what Linear sent,
+    // and `readJson` would throw exactly those bytes away.
+    const rawBody = new Uint8Array(await context.req.raw.arrayBuffer());
+    const outcome = classifyLinearDelivery({
+      rawBody,
+      headers: {
+        signature: context.req.header("linear-signature"),
+        delivery: context.req.header("linear-delivery"),
+        event: context.req.header("linear-event"),
+      },
+      secret,
+      ownerEmail: (await settingsSource.load()).linearWebhook.actorEmail,
+      now: clock(),
+      deliveries: linearDeliveries,
+    });
+
+    if (outcome.kind === "rejected") {
+      logger.warn({ reason: outcome.reason }, "linear webhook rejected");
+      return context.json(
+        { error: outcome.reason === "malformed" ? "malformed" : "invalid_signature" },
+        outcome.reason === "malformed" ? 400 : 401,
+      );
+    }
+    if (outcome.kind === "ignored") {
+      return context.json({ schemaVersion: 1 as const, ingested: false as const });
+    }
+
+    // Enqueued, not awaited: the operator thread runs a model turn on its own
+    // clock and Linear is owed an answer now (mirrors how a Herdr watch wakes).
+    dependencies.captain.wakeFromLinearComment(outcome.comment);
+    return context.json({ schemaVersion: 1 as const, ingested: true as const });
   });
 
   // Mint a one-time pairing offer. The offer secret appears once in the

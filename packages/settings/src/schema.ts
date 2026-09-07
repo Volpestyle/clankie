@@ -500,6 +500,23 @@ export const EmailSettingsSchema = z
   .strict();
 export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
 
+/**
+ * Signed Linear webhook ingest (ADR 0164). The signing secret is a credential
+ * and lives in the broker under `linear-webhook`; only the non-secret question
+ * of whose comments count belongs here.
+ */
+export const LinearWebhookSettingsSchema = z
+  .object({
+    /**
+     * The one author whose comments wake him. Empty means the hook verifies
+     * and drops: an agent's own comment must never wake the thread that wrote
+     * it, so an unset owner fails closed rather than opening the door to all.
+     */
+    actorEmail: z.email().max(320).optional(),
+  })
+  .strict();
+export type LinearWebhookSettings = z.infer<typeof LinearWebhookSettingsSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
@@ -516,6 +533,7 @@ export const ClankieSettingsSchema = z
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
     mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),
+    linearWebhook: LinearWebhookSettingsSchema.default(() => LinearWebhookSettingsSchema.parse({})),
   })
   .strict();
 export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;

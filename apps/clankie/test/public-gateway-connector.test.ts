@@ -109,6 +109,75 @@ describe("public gateway Mac connector", () => {
     expect(connector.hostBaseUrl).toBe(`${gateway.origin}/h/${hostId}`);
   });
 
+  it("hands the control plane a Linear signature and the bytes it covers", async () => {
+    const received: Array<{ readonly headers: Record<string, string | undefined>; readonly body: string }> =
+      [];
+    const control = await listen(
+      createServer(async (request, response) => {
+        let body = "";
+        for await (const chunk of request) body += chunk.toString();
+        received.push({
+          headers: {
+            signature: request.headers["linear-signature"] as string | undefined,
+            delivery: request.headers["linear-delivery"] as string | undefined,
+            event: request.headers["linear-event"] as string | undefined,
+            timestamp: request.headers["linear-timestamp"] as string | undefined,
+          },
+          body,
+        });
+        response.end('{"schemaVersion":1,"ingested":true}');
+      }),
+    );
+    const relay = await listen(createServer((_request, response) => response.end("{}")));
+    const gateway = await fakeGateway();
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      hostToken,
+      controlPlaneUrl: control,
+      relayUrl: relay,
+      logger: { info: () => {}, warn: () => {} },
+      reconnectMinimumMs: 5,
+      reconnectMaximumMs: 10,
+    });
+    connectors.push(connector);
+    connector.start();
+    const connection = await gateway.nextConnection();
+
+    const body = '{"action":"create","type":"Comment","data":{"body":"hi  there"}}';
+    connection.send({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "request",
+      requestId: "request_87654321",
+      target: "control",
+      method: "POST",
+      path: "/v1/hooks/linear",
+      headers: [
+        { name: "content-type", value: "application/json" },
+        { name: "linear-signature", value: "b".repeat(64) },
+        { name: "linear-delivery", value: "delivery-1" },
+        { name: "linear-event", value: "Comment" },
+        { name: "linear-timestamp", value: "1757206800000" },
+      ],
+      bodyBase64: Buffer.from(body).toString("base64"),
+    });
+    await connection.framesThrough("response_end");
+
+    // The signature is worthless if either the headers or the exact bytes are
+    // reshaped on the way through this hop.
+    expect(received).toEqual([
+      {
+        headers: {
+          signature: "b".repeat(64),
+          delivery: "delivery-1",
+          event: "Comment",
+          timestamp: "1757206800000",
+        },
+        body,
+      },
+    ]);
+  });
+
   it("replays live pairing routes after an authenticated reconnect", async () => {
     const target = await listen(createServer((_request, response) => response.end("{}")));
     const gateway = await fakeGateway();

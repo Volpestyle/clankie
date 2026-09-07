@@ -15,6 +15,13 @@ import { z } from "zod";
 import type { ProviderCredential } from "./credential-store.ts";
 
 export const LINEAR_PROVIDER_ID = "linear";
+/**
+ * The Linear webhook signing secret, kept apart from the MCP token above
+ * (ADR 0164). Linear shows it once on the webhook's detail page and the owner
+ * pastes it; nothing here can mint it, because creating a webhook needs an
+ * `admin`-scoped credential this OAuth flow deliberately never asks for.
+ */
+export const LINEAR_WEBHOOK_PROVIDER_ID = "linear-webhook";
 export const LINEAR_MCP_RESOURCE = "https://mcp.linear.app/mcp";
 export const LINEAR_OAUTH_ISSUER = "https://mcp.linear.app";
 export const LINEAR_AUTHORIZE_ENDPOINT = "https://mcp.linear.app/authorize";

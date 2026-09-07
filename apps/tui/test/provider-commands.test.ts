@@ -339,6 +339,7 @@ describe("auth command", () => {
         "services:",
         "  clankie-account  missing",
         "  elevenlabs       API key",
+        "  linear-webhook   missing",
         "  discord_bot      bot token",
         "",
         "Worker harnesses keep their own logins (`codex login`, `claude login`).",

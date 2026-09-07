@@ -75,6 +75,39 @@ describe("operator conversation context", () => {
     await store.close();
   });
 
+  it("runs a signed hook's wake on the global thread as its own kind of internal turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-conversation-hook-"));
+    roots.push(root);
+    const origins: (string | undefined)[] = [];
+    const store = new ConversationStore(root, async (_conversationId, message, publish, context) => {
+      origins.push(context.origin);
+      publish({ type: "message", role: "captain", text: `ran: ${message}`, streaming: false });
+    });
+
+    const accepted = store.submitInternal("global-default", "James commented on VUH-1234", "hook");
+    if (accepted.status !== "accepted") throw new Error("hook turn was not accepted");
+    await store.awaitRun(accepted.runId);
+
+    // A distinct origin, so the turn can say the comment came from Linear
+    // rather than passing as one of his own self-wakes.
+    expect(origins).toEqual(["hook"]);
+    const replay = await store.serve({
+      op: "replay",
+      schemaVersion: 1,
+      replay: {
+        schemaVersion: 1,
+        conversationId: "global-default",
+        surfaceClientId: "test",
+        limit: 20,
+      },
+    });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("replay failed");
+    // He wrote the comment in Linear, not here: nothing may appear as though
+    // he typed it into this conversation.
+    expect(replay.result.events).not.toContainEqual(expect.objectContaining({ role: "operator" }));
+    await store.close();
+  });
+
   it("steers a human send into an in-flight internal turn instead of queuing behind it", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-conversation-steer-"));
     roots.push(root);

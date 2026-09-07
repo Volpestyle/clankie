@@ -28,6 +28,7 @@ import {
   PublicGatewayInstallationIdSchema,
   PublicGatewayTunnelFrameSchema,
   derivePublicGatewayHostId,
+  PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
   publicGatewayTargetFor,
   type PublicGatewayCapabilityHash,
   type PublicGatewayConfig,
@@ -49,7 +50,7 @@ const PUSH_ACCOUNT_BUDGET = 60;
  */
 const PUSH_PEER_BUDGET = 30;
 
-const REQUEST_HEADER_ALLOWLIST = new Set(["accept", "authorization", "content-type"]);
+const REQUEST_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST);
 const RESPONSE_HEADER_ALLOWLIST = new Set(["cache-control", "content-type", "retry-after"]);
 
 export interface PublicGatewayLogger {

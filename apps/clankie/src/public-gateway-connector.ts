@@ -1,6 +1,7 @@
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_IN_FLIGHT_MAX,
+  PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
   PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayHostIdSchema,
@@ -22,7 +23,7 @@ const RECONNECT_MAX_MS = 30_000;
 const TOKEN_REFRESH_WINDOW_MS = 5 * 60_000;
 const RESPONSE_BYTES_MAX = 16 * 1024 * 1024;
 const WEBSOCKET_PAYLOAD_BYTES_MAX = 2 * 1024 * 1024;
-const REQUEST_HEADER_ALLOWLIST = new Set(["accept", "authorization", "content-type"]);
+const REQUEST_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST);
 const RESPONSE_HEADER_ALLOWLIST = new Set(["cache-control", "content-type", "retry-after"]);
 
 export interface PublicGatewayConnectorLogger {

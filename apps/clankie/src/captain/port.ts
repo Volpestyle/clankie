@@ -13,6 +13,7 @@ import type {
   OperatorSeatEvent,
 } from "@clankie/protocol";
 import type { DurableMessageNotice } from "./conversations.ts";
+import type { LinearCommentEvent } from "../linear-webhook.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -127,6 +128,16 @@ export interface CaptainPort {
    * unsubscribe.
    */
   observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void;
+  /**
+   * Wake the operator thread about a verified Linear comment (ADR 0164). The
+   * app has already proved the delivery is Linear's and James's; the captain
+   * owns the thread it lands in, the live fleet a pane is suggested from, and
+   * the decision of what — if anything — to do about it.
+   *
+   * Returns immediately: Linear retires a delivery that is not answered inside
+   * five seconds, so the model turn cannot be on the caller's path.
+   */
+  wakeFromLinearComment(comment: LinearCommentEvent): void;
   /** Graceful shutdown: waits for in-flight turns. */
   close(): Promise<void>;
 }
@@ -165,6 +176,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     // A stub writes no transcripts, so it has nothing to announce. A test that
     // wants the trigger passes its own store's observer through `overrides`.
     observeDurableMessages: () => () => {},
+    wakeFromLinearComment: () => {},
     close: async () => {},
     ...overrides,
   };

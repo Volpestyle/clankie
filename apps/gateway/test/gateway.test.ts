@@ -131,6 +131,39 @@ describe("public gateway", () => {
     expect(gateway.server.listening).toBe(true);
   });
 
+  it("carries a Linear delivery's signature and raw body to the Mac unaltered", async () => {
+    const { origin } = await startGateway([]);
+    const host = await connectHost(origin);
+    openSockets.push(host);
+
+    // Byte-for-byte matters here in a way it does not for any other route: the
+    // HMAC covers these exact bytes, so re-encoding anywhere along the path
+    // would make every real delivery look forged.
+    const body = '{"action":"create","type":"Comment","data":{"body":"hi  there"}}';
+    const hookPromise = fetch(`${origin}/h/${hostId}/v1/hooks/linear`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": "a".repeat(64),
+        "linear-delivery": "delivery-1",
+        "linear-event": "Comment",
+        "linear-timestamp": "1757206800000",
+      },
+      body,
+    });
+    const hook = await nextRequest(host);
+
+    expect(hook).toMatchObject({ target: "control", path: "/v1/hooks/linear" });
+    expect(hook.headers).toContainEqual({ name: "linear-signature", value: "a".repeat(64) });
+    expect(hook.headers).toContainEqual({ name: "linear-delivery", value: "delivery-1" });
+    expect(hook.headers).toContainEqual({ name: "linear-event", value: "Comment" });
+    expect(hook.headers).toContainEqual({ name: "linear-timestamp", value: "1757206800000" });
+    expect(Buffer.from(hook.bodyBase64 ?? "", "base64").toString("utf8")).toBe(body);
+
+    respond(host, hook, 200, '{"schemaVersion":1,"ingested":true}');
+    expect((await hookPromise).status).toBe(200);
+  });
+
   it("routes normalized typed codes and rejects unavailable hosts and private routes", async () => {
     const logs: Array<{ readonly fields: Readonly<Record<string, unknown>>; readonly message: string }> = [];
     const { origin } = await startGateway(logs);

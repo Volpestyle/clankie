@@ -184,6 +184,13 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/hooks/linear",
+      {
+        access: "Linear\u2019s own HMAC signature over the request body",
+        purpose: "Wake the operator thread when the owner comments on a Linear issue.",
+      },
+    ],
+    [
       "POST /operator/v1/dispatch",
       {
         access: "Device bearer plus the operation’s grant",
