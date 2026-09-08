@@ -130,6 +130,22 @@ export class OperatorConversationClientError extends Error {
   }
 }
 
+/** Failed admission, distinct from an error observing an already accepted turn. */
+export class OperatorConversationSendError extends OperatorConversationClientError {
+  public readonly delivery: "not_sent" | "unconfirmed";
+
+  public constructor(delivery: "not_sent" | "unconfirmed", cause: unknown) {
+    super(
+      delivery === "unconfirmed"
+        ? "Delivery unconfirmed. Check the conversation before retrying; Clankie may have received this message."
+        : `Message not sent. ${cause instanceof TypeError ? "Clankie is unreachable. Retry when it reconnects." : cause instanceof Error ? cause.message : "Retry when the connection is ready."}`,
+      cause,
+    );
+    this.delivery = delivery;
+    this.name = "OperatorConversationSendError";
+  }
+}
+
 export class OperatorConversationSelection {
   private readonly client: OperatorConversationClient;
   private selectedId: string | undefined;
@@ -540,17 +556,23 @@ export class OperatorConversationPromptSession {
     sink?: OperatorConversationEventSink,
   ): Promise<void> {
     // Serialize revision reads and sends, including inputs typed during startup.
-    const admission = active.admissions.then(async () => {
-      if (this.activeRun !== active)
-        throw new OperatorConversationClientError("The observed prompt ended; send a new prompt");
-      if (sink !== undefined && !(await this.restoreConversation(active.conversationId, sink))) {
-        throw new OperatorConversationClientError(
-          "Conversation history requires an explicit recovery before sending",
-        );
-      }
-      const runId = await this.send(active.conversationId, message, delivery);
-      active.runIds.add(runId);
-    });
+    const admission = active.admissions
+      .then(async () => {
+        if (this.activeRun !== active)
+          throw new OperatorConversationClientError("The observed prompt ended; send a new prompt");
+        if (sink !== undefined && !(await this.restoreConversation(active.conversationId, sink))) {
+          throw new OperatorConversationClientError(
+            "Conversation history requires an explicit recovery before sending",
+          );
+        }
+        const runId = await this.send(active.conversationId, message, delivery);
+        active.runIds.add(runId);
+      })
+      .catch((error: unknown) => {
+        throw error instanceof OperatorConversationSendError
+          ? error
+          : new OperatorConversationSendError("not_sent", error);
+      });
     active.admissions = admission.catch(() => undefined);
     return admission;
   }
@@ -565,16 +587,21 @@ export class OperatorConversationPromptSession {
       throw new OperatorConversationClientError("Selected operator conversation no longer exists");
     }
     const herdrPaneId = this.herdrPaneId();
-    const accepted = await this.client.send({
-      schemaVersion: 1,
-      kind: "message",
-      conversationId,
-      surfaceClientId: this.tails.surfaceClientId,
-      expectedRevision: conversation.revision,
-      message,
-      ...(delivery === undefined ? {} : { delivery }),
-      ...(herdrPaneId === undefined ? {} : { herdrPaneId }),
-    });
+    const accepted = await this.client
+      .send({
+        schemaVersion: 1,
+        kind: "message",
+        conversationId,
+        surfaceClientId: this.tails.surfaceClientId,
+        expectedRevision: conversation.revision,
+        message,
+        ...(delivery === undefined ? {} : { delivery }),
+        ...(herdrPaneId === undefined ? {} : { herdrPaneId }),
+      })
+      .catch((error: unknown) => {
+        // The request may have committed before its acknowledgement was lost.
+        throw new OperatorConversationSendError("unconfirmed", error);
+      });
     if (accepted.status === "revision_conflict") {
       throw new OperatorConversationClientError("This conversation changed elsewhere; retry the prompt");
     }

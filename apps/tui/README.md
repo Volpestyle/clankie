@@ -120,6 +120,11 @@ credential holder.
   separate follow-up after the current turn and any earlier queued prompts.
   The console keeps observing until all accepted inputs settle; Esc interrupts
   the current turn. These choices also apply to `/skill-name` prompts.
+- Failed sends return the message to the editor, preserving any newer draft.
+  A failure before sending says **Message not sent**. If the send loses its
+  acknowledgement, **Delivery unconfirmed** asks you to check the conversation
+  before retrying. Sends never retry automatically; an accepted turn's dropped
+  observation reconnects without resending its message.
 - `/conversation` opens a searchable dialog for his own retained conversations
   — the global and workspace threads this console holds, never a fleet agent's
   DM thread or a channel; `/conversation <name-or-path>` switches directly, and

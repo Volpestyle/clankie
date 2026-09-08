@@ -6,8 +6,69 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildConsoleCommands } from "../src/commands.ts";
 import { ClankieFaceShell, clickedTranscriptBlock } from "../src/shell/shell.ts";
+import { OperatorConversationSendError } from "../src/session/operator-conversations.ts";
 
 describe("shell assembly", () => {
+  it.each([
+    { pending: false, delivery: "not_sent" as const, draft: "" },
+    { pending: false, delivery: "unconfirmed" as const, draft: "newer draft" },
+    { pending: true, delivery: "not_sent" as const, draft: "" },
+    { pending: true, delivery: "unconfirmed" as const, draft: "newer draft" },
+  ])(
+    "preserves a failed prompt ($pending, $delivery) without replacing newer input",
+    async ({ pending, delivery, draft }) => {
+      let reject!: (error: Error) => void;
+      let finish!: () => void;
+      const admission = new Promise<void>((_, fail) => {
+        reject = fail;
+      });
+      const active = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const shell = new ClankieFaceShell({
+        commands: [],
+        cwd: process.cwd(),
+        env: {},
+        bannerFields: { title: "Clankie" },
+        onPrompt: () => (pending ? active : admission),
+        onPendingPrompt: () => admission,
+      });
+      const editor = (shell as unknown as { editor: { setText(text: string): void; getText(): string } })
+        .editor;
+      const notices = vi.spyOn(shell, "insertMarkdown");
+      const running = pending ? shell.submitUserPrompt("already accepted") : undefined;
+      const failed = shell.submitUserPrompt("keep these words");
+      editor.setText(draft);
+      reject(new OperatorConversationSendError(delivery, new TypeError("fetch failed")));
+      try {
+        await failed;
+        expect(editor.getText()).toBe(draft || "keep these words");
+        expect(notices).toHaveBeenCalledWith(
+          expect.stringContaining(delivery === "not_sent" ? "Message not sent" : "Delivery unconfirmed"),
+        );
+        if (draft) expect(notices).toHaveBeenCalledWith("**Unconfirmed prompt**\n\nkeep these words");
+      } finally {
+        finish();
+        await running;
+      }
+    },
+  );
+
+  it("does not put an accepted prompt back in the editor when observation fails", async () => {
+    const shell = new ClankieFaceShell({
+      commands: [],
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+      onPrompt: async () => {
+        throw new Error("Observation failed after acceptance");
+      },
+    });
+    await shell.submitUserPrompt("already accepted");
+    const editor = (shell as unknown as { editor: { getText(): string } }).editor;
+    expect(editor.getText()).toBe("");
+  });
+
   it("steers on Enter and queues on Alt+Enter without replacing the active turn", async () => {
     let finish!: () => void;
     const finishPromise = new Promise<void>((resolve) => {

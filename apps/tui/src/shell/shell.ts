@@ -73,6 +73,7 @@ import {
 import { runFaceBashCommand } from "../face/clankie-face-bash.ts";
 import { ClankieVoiceTranscriptOverlay } from "../face/clankie-voice-transcripts.ts";
 import { followVoiceTranscripts, type DiscordVoiceTranscriptClient } from "../session/voice-transcripts.ts";
+import { OperatorConversationSendError } from "../session/operator-conversations.ts";
 import { clankieSlashSkillSuffix, resolveClankieSlashSkill } from "../skill-catalog.ts";
 import { ClankieCommandTextResultComponent, type CommandLogTone } from "./command-log.ts";
 import { createFaceThemeBundle, type FaceThemeBundle } from "./theme.ts";
@@ -1209,14 +1210,7 @@ export class ClankieFaceShell {
         await this.options.onPendingPrompt(prompt, delivery);
         this.refreshStatus(delivery === "queue" ? "follow-up queued" : "steering sent");
       } catch (error) {
-        // Preserve an unsent prompt without overwriting text typed while the send
-        // was in flight. Accepted inputs are echoed once by the existing tail.
-        if (this.editor.getText().length === 0) {
-          this.editor.setText(prompt);
-          this.refreshCommandSurface(prompt);
-        } else {
-          this.insertMarkdown(`**Unsent prompt**\n\n${prompt}`);
-        }
+        this.restoreFailedPrompt(prompt, error);
         this.insertMarkdown(`**Error**\n\n${formatError(error)}`);
       }
       return;
@@ -1234,11 +1228,28 @@ export class ClankieFaceShell {
     try {
       await onPrompt(prompt, this, controller.signal, delivery);
     } catch (error) {
-      if (!controller.signal.aborted) this.insertMarkdown(`**Error**\n\n${formatError(error)}`);
+      if (!controller.signal.aborted) {
+        if (error instanceof OperatorConversationSendError) this.restoreFailedPrompt(prompt, error);
+        this.insertMarkdown(`**Error**\n\n${formatError(error)}`);
+      }
     } finally {
       this.stopTurnLoader();
       if (this.activeTurn === turn) this.activeTurn = undefined;
       this.refreshStatus("ready");
+    }
+  }
+
+  private restoreFailedPrompt(prompt: string, error: unknown): void {
+    // Keep newer input intact; confirmed turns never return to the editor.
+    if (this.editor.getText().length === 0) {
+      this.editor.setText(prompt);
+      this.refreshCommandSurface(prompt);
+    } else {
+      const label =
+        error instanceof OperatorConversationSendError && error.delivery === "unconfirmed"
+          ? "Unconfirmed prompt"
+          : "Unsent prompt";
+      this.insertMarkdown(`**${label}**\n\n${prompt}`);
     }
   }
 

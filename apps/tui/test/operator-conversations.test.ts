@@ -909,6 +909,34 @@ describe("TUI selected-conversation prompt path", () => {
     );
   });
 
+  it.each(["replay", "get", "send"] as const)(
+    "keeps a failed %s admission retryable without resending",
+    async (stage) => {
+      const { store } = await tempTailStore();
+      const selection = new OperatorConversationSelection(client());
+      await selection.selectDefault();
+      const send = vi.fn(client().send);
+      const routed: OperatorConversationClient = {
+        ...client(),
+        send,
+        [stage]: vi.fn(async () => {
+          throw new TypeError("fetch failed");
+        }),
+      };
+      const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
+      await session.initialize();
+      await expect(session.prompt("keep these words", recordingSink().sink)).rejects.toMatchObject({
+        name: "OperatorConversationSendError",
+        delivery: stage === "send" ? "unconfirmed" : "not_sent",
+        message: expect.stringContaining(
+          stage === "send" ? "Check the conversation before retrying" : "Message not sent",
+        ),
+      });
+      expect(routed[stage]).toHaveBeenCalledOnce();
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
   it("resumes a recoverable retained boundary before sending", async () => {
     const { store } = await tempTailStore();
     const selection = new OperatorConversationSelection(client());
