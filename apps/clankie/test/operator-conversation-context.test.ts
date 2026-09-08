@@ -75,7 +75,7 @@ describe("operator conversation context", () => {
     await store.close();
   });
 
-  it("runs a signed hook's wake on the global thread as its own kind of internal turn", async () => {
+  it("runs signed activity in a separate resumable Linear inbox", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-conversation-hook-"));
     roots.push(root);
     const origins: (string | undefined)[] = [];
@@ -84,7 +84,11 @@ describe("operator conversation context", () => {
       publish({ type: "message", role: "captain", text: `ran: ${message}`, streaming: false });
     });
 
-    const accepted = store.submitInternal("global-default", "James commented on VUH-1234", "hook");
+    const inbox = store.linearInboxConversationId();
+    expect(inbox).toBe("linear-inbox");
+    expect(store.linearInboxConversationId()).toBe(inbox);
+    expect(inbox).not.toBe(store.defaultGlobalConversationId());
+    const accepted = store.submitInternal(inbox, "Linear activity on VUH-1234", "hook");
     if (accepted.status !== "accepted") throw new Error("hook turn was not accepted");
     await store.awaitRun(accepted.runId);
 
@@ -96,7 +100,7 @@ describe("operator conversation context", () => {
       schemaVersion: 1,
       replay: {
         schemaVersion: 1,
-        conversationId: "global-default",
+        conversationId: inbox,
         surfaceClientId: "test",
         limit: 20,
       },
@@ -106,6 +110,52 @@ describe("operator conversation context", () => {
     // he typed it into this conversation.
     expect(replay.result.events).not.toContainEqual(expect.objectContaining({ role: "operator" }));
     await store.close();
+    const reopened = new ConversationStore(root, async () => {});
+    expect(reopened.linearInboxConversationId()).toBe(inbox);
+    expect(reopened.conversation("global-default")?.revision).toBe(0);
+    await reopened.close();
+  });
+
+  it("keeps off-period Linear messages across restart without running a model or sending reply notifications", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-conversation-inbox-"));
+    roots.push(root);
+    let runs = 0;
+    let notifications = 0;
+    const store = new ConversationStore(root, async () => {
+      runs += 1;
+    });
+    store.observeDurableMessages(() => {
+      notifications += 1;
+    });
+    store.receiveLinearActivity("Linear issue created", false);
+    store.receiveLinearActivity("Swarm comment added", false);
+    expect(runs).toBe(0);
+    expect(notifications).toBe(0);
+    expect(store.conversation("global-default")?.revision).toBe(0);
+    await store.close();
+    const reopened = new ConversationStore(root, async () => {
+      runs += 1;
+    });
+    const replay = await reopened.serve({
+      op: "replay",
+      schemaVersion: 1,
+      replay: {
+        schemaVersion: 1,
+        conversationId: "linear-inbox",
+        surfaceClientId: "test",
+        limit: 20,
+      },
+    });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("replay failed");
+    expect(replay.result.events.map((event) => event.type)).toEqual(["message", "message"]);
+    expect(replay.result.events).toMatchObject([
+      { role: "external", text: "Linear issue created" },
+      { role: "external", text: "Swarm comment added" },
+    ]);
+    expect(runs).toBe(0);
+    reopened.receiveLinearActivity("New live activity", true);
+    await reopened.close();
+    expect(runs).toBe(1);
   });
 
   it("steers a human send into an in-flight internal turn instead of queuing behind it", async () => {

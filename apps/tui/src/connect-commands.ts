@@ -11,13 +11,14 @@ import {
   type RedactedCredential,
 } from "@clankie/credential-broker";
 import { LINEAR_WEBHOOK_PATH } from "@clankie/protocol/public-gateway";
+import { runLinearCommand } from "./command/linear.ts";
 import { describeRedactedCredential, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 const LINEAR_PROVIDER_ID = "linear";
 const EMAIL_PROVIDER_ID = "email";
 const LINEAR_KEY_URL = "https://linear.app/settings/account/security";
-const LINEAR_WEBHOOK_SETTINGS_URL = "https://linear.app/settings/api/webhooks";
+const LINEAR_WEBHOOK_SETTINGS_URL = "https://linear.app/settings/api";
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 
 export type EmailPresetId = "gmail" | "icloud" | "fastmail" | "outlook" | "custom";
@@ -315,14 +316,15 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
   const flow = shell.setupFlow;
   const listed = await services.listCredentials();
   const existing = listed[LINEAR_PROVIDER_ID];
-  const commentWakeHint =
-    listed[LINEAR_WEBHOOK_PROVIDER_ID] === undefined ? "not set up" : "webhook secret stored";
+  const following = (await services.settings.load()).linearWebhook.following;
+  const followHint =
+    listed[LINEAR_WEBHOOK_PROVIDER_ID] === undefined ? "set up webhook" : following ? "on" : "off";
   if (existing !== undefined) {
     const decision = await flow.readSelect({
       message: `Linear is already stored — ${describeRedactedCredential(existing)}`,
       options: [
         { value: "keep", label: "Keep it" },
-        { value: "comments", label: "Wake me on my comments", hint: commentWakeHint },
+        { value: "follow", label: "Follow Linear", hint: followHint },
         { value: "oauth", label: "Sign in with Linear again", hint: "browser OAuth" },
         { value: "key", label: "Replace with an API key" },
         { value: "remove", label: "Disconnect Linear" },
@@ -331,8 +333,8 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
     });
     const choice = decision;
     if (choice === undefined || choice === "keep") return;
-    if (choice === "comments") {
-      await runLinearCommentWakeFlow(shell, services);
+    if (choice === "follow") {
+      await runLinearFollowFlow(shell, services);
       return;
     }
     if (choice === "remove") {
@@ -366,31 +368,53 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
         description: `Personal key from ${LINEAR_KEY_URL}.`,
       },
       {
-        value: "comments",
-        label: "Wake me on my comments",
-        hint: commentWakeHint,
-        description: "A signed webhook, separate from sign-in: his MCP token cannot sign one.",
+        value: "follow",
+        label: "Follow Linear",
+        hint: followHint,
+        description: "Opt-in awareness of issue, comment, project and other activity in a separate inbox.",
       },
     ],
     allowBack: true,
   });
   if (method === "oauth") await connectLinearOauth(shell, services);
   else if (method === "key") await connectLinearApiKey(shell, services);
-  else if (method === "comments") await runLinearCommentWakeFlow(shell, services);
+  else if (method === "follow") await runLinearFollowFlow(shell, services);
 }
 
-/**
- * Everything a Linear comment wake needs, in one place: the URL to register,
- * the signing secret, and whose comments count. The webhook itself is made in
- * Linear's own UI — creating one needs an `admin` credential Clankie never asks
- * for — so this flow's job is to hand over the address and take back what
- * Linear shows once (ADR 0165).
- */
-async function runLinearCommentWakeFlow(
-  shell: ClankieFaceShell,
-  services: ConnectCommandServices,
-): Promise<void> {
+/** Configure the webhook independently of the switch that wakes the Linear inbox. */
+async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
   const flow = shell.setupFlow;
+  const following = (await services.settings.load()).linearWebhook.following;
+  const action = await flow.readSelect({
+    message: `Follow Linear is ${following ? "on" : "off"}`,
+    options: [
+      {
+        value: following ? "off" : "on",
+        label: following ? "Stop following" : "Start following",
+        hint: following
+          ? "Keep receiving inbox messages without waking him"
+          : "Wake on new inbox activity; replies are optional",
+      },
+      { value: "setup", label: "Configure webhook", hint: "URL, all activity events, signing secret" },
+    ],
+    allowBack: true,
+  });
+  if (action === undefined) return;
+  if (action === "on" || action === "off") {
+    if (action === "on" && (await services.listCredentials())[LINEAR_WEBHOOK_PROVIDER_ID] === undefined) {
+      shell.insertCommandResult("/connect linear", "Configure the Linear webhook first.", "error");
+      return;
+    }
+    const result = await runLinearCommand(["follow", action], { settings: services.settings });
+    shell.insertCommandResult(
+      "/connect linear",
+      result.following
+        ? "Following Linear in the Linear inbox. Routine updates can pass silently."
+        : "Stopped following Linear. New activity stays in the inbox without waking him.",
+      "success",
+    );
+    return;
+  }
   const doorway = await services.gatewayHook?.();
   if (doorway === undefined) {
     shell.insertCommandResult(
@@ -407,24 +431,27 @@ async function runLinearCommentWakeFlow(
   const webhookUrl = `${doorway.url.replace(/\/+$/u, "")}/h/${doorway.hostId}${LINEAR_WEBHOOK_PATH}`;
   flow.renderLine("Create the webhook in Linear, then paste what it shows you.", "info");
   flow.renderLine(`  URL:    ${webhookUrl}`, "info");
-  flow.renderLine("  Events: Comments", "info");
+  flow.renderLine(
+    "  Events: Select all available activity events (issues, comments, projects, and the rest)",
+    "info",
+  );
   flow.renderLine(`  Make it at ${LINEAR_WEBHOOK_SETTINGS_URL}`, "info");
 
   const listed = await services.listCredentials();
   const storedSecret = listed[LINEAR_WEBHOOK_PROVIDER_ID];
-  let secretStored = storedSecret !== undefined;
   if (storedSecret !== undefined) {
     const decision = await flow.readSelect({
       message: `Signing secret is stored — ${describeRedactedCredential(storedSecret)}`,
       options: [
         { value: "keep", label: "Keep it" },
         { value: "replace", label: "Paste a new one", hint: "after rotating it in Linear" },
-        { value: "remove", label: "Remove it", hint: "stops the comment wake" },
+        { value: "remove", label: "Remove it", hint: "stops receiving activity" },
       ],
       allowBack: true,
     });
     if (decision === undefined) return;
     if (decision === "remove") {
+      await runLinearCommand(["follow", "off"], { settings: services.settings });
       await services.removeCredential(LINEAR_WEBHOOK_PROVIDER_ID);
       shell.insertCommandResult("/connect linear", "Removed the Linear webhook secret.", "success");
       return;
@@ -436,7 +463,6 @@ async function runLinearCommentWakeFlow(
       });
       if (replacement === undefined) return;
       await services.setCredential(LINEAR_WEBHOOK_PROVIDER_ID, replacement.trim());
-      secretStored = true;
     }
   } else {
     const secret = await flow.readSecret({
@@ -445,31 +471,14 @@ async function runLinearCommentWakeFlow(
     });
     if (secret === undefined) return;
     await services.setCredential(LINEAR_WEBHOOK_PROVIDER_ID, secret.trim());
-    secretStored = true;
   }
-
-  // Asked every time, because an unset author drops every comment — a silent
-  // failure that looks exactly like a broken webhook.
-  const current = (await services.settings.load()).linearWebhook.actorEmail;
-  const actorEmail = await flow.readText({
-    message: "Your Linear account email (only this author's comments wake him)",
-    ...(current === undefined ? {} : { initialValue: current }),
-    placeholder: "you@example.com",
-    validate: validateActorEmail,
-  });
-  if (actorEmail === undefined) return;
-  const trimmed = actorEmail.trim();
-  await services.settings.update((settings) => ({
-    ...settings,
-    linearWebhook: { ...settings.linearWebhook, actorEmail: trimmed },
-  }));
 
   shell.insertCommandResult(
     "/connect linear",
     [
-      `Linear comment wake ready. Secret ${secretStored ? "stored" : "missing"}; waking on ${trimmed}.`,
+      "Linear webhook ready. Select all activity events in Linear, including on an existing webhook.",
       `URL: ${webhookUrl}`,
-      "He acts on the comment, then replies on that Linear issue.",
+      `Follow Linear is ${following ? "on" : "off"}. Use /connect linear → Follow Linear to change it.`,
     ].join("\n"),
     "success",
   );
@@ -480,12 +489,6 @@ function validateSigningSecret(value: string): string | undefined {
   if (trimmed.length < 8) return "That doesn't look like a signing secret.";
   if (/\s/u.test(trimmed)) return "A signing secret has no spaces — copy it again.";
   return undefined;
-}
-
-function validateActorEmail(value: string): string | undefined {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return "Without an author, every comment is dropped.";
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(trimmed) ? undefined : "That is not an email address.";
 }
 
 async function connectLinearOauth(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {

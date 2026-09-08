@@ -458,7 +458,9 @@ private struct ConversationTranscript: View {
       }
       ForEach(displayEvents) { event in
         if event.type == "message", let text = event.text {
-          TranscriptBubble(speaker: event.role == "operator" ? "You" : "Clankie", text: text)
+          TranscriptBubble(
+            speaker: event.role == "external" ? "External activity" : event.role == "operator" ? "You" : "Clankie",
+            text: text)
         } else {
           Text([event.name, event.phase, event.summary].compactMap { $0 }.joined(separator: " · "))
             .font(.caption2).foregroundStyle(.secondary).frame(

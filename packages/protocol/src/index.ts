@@ -1083,8 +1083,8 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("message"),
-    /** `agent` is a durable fleet character speaking (ADR 0147). */
-    role: z.enum(["operator", "captain", "agent"]),
+    /** `agent` is a fleet character; `external` is received context, never operator direction. */
+    role: z.enum(["operator", "captain", "agent", "external"]),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
     /**
@@ -1906,6 +1906,14 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
+      op: z.literal("reset"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      expectedRevision: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("close"),
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
@@ -2130,6 +2138,14 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("fork"),
       schemaVersion: z.literal(1),
       conversation: OperatorConversationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("reset"),
+      schemaVersion: z.literal(1),
+      conversation: OperatorConversationSchema,
+      archiveId: z.string().min(1).max(128),
     })
     .strict(),
   z
@@ -2407,6 +2423,13 @@ export interface OperatorConversationServiceClient {
     readonly emoji: string;
     readonly remove: boolean;
   }): Promise<boolean>;
+  reset?(
+    conversationId: string,
+    expectedRevision: number,
+  ): Promise<{
+    conversation: OperatorConversation;
+    archiveId: string;
+  }>;
   close(conversationId: string): Promise<boolean>;
   replay(request: ReplayOperatorConversationRequest): Promise<ReplayOperatorConversationResult>;
   /**
@@ -2571,6 +2594,11 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "fork", schemaVersion: 1, parentConversationId });
       if (result.op !== "fork") throw new Error(`Unexpected ${result.op} result for fork`);
       return result.conversation;
+    },
+    async reset(conversationId, expectedRevision) {
+      const result = await dispatch({ op: "reset", schemaVersion: 1, conversationId, expectedRevision });
+      if (result.op !== "reset") throw new Error(`Unexpected ${result.op} result for reset`);
+      return { conversation: result.conversation, archiveId: result.archiveId };
     },
     async close(conversationId) {
       const result = await dispatch({ op: "close", schemaVersion: 1, conversationId });

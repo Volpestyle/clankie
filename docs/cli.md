@@ -41,21 +41,21 @@ starts the clankie service if needed and attaches the fullscreen face.
 `--json` is required only where the default is human-readable (pairing QR,
 device table, credential-rotate sentence). Everything else is already JSON.
 
-| Command                                                                             | stdout                                                                                       |
-| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`                      | JSON                                                                                         |
-| `model …`, `effort …`, `image-model …`, `video-model …`                             | JSON                                                                                         |
-| `persona …`, `games …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
-| `play status`                                                                       | JSON                                                                                         |
-| `send --conversation ID …`                                                          | JSON accepted-run receipt or refusal                                                         |
-| `memory …`, `metrics …`                                                             | JSON                                                                                         |
-| `play stop`                                                                         | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
-| `prompt …`, `memory-card …`                                                         | Plain text: the prompt or card itself, verbatim                                              |
-| `seat`                                                                              | Interactive (TTY); `seat --dry-run` is JSON                                                  |
-| `mcp`                                                                               | JSON-RPC for a harness, never for people                                                     |
-| `pair`, `devices`, `operator-credential rotate`                                     | Human text; pass `--json`                                                                    |
-| `help`                                                                              | This index (plain text)                                                                      |
-| `--version`                                                                         | `clankie <version>`                                                                          |
+| Command                                                                                         | stdout                                                                                       |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`                                  | JSON                                                                                         |
+| `model …`, `effort …`, `image-model …`, `video-model …`                                         | JSON                                                                                         |
+| `linear …`, `persona …`, `games …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
+| `play status`                                                                                   | JSON                                                                                         |
+| `send --conversation ID …`                                                                      | JSON accepted-run receipt or refusal                                                         |
+| `memory …`, `metrics …`                                                                         | JSON                                                                                         |
+| `play stop`                                                                                     | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
+| `prompt …`, `memory-card …`                                                                     | Plain text: the prompt or card itself, verbatim                                              |
+| `seat`                                                                                          | Interactive (TTY); `seat --dry-run` is JSON                                                  |
+| `mcp`                                                                                           | JSON-RPC for a harness, never for people                                                     |
+| `pair`, `devices`, `operator-credential rotate`                                                 | Human text; pass `--json`                                                                    |
+| `help`                                                                                          | This index (plain text)                                                                      |
+| `--version`                                                                                     | `clankie <version>`                                                                          |
 
 Do not edit `~/.config/clankie/clankie.json`,
 `~/.config/clankie/settings.json`, or Keychain entries by hand.
@@ -272,25 +272,57 @@ out and removes its installation binding.
 `set --url URL --host-id ID` remains only for legacy static-bearer migration and
 local verification. It never accepts a secret as a flag.
 
-### Linear comment ingress
+### `linear status` / `linear follow on|off`
 
-Signed Linear `Comment.create` webhooks wake Clankie's operator thread with the
-comment quoted (ADR 0165). He does what the comment needs, then replies on that
-Linear issue (ADR 0167).
+With the webhook configured, accepted events appear in the **Linear inbox**
+conversation (`linear-inbox`) as **External activity** messages, including swarm
+posts delivered by the webhook. Following controls whether those messages wake
+Clankie:
 
-Set it up from the console with `/connect linear` → **Wake me on my comments**,
-once the doorway is configured. That flow prints the URL to register, takes the
-signing secret into the broker (`linear-webhook`), and records which author's
-comments count — no provider id typed by hand and no settings file edited.
+| Following     | Inbox delivery                          | Automatic model turns         |
+| ------------- | --------------------------------------- | ----------------------------- |
+| Off (default) | Events stay visible in the conversation | None from incoming events     |
+| On            | Events stay visible in the conversation | New events wake Clankie there |
 
-Creating the webhook itself stays a step in Linear's own UI: point it at the
-printed URL with **Comments** events. Clankie cannot create it, because
-`webhookCreate` needs an `admin` credential the `/connect linear` MCP token is
-audience-restricted away from — it can neither create nor sign webhooks.
+Open the conversation with `clankie --chat linear-inbox`. It is created on the
+first accepted event, including while off. Ask Clankie to **check the Linear
+inbox** when you want him to read its retained messages; collecting them does
+not automatically load them into model context. Turning following on does not
+schedule a turn for every old message. Normal conversation retention bounds
+history, so this is not an unlimited archive.
 
-The author is required, not optional. Until one is set every verified comment is
-dropped, so an agent commenting on his issue can never wake the thread that
-wrote it.
+`clankie linear follow off` suppresses new event-triggered turns and skips model
+turns still queued; their inbox messages remain. An already-running turn can
+finish. `clankie linear follow on|off` applies without a restart, and
+`clankie linear status` reads the switch. All three return JSON with `ok`,
+`following`, `conversationId` (`linear-inbox`), and `settingsFile`.
+
+The inbox has its own model context. Linear events do not enter the default
+Clankie conversation or its bound Herdr seat. Removing the webhook stops inbox
+delivery; setting following off keeps delivery enabled.
+
+Configure the webhook from `/connect linear` → **Follow Linear** → **Configure
+webhook**. The flow prints the public URL and stores the signing secret in the
+credential broker (`linear-webhook`). In Linear's webhook settings, select **all
+available activity events**, including issues, comments, projects, and updates.
+An existing Comments-only webhook also needs its event selection expanded there.
+Setup does not enable following; **Start following** / **Stop following** is a
+separate choice under **Follow Linear**.
+
+The consumer accepts signed `create`, `update`, and `remove` activity from any
+resource type and actor. The prompt carries the resource, action, author, URL,
+data and previous values as bounded untrusted context. Shared-account agent
+posts are not attributed to the human. Clankie decides what merits attention;
+routine updates and his own echoes need no acknowledgment, dispatch or reply.
+A delivery supplies context, not new permission.
+[ADR 0168](adr/0168-linear-awareness-is-opt-in.md) describes the decision.
+
+The local operator API exposes `GET /v1/linear/follow` and
+`PUT /v1/linear/follow` with `{ "following": true | false }`. Both require the
+operator bearer and return `{ "schemaVersion": 1, "following": boolean,
+"conversationId": "linear-inbox" }`. The signed public ingress remains
+`POST /v1/hooks/linear`. Changing the local follow switch does not change which
+events Linear sends; the owner configures that subscription in Linear.
 
 ### `operator-credential rotate [--json]`
 
@@ -547,6 +579,27 @@ home directory. `set` expands a leading `~` and stores the absolute path.
 JSON contains `workingDirectory` (the configured value or `null`),
 `effective` (what the captain runs in after a restart), `settingsFile`, and
 `"restart": "clankie restart captain"`.
+
+### `reset --conversation ID`
+
+Archive an idle service-owned global or workspace conversation and start fresh
+model context under the same ID and title. For the root conversation:
+
+```bash
+clankie reset --conversation global-default
+```
+
+The TUI's `/reset` resets the selected conversation. `/clear` only clears the
+screen; `/new` creates another conversation. Reset preserves persona, settings,
+and durable memory, and clears the conversation's pending goals and watches.
+The transcript and Pi session remain in `conversation-archives/reset-UUID`,
+beside the service's `conversations` directory. JSON returns the fresh
+`conversation` and `archiveId`.
+
+Reset requires an idle conversation with no open side conversations. A root
+bound to an external seat refuses reset: end that seat first because its
+model context belongs to the external harness. The API's `reset` operation
+requires `expectedRevision`; stale requests refuse without changing history.
 
 ### `send --conversation ID [--delivery steer|queue] (MESSAGE | --stdin)`
 

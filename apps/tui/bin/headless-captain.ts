@@ -6,6 +6,7 @@ import { statusCommand } from "../src/command/status.ts";
 import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
 import { runGamesCommand } from "../src/command/games.ts";
+import { runLinearCommand } from "../src/command/linear.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
 import { forwardsToFleetHerdr, runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
@@ -19,6 +20,7 @@ import { runDevicesCommand } from "../src/command/devices.ts";
 import { runPlayCommand } from "../src/command/play.ts";
 import { runStanceCommand } from "../src/command/stance.ts";
 import { runPromptCommand } from "../src/command/prompt.ts";
+import { runResetCommand } from "../src/command/reset.ts";
 import { runSendCommand } from "../src/command/send.ts";
 import { runMemoryCardCommand } from "../src/command/memory-card.ts";
 import { runMemoryCommand } from "../src/command/memory.ts";
@@ -138,6 +140,10 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result);
       return 0;
     }
+    if (command === "linear") {
+      outputJson(stdout, await runLinearCommand(rest, options));
+      return 0;
+    }
     if (command === "fleet") {
       const result = await runFleetCommand(rest, options);
       outputJson(stdout, result);
@@ -163,6 +169,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "prompt") {
       return await runPromptCommand(rest, { ...options, stdout });
     }
+    if (command === "reset") return await runResetCommand(rest, options);
     if (command === "send") return await runSendCommand(rest, { ...options, stdout });
     if (command === "memory-card") {
       return await runMemoryCardCommand(rest, { ...options, stdout });

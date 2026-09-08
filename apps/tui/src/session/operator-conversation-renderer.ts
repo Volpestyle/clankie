@@ -128,7 +128,9 @@ export function createOperatorConversationShellSink(
         shell.setTurnLoaderMessage?.("Waiting for response...");
       }
       if (event.type === "message") {
-        if (event.role === "operator") {
+        if (event.role === "external") {
+          shell.insertMarkdown(`**External activity**\n\n${event.text}`);
+        } else if (event.role === "operator") {
           if (pendingEcho !== undefined && event.text === pendingEcho) pendingEcho = undefined;
           else shell.insertUserMessage(event.text);
         } else {

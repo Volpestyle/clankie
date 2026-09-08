@@ -449,11 +449,13 @@ describe("mcp and email settings", () => {
       `${JSON.stringify({
         schemaVersion: 1,
         linear: { defaultTeamId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+        linearWebhook: { actorEmail: "me@example.com" },
         discord: { possessorVoiceEnabled: true },
       })}\n`,
       "utf8",
     );
     expect((await new SettingsStore(path).load()).mcp.servers).toEqual([]);
+    expect((await new SettingsStore(path).load()).linearWebhook).toEqual({ following: false });
 
     await writeFile(path, `${JSON.stringify({ schemaVersion: 1, lienar: {} })}\n`, "utf8");
     await expect(new SettingsStore(path).load()).rejects.toThrow(/nrecognized/);

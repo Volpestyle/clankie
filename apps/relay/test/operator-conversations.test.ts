@@ -247,6 +247,28 @@ describe("authenticated operator conversation relay", () => {
     expect(await response.json()).toEqual({ error: "steer_grant_required" });
   });
 
+  it("requires the steer grant to reset conversation context", async () => {
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, steer: false } },
+        }),
+      },
+      dispatch: async () => {
+        throw new Error("must not dispatch");
+      },
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "reset",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      expectedRevision: 0,
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "steer_grant_required" });
+  });
+
   it("requires the steer grant to move a seat", async () => {
     // Moving closes a pane and starts a process, so it is at least as
     // consequential as either half; a chat-only device must not reach it.

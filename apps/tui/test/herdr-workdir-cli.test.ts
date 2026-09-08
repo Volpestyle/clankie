@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
+import { runLinearCommand } from "../src/command/linear.ts";
 import { runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 
@@ -73,5 +74,20 @@ describe("clankie workdir", () => {
     const settings = await tempStore();
     await expect(runWorkdirCommand(["set"], { settings })).rejects.toThrow("Usage: clankie workdir");
     await expect(runWorkdirCommand(["wipe"], { settings })).rejects.toThrow("Usage: clankie workdir");
+  });
+});
+
+describe("clankie linear", () => {
+  it("defaults off, persists live follow toggles, and rejects invalid commands", async () => {
+    const settings = await tempStore();
+    expect(await runLinearCommand([], { settings })).toMatchObject({
+      following: false,
+      conversationId: "linear-inbox",
+    });
+    expect(await runLinearCommand(["follow", "on"], { settings })).toMatchObject({ following: true });
+    expect((await settings.load()).linearWebhook.following).toBe(true);
+    expect(await runLinearCommand(["follow", "off"], { settings })).toMatchObject({ following: false });
+    await expect(runLinearCommand(["follow", "yes"], { settings })).rejects.toThrow("Usage:");
+    await expect(runLinearCommand(["status", "on"], { settings })).rejects.toThrow("Usage:");
   });
 });

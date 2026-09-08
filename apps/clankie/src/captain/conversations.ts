@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import {
   OPERATOR_CHANNEL_MEMBER_MAX,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
@@ -332,6 +332,8 @@ export interface DurableMessageNotice {
   readonly role: "captain" | "agent";
 }
 
+export class ConversationResetError extends Error {}
+
 /**
  * File-backed conversation registry: `meta.json` + append-only `events.jsonl`
  * per conversation. The wire contract (list/get/create/close/replay/tail/send with
@@ -407,6 +409,24 @@ export class ConversationStore {
     this.personaPresentation = personaPresentation;
     this.reportSeatEdge = reportSeatEdge;
     mkdirSync(root, { recursive: true });
+    // Complete a reset interrupted after archiving but before installing fresh metadata.
+    const archives = join(dirname(root), "conversation-archives");
+    if (statSync(archives, { throwIfNoEntry: false })?.isDirectory()) {
+      for (const entry of readdirSync(archives, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !/^reset-[a-f0-9-]+\.pending$/u.test(entry.name)) continue;
+        const staging = join(archives, entry.name);
+        const archived = join(archives, entry.name.slice(0, -8));
+        if (!statSync(archived, { throwIfNoEntry: false })?.isDirectory()) continue;
+        const pending = JSON.parse(readFileSync(join(staging, "meta.json"), "utf8")) as ConversationMeta;
+        if (!/^[a-zA-Z0-9_-]+$/u.test(pending.conversationId))
+          throw new Error("Invalid pending reset conversation");
+        const destination = join(root, pending.conversationId);
+        if (!statSync(destination, { throwIfNoEntry: false })) {
+          this.onPrune?.(pending.conversationId, pending.scope);
+          renameSync(staging, destination);
+        }
+      }
+    }
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       try {
@@ -562,6 +582,8 @@ export class ConversationStore {
           schemaVersion: 1,
           conversation: await this.fork(request.parentConversationId),
         };
+      case "reset":
+        return this.resetConversation(request.conversationId, request.expectedRevision);
       case "close":
         return {
           op: "close",
@@ -666,6 +688,26 @@ export class ConversationStore {
       if (meta.scope.kind === "global" && meta.isDefault) return meta.conversationId;
     }
     return "global-default";
+  }
+
+  /** A separate, resumable room for opt-in Linear awareness. Normal retention applies. */
+  public linearInboxConversationId(): string {
+    const id = "linear-inbox";
+    if (!this.metas.has(id)) this.create({ kind: "global" }, "Linear inbox", id);
+    return id;
+  }
+
+  /** Keep signed activity visible even when the operator does not want a model turn. */
+  public receiveLinearActivity(message: string, following: boolean): void {
+    const id = this.linearInboxConversationId();
+    const meta = this.metas.get(id)!;
+    meta.revision += 1;
+    this.append(meta, { type: "message", role: "external", text: message, streaming: false });
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+    if (!following) return;
+    const result = this.submitInternal(id, message, "hook");
+    if (result.status !== "accepted") throw new Error("Linear activity was not accepted");
   }
 
   public conversationIdForSeat(seatId: string): string | undefined {
@@ -869,7 +911,11 @@ export class ConversationStore {
     await Promise.allSettled([...this.runs.values(), ...this.seatSends.values()]);
   }
 
-  private create(scope: OperatorConversationScope, title: string): ConversationMeta {
+  private create(
+    scope: OperatorConversationScope,
+    title: string,
+    conversationId: string = `conv-${randomUUID()}`,
+  ): ConversationMeta {
     if (scope.kind === "persona") {
       const existing = this.conversationIdForPersona(scope.personaId);
       if (existing !== undefined) return this.metas.get(existing)!;
@@ -888,7 +934,7 @@ export class ConversationStore {
     }
     const now = new Date().toISOString();
     const meta: ConversationMeta = {
-      conversationId: `conv-${randomUUID()}`,
+      conversationId,
       scope,
       title,
       // The boot-seeded global conversation owns default; created ones never do.
@@ -1982,6 +2028,62 @@ export class ConversationStore {
     this.counts.delete(meta.conversationId);
     this.sequences.delete(meta.conversationId);
     this.onPrune?.(meta.conversationId, meta.scope);
+  }
+
+  private resetConversation(conversationId: string, expectedRevision: number): ConversationServiceResult {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined) throw new ConversationResetError("Unknown conversation");
+    if (!this.runsCaptainTurns(conversationId) || meta.parentConversationId !== undefined) {
+      throw new ConversationResetError(
+        "Only Clankie's own global and workspace conversations can reset context",
+      );
+    }
+    if (meta.revision !== expectedRevision)
+      throw new ConversationResetError("Conversation changed; refresh before resetting context");
+    if (
+      (this.runCounts.get(conversationId) ?? 0) > 0 ||
+      this.seatSends.has(conversationId) ||
+      [...this.metas.values()].some((candidate) => candidate.parentConversationId === conversationId)
+    ) {
+      throw new ConversationResetError(
+        "Wait for the current turn to finish and close side conversations before resetting context",
+      );
+    }
+    const archiveId = `reset-${randomUUID()}`;
+    const archiveRoot = join(dirname(this.root), "conversation-archives");
+    const archive = join(archiveRoot, archiveId);
+    const staging = join(archiveRoot, `${archiveId}.pending`);
+    const live = join(this.root, conversationId);
+    // Advance the replay boundary so every old cursor must recover, even the latest.
+    const boundary = this.eventSequence(meta) + 1;
+    const fresh: ConversationMeta = {
+      conversationId,
+      scope: meta.scope,
+      title: meta.title,
+      isDefault: meta.isDefault,
+      createdAt: meta.createdAt,
+      updatedAt: new Date().toISOString(),
+      revision: meta.revision + 1,
+      sessionState: "unbound",
+      retainedFromCursor: String(boundary).padStart(CURSOR_WIDTH, "0"),
+    };
+    mkdirSync(staging, { recursive: true, mode: 0o700 });
+    writeFileSync(join(staging, "meta.json"), JSON.stringify(fresh, null, 2), { mode: 0o600 });
+    renameSync(live, archive);
+    try {
+      this.onPrune?.(conversationId, meta.scope);
+      renameSync(staging, live);
+    } catch (error) {
+      renameSync(archive, live);
+      throw error;
+    }
+    this.metas.set(conversationId, fresh);
+    this.chains.delete(conversationId);
+    this.counts.set(conversationId, 0);
+    this.sequences.set(conversationId, boundary);
+    this.drafts.delete(conversationId);
+    this.wakeTails(conversationId);
+    return { op: "reset", schemaVersion: 1, conversation: publicConversation(fresh), archiveId };
   }
 
   private async removeConversation(conversationId: string): Promise<boolean> {

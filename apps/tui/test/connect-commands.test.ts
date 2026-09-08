@@ -117,15 +117,18 @@ describe("discord invite URL", () => {
   });
 });
 
-describe("linear comment wake setup", () => {
+describe("Linear follow setup", () => {
   function harness(options: {
     readonly selections: readonly string[];
     readonly secret?: string | undefined;
-    readonly email?: string | undefined;
+    readonly following?: boolean;
     readonly stored?: Record<string, unknown>;
     readonly gatewayHook?: ConnectServices["gatewayHook"];
   }) {
-    let settings: ClankieSettings = emptySettings();
+    let settings: ClankieSettings = {
+      ...emptySettings(),
+      linearWebhook: { following: options.following ?? false },
+    };
     const selections = [...options.selections];
     const stored = new Map<string, string>();
     const removed: string[] = [];
@@ -136,7 +139,6 @@ describe("linear comment wake setup", () => {
       end: () => undefined,
       readSelect: async () => selections.shift(),
       readSecret: async () => options.secret,
-      readText: async () => options.email,
       renderLine: (line: string) => lines.push(line),
     } as unknown as SetupFlow;
     const shell = {
@@ -171,20 +173,21 @@ describe("linear comment wake setup", () => {
     return { connect, shell, stored, removed, lines, results, settings: () => settings };
   }
 
-  it("takes the secret and the author without either being typed by hand", async () => {
-    const h = harness({ selections: ["comments"], secret: "sec-1234567890", email: "me@example.com" });
+  it("stores the webhook secret without automatically enabling follow", async () => {
+    const h = harness({ selections: ["follow", "setup"], secret: "sec-1234567890" });
 
     await h.connect.run("linear", h.shell);
 
     // The two things an owner would otherwise hand-edit: a provider id typed
     // into /auth, and a settings key.
     expect(h.stored.get("linear-webhook")).toBe("sec-1234567890");
-    expect(h.settings().linearWebhook.actorEmail).toBe("me@example.com");
+    expect(h.settings().linearWebhook.following).toBe(false);
+    expect(h.lines.join("\n")).toContain("Select all available activity events");
     expect(h.lines.join("\n")).toContain("https://api.clankie.bot/h/host-abc/v1/hooks/linear");
   });
 
   it("says what is wrong instead of printing an address Linear cannot reach", async () => {
-    const h = harness({ selections: ["comments"], gatewayHook: async () => undefined });
+    const h = harness({ selections: ["follow", "setup"], gatewayHook: async () => undefined });
 
     await h.connect.run("linear", h.shell);
 
@@ -194,13 +197,35 @@ describe("linear comment wake setup", () => {
 
   it("removes the secret when he asks, and keeps it when he does not", async () => {
     const stored = { "linear-webhook": { type: "api", redacted: "sec…" } };
-    const removeRun = harness({ selections: ["comments", "remove"], stored });
+    const removeRun = harness({ selections: ["follow", "setup", "remove"], stored, following: true });
     await removeRun.connect.run("linear", removeRun.shell);
     expect(removeRun.removed).toEqual(["linear-webhook"]);
 
-    const keepRun = harness({ selections: ["comments", "keep"], stored, email: "me@example.com" });
+    const keepRun = harness({ selections: ["follow", "setup", "keep"], stored });
     await keepRun.connect.run("linear", keepRun.shell);
     expect(keepRun.removed).toEqual([]);
-    expect(keepRun.settings().linearWebhook.actorEmail).toBe("me@example.com");
+    expect(keepRun.settings().linearWebhook.following).toBe(false);
+    expect(removeRun.settings().linearWebhook.following).toBe(false);
+  });
+  it("toggles follow without rotating a credential or needing a doorway", async () => {
+    const stored = { "linear-webhook": { type: "api", redacted: "sec…" } };
+    const on = harness({ selections: ["follow", "on"], stored, gatewayHook: async () => undefined });
+    await on.connect.run("linear", on.shell);
+    expect(on.settings().linearWebhook.following).toBe(true);
+    expect(on.stored.size).toBe(0);
+    const off = harness({
+      selections: ["follow", "off"],
+      following: true,
+      gatewayHook: async () => undefined,
+    });
+    await off.connect.run("linear", off.shell);
+    expect(off.settings().linearWebhook.following).toBe(false);
+  });
+
+  it("requires webhook setup before starting from the wizard", async () => {
+    const h = harness({ selections: ["follow", "on"] });
+    await h.connect.run("linear", h.shell);
+    expect(h.settings().linearWebhook.following).toBe(false);
+    expect(h.results.join("\n")).toContain("Configure the Linear webhook first");
   });
 });

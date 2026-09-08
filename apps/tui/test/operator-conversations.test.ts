@@ -1180,6 +1180,25 @@ describe("TUI selected-conversation prompt path", () => {
     expect(recorded.statuses).toEqual(["conversation turn accepted"]);
   });
 
+  it("renders received external activity without impersonating either participant", () => {
+    const recorded = recordingTarget();
+    createOperatorConversationShellSink(recorded.target).event({
+      schemaVersion: 1,
+      conversationId: "linear-inbox",
+      cursor: "000000000001",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+      type: "message",
+      role: "external",
+      text: "Linear issue created",
+      streaming: false,
+    });
+    expect(recorded.markdown).toEqual(["**External activity**\n\nLinear issue created"]);
+    expect(recorded.userMessages).toEqual([]);
+    expect(recorded.assistantMessages).toEqual([]);
+    expect(recorded.loaders).toEqual([]);
+  });
+
   it("routes context snapshots to the status surface without transcript noise", () => {
     const recorded = recordingTarget();
     const usages: { tokens: number | null; contextWindow: number }[] = [];

@@ -37,8 +37,8 @@ import {
   type AgentSession,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import { ConversationStore, type ConversationTurnContext } from "./conversations.ts";
-import { linearCommentWakePrompt, suggestSeatForIssue } from "../linear-webhook.ts";
+import { ConversationResetError, ConversationStore, type ConversationTurnContext } from "./conversations.ts";
+import { linearActivityPrompt } from "../linear-webhook.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
   readFleet,
@@ -641,14 +641,9 @@ export async function runOneShotDiscordTurn(
  * caller.
  */
 /**
- * What a turn is to a bound seat, or nothing when pi runs it. Wakes, watches,
- * and signed hooks go to the seat from any conversation; a human send goes only
- * when it lands in the head conversation, where the seat is the one answering.
- * A goal continuation stays with its pi loop: the seat has no turn boundary the
- * autonomy runner could wait on, so handing it over would spin.
- *
- * A hook rides the existing wake kind rather than widening the wire — what
- * makes it a Linear comment is the prompt, which already says so.
+ * Wakes and watches reach the bound seat; human sends do so only in the head
+ * conversation. Linear hooks stay in their own service conversation, and goal
+ * continuations stay with their Pi loop.
  */
 export function seatEventKindFor(
   context: Pick<ConversationTurnContext, "internal" | "origin">,
@@ -656,7 +651,7 @@ export function seatEventKindFor(
 ): OperatorSeatEventKind | undefined {
   if (context.internal === true) {
     if (context.origin === "wake" || context.origin === "watch") return context.origin;
-    return context.origin === "hook" ? "wake" : undefined;
+    return undefined;
   }
   return isHeadConversation ? "escalation" : undefined;
 }
@@ -853,6 +848,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const conversations = new ConversationStore(
     join(options.stateDir, "conversations"),
     async (conversationId, message, publish, context) => {
+      // Turning follow off also drops activity still queued behind a live turn.
+      if (context.origin === "hook" && !(await settings()).linearWebhook.following) return;
       const kind = seatEventKind(conversationId, context);
       if (kind !== undefined) {
         const delivery = await seatOutbox.deliver({
@@ -1575,6 +1572,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     async serveOperatorConversation(
       request: OperatorConversationServiceRequest,
     ): Promise<OperatorConversationServiceResult> {
+      if (
+        request.op === "reset" &&
+        request.conversationId === conversations.defaultGlobalConversationId() &&
+        seatOutbox.bound()
+      ) {
+        throw new ConversationResetError(
+          "The default conversation is bound to an external seat; end that seat before resetting its service context",
+        );
+      }
       if (request.op === "terminal_tail") {
         return {
           op: "terminal_tail",
@@ -1919,19 +1925,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return conversations.observeDurableMessages(listener);
     },
 
-    wakeFromLinearComment(comment) {
-      // The suggestion is read off the seats the fleet already refreshed, never
-      // a census of its own: this runs on Linear's five-second clock.
-      const prompt = linearCommentWakePrompt(
-        comment,
-        suggestSeatForIssue(comment.issueIdentifier, liveSeats),
-      );
-      const conversationId = conversations.defaultGlobalConversationId();
-      if (!conversations.runsCaptainTurns(conversationId)) return;
-      // Enqueued and left to run, the way a settled watch is: the doorway has
-      // already answered Linear by the time the turn starts.
-      const result = conversations.submitInternal(conversationId, prompt, "hook");
-      if (result.status !== "accepted") throw new Error("Linear comment wake was not accepted");
+    receiveLinearActivity(activity, following) {
+      conversations.receiveLinearActivity(linearActivityPrompt(activity), following);
     },
 
     async close(): Promise<void> {

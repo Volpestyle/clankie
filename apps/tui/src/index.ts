@@ -204,6 +204,16 @@ const conversationsContext = {
   },
   conversations: () => conversationSelection.conversations(),
   close: (conversationId: string) => conversationClient.close(conversationId),
+  reset: async () => {
+    const id = conversationSelection.conversationId;
+    if (id === undefined || conversationClient.reset === undefined)
+      throw new Error("No resettable conversation is selected");
+    const current = await conversationClient.get(id);
+    if (current === undefined) throw new Error("Conversation is unavailable");
+    const result = await conversationClient.reset(id, current.revision);
+    await conversationsContext.select(id);
+    return result;
+  },
   autonomy: async (command: Parameters<typeof conversationClient.autonomy>[1]) => {
     const conversationId = conversationSelection.conversationId;
     if (conversationId === undefined) throw new Error("No conversation is selected");

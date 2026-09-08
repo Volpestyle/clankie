@@ -79,6 +79,7 @@ export interface ConsoleCommandContext {
     select(conversationId: string): Promise<{ readonly conversationId: string; readonly title: string }>;
     /** Forks and selects an ephemeral Pi branch from the current conversation. */
     fork?(): Promise<{ readonly conversationId: string; readonly title: string }>;
+    reset?(): Promise<{ archiveId: string }>;
     close?(conversationId: string): Promise<boolean>;
     /** Creates and selects a conversation with fresh model context in the current scope. */
     create?(title?: string): Promise<{ readonly conversationId: string; readonly title: string }>;
@@ -575,9 +576,24 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "reset",
+      aliases: [],
+      description: "Archive this conversation and start with fresh model context",
+      takesArgument: false,
+      async run(_argument, shell): Promise<void> {
+        if (conversations?.reset === undefined) throw new Error("Conversation reset is unavailable");
+        const result = await conversations.reset();
+        shell.insertCommandResult(
+          "/reset",
+          `Started fresh context. Previous session archived as ${result.archiveId}.`,
+          "success",
+        );
+      },
+    },
+    {
       name: "clear",
       aliases: [],
-      description: "Clear the transcript",
+      description: "Clear the screen (keeps model context)",
       takesArgument: false,
       run(_argument, shell): void {
         shell.clearTranscript();

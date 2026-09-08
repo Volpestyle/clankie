@@ -108,6 +108,16 @@ export function createCaptainOperatorConversationClient(
       ...(signal === undefined ? {} : { signal }),
     });
     if (!response.ok) {
+      if (request.op === "reset" && response.status === 409) {
+        const body: unknown = await response.json();
+        if (
+          typeof body === "object" &&
+          body !== null &&
+          "message" in body &&
+          typeof body.message === "string"
+        )
+          throw new Error(body.message);
+      }
       throw new Error(`Operator conversation dispatch failed with status ${response.status}`);
     }
     try {

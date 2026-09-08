@@ -500,19 +500,10 @@ export const EmailSettingsSchema = z
   .strict();
 export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
 
-/**
- * Signed Linear webhook ingest (ADR 0165). The signing secret is a credential
- * and lives in the broker under `linear-webhook`; only the non-secret question
- * of whose comments count belongs here.
- */
+/** Live Linear awareness is opt-in; the signing secret lives in the credential broker. */
 export const LinearWebhookSettingsSchema = z
   .object({
-    /**
-     * The one author whose comments wake him. Empty means the hook verifies
-     * and drops: an agent's own comment must never wake the thread that wrote
-     * it, so an unset owner fails closed rather than opening the door to all.
-     */
-    actorEmail: z.email().max(320).optional(),
+    following: z.boolean().default(false),
   })
   .strict();
 export type LinearWebhookSettings = z.infer<typeof LinearWebhookSettingsSchema>;
@@ -580,6 +571,12 @@ export function dropRetiredSettings(parsed: unknown): unknown {
       Object.entries(gameplay as Record<string, unknown>).filter(
         ([key]) => !RETIRED_GAMEPLAY_SETTINGS_KEYS.includes(key),
       ),
+    );
+  }
+  const linearWebhook = settings["linearWebhook"];
+  if (linearWebhook !== null && typeof linearWebhook === "object" && !Array.isArray(linearWebhook)) {
+    settings["linearWebhook"] = Object.fromEntries(
+      Object.entries(linearWebhook).filter(([key]) => key !== "actorEmail"),
     );
   }
   return settings;

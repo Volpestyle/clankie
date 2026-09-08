@@ -1,3 +1,4 @@
+import { ConversationResetError } from "./captain/conversations.ts";
 import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@clankie/protocol";
 /**
  * The Clankie service's HTTP surface. Local capabilities are wired in-process.
@@ -327,7 +328,10 @@ export interface ClankieAppDependencies {
   captain: CaptainPort;
   memory?: MemoryStores;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
-  settings?: { load(): Promise<ClankieSettings> };
+  settings?: {
+    load(): Promise<ClankieSettings>;
+    update?(mutate: (current: ClankieSettings) => ClankieSettings): Promise<ClankieSettings>;
+  };
   discordPresenceRuntime?: DiscordPresenceRuntimePort;
   discordUserPresenceRuntime?: DiscordPresenceRuntimePort;
   activityObservations?: ActivityObservationReadPort;
@@ -1914,11 +1918,40 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ session });
   });
 
-  // Signed Linear comment ingest (ADR 0165). Public, because Linear posts here
-  // from its own servers with no bearer of ours; the HMAC over the raw body is
-  // the whole authentication. Everything Linear signed but we do not act on
-  // still answers 200 — a 4xx would put the delivery into a six-hour retry for
-  // a comment we have already decided is not his.
+  // Local operator control, independent of the publicly reachable signed webhook.
+  app.on(["GET", "PUT"], "/v1/linear/follow", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
+    let current;
+    if (context.req.method === "PUT") {
+      const body = await readJson(context.req.raw);
+      if (
+        body === null ||
+        typeof body !== "object" ||
+        Array.isArray(body) ||
+        Object.keys(body).length !== 1 ||
+        !("following" in body) ||
+        typeof body.following !== "boolean"
+      ) {
+        return context.json({ error: "malformed" }, 400);
+      }
+      if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
+      const following = body.following;
+      current = await settingsSource.update((value) => ({ ...value, linearWebhook: { following } }));
+    } else {
+      current = await settingsSource.load();
+    }
+    return context.json({
+      schemaVersion: 1 as const,
+      following: current.linearWebhook.following,
+      conversationId: "linear-inbox",
+    });
+  });
+
+  // Linear authenticates with an HMAC over the raw body, not our operator bearer.
+  // Authentic deliveries receive 200 even when follow mode is off.
   const linearDeliveries = new LinearDeliveryMemory();
 
   app.post(LINEAR_WEBHOOK_PATH, async (context) => {
@@ -1939,7 +1972,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         event: context.req.header("linear-event"),
       },
       secret,
-      ownerEmail: (await settingsSource.load()).linearWebhook.actorEmail,
       now: clock(),
       deliveries: linearDeliveries,
     });
@@ -1955,9 +1987,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ schemaVersion: 1 as const, ingested: false as const });
     }
 
-    // Enqueued, not awaited: the operator thread runs a model turn on its own
-    // clock and Linear is owed an answer now (mirrors how a Herdr watch wakes).
-    dependencies.captain.wakeFromLinearComment(outcome.comment);
+    // Persist first; following controls model turns, not inbox delivery.
+    dependencies.captain.receiveLinearActivity(
+      outcome.activity,
+      (await settingsSource.load()).linearWebhook.following,
+    );
     return context.json({ schemaVersion: 1 as const, ingested: true as const });
   });
 
@@ -2298,7 +2332,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return context.json({ error: "herdr_session_mismatch" }, 409);
       }
     }
-    return context.json(await dependencies.captain.serveOperatorConversation(parsed.data));
+    try {
+      return context.json(await dependencies.captain.serveOperatorConversation(parsed.data));
+    } catch (error) {
+      if (error instanceof ConversationResetError)
+        return context.json({ error: "reset_refused", message: error.message }, 409);
+      throw error;
+    }
   });
 
   app.get(LOCAL_VOICE_CHAT_PATH, async (context) => {

@@ -1,6 +1,10 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["reset"],
+    lines: ["  reset --conversation ID  Archive the old session and reset model context (JSON)"],
+  },
+  {
     nouns: ["send"],
     lines: [
       "  send --conversation ID [--delivery steer|queue] (MESSAGE | --stdin)",
@@ -82,6 +86,10 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["persona"],
     lines: ["  persona set --display-name NAME [--aliases name,name] [--character-notes TEXT] …"],
+  },
+  {
+    nouns: ["linear"],
+    lines: ["  linear [status] | follow on|off  Live awareness in the Linear inbox (no restart)"],
   },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
@@ -195,7 +203,7 @@ export function commandHelp(): string {
     "  An endpoint that wants a key reads it from the credential store under the provider",
     "  id; put it there with /auth <providerId> in the console.",
     "  --set selects the first listed model as captain.",
-    "  Config writes need `clankie restart captain` before the running service uses them.",
+    "  Config writes need `clankie restart captain`, except Linear follow which applies live.",
     "",
     "pair / devices / operator-credential rotate default to human text; pass --json.",
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",
