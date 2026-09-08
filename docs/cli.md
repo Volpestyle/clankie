@@ -288,8 +288,14 @@ Open the conversation with `clankie --chat linear-inbox`. It is created on the
 first accepted event, including while off. Ask Clankie to **check the Linear
 inbox** when you want him to read its retained messages; collecting them does
 not automatically load them into model context. Turning following on does not
-schedule a turn for every old message. Normal conversation retention bounds
-history, so this is not an unlimited archive.
+schedule a turn for every old message. Unread events survive retention; normal conversation retention bounds consumed
+history.
+
+Linear unread activity: `clankie linear inbox` previews the next 20 events and
+unread count. `clankie linear inbox read` consumes that page; repeat while
+`hasMore` is true. Consumption survives restart and retains conversation history.
+The operator API exposes preview at `GET /v1/linear/inbox` and consumption at
+`POST /v1/linear/inbox`. Following controls waking, not collection.
 
 `clankie linear follow off` suppresses new event-triggered turns and skips model
 turns still queued; their inbox messages remain. An already-running turn can

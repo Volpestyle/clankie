@@ -306,6 +306,14 @@ describe("Linear follow control", () => {
       clock: () => NOW,
     });
     const headers = { authorization: "Bearer test-operator", "content-type": "application/json" };
+    for (const method of ["GET", "POST"]) {
+      expect((await app.request("/v1/linear/inbox", { method })).status).toBe(401);
+      expect(await (await app.request("/v1/linear/inbox", { method, headers })).json()).toMatchObject({
+        items: [],
+        unreadCount: 0,
+        hasMore: false,
+      });
+    }
     expect((await app.request("/v1/linear/follow")).status).toBe(401);
     expect(
       (await app.request("/v1/linear/follow", { method: "PUT", body: '{"following":true}' })).status,

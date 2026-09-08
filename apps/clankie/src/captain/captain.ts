@@ -1925,6 +1925,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return conversations.observeDurableMessages(listener);
     },
 
+    readLinearInbox: (consume) => conversations.readLinearInbox(consume),
     receiveLinearActivity(activity, following) {
       conversations.receiveLinearActivity(linearActivityPrompt(activity), following);
     },

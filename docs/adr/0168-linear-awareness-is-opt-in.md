@@ -29,8 +29,8 @@ Clankie to read when asked to check the inbox; receipt alone does not load them
 into model context.
 
 Accepted activity is stored in the stable `linear-inbox` conversation, titled
-**Linear inbox**, with its own durable Pi context and normal conversation
-retention. Hooks do not enter the default global conversation or its bound
+**Linear inbox**, with its own durable Pi context. Retention preserves unread events and bounds
+consumed history. The inbox conversation is exempt from automatic pruning. Hooks do not enter the default global conversation or its bound
 Herdr seat. Operator chat and fleet-completion watches retain their routes.
 
 The event is quoted as untrusted external context, including its actor and
@@ -59,7 +59,12 @@ not answer when James wants live awareness. The follow switch remains useful
 regardless of identity setup.
 
 The passive inbox uses existing conversation persistence, replay, and retention.
-It has no separate task database or unread-job queue. External messages do not
+A durable read cursor in conversation metadata tracks consumed external messages.
+`clankie linear inbox read` returns and consumes up to 20 unread events; preview
+does not consume. History stays under normal conversation retention. Live wake
+prompts use the same read command, so manual and live reads share one unread
+boundary. A failed response transport after consumption can require rereading
+conversation history; consumption records delivery, not model comprehension. External messages do not
 impersonate the operator or a fleet agent and do not emit reply notifications.
 
 Batching can reduce turns during sustained bursts. This mode currently admits

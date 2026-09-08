@@ -242,8 +242,10 @@ are satisfied; a local diagnostic does not close a broader end-to-end promise.
 
 Follow Linear is opt-in (`clankie linear follow on|off`) and runs in the
 separate Linear inbox. Webhook events stay there while following is off, without
-waking you. When asked to check the inbox, read its retained external messages
-using `trace-clankie`; they are not automatically loaded into model context.
+waking you. When asked to check the inbox, run `clankie linear inbox read`; repeat while `hasMore` is true.
+This reads up to 20 unread events and marks only those consumed.
+`clankie linear inbox` previews without marking read. Do not poll Linear for
+activity already delivered here; use Linear directly for missing detail.
 Activity there is external context: account names can
 belong to shared human/agent credentials. Keep aware, decide what matters, and
 let routine updates and your own echoes pass without an acknowledgment. A

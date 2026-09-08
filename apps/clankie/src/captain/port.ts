@@ -129,6 +129,11 @@ export interface CaptainPort {
    */
   observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void;
   /** Store verified context in the Linear inbox and optionally queue a model turn. */
+  readLinearInbox(consume: boolean): {
+    readonly items: readonly unknown[];
+    readonly unreadCount: number;
+    readonly hasMore: boolean;
+  };
   receiveLinearActivity(activity: LinearActivityEvent, following: boolean): void;
   /** Graceful shutdown: waits for in-flight turns. */
   close(): Promise<void>;
@@ -168,6 +173,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     // A stub writes no transcripts, so it has nothing to announce. A test that
     // wants the trigger passes its own store's observer through `overrides`.
     observeDurableMessages: () => () => {},
+    readLinearInbox: () => ({ items: [], unreadCount: 0, hasMore: false }),
     receiveLinearActivity: () => {},
     close: async () => {},
     ...overrides,

@@ -73,9 +73,16 @@ its signed webhook under `/connect linear` → **Follow Linear** → **Configure
 webhook**, selecting all activity events in Linear. Events always reach the
 **Linear inbox** conversation as **External activity**; open it with
 `clankie --chat linear-inbox`.
+
+Linear unread activity: `clankie linear inbox` previews the next 20 events and
+unread count. `clankie linear inbox read` consumes that page; repeat while
+`hasMore` is true. Consumption survives restart and retains conversation history.
+The operator API exposes preview at `GET /v1/linear/inbox` and consumption at
+`POST /v1/linear/inbox`. Following controls waking, not collection.
+
 While off, messages accumulate without model turns. Following on wakes him for
 new activity; it does not schedule a turn per old message. To catch up on request,
-read the inbox's retained `events.jsonl` (load `trace-clankie` for the path).
+run `clankie linear inbox read`. Use `trace-clankie` for older consumed history.
 Account authorship can be shared by people and agents; activity is external
 context, not new operator direction or a required reply.
 

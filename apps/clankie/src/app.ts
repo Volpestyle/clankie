@@ -1918,6 +1918,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ session });
   });
 
+  app.on(["GET", "POST"], "/v1/linear/inbox", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
+    return context.json({
+      schemaVersion: 1,
+      ...dependencies.captain.readLinearInbox(context.req.method === "POST"),
+    });
+  });
+
   // Local operator control, independent of the publicly reachable signed webhook.
   app.on(["GET", "PUT"], "/v1/linear/follow", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);

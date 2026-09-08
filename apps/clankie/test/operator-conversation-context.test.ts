@@ -153,9 +153,20 @@ describe("operator conversation context", () => {
       { role: "external", text: "Swarm comment added" },
     ]);
     expect(runs).toBe(0);
+    expect(reopened.readLinearInbox(false).unreadCount).toBe(2);
+    expect(reopened.readLinearInbox(true).items).toHaveLength(2);
+    expect(reopened.readLinearInbox(true).items).toHaveLength(0);
     reopened.receiveLinearActivity("New live activity", true);
     await reopened.close();
     expect(runs).toBe(1);
+    const again = new ConversationStore(root, async () => {});
+    expect(again.readLinearInbox(true).items).toMatchObject([{ text: "New live activity" }]);
+    for (let i = 0; i < 25; i += 1) again.receiveLinearActivity(`event ${i}`, false);
+    expect(again.readLinearInbox(true)).toMatchObject({ unreadCount: 5, hasMore: true });
+    expect(again.readLinearInbox(true)).toMatchObject({ unreadCount: 0, hasMore: false });
+    for (let i = 0; i < 510; i += 1) again.receiveLinearActivity(`retained ${i}`, false);
+    expect(again.readLinearInbox(false).unreadCount).toBe(510);
+    await again.close();
   });
 
   it("steers a human send into an in-flight internal turn instead of queuing behind it", async () => {

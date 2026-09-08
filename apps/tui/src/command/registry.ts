@@ -89,7 +89,7 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["linear"],
-    lines: ["  linear [status] | follow on|off  Live awareness in the Linear inbox (no restart)"],
+    lines: ["  linear [status] | follow on|off | inbox [read]  Linear awareness and unread activity"],
   },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
