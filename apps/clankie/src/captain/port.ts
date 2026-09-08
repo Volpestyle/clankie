@@ -132,7 +132,7 @@ export interface CaptainPort {
    * Wake the operator thread about a verified Linear comment (ADR 0165). The
    * app has already proved the delivery is Linear's and James's; the captain
    * owns the thread it lands in, the live fleet a pane is suggested from, and
-   * the decision of what — if anything — to do about it.
+   * the decision of what to do about it, including the Linear reply (ADR 0167).
    *
    * Returns immediately: Linear retires a delivery that is not answered inside
    * five seconds, so the model turn cannot be on the caller's path.

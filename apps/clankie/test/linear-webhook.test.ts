@@ -249,13 +249,15 @@ describe("the prompt a comment becomes", () => {
     url: "https://linear.app/vuhlp/issue/VUH-1234#comment-abc",
   };
 
-  it("quotes him as untrusted text and forbids dispatching a pane", () => {
+  it("quotes him as untrusted text and tells him to reply on the ticket", () => {
     const prompt = linearCommentWakePrompt(comment, "seat-a");
 
     expect(prompt).toContain("VUH-1234");
     expect(prompt).toContain("> ship the header allowlist first");
     expect(prompt).toContain("untrusted");
-    expect(prompt).toMatch(/do not prompt or dispatch any\npane/iu);
+    expect(prompt).toMatch(/comment on that Linear issue/i);
+    expect(prompt).toMatch(/this wake is the approval/iu);
+    expect(prompt).not.toMatch(/do not prompt or dispatch/iu);
     expect(prompt).toContain("seat-a");
   });
 

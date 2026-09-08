@@ -469,7 +469,7 @@ async function runLinearCommentWakeFlow(
     [
       `Linear comment wake ready. Secret ${secretStored ? "stored" : "missing"}; waking on ${trimmed}.`,
       `URL: ${webhookUrl}`,
-      "He reads the comment and decides what to do. Nothing is sent to a pane.",
+      "He acts on the comment, then replies on that Linear issue.",
     ].join("\n"),
     "success",
   );

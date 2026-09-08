@@ -1,13 +1,15 @@
 # ADR 0165: A Linear comment wakes the operator thread
 
-Status: accepted (James, 2026-09-07, operator console). Rides the routing built
-in [ADR 0151](0151-the-public-doorway-routes-home.md) and the wake seam built in
+Status: accepted (James, 2026-09-07, operator console). Amended by
+[ADR 0167](0167-a-linear-comment-is-answered-on-the-ticket.md): the wake acts
+and replies on the ticket; ingest, signature, and author filter are unchanged.
+Rides the routing built in [ADR 0151](0151-the-public-doorway-routes-home.md)
+and the wake seam built in
 [ADR 0130](0130-goals-and-self-wakes-share-the-operator-thread.md) and
 [ADR 0131](0131-herdr-completion-watches-wake-the-operator-thread.md). Splits a
 second Linear credential away from the MCP token of
 [ADR 0093](0093-owner-authored-service-connections.md) and
-[ADR 0109](0109-mcp-is-how-he-reaches-a-service.md). Stops short of the
-delivery path in [ADR 0161](0161-a-fleet-seat-reads-its-mail-instead-of-its-keyboard.md).
+[ADR 0109](0109-mcp-is-how-he-reaches-a-service.md).
 
 ## Context
 
@@ -78,8 +80,9 @@ a six-hour retry.
 captain, which composes a host-authored prompt and enqueues an internal turn on
 the default global conversation under a new `hook` origin, then returns — the
 same shape a settled Herdr watch already uses. The prompt quotes the comment as
-untrusted text, names the issue, suggests at most one pane, and says explicitly
-that this is something to look at, not something to act on.
+untrusted text, names the issue, and suggests at most one pane.
+[ADR 0167](0167-a-linear-comment-is-answered-on-the-ticket.md) is what he does
+with it: act, then reply on the ticket.
 
 **The suggested pane is a read, not a record.** It is matched against the live
 fleet census the captain already keeps — a ticket identifier appearing in a
@@ -148,8 +151,8 @@ the exact framing that makes quoted text read as instruction.
   durable state that has to be pruned.
 - A comment thread between agents on one of his issues stays silent, because the
   filter is a single configured author rather than a bot exclusion list.
-- Nothing is dispatched. Every routing decision remains Clankie's, in his thread,
-  where James can see it.
+- Every routing decision remains Clankie's. [ADR 0167](0167-a-linear-comment-is-answered-on-the-ticket.md)
+  is the reply on the ticket.
 - This is the first inbound signed hook. A second one — GitHub, say — adds a
   route, its headers, and its own broker secret, and reuses the raw-body-then-
   verify shape rather than inventing another.
