@@ -51,6 +51,49 @@ service process. Bare form starts the TUI in-process and hangs the tool
 call. `herdr-lead split` and `herdr-lead state` are the verbs that belong
 there.
 
+## Operational ownership
+
+James's September 7, 2026 Grapple swarm reflection distinguishes integration
+from whole-fleet direction. Competing dispatches reassign lanes that still have
+owners, and delayed relays turn old resource observations into unnecessary
+waits. A long-running lead thread does not provide continuous visibility.
+
+The current dispatcher owns priorities and assignments; the integrator owns
+shared changes and delivery. One agent may hold both roles. Product scope and
+evidence live on the issue; pane assignments and leadership transfers stay in
+the current local handoff. The dashboard remains an observation surface.
+
+James's September 8, 2026 direction makes inspected results the publishing unit.
+Attempt-by-attempt threads and repeated coordinator handoffs obscure the media
+and decisions the user needs. Workers publish directly using `linear-issues`:
+what the media shows, the major hurdle, the decision and a human need only when
+action is required. Detailed attempts remain in retained evidence records.
+
+Optional planner and tracker roles divide attention: planner maintains bounded
+deliverables and dependencies; tracker identifies missing evidence and stale
+handoffs. Each deliverable has one harvest owner. These roles do not create a
+mandatory relay or another dispatch authority. Clankie can be the lead instead
+of another supervisor above it. The alternative of routing every result through
+tracker and lead is rejected because it duplicates context and review without
+changing the result. `herdr-lead` owns task-based effort guidance; fleet settings
+carry the user's preferences, and the active harness applies actual effort.
+
+```mermaid
+flowchart LR
+    User[User direction] --> Dispatcher[Current dispatcher]
+    Dispatcher --> Lanes[Deliverable owners]
+    Lanes --> Evidence[Issue: inspected media and findings]
+    Evidence --> User
+    Lanes -->|Actionable decisions| Dispatcher
+    Lanes -->|Green changes and shared conflicts| Integrator[Current integrator]
+    Integrator --> Delivered[Integrated usable result]
+```
+
+The captain instructions and `herdr-lead` skill carry this operating guidance.
+Only current pane, checkout and resource observations support a status claim;
+a relay remains a report to verify before changing someone else's work. Seat
+lifecycle tallies are activity observations, not acceptance or delivery metrics.
+
 ## Options weighed
 
 - **Bespoke `herdr_*` captain tools.** Rejected again: leadership stays
