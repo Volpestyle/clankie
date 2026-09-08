@@ -74,11 +74,14 @@ webhook**, selecting all activity events in Linear. Events always reach the
 **Linear inbox** conversation as **External activity**; open it with
 `clankie --chat linear-inbox`.
 
-Linear unread activity: `clankie linear inbox` previews the next 20 events and
-unread count. `clankie linear inbox read` consumes that page; repeat while
-`hasMore` is true. Consumption survives restart and retains conversation history.
-The operator API exposes preview at `GET /v1/linear/inbox` and consumption at
-`POST /v1/linear/inbox`. Following controls waking, not collection.
+`clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
+in `items`, at most 20 events and under 31 KB serialized. Reading leaves it
+unread. Review every item, then run `clankie linear inbox ack CURSOR` with the
+returned `ackCursor`; read the next page while `hasMore` is true. Never drain
+pages in a script or acknowledge truncated output. Unacknowledged pages survive
+restart. `GET /v1/linear/inbox` reads; `POST /v1/linear/inbox` requires
+`{ "ackCursor": "..." }` and acknowledges only previously offered events.
+Following controls waking, not collection.
 
 While off, messages accumulate without model turns. Following on wakes him for
 new activity; it does not schedule a turn per old message. To catch up on request,
@@ -147,8 +150,12 @@ console. Voice is as capable as the room it is in.
 
 ## Herdr runtime
 
-Clankie saves one Herdr binding on first service start: `auto` adopts the
-surrounding Herdr session, otherwise starts private bundled Herdr. Later
+In the TUI, `/herdr` opens the session/runtime menu. Save a selection and choose
+**Restart now** to apply it without leaving the TUI, or **Later** to leave it
+pending. The menu shows both configured and active bindings.
+
+Clankie saves one Herdr binding on first service start: `auto` starts
+private bundled Herdr unless an external session is explicitly configured. Later
 consoles and service restarts keep that choice. Checkouts need
 `pnpm herdr:build` for private mode. `clankie herdr status` distinguishes the
 configured choice from the running `active` binding. Change it with

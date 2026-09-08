@@ -1923,10 +1923,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
-    return context.json({
-      schemaVersion: 1,
-      ...dependencies.captain.readLinearInbox(context.req.method === "POST"),
-    });
+    if (context.req.method === "POST") {
+      const body = await readJson(context.req.raw);
+      if (
+        body === null ||
+        typeof body !== "object" ||
+        Array.isArray(body) ||
+        Object.keys(body).length !== 1 ||
+        !("ackCursor" in body) ||
+        typeof body.ackCursor !== "string"
+      )
+        return context.json({ error: "ack_cursor_required" }, 400);
+      if (!dependencies.captain.acknowledgeLinearInbox(body.ackCursor)) {
+        return context.json({ error: "cursor_not_offered" }, 409);
+      }
+      return context.json({ schemaVersion: 1, acknowledged: body.ackCursor });
+    }
+    return context.json({ schemaVersion: 1, ...dependencies.captain.readLinearInbox() });
   });
 
   // Local operator control, independent of the publicly reachable signed webhook.

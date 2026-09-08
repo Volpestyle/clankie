@@ -289,6 +289,7 @@ describe("Linear follow control", () => {
     const wakes: LinearActivityEvent[] = [];
     const { app } = await createClankieApp({
       captain: createStubCaptain({
+        acknowledgeLinearInbox: (cursor) => cursor === "000000000001",
         receiveLinearActivity: (activity, following) => {
           if (following) wakes.push(activity);
         },
@@ -308,12 +309,28 @@ describe("Linear follow control", () => {
     const headers = { authorization: "Bearer test-operator", "content-type": "application/json" };
     for (const method of ["GET", "POST"]) {
       expect((await app.request("/v1/linear/inbox", { method })).status).toBe(401);
-      expect(await (await app.request("/v1/linear/inbox", { method, headers })).json()).toMatchObject({
-        items: [],
-        unreadCount: 0,
-        hasMore: false,
-      });
+      const response = await app.request("/v1/linear/inbox", { method, headers });
+      if (method === "POST") expect(response.status).toBe(400);
+      else expect(await response.json()).toMatchObject({ items: [], unreadCount: 0, hasMore: false });
     }
+    expect(
+      (
+        await app.request("/v1/linear/inbox", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ ackCursor: "000000000099" }),
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      await (
+        await app.request("/v1/linear/inbox", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ ackCursor: "000000000001" }),
+        })
+      ).json(),
+    ).toEqual({ schemaVersion: 1, acknowledged: "000000000001" });
     expect((await app.request("/v1/linear/follow")).status).toBe(401);
     expect(
       (await app.request("/v1/linear/follow", { method: "PUT", body: '{"following":true}' })).status,

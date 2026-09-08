@@ -43,6 +43,7 @@ type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 export interface ConsoleCommandContext {
   readonly settings?: SettingsStore;
   readonly herdrOptions?: HerdrConnectionOptions;
+  readonly restartCaptain?: () => Promise<void>;
   readonly commandStatus?: () => Promise<StatusCommandResult>;
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
   readonly activityClient?: ActivityObservationClient;
@@ -144,6 +145,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[status | open | set --runtime auto|bundled|external | set --session NAME]",
       async run(argument, shell): Promise<void> {
         try {
+          if (argument.trim() === "") {
+            await showHerdrMenu(shell, context);
+            return;
+          }
           if (argument.trim() === "open") {
             if (!context.herdrOptions) throw new Error("Herdr connection is unavailable");
             const code = await shell.withTerminal(() => openHerdr(context.herdrOptions!));
@@ -889,4 +894,85 @@ function runLayoutCommand(shell: ClankieFaceShell, argument: string): void {
   }
 
   shell.insertCommandResult("/layout", "Usage: /layout [status|header on|off|toggle]", "error");
+}
+
+async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandContext): Promise<void> {
+  const flow = shell.setupFlow;
+  const options = { ...context.herdrOptions, ...(context.settings ? { settings: context.settings } : {}) };
+  let ended = false;
+  flow.begin("herdr");
+  try {
+    const current = await runHerdrCommand(["status"], options);
+    flow.renderLine(`Configured: ${current.herdr.runtime} · ${current.herdr.session}`);
+    flow.renderLine(
+      current.active
+        ? `Active: ${current.active.runtime} · ${current.active.session}`
+        : (current.unavailable ?? "Active session unavailable"),
+    );
+    const action = await flow.readSelect({
+      message: "Herdr",
+      options: [
+        { value: "session", label: "Choose external session", hint: "Use an existing named Herdr session" },
+        { value: "runtime", label: "Choose runtime", hint: "Private bundled Herdr or an external session" },
+        { value: "open", label: "Open active session" },
+        ...(context.restartCaptain
+          ? [{ value: "restart", label: "Apply saved changes", hint: "Restart Clankie, relay and Discord" }]
+          : []),
+      ],
+      allowBack: true,
+    });
+    if (action === undefined) return;
+    if (action === "open") {
+      if (!context.herdrOptions) throw new Error("Herdr connection is unavailable");
+      flow.end();
+      ended = true;
+      const code = await shell.withTerminal(() => openHerdr(context.herdrOptions!));
+      if (code !== 0) throw new Error(`Herdr viewer exited with status ${code}`);
+      return;
+    }
+    if (action === "session") {
+      const session = await flow.readText({
+        message: "Herdr session name",
+        defaultValue: current.herdr.session,
+        allowBack: true,
+        validate: (value) => (value.trim().length === 0 ? "Enter a session name." : undefined),
+      });
+      if (session === undefined) return;
+      await runHerdrCommand(["set", "--session", session.trim()], options);
+    } else if (action === "runtime") {
+      const runtime = await flow.readSelect({
+        message: "Herdr runtime",
+        options: [
+          { value: "bundled", label: "Private bundled Herdr" },
+          { value: "external", label: "External Herdr", hint: `Session: ${current.herdr.session}` },
+          { value: "auto", label: "Automatic", hint: "Clear binding and select at next start" },
+        ],
+        allowBack: true,
+      });
+      if (runtime === undefined) return;
+      await runHerdrCommand(["set", "--runtime", runtime], options);
+    }
+    if (action !== "restart") {
+      flow.renderLine("Saved. Restart to apply the new binding.", "success");
+      if (!context.restartCaptain) return;
+      const apply = await flow.readSelect({
+        message: "Apply Herdr changes?",
+        options: [
+          {
+            value: "restart",
+            label: "Restart now",
+            hint: "Clankie, relay and Discord; Herdr panes stay open",
+          },
+          { value: "later", label: "Later" },
+        ],
+        allowBack: true,
+      });
+      if (apply !== "restart") return;
+    }
+    flow.setStatus("Restarting Clankie…");
+    await context.restartCaptain?.();
+    flow.renderLine("Herdr changes applied.", "success");
+  } finally {
+    if (!ended) flow.end();
+  }
 }

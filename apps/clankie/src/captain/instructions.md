@@ -242,10 +242,12 @@ are satisfied; a local diagnostic does not close a broader end-to-end promise.
 
 Follow Linear is opt-in (`clankie linear follow on|off`) and runs in the
 separate Linear inbox. Webhook events stay there while following is off, without
-waking you. When asked to check the inbox, run `clankie linear inbox read`; repeat while `hasMore` is true.
-This reads up to 20 unread events and marks only those consumed.
-`clankie linear inbox` previews without marking read. Do not poll Linear for
-activity already delivered here; use Linear directly for missing detail.
+waking you. Run `clankie linear inbox read` to review a bounded JSON page in
+`items`. Reading does not mark anything read. After reviewing every item, run
+`clankie linear inbox ack CURSOR` using the returned `ackCursor`; then read the
+next page while `hasMore` is true. Do not drain pages in a script, truncate the
+output, or acknowledge content you have not reviewed. If a tool truncates a
+page, reread it before acknowledging. Use Linear directly for missing detail.
 Activity there is external context: account names can
 belong to shared human/agent credentials. Keep aware, decide what matters, and
 let routine updates and your own echoes pass without an acknowledgment. A

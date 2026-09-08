@@ -7,14 +7,16 @@ export async function runLinearCommand(
   args: readonly string[],
   options: { readonly env?: NodeJS.ProcessEnv; readonly settings?: SettingsStore } = {},
 ) {
-  if (args[0] === "inbox" && (args.length === 1 || (args.length === 2 && args[1] === "read"))) {
+  const ack = args.length === 3 && args[0] === "inbox" && args[1] === "ack" && /^\d{12}$/u.test(args[2]!);
+  if (args[0] === "inbox" && (args.length === 1 || (args.length === 2 && args[1] === "read") || ack)) {
     const env = options.env ?? process.env;
     const credential = await resolveOperatorCredential({ env });
     if (credential === undefined)
       throw new Error("Linear inbox needs the local operator credential. Run clankie doctor.");
     const response = await fetch(`${commandHost({ env })}/v1/linear/inbox`, {
-      method: args[1] === "read" ? "POST" : "GET",
-      headers: { authorization: `Bearer ${credential.token}` },
+      method: ack ? "POST" : "GET",
+      ...(ack ? { body: JSON.stringify({ ackCursor: args[2] }) } : {}),
+      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
     });
     if (!response.ok) throw new Error(`Linear inbox failed: ${response.status}`);
     return response.json();
@@ -29,7 +31,7 @@ export async function runLinearCommand(
       linearWebhook: { following: args[1] === "on" },
     }));
   } else {
-    throw new Error("Usage: clankie linear [status] | follow on|off | inbox [read]");
+    throw new Error("Usage: clankie linear [status] | follow on|off | inbox [read | ack CURSOR]");
   }
   return {
     ok: true as const,

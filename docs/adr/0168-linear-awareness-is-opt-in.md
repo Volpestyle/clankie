@@ -59,12 +59,16 @@ not answer when James wants live awareness. The follow switch remains useful
 regardless of identity setup.
 
 The passive inbox uses existing conversation persistence, replay, and retention.
-A durable read cursor in conversation metadata tracks consumed external messages.
-`clankie linear inbox read` returns and consumes up to 20 unread events; preview
-does not consume. History stays under normal conversation retention. Live wake
-prompts use the same read command, so manual and live reads share one unread
-boundary. A failed response transport after consumption can require rereading
-conversation history; consumption records delivery, not model comprehension. External messages do not
+A durable acknowledgment cursor tracks reviewed external messages. Reads return
+`items` with at most 20 events and a 30,000-byte event budget (under 31 KB for
+the full response), below the bash tool's 50 KB output cap. Reads never consume.
+The response supplies an `ackCursor`; only an explicit acknowledgment advances
+the read boundary, and only to an external event already offered. Retries are
+idempotent and cannot consume later arrivals. Legacy consume-on-read markers
+are not evidence of review, so retained history is offered again once.
+Live and manual reads share this contract. Transport failure leaves the page
+unread; acknowledgment records the caller's review, not inferred comprehension.
+External messages do not
 impersonate the operator or a fleet agent and do not emit reply notifications.
 
 Batching can reduce turns during sustained bursts. This mode currently admits

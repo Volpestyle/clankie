@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -153,19 +153,67 @@ describe("operator conversation context", () => {
       { role: "external", text: "Swarm comment added" },
     ]);
     expect(runs).toBe(0);
-    expect(reopened.readLinearInbox(false).unreadCount).toBe(2);
-    expect(reopened.readLinearInbox(true).items).toHaveLength(2);
-    expect(reopened.readLinearInbox(true).items).toHaveLength(0);
+    expect(reopened.readLinearInbox().unreadCount).toBe(2);
+    const page = reopened.readLinearInbox();
+    expect(reopened.readLinearInbox()).toEqual(page);
+    expect(reopened.acknowledgeLinearInbox("999999999999")).toBe(false);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!)).toBe(true);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!)).toBe(true);
+    expect(reopened.readLinearInbox().items).toHaveLength(0);
     reopened.receiveLinearActivity("New live activity", true);
     await reopened.close();
     expect(runs).toBe(1);
     const again = new ConversationStore(root, async () => {});
-    expect(again.readLinearInbox(true).items).toMatchObject([{ text: "New live activity" }]);
+    expect(again.readLinearInbox().items).toMatchObject([{ text: "New live activity" }]);
+    expect(again.acknowledgeLinearInbox(again.readLinearInbox().ackCursor!)).toBe(true);
     for (let i = 0; i < 25; i += 1) again.receiveLinearActivity(`event ${i}`, false);
-    expect(again.readLinearInbox(true)).toMatchObject({ unreadCount: 5, hasMore: true });
-    expect(again.readLinearInbox(true)).toMatchObject({ unreadCount: 0, hasMore: false });
+    const offered = again.readLinearInbox();
+    expect(offered).toMatchObject({ unreadCount: 25, hasMore: true });
+    again.receiveLinearActivity("Arrived after the read", false);
+    expect(again.acknowledgeLinearInbox(offered.ackCursor!)).toBe(true);
+    expect(again.readLinearInbox()).toMatchObject({ unreadCount: 6, hasMore: false });
+    again.acknowledgeLinearInbox(again.readLinearInbox().ackCursor!);
     for (let i = 0; i < 510; i += 1) again.receiveLinearActivity(`retained ${i}`, false);
-    expect(again.readLinearInbox(false).unreadCount).toBe(510);
+    expect(again.readLinearInbox().unreadCount).toBe(510);
+    await again.close();
+  });
+
+  it("bounds serialized output in bytes and preserves an unacknowledged page across restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-inbox-budget-"));
+    roots.push(root);
+    const store = new ConversationStore(root, async () => {});
+    for (let i = 0; i < 20; i += 1) store.receiveLinearActivity("🍀".repeat(2000), false);
+    const page = store.readLinearInbox();
+    expect(page.items.length).toBeGreaterThan(0);
+    expect(page.items.length).toBeLessThan(20);
+    expect(Buffer.byteLength(JSON.stringify({ schemaVersion: 1, ...page }))).toBeLessThan(31_000);
+    await store.close();
+    const reopened = new ConversationStore(root, async () => {});
+    expect(reopened.readLinearInbox()).toEqual(page);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!)).toBe(true);
+    expect(reopened.readLinearInbox().unreadCount).toBe(20 - page.items.length);
+    await reopened.close();
+  });
+
+  it("reoffers legacy consumed history once, then preserves explicit acknowledgments", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-inbox-legacy-"));
+    roots.push(root);
+    const store = new ConversationStore(root, async () => {});
+    store.receiveLinearActivity("Previously truncated", false);
+    const page = store.readLinearInbox();
+    store.acknowledgeLinearInbox(page.ackCursor!);
+    await store.close();
+    const path = join(root, "linear-inbox", "meta.json");
+    const meta = JSON.parse(await readFile(path, "utf8"));
+    delete meta.linearAckVersion;
+    delete meta.linearOfferedCursor;
+    await writeFile(path, JSON.stringify(meta));
+    const reopened = new ConversationStore(root, async () => {});
+    expect(reopened.readLinearInbox().unreadCount).toBe(1);
+    reopened.acknowledgeLinearInbox(reopened.readLinearInbox().ackCursor!);
+    await reopened.close();
+    const again = new ConversationStore(root, async () => {});
+    expect(again.readLinearInbox().unreadCount).toBe(0);
     await again.close();
   });
 

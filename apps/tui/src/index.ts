@@ -342,6 +342,19 @@ const brokeredCommands = {
   removeCredential: (providerId: string) => services.store.delete(providerId),
   ...(operatorClient === undefined ? {} : { userSessionOptIn: operatorClient }),
 };
+async function restartCaptain(): Promise<void> {
+  const outcomes = await restartTarget(
+    "clankie",
+    await createServiceOptions({
+      repoRoot,
+      env: process.env,
+      stderr: { write: () => undefined },
+    }),
+  );
+  const failed = outcomes.find((outcome) => !outcome.ok);
+  if (failed !== undefined) throw new Error(failed.error ?? `${failed.label} failed to restart`);
+}
+
 const commands = [
   ...buildConsoleCommands({
     settings: settingsStore,
@@ -358,6 +371,7 @@ const commands = [
     contextUsage: () => currentContextUsage,
     herdrRoster: () => herdrRoster.snapshot(),
     herdrOptions,
+    restartCaptain,
     herdLead: {
       ensure: async () => ensureHerdLeadCompanion({ env: await fleetEnvironment() }),
       focus: async () => focusHerdLeadCompanion({ env: await fleetEnvironment() }),
@@ -375,14 +389,7 @@ const commands = [
   ...buildGatewayCommands({
     settings: settingsStore,
     credentials: services.store,
-    restartGateway: async () => {
-      const outcomes = await restartTarget(
-        "clankie",
-        await createServiceOptions({ repoRoot, env: process.env }),
-      );
-      const failed = outcomes.find((outcome) => !outcome.ok);
-      if (failed !== undefined) throw new Error(failed.error ?? `${failed.label} failed to restart`);
-    },
+    restartGateway: restartCaptain,
   }),
   ...buildConnectCommands({
     ...brokeredCommands,

@@ -291,11 +291,14 @@ not automatically load them into model context. Turning following on does not
 schedule a turn for every old message. Unread events survive retention; normal conversation retention bounds consumed
 history.
 
-Linear unread activity: `clankie linear inbox` previews the next 20 events and
-unread count. `clankie linear inbox read` consumes that page; repeat while
-`hasMore` is true. Consumption survives restart and retains conversation history.
-The operator API exposes preview at `GET /v1/linear/inbox` and consumption at
-`POST /v1/linear/inbox`. Following controls waking, not collection.
+`clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
+in `items`, at most 20 events and under 31 KB serialized. Reading leaves it
+unread. Review every item, then run `clankie linear inbox ack CURSOR` with the
+returned `ackCursor`; read the next page while `hasMore` is true. Never drain
+pages in a script or acknowledge truncated output. Unacknowledged pages survive
+restart. `GET /v1/linear/inbox` reads; `POST /v1/linear/inbox` requires
+`{ "ackCursor": "..." }` and acknowledges only previously offered events.
+Following controls waking, not collection.
 
 `clankie linear follow off` suppresses new event-triggered turns and skips model
 turns still queued; their inbox messages remain. An already-running turn can
@@ -534,6 +537,13 @@ clankie fleet set --notes "codex is the workhorse. claude when it needs skills o
 ```
 
 ### `herdr [status|open]` / `herdr set --runtime auto|bundled|external` / `herdr set --session NAME`
+
+In the TUI, `/herdr` opens a modal menu showing configured and active sessions.
+Choose an external session by name, select a runtime, or open the active session.
+After saving, choose **Restart now** to apply the binding or **Later** to keep it
+pending. **Apply saved changes** restarts Clankie, relay and Discord from the
+menu. Existing Herdr panes stay open. Argument forms such as `/herdr status`
+and `/herdr set --session NAME` remain available.
 
 Clankie saves one worker-runtime binding at service startup
 ([ADR 0157](adr/0157-herdr-is-an-owned-runtime.md)). On the first `auto` start he
