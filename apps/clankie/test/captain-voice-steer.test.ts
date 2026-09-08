@@ -161,7 +161,10 @@ describe("runDurableTurn", () => {
     await drain();
 
     session.settleRunAs("error", "The usage limit has been reached");
-    await expect(first).rejects.toThrow("The usage limit has been reached");
+    await expect(first).rejects.toMatchObject({
+      message: "The usage limit has been reached",
+      code: "captain_usage_limit_reached",
+    });
     await expect(second).rejects.toThrow("steered into failed");
     await expect(shared).resolves.toBe(false);
   });
@@ -174,7 +177,10 @@ describe("runDurableTurn", () => {
     await drain();
 
     session.settleRunAs("error");
-    await expect(turn).rejects.toThrow("without a reason");
+    await expect(turn).rejects.toMatchObject({
+      message: "The model run failed without a reason.",
+      code: "captain_model_failed",
+    });
   });
 
   it("leaves a normal stop alone, so an answer with no tool calls still runs", async () => {
@@ -248,12 +254,36 @@ describe("runDurableTurn", () => {
 });
 
 describe("runOneShotDiscordTurn", () => {
+  it.each([
+    "Codex error: The usage limit has been reached",
+    "Codex error: usage_limit_reached",
+    "You have hit your ChatGPT usage limit (pro plan). Try again in ~30 min.",
+  ])("preserves the provider failure %s with a content-free usage-limit code", async (errorMessage) => {
+    await expect(
+      runOneShotDiscordTurn(
+        {
+          state: { messages: [{ role: "assistant", stopReason: "error", errorMessage }] },
+          prompt: () => Promise.resolve(),
+          abort: () => Promise.resolve(),
+          subscribe: () => () => undefined,
+        },
+        "hello",
+        [],
+      ),
+    ).rejects.toMatchObject({ message: errorMessage, code: "captain_usage_limit_reached" });
+  });
+
   it("declares a turn dead only after it has gone silent inside, never for being slow", async () => {
     vi.useFakeTimers();
     try {
       const abort = vi.fn(() => Promise.resolve());
       const run = runOneShotDiscordTurn(
-        { abort, prompt: () => new Promise<void>(() => undefined), subscribe: () => () => undefined },
+        {
+          state: { messages: [] },
+          abort,
+          prompt: () => new Promise<void>(() => undefined),
+          subscribe: () => () => undefined,
+        },
         "hello",
         [],
       );

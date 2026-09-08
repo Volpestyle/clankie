@@ -76,6 +76,11 @@ without storing message bodies or media.
   first assistant message, so a one-shot that timed out or failed before he
   replied leaves nothing under `turns/`. Absence is evidence; pair it with the
   `discord.text.ingress` receipt that has no matching `discord.text.reply`.
+- **A provider failure can resolve with no reply.** For `captain_model_failed`
+  or `captain_usage_limit_reached`, read the terminal assistant's `stopReason`
+  and `errorMessage` in the matching Pi tree. Older `captain_response_missing`
+  receipts can hide the same failure; do not infer an empty successful run
+  from that code alone.
 - **An `accepted` receipt with no terminal one is a turn still running, not a
   lost one.** The terminal receipt lands whenever the turn settles, which for a
   wedged turn is at the 3-minute deadline — outside any window you picked from

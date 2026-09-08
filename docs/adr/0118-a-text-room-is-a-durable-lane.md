@@ -127,6 +127,15 @@ the tldraw host, and the bridge all call it. The bridge additionally degrades
 rather than throwing: an artifact it cannot resolve costs the picture and says
 so in the reply, never the words.
 
+**Provider failures keep their cause.** Both durable and one-shot turns inspect
+Pi's terminal assistant state even when `prompt()` resolves. A usage-limit
+failure returns `captain_usage_limit_reached`; other terminal model errors
+return `captain_model_failed`. The original provider message stays in the Pi
+tree. Receipts carry only the failure code, so diagnosing a provider rejection
+does not require putting model content or provider response bodies into logs.
+`captain_response_missing` means the run finished without a provider error or
+reply text.
+
 ```mermaid
 sequenceDiagram
     participant R as Room

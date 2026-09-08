@@ -474,10 +474,25 @@ interface PiRunState {
  * Preserve its reason for the existing failure path. Aborts remain the caller's
  * interrupt path.
  */
-function piRunFailure(state: PiRunState): string | undefined {
+class PiRunError extends Error {
+  readonly code: string;
+
+  constructor(message: string) {
+    super(message);
+    // Receipts stay content-free; the provider's full reason remains in Pi's tree.
+    this.code =
+      /\busage limit (?:has been )?reached\b|\busage_limit_reached\b|\byou have hit your ChatGPT usage limit\b/iu.test(
+        message,
+      )
+        ? "captain_usage_limit_reached"
+        : "captain_model_failed";
+  }
+}
+
+function piRunFailure(state: PiRunState): PiRunError | undefined {
   const last = state.messages.at(-1);
   if (last?.role !== "assistant" || last.stopReason !== "error") return undefined;
-  return last.errorMessage ?? "The model run failed without a reason.";
+  return new PiRunError(last.errorMessage ?? "The model run failed without a reason.");
 }
 
 /**
@@ -526,7 +541,7 @@ export async function runDurableTurn(
         });
       await run;
       const failure = await settlement;
-      if (failure !== undefined) throw new Error(failure);
+      if (failure !== undefined) throw failure;
       return "ran";
     }
     if (lane.session.isStreaming) {
@@ -599,14 +614,18 @@ export async function runTurnWithStallWatchdog<T>(
 
 /** A one-shot Discord turn under the shared watchdog; `false` means it went dead, not slow. */
 export async function runOneShotDiscordTurn(
-  session: Pick<AgentSession, "abort" | "prompt" | "subscribe">,
+  session: Pick<AgentSession, "abort" | "prompt" | "subscribe"> & { readonly state: PiRunState },
   prompt: string,
   images: ImageContent[],
   stallMs = DISCORD_TURN_STALL_MS,
 ): Promise<boolean> {
   const outcome = await runTurnWithStallWatchdog(
     session,
-    () => session.prompt(prompt, { expandPromptTemplates: false, images }),
+    async () => {
+      await session.prompt(prompt, { expandPromptTemplates: false, images });
+      const failure = piRunFailure(session.state);
+      if (failure !== undefined) throw failure;
+    },
     { stallMs },
   );
   return outcome.completed;
@@ -1418,9 +1437,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           };
         }
       }
-    } catch {
+    } catch (error) {
       settled = "failed";
-      early = { state: "failed", turnId, code: "captain_session_failed" };
+      early = {
+        state: "failed",
+        captainSessionId: normalized.sessionKey,
+        turnId,
+        code: error instanceof PiRunError ? error.code : "captain_session_failed",
+      };
     } finally {
       tokensEnd = contextTokenCount(lane.session.getContextUsage());
       unsubscribeEvents();
