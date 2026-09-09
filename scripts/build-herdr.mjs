@@ -29,6 +29,10 @@ export async function buildHerdr(destination = join(root, ".data/herdr/bin/herdr
     env: { ...process.env, HERDR_BUILD_COMMIT: herdrPin.revision },
   });
   await mkdir(resolve(destination, ".."), { recursive: true });
+  // Overwriting the file a running fleet server was exec'd from leaves macOS
+  // holding a stale code signature for it, and every later exec dies on SIGKILL.
+  // Unlinking first gives the new build its own inode; the live server keeps the old.
+  await rm(destination, { force: true });
   await copyFile(join(herdrSource, "target/release/herdr"), destination);
   await chmod(destination, 0o755);
   process.stdout.write(`Herdr ${herdrPin.revision}: ${destination}\n`);
