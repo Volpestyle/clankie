@@ -6,17 +6,40 @@ import { createConnection } from "node:net";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
-import type { HerdrSettings } from "@clankie/settings";
 
 const exec = promisify(execFile);
 type RuntimeState = "starting" | "healthy" | "recovering" | "stopped";
 
-export function bundledHerdrBinary(repoRoot: string, settings: HerdrSettings): string | undefined {
-  if (settings.runtime === "external") return undefined;
+/** Where his own Herdr lives, whether or not the current binding uses it. */
+export function bundledHerdrBinary(repoRoot: string): string {
   const installed = join(repoRoot, "libexec/herdr");
   if (existsSync(installed) || existsSync(join(repoRoot, "release.json"))) return installed;
-  const checkout = join(repoRoot, ".data/herdr/bin/herdr");
-  return checkout;
+  return join(repoRoot, ".data/herdr/bin/herdr");
+}
+
+/**
+ * A bound session that stops is unbound rather than waited on (ADR 0170).
+ * Connect-only: the owner's server answers on its own socket, and a busy one
+ * must never read as a dead one, so `onLost` fires only after the socket has
+ * refused three checks in a row.
+ */
+export function watchHerdrSocket(input: { socketPath: string; onLost: () => void; intervalMs?: number }): {
+  close: () => void;
+} {
+  let misses = 0;
+  const timer = setInterval(() => {
+    void socketListening(input.socketPath).then((listening) => {
+      if (listening) {
+        misses = 0;
+        return;
+      }
+      if (++misses < 3) return;
+      clearInterval(timer);
+      input.onLost();
+    });
+  }, input.intervalMs ?? 10_000);
+  timer.unref();
+  return { close: () => clearInterval(timer) };
 }
 
 /** Env a running harness stamps on its children; none of it belongs to a fresh seat. */

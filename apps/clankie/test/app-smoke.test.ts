@@ -68,7 +68,7 @@ describe("clankie app smoke", () => {
       const received: unknown[] = [];
       const binding = { runtime, session: "default", socketPath: "/tmp/chosen.sock" };
       const clankie = await createClankieApp({
-        herdrBinding: binding,
+        herdrBinding: () => binding,
         captain: createStubCaptain({
           serveOperatorConversation: async (request) => {
             received.push(request);

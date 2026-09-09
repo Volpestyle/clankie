@@ -320,19 +320,20 @@ export type PublicGatewaySettings = z.infer<typeof PublicGatewaySettingsSchema>;
 /**
  * Which herdr session is his (ADR 0149).
  *
- * Auto chooses once at service startup and saves the binding. Every console
- * observes the service's fleet, regardless of its own terminal environment.
+ * The owner's intent, never machine state: the service resolves it again at
+ * every start and writes nothing back (ADR 0170). Every console observes the
+ * service's fleet, regardless of its own terminal environment.
  */
 export const HerdrSettingsSchema = z
   .object({
-    /** `auto` bundles his own session unless a session or socket is named (ADR 0164). */
+    /** `auto` takes the session he is launched in, else his own bundled fleet. */
     runtime: z.enum(["auto", "bundled", "external"]).default("auto"),
     /** Named herdr session he leads; `default` is herdr's own default session. */
     session: z
       .string()
       .regex(/^[\w][\w.-]{0,63}$/u, "must be a herdr session name")
       .default("default"),
-    /** Exact external socket saved on adoption, including custom socket overrides. */
+    /** A socket override for a session `herdr session list` cannot name. */
     socketPath: z.string().startsWith("/").max(102).optional(),
   })
   .strict();

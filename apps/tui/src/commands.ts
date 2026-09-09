@@ -945,7 +945,11 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
         options: [
           { value: "bundled", label: "Private bundled Herdr" },
           { value: "external", label: "External Herdr", hint: `Session: ${current.herdr.session}` },
-          { value: "auto", label: "Automatic", hint: "Clear binding and select at next start" },
+          {
+            value: "auto",
+            label: "Automatic",
+            hint: "The session he is launched in, else bundled",
+          },
         ],
         allowBack: true,
       });

@@ -38,7 +38,7 @@ import {
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { resolveHerdrBinding } from "./herdr-session.ts";
-import { bundledHerdrBinary, startHerdrRuntime } from "./herdr-runtime.ts";
+import { bundledHerdrBinary, startHerdrRuntime, watchHerdrSocket } from "./herdr-runtime.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "./world/session.ts";
@@ -97,25 +97,39 @@ const settingsFilledNames = [
 const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
 // Workers inherit private Herdr XDG paths; Clankie commands still use this owner settings file.
 process.env.CLANKIE_SETTINGS_FILE = settingsStore.path;
-const herdrBinding = await resolveHerdrBinding(startupSettings.herdr);
-const herdrBinary = bundledHerdrBinary(repoRoot, herdrBinding);
-const herdrRuntime =
-  herdrBinary === undefined
+// The binding is chosen fresh at every start and never written back
+// (ADR 0170): settings carry the owner's intent, `GET /v1/herdr` and
+// `clankie herdr status` carry what is live.
+const herdrBinary = bundledHerdrBinary(repoRoot);
+let herdrBinding = await resolveHerdrBinding(startupSettings.herdr);
+let herdrRuntime =
+  herdrBinding.runtime === "external"
     ? undefined
     : await startHerdrRuntime({ binary: herdrBinary, repoRoot, stateRoot, env: process.env });
-if (JSON.stringify(herdrBinding) !== JSON.stringify(startupSettings.herdr)) {
-  try {
-    await settingsStore.update((current) => {
-      if (JSON.stringify(current.herdr) !== JSON.stringify(startupSettings.herdr)) {
-        throw new Error("Herdr settings changed during startup; restart Clankie to apply them");
-      }
-      return { ...current, herdr: herdrBinding };
-    });
-  } catch (error) {
-    await herdrRuntime?.close();
-    throw error;
-  }
-}
+// A bound session that stops takes his fleet with it, so he unbinds and falls
+// back to his own runtime rather than leading a socket nobody answers.
+const herdrWatch =
+  herdrBinding.runtime === "external" && process.env.HERDR_SOCKET_PATH !== undefined
+    ? watchHerdrSocket({
+        socketPath: process.env.HERDR_SOCKET_PATH,
+        onLost: () => {
+          const stopped = { session: herdrBinding.session, socketPath: process.env.HERDR_SOCKET_PATH };
+          void startHerdrRuntime({ binary: herdrBinary, repoRoot, stateRoot, env: process.env }).then(
+            (runtime) => {
+              herdrRuntime = runtime;
+              herdrBinding = { runtime: "bundled", session: herdrBinding.session };
+              logger.warn(stopped, "herdr session stopped; the fleet fell back to Clankie's own runtime");
+            },
+            (error: unknown) => {
+              logger.error(
+                { ...stopped, error: error instanceof Error ? error.message : String(error) },
+                "herdr session stopped and his own runtime would not start; the fleet is unavailable",
+              );
+            },
+          );
+        },
+      })
+    : undefined;
 // Keep the existing on-disk directory so browser profiles survive the process merge.
 const capabilityStateRoot = join(stateRoot, "runner");
 const eventLogPath = process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "events.jsonl");
@@ -511,12 +525,14 @@ const captain = createCaptain(
 
 const clankie = await createClankieApp({
   captain,
-  ...(herdrRuntime === undefined ? {} : { herdrRuntime: herdrRuntime.status }),
-  herdrBinding: {
+  // Read through, both of them: a fallback after a session stops must reach
+  // every client that asks which Herdr is his, and its health, without a restart.
+  herdrRuntime: () => herdrRuntime?.status(),
+  herdrBinding: () => ({
     runtime: herdrBinding.runtime === "external" ? "external" : "bundled",
     session: herdrBinding.session,
     socketPath: process.env.HERDR_SOCKET_PATH!,
-  },
+  }),
   memory,
   settings: settingsStore,
   mediaGenerator,
@@ -632,6 +648,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await captain.close().catch(() => undefined);
+    herdrWatch?.close();
     await herdrRuntime?.close();
     await browserHost?.close().catch(() => undefined);
     await mcpHost.close().catch(() => undefined);

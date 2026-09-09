@@ -61,9 +61,11 @@ Herdr is built from the checksum-pinned fork in `scripts/release/herdr.json`.
 The service owns its headless process and private state under
 `$CLANKIE_STATE/herdr` (default `~/.clankie/herdr`), with health and crash
 recovery through a child supervisor. See [ADR 0157](adr/0157-herdr-is-an-owned-runtime.md).
-On first service start, `auto` starts private bundled Herdr and saves the
-binding for future clients and restarts; the fleet is Clankie's own session and
-launching inside another Herdr does not adopt it
+`auto` leads the session the service was launched inside, and private bundled
+Herdr when it was launched outside every session; the binding is resolved again
+at every start, and a session that stops is unbound rather than fatal
+([ADR 0170](adr/0170-a-session-that-stops-is-unbound.md)). The fleet is
+Clankie's own session either way
 ([ADR 0164](adr/0164-the-fleet-is-its-own-session.md)).
 Source checkouts need `pnpm herdr:build` for private mode. Explicit
 `clankie herdr set --session NAME` selects an external session; restart Clankie

@@ -545,25 +545,29 @@ pending. **Apply saved changes** restarts Clankie, relay and Discord from the
 menu. Existing Herdr panes stay open. Argument forms such as `/herdr status`
 and `/herdr set --session NAME` remain available.
 
-Clankie saves one worker-runtime binding at service startup
-([ADR 0157](adr/0157-herdr-is-an-owned-runtime.md)). On the first `auto` start he
-starts private bundled Herdr; only a session or socket the owner named makes
-the binding external ([ADR 0164](adr/0164-the-fleet-is-its-own-session.md)).
-Launching inside a Herdr session does not adopt it. The service saves the chosen mode and exact
-external socket. Later launches, consoles, and restarts keep that binding.
-Existing explicitly named session settings are preserved.
+The binding is resolved at every service start and never written back
+([ADR 0170](adr/0170-a-session-that-stops-is-unbound.md)). He leads the session
+or socket the owner named; failing that, the Herdr session the service was
+launched inside; failing that, his own private bundled Herdr
+([ADR 0164](adr/0164-the-fleet-is-its-own-session.md)). A candidate that does
+not answer is stepped over rather than fatal, so a session that stopped since
+the last start costs a fallback and never the boot. While he runs, a bound
+session whose socket stops answering is unbound: he starts his own runtime and
+points every child he spawns from then on at it.
 
-`bundled` requires the native release binary or `pnpm herdr:build` in a checkout.
-`set --session NAME` selects external mode and resolves that named session on
-restart. External mode never starts or stops the owner's server; a missing or
-unreachable session refuses startup. `set --runtime auto` clears the binding
-for selection at the next service start. Apply changes with
-`clankie restart captain`.
+`bundled` requires the native release binary or `pnpm herdr:build` in a checkout,
+and opts out of both the named and the surrounding session — no session is
+probed. `set --session NAME` selects external mode and resolves that named
+session on restart. External mode never starts or stops the owner's server.
+`set --runtime auto` clears the named session, leaving the surrounding one or
+bundled. Apply changes with `clankie restart captain`.
 
 `clankie herdr status` reports configured `herdr`, `settingsFile`, `restart`,
-and the running service's `active` binding (or `unavailable`). The authenticated
-operator endpoint `GET /v1/herdr` returns the running binding; pending settings
-do not redirect clients. `/health` includes owned Herdr's state and returns 503
+and the running service's `active` binding (or `unavailable`). Settings hold
+the owner's intent and `active` holds what is live; the two differ whenever a
+named session is down. The authenticated operator endpoint `GET /v1/herdr`
+returns the running binding, following a fallback without a restart; pending
+settings do not redirect clients. `/health` includes owned Herdr's state and returns 503
 during recovery.
 
 `clankie-herdr` with no arguments is the shortcut for `clankie herdr open`. It

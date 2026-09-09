@@ -322,8 +322,10 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
-  herdrRuntime?: () => string;
-  herdrBinding?: HerdrBinding;
+  /** The owned runtime's state, or undefined while he leads someone else's. */
+  herdrRuntime?: () => string | undefined;
+  /** Read through: the binding changes when a bound session stops (ADR 0170). */
+  herdrBinding?: () => HerdrBinding;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
   memory?: MemoryStores;
@@ -622,8 +624,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.herdrBinding) return context.json({ error: "herdr_binding_unavailable" }, 503);
-    return context.json(dependencies.herdrBinding);
+    const binding = dependencies.herdrBinding?.();
+    if (!binding) return context.json({ error: "herdr_binding_unavailable" }, 503);
+    return context.json(binding);
   });
 
   app.get("/health", (context) => {
@@ -2346,10 +2349,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
     // Pane IDs are local to their source session, in both runtime modes.
+    const binding = dependencies.herdrBinding?.();
     const sameHerdrSession =
-      dependencies.herdrBinding !== undefined
-        ? context.req.header(HERDR_SOCKET_HEADER) === dependencies.herdrBinding.socketPath
-        : dependencies.herdrRuntime === undefined;
+      binding !== undefined
+        ? context.req.header(HERDR_SOCKET_HEADER) === binding.socketPath
+        : dependencies.herdrRuntime?.() === undefined;
     if (!sameHerdrSession) {
       if (parsed.data.op === "send") delete parsed.data.turn.herdrPaneId;
       if (parsed.data.op === "state_stance") {

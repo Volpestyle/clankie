@@ -1,7 +1,10 @@
 # ADR 0164: The fleet is its own session
 
-Status: proposed (2026-09-06), for James to accept with the first service
-start that binds bundled from inside a Herdr pane. Amends
+Status: proposed (2026-09-06). Its `auto` rule was overtaken before acceptance
+by [ADR 0170](0170-a-session-that-stops-is-unbound.md): the session the service
+was launched inside is a signal again, and no binding is written back to
+settings. The rest of this record is in force — the fleet is still its own
+session, and it still outlives the service. Amends
 [ADR 0157](0157-herdr-is-an-owned-runtime.md) (retires its adopt-the-surrounding-session
 rule) and [ADR 0139](0139-clankie-rides-vanilla-herdr.md) (retires the fork's
 scheduled death). Stands on [ADR 0149](0149-his-herdr-session-is-chosen-not-inherited.md):
@@ -36,8 +39,12 @@ app. No pane is ever adopted from the session the service was launched in.
 - `auto` binds **bundled** on first start, always. Only a session or socket
   the owner named (`clankie herdr set --session NAME`) makes the binding
   external, and then that named session is the fleet.
+  ([ADR 0170](0170-a-session-that-stops-is-unbound.md) amends this: the
+  session the service was launched inside is preferred over bundled.)
 - Launching `clankie` inside some Herdr session is not a signal. `HERDR_ENV`,
   `HERDR_SESSION`, and `HERDR_SOCKET_PATH` play no part in the choice.
+  (Amended by ADR 0170: `HERDR_SOCKET_PATH` names the session he leads when
+  the owner has named none.)
 - The owner sees the bundled fleet through `clankie-herdr`, the viewer; a
   developer who wants a windowed session runs the fork binary and names a
   session of their own for the fleet, side by side with their personal one.
@@ -94,4 +101,6 @@ flowchart LR
   a status line, and it may never take the console down with it.
 - An owner already bound to an external session keeps that binding; the
   service saves it once and `auto` only runs again after
-  `clankie herdr set --runtime auto`.
+  `clankie herdr set --runtime auto`. (ADR 0170 retires the save: the binding
+  is resolved fresh at every start and settings hold only what the owner
+  wrote.)
