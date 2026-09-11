@@ -22,8 +22,8 @@ additional global or workspace-scoped conversations. Different conversations
 run concurrently; sends to the same conversation serialize. A stale revision is
 rejected with the current revision and safe cursor so the client can refresh.
 
-Each TUI process creates a fresh conversation in its launch scope unless
-`--chat` explicitly resumes one. Conversation and Pi session lifetime stay the
+Each TUI process opens the existing default global conversation unless
+`--chat` explicitly selects another. Conversation and Pi session lifetime stay the
 same; bounded retention removes their shared directory together
 ([ADR 0111](0111-a-console-process-starts-one-conversation.md)).
 

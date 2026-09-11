@@ -143,8 +143,8 @@ pane's pty, and a Codex seat takes it through `codex queue`, so nothing the
 operator is drafting there is touched
 ([ADR 0161](adr/0161-a-fleet-seat-reads-its-mail-instead-of-its-keyboard.md)).
 
-A TUI process creates a fresh captain conversation unless `--chat` explicitly
-resumes one. A captain conversation and its Pi session are one lifetime: bounded
+A TUI process opens the existing main Clankie conversation unless `--chat`
+selects another. `/new` creates a fresh conversation explicitly. A captain conversation and its Pi session are one lifetime: bounded
 retention removes their shared directory, while public event logs rotate with
 typed cursor recovery ([ADR 0111](adr/0111-a-console-process-starts-one-conversation.md)).
 `/btw` temporarily selects an ephemeral child made with Pi's native current-leaf

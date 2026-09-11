@@ -32,9 +32,9 @@ import {
   type HerdLeadCompanionResult,
 } from "./observation/herd-lead-companion.ts";
 import { formatCaptainContextUsage } from "./shell/footer.ts";
-import { formatHerdrJumpResult } from "./session/herdr-report.ts";
+import { formatHerdrJumpResult, type HerdrSessionEntry } from "./session/herdr-report.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
-import { runHerdrCommand } from "./command/herdr.ts";
+import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
 
@@ -43,6 +43,8 @@ type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 export interface ConsoleCommandContext {
   readonly settings?: SettingsStore;
   readonly herdrOptions?: HerdrConnectionOptions;
+  /** Herdr's saved sessions, for the `/herdr` session picker. */
+  readonly herdrSessions?: () => Promise<readonly HerdrSessionEntry[]>;
   readonly restartCaptain?: () => Promise<void>;
   readonly commandStatus?: () => Promise<StatusCommandResult>;
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
@@ -904,12 +906,8 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
   try {
     const current = await runHerdrCommand(["status"], options);
     flow.renderLine(`Configured: ${current.herdr.runtime} · ${current.herdr.session}`);
-    flow.renderLine(
-      current.active
-        ? `Active: ${current.active.runtime} · ${current.active.session}`
-        : (current.unavailable ?? "Active session unavailable"),
-    );
-    const action = await flow.readSelect({
+    flow.renderLine(herdrActiveLine(current));
+    let action = await flow.readSelect({
       message: "Herdr",
       options: [
         { value: "session", label: "Choose external session", hint: "Use an existing named Herdr session" },
@@ -930,21 +928,12 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
       if (code !== 0) throw new Error(`Herdr viewer exited with status ${code}`);
       return;
     }
-    if (action === "session") {
-      const session = await flow.readText({
-        message: "Herdr session name",
-        defaultValue: current.herdr.session,
-        allowBack: true,
-        validate: (value) => (value.trim().length === 0 ? "Enter a session name." : undefined),
-      });
-      if (session === undefined) return;
-      await runHerdrCommand(["set", "--session", session.trim()], options);
-    } else if (action === "runtime") {
+    if (action === "runtime") {
       const runtime = await flow.readSelect({
         message: "Herdr runtime",
         options: [
           { value: "bundled", label: "Private bundled Herdr" },
-          { value: "external", label: "External Herdr", hint: `Session: ${current.herdr.session}` },
+          { value: "external", label: "External Herdr", hint: "Choose a named session" },
           {
             value: "auto",
             label: "Automatic",
@@ -954,7 +943,30 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
         allowBack: true,
       });
       if (runtime === undefined) return;
-      await runHerdrCommand(["set", "--runtime", runtime], options);
+      // External means a session: saving the runtime alone would keep whatever
+      // name was saved before, running or not.
+      if (runtime === "external") action = "session";
+      else await runHerdrCommand(["set", "--runtime", runtime], options);
+    }
+    if (action === "session") {
+      const sessions = [...((await context.herdrSessions?.()) ?? [])].sort(
+        (left, right) => Number(right.running) - Number(left.running),
+      );
+      if (sessions.length === 0) {
+        flow.renderLine("No Herdr sessions found. Start one with `herdr --session NAME`.", "warning");
+        return;
+      }
+      const session = await flow.readSelect({
+        message: "Herdr session",
+        options: sessions.map((entry) => ({
+          value: entry.name,
+          label: entry.name,
+          hint: entry.running ? "running" : "stopped",
+        })),
+        allowBack: true,
+      });
+      if (session === undefined) return;
+      await runHerdrCommand(["set", "--session", session], options);
     }
     if (action !== "restart") {
       flow.renderLine("Saved. Restart to apply the new binding.", "success");
@@ -975,8 +987,26 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
     }
     flow.setStatus("Restarting Clankie…");
     await context.restartCaptain?.();
-    flow.renderLine("Herdr changes applied.", "success");
+    // The binding resolves at start and steps over a session that does not
+    // answer (ADR 0170), so report where he landed rather than what was saved.
+    const applied = await runHerdrCommand(["status"], options);
+    const missed =
+      applied.herdr.runtime === "external" &&
+      applied.active !== undefined &&
+      applied.active.session !== applied.herdr.session;
+    flow.renderLine(
+      missed
+        ? `${herdrActiveLine(applied)} (${applied.herdr.session} did not answer)`
+        : herdrActiveLine(applied),
+      applied.active === undefined || missed ? "warning" : "success",
+    );
   } finally {
     if (!ended) flow.end();
   }
+}
+
+function herdrActiveLine(status: HerdrCommandResult): string {
+  return status.active
+    ? `Active: ${status.active.runtime} · ${status.active.session}`
+    : (status.unavailable ?? "Active session unavailable");
 }

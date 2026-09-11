@@ -39,14 +39,13 @@ The captain builds that conversation's pi session with `cwd = workspaceId` — f
 `AGENTS.md` and skills, and for the session header. Clankie's skills stay on the
 path from the service repo, and a global conversation still works there.
 
-The launch directory decides the fresh conversation's scope. Outside this
-repository that is the launch directory's checkout root (nearest ancestor
-holding `.git`, else the directory itself). Inside this repository there is no
-workspace, so the fresh conversation has global scope. `/cd <path>` moves to the
-newest retained conversation for that workspace (creating its first when none
-exists), while `/new` creates a fresh conversation in the current scope. The
-console's banner, shell escape, path completion, and `/status` follow the
-selected conversation ([ADR 0111](0111-a-console-process-starts-one-conversation.md)).
+Plain `clankie` opens the main global conversation regardless of launch directory.
+`/cd <path>` moves to the newest retained conversation for that workspace
+(creating its first when none exists). Workspace paths resolve to the nearest
+ancestor holding `.git`, else the directory itself. `/new` creates a fresh
+conversation in the current scope. The console's banner, shell escape, path
+completion, and `/status` follow the selected conversation
+([ADR 0111](0111-a-console-process-starts-one-conversation.md)).
 
 ![ADR 0104 workspace-scoped operator conversations](../diagrams/0104-clankie-works-where-you-launched-him.jpg)
 
@@ -62,10 +61,10 @@ machine, because that path becomes the cwd of an unsandboxed shell.
 
 ## Consequences
 
-- `clankie` in a project creates a fresh room with the captain's tools and the
-  console's `!` shell both rooted there.
-- Concurrent consoles in the same project have independent conversations and
-  Pi contexts. `--chat` is the explicit way to share or resume one.
+- `/cd` selects a project room with the captain's tools and the console's `!`
+  shell both rooted there. Plain startup opens the main global room.
+- Concurrent consoles share the main conversation by default. `/new` creates an
+  independent context; `--chat` selects a particular retained conversation.
 - The captain reads the project's own `AGENTS.md` and repository skills, so his
   instructions are the ones that repository publishes. Clankie's own skills stay
   on the service root: product skills in `.agents/skills` (shipped with a

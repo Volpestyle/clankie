@@ -43,22 +43,42 @@ function defaultRunner(
   );
 }
 
+export interface HerdrSessionEntry {
+  readonly name: string;
+  readonly running: boolean;
+  readonly socketPath: string;
+}
+
+/** Herdr's saved sessions, running or not; none when the CLI cannot answer. */
+export async function listHerdrSessions(
+  options: HerdrReportOptions = {},
+): Promise<readonly HerdrSessionEntry[]> {
+  try {
+    const { stdout } = await (options.runCommand ?? defaultRunner)(
+      "herdr",
+      ["session", "list", "--json"],
+      options.env ?? process.env,
+    );
+    const parsed = JSON.parse(stdout) as {
+      sessions?: { name: string; running?: boolean; socket_path: string }[];
+    };
+    return (parsed.sessions ?? []).map((session) => ({
+      name: session.name,
+      running: session.running === true,
+      socketPath: session.socket_path,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /** Resolve the caller's own session before sending any pane-scoped identity. */
 export async function sourceHerdrSocket(options: HerdrReportOptions = {}): Promise<string | undefined> {
   const env = options.env ?? process.env;
   if (env.HERDR_ENV !== "1") return undefined;
   if (env.HERDR_SOCKET_PATH?.startsWith("/")) return env.HERDR_SOCKET_PATH;
-  try {
-    const { stdout } = await (options.runCommand ?? defaultRunner)(
-      "herdr",
-      ["session", "list", "--json"],
-      env,
-    );
-    const parsed = JSON.parse(stdout) as { sessions?: { name: string; socket_path: string }[] };
-    return parsed.sessions?.find((session) => session.name === (env.HERDR_SESSION || "default"))?.socket_path;
-  } catch {
-    return undefined;
-  }
+  const sessions = await listHerdrSessions(options);
+  return sessions.find((session) => session.name === (env.HERDR_SESSION || "default"))?.socketPath;
 }
 
 /**

@@ -26,7 +26,10 @@ clankie help                    # also --help, -h
 ```
 
 `--chat` is stripped before headless routing. With no command, the launcher
-starts the clankie service if needed and attaches the fullscreen face.
+starts the clankie service if needed and opens the existing main **Clankie**
+conversation, regardless of the launch directory. It does not create a chat.
+Use `--chat ID` for another retained conversation, `/new` for a fresh chat,
+or `/cd PATH` to select a project conversation.
 
 ## Conventions
 
@@ -539,11 +542,14 @@ clankie fleet set --notes "codex is the workhorse. claude when it needs skills o
 ### `herdr [status|open]` / `herdr set --runtime auto|bundled|external` / `herdr set --session NAME`
 
 In the TUI, `/herdr` opens a modal menu showing configured and active sessions.
-Choose an external session by name, select a runtime, or open the active session.
-After saving, choose **Restart now** to apply the binding or **Later** to keep it
-pending. **Apply saved changes** restarts Clankie, relay and Discord from the
-menu. Existing Herdr panes stay open. Argument forms such as `/herdr status`
-and `/herdr set --session NAME` remain available.
+Pick an external session from Herdr's saved sessions (running ones first),
+select a runtime, or open the active session; the external runtime goes to the
+same session picker. After saving, choose **Restart now** to apply the binding
+or **Later** to keep it pending. **Apply saved changes** restarts Clankie, relay
+and Discord from the menu. Either restart then shows the binding he actually
+landed on, and warns when the saved session did not answer. Existing Herdr panes
+stay open. Argument forms such as `/herdr status` and `/herdr set --session NAME`
+remain available.
 
 The binding is resolved at every service start and never written back
 ([ADR 0170](adr/0170-a-session-that-stops-is-unbound.md)). He leads the session
@@ -558,7 +564,8 @@ points every child he spawns from then on at it.
 `bundled` requires the native release binary or `pnpm herdr:build` in a checkout,
 and opts out of both the named and the surrounding session — no session is
 probed. `set --session NAME` selects external mode and resolves that named
-session on restart. External mode never starts or stops the owner's server.
+session on restart; `set --runtime external` keeps whichever session name is
+already saved. External mode never starts or stops the owner's server.
 `set --runtime auto` clears the named session, leaving the surrounding one or
 bundled. Apply changes with `clankie restart captain`.
 

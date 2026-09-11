@@ -223,7 +223,7 @@ const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true;
 
 /**
  * The newest retained conversation rooted at a workspace directory, used by
- * `/cd`. Process startup creates a fresh conversation instead.
+ * `/cd`. Process startup selects the default global conversation.
  */
 export async function resolveWorkspaceConversation(input: {
   readonly client: OperatorConversationClient;
@@ -244,30 +244,15 @@ export function newConversationTitle(now = new Date()): string {
   return `New chat · ${now.toISOString().replace("T", " ")}`;
 }
 
-/**
- * A TUI process is one fresh conversation unless `--chat` explicitly resumes
- * an existing one. The conversation remains the only durable model-session
- * identity; the process does not persist a second local selection/session.
- */
+/** Startup resumes the default global room unless an explicit --chat selects another. */
 export async function resolveInitialConversation(input: {
   readonly client: OperatorConversationClient;
   readonly directConversationId?: string;
-  readonly workspace?: string;
 }): Promise<OperatorConversation> {
-  if (input.directConversationId !== undefined) {
-    const conversation = await input.client.get(input.directConversationId);
-    if (conversation === undefined) {
-      throw new Error(`Unknown operator conversation ${input.directConversationId}`);
-    }
-    return conversation;
-  }
-  return await input.client.create({
-    scope:
-      input.workspace === undefined
-        ? { kind: "global" }
-        : { kind: "workspace", workspaceId: input.workspace },
-    title: newConversationTitle(),
-  });
+  const selection = new OperatorConversationSelection(input.client);
+  return input.directConversationId === undefined
+    ? await selection.selectDefault()
+    : await selection.select(input.directConversationId);
 }
 
 export function parseDirectConversation(args: readonly string[]): {

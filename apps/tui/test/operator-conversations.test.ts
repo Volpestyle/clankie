@@ -40,6 +40,7 @@ function recordingTarget(): {
   reasoning: string[];
   toolCalls: string[];
   markdown: string[];
+  external: string[];
   statuses: string[];
   loaders: string[];
   liveDrafts: string[];
@@ -49,6 +50,7 @@ function recordingTarget(): {
   const reasoning: string[] = [];
   const toolCalls: string[] = [];
   const markdown: string[] = [];
+  const external: string[] = [];
   const statuses: string[] = [];
   const loaders: string[] = [];
   const liveDrafts: string[] = [];
@@ -57,6 +59,7 @@ function recordingTarget(): {
     liveDrafts,
     loaders,
     markdown,
+    external,
     reasoning,
     statuses,
     target: {
@@ -70,6 +73,7 @@ function recordingTarget(): {
         ),
       insertAssistantMarkdown: (text) => assistantMessages.push(text),
       insertMarkdown: (text) => markdown.push(text),
+      insertExternalActivity: (text) => external.push(text),
       insertReasoning: (text) => reasoning.push(text),
       insertUserMessage: (text) => userMessages.push(text),
       updateLiveAssistant: (text) => liveDrafts.push(text),
@@ -255,42 +259,33 @@ describe("TUI operator conversation selection", () => {
     expect(reopened.cursor("conversation-256")).toBe("256");
   });
 
-  it("starts fresh by default and resumes only an explicit --chat", async () => {
-    const conversations: OperatorConversation[] = [DEFAULT, WORKSPACE];
-    const created: OperatorConversation[] = [];
+  it("reopens the default room on every launch and never creates a startup conversation", async () => {
+    const conversations = [
+      WORKSPACE,
+      { ...DEFAULT, conversationId: "linear-inbox", isDefault: false },
+      DEFAULT,
+    ];
+    let creates = 0;
     const scoped: OperatorConversationClient = {
       ...client(),
+      list: async () => conversations,
       get: async (id) => conversations.find((conversation) => conversation.conversationId === id),
-      create: async (input) => {
-        const conversation: OperatorConversation = {
-          ...DEFAULT,
-          ...input,
-          conversationId: `conv-${created.length + 1}`,
-          isDefault: false,
-        };
-        created.push(conversation);
-        conversations.push(conversation);
-        return conversation;
+      create: async () => {
+        creates += 1;
+        throw new Error("Startup must not create a conversation");
       },
     };
-
-    const first = await resolveInitialConversation({ client: scoped, workspace: "/repos/thing" });
-    const second = await resolveInitialConversation({ client: scoped, workspace: "/repos/thing" });
-    const global = await resolveInitialConversation({ client: scoped });
-    expect(first.conversationId).not.toBe(second.conversationId);
-    expect(first.scope).toEqual({ kind: "workspace", workspaceId: "/repos/thing" });
-    expect(global.scope).toEqual({ kind: "global" });
-    expect(created).toHaveLength(3);
-    expect(created.every((conversation) => conversation.title.startsWith("New chat · "))).toBe(true);
-
-    const confirmed = await resolveInitialConversation({
-      client: scoped,
-      directConversationId: "workspace-1",
-    });
-    expect(confirmed.conversationId).toBe("workspace-1");
+    expect(await resolveInitialConversation({ client: scoped })).toEqual(DEFAULT);
+    expect(await resolveInitialConversation({ client: scoped })).toEqual(DEFAULT);
+    expect(await resolveInitialConversation({ client: scoped, directConversationId: "workspace-1" })).toEqual(
+      WORKSPACE,
+    );
     await expect(
       resolveInitialConversation({ client: scoped, directConversationId: "ghost" }),
     ).rejects.toThrow(/Unknown operator conversation/u);
+    conversations.splice(0);
+    await expect(resolveInitialConversation({ client: scoped })).rejects.toThrow(/exactly one default/u);
+    expect(creates).toBe(0);
   });
 
   it("reuses the newest workspace conversation only for an in-process /cd", async () => {
@@ -1193,7 +1188,8 @@ describe("TUI selected-conversation prompt path", () => {
       text: "Linear issue created",
       streaming: false,
     });
-    expect(recorded.markdown).toEqual(["**External activity**\n\nLinear issue created"]);
+    expect(recorded.external).toEqual(["Linear issue created"]);
+    expect(recorded.markdown).toEqual([]);
     expect(recorded.userMessages).toEqual([]);
     expect(recorded.assistantMessages).toEqual([]);
     expect(recorded.loaders).toEqual([]);

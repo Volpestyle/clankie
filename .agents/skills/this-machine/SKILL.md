@@ -27,6 +27,10 @@ you are helping.
 After-the-fact trails (what you said, receipts, play journals) live under the
 user's Clankie homes — load `trace-clankie`. Those paths exist on every install.
 
+Plain `clankie` opens the existing main Clankie conversation from any directory.
+Use `clankie --chat ID` for another thread, `/new` for a fresh chat, or `/cd PATH`
+for a workspace conversation. Reopening the TUI does not reset model context.
+
 ## Reset conversation context
 
 Use `clankie reset --conversation ID` (root: `global-default`) or `/reset` in
@@ -150,25 +154,28 @@ console. Voice is as capable as the room it is in.
 
 ## Herdr runtime
 
-In the TUI, `/herdr` opens the session/runtime menu. Save a selection and choose
-**Restart now** to apply it without leaving the TUI, or **Later** to leave it
-pending. The menu shows both configured and active bindings.
+In the TUI, `/herdr` opens the session/runtime menu. Pick a session from Herdr's
+saved sessions, save, and choose **Restart now** to apply it without leaving the
+TUI, or **Later** to leave it pending. The menu shows both configured and active
+bindings, and after a restart it warns when the saved session did not answer.
 
-Clankie saves one Herdr binding on first service start: `auto` starts
-private bundled Herdr unless an external session is explicitly configured. Later
-consoles and service restarts keep that choice. Checkouts need
+The binding is resolved fresh at every service start and never written back
+(ADR 0170): the named session, else the Herdr session the service was launched
+inside, else private bundled Herdr. A candidate that does not answer is stepped
+over, so a stopped session costs a fallback, not the boot. Checkouts need
 `pnpm herdr:build` for private mode. `clankie herdr status` distinguishes the
 configured choice from the running `active` binding. Change it with
 `set --session NAME` (external), `set --runtime bundled`, or `set --runtime auto`
-(reselect next start), then `clankie restart captain`.
+(the surrounding session, else bundled), then `clankie restart captain`.
+`set --runtime external` keeps whichever session name is already saved.
 
 `clankie-herdr`, `clankie herdr open`, and TUI `/herdr open` attach to the
 running local fleet; Ctrl+B then Q detaches without stopping workers. Every
 TUI's roster, jumps, and optional board follow the service's binding. Source
 socket identity qualifies pane-scoped messages and worker stances.
 
-External mode leaves server lifecycle to its owner and refuses startup if the
-selected session is unreachable. `/health` reports owned runtime recovery.
+External mode leaves server lifecycle to its owner. `/health` reports owned
+runtime recovery.
 Doctor's `commands.herdr` probes the selected CLI. `commands.herdr-lead` and
 `herdrPlugin` describe the optional dashboard integration.
 Load `herdr-lead` only when that skill is present. Never run `herdr-lead`

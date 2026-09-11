@@ -1,4 +1,4 @@
-# ADR 0111: A console process starts one conversation
+# ADR 0111: A console opens the main conversation by default
 
 Status: accepted (James, 2026-08-16). Refines the operator lifecycle from
 [ADR 0032](0032-conversation-scoped-operator-lanes.md) without adding another
@@ -14,11 +14,10 @@ under the same domain-event type.
 
 ## Context
 
-Persisting a console's last selected conversation and silently reopening it on
-the next process launch makes a project directory accumulate one effectively
-immortal model context. It also makes the local selection file look like a
-second session record even though the server conversation already owns the
-transcript, Pi tree, revision, and replay log.
+Opening the console is a request to talk to Clankie, not to create another
+conversation. The service's default global conversation provides a stable
+startup target without persisting a second local selection record. Operators
+choose a fresh context explicitly through `/new` or `/reset`.
 
 Deleting a conversation when its TUI exits is unsafe. Another console or device
 may be attached, and an accepted turn deliberately survives a detached client.
@@ -28,12 +27,11 @@ without a storage lifecycle.
 
 ## Decision
 
-A TUI process starts one fresh server-owned conversation. A normal `clankie`
-launch creates it in the launch workspace scope; a launch inside this repository
-creates it in global scope. `clankie --chat <conversationId>` is the explicit
-resume path. `/conversation` switches to a retained conversation, `/cd` switches
-workspace scope, and `/new [title]` starts another fresh conversation in the
-current scope.
+A normal `clankie` launch selects the existing default global conversation from
+any directory. Startup never creates a conversation; a missing or ambiguous
+default is an error. `clankie --chat <conversationId>` selects that retained
+conversation instead. `/conversation` switches rooms, `/cd` selects a workspace
+conversation, and `/new [title]` starts a fresh conversation in the current scope.
 
 The conversation picker may explicitly close an inactive, non-default
 conversation. Close uses the registry's whole-directory removal path, so its
@@ -52,9 +50,9 @@ tailing resumes at the newly rendered cursor.
 flowchart LR
     Start[TUI process starts] --> Choice{--chat id?}
     Choice -->|yes| Resume[Select retained conversation]
-    Choice -->|no| Create[Create fresh conversation in launch scope]
+    Choice -->|no| Default[Select existing default global conversation]
     Resume --> Room[Conversation directory]
-    Create --> Room
+    Default --> Room
     Room --> Meta[meta.json]
     Room --> Events[events.jsonl]
     Room --> Pi[one Pi session tree]
@@ -81,17 +79,16 @@ together and any cached in-memory Pi lane is disposed.
 ## Alternatives
 
 - Persist the last selected conversation per workspace: rejected because a new
-  process silently inherits an old model context and recreates a second durable
-  pointer to the session.
+  process would need a second durable pointer instead of the service default.
 - Delete on TUI exit: rejected because process ownership does not match shared
   conversation ownership and can destroy detached work.
-- Rotate Pi sessions inside one conversation: rejected because it makes
-  conversation and model-session lifetime diverge. Retention deletes their one
-  shared directory instead.
+- Automatically rotate Pi sessions on launch: opening another surface must not
+  reset shared context. Explicit `/reset` archives the old context under
+  [ADR 0169](0169-conversation-context-can-start-fresh.md).
 
 ## Consequences
 
-- Starting `clankie` gives clean model context; resuming is intentional.
+- Starting `clankie` resumes the main room; fresh context is an explicit choice.
 - Exiting the console is nondestructive, so accepted turns and other attached
   surfaces remain safe.
 - Recent conversations remain inspectable and resumable, while their logs have
@@ -99,4 +96,4 @@ together and any cached in-memory Pi lane is disposed.
 - The picker closes an unwanted inactive conversation immediately without
   weakening the protections around active work or the default global room.
 - The non-deletable default global conversation remains available to clients
-  that explicitly select it, but it is not the normal TUI startup target.
+  and is the normal TUI startup target.

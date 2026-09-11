@@ -1,19 +1,11 @@
-/**
- * Which directory a console works in.
- *
- * The `clankie` launcher is a symlink into this repo, so the process it starts
- * always sits in the service repo no matter where it was typed. That is right
- * for the services it spawns and wrong for the operator: launching in a project
- * means "work here". A workspace is that launch directory, carried on the
- * conversation's scope so the captain's session runs its tools there.
- */
+/** Workspace paths for explicit /cd selection; plain startup opens the main global room. */
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import type { OperatorConversation } from "@clankie/protocol";
 
 /**
- * The workspace a console launched in `cwd` should attach to, or `undefined`
+ * The workspace represented by `cwd`, or `undefined`
  * for the service repo itself — Clankie's own body is the global conversation's
  * home, not one project among the others.
  */
@@ -24,8 +16,8 @@ export function launchWorkspace(cwd: string, repoRoot: string): string | undefin
 
 /**
  * A directory's project root: the nearest ancestor holding `.git`, else the
- * directory itself. `cd src && clankie` continues the conversation the repo
- * already has rather than opening a second one for the subdirectory.
+ * directory itself. `/cd src` selects the repository workspace rather than
+ * creating a second workspace for its subdirectory.
  */
 export function workspaceRoot(dir: string): string {
   const start = resolve(dir);

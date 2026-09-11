@@ -49,6 +49,7 @@ import { createDiscordVoiceTranscriptClient } from "./session/voice-transcripts.
 import { HerdrRoster } from "./observation/herdr-roster.ts";
 import {
   herdrPaneIdFromEnv,
+  listHerdrSessions,
   reportHerdrAgent,
   reportHerdrMetadata,
   sourceHerdrSocket,
@@ -100,8 +101,8 @@ const services = createProviderServices({
 });
 
 // Production operator conversation client over the service's authenticated
-// dispatch route. A process creates one fresh server-owned conversation;
-// `--chat` is the explicit resume path. The bearer resolves through the
+// dispatch route. Startup selects the existing default global conversation;
+// `--chat` selects another retained conversation. The bearer resolves through the
 // credential broker (env override first), so a shell-launched face matches the
 // token the launcher injected into the service.
 const captainRouteToken = await resolveCaptainRouteToken({ env: process.env });
@@ -180,7 +181,6 @@ try {
   const initial = await resolveInitialConversation({
     client: conversationClient,
     ...(directConversationId === undefined ? {} : { directConversationId }),
-    ...(launchedWorkspace === undefined ? {} : { workspace: launchedWorkspace }),
   });
   const selected = await conversationSelection.select(initial.conversationId);
   currentConversationTitle = selected.title;
@@ -370,6 +370,7 @@ const commands = [
     presence: () => presence.snapshot,
     contextUsage: () => currentContextUsage,
     herdrRoster: () => herdrRoster.snapshot(),
+    herdrSessions: () => listHerdrSessions({ env: herdrOptions.env }),
     herdrOptions,
     restartCaptain,
     herdLead: {
