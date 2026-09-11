@@ -26,6 +26,8 @@ export interface OperatorConversationRenderTarget {
     outcome: { readonly failed: boolean; readonly detail?: string | undefined },
   ): void;
   insertMarkdown(markdown: string): unknown;
+  /** Received context, headline shown and payload folded. */
+  insertExternalActivity(text: string): void;
   refreshStatus(label: string): void;
   setTurnLoaderMessage?(message: string): void;
 }
@@ -129,7 +131,7 @@ export function createOperatorConversationShellSink(
       }
       if (event.type === "message") {
         if (event.role === "external") {
-          shell.insertMarkdown(`**External activity**\n\n${event.text}`);
+          shell.insertExternalActivity(event.text);
         } else if (event.role === "operator") {
           if (pendingEcho !== undefined && event.text === pendingEcho) pendingEcho = undefined;
           else shell.insertUserMessage(event.text);

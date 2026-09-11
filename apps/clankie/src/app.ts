@@ -1,4 +1,4 @@
-import { ConversationResetError } from "./captain/conversations.ts";
+import { ConversationResetError, LINEAR_INBOX_CONVERSATION_ID } from "./captain/conversations.ts";
 import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@clankie/protocol";
 /**
  * The Clankie service's HTTP surface. Local capabilities are wired in-process.
@@ -1973,7 +1973,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({
       schemaVersion: 1 as const,
       following: current.linearWebhook.following,
-      conversationId: "linear-inbox",
+      conversationId: LINEAR_INBOX_CONVERSATION_ID,
     });
   });
 

@@ -46,7 +46,8 @@ The binding is owner-chosen configuration, resolved once at service startup.
   whose pinned session answers, seated or not. A seated turn keeps the join
   framing ("that pane is you"); an unseated turn — the phone, the menu bar —
   leads the same session from the service body, with no pane marked as him. A
-  turn with no live session carries no herdr preamble at all.
+  turn with no live session carries no herdr preamble at all, and neither does
+  a turn in the Linear inbox (ADR 0168), which is a reading room.
 - `captain.workingDirectory` in settings names where his shell and sessions
   run when a conversation names no workspace (default: the operator's home
   directory, replacing the repo root). `clankie workdir set PATH` is the

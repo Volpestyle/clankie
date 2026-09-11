@@ -116,6 +116,25 @@ describe("operator conversation context", () => {
     await reopened.close();
   });
 
+  it("folds a burst of followed Linear deliveries into one queued turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-conversation-inbox-burst-"));
+    roots.push(root);
+    let release: () => void = () => {};
+    const runs: string[] = [];
+    const store = new ConversationStore(root, async (conversationId) => {
+      runs.push(conversationId);
+      if (runs.length === 1) await new Promise<void>((resolve) => (release = resolve));
+    });
+    store.receiveLinearActivity("first", true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let i = 0; i < 5; i += 1) store.receiveLinearActivity(`burst ${i}`, true);
+    release();
+    await store.close();
+    // The first delivery ran; the five behind it share one queued turn.
+    expect(runs).toEqual(["linear-inbox", "linear-inbox"]);
+    expect(store.readLinearInbox().unreadCount).toBe(6);
+  });
+
   it("keeps off-period Linear messages across restart without running a model or sending reply notifications", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-conversation-inbox-"));
     roots.push(root);

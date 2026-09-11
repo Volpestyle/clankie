@@ -32,9 +32,13 @@ Accepted activity is stored in the stable `linear-inbox` conversation, titled
 **Linear inbox**, with its own durable Pi context. Retention preserves unread events and bounds
 consumed history. The inbox conversation is exempt from automatic pruning. Hooks do not enter the default global conversation or its bound
 Herdr seat. Operator chat and fleet-completion watches retain their routes.
+The inbox is a reading room, not a lead room: turns there carry no Herdr
+census (ADR 0149), whoever opens them.
 
 The event is quoted as untrusted external context, including its actor and
-metadata. The model sees the type, action, URL, timestamp, data and previous
+metadata. Its first line is a headline (type, action, issue, actor) so a
+transcript can show one line per event and unfold the payload on demand; the
+TUI renders external activity that way. The model sees the type, action, URL, timestamp, data and previous
 values, bounded to 8,000 characters before quotation. Clankie chooses whether
 anything deserves action; silence is ordinary. A shared account name does not
 establish human authorship. His own echoes require no reply. A webhook grants
@@ -71,6 +75,7 @@ unread; acknowledgment records the caller's review, not inferred comprehension.
 External messages do not
 impersonate the operator or a fleet agent and do not emit reply notifications.
 
-Batching can reduce turns during sustained bursts. This mode currently admits
-one queued turn per delivery and uses the existing serialized conversation
-runner. Add batching when live-follow traffic shows that queue cannot keep up.
+Deliveries coalesce: at most one hook turn waits behind a running one, and
+every delivery that lands before it starts rides it, since the turn reads the
+whole unread page. A burst costs one turn of context, not one per event. The
+existing serialized conversation runner carries it.

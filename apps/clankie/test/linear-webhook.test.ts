@@ -6,6 +6,7 @@ import { seatEventKindFor } from "../src/captain/captain.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import {
   LinearDeliveryMemory,
+  linearActivityHeadline,
   linearActivityPrompt,
   type LinearActivityEvent,
 } from "../src/linear-webhook.ts";
@@ -262,6 +263,19 @@ describe("the prompt an activity becomes", () => {
     expect(prompt).toContain("untrusted external context");
     expect(prompt).not.toContain("This is him talking to you");
     expect(prompt).not.toContain("This wake is the approval");
+  });
+
+  it("leads with a one-line headline a folded transcript can show", () => {
+    expect(linearActivityHeadline(activity)).toBe("Linear Issue update · VUH-1234 new title · James");
+    expect(linearActivityPrompt(activity).split("\n")[0]).toBe(linearActivityHeadline(activity));
+    expect(
+      linearActivityHeadline({
+        ...activity,
+        type: "Comment",
+        action: "create",
+        data: { body: "x", issue: { identifier: "VUH-9", title: "t".repeat(300) } },
+      }),
+    ).toMatch(/^Linear Comment create · VUH-9 t+…$/u);
   });
 
   it("bounds large activity payloads", () => {

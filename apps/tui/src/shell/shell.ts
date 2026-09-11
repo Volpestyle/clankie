@@ -76,6 +76,7 @@ import { followVoiceTranscripts, type DiscordVoiceTranscriptClient } from "../se
 import { OperatorConversationSendError } from "../session/operator-conversations.ts";
 import { clankieSlashSkillSuffix, resolveClankieSlashSkill } from "../skill-catalog.ts";
 import { ClankieCommandTextResultComponent, type CommandLogTone } from "./command-log.ts";
+import { ClankieExternalActivityComponent } from "./external-activity.ts";
 import { createFaceThemeBundle, type FaceThemeBundle } from "./theme.ts";
 import { ClankieFooterComponent, displayHomePath, type ClankieFooterData } from "./footer.ts";
 import { createSetupFlow, type SetupFlowController } from "./setup-flow.ts";
@@ -616,6 +617,12 @@ export class ClankieFaceShell {
       isError: outcome.failed,
     });
     this.tui.requestRender();
+  }
+
+  insertExternalActivity(text: string): void {
+    const block = new ClankieExternalActivityComponent(text);
+    this.registerExpandable(block);
+    this.appendChatBlock(block);
   }
 
   insertMarkdown(text: string): FaceBlockHandle {

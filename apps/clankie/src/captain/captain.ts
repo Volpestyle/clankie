@@ -37,7 +37,12 @@ import {
   type AgentSession,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import { ConversationResetError, ConversationStore, type ConversationTurnContext } from "./conversations.ts";
+import {
+  ConversationResetError,
+  ConversationStore,
+  LINEAR_INBOX_CONVERSATION_ID,
+  type ConversationTurnContext,
+} from "./conversations.ts";
 import { linearActivityPrompt } from "../linear-webhook.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
@@ -1012,8 +1017,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const paneId = context.seat?.herdrPaneId;
         // Seated or not, an operator turn carries the fleet of the pinned
         // session (ADR 0149); an unseated turn with no live session attaches
-        // nothing rather than herdr noise.
-        const census = live ? undefined : await readHerdrSessionCensus(paneId);
+        // nothing rather than herdr noise. The Linear inbox is a reading room,
+        // not a lead room (ADR 0168): no census there.
+        const census =
+          live || conversationId === LINEAR_INBOX_CONVERSATION_ID
+            ? undefined
+            : await readHerdrSessionCensus(paneId);
         const prompt = resolveOperatorPrompt(
           message,
           lane.session.resourceLoader.getSkills().skills,
