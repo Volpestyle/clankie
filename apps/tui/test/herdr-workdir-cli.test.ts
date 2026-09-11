@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
-import { runLinearCommand } from "../src/command/linear.ts";
+import { parseInboxRead, runLinearCommand } from "../src/command/linear.ts";
 import { runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 
@@ -89,5 +89,15 @@ describe("clankie linear", () => {
     expect(await runLinearCommand(["follow", "off"], { settings })).toMatchObject({ following: false });
     await expect(runLinearCommand(["follow", "yes"], { settings })).rejects.toThrow("Usage:");
     await expect(runLinearCommand(["status", "on"], { settings })).rejects.toThrow("Usage:");
+  });
+
+  it("turns inbox read flags into the query the service expects", () => {
+    expect(parseInboxRead([])).toBe("");
+    expect(parseInboxRead(["--headlines", "--limit", "50", "--before", "000000000042"])).toBe(
+      "?headlines=1&limit=50&before=000000000042",
+    );
+    expect(parseInboxRead(["--limit"])).toBeUndefined();
+    expect(parseInboxRead(["--before", "42"])).toBeUndefined();
+    expect(parseInboxRead(["--drain"])).toBeUndefined();
   });
 });

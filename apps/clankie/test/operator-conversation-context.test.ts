@@ -135,6 +135,56 @@ describe("operator conversation context", () => {
     expect(store.readLinearInbox().unreadCount).toBe(6);
   });
 
+  it("words a hook wake from the headlines that arrived, once", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-inbox-wake-"));
+    roots.push(root);
+    const store = new ConversationStore(root, async () => {});
+    expect(store.linearWakePrompt()).toBeUndefined();
+    store.receiveLinearActivity("Linear Comment create · VUH-1 title · James\nquoted payload", false);
+    store.receiveLinearActivity("Linear Issue update · VUH-2 other\nquoted payload", false);
+    const prompt = store.linearWakePrompt();
+    expect(prompt).toContain("2 new events");
+    expect(prompt).toContain("Linear Comment create · VUH-1 title · James");
+    expect(prompt).toContain("Linear Issue update · VUH-2 other");
+    expect(prompt).not.toContain("quoted payload");
+    expect(store.linearWakePrompt()).toBeUndefined();
+    store.receiveLinearActivity("Linear Issue create · VUH-3\nbody", false);
+    expect(store.linearWakePrompt()).toContain("1 new event in");
+    await store.close();
+  });
+
+  it("reads forward by default, backward with before, and cheaply with headlines", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-inbox-deep-"));
+    roots.push(root);
+    const store = new ConversationStore(root, async () => {});
+    for (let i = 0; i < 30; i += 1) store.receiveLinearActivity(`headline ${i}\nbody ${i}`, false);
+    const first = store.readLinearInbox({ limit: 5 });
+    expect(first.items).toHaveLength(5);
+    expect(first).toMatchObject({ unreadCount: 30, hasMore: true });
+    store.acknowledgeLinearInbox(first.ackCursor!);
+    const cheap = store.readLinearInbox({ headlines: true, limit: 100 });
+    expect(cheap.items).toHaveLength(25);
+    expect(cheap.items[0]).toMatchObject({ headline: "headline 5" });
+    expect(cheap.items[0]).not.toHaveProperty("text");
+    // Back into acknowledged history from the oldest unread, three at a time.
+    const back = store.readLinearInbox({ before: cheap.oldestCursor!, limit: 3, headlines: true });
+    expect(back.items.map((item) => (item as { headline: string }).headline)).toEqual([
+      "headline 2",
+      "headline 3",
+      "headline 4",
+    ]);
+    expect(back.hasMore).toBe(true);
+    const oldest = store.readLinearInbox({ before: back.oldestCursor!, limit: 10, headlines: true });
+    expect(oldest.items).toHaveLength(2);
+    expect(oldest.hasMore).toBe(false);
+    // A backward read past already-read events offers nothing new to acknowledge...
+    expect(oldest.ackCursor).toBe(cheap.ackCursor);
+    // ...and every unread event shown, forward or backward, is acknowledgeable.
+    expect(store.acknowledgeLinearInbox(cheap.ackCursor!)).toBe(true);
+    expect(store.readLinearInbox()).toMatchObject({ unreadCount: 0, items: [], ackCursor: null });
+    await store.close();
+  });
+
   it("keeps off-period Linear messages across restart without running a model or sending reply notifications", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-conversation-inbox-"));
     roots.push(root);

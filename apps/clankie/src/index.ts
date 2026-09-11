@@ -49,6 +49,7 @@ import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
+import { LinearSelfWriteMemory, recordLinearWrite } from "./linear-webhook.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
@@ -363,10 +364,14 @@ const boundApp = (): ClankieApp => {
 // His connected services (ADR 0109). Servers are connected up front so no turn
 // pays for a handshake; one that is unreachable costs him that server's tools
 // and nothing else.
+// What he writes to Linear is remembered briefly so the webhook about it is
+// dropped at ingress rather than waking him about his own post (ADR 0168).
+const linearSelfWrites = new LinearSelfWriteMemory();
 const mcpHost = createMcpHost({
   credentials: operatorCredentialStore,
   settings: settingsStore,
   logger,
+  observeCall: (call) => recordLinearWrite(linearSelfWrites, call, new Date()),
 });
 await mcpHost.warm();
 
@@ -575,6 +580,7 @@ const clankie = await createClankieApp({
       const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
       return credential?.type === "api" ? credential.key : undefined;
     },
+    selfWrites: linearSelfWrites,
   },
 });
 clankieRef = clankie;

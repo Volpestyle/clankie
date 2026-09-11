@@ -295,12 +295,16 @@ schedule a turn for every old message. Unread events survive retention; normal c
 history.
 
 `clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
-in `items`, at most 20 events and under 31 KB serialized. Reading leaves it
-unread. Review every item, then run `clankie linear inbox ack CURSOR` with the
-returned `ackCursor`; read the next page while `hasMore` is true. Never drain
-pages in a script or acknowledge truncated output. Unacknowledged pages survive
-restart. `GET /v1/linear/inbox` reads; `POST /v1/linear/inbox` requires
-`{ "ackCursor": "..." }` and acknowledges only previously offered events.
+in `items`: the oldest unread events, 20 by default (`--limit N`, up to 100),
+under 31 KB serialized. `--headlines` returns one line per event (cursor,
+time, headline) instead of the quoted payload; `--before CURSOR` returns the
+events just before that cursor, read or not, so history can be walked back
+from `oldestCursor` as deep as wanted. Reading leaves events unread. Review
+what was shown, then run `clankie linear inbox ack CURSOR` with the returned
+`ackCursor`; it moves the read boundary forward over events already offered,
+never past one unseen. Never acknowledge truncated output. Unacknowledged
+pages survive restart. `GET /v1/linear/inbox?limit=&before=&headlines=1`
+reads; `POST /v1/linear/inbox` requires `{ "ackCursor": "..." }`.
 Following controls waking, not collection.
 
 `clankie linear follow off` suppresses new event-triggered turns and skips model
@@ -322,11 +326,13 @@ Setup does not enable following; **Start following** / **Stop following** is a
 separate choice under **Follow Linear**.
 
 The consumer accepts signed `create`, `update`, and `remove` activity from any
-resource type and actor. The prompt carries the resource, action, author, URL,
-data and previous values as bounded untrusted context. Shared-account agent
-posts are not attributed to the human. Clankie decides what merits attention;
-routine updates and his own echoes need no acknowledgment, dispatch or reply.
-A delivery supplies context, not new permission.
+resource type and actor, except the webhook about an object Clankie himself
+just wrote through Linear's MCP, which is dropped at ingress. A wake carries
+one headline per new event; the stored message carries the resource, action,
+author, URL, data and previous values as bounded untrusted context.
+Shared-account agent posts are not attributed to the human. Clankie decides
+what merits attention; routine updates need no acknowledgment, dispatch or
+reply. A delivery supplies context, not new permission.
 [ADR 0168](adr/0168-linear-awareness-is-opt-in.md) describes the decision.
 
 The local operator API exposes `GET /v1/linear/follow` and

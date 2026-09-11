@@ -130,6 +130,13 @@ export interface McpHostOptions {
   readonly curated?: readonly McpServerSettings[];
   /** Injected in tests; the real one connects a transport. */
   readonly connect?: (server: McpServerSettings, credentials: CredentialStore) => Promise<McpConnection>;
+  /** Sees every settled call, for side channels that must know what he wrote. */
+  readonly observeCall?: (call: {
+    readonly server: string;
+    readonly tool: string;
+    readonly content: string;
+    readonly isError: boolean;
+  }) => void;
 }
 
 /** The part of an MCP client this host uses, so tests can supply a fake. */
@@ -340,6 +347,12 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           { event: "mcp.host.call", server: server.id, tool: input.tool },
           "mcp tool called",
         );
+        options.observeCall?.({
+          server: server.id,
+          tool: input.tool,
+          content: result.content,
+          isError: result.isError,
+        });
         return {
           outcome: "ok",
           content: result.content.slice(0, MAX_RESULT_CHARACTERS),

@@ -143,7 +143,11 @@ import {
   mintDeviceSessionClaims,
 } from "./device-session.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
-import { LinearDeliveryMemory, classifyLinearDelivery } from "./linear-webhook.ts";
+import {
+  LinearDeliveryMemory,
+  type LinearSelfWriteMemory,
+  classifyLinearDelivery,
+} from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { LocalVoiceChatSession } from "./local-voice-chat.ts";
@@ -362,7 +366,7 @@ export interface ClankieAppDependencies {
    * webhook is configured and the route reports itself unavailable; the wake it
    * leads to belongs to the captain.
    */
-  linearWebhook?: { secret(): Promise<string | undefined> };
+  linearWebhook?: { secret(): Promise<string | undefined>; selfWrites?: LinearSelfWriteMemory };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;
@@ -1942,7 +1946,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
       return context.json({ schemaVersion: 1, acknowledged: body.ackCursor });
     }
-    return context.json({ schemaVersion: 1, ...dependencies.captain.readLinearInbox() });
+    const query = context.req.query();
+    const limit = query.limit === undefined ? undefined : Number.parseInt(query.limit, 10);
+    if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= 100))
+      return context.json({ error: "limit_out_of_range" }, 400);
+    if (query.before !== undefined && !/^\d{12}$/u.test(query.before))
+      return context.json({ error: "before_cursor_invalid" }, 400);
+    return context.json({
+      schemaVersion: 1,
+      ...dependencies.captain.readLinearInbox({
+        ...(limit === undefined ? {} : { limit }),
+        ...(query.before === undefined ? {} : { before: query.before }),
+        headlines: query.headlines === "1" || query.headlines === "true",
+      }),
+    });
   });
 
   // Local operator control, independent of the publicly reachable signed webhook.
@@ -2001,6 +2018,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       secret,
       now: clock(),
       deliveries: linearDeliveries,
+      ...(hook.selfWrites === undefined ? {} : { selfWrites: hook.selfWrites }),
     });
 
     if (outcome.kind === "rejected") {

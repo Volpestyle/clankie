@@ -12,7 +12,7 @@ import type {
   OperatorConversationServiceResult,
   OperatorSeatEvent,
 } from "@clankie/protocol";
-import type { DurableMessageNotice } from "./conversations.ts";
+import type { DurableMessageNotice, LinearInboxPage, LinearInboxReadOptions } from "./conversations.ts";
 import type { LinearActivityEvent } from "../linear-webhook.ts";
 
 /**
@@ -129,13 +129,7 @@ export interface CaptainPort {
    */
   observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void;
   /** Offer a bounded page without consuming it. */
-  readLinearInbox(): {
-    readonly items: readonly unknown[];
-    readonly unreadCount: number;
-    readonly hasMore: boolean;
-    readonly ackCursor: string | null;
-    readonly next: string | null;
-  };
+  readLinearInbox(options?: LinearInboxReadOptions): LinearInboxPage;
   acknowledgeLinearInbox(cursor: string): boolean;
   /** Store verified context in the Linear inbox and optionally queue a model turn. */
   receiveLinearActivity(activity: LinearActivityEvent, following: boolean): void;
@@ -177,7 +171,14 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     // A stub writes no transcripts, so it has nothing to announce. A test that
     // wants the trigger passes its own store's observer through `overrides`.
     observeDurableMessages: () => () => {},
-    readLinearInbox: () => ({ items: [], unreadCount: 0, hasMore: false, ackCursor: null, next: null }),
+    readLinearInbox: () => ({
+      items: [],
+      unreadCount: 0,
+      hasMore: false,
+      oldestCursor: null,
+      ackCursor: null,
+      next: null,
+    }),
     acknowledgeLinearInbox: () => false,
     receiveLinearActivity: () => {},
     close: async () => {},

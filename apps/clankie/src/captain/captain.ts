@@ -852,9 +852,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const conversations = new ConversationStore(
     join(options.stateDir, "conversations"),
-    async (conversationId, message, publish, context) => {
+    async (conversationId, incoming, publish, context) => {
       // Turning follow off also drops activity still queued behind a live turn.
       if (context.origin === "hook" && !(await settings()).linearWebhook.following) return;
+      // A hook wake is worded when it starts, from whatever arrived until now.
+      const message = context.origin === "hook" ? conversations.linearWakePrompt() : incoming;
+      if (message === undefined) return;
       const kind = seatEventKind(conversationId, context);
       if (kind !== undefined) {
         const delivery = await seatOutbox.deliver({
@@ -1934,7 +1937,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return conversations.observeDurableMessages(listener);
     },
 
-    readLinearInbox: () => conversations.readLinearInbox(),
+    readLinearInbox: (options) => conversations.readLinearInbox(options),
     acknowledgeLinearInbox: (cursor) => conversations.acknowledgeLinearInbox(cursor),
     receiveLinearActivity(activity, following) {
       conversations.receiveLinearActivity(linearActivityPrompt(activity), following);

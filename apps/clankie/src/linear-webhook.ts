@@ -20,7 +20,7 @@ type LinearWebhookRejection = "bad_signature" | "stale" | "malformed";
 /** Authenticated deliveries we pass over still receive 200 so Linear does not retry. */
 export type LinearWebhookOutcome =
   | { readonly kind: "activity"; readonly activity: LinearActivityEvent }
-  | { readonly kind: "ignored"; readonly reason: "duplicate" | "other_event" }
+  | { readonly kind: "ignored"; readonly reason: "duplicate" | "other_event" | "self_echo" }
   | { readonly kind: "rejected"; readonly reason: LinearWebhookRejection };
 
 // The envelope is stable; each resource owns its data shape. New fields and
@@ -84,6 +84,60 @@ export class LinearDeliveryMemory {
   }
 }
 
+const SELF_WRITE_TTL_MS = 90_000;
+const SELF_WRITE_MAX = 500;
+const LINEAR_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu;
+const LINEAR_WRITE_TOOL = /^(create|update|save|delete|archive|unarchive)_/u;
+
+/**
+ * Objects Clankie just wrote through Linear's MCP, so the webhook Linear fires
+ * back about them is dropped at ingress instead of waking him about himself.
+ * He posts through the owner's account, so the actor cannot tell them apart;
+ * the object id can. A short TTL keeps a human's later edit to the same object
+ * from being mistaken for the echo.
+ */
+export class LinearSelfWriteMemory {
+  private readonly written = new Map<string, number>();
+
+  public record(ids: Iterable<string>, now: Date): void {
+    for (const id of ids) {
+      this.written.delete(id);
+      this.written.set(id.toLowerCase(), now.getTime());
+    }
+    while (this.written.size > SELF_WRITE_MAX) {
+      const oldest = this.written.keys().next();
+      if (oldest.done) break;
+      this.written.delete(oldest.value);
+    }
+  }
+
+  public matches(id: unknown, now: Date): boolean {
+    if (typeof id !== "string") return false;
+    const at = this.written.get(id.toLowerCase());
+    return at !== undefined && now.getTime() - at <= SELF_WRITE_TTL_MS;
+  }
+}
+
+/** Every Linear id a write's result names: the object itself and what it hangs off. */
+export function linearIdsInResult(content: string): string[] {
+  return [...new Set(content.match(LINEAR_ID) ?? [])];
+}
+
+/** Feed a settled MCP call to the memory; reads and failures leave no trace. */
+export function recordLinearWrite(
+  memory: LinearSelfWriteMemory,
+  call: {
+    readonly server: string;
+    readonly tool: string;
+    readonly content: string;
+    readonly isError: boolean;
+  },
+  now: Date,
+): void {
+  if (call.server !== "linear" || call.isError || !LINEAR_WRITE_TOOL.test(call.tool)) return;
+  memory.record(linearIdsInResult(call.content), now);
+}
+
 function signatureMatches(rawBody: Uint8Array, secret: string, presentedHex: string): boolean {
   if (!/^[a-f0-9]{64}$/u.test(presentedHex)) return false;
   const expected = createHmac("sha256", secret).update(rawBody).digest();
@@ -99,6 +153,7 @@ export function classifyLinearDelivery(input: {
   readonly secret: string;
   readonly now: Date;
   readonly deliveries: LinearDeliveryMemory;
+  readonly selfWrites?: LinearSelfWriteMemory;
 }): LinearWebhookOutcome {
   const { rawBody, headers, secret, now, deliveries } = input;
   if (headers.signature === undefined || !signatureMatches(rawBody, secret, headers.signature)) {
@@ -122,6 +177,8 @@ export function classifyLinearDelivery(input: {
   }
 
   if (!deliveries.admit(headers.delivery)) return { kind: "ignored", reason: "duplicate" };
+  if (input.selfWrites?.matches(payload.data?.id, now) === true)
+    return { kind: "ignored", reason: "self_echo" };
 
   return {
     kind: "activity",

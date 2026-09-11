@@ -6,8 +6,11 @@ import { seatEventKindFor } from "../src/captain/captain.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import {
   LinearDeliveryMemory,
+  LinearSelfWriteMemory,
   linearActivityHeadline,
   linearActivityPrompt,
+  linearIdsInResult,
+  recordLinearWrite,
   type LinearActivityEvent,
 } from "../src/linear-webhook.ts";
 
@@ -43,7 +46,7 @@ function sign(body: string, secret = SECRET): string {
   return createHmac("sha256", secret).update(Buffer.from(body, "utf8")).digest("hex");
 }
 
-async function hookApp(following = true) {
+async function hookApp(following = true, selfWrites?: LinearSelfWriteMemory) {
   const wakes: LinearActivityEvent[] = [];
   const inbox: LinearActivityEvent[] = [];
   const clankie = await createClankieApp({
@@ -62,7 +65,10 @@ async function hookApp(following = true) {
           }),
         ),
     },
-    linearWebhook: { secret: () => Promise.resolve(SECRET) },
+    linearWebhook: {
+      secret: () => Promise.resolve(SECRET),
+      ...(selfWrites === undefined ? {} : { selfWrites }),
+    },
     clock: () => NOW,
   });
   const post = (body: string, headers: Record<string, string> = {}) =>
@@ -95,6 +101,41 @@ describe("linear activity ingress", () => {
       actorEmail: OWNER,
       data: { body: "This one is blocked on the gateway header allowlist." },
     });
+  });
+
+  it("drops the webhook about a comment he just wrote, and only that one, only for a while", async () => {
+    const selfWrites = new LinearSelfWriteMemory();
+    const own = "0f5a2d1e-7c3b-4a1d-9e2f-1234567890ab";
+    recordLinearWrite(
+      selfWrites,
+      {
+        server: "linear",
+        tool: "create_comment",
+        content: JSON.stringify({ id: own, issue: { identifier: "VUH-1234" } }),
+        isError: false,
+      },
+      new Date(NOW.getTime() - 5_000),
+    );
+    // A read names ids too, and must not turn them into echoes.
+    recordLinearWrite(
+      selfWrites,
+      {
+        server: "linear",
+        tool: "list_comments",
+        content: JSON.stringify({ id: "comment-abc" }),
+        isError: false,
+      },
+      NOW,
+    );
+    const { post, inbox } = await hookApp(true, selfWrites);
+
+    const echoed = await post(commentBody({}, { id: own }));
+    await expect(echoed.json()).resolves.toMatchObject({ ingested: false });
+    const human = await post(commentBody({}, { id: "comment-abc" }), { "linear-delivery": "delivery-2" });
+    await expect(human.json()).resolves.toMatchObject({ ingested: true });
+    expect(inbox.map((event) => event.data.id)).toEqual(["comment-abc"]);
+    expect(selfWrites.matches(own, new Date(NOW.getTime() + 120_000))).toBe(false);
+    expect(linearIdsInResult(`${own} and ${own.toUpperCase()} again`)).toHaveLength(2);
   });
 
   it("refuses a body the signature does not cover", async () => {

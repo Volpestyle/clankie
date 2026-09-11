@@ -79,12 +79,16 @@ webhook**, selecting all activity events in Linear. Events always reach the
 `clankie --chat linear-inbox`.
 
 `clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
-in `items`, at most 20 events and under 31 KB serialized. Reading leaves it
-unread. Review every item, then run `clankie linear inbox ack CURSOR` with the
-returned `ackCursor`; read the next page while `hasMore` is true. Never drain
-pages in a script or acknowledge truncated output. Unacknowledged pages survive
-restart. `GET /v1/linear/inbox` reads; `POST /v1/linear/inbox` requires
-`{ "ackCursor": "..." }` and acknowledges only previously offered events.
+in `items`: the oldest unread events, 20 by default (`--limit N`, up to 100),
+under 31 KB serialized. `--headlines` returns one line per event (cursor,
+time, headline) instead of the quoted payload; `--before CURSOR` returns the
+events just before that cursor, read or not, so history can be walked back
+from `oldestCursor` as deep as wanted. Reading leaves events unread. Review
+what was shown, then run `clankie linear inbox ack CURSOR` with the returned
+`ackCursor`; it moves the read boundary forward over events already offered,
+never past one unseen. Never acknowledge truncated output. Unacknowledged
+pages survive restart. `GET /v1/linear/inbox?limit=&before=&headlines=1`
+reads; `POST /v1/linear/inbox` requires `{ "ackCursor": "..." }`.
 Following controls waking, not collection.
 
 While off, messages accumulate without model turns. Following on wakes him for

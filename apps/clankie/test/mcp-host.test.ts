@@ -119,6 +119,22 @@ describe("mcp host", () => {
     expect(result).toEqual({ outcome: "ok", content: "ran list_issues", isError: false });
   });
 
+  it("shows every settled call to the observer", async () => {
+    const seen: unknown[] = [];
+    const host = createMcpHost({
+      credentials: credentialStore(),
+      settings: settingsStore([server({ id: "tracker", lane: "everywhere" })]),
+      logger: silent,
+      curated: [],
+      connect: async () => fakeConnection(["create_comment"]),
+      observeCall: (call) => seen.push(call),
+    });
+    await host.call({ lane: "operator", server: "tracker", tool: "create_comment", arguments: {} });
+    expect(seen).toEqual([
+      { server: "tracker", tool: "create_comment", content: "ran create_comment", isError: false },
+    ]);
+  });
+
   it("offers a curated connector only once its credential is stored", async () => {
     const curated = [server({ id: "linear", lane: "everywhere", credential: "linear" })];
     const connect = async (): Promise<McpConnection> => fakeConnection(["list_issues"]);
