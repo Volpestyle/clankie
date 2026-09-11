@@ -17,6 +17,7 @@ import {
 import type {
   ObservableCaptainLane,
   OperatorAutonomyCommand,
+  HerdrBinding,
   OperatorAutonomyStatus,
   OperatorConversationContextUsage,
   OperatorConversationSessionState,
@@ -31,7 +32,7 @@ import {
   formatHerdLeadCompanionResult,
   type HerdLeadCompanionResult,
 } from "./observation/herd-lead-companion.ts";
-import { formatCaptainContextUsage } from "./shell/footer.ts";
+import { describeHerdrBinding, formatCaptainContextUsage } from "./shell/footer.ts";
 import { formatHerdrJumpResult, type HerdrSessionEntry } from "./session/herdr-report.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
@@ -45,6 +46,10 @@ export interface ConsoleCommandContext {
   readonly herdrOptions?: HerdrConnectionOptions;
   /** Herdr's saved sessions, for the `/herdr` session picker. */
   readonly herdrSessions?: () => Promise<readonly HerdrSessionEntry[]>;
+  /** The binding the running service holds, as last read; the footer shows it. */
+  readonly herdrBinding?: () => HerdrBinding | undefined;
+  /** Re-read the live binding after anything that could move it. */
+  readonly refreshHerdrBinding?: () => Promise<void>;
   readonly restartCaptain?: () => Promise<void>;
   readonly commandStatus?: () => Promise<StatusCommandResult>;
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
@@ -703,6 +708,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       availableInSideConversation: true,
       async run(_argument, shell): Promise<void> {
         const s = statusHelpers(shell);
+        await context.refreshHerdrBinding?.();
+        const binding = context.herdrBinding?.();
         const snapshot = presence?.();
         const currentContextUsage = contextUsage?.();
         const roster = herdrRoster?.();
@@ -734,6 +741,11 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                 ]),
             s.title("Console"),
             s.line("discord", snapshot?.phase ?? "unavailable", snapshot === undefined ? "warn" : "ok"),
+            s.line(
+              "herdr",
+              binding === undefined ? "unavailable" : describeHerdrBinding(binding),
+              binding === undefined ? "warn" : "ok",
+            ),
             s.line("conversation", conversations?.title ?? "none selected", "active"),
             s.line("workspace", conversations?.workspace ?? "unknown", "normal"),
             s.line(
@@ -987,6 +999,7 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
     }
     flow.setStatus("Restarting Clankie…");
     await context.restartCaptain?.();
+    await context.refreshHerdrBinding?.();
     // The binding resolves at start and steps over a session that does not
     // answer (ADR 0170), so report where he landed rather than what was saved.
     const applied = await runHerdrCommand(["status"], options);
@@ -1007,6 +1020,6 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
 
 function herdrActiveLine(status: HerdrCommandResult): string {
   return status.active
-    ? `Active: ${status.active.runtime} · ${status.active.session}`
+    ? `Active: ${describeHerdrBinding(status.active)}`
     : (status.unavailable ?? "Active session unavailable");
 }

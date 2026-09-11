@@ -18,7 +18,7 @@ import {
 } from "@clankie/credential-broker";
 import { loadConfig, type ClankieConfig } from "@clankie/model-provider";
 import { SettingsStore } from "@clankie/settings";
-import type { OperatorConversationContextUsage } from "@clankie/protocol";
+import type { HerdrBinding, OperatorConversationContextUsage } from "@clankie/protocol";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import { buildProviderCommands, createProviderServices, formatModelBanner } from "./provider-commands.ts";
@@ -57,7 +57,7 @@ import {
   type HerdrJumpResult,
 } from "./session/herdr-report.ts";
 import { PresencePoller } from "./observation/presence.ts";
-import { formatCaptainPresenceStatus } from "./shell/footer.ts";
+import { formatCaptainPresenceStatus, formatHerdrBindingStatus } from "./shell/footer.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
 import { doctorCommand } from "./command/doctor.ts";
@@ -121,6 +121,16 @@ const herdrOptions = {
 };
 async function fleetEnvironment(): Promise<NodeJS.ProcessEnv> {
   return herdrConnection(await readHerdrBinding(herdrOptions), herdrOptions).env;
+}
+// The binding he actually holds, for the footer and /status. Read at start and
+// after anything that can move it; a service that cannot answer shows as such.
+let herdrBinding: HerdrBinding | undefined;
+async function refreshHerdrBinding(): Promise<void> {
+  try {
+    herdrBinding = await readHerdrBinding(herdrOptions);
+  } catch {
+    herdrBinding = undefined;
+  }
 }
 async function jumpToFleetAgent(target: string): Promise<HerdrJumpResult> {
   try {
@@ -371,6 +381,8 @@ const commands = [
     contextUsage: () => currentContextUsage,
     herdrRoster: () => herdrRoster.snapshot(),
     herdrSessions: () => listHerdrSessions({ env: herdrOptions.env }),
+    herdrBinding: () => herdrBinding,
+    refreshHerdrBinding,
     herdrOptions,
     restartCaptain,
     herdLead: {
@@ -420,7 +432,11 @@ const shell = new ClankieFaceShell({
     model: currentModelDisplay,
     title: currentConversationTitle,
   }),
-  statusExtras: () => [...sideConversationStatus(), formatCaptainPresenceStatus(presence.snapshot)],
+  statusExtras: () => [
+    ...sideConversationStatus(),
+    formatHerdrBindingStatus(herdrBinding),
+    formatCaptainPresenceStatus(presence.snapshot),
+  ],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal, delivery) => {
     let ready!: () => void;
@@ -547,6 +563,9 @@ async function applyModelDisplay(config: ClankieConfig): Promise<void> {
   // The footer reads the model lazily; a repaint is all a change needs.
   shell.refreshStatusView();
 }
+
+// First footer read of the fleet binding; later reads follow /herdr and /status.
+void refreshHerdrBinding().then(() => shell.refreshStatusView());
 
 // Crash-safety envelope: Node >=24 terminates on an unhandled rejection with no
 // cleanup, which would leave SGR mouse tracking + raw mode enabled (corrupt

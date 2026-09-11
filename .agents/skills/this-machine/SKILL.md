@@ -158,10 +158,14 @@ console. Voice is as capable as the room it is in.
 
 ## Herdr runtime
 
-In the TUI, `/herdr` opens the session/runtime menu. Pick a session from Herdr's
-saved sessions, save, and choose **Restart now** to apply it without leaving the
-TUI, or **Later** to leave it pending. The menu shows both configured and active
-bindings, and after a restart it warns when the saved session did not answer.
+The TUI footer shows the live binding (`herdr internal (bundled)` or
+`herdr external · NAME`); `/status` repeats it. In the TUI, `/herdr` opens the
+session/runtime menu. Pick a session from Herdr's saved sessions, save, and
+choose **Restart now** to apply it without leaving the TUI, or **Later** to leave
+it pending. The menu shows both configured and active bindings, and after a
+restart it warns when the saved session did not answer. Bundled panes start
+the owner's login shell with the owner's environment restored; the private
+XDG roots that isolate that Herdr never reach an agent.
 
 The binding is resolved fresh at every service start and never written back
 (ADR 0170): the named session, else the Herdr session the service was launched

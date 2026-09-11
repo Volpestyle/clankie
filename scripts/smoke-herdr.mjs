@@ -23,6 +23,7 @@ export async function smokeHerdr(repoRoot = checkout) {
   const env = {
     ...process.env,
     SHELL: "/bin/sh",
+    XDG_CONFIG_HOME: "/owner/config",
     HERDR_PANE_ID: "external-pane",
     HERD_LEAD_SUMMARIES_CACHE: "/external/summaries.json",
   };
@@ -39,33 +40,46 @@ export async function smokeHerdr(repoRoot = checkout) {
     assert.equal(env.HERD_LEAD_SUMMARIES_CACHE, undefined);
     assert.ok(env.HERDR_PLUGIN_STATE_DIR.startsWith(root));
     assert.equal((await stat(env.HERDR_SOCKET_PATH)).mode & 0o777, 0o600);
-    await assert.rejects(startHerdrRuntime({ ...options, env: { ...env } }), /already has an owner/u);
+    // A live server that answers is adopted, never refused (ADR 0164).
+    const adopter = await startHerdrRuntime({ ...options, env: { ...env } });
+    assert.equal(adopter.status(), "healthy");
+    await adopter.close();
     await command("workspace", "create", "--cwd", root, "--label", "clankie-runtime-proof");
     const first = await snapshot();
     assert.equal(first.workspaces.length, 1);
     assert.ok(first.panes.length > 0);
     const marker = join(root, "worker-result");
     const pidFile = join(root, "server-pid");
+    const paneEnv = join(root, "pane-env");
     await command(
       "pane",
       "run",
       first.panes[0].pane_id,
-      `printf clankie-herdr-ok > '${marker}'; printf '%s' "$PPID" > '${pidFile}'`,
+      `printf clankie-herdr-ok > '${marker}'; printf '%s' "$PPID" > '${pidFile}'; printf '%s|%s' "$XDG_CONFIG_HOME" "$SHELL" > '${paneEnv}'`,
     );
     await until(async () => existsSync(marker) && (await readFile(marker, "utf8")) === "clankie-herdr-ok");
+    // The pane is the owner's shell with the owner's environment, not the
+    // server's private XDG isolation.
+    await until(async () => (await readFile(paneEnv, "utf8")) === "/owner/config|/bin/sh");
     const previousPid = Number(await readFile(pidFile, "utf8"));
     assert.ok(Number.isSafeInteger(previousPid) && previousPid > 1);
     const configPath = join(root, "herdr/herdr/config.toml");
     await appendFile(configPath, "\n# viewer preferences survive restart\n");
-    // Stop through Clankie, then restore the persisted workspace before crashing the server.
+    // A stop through Clankie detaches and the fleet outlives him (ADR 0164);
+    // stopping the fleet itself is explicit and persists the session. The next
+    // start then restores it, and the config keeps its additions.
     await runtime.close();
+    await command("server", "stop");
+    await until(async () => !processAlive(previousPid));
     runtime = await startHerdrRuntime(options);
     await until(async () => (await snapshot()).workspaces.length === 1);
     assert.ok((await readFile(configPath, "utf8")).includes("# viewer preferences survive restart"));
     const restored = await snapshot();
+    await rm(pidFile, { force: true });
     await command("pane", "run", restored.panes[0].pane_id, `printf '%s' "$PPID" > '${pidFile}'`);
-    await until(async () => Number(await readFile(pidFile, "utf8")) !== previousPid);
+    await until(async () => existsSync(pidFile) && Number(await readFile(pidFile, "utf8")) > 1);
     const crashedPid = Number(await readFile(pidFile, "utf8"));
+    assert.notEqual(crashedPid, previousPid, "an explicit stop ends the server");
     const processCommand = (await exec("ps", ["-p", String(crashedPid), "-o", "command="])).stdout;
     assert.ok(
       processCommand.includes(binary) && processCommand.includes("server"),
@@ -77,9 +91,11 @@ export async function smokeHerdr(repoRoot = checkout) {
     assert.equal(await readFile(marker, "utf8"), "clankie-herdr-ok");
     await command("workspace", "create", "--cwd", root, "--label", "after-reconnect");
     assert.equal((await snapshot()).workspaces.length, 2);
+    // Clankie leaving does not end the fleet: the server still answers, a new
+    // owner adopts it, and losing that owner to SIGKILL leaves it working too.
     await runtime.close();
     runtime = undefined;
-    await assert.rejects(command("api", "snapshot"));
+    assert.equal((await snapshot()).workspaces.length, 2);
     const ownerScript = join(root, "owner.mjs");
     const runtimeModule = pathToFileURL(
       existsSync(compiled) ? compiled : compiled.replace(/\.js$/u, ".ts"),
@@ -98,19 +114,18 @@ export async function smokeHerdr(repoRoot = checkout) {
     const ownedCommand = (await exec("ps", ["-p", String(orphanPid), "-o", "command="])).stdout;
     assert.ok(ownedCommand.includes(binary) && ownedCommand.includes("server"));
     owner.kill("SIGKILL");
-    await until(async () => {
-      try {
-        await command("api", "snapshot");
-        return false;
-      } catch {
-        return true;
-      }
-    });
-    await until(async () => !processAlive(orphanPid));
-    orphanPid = undefined;
+    await until(async () => !processAlive(owner.pid));
     owner = undefined;
+    await sleep(500);
+    assert.ok(processAlive(orphanPid), "the fleet outlives its owner");
+    assert.equal((await snapshot()).workspaces.length, 2);
+    // Stopping the fleet is explicit, and only that ends the server.
+    await command("server", "stop");
+    await until(async () => !processAlive(orphanPid));
+    await assert.rejects(command("api", "snapshot"));
+    orphanPid = undefined;
     process.stdout.write(
-      `Herdr smoke passed (${process.platform}-${process.arch}): worker execution, exclusive ownership, restore, crash recovery, reconnect, parent-death cleanup\n`,
+      `Herdr smoke passed (${process.platform}-${process.arch}): worker execution, owner environment in panes, adoption, restore, crash recovery, reconnect, fleet outlives owner, explicit stop\n`,
     );
   } finally {
     await runtime?.close();

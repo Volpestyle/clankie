@@ -6,7 +6,7 @@
  * footer always renders current state without change bookkeeping.
  */
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
-import type { OperatorConversationContextUsage } from "@clankie/protocol";
+import type { HerdrBinding, OperatorConversationContextUsage } from "@clankie/protocol";
 import type { ClankieFaceAnsiTheme } from "../face/clankie-face-theme.ts";
 import type { PresenceSnapshot } from "../observation/presence.ts";
 
@@ -19,6 +19,15 @@ export interface ClankieFooterData {
 export interface ClankieFooterState extends ClankieFooterData {
   readonly cwd: string;
   readonly extras: readonly string[];
+}
+
+/** Which fleet he leads right now: his own, or a named session of the owner's. */
+export function describeHerdrBinding(binding: HerdrBinding): string {
+  return binding.runtime === "bundled" ? "internal (bundled)" : `external · ${binding.session}`;
+}
+
+export function formatHerdrBindingStatus(binding: HerdrBinding | undefined): string {
+  return `herdr ${binding === undefined ? "unavailable" : describeHerdrBinding(binding)}`;
 }
 
 export function formatCaptainPresenceStatus(presence: PresenceSnapshot | undefined): string {

@@ -547,6 +547,11 @@ clankie fleet set --notes "codex is the workhorse. claude when it needs skills o
 
 ### `herdr [status|open]` / `herdr set --runtime auto|bundled|external` / `herdr set --session NAME`
 
+The TUI footer always shows the fleet he is bound to: `herdr internal (bundled)`
+for his own fleet, `herdr external · NAME` for one of the owner's sessions, or
+`herdr unavailable` when the service cannot answer. `/status` repeats it. It is
+re-read at start, after `/herdr`, and on `/status`.
+
 In the TUI, `/herdr` opens a modal menu showing configured and active sessions.
 Pick an external session from Herdr's saved sessions (running ones first),
 select a runtime, or open the active session; the external runtime goes to the
@@ -569,7 +574,13 @@ points every child he spawns from then on at it.
 
 `bundled` requires the native release binary or `pnpm herdr:build` in a checkout,
 and opts out of both the named and the surrounding session — no session is
-probed. `set --session NAME` selects external mode and resolves that named
+probed. Panes in the bundled fleet start the owner's login shell with the
+owner's environment: the private XDG roots that isolate that Herdr never
+reach an agent, so `gh`, `git`, `mise` and the rest behave as in any terminal.
+macOS permissions (screen recording, accessibility) follow the process that
+started the service, so a fleet descending from a terminal carries that
+terminal's grants; one started by the login-time autostart job may prompt for
+them once. `set --session NAME` selects external mode and resolves that named
 session on restart; `set --runtime external` keeps whichever session name is
 already saved. External mode never starts or stops the owner's server.
 `set --runtime auto` clears the named session, leaving the surrounding one or

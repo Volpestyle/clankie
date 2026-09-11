@@ -1,10 +1,13 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
   bundledHerdrBinary,
   isHarnessSessionMarker,
+  paneShellScript,
   startHerdrRuntime,
   watchHerdrSocket,
 } from "../src/herdr-runtime.ts";
@@ -44,6 +47,29 @@ it("refuses to take over an occupied runtime socket", async () => {
   } finally {
     await new Promise<void>((done) => server.close(() => done()));
   }
+});
+
+it("gives a bundled pane the owner's environment back before starting their login shell", async () => {
+  const root = await temporary();
+  // A stand-in for the owner's shell: it shows what the pane would inherit.
+  const shell = join(root, "owner-shell");
+  await writeFile(shell, '#!/bin/sh\necho "$1|${XDG_CONFIG_HOME-unset}|${XDG_STATE_HOME-unset}|$SHELL"\n', {
+    mode: 0o700,
+  });
+  const script = join(root, "pane-shell");
+  await writeFile(script, paneShellScript({ SHELL: shell, XDG_CONFIG_HOME: "/Users/o'wner/.config" }), {
+    mode: 0o700,
+  });
+  // What the server, and so the pane, would otherwise carry: Clankie's isolation.
+  const { stdout } = await promisify(execFile)(script, [], {
+    env: {
+      PATH: process.env.PATH ?? "",
+      XDG_CONFIG_HOME: "/private/root",
+      XDG_STATE_HOME: "/private/root",
+      SHELL: script,
+    },
+  });
+  expect(stdout.trim()).toBe(`-l|/Users/o'wner/.config|unset|${shell}`);
 });
 
 it("the owned runtime drops the markers a running harness stamps on its children", () => {

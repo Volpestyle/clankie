@@ -89,9 +89,15 @@ flowchart LR
   `clankie-herdr server stop`. This reverses ADR 0157's
   close-on-disconnect: an orphaned server is a fleet still working, and the
   socket is the lock that keeps there being exactly one.
-- The bundled runtime's private `XDG_STATE_HOME` isolates that Herdr's own
-  config, logs, and sessions, and Herdr hands its environment to every pane it
-  opens. `CLANKIE_STATE_HOME` is set alongside it and points at the owner's
+- The bundled runtime's private `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and
+  `XDG_RUNTIME_DIR` isolate that Herdr's own config, logs, and sessions, and
+  Herdr hands its environment to every pane it opens. That isolation is the
+  server's, not the owner's: a pane is the owner's shell, so the runtime names
+  a pane shell (`<state>/herdr/pane-shell`, rewritten at every service start)
+  that restores the owner's values of those three variables and then starts
+  the owner's login shell. Without it `gh` is logged out, `git` and `mise`
+  lose their config, and an agent hired inside the fleet cannot run the
+  machine. `CLANKIE_STATE_HOME` is set alongside and points at the owner's
   real state home, so a console, seat, or launcher running inside the fleet
   resolves Clankie's own records rather than a directory that holds none.
   Without it the launcher reads its own healthy services as foreign.

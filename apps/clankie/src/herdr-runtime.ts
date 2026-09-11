@@ -1,7 +1,7 @@
 import { execFile, fork, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -47,6 +47,36 @@ export function isHarnessSessionMarker(name: string): boolean {
   return name === "CLAUDECODE" || name === "CLAUDE_PID" || name.startsWith("CLAUDE_CODE_");
 }
 
+const RESTORED_IN_PANES = ["XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"] as const;
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+
+/**
+ * The shell every bundled pane starts. Herdr hands its own environment to each
+ * pane, and the bundled server's environment is Clankie's isolation (private
+ * XDG_* roots), not the owner's: inside it `gh` is logged out, `git` and `mise`
+ * lose their config, and an agent cannot run the machine it was hired to run.
+ * A pane is the owner's shell, so this puts the owner's values back and then
+ * starts their login shell. Values are baked at service start rather than
+ * passed through the environment, so an adopted server from an earlier run
+ * still opens panes with the current ones.
+ */
+export function paneShellScript(owner: NodeJS.ProcessEnv): string {
+  const shell = owner.SHELL?.trim() || (process.platform === "darwin" ? "/bin/zsh" : "/bin/sh");
+  return [
+    "#!/bin/sh",
+    "# Written by Clankie at every service start: a bundled Herdr pane is the",
+    "# owner's shell, with the owner's environment, not the server's isolation.",
+    ...RESTORED_IN_PANES.map((name) => {
+      const value = owner[name];
+      return value === undefined ? `unset ${name}` : `export ${name}=${shellQuote(value)}`;
+    }),
+    `export SHELL=${shellQuote(shell)}`,
+    `exec ${shellQuote(shell)} -l`,
+    "",
+  ].join("\n");
+}
+
 /** A child supervisor loses its IPC channel even if Clankie is killed with SIGKILL. */
 export async function startHerdrRuntime(input: {
   binary: string;
@@ -78,12 +108,25 @@ export async function startHerdrRuntime(input: {
     }));
   if (listening && !adopt) throw new Error(`Herdr runtime already has an owner: ${socketPath}`);
   await mkdir(join(root, "herdr"), { recursive: true, mode: 0o700 });
+  // The pane shell is rewritten every start so it carries the owner's current
+  // environment; the config is created once and only patched to name it, so
+  // viewer preferences the owner adds to that file survive.
+  const paneShell = join(root, "pane-shell");
+  await writeFile(paneShell, paneShellScript(input.env), { mode: 0o700 });
+  await chmod(paneShell, 0o700);
+  const configPath = join(root, "herdr/config.toml");
+  const shellLine = `default_shell = ${JSON.stringify(paneShell)}`;
   await writeFile(
-    join(root, "herdr/config.toml"),
-    "onboarding = false\n[update]\nversion_check = false\nmanifest_check = false\n",
+    configPath,
+    `onboarding = false\n[terminal]\n${shellLine}\n[update]\nversion_check = false\nmanifest_check = false\n`,
     { mode: 0o600, flag: "wx" },
-  ).catch((error: NodeJS.ErrnoException) => {
+  ).catch(async (error: NodeJS.ErrnoException) => {
     if (error.code !== "EEXIST") throw error;
+    const current = await readFile(configPath, "utf8");
+    const patched = /^default_shell = .*$/mu.test(current)
+      ? current.replace(/^default_shell = .*$/mu, shellLine)
+      : `${current.trimEnd()}\n[terminal]\n${shellLine}\n`;
+    if (patched !== current) await writeFile(configPath, patched, { mode: 0o600 });
   });
   for (const name of Object.keys(input.env)) {
     if (name.startsWith("HERDR_")) delete input.env[name];
