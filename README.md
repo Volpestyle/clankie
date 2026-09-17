@@ -4,12 +4,16 @@
 
 # Clankie
 
-**A persistent agent with a life of his own.**
+**Your persistent lead. Your choice of worker harnesses.**
 
-Clankie hangs out in your Discord — text and voice — plays Pokemon live on a
-watch surface, draws pictures, makes videos, browses the web, remembers people
-and what happened yesterday, and codes. When work is bigger than one pair of
-hands, he leads a fleet of coding agents through herdr panes you can watch.
+Start with Clankie's terminal console: give him work, choose his model, and
+let him coordinate Claude Code, Codex, or other supported coding agents in
+Herdr. He keeps the conversation and ongoing goals on your machine. You
+choose the workers' harnesses and can inspect and steer their real sessions.
+
+The companion app brings that same work into three views: **Messages** to
+talk to Clankie and the team, **Terminal** to reach their Herdr panes, and
+**Commons** to see swarm activity and open the agent behind it.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%2B%20AGPL--3.0-blue?style=flat-square)](#license)
 [![built on pi](https://img.shields.io/badge/agent-pi-7c3aed?style=flat-square)](https://pi.dev)
@@ -21,6 +25,14 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
 
 ## What he does
 
+- **Leads ongoing work.** Clankie runs on pi in the local service, reached
+  through the TUI or app. He can code himself, delegate to workers in Herdr,
+  watch their completion, and continue an owner-approved goal. His model and
+  each worker's harness are separate choices.
+- **Makes the fleet visible.** Messages holds durable agent contacts and
+  shared conversations. Terminal opens live worker panes, with input when
+  granted. Commons places agents by working directory and shows activity,
+  delegation, and message exchanges; tap a figure to chat or reach its controls.
 - **Discord teammate.** A real member of your server: bounded text turns,
   consented group voice, pictures ride his replies, and he remembers the
   people he talks to. Ask him to search or play YouTube music in voice; he can
@@ -35,11 +47,6 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
   Clankie's body or receives his room input.
 - **Makes things.** Image and video generation behind one provider-neutral
   seam (OpenAI, Google, Grok); a browser via the agent-browser MCP host.
-- **Codes and leads.** The same pi coding tools every agent has, plus the
-  herdr CLI for fanning work out to visible agent panes — from the console,
-  and from Discord when the person asking is on the system-actor allowlist.
-  No mission protocol — he delegates, watches, and reports what actually
-  happened.
 - **One Clankie everywhere.** The TUI, Discord, voice, and gameplay are rooms,
   not separate agents: he can read his other rooms, and his persona is
   owner-authored settings, never caller input.
@@ -53,17 +60,24 @@ curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh 
 clankie
 ```
 
-The launcher starts the service and opens the console. In it, `/auth` stores a
+The launcher starts the service and opens the console, the primary place to
+work with Clankie as your lead. In it, `/auth` stores a
 provider key or OAuth login in the Keychain-backed credential broker and
 `/model` picks the captain model. That is the whole setup; talk to him.
 `/persona`, `/image-model`, `/discord`, and `/connect` are optional.
 `clankie doctor` prints the install card whenever you want to know what is
 configured.
 
+Ask him to use the worker harnesses you prefer; those harnesses need to be
+installed and authenticated on the host. For ongoing work, `/goal <objective>`
+sets a durable goal and `/autonomy on` enables continuation. The service keeps
+running when you close the console; your Mac must remain awake and online.
+
 ### Reach him from your phone
 
 The iPhone and iPad app is a companion that reaches your Mac through
-`api.clankie.bot`; nothing of his runs in the cloud. Four more steps:
+`api.clankie.bot`. Clankie and the workers run on your Mac; model requests use
+the providers or local runtimes you configure. Four more steps:
 
 1. **Sign the Mac in.** `/gateway`, choose **Enable remote access**, enter the
    email your invitation named, then the one-time code it receives. That
@@ -91,7 +105,9 @@ The iPhone and iPad app is a companion that reaches your Mac through
    connect. Each offer is single-use. `clankie devices` lists and revokes paired
    devices.
 
-From here the app is Messages, the fleet, and the terminal on your Mac.
+From here, use Messages to direct the work, Terminal to inspect or control a
+worker pane, and Commons to follow activity across the fleet. The app and TUI
+reach the same Clankie service on your Mac.
 
 To invite someone, an operator runs `infra/aws/accounts/deploy.sh invite <email>`
 before that person reaches step 1

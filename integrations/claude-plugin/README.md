@@ -1,10 +1,14 @@
 # Clankie Claude Code plugin
 
-Clankie's operator seat as a Claude Code plugin
+An optional alternative to Clankie's primary TUI lead: his operator seat as a Claude Code plugin
 ([ADR 0152](../../docs/adr/0152-a-harness-takes-the-operator-seat.md)). Sit in
 Claude Code on your own plan and you are talking to Clankie: his identity, the
 owner persona, his tools over MCP, the newest memory card on every turn, and
 his skills. The service keeps running his body, Discord, voice, and play.
+
+Running Claude Code as a worker in Clankie's Herdr fleet does not require
+replacing the lead with this seat. Goal continuations and Linear hook turns
+remain in the service's pi runtime even while this alternative seat is open.
 
 Like the [herdr plugin](../herdr-plugin/README.md), this carries only what a
 plugin can uniquely declare. Everything else lives in the service and the

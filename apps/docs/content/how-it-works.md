@@ -1,26 +1,27 @@
 # How Clankie works
 
-Clankie is one service plus the surfaces that reach it. The service runs on your machine. It owns the captain (a [pi](https://pi.dev)-based agent with durable sessions), his tools, his game body, his memory, and the HTTP API every surface speaks. Everything else — the console, the phone app, Discord, a Claude Code seat, the menu bar — is a window into that one process.
+Clankie is your persistent lead agent, running on your machine. Start in his terminal console, give him work, and choose the worker harnesses he coordinates through Herdr. The lead runs on [pi](https://pi.dev); Claude Code, Codex, and other supported harnesses run as workers in their own terminal panes. Choosing a worker harness does not change the lead's runtime.
+
+The service owns Clankie's durable conversations, goals, memory, tools, and device access. The TUI and companion app reach that same service, so you can direct work at your desk and follow it from your phone while the host remains awake and online. Discord, voice, media generation, and play extend what Clankie can do.
 
 <div class="diagram" role="img" aria-label="Surfaces reach one local service, which reaches models, a browser, a herdr fleet, a PokeAgents world, and connected services. State stays on your machine.">
   <div class="diagram-col">
     <h4>Surfaces</h4>
-    <div class="dnode"><strong>Console</strong><span>the TUI, in any terminal</span></div>
-    <div class="dnode"><strong>iPhone / iPad app</strong><span>through api.clankie.bot</span></div>
+    <div class="dnode"><strong>Console</strong><span>primary workspace with the lead</span></div>
+    <div class="dnode"><strong>iPhone / iPad app</strong><span>Messages · Terminal · Commons</span></div>
     <div class="dnode"><strong>Discord</strong><span>one active body, text and voice</span></div>
-    <div class="dnode"><strong>Claude Code seat</strong><span>clankie seat · clankie mcp</span></div>
     <div class="dnode"><strong>Menu bar</strong><span>private local voice</span></div>
   </div>
   <div class="diagram-col diagram-center">
     <h4>The service</h4>
-    <div class="dnode dnode-main"><strong>apps/clankie</strong><span>captain · tools · rooms · memory</span><span>HTTP on 127.0.0.1:4310</span></div>
+    <div class="dnode dnode-main"><strong>Clankie, the lead</strong><span>pi · goals · tools · memory</span><span>HTTP on 127.0.0.1:4310</span></div>
     <div class="dnode"><strong>On your machine</strong><span>Keychain credential broker</span><span>~/.clankie · ~/.config/clankie</span></div>
   </div>
   <div class="diagram-col">
     <h4>What he reaches</h4>
     <div class="dnode"><strong>Models</strong><span>any provider, or a local runtime</span></div>
     <div class="dnode"><strong>Browser</strong><span>agent-browser, his own profile</span></div>
-    <div class="dnode"><strong>Herdr fleet</strong><span>coding agents in visible panes</span></div>
+    <div class="dnode"><strong>Herdr workers</strong><span>your choice of installed harnesses</span><span>real sessions in visible panes</span></div>
     <div class="dnode"><strong>PokeAgents world</strong><span>his own seat, watched live</span></div>
     <div class="dnode"><strong>Linear · email</strong><span>connected by the owner</span></div>
   </div>
@@ -31,6 +32,18 @@ Clankie is one service plus the surfaces that reach it. The service runs on your
 `clankie` with no arguments starts the service if it is not running and opens the console. The launcher supervises the long-lived local processes and starts them in dependency order: the service, the relay for the app, the one Discord body you selected (which owns a native media child for voice), and the optional watch-me-play surface. `clankie restart [service]` and `clankie down [service]` name them; `clankie autostart enable` makes the same start happen at login. The service stays up when a console exits, so several consoles, the app, and Discord can be open at once.
 
 The captain runs on pi: models, sessions, tools, skills, and compaction are pi's. Clankie adds who he is, the rooms he lives in, the bodies he can put on, and the authority each caller carries.
+
+## Three views of the same work
+
+| View         | Use it to                                                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Messages** | Give Clankie direction, talk to individual workers, and read shared conversations and tool activity. Agent contacts outlive their current terminal sessions.              |
+| **Terminal** | Open the real Herdr pane behind an agent. Observe its output or use direct input when the paired device has control permission.                                           |
+| **Commons**  | See workers grouped by working directory, their activity, who spawned whom, and recent message exchanges. Tap a figure to chat, open its terminal, or reach its controls. |
+
+Commons is a practical map of the live fleet. Its figures and relationships come from the same host snapshot that supplies the other views. When the connection is lost, live figures disappear rather than continuing to act out stale activity. Decoration and camera preferences belong to the app.
+
+A figure becoming idle means its turn stopped; it does not prove a test passed. A celebration is an agent's statement about its work. Use the conversation and terminal to inspect the supporting results.
 
 ## Rooms, not agents
 
@@ -62,9 +75,9 @@ He keeps a bounded ring of self-authored episodes and per-person facts about the
 
 `/goal <objective>` gives a conversation a durable goal; `--tokens` caps it. Continuations run through the same session and event log as your own messages, so every tool call stays visible. `/autonomy on|off` is the global switch for goal continuations and scheduled self-wakes. He proposes goals in chat; proposals never activate themselves.
 
-## Sitting in another harness
+## Optional: a different operator seat
 
-The operator seat is a place any harness can sit. `clankie seat` opens Claude Code, on your own plan, as Clankie: the plugin sets his identity as the output style, `clankie prompt` supplies the persona and reach at session start, `clankie memory-card` supplies recall each turn, and `clankie mcp` bridges the service's lane tool bank at `/v1/mcp` over stdio. While a seat is open, self-wakes and room escalations reach it as channel events. Social lanes never sit in the seat.
+The TUI's pi-based Clankie is the primary lead. Separately, `clankie seat` opens Claude Code on your own plan as an alternative operator seat, with Clankie's identity, tools, memory card, and skills supplied by the service. Wakes, Herdr completion watches, and head-conversation messages can reach that seat; goal continuations and Linear hook turns remain in pi. Social lanes also remain in the service. This alternative is not required to use Claude Code as a worker. The [plugin guide](https://github.com/Volpestyle/clankie/blob/main/integrations/claude-plugin/README.md) describes setup and limitations.
 
 ## Where secrets live
 

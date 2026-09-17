@@ -1,6 +1,12 @@
 # Clankie TUI (`@clankie/tui`)
 
-The TUI is Clankie's local chat and tool workspace. The chat surface is pi's,
+The TUI is the primary workspace for Clankie as your persistent lead. Give him
+work here and choose which installed worker harnesses he uses in Herdr, such
+as Claude Code or Codex. Clankie's own pi-based runtime keeps the conversation,
+goals, and memory; workers run in their own inspectable terminal panes. The
+companion app reaches the same service through Messages, Terminal, and Commons.
+
+The chat surface is pi's,
 in pi's fullscreen mode: messages, tool executions, the working indicator, and
 the footer render with pi's own interactive components in a scrollable
 transcript (mouse wheel, scrollbar, drag text selection, `Ctrl+Shift+F`
