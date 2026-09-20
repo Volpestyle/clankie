@@ -250,7 +250,7 @@ describe("device-to-host encryption security boundary", () => {
           if (attack === "reorder") [records[0], records[1]] = [records[1]!, records[0]!];
           if (attack === "tamper") {
             const record = JSON.parse(records[1]!);
-            record.sealed = "A" + record.sealed.slice(1);
+            record.sealed = (record.sealed[0] === "A" ? "B" : "A") + record.sealed.slice(1);
             records[1] = JSON.stringify(record);
           }
           if (attack === "replay") records.splice(1, 0, records[1]!);

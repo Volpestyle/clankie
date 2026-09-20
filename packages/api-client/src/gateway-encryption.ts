@@ -29,9 +29,11 @@ const decoder = new TextDecoder();
 
 function decodeUtf8Response(response: Response): Response {
   const clone = response.clone.bind(response);
-  response.text = async () => decoder.decode(await response.arrayBuffer());
-  response.json = async () => JSON.parse(await response.text()) as unknown;
-  response.clone = () => decodeUtf8Response(clone());
+  Object.defineProperties(response, {
+    text: { configurable: true, value: async () => decoder.decode(await response.arrayBuffer()) },
+    json: { configurable: true, value: async () => JSON.parse(await response.text()) as unknown },
+    clone: { configurable: true, value: () => decodeUtf8Response(clone()) },
+  });
   return response;
 }
 
