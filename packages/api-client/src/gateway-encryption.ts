@@ -25,6 +25,16 @@ export interface GatewayEncryptedFetchOptions {
   credential: () => GatewayEncryptionCredential | undefined;
 }
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function decodeUtf8Response(response: Response): Response {
+  const clone = response.clone.bind(response);
+  response.text = async () => decoder.decode(await response.arrayBuffer());
+  response.json = async () => JSON.parse(await response.text()) as unknown;
+  response.clone = () => decodeUtf8Response(clone());
+  return response;
+}
+
 function base64(bytes: Uint8Array): string {
   let text = "";
   for (const byte of bytes) text += String.fromCharCode(byte);
@@ -168,9 +178,12 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
       offset += chunk.length;
     }
     // Bounded HTTP/long-poll consumers see no unauthenticated partial result.
-    return new Response(status === 204 || status === 205 || status === 304 ? null : bytes, {
+    const empty = status === 204 || status === 205 || status === 304;
+    const response = new Response(empty ? null : bytes, {
       status,
       headers,
     });
+    // React Native's Response treats UTF-8 bytes as Latin-1 in text()/json().
+    return empty ? response : decodeUtf8Response(response);
   };
 }

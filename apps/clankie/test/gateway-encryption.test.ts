@@ -23,9 +23,21 @@ const apps: ClankieApp[] = [];
 afterEach(() => {
   for (const app of apps.splice(0)) app.close();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-async function account(accountId: string) {
+async function account(
+  accountId: string,
+  applicationResponse: () => Response = () =>
+    new Response(new Uint8Array([0, 255, 27, 65]), {
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-disposition": 'attachment; filename="proof.bin"',
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      },
+    }),
+) {
   const hostId = derivePublicGatewayHostId(accountId, "i".repeat(22));
   const master = randomBytes(32);
   let host = new GatewayEncryptionHost(hostId, master);
@@ -49,14 +61,7 @@ async function account(accountId: string) {
   const forward = async (request: Request): Promise<Response> => {
     if (new URL(request.url).hostname === "control") return app.app.fetch(request);
     dispatched++;
-    return new Response(new Uint8Array([0, 255, 27, 65]), {
-      headers: {
-        "content-type": "application/octet-stream",
-        "content-disposition": 'attachment; filename="proof.bin"',
-        "cache-control": "no-store",
-        "x-content-type-options": "nosniff",
-      },
-    });
+    return applicationResponse();
   };
   const raw: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -104,6 +109,52 @@ async function account(accountId: string) {
 }
 
 describe("device-to-host encryption security boundary", () => {
+  it("decodes UTF-8 without changing the encrypted response bytes or metadata", async () => {
+    const NativeResponse = Response;
+    vi.stubGlobal(
+      "Response",
+      class ReactNativeResponse extends NativeResponse {
+        public override async text(): Promise<string> {
+          return Array.from(new Uint8Array(await this.arrayBuffer()), (byte) =>
+            String.fromCharCode(byte),
+          ).join("");
+        }
+      },
+    );
+    const bytes = new TextEncoder().encode('{"name":"Renaming… ⠼"}');
+    const actor = await account(
+      "utf8-account",
+      () =>
+        new Response(bytes, {
+          status: 206,
+          headers: { "content-type": "application/json", "cache-control": "no-store" },
+        }),
+    );
+
+    const response = await actor.client(`${actor.base}/operator/v1/dispatch`, {
+      method: "POST",
+      headers: actor.headers,
+      body: "{}",
+    });
+
+    expect(await response.clone().json()).toEqual({ name: "Renaming… ⠼" });
+    expect(new Uint8Array(await response.clone().arrayBuffer())).toEqual(bytes);
+    expect(new Uint8Array(await (await response.clone().blob()).arrayBuffer())).toEqual(bytes);
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+
+    const emptyActor = await account("empty-account", () => new Response(null, { status: 204 }));
+    const empty = await emptyActor.client(`${emptyActor.base}/operator/v1/dispatch`, {
+      method: "POST",
+      headers: emptyActor.headers,
+      body: "{}",
+    });
+    expect(empty.status).toBe(204);
+    expect(empty.body).toBeNull();
+    expect(await empty.text()).toBe("");
+  });
+
   it("authenticates two unrelated account/host pairings, hides all application bytes, rejects cross-device and cross-host credentials", async () => {
     const alice = await account("unrelated-alice");
     const bob = await account("unrelated-bob");
