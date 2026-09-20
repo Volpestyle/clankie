@@ -11,7 +11,10 @@
         "docs/testing/2026-09-04-case-b-execution-metrics/flows/check-arm.mjs",
         "docs/testing/2026-09-05-push-delivery-boundary/flows/vitest.boundary.config.mjs",
         "docs/testing/2026-09-05-push-delivery-boundary/flows/boundary.test.ts",
-        "docs/testing/2026-09-05-pokeagent-evidence-sweep/flows/sweep-play-archive.mjs"
+        "docs/testing/2026-09-05-pokeagent-evidence-sweep/flows/sweep-play-archive.mjs",
+        "docs/testing/2026-09-20-delivered-files-live/flows/build-presentation.mjs",
+        "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs",
+        "docs/testing/2026-09-20-delivered-files-live/flows/run-isolated-proof.mjs"
       ],
       "paths": {
         "/clankie/*": ["./*"]
@@ -29,6 +32,8 @@
   },
   "ignoreIssues": {
     "docs/testing/2026-09-05-push-delivery-boundary/flows/harness.ts": ["unlisted"],
-    "docs/testing/2026-09-05-push-delivery-boundary/flows/vitest.boundary.config.mjs": ["unlisted"]
+    "docs/testing/2026-09-05-push-delivery-boundary/flows/vitest.boundary.config.mjs": ["unlisted"],
+    "docs/testing/2026-09-20-delivered-files-live/flows/build-presentation.mjs": ["unlisted"],
+    "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs": ["unlisted"]
   }
 }

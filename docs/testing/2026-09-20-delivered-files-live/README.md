@@ -45,6 +45,11 @@ presentation. `flows/site-source/` is the exact input tree packed into the websi
 
 Build the four artifacts with the scripts in `flows/`, then run:
 
+The workbook and presentation builders use the artifact-tool runtime provided by the installed
+Spreadsheets and Presentations skills (`@oai/artifact-tool`), not a Clankie production dependency.
+Run those builders in that skill runtime; the presentation builder also accepts its skill directory
+and Python executable as arguments. The host/relay proof below uses the repository's Node dependencies.
+
 ```bash
 node docs/testing/2026-09-20-delivered-files-live/flows/run-isolated-proof.mjs
 ```
