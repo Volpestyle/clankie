@@ -314,6 +314,7 @@ export interface TrustedOperatorIdentity {
 export type OperatorAuthenticator = (request: Request) => Promise<TrustedOperatorIdentity | undefined>;
 
 interface PairingOfferPublisher {
+  protectPairingOffer?(offer: StoredPairingOffer): ReturnType<typeof pairingOfferWire>;
   publishPairingOffer(offer: StoredPairingOffer): Promise<void>;
   /** Re-register a review offer's route after a restart (ADR 0154); no acknowledgment awaited. */
   restorePairingRoute?(route: PairingOfferRecord): void;
@@ -2096,7 +2097,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       { offerId: offer.offerId, operatorId: operator.operatorId, expiresAt: offer.expiresAt },
       "pairing offer minted",
     );
-    return context.json(pairingOfferWire(offer));
+    return context.json(
+      dependencies.pairingOfferPublisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer),
+    );
   });
 
   // Redeem an offer secret or typed code (the secret IS the capability, so the

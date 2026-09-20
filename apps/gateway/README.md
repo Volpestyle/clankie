@@ -33,15 +33,13 @@ health route.
 
 ## Public surface
 
-- `POST /v1/pairing/redeem` hashes the presented short-lived capability and
-  routes it through the Mac that registered the same hash.
-- `/h/{hostId}/v1/pairing/complete` and the device self/refresh routes go to
-  the Mac's Clankie service.
-- `/h/{hostId}/v1/devices/self/push` records the device's delivery reference on its Mac.
+- `GET /h/{hostId}/v1/gateway/challenge` obtains a one-use host challenge.
+- `POST /h/{hostId}/v1/gateway/encrypted` carries authenticated ciphertext for
+  pairing, device self/refresh, push reference, conversation/control, artifact
+  downloads and native terminal traffic. No device bearer appears outside it.
 - `POST /gateway/v1/push/registrations` and `/gateway/v1/push/registrations/clear`
-  authorize or clear delivery at this gateway (when push is configured).
-- `/h/{hostId}/operator/v1/{dispatch,tail,terminal-tail}` goes to the Mac's
-  operator relay.
+  carry delivery metadata and a one-use encrypted device authorization proof.
+- `/h/{hostId}/v1/hooks/linear` carries separately signed third-party webhooks.
 - `/gateway/v1/hosts/connect?hostId=…&installationId=…` is the account-authenticated
   Mac WebSocket. The one-parameter form is the temporary legacy bearer route.
 
@@ -58,8 +56,9 @@ any Mac mints `clankie pair --review`: an older gateway still enforces fifteen
 minutes and drops the Mac connection, including on every reconnect replay,
 until that review offer expires or is redeemed.
 
-Everything else is `404`. An unavailable Mac is `503`; an expired or unknown
-pairing capability is `410`.
+Plaintext application routes and public short-code redemption return `426`.
+Unknown routes return `404`; an unavailable Mac returns `503`. Offer expiry and
+single-use checks remain inside the encrypted host response.
 
 Structured logs contain host id, request id, status, byte count, duration, and
 connection state only. The gateway never logs authorization headers, pairing
@@ -141,9 +140,25 @@ Losing it is recoverable (each app re-registers on next launch); leaking it
 exposes which devices exist and lets nothing be sent, since sending also needs
 the signing key.
 
-The initial deployment intentionally runs one process on one Lightsail instance
-for the invited beta. TLS terminates at Caddy on that host, so the gateway
-process can technically read forwarded content even though it neither records
-nor interprets it. App-layer encryption remains required before unrelated
-customers share it. Durable route coordination is added only when a second
-gateway process is justified by measured load.
+The gateway runs one process on one Lightsail instance. Device-to-host
+application encryption ends on the Mac, independently of TLS termination at
+Caddy. [ADR 0173](../../docs/adr/0173-the-gateway-cannot-read-device-traffic.md)
+describes the threat model, exposed metadata, wire contract and recovery.
+Durable route coordination is added only when a second gateway process is
+justified by measured load.
+
+## Encryption recovery
+
+Pair with the current app using the secure QR or full pasted link from
+`clankie pair`; an old public session cannot downgrade to plaintext. The host
+broker retains the ticket-wrapping key across restarts. Session refresh rotates
+the device encryption key and ticket while retaining live grant checks.
+`clankie gateway rotate-encryption-key` (also in `/gateway`) replaces the host
+wrapping key. Coordinate the captain restart separately, then re-pair every
+device. The command never restarts a running service itself.
+
+A connected doorway with `invalid_encrypted_request` means an expired, rotated,
+replayed or mismatched encrypted identity: obtain a fresh QR after checking host
+selection. `encryption_required` / `secure_pairing_required` means the client
+needs an update or a secure pairing link. These errors never print keys,
+tickets, capabilities or decrypted bodies.

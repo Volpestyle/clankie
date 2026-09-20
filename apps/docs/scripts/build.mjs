@@ -149,6 +149,35 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
 function buildNetworkRows() {
   const routeDetails = new Map([
     [
+      "POST /operator/v1/artifacts/download",
+      {
+        access: "Encrypted device bearer plus chat grant",
+        purpose: "Download exact bytes of a delivered artifact scoped to its conversation.",
+      },
+    ],
+    [
+      "GET /v1/gateway/challenge",
+      {
+        access: "Host routing identity; no device bearer",
+        purpose: "Obtain a one-use challenge for an encrypted device exchange.",
+      },
+    ],
+    [
+      "POST /v1/gateway/encrypted",
+      {
+        access: "Authenticated device-to-host AES-GCM envelope",
+        purpose:
+          "Carry pairing, conversation, control, artifact and terminal traffic without revealing application bytes to the gateway.",
+      },
+    ],
+    [
+      "POST /v1/gateway/push-authorize",
+      {
+        access: "Gateway-internal one-use encrypted device proof",
+        purpose: "Authorize push delivery at the device’s Mac without exposing its bearer.",
+      },
+    ],
+    [
       "POST /v1/pairing/redeem",
       {
         access: "One-time offer secret or typed code",
@@ -235,13 +264,13 @@ function buildNetworkRows() {
     {
       method: "POST",
       route: PUBLIC_GATEWAY_PUSH_REGISTRATIONS_PATH,
-      access: "Device bearer verified by its machine, plus the app’s delivery key",
+      access: "Encrypted device proof verified by its machine, plus the app’s delivery key",
       purpose: "Register or move versioned APNs delivery when push is configured.",
     },
     {
       method: "POST",
       route: PUBLIC_GATEWAY_PUSH_CLEAR_PATH,
-      access: "App delivery key; first allocation also requires a verified device bearer",
+      access: "App delivery key; first allocation also requires an encrypted device proof",
       purpose: "Revoke delivery, including when the former machine is offline.",
     },
   ];
@@ -253,7 +282,9 @@ function buildNetworkRows() {
     routeDetails.delete(key);
     rows.push({
       method: route.method,
-      route: route.path === "/v1/pairing/redeem" ? route.path : `/h/{hostId}${route.path}`,
+      route: ["/v1/gateway/challenge", "/v1/gateway/encrypted", "/v1/hooks/linear"].includes(route.path)
+        ? `/h/{hostId}${route.path}`
+        : `${route.path} (inside encrypted exchange)`,
       ...detail,
     });
   }

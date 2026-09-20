@@ -78,57 +78,32 @@ describe("public gateway", () => {
     expect(error.message).toMatch(/401/u);
   });
 
-  it("routes one-time pairing and host-scoped relay exchanges over the Mac connection", async () => {
-    const logs: Array<{ readonly fields: Readonly<Record<string, unknown>>; readonly message: string }> = [];
-    const { gateway, origin } = await startGateway(logs);
+  it("routes opaque encrypted exchanges and refuses plaintext pairing and bearer headers", async () => {
+    const { origin } = await startGateway([]);
     const host = await connectHost(origin);
     openSockets.push(host);
-    const routeReady = nextFrame(host);
-    send(host, {
-      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
-      kind: "pairing_route",
-      offerHash: hash("offer-secret"),
-      codeHash: hash("7F3KM2QT"),
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    });
-    expect(await routeReady).toMatchObject({ kind: "pairing_route_ready" });
-
-    const redeemPromise = fetch(`${origin}/v1/pairing/redeem`, {
+    const response = fetch(`${origin}/h/${hostId}/v1/gateway/encrypted`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ offerSecret: "offer-secret", device: { name: "iPhone", platform: "ios" } }),
+      body: "opaque envelope",
     });
-    const redeemRequest = await nextRequest(host);
-    expect(redeemRequest).toMatchObject({ target: "control", path: "/v1/pairing/redeem" });
-    expect(JSON.parse(Buffer.from(redeemRequest.bodyBase64 ?? "", "base64").toString("utf8"))).toMatchObject({
-      offerSecret: "offer-secret",
-    });
-    respond(host, redeemRequest, 200, JSON.stringify({ deviceId: "device-1" }));
-    const redeem = await redeemPromise;
-    expect(redeem.status).toBe(200);
-    expect(await redeem.json()).toEqual({ deviceId: "device-1" });
-
-    const duplicate = await fetch(`${origin}/v1/pairing/redeem`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ offerSecret: "offer-secret", device: { name: "iPhone", platform: "ios" } }),
-    });
-    expect(duplicate.status).toBe(410);
-
-    const dispatchPromise = fetch(`${origin}/h/${hostId}/operator/v1/dispatch`, {
-      method: "POST",
-      headers: { authorization: "Bearer device-token", "content-type": "application/json" },
-      body: JSON.stringify({ op: "list", schemaVersion: 1 }),
-    });
-    const dispatch = await nextRequest(host);
-    expect(dispatch).toMatchObject({ target: "relay", path: "/operator/v1/dispatch" });
-    expect(dispatch.headers).toContainEqual({ name: "authorization", value: "Bearer device-token" });
-    respond(host, dispatch, 200, '{"schemaVersion":1,"result":{}}');
-    expect(await (await dispatchPromise).json()).toEqual({ schemaVersion: 1, result: {} });
-
-    expect(logs.some((entry) => JSON.stringify(entry).includes("offer-secret"))).toBe(false);
-    expect(logs.some((entry) => JSON.stringify(entry).includes("device-token"))).toBe(false);
-    expect(gateway.server.listening).toBe(true);
+    const frame = await nextRequest(host);
+    expect(frame).toMatchObject({ target: "control", path: "/v1/gateway/encrypted" });
+    expect(Buffer.from(frame.bodyBase64!, "base64").toString()).toBe("opaque envelope");
+    respond(host, frame, 200, "opaque response");
+    expect(await (await response).text()).toBe("opaque response");
+    expect((await fetch(`${origin}/v1/pairing/redeem`, { method: "POST", body: "{}" })).status).toBe(426);
+    expect(
+      (await fetch(`${origin}/h/${hostId}/operator/v1/dispatch`, { method: "POST", body: "{}" })).status,
+    ).toBe(426);
+    expect(
+      (
+        await fetch(`${origin}/h/${hostId}/v1/gateway/encrypted`, {
+          method: "POST",
+          headers: { authorization: "Bearer plaintext" },
+          body: "{}",
+        })
+      ).status,
+    ).toBe(400);
   });
 
   it("carries a Linear delivery's signature and raw body to the Mac unaltered", async () => {
@@ -164,7 +139,7 @@ describe("public gateway", () => {
     expect((await hookPromise).status).toBe(200);
   });
 
-  it("routes normalized typed codes and rejects unavailable hosts and private routes", async () => {
+  it("rejects short gateway codes, unavailable hosts and private routes", async () => {
     const logs: Array<{ readonly fields: Readonly<Record<string, unknown>>; readonly message: string }> = [];
     const { origin } = await startGateway(logs);
     const host = await connectHost(origin);
@@ -184,9 +159,7 @@ describe("public gateway", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code: "7f3k-m2qt", device: { name: "iPad", platform: "ios" } }),
     });
-    const typed = await nextRequest(host);
-    respond(host, typed, 200, "{}");
-    expect((await typedPromise).status).toBe(200);
+    expect((await typedPromise).status).toBe(426);
 
     expect((await fetch(`${origin}/h/${hostId}/v1/private`)).status).toBe(404);
     expect((await fetch(`${origin}/health?`)).status).toBe(404);
@@ -194,7 +167,7 @@ describe("public gateway", () => {
     await once(host, "close");
     expect(
       (
-        await fetch(`${origin}/h/${hostId}/operator/v1/dispatch`, {
+        await fetch(`${origin}/h/${hostId}/v1/gateway/encrypted`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: "{}",
@@ -221,8 +194,7 @@ describe("public gateway", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code: "rev1-ewcd", device: { name: "Reviewer", platform: "ios" } }),
     });
-    respond(host, await nextRequest(host), 200, "{}");
-    expect((await redeemPromise).status).toBe(200);
+    expect((await redeemPromise).status).toBe(426);
 
     const closed = once(host, "close");
     send(host, {

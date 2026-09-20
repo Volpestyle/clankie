@@ -1,3 +1,7 @@
+import { randomBytes } from "node:crypto";
+import { createGatewayEncryptedFetch } from "../../../packages/api-client/src/gateway-encryption.ts";
+import { GatewayEncryptionCredentialSchema } from "@clankie/protocol/gateway-encryption";
+import { sealGatewayValue, openGatewayValue } from "../src/gateway-encryption.ts";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -50,6 +54,7 @@ describe("public gateway product path", () => {
       hostDisplayName: "James Mac",
       publicGatewayHostBaseUrl: hostBaseUrl,
       pairingOfferPublisher: {
+        protectPairingOffer: (offer) => connector!.protectPairingOffer(offer),
         publishPairingOffer: (offer) => {
           if (connector === undefined) return Promise.reject(new Error("connector not ready"));
           return connector.publishPairingOffer(offer);
@@ -80,6 +85,7 @@ describe("public gateway product path", () => {
       gatewayUrl: gatewayOrigin,
       hostId: HOST_ID,
       hostToken: HOST_TOKEN,
+      encryptionKey: randomBytes(32),
       controlPlaneUrl: controlOrigin,
       relayUrl: relayOrigin,
     });
@@ -96,36 +102,50 @@ describe("public gateway product path", () => {
     const offerSecret = new URL(offer.deepLink).searchParams.get("offer");
     expect(offerSecret).toBeTruthy();
 
-    const redeem = await fetch(`${gatewayOrigin}/v1/pairing/redeem`, {
+    const credential = GatewayEncryptionCredentialSchema.parse(
+      Object.fromEntries(new URLSearchParams(new URL(offer.deepLink).hash.slice(1))),
+    );
+    const encryptedFetch = createGatewayEncryptedFetch({
+      credential: () => credential,
+      crypto: {
+        randomBytes,
+        seal: async (key, plain, aad) => sealGatewayValue(Buffer.from(key, "base64"), plain, aad),
+        open: async (key, sealed, aad) => openGatewayValue(Buffer.from(key, "base64"), sealed, aad),
+      },
+    });
+    const redeem = await encryptedFetch(`${hostBaseUrl}/v1/pairing/redeem`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ offerSecret, device: { name: "James iPhone", platform: "ios" } }),
     });
     expect(redeem.status).toBe(200);
+    credential.ticket = redeem.headers.get("x-clankie-encryption-ticket")!;
     const redeemed = (await redeem.json()) as {
       readonly completionToken: string;
       readonly hostBaseUrl: string;
     };
     expect(redeemed.hostBaseUrl).toBe(hostBaseUrl);
 
-    const complete = await fetch(`${redeemed.hostBaseUrl}/v1/pairing/complete`, {
+    const complete = await encryptedFetch(`${redeemed.hostBaseUrl}/v1/pairing/complete`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ completionToken: redeemed.completionToken, acceptedGrants: SUPERVISE_GRANTS }),
     });
     expect(complete.status).toBe(200);
+    credential.ticket = complete.headers.get("x-clankie-encryption-ticket")!;
+    credential.key = complete.headers.get("x-clankie-encryption-key")!;
     const completed = (await complete.json()) as { readonly deviceToken: string; readonly relayUrl: string };
     expect(completed.relayUrl).toBe(hostBaseUrl);
 
     const headers = { authorization: `Bearer ${completed.deviceToken}`, "content-type": "application/json" };
-    const conversations = await fetch(`${completed.relayUrl}/operator/v1/dispatch`, {
+    const conversations = await encryptedFetch(`${completed.relayUrl}/operator/v1/dispatch`, {
       method: "POST",
       headers,
       body: JSON.stringify({ op: "list", schemaVersion: 1 }),
     });
     expect(await conversations.json()).toEqual({ op: "list", schemaVersion: 1, conversations: [] });
 
-    const terminal = await fetch(`${completed.relayUrl}/operator/v1/terminal-tail`, {
+    const terminal = await encryptedFetch(`${completed.relayUrl}/operator/v1/terminal-tail`, {
       method: "POST",
       headers,
       body: JSON.stringify({

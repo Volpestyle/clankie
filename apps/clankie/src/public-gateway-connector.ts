@@ -14,6 +14,9 @@ import {
 } from "@clankie/protocol/public-gateway";
 import type { PublicGatewayPushWakeFrame } from "@clankie/protocol";
 import { WebSocket, type RawData } from "ws";
+import { GatewayEncryptionHost } from "./gateway-encryption.ts";
+import { pairingOfferWire, type StoredPairingOffer } from "./pairing.ts";
+import type { PairingOfferWire } from "@clankie/protocol";
 import { hashPairingCode, hashPairingSecret } from "./pairing.ts";
 import type { PushWakeRequest, PushWakeStatus } from "./push.ts";
 
@@ -21,8 +24,8 @@ const CONNECT_TIMEOUT_MS = 5_000;
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const TOKEN_REFRESH_WINDOW_MS = 5 * 60_000;
-const RESPONSE_BYTES_MAX = 16 * 1024 * 1024;
-const WEBSOCKET_PAYLOAD_BYTES_MAX = 2 * 1024 * 1024;
+const RESPONSE_BYTES_MAX = 32 * 1024 * 1024;
+const WEBSOCKET_PAYLOAD_BYTES_MAX = 4 * 1024 * 1024;
 const REQUEST_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST);
 const RESPONSE_HEADER_ALLOWLIST = new Set(["cache-control", "content-type", "retry-after"]);
 
@@ -35,6 +38,7 @@ export interface PublicGatewayConnectorOptions {
   readonly gatewayUrl: string;
   readonly hostId: string;
   readonly hostToken?: string;
+  readonly encryptionKey?: Uint8Array;
   readonly installationId?: string;
   readonly resolveHostToken?: () => Promise<{ readonly token: string; readonly expiresAt: number }>;
   readonly controlPlaneUrl: string;
@@ -86,6 +90,7 @@ export class PublicGatewayConnector {
   public readonly hostBaseUrl: string;
 
   private readonly connectUrl: string;
+  private readonly encryption: GatewayEncryptionHost | undefined;
   private readonly hostId: string;
   private readonly hostToken: string | undefined;
   private readonly resolveHostToken:
@@ -112,6 +117,10 @@ export class PublicGatewayConnector {
   public constructor(options: PublicGatewayConnectorOptions) {
     const gatewayOrigin = requireHttpOrigin(options.gatewayUrl, "Gateway URL");
     this.hostId = PublicGatewayHostIdSchema.parse(options.hostId);
+    this.encryption =
+      options.encryptionKey === undefined
+        ? undefined
+        : new GatewayEncryptionHost(this.hostId, options.encryptionKey);
     if ((options.hostToken === undefined) === (options.resolveHostToken === undefined)) {
       throw new Error("Configure one static or renewable gateway host token source");
     }
@@ -141,6 +150,15 @@ export class PublicGatewayConnector {
       );
     }
     this.connectUrl = connect.toString();
+  }
+
+  public protectPairingOffer(offer: StoredPairingOffer): PairingOfferWire {
+    if (this.encryption === undefined) throw new Error("Gateway encryption is unavailable");
+    const credential = this.encryption.pairingCredential(offer);
+    const wire = pairingOfferWire(offer);
+    const fragment = new URLSearchParams(credential).toString();
+    const deepLink = `${wire.deepLink}#${fragment}`;
+    return { ...wire, deepLink, code: deepLink };
   }
 
   public start(): void {
@@ -394,12 +412,26 @@ export class PublicGatewayConnector {
     }
     const body = frame.bodyBase64 === undefined ? undefined : Buffer.from(frame.bodyBase64, "base64");
     try {
-      const response = await this.fetcher(new URL(frame.path, baseUrl), {
-        method: frame.method,
-        headers,
-        signal: abort.signal,
-        ...(body === undefined ? {} : { body }),
-      });
+      const response =
+        frame.path === "/v1/hooks/linear"
+          ? await this.fetcher(new URL(frame.path, baseUrl), {
+              method: frame.method,
+              headers,
+              signal: abort.signal,
+              ...(body === undefined ? {} : { body }),
+            })
+          : this.encryption === undefined
+            ? Response.json({ error: "encryption_required" }, { status: 426 })
+            : await this.encryption.handle(
+                frame.path,
+                body?.toString("utf8") ?? "",
+                abort.signal,
+                async (request) => {
+                  const url = new URL(request.url);
+                  const origin = url.hostname === "control" ? this.controlPlaneUrl : this.relayUrl;
+                  return this.fetcher(new Request(new URL(url.pathname, origin), request));
+                },
+              );
       await sendFrame(socket, {
         schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
         kind: "response_start",

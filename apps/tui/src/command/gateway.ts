@@ -1,6 +1,8 @@
+import { randomBytes } from "node:crypto";
 import {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
+  PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID,
   createDefaultCredentialStore,
   derivePublicGatewayHostId,
   type CredentialStore,
@@ -16,6 +18,7 @@ const GATEWAY_USAGE = [
   "Usage: clankie gateway [status]",
   "       clankie gateway set --url URL --host-id ID",
   "       clankie gateway disable",
+  "       clankie gateway rotate-encryption-key",
   "Enter the host bearer with the interactive /gateway wizard; secrets are never flags.",
 ].join("\n");
 
@@ -100,6 +103,13 @@ export async function runGatewayCommand(
 ): Promise<GatewayCommandResult> {
   const verb = args[0];
   if (verb === undefined || verb === "status") return await gatewayStatus(options);
+  if (verb === "rotate-encryption-key" && args.length === 1) {
+    await stores(options).credentials.set(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID, {
+      type: "api",
+      key: randomBytes(32).toString("hex"),
+    });
+    return await result(options);
+  }
   if (verb === "disable" && args.length === 1) return await gatewayDisable(options);
   if (verb === "set" && args.length === 5) {
     const values = new Map<string, string>();

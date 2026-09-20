@@ -6,6 +6,7 @@ import {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   FileCredentialStore,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
+  PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID,
   derivePublicGatewayHostId,
 } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
@@ -45,6 +46,23 @@ describe("gateway command", () => {
       credentialPresent: false,
       publicGateway: {},
     });
+  });
+
+  it("rotates only the encryption wrapping key and leaves restart explicit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-gateway-rotation-"));
+    tempDirectories.push(directory);
+    const settings = new SettingsStore(join(directory, "settings.json"));
+    const credentials = new FileCredentialStore(join(directory, "credentials.json"));
+    await credentials.set(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID, { type: "api", key: "a".repeat(64) });
+    const rotated = await runGatewayCommand(["rotate-encryption-key"], {
+      settings,
+      credentials,
+      env: {},
+    });
+    const key = await credentials.get(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID);
+    expect(key?.type === "api" && key.key).toMatch(/^[a-f0-9]{64}$/u);
+    expect(key?.type === "api" && key.key).not.toBe("a".repeat(64));
+    expect(rotated.restart).toBe("clankie restart captain");
   });
 
   it("reports an account-derived host identity and removes it on disable", async () => {

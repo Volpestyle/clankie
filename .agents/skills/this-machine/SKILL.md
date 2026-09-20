@@ -108,7 +108,13 @@ is in `apps/gateway/README.md`. Tokens and delivery keys never go to the host.
 notes survive the recent ring; a full retained store refuses another retain
 until a note is released or forgotten. `/memory` is the console browser.
 `clankie pair` and `/pair` start or reuse the local relay before minting a code;
-run pairing on the host that owns the relay.
+run pairing on the host that owns the relay. Public pairing requires the secure
+QR or full link; its fragment is secret-bearing. Never paste it into logs or
+HTTP URLs. Short codes work only on direct private connections. A connected
+doorway returning `invalid_encrypted_request` needs a fresh pairing after host
+selection/expiry checks. `clankie gateway rotate-encryption-key` changes the
+broker wrapping key; coordinate a captain restart separately and re-pair every
+device afterward. It never restarts the service itself.
 
 `clankie send --conversation ID "message"` steers Clankie's active Pi turn;
 add `--delivery queue` for a separate follow-up. Use `--stdin` instead of a

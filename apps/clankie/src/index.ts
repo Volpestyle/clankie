@@ -61,6 +61,7 @@ import { createWorldPlayExecution } from "./play-execution-world.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
+import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import { PublicGatewayConnector } from "./public-gateway-connector.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
@@ -153,6 +154,7 @@ if (startupSettings.publicGateway.url !== undefined && startupSettings.publicGat
       );
     } else {
       publicGatewayConnector = new PublicGatewayConnector({
+        encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
         gatewayUrl: startupSettings.publicGateway.url,
         hostId: startupSettings.publicGateway.hostId,
         hostToken,
@@ -184,6 +186,7 @@ if (
     const initial = await resolveAccountToken();
     const hostId = derivePublicGatewayHostId(initial.accountId, startupSettings.publicGateway.installationId);
     publicGatewayConnector = new PublicGatewayConnector({
+      encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
       gatewayUrl: startupSettings.publicGateway.url,
       hostId,
       installationId: startupSettings.publicGateway.installationId,

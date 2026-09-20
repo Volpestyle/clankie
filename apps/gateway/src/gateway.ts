@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import {
-  DeviceSelfResponseSchema,
-  PairingRedeemRequestSchema,
   PUBLIC_GATEWAY_PUSH_REGISTRATIONS_PATH,
   PUBLIC_GATEWAY_PUSH_CLEAR_PATH,
   PublicGatewayPushRegistrationRequestSchema,
@@ -13,6 +11,13 @@ import {
   type PublicGatewayPushWakeFrame,
   type PublicGatewayPushWakeResultFrame,
 } from "@clankie/protocol";
+import {
+  GATEWAY_CHALLENGE_PATH,
+  GatewayPushIdentitySchema,
+  GATEWAY_ENCRYPTED_PATH,
+  GATEWAY_PUSH_AUTHORIZE_PATH,
+  type GatewayEnvelope,
+} from "@clankie/protocol/gateway-encryption";
 import type { ApnsSender, ApnsResult } from "./apns.ts";
 import { PushRegistrationError, type PushRegistrations } from "./push-registrations.ts";
 import {
@@ -40,8 +45,8 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 const PUBLIC_REQUEST_DEADLINE_MS = 60_000;
 const HOST_HEARTBEAT_MS = 20_000;
-const WEBSOCKET_PAYLOAD_BYTES_MAX = 2 * 1024 * 1024;
-const RESPONSE_BYTES_MAX = 16 * 1024 * 1024;
+const WEBSOCKET_PAYLOAD_BYTES_MAX = 4 * 1024 * 1024;
+const RESPONSE_BYTES_MAX = 32 * 1024 * 1024;
 /** Wakes and registrations an authenticated account may spend per burst. */
 const PUSH_ACCOUNT_BUDGET = 60;
 /**
@@ -281,7 +286,10 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
 
   // The device check shares sequencing, cancellation and connection ownership
   // with forwarded requests. No loopback HTTP or second tunnel RPC.
-  function inspectDevice(host: HostConnection, token: string): Promise<{ status: number; body: Buffer }> {
+  function inspectDevice(
+    host: HostConnection,
+    proof: GatewayEnvelope,
+  ): Promise<{ status: number; body: Buffer }> {
     return new Promise((resolve) => {
       let status = 0;
       const chunks: Buffer[] = [];
@@ -292,9 +300,10 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
           kind: "request",
           requestId: requestIdFactory(),
           target: "control",
-          method: "GET",
-          path: "/v1/devices/self",
-          headers: [{ name: "authorization", value: `Bearer ${token}` }],
+          method: "POST",
+          path: GATEWAY_PUSH_AUTHORIZE_PATH,
+          headers: [],
+          bodyBase64: Buffer.from(JSON.stringify(proof)).toString("base64"),
         },
         {
           start: (value) => {
@@ -373,8 +382,8 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
         }
       }
       const host = parsed.data.hostId === undefined ? undefined : hosts.get(parsed.data.hostId);
-      const token = bearerToken(request.headers.authorization);
-      if (token === null) {
+      const proof = parsed.data.deviceAuthorization;
+      if (proof === undefined || request.headers.authorization !== undefined) {
         sendJson(response, 401, { error: "device_auth_required" });
         return;
       }
@@ -382,7 +391,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
         sendJson(response, 503, { error: "host_unavailable" });
         return;
       }
-      const inspected = await inspectDevice(host, token);
+      const inspected = await inspectDevice(host, proof);
       if (inspected.status !== 200) {
         sendJson(response, inspected.status === 401 || inspected.status === 403 ? 401 : 503, {
           error:
@@ -394,7 +403,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       }
       let device;
       try {
-        device = DeviceSelfResponseSchema.parse(JSON.parse(inspected.body.toString("utf8")));
+        device = GatewayPushIdentitySchema.parse(JSON.parse(inspected.body.toString("utf8")));
       } catch {
         sendJson(response, 502, { error: "invalid_device_response" });
         return;
@@ -519,34 +528,9 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       return null;
     }
 
-    if (request.method === "POST" && url.pathname === "/v1/pairing/redeem") {
-      const body = await readBody(request, response);
-      if (body === null) return null;
-      let parsed: ReturnType<typeof PairingRedeemRequestSchema.safeParse>;
-      try {
-        parsed = PairingRedeemRequestSchema.safeParse(JSON.parse(body.toString("utf8")));
-      } catch {
-        sendJson(response, 400, { error: "malformed" });
-        return null;
-      }
-      if (!parsed.success) {
-        sendJson(response, 400, { error: "malformed" });
-        return null;
-      }
-      const capabilityHash = parsed.data.offerSecret
-        ? hashCapability(parsed.data.offerSecret)
-        : hashCapability(normalizePairingCode(parsed.data.code ?? ""));
-      const route = claimPairingRoute(capabilityHash);
-      if (route === null) {
-        sendJson(response, 410, { error: "expired" });
-        return null;
-      }
-      const host = hosts.get(route.hostId);
-      if (host === undefined) {
-        sendJson(response, 503, { error: "host_unavailable" });
-        return null;
-      }
-      return { host, target: "control", path: url.pathname, body };
+    if (url.pathname === "/v1/pairing/redeem") {
+      sendJson(response, 426, { error: "secure_pairing_required" });
+      return null;
     }
 
     const hostRoute = parseHostRoute(url.pathname);
@@ -560,6 +544,14 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
         : undefined;
     if (target === undefined) {
       sendJson(response, 404, { error: "route_not_found" });
+      return null;
+    }
+    if (![GATEWAY_CHALLENGE_PATH, GATEWAY_ENCRYPTED_PATH, "/v1/hooks/linear"].includes(hostRoute.path)) {
+      sendJson(response, 426, { error: "encryption_required" });
+      return null;
+    }
+    if (hostRoute.path !== "/v1/hooks/linear" && request.headers.authorization !== undefined) {
+      sendJson(response, 400, { error: "plaintext_authorization_forbidden" });
       return null;
     }
     const host = hosts.get(hostRoute.hostId);
@@ -792,15 +784,6 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     );
   }
 
-  function claimPairingRoute(hash: PublicGatewayCapabilityHash): PairingRoute | null {
-    prunePairingRoutes();
-    const route = pairingRoutes.get(hash);
-    if (route === undefined) return null;
-    pairingRoutes.delete(route.offerHash);
-    pairingRoutes.delete(route.codeHash);
-    return route;
-  }
-
   function prunePairingRoutes(): void {
     const now = clock();
     for (const route of new Set(pairingRoutes.values())) {
@@ -968,14 +951,6 @@ function constantTimeEqual(left: string, right: string): boolean {
   const leftHash = createHash("sha256").update(left).digest();
   const rightHash = createHash("sha256").update(right).digest();
   return timingSafeEqual(leftHash, rightHash);
-}
-
-function normalizePairingCode(code: string): string {
-  return code.toUpperCase().replace(/[\s-]/g, "");
-}
-
-function hashCapability(value: string): PublicGatewayCapabilityHash {
-  return createHash("sha256").update(value).digest("hex") as PublicGatewayCapabilityHash;
 }
 
 function sendJson(response: ServerResponse, status: number, body: Readonly<Record<string, unknown>>): void {

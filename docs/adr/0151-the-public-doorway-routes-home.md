@@ -1,6 +1,7 @@
 # ADR 0151: The public doorway routes home
 
-Status: accepted (James, 2026-08-31), with manual host enrollment amended by
+Status: accepted (James, 2026-08-31), with application encryption amended by
+[ADR 0173](0173-the-gateway-cannot-read-device-traffic.md), with manual host enrollment amended by
 [ADR 0153](0153-an-account-signs-the-mac-in.md). Extends
 [ADR 0138](0138-terminal-truth-rides-the-operator-relay.md) and
 [ADR 0144](0144-the-phone-reaches-into-the-pane.md) without moving device
@@ -80,10 +81,9 @@ Forwarded response bodies are not retained. It logs bounded route, host, request
 status, byte-count, duration, and disconnect metadata only. It never logs
 authorization headers, pairing capabilities, message bodies, terminal bytes,
 or response bodies. Requests use TLS from the Apple device to Caddy and the Mac
-uses TLS for its outbound connection. The first deployment is content-oblivious
-but not cryptographically blind because public TLS terminates on the gateway
-instance; application-layer device-to-Mac encryption is the gate before the
-service becomes multi-tenant.
+uses TLS for its outbound connection. Device-to-Mac AES-GCM envelopes protect application traffic independently of
+public TLS termination on the gateway instance, as specified in ADR 0173.
+The ciphertext carrier preserves local authorization.
 
 The first deployment runs one gateway process and keeps live host connections
 and expiring pairing hashes in process memory. A process replacement drops only
@@ -189,11 +189,9 @@ feature.
   scale ceiling. Horizontal routing arrives with measured demand and requires an external
   live-connection broker, not a migration of Clankie state.
 - App Review and a small invited paid beta fit this boundary. Automatic public
-  host enrollment and application-layer end-to-end encryption arrive before
-  unrelated customers share it.
+  host enrollment and validated application encryption gate unrelated customers.
 - Metadata-only logging and no content retention keep the gateway's privacy
-  surface small. Application-layer end-to-end encryption remains required
-  before unrelated customers share the service.
+  surface small. ADR 0173 specifies the mandatory application encryption boundary.
 
 ## Primary platform references
 

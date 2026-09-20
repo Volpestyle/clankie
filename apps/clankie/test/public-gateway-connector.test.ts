@@ -33,7 +33,7 @@ afterEach(async () => {
 });
 
 describe("public gateway Mac connector", () => {
-  it("registers hashed offers and forwards bounded relay responses", async () => {
+  it("registers hashed offers and refuses plaintext application forwarding", async () => {
     const relayRequests: Array<{ readonly authorization?: string; readonly body: string }> = [];
     const relay = await listen(
       createServer(async (request, response) => {
@@ -96,15 +96,13 @@ describe("public gateway Mac connector", () => {
       bodyBase64: Buffer.from('{"schemaVersion":1,"op":"tail"}').toString("base64"),
     });
     const responseFrames = await connection.framesThrough("response_end");
-    expect(responseFrames[0]).toMatchObject({ kind: "response_start", status: 200 });
+    expect(responseFrames[0]).toMatchObject({ kind: "response_start", status: 426 });
     const body = responseFrames
       .filter((frame): frame is PublicGatewayResponseChunkFrame => frame.kind === "response_chunk")
       .map((frame) => Buffer.from(frame.bodyBase64, "base64").toString())
       .join("");
-    expect(body).toBe('{"kind":"event"}\n{"kind":"done"}\n');
-    expect(relayRequests).toEqual([
-      { authorization: "Bearer device-token", body: '{"schemaVersion":1,"op":"tail"}' },
-    ]);
+    expect(JSON.parse(body)).toEqual({ error: "encryption_required" });
+    expect(relayRequests).toEqual([]);
     expect(logs.some((entry) => JSON.stringify(entry).includes("device-token"))).toBe(false);
     expect(connector.hostBaseUrl).toBe(`${gateway.origin}/h/${hostId}`);
   });

@@ -58,6 +58,7 @@ export {
   type ClankieAccountTokenProvider,
 } from "./account-credential.ts";
 export {
+  PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
   PUBLIC_GATEWAY_FORBIDDEN_ENV,
   resolvePublicGatewayCredential,

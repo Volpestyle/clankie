@@ -26,3 +26,6 @@ export async function resolvePublicGatewayCredential(
   }
   return credential.key;
 }
+
+/** Host-only key wrapping the device-to-host encryption tickets. */
+export const PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID = "clankie-gateway-encryption";

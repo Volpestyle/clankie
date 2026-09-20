@@ -7,7 +7,7 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import { PublicGatewaySettingsSchema, SettingsStore } from "@clankie/settings";
-import { gatewayConfigure, gatewayDisable, gatewayStatus } from "./command/gateway.ts";
+import { gatewayConfigure, gatewayDisable, gatewayStatus, runGatewayCommand } from "./command/gateway.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export function buildGatewayCommands(services: {
@@ -68,6 +68,11 @@ async function runWizard(
       options: [
         { value: "configure", label: "Enable remote access", hint: "email + one-time code" },
         { value: "status", label: "Show status" },
+        {
+          value: "rotate",
+          label: "Rotate encryption key",
+          hint: "re-pair devices after restarting the captain",
+        },
         ...(current.publicGateway.url === undefined
           ? []
           : [{ value: "disable", label: "Sign out and disable" }]),
@@ -75,6 +80,14 @@ async function runWizard(
     });
     if (action === "status") {
       await showStatus(shell, services);
+      return;
+    }
+    if (action === "rotate") {
+      await runGatewayCommand(["rotate-encryption-key"], services);
+      flow.renderLine(
+        "Encryption key rotated. Restart the captain, then run /pair for each device.",
+        "success",
+      );
       return;
     }
     if (action === "disable") {

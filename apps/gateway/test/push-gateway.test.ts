@@ -65,9 +65,21 @@ async function setup() {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(bearer === undefined || bearer === null ? {} : { authorization: `Bearer ${bearer}` }),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...(body as object),
+        ...(!bearer
+          ? {}
+          : {
+              deviceAuthorization: {
+                version: 1,
+                ticket: Buffer.alloc(32).toString("base64"),
+                challenge: "a".repeat(64),
+                requestId: "b".repeat(64),
+                sealed: Buffer.alloc(32).toString("base64"),
+              },
+            }),
+      }),
     });
   }
   /** Raw body and extra headers, for budget checks that must not be parsed. */
@@ -180,10 +192,10 @@ describe("gateway push authorization", () => {
     const probe = await frame;
     expect(probe).toMatchObject({
       kind: "request",
-      path: "/v1/devices/self",
-      method: "GET",
+      path: "/v1/gateway/push-authorize",
+      method: "POST",
       target: "control",
-      headers: [{ name: "authorization", value: "Bearer device-session" }],
+      headers: [],
     });
     expect(JSON.stringify(probe)).not.toContain(registration.deliveryKey);
     expect(JSON.stringify(probe)).not.toContain(registration.deviceToken);

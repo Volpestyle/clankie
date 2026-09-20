@@ -1,3 +1,4 @@
+import { GatewayEnvelopeSchema } from "./gateway-encryption.ts";
 import { z } from "zod";
 
 /** Portable schemas: the phone imports these without Node gateway dependencies. */
@@ -37,6 +38,7 @@ export type DevicePushRequest = z.infer<typeof DevicePushRequestSchema>;
 /** Device initiated. The gateway verifies the bearer at hostId, then checks the delivery key. */
 export const PublicGatewayPushRegistrationRequestSchema = DevicePushBindingSchema.extend({
   hostId: OpaqueIdSchema.min(16),
+  deviceAuthorization: GatewayEnvelopeSchema.optional(),
   deliveryKey: DeliveryKeySchema,
   deviceToken: ApnsDeviceTokenSchema,
   environment: DevicePushEnvironmentSchema,
@@ -48,6 +50,7 @@ export const PublicGatewayPushClearRequestSchema = DevicePushBindingSchema.exten
   deliveryKey: DeliveryKeySchema,
   // Only needed to authorize creating a tombstone before the first registration.
   hostId: OpaqueIdSchema.min(16).optional(),
+  deviceAuthorization: GatewayEnvelopeSchema.optional(),
 }).strict();
 export type PublicGatewayPushClearRequest = z.infer<typeof PublicGatewayPushClearRequestSchema>;
 

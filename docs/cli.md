@@ -219,7 +219,9 @@ lives five minutes. A remote `CLANKIE_CONTROL_PLANE_URL` fails with
 `unavailable`: run pairing on that host so its launcher can verify the relay.
 The console's `/pair` runs this same command and accepts the same flags.
 
-Human mode writes the QR and code to stdout. Those values are secret-bearing
+Public-gateway pairing uses a secure QR or full pasted link; the encryption
+credential is in its fragment. Short codes are for direct private connections.
+Human mode writes the QR and code/link to stdout. Those values are secret-bearing
 display data — never log or persist them. `--json` is the agent form:
 
 ```json
@@ -265,6 +267,11 @@ permission. Signing/storage setup is in the [gateway guide](../apps/gateway/READ
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
 ### `gateway [status]` / `gateway set --url URL --host-id ID` / `gateway disable`
+
+`clankie gateway rotate-encryption-key` replaces the broker key wrapping device
+tickets. It reports the required captain restart without performing it. Coordinate
+that restart, then re-pair every device. The `/gateway` menu exposes the same
+action. [Encryption contract](adr/0173-the-gateway-cannot-read-device-traffic.md).
 
 Read the public doorway binding or disable it. JSON includes `publicGateway`,
 the derived `hostId`, `credentialPresent`, `enabled`, `settingsFile`, and the

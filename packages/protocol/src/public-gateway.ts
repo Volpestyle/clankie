@@ -13,7 +13,7 @@ export const PUBLIC_GATEWAY_CONFIG_PATH = "/gateway/v1/config";
 export const PUBLIC_GATEWAY_HOST_CONNECT_PATH = "/gateway/v1/hosts/connect";
 export const PUBLIC_GATEWAY_HEALTH_PATH = "/health";
 export const PUBLIC_GATEWAY_HOST_PATH_PREFIX = "/h";
-export const PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX = 1024 * 1024;
+export const PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX = 2 * 1024 * 1024;
 export const PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX = 48 * 1024;
 export const PUBLIC_GATEWAY_IN_FLIGHT_MAX = 128;
 /** The gateway's route window; defined beside the review-offer cap it shares (ADR 0154). */
@@ -23,6 +23,9 @@ export { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./index.ts";
 export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  { method: "GET", path: "/v1/gateway/challenge", target: "control" },
+  { method: "POST", path: "/v1/gateway/encrypted", target: "control" },
+  { method: "POST", path: "/v1/gateway/push-authorize", target: "control" },
   { method: "POST", path: "/v1/pairing/redeem", target: "control" },
   { method: "POST", path: "/v1/pairing/complete", target: "control" },
   { method: "GET", path: "/v1/devices/self", target: "control" },
