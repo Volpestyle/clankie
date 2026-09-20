@@ -60,6 +60,11 @@ Plaintext application routes and public short-code redemption return `426`.
 Unknown routes return `404`; an unavailable Mac returns `503`. Offer expiry and
 single-use checks remain inside the encrypted host response.
 
+Cancelling an HTTP request retires only that exchange. Late response frames
+for a retired request are discarded: they have no destination and cannot
+disconnect other requests on the Mac's shared socket. Responses for an active
+exchange still require its owning host connection and valid frame sequencing.
+
 Structured logs contain host id, request id, status, byte count, duration, and
 connection state only. The gateway never logs authorization headers, pairing
 capabilities, request bodies, or response bodies.

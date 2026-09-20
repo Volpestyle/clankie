@@ -729,7 +729,10 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     >,
   ): void {
     const exchange = pending.get(frame.requestId);
-    if (exchange === undefined || exchange.host !== connection) {
+    // Cancellation and a response can cross on the wire. A retired request has
+    // no destination; discard its late frames without dropping unrelated work.
+    if (exchange === undefined) return;
+    if (exchange.host !== connection) {
       connection.socket.close(1008, "response does not name a live host exchange");
       return;
     }

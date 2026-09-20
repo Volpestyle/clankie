@@ -106,6 +106,34 @@ describe("public gateway", () => {
     ).toBe(400);
   });
 
+  it("keeps other requests alive when a cancelled response arrives late", async () => {
+    const { origin } = await startGateway([]);
+    const host = await connectHost(origin);
+    openSockets.push(host);
+    const abort = new AbortController();
+    const cancelled = fetch(`${origin}/h/${hostId}/v1/gateway/challenge`, {
+      signal: abort.signal,
+    }).catch(() => undefined);
+    const cancelledRequest = await nextRequest(host);
+    const live = fetch(`${origin}/h/${hostId}/v1/gateway/challenge`);
+    const liveRequest = await nextRequest(host);
+    const cancellation = nextFrame(host);
+    abort.abort();
+    await cancelled;
+    expect(await cancellation).toMatchObject({ kind: "cancel", requestId: cancelledRequest.requestId });
+
+    // A response already in transit can cross the cancellation on the wire.
+    const connectionState = Promise.race([
+      once(host, "close").then(() => "closed"),
+      once(host, "pong").then(() => "open"),
+    ]);
+    respond(host, cancelledRequest, 200, "late response");
+    host.ping();
+    expect(await connectionState).toBe("open");
+    respond(host, liveRequest, 200, "still connected");
+    expect(await (await live).text()).toBe("still connected");
+  });
+
   it("carries a Linear delivery's signature and raw body to the Mac unaltered", async () => {
     const { origin } = await startGateway([]);
     const host = await connectHost(origin);
