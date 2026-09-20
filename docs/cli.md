@@ -51,6 +51,7 @@ device table, credential-rotate sentence). Everything else is already JSON.
 | `linear …`, `persona …`, `games …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                                                   | JSON                                                                                         |
 | `send --conversation ID …`                                                                      | JSON accepted-run receipt or refusal                                                         |
+| `file publish --conversation ID PATH …`                                                         | JSON delivered-file metadata                                                                 |
 | `memory …`, `metrics …`                                                                         | JSON                                                                                         |
 | `play stop`                                                                                     | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
 | `prompt …`, `memory-card …`                                                                     | Plain text: the prompt or card itself, verbatim                                              |
@@ -675,6 +676,27 @@ A revision conflict or offline seat returns its JSON refusal and exit 1;
 inspect the conversation before resubmitting. Observe replies with
 `clankie --chat ID` or the conversation API. The running service and a local
 captain credential are required.
+
+### `file publish --conversation ID PATH [--name FILE] [--type MEDIA_TYPE]`
+
+Publish one finished regular file from the conversation's working directory.
+`PATH` may be relative to that directory or an absolute path inside it. Realpath
+containment rejects symlink and parent-directory escapes; files larger than
+15 MiB are refused. `--name` changes only the safe delivered filename and
+`--type` overrides extension-based content-type detection.
+
+```bash
+clankie file publish --conversation global-default build/report.pdf
+clankie file publish --conversation global-default dist/site.zip --name launch-site.zip
+```
+
+The JSON result contains the opaque artifact id, filename, content type, byte
+count, and SHA-256. The same metadata appears as a durable file event in the
+conversation. The command is local-only because it accepts a host path; paired
+devices may retrieve published bytes with their chat grant but cannot publish a
+path on the Mac. Files share the conversation's retention and are removed when
+that conversation resets, closes, or ages out. See
+[ADR 0174](adr/0174-finished-files-belong-to-conversations.md).
 
 ### `prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model]`
 

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./index.ts";
 import {
   DEVICE_PUSH_PATH,
   PublicGatewayPushWakeFrameSchema,
@@ -31,6 +32,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
   { method: "POST", path: "/operator/v1/terminal-tail", target: "relay" },
+  { method: "POST", path: OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH, target: "relay" },
 ] as const;
 
 /**
