@@ -31,8 +31,10 @@ that seat without the service knowing which one sat down.
 
 ## Decision
 
-The operator seat is a place any harness can sit. Claude Code sits first, on
-the owner's plan. pi keeps the body and every social lane.
+The primary operator seat is the TUI over Clankie's persistent pi lead. An
+optional harness seat lets the owner talk to the same Clankie through Claude
+Code on the owner's plan. pi keeps the body and every social lane. Choosing
+Claude Code or Codex for a fleet worker does not select this alternative seat.
 
 ```mermaid
 flowchart LR
