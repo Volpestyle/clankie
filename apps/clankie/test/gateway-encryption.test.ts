@@ -119,9 +119,14 @@ describe("device-to-host encryption security boundary", () => {
             String.fromCharCode(byte),
           ).join("");
         }
+
+        public override async json(): Promise<unknown> {
+          return JSON.parse(await this.text()) as unknown;
+        }
       },
     );
-    const bytes = new TextEncoder().encode('{"name":"Renaming… ⠼"}');
+    const json = '{"name":"Renaming… ⠼"}';
+    const bytes = new TextEncoder().encode(json);
     const actor = await account(
       "utf8-account",
       () =>
@@ -137,12 +142,19 @@ describe("device-to-host encryption security boundary", () => {
       body: "{}",
     });
 
-    expect(await response.clone().json()).toEqual({ name: "Renaming… ⠼" });
     expect(new Uint8Array(await response.clone().arrayBuffer())).toEqual(bytes);
     expect(new Uint8Array(await (await response.clone().blob()).arrayBuffer())).toEqual(bytes);
     expect(response.status).toBe(206);
     expect(response.headers.get("content-type")).toBe("application/json");
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe(json);
+
+    const jsonResponse = await actor.client(`${actor.base}/operator/v1/dispatch`, {
+      method: "POST",
+      headers: actor.headers,
+      body: "{}",
+    });
+    expect(await jsonResponse.json()).toEqual({ name: "Renaming… ⠼" });
 
     const emptyActor = await account("empty-account", () => new Response(null, { status: 204 }));
     const empty = await emptyActor.client(`${emptyActor.base}/operator/v1/dispatch`, {
