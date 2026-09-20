@@ -4,9 +4,9 @@ AWS answers a production-access request with a form letter asking how often
 we send, how recipient lists are maintained, how bounces, complaints, and
 unsubscribes are handled, and for sample content. This is the answer, kept
 current with the stack so a re-request in this or another region is a paste.
-Review this text before replying on existing case `178831379600291` in the
-AWS Support Center; the notification address cannot receive mail. The case
-is closed after no response, and requires reopening. This draft is not sent.
+Case `178831379600291` in the AWS Support Center is **Reopened**. Its
+correspondence contains the approved reply below, verified on September 20,
+2026 at 16:57:58 CDT. AWS production-access review remains outstanding.
 
 Operator alarm delivery is a release prerequisite. The intended subscription
 is email `volpestyle@gmail.com` on
@@ -14,7 +14,7 @@ is email `volpestyle@gmail.com` on
 The approved subscription request is created and has `PendingConfirmation=true`.
 James must follow the AWS SNS confirmation email link before notifications can
 arrive. A returned subscription ARN alone does not prove confirmation. The
-case reply is approved and prepared below.
+submitted case reply is retained below.
 
 ---
 
