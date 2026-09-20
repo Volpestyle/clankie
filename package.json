@@ -1,6 +1,6 @@
 {
   "name": "clankie",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Clankie: a persistent agent who codes, leads herdr fleets, plays games, and hangs out in Discord.",
   "type": "module",
