@@ -124,6 +124,8 @@ unless bundled JavaScript and reachable Cargo dependencies have declared
 licenses and included license text. The smoke test extracts the archive outside
 the checkout and exercises its launcher, service, Activity assets, Vox IPC,
 and native Herdr worker execution, session restoration, crash recovery, and cleanup.
+Shared provider registration includes Pi's static OAuth flows in the bundle;
+`apps/tui/test/packaged-oauth.test.ts` checks auth derivation outside the checkout.
 
 `pnpm herdr:linux:smoke` builds and exercises the same pinned Herdr runtime
 inside Docker. This proves the native Linux boundary; the complete hosted

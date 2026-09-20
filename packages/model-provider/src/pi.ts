@@ -8,6 +8,7 @@ import {
   type ThinkingLevelMap,
 } from "@earendil-works/pi-ai";
 import type { ModelRuntime, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
 import { providerFamilyFor } from "./instantiate.ts";
 import { LOCAL_PLACEHOLDER_API_KEY } from "./local-endpoint.ts";
@@ -233,6 +234,8 @@ export function registerConfiguredPiProviders(
   config: ClankieConfig,
   catalog: Catalog,
 ): void {
+  // Pi's static flow registry also keeps OAuth available in our esbuild release.
+  registerBunOAuthFlows();
   const merged = mergedCatalog(config, catalog);
   for (const [providerId, declared] of Object.entries(config.provider ?? {})) {
     const baseUrl = typeof declared.options?.baseURL === "string" ? declared.options.baseURL : undefined;

@@ -54,6 +54,11 @@ and the files being changed before editing. The active implementation lives in:
 
 ## Packaging gotchas
 
+- Pi OAuth uses variable dynamic imports that esbuild cannot discover. Shared
+  provider registration installs Pi's static `bun-oauth` flow registry (also
+  compatible with Node); `apps/tui/test/packaged-oauth.test.ts` proves auth
+  derivation from an isolated bundle. Service health alone misses this failure.
+
 - Esbuild cannot see `require(...)` calls emitted later as strings by AJV. Audit
   final bundles for non-builtin runtime requires and keep only the required
   runtime package closure under the artifact's `node_modules`.
