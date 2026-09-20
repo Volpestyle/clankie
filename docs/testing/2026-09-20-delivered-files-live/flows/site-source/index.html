@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clankie Delivered Files</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">VUH 1105</p>
+      <h1>Delivered files</h1>
+      <p class="lead">
+        Clankie publishes chosen conversation outputs as durable file events. Authenticated clients retrieve
+        exact bytes and open or share a protected local copy.
+      </p>
+      <section>
+        <h2>Delivery path</h2>
+        <ol>
+          <li>
+            <strong>Publish</strong><span>Resolve a regular file inside the conversation workspace.</span>
+          </li>
+          <li><strong>Store</strong><span>Hash and retain bytes under the private attachment root.</span></li>
+          <li>
+            <strong>Retrieve</strong><span>Authorize a strict POST request and return exact bytes.</span>
+          </li>
+          <li>
+            <strong>Open or share</strong><span>Use the device system preview and share surfaces.</span>
+          </li>
+        </ol>
+      </section>
+      <section>
+        <h2>Boundaries</h2>
+        <ul>
+          <li>Workspace realpath containment and regular files only</li>
+          <li>15 MiB maximum per artifact</li>
+          <li>Conversation and current device grant checks</li>
+          <li>No bearer or capability in a download URL</li>
+          <li>Stored hash and byte count verified before delivery</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Sources</h2>
+        <p>See <a href="sources.txt">sources.txt</a> and <a href="data.json">data.json</a> in this bundle.</p>
+      </section>
+    </main>
+  </body>
+</html>

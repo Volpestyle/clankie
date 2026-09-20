@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "issue": "VUH-1105",
+  "downloadRoute": "POST /operator/v1/artifacts/download",
+  "maximumBytes": 15728640,
+  "artifacts": [
+    "delivered-files-acceptance-report.docx",
+    "delivered-files-evidence-matrix.xlsx",
+    "delivered-files-workflow.pptx",
+    "delivered-files-site-bundle.zip"
+  ]
+}

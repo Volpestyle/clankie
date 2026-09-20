@@ -1,0 +1,30 @@
+{"level":30,"time":"2026-09-20T22:35:01.309Z","service":"clankie","version":"0.2.0","event":"mcp.host.ready","server":"linear","msg":"mcp server ready"}
+{"level":30,"time":"2026-09-20T22:35:01.554Z","service":"clankie","version":"0.2.0","environmentIds":["pokemon-firered","pokemon-emerald"],"msg":"embodiment play host started"}
+{"level":30,"time":"2026-09-20T22:35:01.555Z","service":"clankie","version":"0.2.0","hostname":"127.0.0.1","port":4395,"eventLogPath":"/tmp/clankie-vuh1105-m2yf3r/body/events.jsonl","memoryDir":"/tmp/clankie-vuh1105-m2yf3r/body/memory","settingsFilledNames":["DISCORD_INGRESS_DM_POLICY","DISCORD_INGRESS_CONTEXT_MESSAGES","DISCORD_VOICE_JOIN_POLICY","DISCORD_VOICE_CONSENT_POLICY","DISCORD_ACTIVE_BODY","DISCORD_USER_SESSION_DM_POLICY"],"localVoiceAvailable":true,"msg":"clankie listening"}
+{"level":30,"time":"2026-09-20T22:35:05.815Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-e84776bb-c2a","operatorId":"local-operator","expiresAt":"2026-09-20T22:40:05.814Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-09-20T22:35:05.859Z","service":"clankie","version":"0.2.0","deviceId":"device-bf465ea6-a0a","offerId":"pairing-offer-e84776bb-c2a","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-20T22:35:05.862Z","service":"clankie","version":"0.2.0","deviceId":"device-bf465ea6-a0a","msg":"device activated"}
+Error: delivered_file_outside_conversation_workspace
+    at DeliveredFileStore.publish (/Users/james/dev/clankie/apps/clankie/src/delivered-files.ts:33:13)
+    at async ConversationStore.publishFile (/Users/james/dev/clankie/apps/clankie/src/captain/conversations.ts:710:23)
+    at async ConversationStore.serve (/Users/james/dev/clankie/apps/clankie/src/captain/conversations.ts:671:17)
+    at async Object.serveOperatorConversation (/Users/james/dev/clankie/apps/clankie/src/captain/captain.ts:1858:22)
+    at async Array.<anonymous> (/Users/james/dev/clankie/apps/clankie/src/app.ts:2432:27)
+    at async responseViaResponseObject (file:///Users/james/dev/clankie/node_modules/.pnpm/@hono+node-server@2.0.8_hono@4.12.28/node_modules/@hono/node-server/dist/index.mjs:715:13)
+    at async Server.<anonymous> (file:///Users/james/dev/clankie/node_modules/.pnpm/@hono+node-server@2.0.8_hono@4.12.28/node_modules/@hono/node-server/dist/index.mjs:813:11)
+{"level":30,"time":"2026-09-20T22:35:06.883Z","service":"clankie","version":"0.2.0","signal":"SIGTERM","exitCode":143,"playShutdownDeadlineMs":15000,"msg":"clankie shutdown requested"}
+{"level":30,"time":"2026-09-20T22:35:06.972Z","service":"clankie","version":"0.2.0","signal":"SIGTERM","exitCode":143,"playShutdown":"idle","msg":"clankie shutdown settled"}
+{"level":30,"time":"2026-09-20T22:35:06.972Z","service":"clankie","version":"0.2.0","signal":"SIGTERM","handles":["FSReqCallback","ProcessWrap"],"msg":"clankie shutdown handles"}
+{"level":30,"time":"2026-09-20T22:35:09.388Z","service":"clankie","version":"0.2.0","event":"mcp.host.ready","server":"linear","msg":"mcp server ready"}
+{"level":30,"time":"2026-09-20T22:35:09.565Z","service":"clankie","version":"0.2.0","environmentIds":["pokemon-firered","pokemon-emerald"],"msg":"embodiment play host started"}
+{"level":30,"time":"2026-09-20T22:35:09.566Z","service":"clankie","version":"0.2.0","hostname":"127.0.0.1","port":4395,"eventLogPath":"/tmp/clankie-vuh1105-m2yf3r/body/events.jsonl","memoryDir":"/tmp/clankie-vuh1105-m2yf3r/body/memory","settingsFilledNames":["DISCORD_INGRESS_DM_POLICY","DISCORD_INGRESS_CONTEXT_MESSAGES","DISCORD_VOICE_JOIN_POLICY","DISCORD_VOICE_CONSENT_POLICY","DISCORD_ACTIVE_BODY","DISCORD_USER_SESSION_DM_POLICY"],"localVoiceAvailable":true,"msg":"clankie listening"}
+{"level":30,"time":"2026-09-20T22:35:10.477Z","service":"clankie","version":"0.2.0","deviceId":"device-bf465ea6-a0a","operatorId":"local-operator","msg":"device revoked"}
+{"level":30,"time":"2026-09-20T22:35:11.468Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-24c4c6d9-465","operatorId":"local-operator","expiresAt":"2026-09-20T22:40:11.467Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-09-20T22:35:12.737Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-6cf711a9-d0b","operatorId":"local-operator","expiresAt":"2026-09-20T22:40:12.736Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-09-20T22:35:53.743Z","service":"clankie","version":"0.2.0","deviceId":"device-0eeaf50d-db3","offerId":"pairing-offer-24c4c6d9-465","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-20T22:36:09.260Z","service":"clankie","version":"0.2.0","deviceId":"device-44543ae2-f2e","offerId":"pairing-offer-6cf711a9-d0b","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-20T22:37:33.672Z","service":"clankie","version":"0.2.0","deviceId":"device-0eeaf50d-db3","msg":"device activated"}
+{"level":30,"time":"2026-09-20T22:37:49.254Z","service":"clankie","version":"0.2.0","deviceId":"device-44543ae2-f2e","msg":"device activated"}
+{"level":30,"time":"2026-09-20T22:42:51.176Z","service":"clankie","version":"0.2.0","signal":"SIGINT","exitCode":130,"playShutdownDeadlineMs":15000,"msg":"clankie shutdown requested"}
+{"level":30,"time":"2026-09-20T22:42:51.191Z","service":"clankie","version":"0.2.0","signal":"SIGINT","exitCode":130,"playShutdown":"idle","msg":"clankie shutdown settled"}
+{"level":30,"time":"2026-09-20T22:42:51.191Z","service":"clankie","version":"0.2.0","signal":"SIGINT","handles":["FSReqCallback","ProcessWrap"],"msg":"clankie shutdown handles"}

@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-20T22:34:53.084Z",
+  "scope": "Current source service and relay with fresh ports, fresh state, canonical broker credentials only in child-process memory",
+  "hostPort": 4395,
+  "relayPort": 4396,
+  "checks": [
+    "fresh isolated service and relay became healthy",
+    "four sourced artifacts published through the CLI into one conversation",
+    "conversation replay returned the four published file events",
+    "authenticated relay retrieval returned the exact four published byte streams and content types",
+    "missing authorization, unrelated conversation, and outside-workspace publication were refused",
+    "the same device retrieved all four exact byte streams after a service restart with retained state",
+    "revoked device retrieval was refused on its next relay request"
+  ],
+  "artifacts": [
+    {
+      "filename": "delivered-files-acceptance-report.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "sourceBytes": 38937,
+      "sourceSha256": "d5ccf244c7615cd92975b63d6b7a9786c1c7d758cbbf216b5796116421260034",
+      "published": {
+        "artifactId": "8b31f7a7dd84a63bbdbf72fad9fb58fd9ca005124f541043",
+        "filename": "delivered-files-acceptance-report.docx",
+        "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "byteCount": 38937,
+        "sha256": "d5ccf244c7615cd92975b63d6b7a9786c1c7d758cbbf216b5796116421260034"
+      }
+    },
+    {
+      "filename": "delivered-files-evidence-matrix.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "sourceBytes": 5507,
+      "sourceSha256": "26adc50986b5a6dd3dc1790373c874a80f6e077b5fcc1668d495d57a7835a889",
+      "published": {
+        "artifactId": "1d8b685ba0626f1a13a2e8501f81540d6b41806b55239bb3",
+        "filename": "delivered-files-evidence-matrix.xlsx",
+        "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "byteCount": 5507,
+        "sha256": "26adc50986b5a6dd3dc1790373c874a80f6e077b5fcc1668d495d57a7835a889"
+      }
+    },
+    {
+      "filename": "delivered-files-workflow.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "sourceBytes": 21395,
+      "sourceSha256": "b0c3e1989491670d2947daee60499f6bab506ba1db99287b2c13c3547d6d7afa",
+      "published": {
+        "artifactId": "34888e2b0512d3a90028af0c37c72d30f78ec05f777dcfe0",
+        "filename": "delivered-files-workflow.pptx",
+        "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "byteCount": 21395,
+        "sha256": "b0c3e1989491670d2947daee60499f6bab506ba1db99287b2c13c3547d6d7afa"
+      }
+    },
+    {
+      "filename": "delivered-files-site-bundle.zip",
+      "mediaType": "application/zip",
+      "sourceBytes": 2272,
+      "sourceSha256": "2926cdc80ffd04912e7c434ddea43309235a7860990c90f4678eb33c9f69ff6c",
+      "published": {
+        "artifactId": "07a716f9e4c39c61492a769cbd55947717a44c221c09adcd",
+        "filename": "delivered-files-site-bundle.zip",
+        "mediaType": "application/zip",
+        "byteCount": 2272,
+        "sha256": "2926cdc80ffd04912e7c434ddea43309235a7860990c90f4678eb33c9f69ff6c"
+      }
+    }
+  ],
+  "refusals": {
+    "missingAuthorization": 401,
+    "unrelatedConversation": 404,
+    "pathEscapeExit": 1,
+    "revokedDevice": 401
+  },
+  "conversationId": "global-default",
+  "outcome": "passed",
+  "simulatorPairingPrepared": true,
+  "mobile": {
+    "platform": "iOS 27 simulator",
+    "devices": ["iPhone 17 Pro", "iPad Pro 11-inch (M5)"],
+    "replayedFileCards": 4,
+    "opened": "delivered-files-acceptance-report.docx",
+    "nativePreview": "passed on both devices",
+    "nativeShareSheet": "passed on both devices"
+  }
+}
