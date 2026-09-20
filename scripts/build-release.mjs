@@ -216,7 +216,8 @@ async function copyDynamicRuntimePackages(targetRoot, metafilePath) {
 async function installNativeBinaries(targetRoot) {
   const herdr = join(targetRoot, "libexec/herdr");
   await buildHerdr(herdr);
-  run("codesign", ["--force", "--sign", "-", herdr]);
+  // Preserve upstream bytes: the offline fallback verifies the official checksum.
+  run("codesign", ["--verify", "--strict", herdr]);
   requireArm64(herdr);
   const voxTarget = join(targetRoot, "apps", "vox", "target", "release", "clankvox");
   await mkdir(dirname(voxTarget), { recursive: true });

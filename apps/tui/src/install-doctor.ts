@@ -1,5 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { readFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -148,10 +149,16 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     options.credentialStore ?? createDefaultCredentialStore({ env }),
   );
   const execute = options.execFileImpl ?? defaultExecFile(env);
+  const activeHerdr = join(
+    env.CLANKIE_STATE?.trim() || join(env.HOME?.trim() || homedir(), ".clankie"),
+    "herdr/bin/herdr",
+  );
   const herdrBinary =
     settings.herdr.runtime === "bundled" ||
     (settings.herdr.runtime === "auto" && settings.herdr.session === "default" && env.HERDR_ENV !== "1")
-      ? join(options.repoRoot, kind === "release" ? "libexec/herdr" : ".data/herdr/bin/herdr")
+      ? existsSync(activeHerdr)
+        ? activeHerdr
+        : join(options.repoRoot, kind === "release" ? "libexec/herdr" : ".data/herdr/bin/herdr")
       : "herdr";
   const execFile: ExecFileImpl = (command, args) =>
     execute(command === "herdr" ? herdrBinary : command, args);

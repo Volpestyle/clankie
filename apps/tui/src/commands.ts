@@ -147,9 +147,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "herdr",
       aliases: [],
-      description: "Choose the bundled runtime or an external Herdr session",
+      description: "Use an existing Herdr session or create one for Clankie",
       takesArgument: true,
-      argumentHint: "[status | open | set --runtime auto|bundled|external | set --session NAME]",
+      argumentHint: "[status | open | create | use NAME]",
       async run(argument, shell): Promise<void> {
         try {
           if (argument.trim() === "") {
@@ -168,7 +168,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           });
           shell.insertCommandResult(
             "/herdr",
-            `Configured: ${result.herdr.runtime} · ${result.herdr.session}\n${result.active ? `Active: ${result.active.runtime} · ${result.active.socketPath}` : (result.unavailable ?? "")}\nApply changes with ${result.restart}`,
+            `${result.active ? `Active: ${describeHerdrBinding(result.active)}` : (result.unavailable ?? "")}\nApply changes with ${result.restart}`,
             "success",
           );
         } catch (error) {
@@ -917,13 +917,26 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
   flow.begin("herdr");
   try {
     const current = await runHerdrCommand(["status"], options);
-    flow.renderLine(`Configured: ${current.herdr.runtime} · ${current.herdr.session}`);
+    flow.renderLine(
+      `Selected: ${current.herdr.runtime === "bundled" ? "Clankie’s own session" : current.herdr.runtime === "auto" ? "Use the launch session, or create one for Clankie" : current.herdr.session}`,
+    );
     flow.renderLine(herdrActiveLine(current));
-    let action = await flow.readSelect({
+    flow.renderLine(
+      "Clankie’s own session follows official Herdr releases. Updates apply when the session next starts.",
+    );
+    const action = await flow.readSelect({
       message: "Herdr",
       options: [
-        { value: "session", label: "Choose external session", hint: "Use an existing named Herdr session" },
-        { value: "runtime", label: "Choose runtime", hint: "Private bundled Herdr or an external session" },
+        {
+          value: "session",
+          label: "Use an existing Herdr session",
+          hint: "Choose the agents Clankie can see and lead",
+        },
+        {
+          value: "create",
+          label: "Create a session for Clankie",
+          hint: "His own workers, separate from your other sessions",
+        },
         { value: "open", label: "Open active session" },
         ...(context.restartCaptain
           ? [{ value: "restart", label: "Apply saved changes", hint: "Restart Clankie, relay and Discord" }]
@@ -940,26 +953,7 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
       if (code !== 0) throw new Error(`Herdr viewer exited with status ${code}`);
       return;
     }
-    if (action === "runtime") {
-      const runtime = await flow.readSelect({
-        message: "Herdr runtime",
-        options: [
-          { value: "bundled", label: "Private bundled Herdr" },
-          { value: "external", label: "External Herdr", hint: "Choose a named session" },
-          {
-            value: "auto",
-            label: "Automatic",
-            hint: "The session he is launched in, else bundled",
-          },
-        ],
-        allowBack: true,
-      });
-      if (runtime === undefined) return;
-      // External means a session: saving the runtime alone would keep whatever
-      // name was saved before, running or not.
-      if (runtime === "external") action = "session";
-      else await runHerdrCommand(["set", "--runtime", runtime], options);
-    }
+    if (action === "create") await runHerdrCommand(["create"], options);
     if (action === "session") {
       const sessions = [...((await context.herdrSessions?.()) ?? [])].sort(
         (left, right) => Number(right.running) - Number(left.running),
@@ -978,10 +972,10 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
         allowBack: true,
       });
       if (session === undefined) return;
-      await runHerdrCommand(["set", "--session", session], options);
+      await runHerdrCommand(["use", session], options);
     }
     if (action !== "restart") {
-      flow.renderLine("Saved. Restart to apply the new binding.", "success");
+      flow.renderLine("Saved. Restart to use this session.", "success");
       if (!context.restartCaptain) return;
       const apply = await flow.readSelect({
         message: "Apply Herdr changes?",

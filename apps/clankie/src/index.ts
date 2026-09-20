@@ -38,7 +38,7 @@ import {
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { resolveHerdrBinding } from "./herdr-session.ts";
-import { bundledHerdrBinary, startHerdrRuntime, watchHerdrSocket } from "./herdr-runtime.ts";
+import { startHerdrRuntime, watchHerdrSocket } from "./herdr-runtime.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "./world/session.ts";
@@ -101,12 +101,11 @@ process.env.CLANKIE_SETTINGS_FILE = settingsStore.path;
 // The binding is chosen fresh at every start and never written back
 // (ADR 0170): settings carry the owner's intent, `GET /v1/herdr` and
 // `clankie herdr status` carry what is live.
-const herdrBinary = bundledHerdrBinary(repoRoot);
 let herdrBinding = await resolveHerdrBinding(startupSettings.herdr);
 let herdrRuntime =
   herdrBinding.runtime === "external"
     ? undefined
-    : await startHerdrRuntime({ binary: herdrBinary, repoRoot, stateRoot, env: process.env });
+    : await startHerdrRuntime({ repoRoot, stateRoot, env: process.env });
 // A bound session that stops takes his fleet with it, so he unbinds and falls
 // back to his own runtime rather than leading a socket nobody answers.
 const herdrWatch =
@@ -115,7 +114,7 @@ const herdrWatch =
         socketPath: process.env.HERDR_SOCKET_PATH,
         onLost: () => {
           const stopped = { session: herdrBinding.session, socketPath: process.env.HERDR_SOCKET_PATH };
-          void startHerdrRuntime({ binary: herdrBinary, repoRoot, stateRoot, env: process.env }).then(
+          void startHerdrRuntime({ repoRoot, stateRoot, env: process.env }).then(
             (runtime) => {
               herdrRuntime = runtime;
               herdrBinding = { runtime: "bundled", session: herdrBinding.session };

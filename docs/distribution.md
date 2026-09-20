@@ -57,7 +57,15 @@ The working directory of an interactive Clankie conversation is the directory
 where the operator invokes `clankie`; supervised services run from their
 installed release root.
 
-Herdr is built from the checksum-pinned fork in `scripts/release/herdr.json`.
+Herdr ships as an official stable release binary, verified against the
+platform checksum in `scripts/release/herdr.json`. Its matching source archive
+is retained for license inventory; no fork or Rust/Zig build is needed for Herdr.
+The service checks `https://herdr.dev/latest.json` at startup and every six hours,
+staging verified releases outside the immutable install. Live workers keep a
+matching server/CLI copy. Staged releases apply when Clankie's own fleet starts
+with no existing server; restarting Clankie alone leaves a live fleet intact.
+Offline starts use the last verified cached release or the official packaged
+fallback. See [ADR 0172](adr/0172-herdr-sessions-follow-official-releases.md).
 The service owns its headless process and private state under
 `$CLANKIE_STATE/herdr` (default `~/.clankie/herdr`), with health and crash
 recovery through a child supervisor. See [ADR 0157](adr/0157-herdr-is-an-owned-runtime.md).
@@ -67,9 +75,10 @@ at every start, and a session that stops is unbound rather than fatal
 ([ADR 0170](adr/0170-a-session-that-stops-is-unbound.md)). The fleet is
 Clankie's own session either way
 ([ADR 0164](adr/0164-the-fleet-is-its-own-session.md)).
-Source checkouts need `pnpm herdr:build` for private mode. Explicit
-`clankie herdr set --session NAME` selects an external session; restart Clankie
-to apply. `clankie-herdr` opens the running fleet without owning its lifetime.
+Source checkouts download the official release on first use; `pnpm herdr:build`
+prepares the pinned offline fallback and license source. `clankie herdr use NAME`
+selects an existing session; `clankie herdr create` selects Clankie’s own.
+Restart Clankie to apply. `clankie-herdr` opens the running fleet without owning its lifetime.
 The Clankie TUI works inside vanilla Herdr in either distribution.
 
 Optional integrations such as cloudflared and external browser tools remain

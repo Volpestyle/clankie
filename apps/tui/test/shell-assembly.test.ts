@@ -9,6 +9,65 @@ import { ClankieFaceShell, clickedTranscriptBlock } from "../src/shell/shell.ts"
 import { OperatorConversationSendError } from "../src/session/operator-conversations.ts";
 
 describe("shell assembly", () => {
+  it("groups adjacent exploration, preserves errors and expands through Ctrl+O", () => {
+    const shell = new ClankieFaceShell({
+      commands: [],
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+    });
+    const internal = shell as unknown as {
+      chat: { children: unknown[]; render(width: number): string[] };
+      routeInput(data: string): unknown;
+    };
+    const render = () => internal.chat.render(80).join("\n");
+    shell.beginToolCall("a", "read", '{"path":"first.ts"}');
+    shell.completeToolCall("a", "read", { failed: false, detail: "hidden contents" });
+    shell.clearLiveAssistant(); // A cleared streaming draft is not a turn boundary.
+    shell.beginToolCall("b", "grep", '{"pattern":"needle","path":"src"}');
+    expect(internal.chat.children).toHaveLength(1);
+    expect(render()).toContain("Exploring");
+    shell.completeToolCall("b", "grep", { failed: true, detail: "permission denied" });
+    expect(render()).toContain("Explored");
+    expect(render()).toContain("permission denied");
+    expect(render()).not.toContain("hidden contents");
+    const group = internal.chat.children[0] as { render(width: number): string[] };
+    expect(group.render(80)).toBe(group.render(80));
+    internal.routeInput("\x0f");
+    expect(render()).toContain("hidden contents");
+    shell.endToolGroup();
+    shell.beginToolCall("c", "read", '{"path":"next-turn.ts"}');
+    expect(internal.chat.children).toHaveLength(2);
+    shell.completeToolCall("c", "read", { failed: false, detail: "next contents" });
+    shell.insertAssistantMarkdown("A boundary");
+    shell.completeToolCall("replay", "read", { failed: false, detail: "restored contents" });
+    expect(render()).toContain("restored contents");
+    shell.beginToolCall("bash", "bash", '{"command":"cat first.ts"}');
+    shell.completeToolCall("bash", "bash", { failed: false, detail: "shell output" });
+    expect(render()).toContain("shell output");
+  });
+
+  it("renders bounded pending previews above the editor and clears on conversation change", () => {
+    const shell = new ClankieFaceShell({
+      commands: [],
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie" },
+    });
+    const pending = (shell as unknown as { pendingPrompts: { render(width: number): string[] } })
+      .pendingPrompts;
+    shell.setPendingPrompts([
+      { message: "first\nsecond", delivery: "steer" },
+      ...Array.from({ length: 4 }, () => ({ message: "next task".repeat(40), delivery: "queue" as const })),
+    ]);
+    expect(pending.render(80).join("\n")).toContain("Steer: first second");
+    expect(pending.render(80).join("\n")).toContain("Follow-up:");
+    expect(pending.render(80).join("\n")).toContain("+2 more");
+    expect(pending.render(20)).toHaveLength(5);
+    shell.clearTranscript();
+    expect(pending.render(80)).toEqual([]);
+  });
+
   it.each([
     { pending: false, delivery: "not_sent" as const, draft: "" },
     { pending: false, delivery: "unconfirmed" as const, draft: "newer draft" },

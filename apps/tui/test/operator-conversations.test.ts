@@ -546,7 +546,8 @@ describe("TUI selected-conversation prompt path", () => {
     const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
     await session.initialize();
     let settled = false;
-    const running = session.prompt("first", recordingSink().sink).then(() => {
+    const pending = vi.fn();
+    const running = session.prompt("first", { ...recordingSink().sink, pending }).then(() => {
       settled = true;
     });
     const steer = session.submit("correction", "steer");
@@ -560,11 +561,14 @@ describe("TUI selected-conversation prompt path", () => {
       ["later", "queue"],
     ]);
     expect(settled).toBe(false);
+    expect(pending).toHaveBeenCalledWith([{ message: "correction", delivery: "steer" }]);
+    expect(pending).toHaveBeenLastCalledWith([{ message: "later", delivery: "queue" }]);
     expect(await session.interruptActive()).toBe(true);
     expect(cancelled).toEqual(["run-3"]);
     finish();
     await running;
     expect(tails).toBe(1);
+    expect(pending).toHaveBeenLastCalledWith([]);
     expect(await session.interruptActive()).toBe(false);
   });
 

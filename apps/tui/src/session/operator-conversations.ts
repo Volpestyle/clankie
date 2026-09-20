@@ -405,7 +405,13 @@ function isStoredTailState(input: unknown): input is StoredOperatorConversationT
   return true;
 }
 
+export interface PendingOperatorPrompt {
+  readonly message: string;
+  readonly delivery: "steer" | "queue";
+}
+
 export interface OperatorConversationEventSink {
+  pending?(prompts: readonly PendingOperatorPrompt[]): void;
   event(event: OperatorConversationStreamEvent): void;
   recovery(recovery: OperatorConversationRecovery): void;
   /**
@@ -416,6 +422,8 @@ export interface OperatorConversationEventSink {
 }
 
 interface ObservedPromptRuns {
+  readonly sink: OperatorConversationEventSink;
+  readonly pending: Map<string, PendingOperatorPrompt>;
   readonly conversationId: string;
   readonly runIds: Set<string>;
   admissions: Promise<void>;
@@ -526,13 +534,20 @@ export class OperatorConversationPromptSession {
     // Snapshot selection once. A concurrent /conversation switch affects only
     // the next prompt; it can never retarget an already submitted turn.
     const conversationId = this.requiredConversationId();
-    const active: ObservedPromptRuns = { conversationId, runIds: new Set(), admissions: Promise.resolve() };
+    const active: ObservedPromptRuns = {
+      conversationId,
+      runIds: new Set(),
+      admissions: Promise.resolve(),
+      sink,
+      pending: new Map(),
+    };
     this.activeRun = active;
     try {
       await this.admit(active, message, delivery, sink);
       await this.observeTail(conversationId, sink, signal, active);
     } finally {
       if (this.activeRun === active) this.activeRun = undefined;
+      sink.pending?.([]);
     }
   }
 
@@ -562,6 +577,10 @@ export class OperatorConversationPromptSession {
         }
         const runId = await this.send(active.conversationId, message, delivery);
         active.runIds.add(runId);
+        if (sink === undefined) {
+          active.pending.set(runId, { message, delivery: delivery ?? "steer" });
+          active.sink.pending?.([...active.pending.values()]);
+        }
       })
       .catch((error: unknown) => {
         throw error instanceof OperatorConversationSendError
@@ -672,6 +691,8 @@ export class OperatorConversationPromptSession {
               await admissions;
             } while (admissions !== active.admissions);
             active.runIds.delete(item.event.runId);
+            active.pending.delete(item.event.runId);
+            active.sink.pending?.([...active.pending.values()]);
             if (active.runIds.size === 0) return;
           }
         }

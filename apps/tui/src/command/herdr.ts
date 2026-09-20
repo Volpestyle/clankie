@@ -3,7 +3,7 @@ import type { HerdrBinding } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath, type HerdrSettings } from "@clankie/settings";
 
 const HERDR_USAGE =
-  "Usage: clankie herdr [status|open]\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external";
+  "Usage: clankie herdr [status|open|create]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external";
 
 export interface HerdrCommandOptions extends Partial<HerdrConnectionOptions> {
   readonly env?: NodeJS.ProcessEnv;
@@ -72,7 +72,14 @@ async function herdrSet(
  */
 export function forwardsToFleetHerdr(args: readonly string[]): boolean {
   const verb = args[0];
-  return verb !== undefined && verb !== "status" && verb !== "set" && verb !== "open";
+  return (
+    verb !== undefined &&
+    verb !== "status" &&
+    verb !== "set" &&
+    verb !== "open" &&
+    verb !== "create" &&
+    verb !== "use"
+  );
 }
 
 export async function runHerdrCommand(
@@ -81,6 +88,9 @@ export async function runHerdrCommand(
 ): Promise<HerdrCommandResult> {
   const verb = args[0];
   if (verb === undefined || verb === "status") return await herdrStatus(options);
+  if (verb === "create" && args.length === 1) return await herdrSet({ runtime: "bundled" }, options);
+  if (verb === "use" && args.length === 2 && args[1] !== undefined)
+    return await herdrSet({ session: args[1] }, options);
   if (verb === "set" && args.length === 3 && args[1] === "--session" && args[2] !== undefined) {
     return await herdrSet({ session: args[2] }, options);
   }

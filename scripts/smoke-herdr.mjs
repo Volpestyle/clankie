@@ -10,15 +10,14 @@ import { promisify } from "node:util";
 const exec = promisify(execFile);
 const checkout = resolve(import.meta.dirname, "..");
 
-export async function smokeHerdr(repoRoot = checkout) {
+export async function smokeHerdr(repoRoot = checkout, binaryOverride, managed = false) {
   const compiled = join(repoRoot, "apps/clankie/src/herdr-runtime.js");
   const { startHerdrRuntime } = await import(
     pathToFileURL(existsSync(compiled) ? compiled : compiled.replace(/\.js$/u, ".ts")).href
   );
-  const binary = join(
-    repoRoot,
-    existsSync(join(repoRoot, "libexec/herdr")) ? "libexec/herdr" : ".data/herdr/bin/herdr",
-  );
+  let binary =
+    binaryOverride ??
+    join(repoRoot, existsSync(join(repoRoot, "libexec/herdr")) ? "libexec/herdr" : ".data/herdr/bin/herdr");
   const root = await mkdtemp("/tmp/ch-smoke-");
   const env = {
     ...process.env,
@@ -30,11 +29,12 @@ export async function smokeHerdr(repoRoot = checkout) {
   let runtime;
   let owner;
   let orphanPid;
-  const options = { binary, repoRoot, stateRoot: root, env };
+  const options = { ...(managed ? {} : { binary }), repoRoot, stateRoot: root, env };
   const command = async (...args) => (await exec(binary, args, { env, timeout: 5_000 })).stdout;
   const snapshot = async () => JSON.parse(await command("api", "snapshot")).result.snapshot;
   try {
     runtime = await startHerdrRuntime(options);
+    if (managed) binary = join(root, "herdr/bin/herdr");
     assert.equal(runtime.status(), "healthy");
     assert.equal(env.HERDR_PANE_ID, undefined);
     assert.equal(env.HERD_LEAD_SUMMARIES_CACHE, undefined);

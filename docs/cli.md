@@ -545,22 +545,23 @@ same values.
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
 ```
 
-### `herdr [status|open]` / `herdr set --runtime auto|bundled|external` / `herdr set --session NAME`
+### `herdr [status|open|create]` / `herdr use NAME`
 
-The TUI footer always shows the fleet he is bound to: `herdr internal (bundled)`
-for his own fleet, `herdr external · NAME` for one of the owner's sessions, or
-`herdr unavailable` when the service cannot answer. `/status` repeats it. It is
-re-read at start, after `/herdr`, and on `/status`.
+The TUI `/status` shows the active fleet binding and `/herdr` shows both the
+configured and active sessions. The binding is re-read at start, after `/herdr`,
+and on `/status`. Routine fleet status stays out of the conversation footer.
 
 In the TUI, `/herdr` opens a modal menu showing configured and active sessions.
-Pick an external session from Herdr's saved sessions (running ones first),
-select a runtime, or open the active session; the external runtime goes to the
-same session picker. After saving, choose **Restart now** to apply the binding
+Choose **Use an existing Herdr session** to pick a saved session (running ones
+first), or **Create a session for Clankie** for a separate worker fleet.
+Creating reuses Clankie’s own retained session if it already exists.
+**Open active session** opens its viewer. After saving, choose **Restart now** to apply the binding
 or **Later** to keep it pending. **Apply saved changes** restarts Clankie, relay
 and Discord from the menu. Either restart then shows the binding he actually
 landed on, and warns when the saved session did not answer. Existing Herdr panes
-stay open. Argument forms such as `/herdr status` and `/herdr set --session NAME`
-remain available.
+stay open. The same choices are available as `/herdr use NAME` and `/herdr create`.
+The older `set --session NAME` and `set --runtime auto|bundled|external` forms
+remain compatible for scripts; the TUI does not ask users to choose a runtime.
 
 The binding is resolved at every service start and never written back
 ([ADR 0170](adr/0170-a-session-that-stops-is-unbound.md)). He leads the session
@@ -572,9 +573,14 @@ the last start costs a fallback and never the boot. While he runs, a bound
 session whose socket stops answering is unbound: he starts his own runtime and
 points every child he spawns from then on at it.
 
-`bundled` requires the native release binary or `pnpm herdr:build` in a checkout,
-and opts out of both the named and the surrounding session — no session is
-probed. Panes in the bundled fleet start the owner's login shell with the
+`create` (the compatible `set --runtime bundled` setting) opts out of both the
+named and surrounding sessions. It follows official stable Herdr releases,
+checking at startup and every six hours. Downloads must match the official
+SHA-256 checksum. Updates are staged separately; active workers retain their
+matching executable until their session ends. The next Clankie start without
+a live fleet server uses the staged release. Existing sessions selected with
+`use NAME` keep their owner's installation and update policy. `pnpm herdr:build`
+prepares the pinned official offline fallback for a checkout. Panes in the bundled fleet start the owner's login shell with the
 owner's environment: the private XDG roots that isolate that Herdr never
 reach an agent, so `gh`, `git`, `mise` and the rest behave as in any terminal.
 macOS permissions (screen recording, accessibility) follow the process that
@@ -596,7 +602,7 @@ during recovery.
 
 `clankie-herdr` with no arguments is the shortcut for `clankie herdr open`. It
 attaches a native viewer to the selected, already-running local server. With
-arguments it is the fleet's own Herdr CLI: `status`, `set`, and `open` stay
+arguments it is the fleet's own Herdr CLI: `status`, `set`, `use`, `create`, and `open` stay
 Clankie's, and every other verb is forwarded to the runtime he is bound to,
 with its binary, its socket, and its configuration. So `clankie-herdr pane
 list` reads the fleet, and `clankie-herdr server stop` ends a bundled fleet

@@ -43,6 +43,9 @@ import {
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { ClankieBannerComponent, type BannerFields } from "../face/clankie-banner.ts";
 import { isClankieLeftMouseButton, parseClankieSgrMouse } from "../face/clankie-sgr-mouse.ts";
+import { ClankieToolGroup } from "./tool-group.ts";
+import { ClankiePendingPrompts } from "./pending-prompts.ts";
+import type { PendingOperatorPrompt } from "../session/operator-conversations.ts";
 import { genericToolRenderer } from "./tool-render.ts";
 import {
   formatHerdrJumpResult,
@@ -109,9 +112,9 @@ export interface FaceShellOptions {
   readonly skills?: readonly ClankieAutocompleteSkill[];
   /** File that persists editor prompt history across sessions. */
   readonly historyPath?: string;
-  /** Model, conversation title, and context usage for the pi-style footer. */
+  /** Model, conversation title, and context usage for the compact footer. */
   readonly footerData?: () => ClankieFooterData;
-  /** Extra footer status segments (presence, activity, …) on the last footer line. */
+  /** Exceptional footer status segments, including the open side conversation. */
   readonly statusExtras?: () => readonly string[];
   /** Captain-authenticated page of retained Discord voice transcripts (ADR 0121). */
   readonly voiceTranscripts?: DiscordVoiceTranscriptClient;
@@ -249,6 +252,8 @@ export class ClankieFaceShell {
   private readonly transcriptScrollView: ScrollView;
   private readonly statusContainer = new Container();
   private readonly editor: Editor;
+  private readonly pendingPrompts: ClankiePendingPrompts;
+  private readonly toolGroups = new WeakMap<ToolExecutionComponent, ClankieToolGroup>();
   private readonly commandTypeaheadPanel: ClankieCommandTypeaheadPanel;
   private readonly footer: ClankieFooterComponent;
 
@@ -348,6 +353,7 @@ export class ClankieFaceShell {
       scrollbar: "auto",
       scrollbarStyle: selectionBg,
     });
+    this.pendingPrompts = new ClankiePendingPrompts(this.theme.ansi);
     this.editor = new Editor(this.tui, this.theme.editorTheme, { autocompleteMaxVisible: 12 });
     this.commandTypeaheadPanel = new ClankieCommandTypeaheadPanel(
       options.commands,
@@ -408,6 +414,7 @@ export class ClankieFaceShell {
     for (const component of [
       this.document,
       this.statusContainer,
+      this.pendingPrompts,
       this.editor,
       this.commandTypeaheadPanel,
       this.footer,
@@ -416,6 +423,7 @@ export class ClankieFaceShell {
     }
     const dock = new VStack([
       { component: this.statusContainer, shrink: 1, minSize: 0 },
+      { component: this.pendingPrompts, shrink: 1, minSize: 0 },
       { component: this.editor, shrink: 1, minSize: 3 },
       { component: this.commandTypeaheadPanel, shrink: 1, minSize: 0 },
       { component: this.footer, shrink: 1, minSize: 1 },
@@ -553,6 +561,11 @@ export class ClankieFaceShell {
     this.liveAssistantBlock = undefined;
   }
 
+  endToolGroup(): void {
+    const last = this.chat.children.at(-1);
+    if (last instanceof ClankieToolGroup) last.sealed = true;
+  }
+
   insertReasoning(text: string): void {
     this.appendChatBlock(
       new AssistantMessageComponent(assistantEnvelope([{ thinking: text, type: "thinking" }])),
@@ -581,9 +594,8 @@ export class ClankieFaceShell {
         this.tui,
         this.cwdValue,
       );
-      this.registerExpandable(component);
+      this.appendToolComponent(component, name, parseToolArguments(argumentsDetail));
       this.activeToolBlocks.set(toolCallId, component);
-      this.chat.addChild(component);
     }
     component.markExecutionStarted();
     this.tui.requestRender();
@@ -606,8 +618,7 @@ export class ClankieFaceShell {
         this.tui,
         this.cwdValue,
       );
-      this.registerExpandable(component);
-      this.chat.addChild(component);
+      this.appendToolComponent(component, name, undefined);
       component.markExecutionStarted();
     }
     this.activeToolBlocks.delete(toolCallId);
@@ -616,6 +627,29 @@ export class ClankieFaceShell {
       content: [{ text: outcome.detail ?? "", type: "text" }],
       isError: outcome.failed,
     });
+    this.toolGroups.get(component)?.complete(component, outcome.failed);
+    this.tui.requestRender();
+  }
+
+  private appendToolComponent(component: ToolExecutionComponent, name: string, args: unknown): void {
+    if (ClankieToolGroup.accepts(name)) {
+      const last = this.chat.children.at(-1);
+      const group =
+        last instanceof ClankieToolGroup && !last.sealed ? last : new ClankieToolGroup(this.theme.ansi);
+      if (group !== last) {
+        this.registerExpandable(group);
+        this.chat.addChild(group);
+      }
+      group.add(component, name, args);
+      this.toolGroups.set(component, group);
+    } else {
+      this.registerExpandable(component);
+      this.chat.addChild(component);
+    }
+  }
+
+  setPendingPrompts(prompts: readonly PendingOperatorPrompt[]): void {
+    this.pendingPrompts.setPrompts(prompts);
     this.tui.requestRender();
   }
 
@@ -643,6 +677,7 @@ export class ClankieFaceShell {
   }
 
   clearTranscript(): void {
+    this.setPendingPrompts([]);
     this.chat.clear();
     this.liveAssistantBlock = undefined;
     this.activeToolBlocks.clear();
@@ -808,7 +843,10 @@ export class ClankieFaceShell {
   private footerExtras(): readonly string[] {
     const { ansi } = this.theme;
     const label =
-      this.currentStatusLabel === "ready" || this.currentStatusLabel === "streaming"
+      this.currentStatusLabel === "ready" ||
+      this.currentStatusLabel === "streaming" ||
+      this.currentStatusLabel === "conversation turn accepted" ||
+      this.currentStatusLabel === "conversation turn completed"
         ? ""
         : this.currentStatusLabel;
     const setupState = this.setupFlow.isWaitingForInput() ? "setup input" : "";
@@ -1215,7 +1253,6 @@ export class ClankieFaceShell {
         if (this.options.onPendingPrompt === undefined)
           throw new Error("This connection cannot accept input while working");
         await this.options.onPendingPrompt(prompt, delivery);
-        this.refreshStatus(delivery === "queue" ? "follow-up queued" : "steering sent");
       } catch (error) {
         this.restoreFailedPrompt(prompt, error);
         this.insertMarkdown(`**Error**\n\n${formatError(error)}`);

@@ -21,7 +21,7 @@ modals — carried the cost of the custom layout's mouse and band math.
 
 ## Decision
 
-The chat surface is pi's, verbatim, in pi's fullscreen mode: a `TuiAltScreen`
+The chat surface uses pi's components in pi's fullscreen mode: a `TuiAltScreen`
 whose transcript lives in a `ScrollView` above a dock pinned to the bottom of
 the terminal, rendering conversation content with pi's own components against
 pi's dark theme (`initTheme("dark")`):
@@ -37,8 +37,9 @@ flowchart TB
         status["working indicator (pi Loader / idle rows)"]
         editor["editor (pi-tui Editor, ghost text, bash-green border)"]
         typeahead["Clankie slash-command typeahead"]
-        footer["pi-style footer: cwd • conversation · context% · model · presence"]
-        status --> editor --> typeahead --> footer
+        footer["compact footer: cwd • conversation · model · context remaining"]
+        pending["accepted local inputs · awaiting completion"]
+        status --> pending --> editor --> typeahead --> footer
     end
     scroll --> dock
 ```
@@ -56,8 +57,9 @@ exit default.
 
 The conversation renderer maps operator conversation events onto typed
 insertions (user box, assistant markdown, reasoning, tool begin/complete)
-instead of markdown strings, so tool calls get pi's bordered execution blocks
-with live loaders.
+instead of markdown strings. Exploration calls share compact expandable groups;
+expansion and non-exploration tools use Pi's execution blocks
+([ADR 0171](0171-the-console-keeps-work-in-the-background.md)).
 
 The selected conversation keeps exactly one cursor-backed tail attached. While
 the editor is idle, that tail renders operator turns and Clankie replies from

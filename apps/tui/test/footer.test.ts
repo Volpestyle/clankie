@@ -34,10 +34,10 @@ describe("context usage", () => {
     expect(formatCaptainContextUsage(undefined)).toBe("unavailable");
   });
 
-  it("formats the pi footer readout with escalating levels", () => {
+  it("formats context remaining with escalating levels", () => {
     expect(formatFooterContext({ tokens: 24_600, contextWindow: 200_000 })).toEqual({
       level: "ok",
-      text: "12.3%/200k",
+      text: "88% context left",
     });
     expect(formatFooterContext({ tokens: 150_000, contextWindow: 200_000 }).level).toBe("warning");
     expect(formatFooterContext({ tokens: 190_000, contextWindow: 200_000 }).level).toBe("error");
@@ -57,7 +57,7 @@ describe("context usage", () => {
 });
 
 describe("footer component", () => {
-  it("renders cwd · title, then stats with the model right-aligned", () => {
+  it("keeps cwd and title on their own row when the stats cannot fit", () => {
     const lines = footer({
       contextUsage: { tokens: 24_600, contextWindow: 200_000 },
       cwd: "/Users/x/dev/clankie",
@@ -66,16 +66,28 @@ describe("footer component", () => {
     }).render(60);
     expect(lines).toHaveLength(2);
     expect(lines[0]).toContain("/Users/x/dev/clankie • dev room");
-    expect(lines[1]).toContain("12.3%/200k");
-    expect(lines[1]?.endsWith("claude-opus")).toBe(true);
-    expect(visibleWidth(lines[1] ?? "")).toBe(60);
+    expect(lines[1]).toContain("88% context left");
+    expect(lines[1]?.startsWith("claude-opus")).toBe(true);
+    expect(visibleWidth(lines[1] ?? "")).toBeLessThanOrEqual(60);
   });
 
   it("adds an extras line only when segments exist", () => {
-    expect(footer({}).render(60)).toHaveLength(2);
+    expect(footer({}).render(60)).toHaveLength(1);
     const lines = footer({ extras: ["discord online", "", "shell"] }).render(60);
-    expect(lines).toHaveLength(3);
-    expect(lines[2]).toContain("discord online · shell");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("discord online · shell");
+  });
+
+  it("fits working context and stats on one row when space allows", () => {
+    const lines = footer({
+      cwd: "/tmp",
+      model: "model · high",
+      contextUsage: { tokens: 40, contextWindow: 100 },
+    }).render(80);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("/tmp");
+    expect(lines[0]).toContain("model · high  60% context left");
+    expect(visibleWidth(lines[0] ?? "")).toBe(80);
   });
 
   it("never exceeds the terminal width", () => {
@@ -84,9 +96,9 @@ describe("footer component", () => {
       extras: ["x".repeat(120)],
       model: "a-very-long-model-name-that-should-truncate",
       contextUsage: { tokens: 190_000, contextWindow: 200_000 },
-    }).render(40);
+    }).render(1);
     for (const line of lines) {
-      expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(1);
     }
   });
 });

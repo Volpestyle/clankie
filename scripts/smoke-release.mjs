@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { smokeHerdr } from "./smoke-herdr.mjs";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
@@ -40,6 +41,13 @@ try {
   }
 
   const binary = join(extracted, "bin", "clankie");
+  assert.equal(
+    createHash("sha256")
+      .update(await readFile(join(extracted, "libexec", "herdr")))
+      .digest("hex"),
+    manifest.herdr.release.sha256["macos-aarch64"],
+    "packaged Herdr must retain its official checksum for offline startup",
+  );
   await smokeHerdr(extracted);
   const node = join(extracted, "libexec", "node");
   const binaryDescription = capture("file", [binary]).stdout;
@@ -97,6 +105,7 @@ try {
   for (const name of Object.keys(env))
     if (name.startsWith("HERDR_") || name.startsWith("HERD_LEAD_")) delete env[name];
 
+  capture(binary, ["herdr", "create"], { env });
   directService = start(node, [join(extracted, "apps", "clankie", "src", "index.js")], env, workspace);
   await waitFor(`http://127.0.0.1:${servicePort}/health`, directService);
   const health = await (await fetch(`http://127.0.0.1:${servicePort}/health`)).json();
@@ -113,7 +122,7 @@ try {
   assert.equal(chosen.active.runtime, "bundled");
   assert.equal(chosen.herdr.runtime, "bundled");
   assert.equal(JSON.parse(await readFile(env.CLANKIE_SETTINGS_FILE, "utf8")).herdr.runtime, "bundled");
-  const native = join(extracted, "libexec/herdr");
+  const native = join(env.CLANKIE_STATE, "herdr/bin/herdr");
   const fleetEnv = { ...env, HERDR_SOCKET_PATH: chosen.active.socketPath };
   capture(native, ["workspace", "create", "--cwd", workspace, "--label", "viewer-proof"], { env: fleetEnv });
   const beforeViewer = JSON.parse(capture(native, ["api", "snapshot"], { env: fleetEnv }).stdout).result
@@ -150,7 +159,7 @@ try {
   await stop(directService);
   directService = undefined;
 
-  // Adopt a real independent session, keep it across restarts, and leave its lifetime to its owner.
+  // Auto adopts the launch session without persisting that incidental binding.
   const runtimeModule = await import(
     pathToFileURL(join(extracted, "apps/clankie/src/herdr-runtime.js")).href
   );
@@ -174,7 +183,8 @@ try {
   const adopted = herdrStatus();
   assert.equal(adopted.active.runtime, "external");
   assert.equal(adopted.active.socketPath, externalEnv.HERDR_SOCKET_PATH);
-  assert.equal(adopted.herdr.socketPath, externalEnv.HERDR_SOCKET_PATH);
+  assert.equal(adopted.herdr.runtime, "auto");
+  assert.equal(adopted.herdr.socketPath, undefined);
   await stop(directService);
   directService = undefined;
   assert.equal(externalRuntime.status(), "healthy");
@@ -186,7 +196,7 @@ try {
     workspace,
   );
   await waitFor(`${env.CLANKIE_CONTROL_PLANE_URL}/health`, directService);
-  assert.deepEqual(herdrStatus().active, adopted.active);
+  assert.deepEqual(herdrStatus().active, chosen.active);
   await stop(directService);
   directService = undefined;
   capture(native, ["api", "snapshot"], { env: externalEnv });
@@ -222,6 +232,14 @@ try {
   if (directService !== undefined) await stop(directService).catch(() => undefined);
   if (activity !== undefined) await stop(activity).catch(() => undefined);
   await externalRuntime?.close();
+  // These test fleets outlive their service owners; stop only our two roots.
+  for (const root of [join(temporary, "clankie-state/herdr"), join(temporary, "external/herdr")]) {
+    spawnSync(join(extracted, "libexec/herdr"), ["server", "stop"], {
+      env: { ...process.env, HERDR_SOCKET_PATH: join(root, "herdr.sock"), XDG_CONFIG_HOME: root },
+      timeout: 5_000,
+      stdio: "ignore",
+    });
+  }
   if (launcherStarted) {
     const binary = join(extracted, "bin", "clankie");
     spawnSync(binary, ["down", "clankie"], {
@@ -250,7 +268,9 @@ function capture(command, args, options = {}) {
     maxBuffer: 16 * 1024 * 1024,
   });
   if (!options.allowFailure && result.status !== 0) {
-    throw new Error(`${command} failed (${String(result.status)}): ${result.stderr}`);
+    throw new Error(
+      `${command} ${args.join(" ")} failed (${String(result.status)}): ${result.stderr || result.stdout}`,
+    );
   }
   return result;
 }

@@ -49,28 +49,28 @@ layer. Do not write Keychain entries, `~/.config/clankie/clankie.json`, or
 contract is `{repoRoot}/docs/cli.md` (every install) and `clankie help` (same
 index). Configure through the headless CLI:
 
-| Job                                   | Command                                                                                                           |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                                                 |
-| Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                                             |
-| Captain + local providers             | `clankie model status`                                                                                            |
-| Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                                         |
-| Switch captain                        | `clankie model set provider/model`                                                                                |
-| Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                                        |
-| Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`                                |
-| Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                                          |
-| Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                                  |
-| Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                           |
-| Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                                               |
-| Worker runtime / external session     | `clankie herdr status`, `clankie herdr set --runtime auto\|bundled\|external`, `clankie herdr set --session NAME` |
-| His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                                     |
-| Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)                                   |
-| Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                                            |
-| Pick up model/provider config         | `clankie restart captain`                                                                                         |
-| Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                             |
-| Rotate operator credential            | `clankie operator-credential rotate --json`                                                                       |
-| Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                                             |
-| Play session                          | `clankie play status` / `clankie play stop`                                                                       |
+| Job                                   | Command                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------------------- |
+| This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                     |
+| Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                 |
+| Captain + local providers             | `clankie model status`                                                                |
+| Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`             |
+| Switch captain                        | `clankie model set provider/model`                                                    |
+| Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`            |
+| Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`    |
+| Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`              |
+| Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`      |
+| Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`               |
+| Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                   |
+| Herdr session                         | `clankie herdr status`, `clankie herdr use NAME`, `clankie herdr create`              |
+| His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`         |
+| Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)       |
+| Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                |
+| Pick up model/provider config         | `clankie restart captain`                                                             |
+| Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json` |
+| Rotate operator credential            | `clankie operator-credential rotate --json`                                           |
+| Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                 |
+| Play session                          | `clankie play status` / `clankie play stop`                                           |
 
 Follow Linear is off by default and changes live without restarting. Configure
 its signed webhook under `/connect linear` → **Follow Linear** → **Configure
@@ -115,7 +115,9 @@ add `--delivery queue` for a separate follow-up. Use `--stdin` instead of a
 quoted message to read a pipe while preserving interior newlines. Either starts
 a turn when idle. JSON stdout is an admission receipt, not a reply; observe the same
 conversation with `clankie --chat ID`. In the console, Enter steers and
-Alt+Enter queues. Channel rounds and external seats keep their own delivery
+Alt+Enter queues. Accepted local inputs appear above the editor until their
+runs settle; “awaiting completion” does not imply the queued turn has started.
+Channel rounds and external seats keep their own delivery
 behavior. Full contract: `{repoRoot}/docs/cli.md`.
 
 JSON is on stdout; progress is on stderr. `pair`, `devices`, and
@@ -158,9 +160,8 @@ console. Voice is as capable as the room it is in.
 
 ## Herdr runtime
 
-The TUI footer shows the live binding (`herdr internal (bundled)` or
-`herdr external · NAME`); `/status` repeats it. In the TUI, `/herdr` opens the
-session/runtime menu. Pick a session from Herdr's saved sessions, save, and
+The TUI `/status` shows the live binding. In the TUI, `/herdr` opens the
+**Use an existing Herdr session** / **Create a session for Clankie** menu. Save, and
 choose **Restart now** to apply it without leaving the TUI, or **Later** to leave
 it pending. The menu shows both configured and active bindings, and after a
 restart it warns when the saved session did not answer. Bundled panes start
@@ -169,11 +170,14 @@ XDG roots that isolate that Herdr never reach an agent.
 
 The binding is resolved fresh at every service start and never written back
 (ADR 0170): the named session, else the Herdr session the service was launched
-inside, else private bundled Herdr. A candidate that does not answer is stepped
-over, so a stopped session costs a fallback, not the boot. Checkouts need
-`pnpm herdr:build` for private mode. `clankie herdr status` distinguishes the
+inside, else Clankie's own Herdr session. A candidate that does not answer is stepped
+over, so a stopped session costs a fallback, not the boot. His own session checks
+official stable releases at startup and every six hours. Verified updates stage
+without replacing a live fleet's executable; the next Clankie start without a
+live owned server applies them. `pnpm herdr:build` prepares the official offline
+fallback in a checkout. `clankie herdr status` distinguishes the
 configured choice from the running `active` binding. Change it with
-`set --session NAME` (external), `set --runtime bundled`, or `set --runtime auto`
+`use NAME`, `create`, or the compatibility command `set --runtime auto`
 (the surrounding session, else bundled), then `clankie restart captain`.
 `set --runtime external` keeps whichever session name is already saved.
 

@@ -3,7 +3,7 @@ import type {
   OperatorConversationRecovery,
   OperatorConversationStreamEvent,
 } from "@clankie/protocol";
-import type { OperatorConversationEventSink } from "./operator-conversations.ts";
+import type { OperatorConversationEventSink, PendingOperatorPrompt } from "./operator-conversations.ts";
 
 /**
  * Structural subset of the face shell's transcript surface, kept local so the
@@ -12,6 +12,8 @@ import type { OperatorConversationEventSink } from "./operator-conversations.ts"
  * executions); everything else renders as a markdown notice.
  */
 export interface OperatorConversationRenderTarget {
+  endToolGroup?(): void;
+  setPendingPrompts?(prompts: readonly PendingOperatorPrompt[]): void;
   insertUserMessage(text: string): void;
   insertAssistantMarkdown(text: string): void;
   /** Draw the message being typed; the settled message lands in the same block. */
@@ -113,6 +115,9 @@ export function createOperatorConversationShellSink(
   let pendingEcho = options.localEchoText?.trim();
   const activeToolMessages = new Map<string, string>();
   return {
+    pending(prompts): void {
+      shell.setPendingPrompts?.(prompts);
+    },
     event(event): void {
       if (event.type === "activity" && activeToolMessages.size === 0) {
         shell.setTurnLoaderMessage?.(activityLoaderMessage(event.phase));
@@ -157,7 +162,10 @@ export function createOperatorConversationShellSink(
         // A turn that ends without settling its draft (failed, cancelled) keeps
         // the words on screen but must stop owning the block, or the next
         // message would be typed into the middle of the last one.
-        if (event.phase !== "accepted") shell.clearLiveAssistant();
+        if (event.phase !== "accepted") {
+          shell.endToolGroup?.();
+          shell.clearLiveAssistant();
+        }
         shell.refreshStatus(`conversation turn ${event.phase}`);
       }
       if (event.type === "context") options.onContextUsage?.(event.usage);

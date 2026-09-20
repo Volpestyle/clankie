@@ -14,10 +14,11 @@ first hosted release.
 
 ## Decision
 
-Clankie bundles a native executable built from a checksum-pinned commit of
-`Volpestyle/clankie-herdr`. The pin and toolchain version live in
-`scripts/release/herdr.json`. The source checkout in `~/dev/herdr` is independent
-of the build; local commits and working-tree edits are not release inputs.
+Clankie bundles an official stable Herdr release executable. The platform
+checksums and matching license-source archive are pinned in
+`scripts/release/herdr.json`. Runtime updates follow the official stable channel
+([ADR 0172](0172-herdr-sessions-follow-official-releases.md)); local commits and
+working-tree edits are not release inputs.
 
 ```mermaid
 flowchart TD
@@ -44,8 +45,8 @@ part of `/health`; it returns 503 while bundled Herdr is unavailable.
 
 Herdr's sockets, configuration, session files, and logs live under
 `$CLANKIE_STATE/herdr` (default `~/.clankie/herdr`). The directory is owner-only,
-and Herdr restricts its sockets to mode 0600. Its update and agent-manifest
-checks default to disabled: Clankie releases own the version. The initial
+and Herdr restricts its sockets to mode 0600. Herdr’s own update checks are disabled; Clankie checks the official stable
+channel every six hours and stages updates separately from the live executable. The initial
 configuration is created only when absent, preserving viewer preferences. Herdr's child environment
 uses this private XDG configuration and state. The captain receives the bundled
 CLI on PATH and the private socket, but keeps his existing settings and memory
@@ -55,8 +56,8 @@ locations. No Herdr socket is exposed through the gateway or relay.
 bundled mode, unless the owner has named a session or socket, which selects
 external ([ADR 0164](0164-the-fleet-is-its-own-session.md) retired the
 adopt-the-surrounding-session rule this decision first shipped with). The service saves that resolved binding in settings after the
-runtime is reachable. Source checkouts require `pnpm herdr:build` for bundled
-mode. Existing explicitly named session preferences remain external. Explicit
+runtime is reachable. Source checkouts download the official release on first use; `pnpm herdr:build`
+prepares an offline fallback. Existing explicitly named session preferences remain external. Explicit
 `set --session NAME` selects external mode; `set --runtime auto` requests fresh
 selection on next start. An unavailable external session refuses startup rather
 than selecting another fleet, and Clankie never starts or stops that server.
@@ -81,10 +82,9 @@ transport stays on the separate authenticated Clankie API.
 
 ## Consequences
 
-Clankie owns fork maintenance, source provenance, native build tools, and license
-inventory. This replaces ADR 0139's fork-retirement objective. Removing unused
-patches remains appropriate when backed by evidence; introducing a private API
-or extracting a Rust library requires a concrete consumer.
+Clankie owns runtime supervision, update verification, and license inventory.
+The executable follows official Herdr releases; Clankie does not carry a fork
+patch stack. Optional agent-edge features degrade on versions that lack them.
 
 Herdr restores its saved session after restart. Running shell commands can be
 interrupted by a crash; this is not durable job execution or a promise to replay

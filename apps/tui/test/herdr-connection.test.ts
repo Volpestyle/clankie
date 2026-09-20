@@ -97,7 +97,14 @@ it("resolves the owner's state home inside a fleet pane, where Herdr's own XDG i
 });
 
 it("keeps Clankie's own herdr verbs local and forwards the rest to the fleet (ADR 0164)", () => {
-  for (const local of [["status"], ["set", "--runtime", "auto"], ["open"], []]) {
+  for (const local of [
+    ["status"],
+    ["set", "--runtime", "auto"],
+    ["open"],
+    ["create"],
+    ["use", "default"],
+    [],
+  ]) {
     expect(forwardsToFleetHerdr(local)).toBe(false);
   }
   for (const forwarded of [

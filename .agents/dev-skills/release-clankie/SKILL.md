@@ -36,8 +36,10 @@ and the files being changed before editing. The active implementation lives in:
   both the bundled Node binary and entrypoint before selecting the installed
   path.
 - `clankvox` remains a separately licensed AGPL executable behind the Apache
-  client/process boundary. Herdr is built from its pinned, checksum-verified
-  fork archive, never a neighboring working tree. Keep its native license
+  client/process boundary. Herdr ships the pinned official release binary, verified by SHA-256; its
+  matching official source archive supplies the license inventory. The runtime
+  stages official stable updates separately from the executable serving live
+  workers. A neighboring working tree is never a release input. Keep its native license
   inventory, including libghostty-vt, in the bundle. Cloudflared and optional
   machine integrations remain external.
 - Every archive contains the generated CycloneDX SBOM, dependency license

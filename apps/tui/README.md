@@ -125,7 +125,12 @@ credential holder.
 - Enter sends a prompt or steers Clankie's active Pi turn. Alt+Enter queues a
   separate follow-up after the current turn and any earlier queued prompts.
   The console keeps observing until all accepted inputs settle; Esc interrupts
-  the current turn. These choices also apply to `/skill-name` prompts.
+  the current turn. Accepted local steers and follow-ups appear above the
+  editor until their durable runs settle, with up to three previews and an
+  overflow count. This view follows the active observation; switching rooms,
+  detaching, or restarting clears it. The conversation log retains the messages.
+  Acceptance is not execution: the service does not publish a separate dequeue
+  event, so the preview says “awaiting completion.” These choices also apply to `/skill-name` prompts.
 - Failed sends return the message to the editor, preserving any newer draft.
   A failure before sending says **Message not sent**. If the send loses its
   acknowledgement, **Delivery unconfirmed** asks you to check the conversation
@@ -175,6 +180,11 @@ credential holder.
 - `/status` renders `clankie status`, then adds console presence, conversation,
   workspace, model context, activity availability, and the Herdr pane roster.
   `/doctor` renders the same install report as `clankie doctor`.
+- `/herdr` offers **Use an existing Herdr session** or **Create a session for
+  Clankie**, followed by **Restart now** or **Later**. `/herdr use NAME` and
+  `/herdr create` are the direct equivalents. Clankie’s own session tracks
+  official stable Herdr releases; staged updates apply when its server next
+  starts, preserving active workers and their matching CLI.
 - `/board`, `/board focus`, and `/board close` manage the herdr-lead companion
   board. A seated turn receives the current agent census.
 - `/connect` configures Linear and email and can open Discord setup; use direct
@@ -222,8 +232,19 @@ credential holder.
 
 ## Transcript rendering
 
-A frame renders every block in the transcript, so block cost is paid on every
-keystroke and must not grow with the length of the session
+Adjacent `read`, `grep`, `find`, and `ls` calls share an **Exploring / Explored**
+block. The collapsed view shows the last three operations; click or `Ctrl+O`
+expands the original Pi tool components. Failed output stays visible when
+collapsed. Messages, other tools, and turn boundaries separate groups; shell
+commands are never classified by guessing what their text does.
+
+The footer keeps workspace, conversation title, model/effort, and context
+remaining on one row when they fit, or two on narrow terminals. Routine fleet
+and Discord details live in `/status`; side-conversation, shell, and exceptional
+status remain visible. See [ADR 0171](../../docs/adr/0171-the-console-keeps-work-in-the-background.md).
+
+A frame visits every block in the transcript, so unchanged blocks reuse their
+rendered lines rather than recomputing their content on every keystroke
 ([ADR 0112](../../docs/adr/0112-a-frame-costs-the-same-at-turn-one-thousand.md)).
 A block component returns a stable array while its content is unchanged —
 memoize through `ClankieRenderCache`, and clear it in `invalidate` and in every
@@ -234,7 +255,7 @@ re-pays its own cost every frame.
 Measure before and after any change to the render path:
 
 ```bash
-node apps/tui/bench/transcript-render.ts          # default 10..500 blocks
+node apps/tui/bench/transcript-render.ts          # plain Pi vs grouped, 10..500 read blocks
 node apps/tui/bench/transcript-render.ts 1000     # a specific scrollback size
 ```
 

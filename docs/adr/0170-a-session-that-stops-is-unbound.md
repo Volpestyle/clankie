@@ -4,8 +4,8 @@ Status: accepted (James, 2026-09-08). Amends
 [ADR 0164](0164-the-fleet-is-its-own-session.md): the fleet is still its own
 session, but `auto` now follows the session the service was launched inside,
 and no binding is saved back to settings. Everything else 0164 decided — the
-owned fork, the fleet outliving the service, `clankie-herdr` as the fleet's
-CLI — is unchanged. Continues the chosen-not-inherited line of
+fleet outliving the service and `clankie-herdr` as the fleet’s CLI — is unchanged.
+Executable sourcing follows [ADR 0172](0172-herdr-sessions-follow-official-releases.md). Continues the chosen-not-inherited line of
 [ADR 0149](0149-his-herdr-session-is-chosen-not-inherited.md) by making the
 choice cheap to express and impossible to be trapped by.
 

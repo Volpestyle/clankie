@@ -3,7 +3,8 @@
 Status: proposed (2026-09-06). Its `auto` rule was overtaken before acceptance
 by [ADR 0170](0170-a-session-that-stops-is-unbound.md): the session the service
 was launched inside is a signal again, and no binding is written back to
-settings. The rest of this record is in force — the fleet is still its own
+settings. Executable sourcing follows [ADR 0172](0172-herdr-sessions-follow-official-releases.md).
+The session ownership rules remain in force — the fleet is still its own
 session, and it still outlives the service. Amends
 [ADR 0157](0157-herdr-is-an-owned-runtime.md) (retires its adopt-the-surrounding-session
 rule) and [ADR 0139](0139-clankie-rides-vanilla-herdr.md) (retires the fork's
@@ -20,14 +21,6 @@ near. For an everyday user that is the wrong default. Someone who runs Herdr
 for their own work has not agreed to have every session read by Clankie, and
 the app's roster should not be a list of strangers who happen to share a
 terminal.
-
-The fork question was decided at the same time. Prompt and spawn edges
-([ADR 0163](0163-the-fleet-carries-its-own-edges.md)) need herdr internals no
-plugin hook or CLI exposes, the fork carries a performance overlay the owner's
-GUI depends on under Clankie's polling, and nothing will be sent upstream. A
-fork with no scheduled death is a runtime Clankie owns, so the binary the owner
-runs must be the one Clankie ships or the fork's features are invisible to the
-one person using the product daily.
 
 ## Decision
 
@@ -48,11 +41,9 @@ app. No pane is ever adopted from the session the service was launched in.
 - The owner sees the bundled fleet through `clankie-herdr`, the viewer; a
   developer who wants a windowed session runs the fork binary and names a
   session of their own for the fleet, side by side with their personal one.
-- **Clankie runs its own herdr.** The bundled binary is built from the pinned
-  fork commit, the owner's machine runs the same binary, and features the
-  fleet needs may live in the fork. The upstream CLI and socket API remain the
-  rule for anything that can be built without a patch, and every fork-only
-  feature degrades to nothing on a binary that lacks it rather than breaking.
+- Clankie supervises its own session using an official stable Herdr release.
+  Updates are staged separately from the executable serving live workers
+  ([ADR 0172](0172-herdr-sessions-follow-official-releases.md)).
 
 ```mermaid
 flowchart LR
@@ -71,10 +62,6 @@ flowchart LR
   means what his agents are doing.
 - A service restart or crash cannot touch a pane the owner opened for
   themselves.
-- The fork carries a rebase tax: every patch it holds is re-applied on each
-  upstream pull. The cost is paid for in fleet features the plugin API cannot
-  provide, and it is why a herdr change is the last resort after a service-side
-  one.
 - The console and `clankie seat` claim a pane as his only when the terminal
   they sit in is the fleet's session, checked by socket. Opened inside any
   other Herdr they run as ordinary consoles: no pane is him, no pane is

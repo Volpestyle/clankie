@@ -7,6 +7,9 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
+import { refreshOfficialHerdr } from "./herdr-release.ts";
+import { prepareHerdrBinary } from "./herdr-binary.ts";
+
 const exec = promisify(execFile);
 type RuntimeState = "starting" | "healthy" | "recovering" | "stopped";
 
@@ -79,13 +82,11 @@ export function paneShellScript(owner: NodeJS.ProcessEnv): string {
 
 /** A child supervisor loses its IPC channel even if Clankie is killed with SIGKILL. */
 export async function startHerdrRuntime(input: {
-  binary: string;
+  binary?: string;
   repoRoot: string;
   stateRoot: string;
   env: NodeJS.ProcessEnv;
 }) {
-  if (!existsSync(input.binary))
-    throw new Error("Bundled Herdr is missing; run pnpm herdr:build or reinstall Clankie");
   const root = resolve(input.stateRoot, "herdr");
   const socketPath = join(root, "herdr.sock");
   if (Buffer.byteLength(`${root}/herdr-client.sock`) > 103) {
@@ -97,15 +98,23 @@ export async function startHerdrRuntime(input: {
   // run that still answers is adopted rather than refused, so restarting
   // Clankie does not close the panes its agents are working in.
   const listening = await socketListening(socketPath);
-  const adopt =
-    listening &&
-    (await runtimeAnswers(input.binary, {
-      ...input.env,
-      XDG_CONFIG_HOME: root,
-      XDG_STATE_HOME: root,
-      XDG_RUNTIME_DIR: root,
-      HERDR_SOCKET_PATH: socketPath,
+  const fleetEnv = {
+    ...input.env,
+    XDG_CONFIG_HOME: root,
+    XDG_STATE_HOME: root,
+    XDG_RUNTIME_DIR: root,
+    HERDR_SOCKET_PATH: socketPath,
+  };
+  const binary =
+    input.binary ??
+    (await prepareHerdrBinary({
+      root,
+      fallback: bundledHerdrBinary(input.repoRoot),
+      listening,
+      answers: (candidate) => runtimeAnswers(candidate, fleetEnv),
     }));
+  if (!existsSync(binary)) throw new Error("Herdr is missing; install Herdr or run pnpm herdr:build");
+  const adopt = listening && (await runtimeAnswers(binary, fleetEnv));
   if (listening && !adopt) throw new Error(`Herdr runtime already has an owner: ${socketPath}`);
   await mkdir(join(root, "herdr"), { recursive: true, mode: 0o700 });
   // The pane shell is rewritten every start so it carries the owner's current
@@ -138,7 +147,7 @@ export async function startHerdrRuntime(input: {
   input.env.HERDR_SOCKET_PATH = socketPath;
   delete input.env.HERD_LEAD_SUMMARIES_CACHE;
   input.env.HERDR_PLUGIN_STATE_DIR = join(root, "herdr/plugins/herd-lead");
-  input.env.PATH = `${dirname(input.binary)}${delimiter}${input.env.PATH ?? ""}`;
+  input.env.PATH = `${dirname(binary)}${delimiter}${input.env.PATH ?? ""}`;
   // Herdr hands this environment to every pane it opens, and the XDG override
   // below is its own isolation, not the owner's. This pointer is what keeps a
   // pane inside the fleet resolving Clankie's real state home (ADR 0164).
@@ -147,7 +156,7 @@ export async function startHerdrRuntime(input: {
   const compiled = join(input.repoRoot, "apps/clankie/src/herdr-runtime.js");
   const child = fork(
     existsSync(compiled) ? compiled : compiled.replace(/\.js$/u, ".ts"),
-    ["--supervise-herdr", input.binary, ...(adopt ? ["--adopt"] : [])],
+    ["--supervise-herdr", binary, ...(adopt ? ["--adopt"] : [])],
     {
       execArgv: [],
       env: { ...input.env, XDG_CONFIG_HOME: root, XDG_STATE_HOME: root, XDG_RUNTIME_DIR: root },
@@ -171,7 +180,9 @@ export async function startHerdrRuntime(input: {
       }
     });
   });
+  let updateTimer: ReturnType<typeof setInterval> | undefined;
   async function close(): Promise<void> {
+    clearInterval(updateTimer);
     if (child.connected) child.disconnect();
     await exited;
   }
@@ -180,6 +191,18 @@ export async function startHerdrRuntime(input: {
   } catch (error) {
     await close();
     throw error;
+  }
+  if (input.binary === undefined) {
+    const stageUpdate = () => {
+      void refreshOfficialHerdr(root, bundledHerdrBinary(input.repoRoot)).catch((error: unknown) => {
+        process.stderr.write(
+          `herdr: update check failed; current fleet stays running: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      });
+    };
+    stageUpdate();
+    updateTimer = setInterval(stageUpdate, 6 * 60 * 60 * 1000);
+    updateTimer.unref();
   }
   return { status: () => state, close };
 }

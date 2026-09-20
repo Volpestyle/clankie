@@ -57,7 +57,6 @@ import {
   type HerdrJumpResult,
 } from "./session/herdr-report.ts";
 import { PresencePoller } from "./observation/presence.ts";
-import { formatCaptainPresenceStatus, formatHerdrBindingStatus } from "./shell/footer.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
 import { doctorCommand } from "./command/doctor.ts";
@@ -426,17 +425,13 @@ const shell = new ClankieFaceShell({
   bannerFields: { title: "Clankie" },
   historyPath: join(tuiStateRoot, "prompt-history.jsonl"),
   voiceTranscripts,
-  // The pi-style footer: cwd · conversation, context %, model, presence.
+  // Routine body and fleet details live in /status; the dock keeps working context.
   footerData: () => ({
     contextUsage: currentContextUsage,
     model: currentModelDisplay,
     title: currentConversationTitle,
   }),
-  statusExtras: () => [
-    ...sideConversationStatus(),
-    formatHerdrBindingStatus(herdrBinding),
-    formatCaptainPresenceStatus(presence.snapshot),
-  ],
+  statusExtras: () => sideConversationStatus(),
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal, delivery) => {
     let ready!: () => void;
@@ -564,7 +559,7 @@ async function applyModelDisplay(config: ClankieConfig): Promise<void> {
   shell.refreshStatusView();
 }
 
-// First footer read of the fleet binding; later reads follow /herdr and /status.
+// Initial fleet binding read; later reads follow /herdr and /status.
 void refreshHerdrBinding().then(() => shell.refreshStatusView());
 
 // Crash-safety envelope: Node >=24 terminates on an unhandled rejection with no

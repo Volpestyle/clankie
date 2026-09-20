@@ -53,6 +53,8 @@ export function herdrConnection(binding: HerdrBinding, options: HerdrConnectionO
       existsSync(join(options.repoRoot, "release.json")) ? "libexec/herdr" : ".data/herdr/bin/herdr",
     );
     const root = dirname(binding.socketPath);
+    const activeBinary = join(root, "bin/herdr");
+    if (existsSync(activeBinary)) command = activeBinary;
     env.XDG_CONFIG_HOME = root;
     env.XDG_STATE_HOME = root;
     env.XDG_RUNTIME_DIR = root;

@@ -1,8 +1,6 @@
 /**
- * Footer band of the face shell, matching pi's interactive footer: a dim
- * working-context line (cwd · conversation title), then a stats line with
- * context usage on the left and the model right-aligned, then any extra
- * status segments on their own line. Data flows in through a provider so the
+ * A quiet working-context line with model and context remaining on the right.
+ * Narrow terminals put the stats on a second row; exceptional status gets its own row. Data flows in through a provider so the
  * footer always renders current state without change bookkeeping.
  */
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
@@ -23,11 +21,7 @@ export interface ClankieFooterState extends ClankieFooterData {
 
 /** Which fleet he leads right now: his own, or a named session of the owner's. */
 export function describeHerdrBinding(binding: HerdrBinding): string {
-  return binding.runtime === "bundled" ? "internal (bundled)" : `external · ${binding.session}`;
-}
-
-export function formatHerdrBindingStatus(binding: HerdrBinding | undefined): string {
-  return `herdr ${binding === undefined ? "unavailable" : describeHerdrBinding(binding)}`;
+  return binding.runtime === "bundled" ? "Clankie’s own session" : binding.session;
 }
 
 export function formatCaptainPresenceStatus(presence: PresenceSnapshot | undefined): string {
@@ -59,7 +53,7 @@ export function formatFooterTokens(count: number): string {
 
 export type FooterContextLevel = "ok" | "warning" | "error";
 
-/** pi's context readout: `12.3%/200k`, escalating color past 70% and 90%. */
+/** Context remaining, escalating color past 70% and 90% usage. */
 export function formatFooterContext(usage: OperatorConversationContextUsage | undefined): {
   readonly text: string;
   readonly level: FooterContextLevel;
@@ -70,7 +64,7 @@ export function formatFooterContext(usage: OperatorConversationContextUsage | un
   const percent = usage.contextWindow > 0 ? (usage.tokens / usage.contextWindow) * 100 : 0;
   return {
     level: percent > 90 ? "error" : percent > 70 ? "warning" : "ok",
-    text: `${percent.toFixed(1)}%/${window}`,
+    text: `${Math.max(0, 100 - percent).toFixed(0)}% context left`,
   };
 }
 
@@ -98,8 +92,12 @@ export class ClankieFooterComponent implements Component {
     const contextLine = [displayHomePath(state.cwd), ...(state.title === undefined ? [] : [state.title])]
       .filter((part) => part.length > 0)
       .join(" • ");
-    const lines = [truncateToWidth(ansi.dim(contextLine), safeWidth, ansi.dim("..."))];
-    lines.push(this.renderStatsLine(state, safeWidth));
+    const stats = this.renderStatsLine(state, safeWidth);
+    const padding = safeWidth - visibleWidth(contextLine) - visibleWidth(stats);
+    const lines =
+      padding >= 2
+        ? [ansi.dim(contextLine) + " ".repeat(padding) + stats]
+        : [truncateToWidth(ansi.dim(contextLine), safeWidth, ansi.dim("…")), stats];
     const extras = state.extras.filter((part) => part.length > 0);
     if (extras.length > 0) {
       const joined = extras
@@ -110,7 +108,7 @@ export class ClankieFooterComponent implements Component {
     return lines;
   }
 
-  /** Left stats + right-aligned model, truncating the model first (pi's rule). */
+  /** Keep the context readout visible when a long model name needs truncation. */
   private renderStatsLine(state: ClankieFooterState, width: number): string {
     const { ansi } = this;
     const usage = formatFooterContext(state.contextUsage);
@@ -127,7 +125,6 @@ export class ClankieFooterComponent implements Component {
     const availableForRight = width - statsLeftWidth - minPadding;
     if (rightSide.length === 0 || availableForRight <= 0) return statsLeft;
     const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
-    const padding = " ".repeat(Math.max(0, width - statsLeftWidth - visibleWidth(truncatedRight)));
-    return `${statsLeft}${ansi.dim(`${padding}${truncatedRight}`)}`;
+    return `${ansi.dim(truncatedRight)}  ${statsLeft}`;
   }
 }
