@@ -50,6 +50,7 @@ it("publishes a workspace file into the transcript and downloads its exact bytes
       file: { filename: "report.csv", mediaType: "text/csv; charset=utf-8", byteCount: expected.length },
     });
     if (published.op !== "publish_file") throw new Error("file was not published");
+    expect(published.file).not.toHaveProperty("artifactRef");
 
     const replay = await conversations.serve({
       op: "replay",

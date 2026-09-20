@@ -707,13 +707,20 @@ export class ConversationStore {
     const meta = this.metas.get(input.conversationId);
     if (meta === undefined) throw new Error("Unknown conversation");
     if (this.publishDeliveredFile === undefined) throw new Error("Delivered files are unavailable");
-    const file = await this.publishDeliveredFile({
+    const published = await this.publishDeliveredFile({
       conversationId: input.conversationId,
       sourceRoot: workspaceOf(meta.scope) ?? this.defaultWorkingDirectory,
       path: input.path,
       ...(input.filename === undefined ? {} : { filename: input.filename }),
       ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType }),
     });
+    const file = {
+      artifactId: published.artifactId,
+      filename: published.filename,
+      mediaType: published.mediaType,
+      byteCount: published.byteCount,
+      sha256: published.sha256,
+    };
     meta.revision += 1;
     this.append(meta, { type: "file", file });
     meta.updatedAt = new Date().toISOString();
