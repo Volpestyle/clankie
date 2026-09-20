@@ -11,10 +11,16 @@ correspondence contains the approved reply below, verified on September 20,
 Operator alarm delivery is a release prerequisite. The intended subscription
 is email `volpestyle@gmail.com` on
 `arn:aws:sns:us-east-1:842434829012:clankie-accounts-alarms`.
-The approved subscription request is created and has `PendingConfirmation=true`.
-James must follow the AWS SNS confirmation email link before notifications can
-arrive. A returned subscription ARN alone does not prove confirmation. The
-submitted case reply is retained below.
+The approved subscription is confirmed: `PendingConfirmation=false`, verified
+through the SNS API on September 20, 2026. Its subscription suffix is
+`489de595-3a79-4a8c-bd7b-abb90b3709c6`.
+
+The submitted case reply is retained verbatim below, including its then-pending
+monitoring disclosure. The actual Cognito email verified during sign-in has
+subject `Your authentication code` and body `Your authentication code is
+<eight-digit code>.`; the sample below is illustrative and is not the current
+template. Future correspondence must use the actual template and confirmed
+monitoring state. No additional reply is required or authorized here.
 
 ---
 
