@@ -7,6 +7,7 @@ import {
   OperatorConversationServiceResultSchema,
   OperatorConversationRecoverySchema,
   OperatorConversationStreamEventSchema,
+  OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OPERATOR_TERMINAL_TAIL_PATH,
   OperatorTerminalTailItemSchema,
   type OperatorConversationRecovery,
@@ -58,6 +59,31 @@ afterEach(async () => {
 });
 
 describe("authenticated operator conversation relay", () => {
+  it("forwards an authenticated file download as exact bytes", async () => {
+    const expected = Buffer.from("delivered bytes");
+    const relay = await startRelay({
+      dispatch: async () => {
+        throw new Error("download must not use dispatch");
+      },
+      downloadFile: async (request) => {
+        expect(request).toEqual({
+          schemaVersion: 1,
+          conversationId: "global-default",
+          artifactId: "artifact-1",
+        });
+        return new Response(expected, { headers: { "content-type": "text/plain; charset=utf-8" } });
+      },
+    });
+    const response = await post(relay.url, OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH, {
+      schemaVersion: 1,
+      conversationId: "global-default",
+      artifactId: "artifact-1",
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(expected);
+  });
+
   it("lists, gets, creates seat threads, reads the roster and composer catalog, and closes", async () => {
     const seen: OperatorConversationServiceRequest[] = [];
     const relay = await startRelay({

@@ -208,6 +208,8 @@ export const OPERATOR_CONVERSATION_TOOL_DETAIL_MAX = OPERATOR_CONVERSATION_TEXT_
 export const OPERATOR_CONVERSATION_MESSAGE_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
 export const OPERATOR_CONVERSATION_CODE_MAX = 128;
 export const OPERATOR_CONVERSATION_REF_MAX = 512;
+export const OPERATOR_DELIVERED_FILE_BYTES_MAX = 15 * 1024 * 1024;
+export const OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH = "/operator/v1/artifacts/download";
 /** A filesystem path, bounded well under PATH_MAX so it never truncates a real one. */
 export const OPERATOR_SEAT_DIRECTORY_MAX = 1024;
 export const OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX = 32;
@@ -239,6 +241,26 @@ export type OperatorConversationCursor = z.infer<typeof OperatorConversationCurs
 export const OperatorConversationRunIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
 export type OperatorConversationRunId = z.infer<typeof OperatorConversationRunIdSchema>;
 const OperatorConversationEventRefSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
+
+export const OperatorDeliveredFileSchema = z
+  .object({
+    artifactId: OperatorConversationEventRefSchema,
+    filename: z.string().trim().min(1).max(256),
+    mediaType: z.string().trim().min(1).max(256),
+    byteCount: z.number().int().nonnegative().max(OPERATOR_DELIVERED_FILE_BYTES_MAX),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+export type OperatorDeliveredFile = z.infer<typeof OperatorDeliveredFileSchema>;
+
+export const OperatorDeliveredFileDownloadRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    conversationId: OperatorConversationIdSchema,
+    artifactId: OperatorConversationEventRefSchema,
+  })
+  .strict();
+export type OperatorDeliveredFileDownloadRequest = z.infer<typeof OperatorDeliveredFileDownloadRequestSchema>;
 
 export const OperatorConversationChannelIdSchema = z
   .string()
@@ -1153,6 +1175,10 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     workerRunId: OperatorConversationWorkerRunIdSchema,
     phase: z.enum(["snapshot", "tail"]),
     summary: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("file"),
+    file: OperatorDeliveredFileSchema,
   }).strict(),
   /**
    * A reaction landing on, or coming off, one earlier entry (ADR 0146).
@@ -2108,6 +2134,16 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       input: OperatorTerminalInputRequestSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("publish_file"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      path: z.string().trim().min(1).max(4096),
+      filename: z.string().trim().min(1).max(256).optional(),
+      mediaType: z.string().trim().min(1).max(256).optional(),
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
 
@@ -2318,6 +2354,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       result: OperatorTerminalInputResultSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("publish_file"),
+      schemaVersion: z.literal(1),
+      file: OperatorDeliveredFileSchema,
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceResult = z.infer<typeof OperatorConversationServiceResultSchema>;
 
@@ -2446,6 +2489,18 @@ export interface OperatorConversationServiceClient {
   /** Interrupt one accepted run; false when it is unknown or already settled. */
   cancel(conversationId: string, runId: string): Promise<boolean>;
   autonomy(conversationId: string, command: OperatorAutonomyCommand): Promise<OperatorAutonomyStatus>;
+  /** Local-only publication of one deliberate file from this conversation's working directory. */
+  publishFile?(input: {
+    readonly conversationId: string;
+    readonly path: string;
+    readonly filename?: string;
+    readonly mediaType?: string;
+  }): Promise<OperatorDeliveredFile>;
+  /** Authenticated raw-byte retrieval; supplied by HTTP transports that expose the file route. */
+  downloadFile?(
+    request: OperatorDeliveredFileDownloadRequest,
+    signal?: AbortSignal,
+  ): Promise<{ readonly mediaType: string; readonly bytes: Uint8Array }>;
 }
 
 export function createOperatorConversationServiceClient(
@@ -2666,6 +2721,13 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "autonomy", schemaVersion: 1, conversationId, command });
       if (result.op !== "autonomy") throw new Error(`Unexpected ${result.op} result for autonomy`);
       return result.status;
+    },
+    async publishFile(input) {
+      const result = await dispatch({ op: "publish_file", schemaVersion: 1, ...input });
+      if (result.op !== "publish_file") {
+        throw new Error(`Unexpected ${result.op} result for publish_file`);
+      }
+      return result.file;
     },
   };
 }

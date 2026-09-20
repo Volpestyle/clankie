@@ -53,6 +53,8 @@ export function renderOperatorConversationNotice(event: OperatorConversationStre
     // toggle would be noisier than the thing it reports.
     case "reaction":
       return undefined;
+    case "file":
+      return `**File delivered**\n\n${event.file.filename} · ${String(event.file.byteCount)} bytes · ${event.file.mediaType}`;
     case "tool": {
       if (event.skillName === undefined || event.phase === "started") return undefined;
       return `**Skill: ${event.skillName} - ${event.phase === "completed" ? "loaded" : "failed to load"}**`;

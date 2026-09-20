@@ -73,6 +73,7 @@ import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import { PersonaStore } from "./personas.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
+import type { DeliveredFileStore } from "../delivered-files.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import {
   discordTurnSessionKey,
@@ -432,6 +433,8 @@ export interface CaptainOptions {
   readonly settings?: SettingsStore;
   /** Real process-level overrides captured before stored settings are projected into child env. */
   readonly discordEnvironment?: NodeJS.ProcessEnv;
+  /** Conversation-scoped file publication; bytes share the conversation retention lifecycle. */
+  readonly deliveredFiles?: Pick<DeliveredFileStore, "publish" | "removeConversation">;
   /**
    * Trusted Discord runtime, used to make a channel's room and webhook
    * (ADR 0146). It is also what answers which guild the swarm home is, so an
@@ -738,6 +741,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     sideConversation = false,
   ): Promise<LaneSession> {
     const capture: TurnContext = {};
+    if (systemTools && options.deliveredFiles !== undefined) {
+      capture.publishFile = async (input) => {
+        if (capture.room === undefined) throw new Error("Delivered files need an active room");
+        const published = await options.deliveredFiles!.publish({
+          conversationId: capture.room,
+          sourceRoot: cwd,
+          ...input,
+        });
+        capture.media = { artifactRef: published.artifactRef, filename: published.filename };
+        return published;
+      };
+    }
     const { runtime: models, resolveSelection } = await runtime();
     const currentSettings = await settings();
     const selection = await resolveSelection();
@@ -902,6 +917,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       lane.capture.room = roomKey("operator", conversationId);
       lane.capture.targetId = conversationId;
+      lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
       if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
 
       const live = lane.running !== undefined || lane.session.isStreaming;
@@ -1086,6 +1102,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     (conversationId, scope) => {
       autonomy.clearConversation(conversationId);
       herdrWatches.cancelConversation(conversationId);
+      void options.deliveredFiles?.removeConversation(conversationId).catch(() => undefined);
       if (scope.kind === "seat") herdrWatches.untrackSeat(scope.seatId);
       const key = `operator:${conversationId}`;
       const pending = sessions.get(key);
@@ -1168,6 +1185,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       });
       if (reply !== null) fleetChanges.touch();
     },
+    options.deliveredFiles === undefined ? undefined : (input) => options.deliveredFiles!.publish(input),
+    workingDirectory,
   );
 
   /**

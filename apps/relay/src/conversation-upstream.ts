@@ -1,6 +1,8 @@
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OperatorConversationServiceResultSchema,
+  type OperatorDeliveredFileDownloadRequest,
   type OperatorConversationServiceDispatch,
 } from "../../../packages/protocol/src/index.ts";
 
@@ -30,6 +32,23 @@ export function createCaptainConversationDispatch(
     if (!response.ok) throw new Error(`Captain conversation service returned HTTP ${response.status}`);
     return OperatorConversationServiceResultSchema.parse(await response.json());
   };
+}
+
+/** Authenticated raw-byte hop; the device bearer never reaches the captain. */
+export function createCaptainFileDownload(options: CaptainConversationDispatchOptions) {
+  if (options.bearerToken.trim().length < 16) throw new Error("Captain bearer token is too short");
+  const endpoint = new URL(OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH, requireHttpBase(options.baseUrl));
+  const fetcher = options.fetch ?? globalThis.fetch;
+  return (request: OperatorDeliveredFileDownloadRequest): Promise<Response> =>
+    fetcher(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${options.bearerToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(30_000),
+    });
 }
 
 function requireHttpBase(value: string): URL {

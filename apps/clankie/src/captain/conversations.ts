@@ -21,6 +21,7 @@ import {
   type OperatorConversation,
   type OperatorConversationContextUsage,
   type OperatorConversationEventBody,
+  type OperatorDeliveredFile,
   type OperatorConversationLiveDraft,
   type OperatorConversationReactor,
   type OperatorConversationScope,
@@ -322,6 +323,13 @@ type ConversationForker = (input: {
   readonly conversationId: string;
   readonly workspace?: string;
 }) => Promise<void>;
+type DeliveredFilePublisher = (input: {
+  readonly conversationId: string;
+  readonly sourceRoot: string;
+  readonly path: string;
+  readonly filename?: string;
+  readonly mediaType?: string;
+}) => Promise<OperatorDeliveredFile>;
 
 /**
  * A workspace scope names the directory the conversation's session works in.
@@ -413,6 +421,8 @@ export class ConversationStore {
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
   private readonly sendToSeat: SeatSender | undefined;
   private readonly reportSeatEdge: SeatEdgeReporter | undefined;
+  private readonly publishDeliveredFile: DeliveredFilePublisher | undefined;
+  private readonly defaultWorkingDirectory: string;
   private readonly forkConversation: ConversationForker | undefined;
   private readonly projection: ChannelProjection | undefined;
   private readonly seatForPersona: PersonaSeatResolver | undefined;
@@ -436,6 +446,8 @@ export class ConversationStore {
     seatForPersona?: PersonaSeatResolver,
     personaPresentation?: PersonaPresentation,
     reportSeatEdge?: SeatEdgeReporter,
+    publishDeliveredFile?: DeliveredFilePublisher,
+    defaultWorkingDirectory = process.cwd(),
   ) {
     this.root = root;
     this.runner = runner;
@@ -447,6 +459,8 @@ export class ConversationStore {
     this.seatForPersona = seatForPersona;
     this.personaPresentation = personaPresentation;
     this.reportSeatEdge = reportSeatEdge;
+    this.publishDeliveredFile = publishDeliveredFile;
+    this.defaultWorkingDirectory = defaultWorkingDirectory;
     mkdirSync(root, { recursive: true });
     // Complete a reset interrupted after archiving but before installing fresh metadata.
     const archives = join(dirname(root), "conversation-archives");
@@ -650,6 +664,12 @@ export class ConversationStore {
       }
       case "send":
         return { op: "send", schemaVersion: 1, result: await this.send(request.turn) };
+      case "publish_file":
+        return {
+          op: "publish_file",
+          schemaVersion: 1,
+          file: await this.publishFile(request),
+        };
       case "cancel":
         return {
           op: "cancel",
@@ -676,6 +696,29 @@ export class ConversationStore {
     this.cancelRequests.add(runId);
     entry.controller.abort();
     return true;
+  }
+
+  public async publishFile(input: {
+    readonly conversationId: string;
+    readonly path: string;
+    readonly filename?: string | undefined;
+    readonly mediaType?: string | undefined;
+  }): Promise<OperatorDeliveredFile> {
+    const meta = this.metas.get(input.conversationId);
+    if (meta === undefined) throw new Error("Unknown conversation");
+    if (this.publishDeliveredFile === undefined) throw new Error("Delivered files are unavailable");
+    const file = await this.publishDeliveredFile({
+      conversationId: input.conversationId,
+      sourceRoot: workspaceOf(meta.scope) ?? this.defaultWorkingDirectory,
+      path: input.path,
+      ...(input.filename === undefined ? {} : { filename: input.filename }),
+      ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType }),
+    });
+    meta.revision += 1;
+    this.append(meta, { type: "file", file });
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+    return file;
   }
 
   /** Keeps an accepted detached run alive for the transport's waitUntil. */

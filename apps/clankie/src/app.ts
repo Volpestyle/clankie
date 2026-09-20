@@ -51,10 +51,12 @@ import {
   DiscordVoiceTranscriptCursorSchema,
   LOCAL_VOICE_CHAT_PATH,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   FLEET_SEAT_EVENTS_PATH,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorConversationServiceRequestSchema,
+  OperatorDeliveredFileDownloadRequestSchema,
   OperatorSeatReplySchema,
   type OperatorSeatEventsPage,
   CaptainChannelTurnResultSchema,
@@ -153,6 +155,7 @@ import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./m
 import { LocalVoiceChatSession } from "./local-voice-chat.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
+import type { DeliveredFileStore } from "./delivered-files.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 
@@ -332,6 +335,8 @@ export interface ClankieAppDependencies {
   herdrBinding?: () => HerdrBinding;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
+  /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
+  deliveredFiles?: Pick<DeliveredFileStore, "read">;
   memory?: MemoryStores;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
   settings?: {
@@ -2359,6 +2364,28 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // The operator conversation contract (TUI direct, relay in front for
   // devices) and the lanes view — the captain's HTTP face. Both clients send
   // the shared captain token, the same credential the channel-turn door takes.
+  app.post(OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH, async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (dependencies.deliveredFiles === undefined) {
+      return context.json({ error: "delivered_files_unavailable" }, 503);
+    }
+    const parsed = OperatorDeliveredFileDownloadRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const found = await dependencies.deliveredFiles.read(parsed.data.conversationId, parsed.data.artifactId);
+    if (found === undefined) return context.json({ error: "artifact_unavailable" }, 404);
+    return new Response(new Uint8Array(found.data), {
+      headers: {
+        "cache-control": "private, no-store",
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(found.file.filename)}`,
+        "content-length": String(found.data.byteLength),
+        "content-type": found.file.mediaType,
+        "x-content-type-options": "nosniff",
+      },
+    });
+  });
+
   app.post(OPERATOR_CONVERSATION_DISPATCH_PATH, async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);

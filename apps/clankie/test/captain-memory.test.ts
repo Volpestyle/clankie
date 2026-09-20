@@ -7,6 +7,36 @@ import type { LaneLog } from "../src/captain/lane-log.ts";
 import { captainTools } from "../src/captain/tools.ts";
 
 describe("captain memory", () => {
+  it("offers delivered files only to a host-authorized turn and returns its published descriptor", async () => {
+    const deps = {
+      embodiment: {
+        submitIntent: () => Promise.reject(new Error("unused")),
+        getSession: () => Promise.reject(new Error("unused")),
+        getLiveSession: () => Promise.reject(new Error("unused")),
+      },
+    } as unknown as CaptainDeps;
+    expect(
+      captainTools(deps, {}, {} as LaneLog, "discord_presence").some((tool) => tool.name === "deliver_file"),
+    ).toBe(false);
+    const published = {
+      artifactId: "artifact-1",
+      filename: "report.pdf",
+      mediaType: "application/pdf",
+      byteCount: 12,
+      sha256: "0".repeat(64),
+    };
+    const tool = captainTools(
+      deps,
+      { publishFile: async () => published },
+      {} as LaneLog,
+      "discord_presence",
+    ).find((candidate) => candidate.name === "deliver_file");
+    if (tool === undefined) throw new Error("deliver_file is missing");
+    await expect(
+      tool.execute("call", { path: "build/report.pdf" }, undefined, undefined, {} as never),
+    ).resolves.toMatchObject({ details: published });
+  });
+
   it("refreshes trusted episodic recall in the system prompt and fails open", async () => {
     const recalled: CaptainSessionLaneV2[] = [];
     const handler = await beforeAgentStartHandler(

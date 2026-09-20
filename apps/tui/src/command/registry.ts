@@ -12,6 +12,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["file"],
+    lines: [
+      "  file publish --conversation ID PATH [--name FILE] [--type MEDIA_TYPE]",
+      "                           Publish one finished local file into the conversation (JSON)",
+    ],
+  },
+  {
     nouns: ["health", "status"],
     lines: ["  health | status          Probe every launcher-owned service (JSON)"],
   },

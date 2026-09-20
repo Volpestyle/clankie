@@ -22,6 +22,7 @@ import { runStanceCommand } from "../src/command/stance.ts";
 import { runPromptCommand } from "../src/command/prompt.ts";
 import { runResetCommand } from "../src/command/reset.ts";
 import { runSendCommand } from "../src/command/send.ts";
+import { runFileCommand } from "../src/command/file.ts";
 import { runMemoryCardCommand } from "../src/command/memory-card.ts";
 import { runMemoryCommand } from "../src/command/memory.ts";
 import { runMetricsCommand } from "../src/command/metrics.ts";
@@ -171,6 +172,7 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "reset") return await runResetCommand(rest, options);
     if (command === "send") return await runSendCommand(rest, { ...options, stdout });
+    if (command === "file") return await runFileCommand(rest, { ...options, stdout });
     if (command === "memory-card") {
       return await runMemoryCardCommand(rest, { ...options, stdout });
     }

@@ -4,8 +4,17 @@ AWS answers a production-access request with a form letter asking how often
 we send, how recipient lists are maintained, how bounces, complaints, and
 unsubscribes are handled, and for sample content. This is the answer, kept
 current with the stack so a re-request in this or another region is a paste.
-Reply on the case in the AWS Support Center; the notification address cannot
-receive mail.
+Review this text before replying on existing case `178831379600291` in the
+AWS Support Center; the notification address cannot receive mail. The case
+is closed after no response, and requires reopening. This draft is not sent.
+
+Operator alarm delivery is a release prerequisite. The intended subscription
+is email `volpestyle@gmail.com` on
+`arn:aws:sns:us-east-1:842434829012:clankie-accounts-alarms`.
+The approved subscription request is created and has `PendingConfirmation=true`.
+James must follow the AWS SNS confirmation email link before notifications can
+arrive. A returned subscription ARN alone does not prove confirmation. The
+case reply is approved and prepared below.
 
 ---
 
@@ -35,15 +44,18 @@ scrape, or import addresses, and a code is only ever sent to the address the
 recipient just typed in.
 
 **Bounces and complaints.** Every send from the domain rides the SES
-configuration set `clankie-accounts-mail`, whose event destination publishes
-BOUNCE, COMPLAINT, and REJECT events to an SNS topic that emails the operator
-in real time. The operator disables the corresponding Cognito user
+configuration set `clankie-accounts-mail`, whose enabled event destination
+publishes BOUNCE, COMPLAINT, and REJECT events to an SNS topic. SES account-level
+suppression is enabled for BOUNCE and COMPLAINT. The SNS operator email subscription is created but awaiting confirmation;
+confirming it is an outstanding prerequisite, and we will keep external testing gated until it is
+confirmed. The operator's handling procedure is to disable the corresponding Cognito user
 (`admin-disable-user`); a disabled user cannot request another code, so the
 address receives no further mail. Because each message is user-initiated and
 single-purpose, we expect bounces to be limited to typos and complaints to be
-near zero; either kind ends that address's mail immediately. A CloudWatch
+near zero. A CloudWatch
 alarm on the account's hourly `Send` metric (threshold 200) notifies the
-same topic so an abnormal loop is caught within the hour.
+same topic; it has actions enabled, but email delivery also depends on that
+subscription being confirmed.
 
 **Unsubscribe.** Transactional sign-in codes carry no subscription. Anyone
 who no longer wants mail from us stops using remote access, or asks the

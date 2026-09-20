@@ -3,9 +3,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { once } from "node:events";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OPERATOR_DELIVERED_FILE_BYTES_MAX,
+  OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OPERATOR_TERMINAL_TAIL_PATH,
   OperatorConversationServiceRequestSchema,
   OperatorConversationServiceResultSchema,
+  OperatorDeliveredFileDownloadRequestSchema,
+  type OperatorDeliveredFileDownloadRequest,
   type OperatorConversationServiceDispatch,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
@@ -29,6 +33,7 @@ export interface RelayConversationLogger {
 export interface OperatorConversationRelayOptions {
   readonly authorizeDevice: RelayDeviceAuthorizer;
   readonly dispatch: OperatorConversationServiceDispatch;
+  readonly downloadFile?: (request: OperatorDeliveredFileDownloadRequest) => Promise<Response>;
   readonly logger?: RelayConversationLogger;
   readonly clock?: () => number;
   readonly tailPollMs?: number;
@@ -48,7 +53,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (
       path !== OPERATOR_CONVERSATION_DISPATCH_PATH &&
       path !== OPERATOR_CONVERSATION_TAIL_PATH &&
-      path !== OPERATOR_TERMINAL_TAIL_PATH
+      path !== OPERATOR_TERMINAL_TAIL_PATH &&
+      path !== OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH
     ) {
       return false;
     }
@@ -67,6 +73,53 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeAuthDenial(response, authorization.denial);
       return true;
     }
+    if (path === OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH) {
+      if (!authorization.device.grants.chat) {
+        writeGrantDenial(response, "chat");
+        return true;
+      }
+      let body: unknown;
+      try {
+        body = await readJson(request);
+      } catch {
+        writeJson(response, 400, { error: "invalid_artifact_request" });
+        return true;
+      }
+      const parsed = OperatorDeliveredFileDownloadRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        writeJson(response, 400, { error: "invalid_artifact_request" });
+        return true;
+      }
+      try {
+        if (options.downloadFile === undefined) throw new Error("artifact upstream unavailable");
+        const upstream = await options.downloadFile(parsed.data);
+        const declaredLength = Number(upstream.headers.get("content-length"));
+        if (Number.isFinite(declaredLength) && declaredLength > OPERATOR_DELIVERED_FILE_BYTES_MAX) {
+          writeJson(response, 502, { error: "artifact_upstream_too_large" });
+          return true;
+        }
+        const body = Buffer.from(await upstream.arrayBuffer());
+        if (body.byteLength > OPERATOR_DELIVERED_FILE_BYTES_MAX) {
+          writeJson(response, 502, { error: "artifact_upstream_too_large" });
+          return true;
+        }
+        response.statusCode = upstream.status;
+        for (const header of [
+          "cache-control",
+          "content-disposition",
+          "content-type",
+          "x-content-type-options",
+        ]) {
+          const value = upstream.headers.get(header);
+          if (value !== null) response.setHeader(header, value);
+        }
+        response.setHeader("content-length", String(body.byteLength));
+        response.end(body);
+      } catch {
+        writeJson(response, 502, { error: "artifact_upstream_unavailable" });
+      }
+      return true;
+    }
     let serviceRequest: OperatorConversationServiceRequest;
     try {
       serviceRequest = OperatorConversationServiceRequestSchema.parse(await readJson(request));
@@ -79,7 +132,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // against the census (ADR 0148). A remote device cannot make that claim — it
     // would be typing some other pane's id — so the op stays on the local door
     // rather than riding a device grant.
-    if (serviceRequest.op === "state_stance") {
+    if (serviceRequest.op === "state_stance" || serviceRequest.op === "publish_file") {
       writeJson(response, 403, { error: "op_is_local_to_the_machine" });
       return true;
     }

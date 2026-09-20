@@ -5,6 +5,7 @@ import {
   type CaptainSessionLaneV2,
   type CaptainTurnMedia,
   type DrawDiagramResult,
+  type OperatorDeliveredFile,
   isAttachableTurnMediaRef,
 } from "@clankie/protocol";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -49,6 +50,14 @@ export interface TurnContext {
   messageId?: string | undefined;
   /** True for a host-authored goal continuation or scheduled wake. */
   autonomous?: boolean | undefined;
+  /** Bound by an operator conversation to publish one deliberate finished file into its transcript. */
+  publishFile?:
+    | ((input: {
+        readonly path: string;
+        readonly filename?: string;
+        readonly mediaType?: string;
+      }) => Promise<OperatorDeliveredFile>)
+    | undefined;
 }
 
 /** Room key, stable across a room's turns and distinct across rooms. */
@@ -99,6 +108,27 @@ export function captainTools(
   return [
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     ...(lane === "operator" && herdrWatches !== undefined ? herdrWatchTools(herdrWatches, turn) : []),
+    ...(turn.publishFile !== undefined
+      ? [
+          defineTool({
+            name: "deliver_file",
+            label: "Deliver a file",
+            description:
+              "Publish one finished file from this conversation's working directory into the conversation. " +
+              "Use this only when the file is ready for the operator to open or share. Bundle a directory first.",
+            parameters: Type.Object({
+              path: Type.String({ minLength: 1, maxLength: 4096 }),
+              filename: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+              mediaType: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+            }),
+            executionMode: "sequential",
+            execute: async (_id, input) => {
+              if (turn.publishFile === undefined) throw new Error("Delivered files are unavailable");
+              return json(await turn.publishFile(input));
+            },
+          }),
+        ]
+      : []),
     defineTool({
       name: "generate_image",
       label: "Draw a picture",

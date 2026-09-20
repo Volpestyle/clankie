@@ -52,6 +52,7 @@ import { createEmailPort } from "./email.ts";
 import { LinearSelfWriteMemory, recordLinearWrite } from "./linear-webhook.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
+import { DeliveredFileStore } from "./delivered-files.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
@@ -296,6 +297,7 @@ function capacityAware<T>(
 // serves (ADR 0085). The root is derived, never merely read, so the bridge
 // that serves the bytes back resolves the same directory this wrote them to.
 const attachmentRoot = discordAttachmentRoot(process.env);
+const deliveredFiles = new DeliveredFileStore(attachmentRoot);
 const mediaGenerator = new ConfiguredMediaGenerator({
   credentials: operatorCredentialStore,
   attachmentRoot,
@@ -520,6 +522,7 @@ const captain = createCaptain(
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
     settings: settingsStore,
+    deliveredFiles,
     discordEnvironment: captainDiscordEnvironment,
     // The same trusted module that owns the bot token owns making a channel's
     // room with it; the captain only asks (ADR 0024, ADR 0146).
@@ -529,6 +532,7 @@ const captain = createCaptain(
 
 const clankie = await createClankieApp({
   captain,
+  deliveredFiles,
   // Read through, both of them: a fallback after a session stops must reach
   // every client that asks which Herdr is his, and its health, without a restart.
   herdrRuntime: () => herdrRuntime?.status(),

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
-import { createCaptainConversationDispatch } from "./conversation-upstream.ts";
+import { createCaptainConversationDispatch, createCaptainFileDownload } from "./conversation-upstream.ts";
 import {
   createOperatorConversationRelayHandler,
   type RelayConversationLogger,
@@ -28,6 +28,14 @@ const conversationHandler = createOperatorConversationRelayHandler({
           baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310",
           bearerToken: captainToken,
         }),
+  ...(captainToken === undefined
+    ? {}
+    : {
+        downloadFile: createCaptainFileDownload({
+          baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310",
+          bearerToken: captainToken,
+        }),
+      }),
   logger: conversationLogger,
 });
 const server = createServer((request, response) => {
