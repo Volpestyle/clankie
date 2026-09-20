@@ -107,3 +107,22 @@ it("publishes a workspace file into the transcript and downloads its exact bytes
     await conversations.close();
   }
 });
+
+it("allows dotdot-prefixed filenames and concurrent publication of the same artifact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-delivered-file-concurrent-"));
+  roots.push(root);
+  const workspace = join(root, "workspace");
+  await mkdir(workspace);
+  await writeFile(join(workspace, "..notes.txt"), "same bytes");
+  const deliveredFiles = new DeliveredFileStore(join(root, "attachments"));
+
+  const input = {
+    conversationId: "global-default",
+    sourceRoot: workspace,
+    path: "..notes.txt",
+  } as const;
+  const [first, second] = await Promise.all([deliveredFiles.publish(input), deliveredFiles.publish(input)]);
+
+  expect(second).toEqual(first);
+  expect((await deliveredFiles.read("global-default", first.artifactId))?.data.toString()).toBe("same bytes");
+});

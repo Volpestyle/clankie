@@ -1,6 +1,6 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   OPERATOR_DELIVERED_FILE_BYTES_MAX,
   OperatorDeliveredFileSchema,
@@ -29,7 +29,7 @@ export class DeliveredFileStore {
     const root = await realpath(input.sourceRoot);
     const source = await realpath(resolve(root, input.path));
     const containment = relative(root, source);
-    if (containment.startsWith("..") || isAbsolute(containment)) {
+    if (containment === ".." || containment.startsWith(`..${sep}`) || isAbsolute(containment)) {
       throw new Error("delivered_file_outside_conversation_workspace");
     }
     const sourceStat = await stat(source);
@@ -127,9 +127,13 @@ function safeFilename(value: string): string {
 }
 
 async function atomicWrite(path: string, data: Buffer): Promise<void> {
-  const pending = `${path}.${process.pid}.pending`;
-  await writeFile(pending, data, { mode: 0o600 });
-  await rename(pending, path);
+  const pending = `${path}.${process.pid}.${randomUUID()}.pending`;
+  try {
+    await writeFile(pending, data, { mode: 0o600 });
+    await rename(pending, path);
+  } finally {
+    await rm(pending, { force: true });
+  }
 }
 
 function contentTypeFor(path: string): string {
