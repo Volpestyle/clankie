@@ -14,6 +14,7 @@ import {
 import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
 import {
   inspectService,
+  listProcessCommands,
   SERVICE_ORDER,
   startService,
   stopService,
@@ -633,5 +634,9 @@ export async function inspectServices(
   ids: readonly ServiceId[],
   options: ServiceRegistryOptions,
 ): Promise<readonly ServiceStatus[]> {
-  return await Promise.all(ids.map((id) => inspectService(managedService(id), options)));
+  // Snapshot before starting network timeouts: repeated synchronous ps calls
+  // otherwise block the event loop long enough to abort healthy probes.
+  const processes = (options.listProcessCommandsImpl ?? listProcessCommands)();
+  const shared = { ...options, listProcessCommandsImpl: () => processes };
+  return await Promise.all(ids.map((id) => inspectService(managedService(id), shared)));
 }

@@ -18,6 +18,7 @@ import {
 } from "../bin/service-supervisor.ts";
 import {
   clankieStopGraceMs,
+  inspectServices,
   managedService,
   parseServiceTarget,
   resolveTargets,
@@ -1150,4 +1151,24 @@ describe("restart carries dependents", () => {
   it("does not widen a stop, which names exactly what it means", () => {
     expect(resolveTargets("clankie")).toEqual(["clankie"]);
   });
+});
+
+it("snapshots processes before concurrent health probes start", async () => {
+  let scans = 0;
+  let probing = false;
+  const services = await inspectServices(["clankie", "relay"], {
+    repoRoot: "/unused",
+    env: await stateEnv(),
+    listProcessCommandsImpl: () => {
+      expect(probing).toBe(false);
+      scans++;
+      return [];
+    },
+    fetchImpl: (async () => {
+      probing = true;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch,
+  });
+  expect(scans).toBe(1);
+  expect(services.map((service) => service.state)).toEqual(["healthy", "healthy"]);
 });

@@ -199,7 +199,7 @@ function readProcessCommand(pid: number): string {
 }
 
 /** Every live process as `[pid, command]`, for finding a service nobody recorded. */
-function listProcessCommands(): readonly (readonly [number, string])[] {
+export function listProcessCommands(): readonly (readonly [number, string])[] {
   try {
     return execFileSync("ps", ["-Ao", "pid=,command="], { encoding: "utf8" })
       .split("\n")
