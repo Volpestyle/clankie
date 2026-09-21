@@ -52,10 +52,12 @@ path gets one bounded retry and then stops without breaking later messages or
 images. The head seat uses its live Herdr working directory by the same rule.
 
 The app renders each event as its own block: an image shows inline, fetched
-through the same authenticated download, and every other file is a card. A tap
-downloads through the injected authenticated transport first, checks the
-published size and content type, then writes the bytes to the private device
-cache and presents Quick Look.
+through the same authenticated download, and every other file is a card. The
+image block shows its filename and a native loading indicator until both the
+download and native image decode finish; a download or decode failure falls
+back to the file card. A tap downloads through the injected authenticated
+transport first, checks the published size and content type, then writes the
+bytes to the private device cache and presents Quick Look.
 Quick Look supplies native preview and share/save actions on both iPhone and
 iPad. Discord machine-authorized turns use the same store and existing
 hash-bound attachment resolver; ungranted social turns never receive the tool.
