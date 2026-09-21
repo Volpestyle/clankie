@@ -673,6 +673,20 @@ export const OperatorSeatLastOutcomeSchema = z
   .strict();
 export type OperatorSeatLastOutcome = z.infer<typeof OperatorSeatLastOutcomeSchema>;
 
+/** One numbered, labelled level of Herdr's workspace → tab hierarchy. */
+const OperatorHerdrLevelSchema = z
+  .object({
+    id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    label: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+    number: z.number().int().positive(),
+  })
+  .strict();
+/** Where a terminal sits in Herdr, as the owner arranged it. */
+export const OperatorHerdrPlacementSchema = z
+  .object({ workspace: OperatorHerdrLevelSchema, tab: OperatorHerdrLevelSchema })
+  .strict();
+export type OperatorHerdrPlacement = z.infer<typeof OperatorHerdrPlacementSchema>;
+
 export const OperatorFleetSeatSchema = z
   .object({
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
@@ -695,6 +709,12 @@ export const OperatorFleetSeatSchema = z
      * join. Absent when the shell cannot resolve one.
      */
     workingDirectory: z.string().trim().max(OPERATOR_SEAT_DIRECTORY_MAX).optional(),
+    /**
+     * The Herdr workspace and tab holding this seat, so a roster can be laid
+     * out the way the owner laid out the work. Absent when Herdr's snapshot
+     * could not be read; the seat is still a seat.
+     */
+    placement: OperatorHerdrPlacementSchema.optional(),
     /**
      * What the occupying agent last said it was doing, while that statement
      * stands. Absent once it expires, so a surface never has to reason about
@@ -954,20 +974,8 @@ export const OperatorTerminalSessionSchema = z
   .object({
     terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     label: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
-    workspace: z
-      .object({
-        id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
-        label: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
-        number: z.number().int().positive(),
-      })
-      .strict(),
-    tab: z
-      .object({
-        id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
-        label: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
-        number: z.number().int().positive(),
-      })
-      .strict(),
+    workspace: OperatorHerdrLevelSchema,
+    tab: OperatorHerdrLevelSchema,
     pane: z
       .object({
         id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),

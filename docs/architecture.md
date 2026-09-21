@@ -106,7 +106,10 @@ never in the event log, that the settled `message` event replaces in the block
 it streamed into ([ADR 0141](adr/0141-the-console-watches-him-type.md)). Herdr
 persona conversations are direct-send lanes with no Pi session. The persona
 owns its name, full appearance tuple, DM, and channel memberships; its current
-Herdr seat supplies live status and terminal routing. Their readable
+Herdr seat supplies live status, terminal routing, and its placement — the
+Herdr workspace and tab it sits in, read from `herdr api snapshot` beside the
+agent list — so a roster can be laid out the way the owner arranged the work.
+Their readable
 history folds the complete active user/assistant branch from Herdr's native
 Claude Code, Codex, Pi, or Grok session identity; raw terminal bytes stay on the
 terminal lane ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)). The app

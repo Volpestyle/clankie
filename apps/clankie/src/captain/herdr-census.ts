@@ -1,7 +1,11 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
-import { OPERATOR_HEAD_AGENT_NAME, type OperatorTerminalSession } from "@clankie/protocol";
+import {
+  OPERATOR_HEAD_AGENT_NAME,
+  type OperatorHerdrPlacement,
+  type OperatorTerminalSession,
+} from "@clankie/protocol";
 import { readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 
 const execFileAsync = promisify(execFile);
@@ -99,6 +103,8 @@ export interface ObservedFleetSeat {
   readonly summary?: string;
   readonly next?: string;
   readonly workingDirectory?: string;
+  /** Herdr's workspace and tab for this seat's terminal, when the snapshot answered. */
+  readonly placement?: OperatorHerdrPlacement;
 }
 
 function defaultRunner(
@@ -378,7 +384,15 @@ export async function readFleet(
 ): Promise<ObservedFleet> {
   const run = options.runCommand ?? defaultRunner;
   try {
-    const { stdout } = await run("herdr", ["agent", "list"]);
+    // The agent list names each seat's workspace and tab only by id; their
+    // labels and order live in the snapshot. A seat without one is still a seat.
+    const [{ stdout }, placements] = await Promise.all([
+      run("herdr", ["agent", "list"]),
+      readTerminalCatalog({ runCommand: run }).then(
+        (sessions) =>
+          new Map(sessions.map(({ terminalId, workspace, tab }) => [terminalId, { workspace, tab }])),
+      ),
+    ]);
     const summaries = readHerdrSummariesFile().agents;
     const occupied = parseHerdrAgentList(stdout).filter(
       (
@@ -412,6 +426,7 @@ export async function readFleet(
         const written = summaries[entry.paneId];
         const paneSubject = subjectForHerdrPane(entry.paneId);
         const named = entry.name === undefined ? undefined : subjectForHerdrName(entry.name);
+        const placement = placements.get(entry.terminalId);
         return {
           seatId: entry.terminalId,
           paneId: entry.paneId,
@@ -430,6 +445,7 @@ export async function readFleet(
           ...(written === undefined ? {} : { summary: bounded(written.summary, SEAT_SUMMARY_MAX) }),
           ...(written?.next === undefined ? {} : { next: bounded(written.next, SEAT_SUMMARY_MAX) }),
           ...(entry.cwd === undefined ? {} : { workingDirectory: bounded(entry.cwd, SEAT_DIRECTORY_MAX) }),
+          ...(placement === undefined ? {} : { placement }),
         };
       });
     return head === undefined ? { seats } : { seats, head };

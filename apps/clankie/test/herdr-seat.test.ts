@@ -171,6 +171,43 @@ describe("herdr session census", () => {
     expect(seats[1]).not.toHaveProperty("renamed");
   });
 
+  it("places a seat in Herdr's workspace and tab, and keeps the seat when the snapshot is silent", async () => {
+    const agent = {
+      pane_id: "w2:p4",
+      terminal_id: "term-worker",
+      workspace_id: "w2",
+      tab_id: "w2:t4",
+      agent: "codex",
+      agent_status: "idle",
+      agent_session: { source: "herdr:codex", kind: "id", value: "session-placed" },
+    };
+    const snapshot = {
+      result: {
+        snapshot: {
+          workspaces: [{ workspace_id: "w2", label: "clankie", number: 2 }],
+          tabs: [{ tab_id: "w2:t4", label: "Delivered files", number: 4 }],
+          panes: [agent],
+        },
+      },
+    };
+    const runner = (snapshotStdout: string | undefined) => (_command: string, args: readonly string[]) =>
+      args[0] === "api"
+        ? snapshotStdout === undefined
+          ? Promise.reject(new Error("socket down"))
+          : Promise.resolve({ stdout: snapshotStdout, stderr: "" })
+        : Promise.resolve({ stdout: JSON.stringify({ result: { agents: [agent] } }), stderr: "" });
+
+    const placed = await readFleetSeats({ runCommand: runner(JSON.stringify(snapshot)) });
+    expect(placed[0]?.placement).toEqual({
+      workspace: { id: "w2", label: "clankie", number: 2 },
+      tab: { id: "w2:t4", label: "Delivered files", number: 4 },
+    });
+
+    const unplaced = await readFleetSeats({ runCommand: runner(undefined) });
+    expect(unplaced).toHaveLength(1);
+    expect(unplaced[0]).not.toHaveProperty("placement");
+  });
+
   it("resolves a pane to its own seat and nothing else (ADR 0148)", async () => {
     const roster = {
       result: {
