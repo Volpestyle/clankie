@@ -1108,10 +1108,28 @@ export class ConversationStore {
       seen.add(entry.id);
     }
     if (!advanced) return;
+    this.resettle(meta);
     meta.seatTranscript = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
     if (latestAgentReply !== undefined) this.resolveSeatReply(seatId, latestAgentReply);
+  }
+
+  /**
+   * A seat's `waiting` is written when its pane's status changes, and a surface
+   * reads everything after it as a turn still in progress. A harness flushes
+   * entries after its pane has settled, and a named image lands later still, so
+   * a thread that was settled before them is settled again behind them. While
+   * the seat works its last activity is `responding`, and this does nothing.
+   */
+  private resettle(meta: ConversationMeta): void {
+    const events = this.readEvents(meta.conversationId);
+    const settled = events.findLastIndex((event) => event.type === "activity");
+    if (settled === events.length - 1) return;
+    const last = events[settled];
+    if (last?.type === "activity" && last.phase === "waiting") {
+      this.append(meta, { type: "activity", phase: "waiting" });
+    }
   }
 
   /**
@@ -1141,6 +1159,7 @@ export class ConversationStore {
         );
         if (shown) continue;
         this.append(meta, { type: "file", file: { artifactId, filename, mediaType, byteCount, sha256 } });
+        this.resettle(meta);
       } catch {
         // Named, but not deliverable from here.
       }

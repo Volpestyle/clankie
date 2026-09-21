@@ -145,7 +145,11 @@ A pty stream is not messages. The persona thread carries the _readable
 projection_, built from signals the service already has:
 
 - `activity` events from agent-status transitions — `working` is literally a
-  typing indicator; `done`/`blocked`/`idle` are delivery states.
+  typing indicator; `done`/`blocked`/`idle` are delivery states. A surface reads
+  everything after the last `waiting` as a turn in progress, so a thread that
+  was settled stays settled: an entry a harness flushes after its pane went
+  idle, or a named image delivered behind a reply (ADR 0174), is followed by
+  `waiting` again. The chat and the commons therefore agree that a seat is idle.
 - `message` and `tool` events from the harness-native session tree. Herdr's resume
   identity selects Claude Code, Codex, and Pi sessions. Grok's exact foreground
   PID selects the matching entry in its native active-session registry, so two
