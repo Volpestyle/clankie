@@ -1,5 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   OPERATOR_DELIVERED_FILE_BYTES_MAX,
@@ -106,6 +107,20 @@ export class DeliveredFileStore {
       force: true,
     });
   }
+}
+
+/**
+ * Image paths a message names, in order, without duplicates. A backticked path
+ * may hold spaces; a bare one ends at whitespace or a delimiter. Whether a
+ * candidate is a real file inside the working directory is `publish`'s call.
+ */
+export function namedImagePaths(text: string): string[] {
+  const pattern = /`([^`\n]+\.(?:png|jpe?g|gif|webp))`|([^\s`'"()<>[\]]+\.(?:png|jpe?g|gif|webp))\b/giu;
+  const paths = [...text.matchAll(pattern)]
+    .map((match) => (match[1] ?? match[2] ?? "").trim())
+    .filter((path) => path.length > 0 && !path.includes("://"))
+    .map((path) => (path.startsWith("~/") ? join(homedir(), path.slice(2)) : path));
+  return [...new Set(paths)];
 }
 
 function conversationStorageKey(conversationId: string): string {

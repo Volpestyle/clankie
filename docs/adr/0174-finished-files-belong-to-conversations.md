@@ -29,9 +29,22 @@ its encrypted envelope. No download URL contains a bearer, device secret, or
 artifact capability. The host revalidates the manifest, size, and hash before
 returning the exact bytes and published content type.
 
-The app renders each event as its own file card. A tap downloads through the
-injected authenticated transport first, checks the published size and content
-type, then writes the bytes to the private device cache and presents Quick Look.
+A seat in a DM has no `deliver_file` tool; it is a vanilla harness that names
+paths in prose, which is exactly the delivery this decision rejects. When a
+seat's reply folds into its persona thread, each image it names (png, jpeg,
+gif, webp; at most four per reply) is published through the same store with the
+seat's working directory as the containment root, and follows the message as a
+`file` event. A name that is not a file, escapes that directory, or exceeds the
+cap stays prose, and an artifact already in the thread is not repeated. The
+reply is untrusted model output, so it can only choose among images already
+inside the directory the seat works in, and only the owner's authorized devices
+can fetch them.
+
+The app renders each event as its own block: an image shows inline, fetched
+through the same authenticated download, and every other file is a card. A tap
+downloads through the injected authenticated transport first, checks the
+published size and content type, then writes the bytes to the private device
+cache and presents Quick Look.
 Quick Look supplies native preview and share/save actions on both iPhone and
 iPad. Discord machine-authorized turns use the same store and existing
 hash-bound attachment resolver; ungranted social turns never receive the tool.
@@ -44,6 +57,7 @@ sequenceDiagram
     participant A as iPhone / iPad app
     C->>S: publish path inside real working directory
     S-->>C: metadata + hash-bound attachment reference
+    Note over C,S: a seat's reply publishes the images it names,<br/>contained by the seat's working directory
     C-->>A: durable file event
     A->>R: authenticated POST conversationId + artifactId
     R->>S: captain-authenticated byte request
@@ -67,5 +81,8 @@ streaming object store if measured use requires it.
   and revocation boundary.
 - Direct native URL downloads were rejected because they bypass the injected
   encrypted device transport.
+- Teaching every seat harness a publish command was rejected: a seat already
+  says which image it means, and a rule per harness would have to be carried
+  into every repo a seat works in.
 - Keeping source paths in transcript events was rejected because paths disclose
   host layout and are meaningless off the host.

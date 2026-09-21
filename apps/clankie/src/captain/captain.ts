@@ -1326,10 +1326,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           fleetChanges.touch();
         }
       }
-      const personaId = liveSeats.find((seat) => seat.seatId === seatId)?.personaId;
+      const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
+      const personaId = seat?.personaId;
       if (personaId === undefined) return;
       if (projection.kind === "transcript") {
-        conversations.syncPersonaTranscript(personaId, seatId, projection.transcript);
+        conversations.syncPersonaTranscript(personaId, seatId, projection.transcript, seat?.workingDirectory);
         return;
       }
       conversations.publishPersonaEvent(

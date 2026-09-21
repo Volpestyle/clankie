@@ -35,6 +35,7 @@ import {
   type UpsertOperatorChannel,
 } from "@clankie/protocol";
 import { parseDiscordWebhookUrl } from "@clankie/discord-presence-core";
+import { namedImagePaths } from "../delivered-files.ts";
 import {
   CHANNEL_NOTICE_AUTHOR,
   CHANNEL_ROUND_INTERRUPTED_NOTICE,
@@ -1030,9 +1031,14 @@ export class ConversationStore {
   }
 
   /** Fold one harness session's complete active chat branch into its durable persona thread. */
-  public syncPersonaTranscript(personaId: string, seatId: string, transcript: HerdrSeatTranscript): void {
+  public syncPersonaTranscript(
+    personaId: string,
+    seatId: string,
+    transcript: HerdrSeatTranscript,
+    workingDirectory?: string,
+  ): void {
     const conversationId = this.conversationIdForPersona(personaId);
-    this.syncConversationTranscript(conversationId, seatId, transcript);
+    this.syncConversationTranscript(conversationId, seatId, transcript, "agent", workingDirectory);
   }
 
   /**
@@ -1059,6 +1065,7 @@ export class ConversationStore {
     seatId: string,
     transcript: HerdrSeatTranscript,
     agentRole: "agent" | "captain" = "agent",
+    workingDirectory?: string,
   ): void {
     const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
     if (meta === undefined || transcript.entries.length === 0) return;
@@ -1091,7 +1098,10 @@ export class ConversationStore {
     for (const entry of transcript.entries) {
       if (seen.has(entry.id)) continue;
       advanced = true;
-      if (entry.type === "message" && entry.role === "agent") latestAgentReply = entry.text;
+      if (entry.type === "message" && entry.role === "agent") {
+        latestAgentReply = entry.text;
+        if (workingDirectory !== undefined) void this.publishNamedImages(meta, entry.text, workingDirectory);
+      }
       if (entry.type !== "message" || entry.role !== "operator" || !this.matchesRecentSeatSend(meta, entry)) {
         this.append(meta, transcriptEventBody(entry, agentRole), entry.occurredAt);
       }
@@ -1102,6 +1112,39 @@ export class ConversationStore {
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
     if (latestAgentReply !== undefined) this.resolveSeatReply(seatId, latestAgentReply);
+  }
+
+  /**
+   * A path on the Mac shows the phone nothing (ADR 0174), so an image a seat
+   * names in its reply follows the message as a delivered file. The seat's
+   * working directory is the containment root; anything the store refuses — a
+   * path that is not a file, escapes the directory, or is too large — stays
+   * prose. Transcript folds never fence operator sends, so no revision moves.
+   */
+  private async publishNamedImages(
+    meta: ConversationMeta,
+    text: string,
+    workingDirectory: string,
+  ): Promise<void> {
+    if (this.publishDeliveredFile === undefined) return;
+    // ponytail: four per message, the visual cap a Discord turn uses; raise it if seats show more at once.
+    for (const path of namedImagePaths(text).slice(0, 4)) {
+      try {
+        const { artifactId, filename, mediaType, byteCount, sha256 } = await this.publishDeliveredFile({
+          conversationId: meta.conversationId,
+          sourceRoot: workingDirectory,
+          path,
+        });
+        if (!this.metas.has(meta.conversationId)) return;
+        const shown = this.readEvents(meta.conversationId).some(
+          (event) => event.type === "file" && event.file.artifactId === artifactId,
+        );
+        if (shown) continue;
+        this.append(meta, { type: "file", file: { artifactId, filename, mediaType, byteCount, sha256 } });
+      } catch {
+        // Named, but not deliverable from here.
+      }
+    }
   }
 
   /** Queue a host-authored continuation without forging an operator message. */
