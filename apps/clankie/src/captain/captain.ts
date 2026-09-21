@@ -1297,7 +1297,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // His own words, in his own thread: the seat's transcript is the head
         // conversation the app pins, spoken as captain, never as an agent.
         if (projection.kind === "transcript") {
-          conversations.syncHeadTranscript(seatId, projection.transcript);
+          conversations.syncHeadTranscript(seatId, projection.transcript, headSeat.workingDirectory);
         } else if (projection.kind === "status") {
           conversations.publishHeadEvent({
             type: "activity",

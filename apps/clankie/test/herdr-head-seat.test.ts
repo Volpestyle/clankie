@@ -45,6 +45,7 @@ describe("the head seat in the census", () => {
       occupantId: expect.stringMatching(/^session-[a-f0-9]{64}$/u),
       harness: "claude",
       status: "working",
+      workingDirectory: "/Users/me/dev/project",
     });
     expect(fleet.seats.map((seat) => seat.seatId)).toEqual(["term-atlas"]);
   });

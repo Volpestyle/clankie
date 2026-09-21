@@ -51,6 +51,13 @@ describe("incremental seat transcript tailing", () => {
       },
     })}\n`;
 
+  const codexImageLine = (id: string, path: string) =>
+    `${JSON.stringify({
+      timestamp: "2026-09-05T00:00:01Z",
+      type: "event_msg",
+      payload: { type: "item_completed", item: { type: "ImageView", id, path } },
+    })}\n`;
+
   const seatFile = (contents: string) => {
     const root = mkdtempSync(join(tmpdir(), "herdr-tail-"));
     roots.push(root);
@@ -101,6 +108,26 @@ describe("incremental seat transcript tailing", () => {
 
     expect(textsOf(tailed)).toEqual(["one", "two", "three"]);
     expect(tailed?.entries).toEqual(parseHerdrSeatTranscript("codex", first + rest));
+  });
+
+  it("keeps an appended Codex ImageView in native order without duplicating its item id", () => {
+    const first = codexLine("m1", "before");
+    const file = seatFile(first);
+    expect(readHerdrSeatTranscript("codex", sessionAt(file))?.entries).toHaveLength(1);
+
+    const image = codexImageLine("exec-image-1", "file:///workspace/frames/f01.png");
+    appendFileSync(file, image + image + codexLine("m2", "after"));
+
+    expect(readHerdrSeatTranscript("codex", sessionAt(file))?.entries).toEqual([
+      expect.objectContaining({ type: "message", id: "codex:m1", text: "before" }),
+      {
+        type: "viewed_image",
+        id: "codex:image:exec-image-1",
+        path: "/workspace/frames/f01.png",
+        occurredAt: "2026-09-05T00:00:01.000Z",
+      },
+      expect.objectContaining({ type: "message", id: "codex:m2", text: "after" }),
+    ]);
   });
 
   it("leaves a half-written record for the next tick instead of dropping it", () => {

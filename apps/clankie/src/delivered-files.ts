@@ -12,6 +12,12 @@ export interface PublishedDeliveredFile extends OperatorDeliveredFile {
   readonly artifactRef: string;
 }
 
+const DELIVERED_IMAGE_EXTENSION = /\.(?:png|jpe?g|gif|webp)$/iu;
+
+export function isDeliveredImagePath(path: string): boolean {
+  return DELIVERED_IMAGE_EXTENSION.test(path);
+}
+
 /** Durable, hash-bound files chosen for delivery from one conversation. */
 export class DeliveredFileStore {
   private readonly attachmentRoot: string;
@@ -119,7 +125,8 @@ export function namedImagePaths(text: string): string[] {
   const paths = [...text.matchAll(pattern)]
     .map((match) => (match[1] ?? match[2] ?? "").trim())
     .filter((path) => path.length > 0 && !path.includes("://"))
-    .map((path) => (path.startsWith("~/") ? join(homedir(), path.slice(2)) : path));
+    .map((path) => (path.startsWith("~/") ? join(homedir(), path.slice(2)) : path))
+    .filter(isDeliveredImagePath);
   return [...new Set(paths)];
 }
 

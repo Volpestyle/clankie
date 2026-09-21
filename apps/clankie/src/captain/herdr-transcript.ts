@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { redactSensitiveText } from "@clankie/observability";
 import {
   OPERATOR_CONVERSATION_CODE_MAX,
@@ -45,7 +46,15 @@ interface HerdrTranscriptTool {
   readonly occurredAt?: string;
 }
 
-export type HerdrTranscriptEntry = HerdrTranscriptMessage | HerdrTranscriptTool;
+export interface HerdrTranscriptViewedImage {
+  readonly type: "viewed_image";
+  readonly id: string;
+  /** Host path only; it never crosses the conversation protocol. */
+  readonly path: string;
+  readonly occurredAt?: string;
+}
+
+export type HerdrTranscriptEntry = HerdrTranscriptMessage | HerdrTranscriptTool | HerdrTranscriptViewedImage;
 
 export interface HerdrSeatTranscript {
   readonly sessionKey: string;
@@ -274,13 +283,32 @@ function codexEntries(
   return dedupeTools(
     entries.flatMap<HerdrTranscriptEntry>((entry, offset) => {
       const index = state.index + offset;
+      const at = timestamp(entry);
+      if (entry.type === "event_msg") {
+        const payload = record(entry.payload);
+        const item = payload?.type === "item_completed" ? record(payload.item) : undefined;
+        if (item?.type !== "ImageView") return [];
+        const path = string(item.path);
+        if (path === undefined) return [];
+        let localPath: string;
+        try {
+          localPath = fileURLToPath(path);
+        } catch {
+          return [];
+        }
+        const nativeId = string(item.id) ?? String(index);
+        const key = `viewed_image\u0000${nativeId}`;
+        if (state.seen.has(key)) return [];
+        state.seen.add(key);
+        return [{ type: "viewed_image", id: `codex:image:${nativeId}`, path: localPath, ...at }];
+      }
       if (entry.type !== "response_item") return [];
       const payload = record(entry.payload);
       if (payload === undefined) return [];
       const payloadType = string(payload.type);
       const metadata = record(payload.internal_chat_message_metadata_passthrough);
       const nativeId = string(payload.id) ?? string(metadata?.turn_id) ?? String(index);
-      const at = timestamp(entry, metadata?.create_time);
+      const responseAt = timestamp(entry, metadata?.create_time);
       if (payloadType === "message") {
         const role = payload.role;
         if (role !== "user" && role !== "assistant") return [];
@@ -298,7 +326,12 @@ function codexEntries(
             .flatMap((item) => (item.type === "output_text" ? [string(item.text) ?? ""] : []))
             .join("\n");
         }
-        return transcriptMessage(`codex:${nativeId}`, role === "user" ? "operator" : "agent", text, at);
+        return transcriptMessage(
+          `codex:${nativeId}`,
+          role === "user" ? "operator" : "agent",
+          text,
+          responseAt,
+        );
       }
       const callId = cleanRef(payload.call_id, nativeId);
       if (payloadType?.endsWith("_call_output") === true) {
@@ -310,7 +343,7 @@ function codexEntries(
             toolNames.get(callId) ?? "tool",
             failed ? "failed" : "completed",
             payload.output ?? payload.result ?? payload.error,
-            at,
+            responseAt,
           ),
         ];
       }
@@ -334,7 +367,7 @@ function codexEntries(
             execution: payload.execution,
             result: payload.result,
           };
-      return [transcriptTool(`codex:${nativeId}`, callId, name, phase, detail, at)];
+      return [transcriptTool(`codex:${nativeId}`, callId, name, phase, detail, responseAt)];
     }),
     state.seen,
   );

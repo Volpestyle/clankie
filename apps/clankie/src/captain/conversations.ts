@@ -35,7 +35,7 @@ import {
   type UpsertOperatorChannel,
 } from "@clankie/protocol";
 import { parseDiscordWebhookUrl } from "@clankie/discord-presence-core";
-import { namedImagePaths } from "../delivered-files.ts";
+import { isDeliveredImagePath, namedImagePaths } from "../delivered-files.ts";
 import {
   CHANNEL_NOTICE_AUTHOR,
   CHANNEL_ROUND_INTERRUPTED_NOTICE,
@@ -351,8 +351,12 @@ function messageKey(role: "operator" | "agent", text: string): string {
   return `${role}\u0000${text}`;
 }
 
+function transcriptImageKey(meta: ConversationMeta, sessionKey: string, entryId: string): string {
+  return `${meta.conversationId}\u0000${sessionKey}\u0000${entryId}`;
+}
+
 function transcriptEventBody(
-  entry: HerdrTranscriptEntry,
+  entry: Exclude<HerdrTranscriptEntry, { readonly type: "viewed_image" }>,
   agentRole: "agent" | "captain",
 ): OperatorConversationEventBody {
   if (entry.type === "message") {
@@ -434,6 +438,10 @@ export class ConversationStore {
   private readonly tailListeners = new Map<string, Set<() => void>>();
   /** The message the captain is typing right now, per conversation. Never durable. */
   private readonly drafts = new Map<string, OperatorConversationLiveDraft>();
+  /** Serializes host file reads so transcript order survives async publication. */
+  private readonly deliveredFilePublishes = new Map<string, Promise<void>>();
+  private readonly pendingTranscriptImages = new Set<string>();
+  private readonly transcriptImageAttempts = new Map<string, number>();
   private draftSequence = 0;
 
   public constructor(
@@ -1047,8 +1055,18 @@ export class ConversationStore {
    * as his own words — `captain`, not `agent` — and always appends: this
    * thread already holds his pi turns, so nothing here replaces them.
    */
-  public syncHeadTranscript(seatId: string, transcript: HerdrSeatTranscript): void {
-    this.syncConversationTranscript(this.defaultGlobalConversationId(), seatId, transcript, "captain");
+  public syncHeadTranscript(
+    seatId: string,
+    transcript: HerdrSeatTranscript,
+    workingDirectory?: string,
+  ): void {
+    this.syncConversationTranscript(
+      this.defaultGlobalConversationId(),
+      seatId,
+      transcript,
+      "captain",
+      workingDirectory,
+    );
   }
 
   public publishHeadEvent(body: OperatorConversationEventBody): void {
@@ -1081,9 +1099,12 @@ export class ConversationStore {
       this.replaceSeatEntries(meta, transcript.entries);
       meta.seatTranscript = {
         sessionKey: transcript.sessionKey,
-        entryIds: transcript.entries.map(({ id }) => id),
+        entryIds: transcript.entries.flatMap((entry) =>
+          entry.type === "viewed_image" && isDeliveredImagePath(entry.path) ? [] : [entry.id],
+        ),
       };
       this.saveMeta(meta);
+      this.publishTranscriptImages(meta, transcript, workingDirectory);
       return;
     }
 
@@ -1092,15 +1113,30 @@ export class ConversationStore {
     const checkpointIds = checkpoint?.entryIds ?? checkpoint?.messageIds ?? [];
     const seen = new Set(checkpoint?.sessionKey === transcript.sessionKey ? checkpointIds : []);
     let latestAgentReply: string | undefined;
+    const added: HerdrTranscriptEntry[] = [];
     // A tailing seat re-publishes the same transcript while it works; without
     // this the checkpoint would be rewritten to disk on every quiet pass.
     let advanced = false;
     for (const entry of transcript.entries) {
       if (seen.has(entry.id)) continue;
+      if (entry.type === "viewed_image") {
+        if (!isDeliveredImagePath(entry.path)) {
+          advanced = true;
+          seen.add(entry.id);
+          continue;
+        }
+        if (workingDirectory === undefined) continue;
+        if (this.pendingTranscriptImages.has(transcriptImageKey(meta, transcript.sessionKey, entry.id))) {
+          continue;
+        }
+      }
       advanced = true;
+      added.push(entry);
       if (entry.type === "message" && entry.role === "agent") {
         latestAgentReply = entry.text;
-        if (workingDirectory !== undefined) void this.publishNamedImages(meta, entry.text, workingDirectory);
+      }
+      if (entry.type === "viewed_image") {
+        continue;
       }
       if (entry.type !== "message" || entry.role !== "operator" || !this.matchesRecentSeatSend(meta, entry)) {
         this.append(meta, transcriptEventBody(entry, agentRole), entry.occurredAt);
@@ -1112,6 +1148,11 @@ export class ConversationStore {
     meta.seatTranscript = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
+    this.publishTranscriptImages(
+      meta,
+      { sessionKey: transcript.sessionKey, entries: added },
+      workingDirectory,
+    );
     if (latestAgentReply !== undefined) this.resolveSeatReply(seatId, latestAgentReply);
   }
 
@@ -1139,31 +1180,96 @@ export class ConversationStore {
    * path that is not a file, escapes the directory, or is too large — stays
    * prose. Transcript folds never fence operator sends, so no revision moves.
    */
-  private async publishNamedImages(
+  private publishTranscriptImages(
     meta: ConversationMeta,
-    text: string,
-    workingDirectory: string,
-  ): Promise<void> {
-    if (this.publishDeliveredFile === undefined) return;
+    transcript: HerdrSeatTranscript,
+    workingDirectory: string | undefined,
+  ): void {
+    if (workingDirectory === undefined) return;
+    for (const entry of transcript.entries) {
+      if (entry.type === "viewed_image") {
+        if (!isDeliveredImagePath(entry.path)) continue;
+        const key = transcriptImageKey(meta, transcript.sessionKey, entry.id);
+        if (this.pendingTranscriptImages.has(key)) continue;
+        this.pendingTranscriptImages.add(key);
+        const attempts = (this.transcriptImageAttempts.get(key) ?? 0) + 1;
+        this.transcriptImageAttempts.set(key, attempts);
+        void this.queueDeliveredImages(meta, [entry.path], workingDirectory).then((published) => {
+          this.pendingTranscriptImages.delete(key);
+          if (published || attempts >= 2) {
+            this.transcriptImageAttempts.delete(key);
+            this.completeTranscriptImage(meta, transcript.sessionKey, entry.id);
+          }
+        });
+      } else if (entry.type === "message" && entry.role === "agent") {
+        this.publishNamedImages(meta, entry.text, workingDirectory);
+      }
+    }
+  }
+
+  private publishNamedImages(meta: ConversationMeta, text: string, workingDirectory: string): void {
     // ponytail: four per message, the visual cap a Discord turn uses; raise it if seats show more at once.
-    for (const path of namedImagePaths(text).slice(0, 4)) {
+    void this.queueDeliveredImages(meta, namedImagePaths(text).slice(0, 4), workingDirectory);
+  }
+
+  private queueDeliveredImages(
+    meta: ConversationMeta,
+    paths: readonly string[],
+    workingDirectory: string,
+  ): Promise<boolean> {
+    if (this.publishDeliveredFile === undefined || paths.length === 0) return Promise.resolve(false);
+    const conversationId = meta.conversationId;
+    const previous = this.deliveredFilePublishes.get(conversationId) ?? Promise.resolve();
+    const result = previous.then(() => this.publishImages(meta, paths, workingDirectory));
+    const queued = result.then(() => undefined);
+    this.deliveredFilePublishes.set(conversationId, queued);
+    void queued.finally(() => {
+      if (this.deliveredFilePublishes.get(conversationId) === queued) {
+        this.deliveredFilePublishes.delete(conversationId);
+      }
+    });
+    return result;
+  }
+
+  private async publishImages(
+    meta: ConversationMeta,
+    paths: readonly string[],
+    workingDirectory: string,
+  ): Promise<boolean> {
+    let published = false;
+    for (const path of paths) {
       try {
-        const { artifactId, filename, mediaType, byteCount, sha256 } = await this.publishDeliveredFile({
+        const { artifactId, filename, mediaType, byteCount, sha256 } = await this.publishDeliveredFile!({
           conversationId: meta.conversationId,
           sourceRoot: workingDirectory,
           path,
         });
-        if (!this.metas.has(meta.conversationId)) return;
+        if (!this.metas.has(meta.conversationId)) return published;
         const shown = this.readEvents(meta.conversationId).some(
           (event) => event.type === "file" && event.file.artifactId === artifactId,
         );
-        if (shown) continue;
+        if (shown) {
+          published = true;
+          continue;
+        }
         this.append(meta, { type: "file", file: { artifactId, filename, mediaType, byteCount, sha256 } });
         this.resettle(meta);
+        published = true;
       } catch {
         // Named, but not deliverable from here.
       }
     }
+    return published;
+  }
+
+  private completeTranscriptImage(meta: ConversationMeta, sessionKey: string, entryId: string): void {
+    if (this.metas.get(meta.conversationId) !== meta || meta.seatTranscript?.sessionKey !== sessionKey) {
+      return;
+    }
+    const entryIds = meta.seatTranscript.entryIds ?? meta.seatTranscript.messageIds ?? [];
+    if (entryIds.includes(entryId)) return;
+    meta.seatTranscript = { sessionKey, entryIds: [...entryIds, entryId] };
+    this.saveMeta(meta);
   }
 
   /** Queue a host-authored continuation without forging an operator message. */
@@ -1181,7 +1287,11 @@ export class ConversationStore {
   }
 
   public async close(): Promise<void> {
-    await Promise.allSettled([...this.runs.values(), ...this.seatSends.values()]);
+    await Promise.allSettled([
+      ...this.runs.values(),
+      ...this.seatSends.values(),
+      ...this.deliveredFilePublishes.values(),
+    ]);
   }
 
   private create(
@@ -2197,10 +2307,16 @@ export class ConversationStore {
         },
       ];
     });
-    const projected = transcript.map((entry) => ({
-      body: transcriptEventBody(entry, "agent"),
-      occurredAt: entry.occurredAt ?? new Date().toISOString(),
-    }));
+    const projected = transcript.flatMap((entry) =>
+      entry.type === "viewed_image"
+        ? []
+        : [
+            {
+              body: transcriptEventBody(entry, "agent"),
+              occurredAt: entry.occurredAt ?? new Date().toISOString(),
+            },
+          ],
+    );
     const previousSequence = this.eventSequence(meta);
     let sequence = previousSequence + 1;
     meta.retainedFromCursor = String(sequence).padStart(CURSOR_WIDTH, "0");

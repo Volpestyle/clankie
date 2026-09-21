@@ -367,6 +367,7 @@ export interface ObservedHeadSeat {
   readonly occupantId: string;
   readonly harness: string;
   readonly status: string;
+  readonly workingDirectory?: string;
 }
 
 export interface ObservedFleet {
@@ -418,6 +419,9 @@ export async function readFleet(
             occupantId: occupantIdForHerdrSession(headEntry.session),
             harness: headEntry.agent,
             status: headEntry.status,
+            ...(headEntry.cwd === undefined
+              ? {}
+              : { workingDirectory: bounded(headEntry.cwd, SEAT_DIRECTORY_MAX) }),
           };
     const seats = occupied
       .filter((entry) => entry !== headEntry)

@@ -180,3 +180,88 @@ it("follows a seat's reply with the images it names inside its working directory
     await conversations.close();
   }
 });
+
+it("backfills explicit Codex image views once, in order, without breaking on refused paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-delivered-file-viewed-"));
+  roots.push(root);
+  const workspace = join(root, "worktree");
+  await mkdir(join(workspace, "frames"), { recursive: true });
+  await writeFile(join(workspace, "frames", "f01.png"), "first");
+  await writeFile(join(workspace, "frames", "f02.png"), "second");
+  await writeFile(join(workspace, "secret.txt"), "not an image");
+  await writeFile(join(root, "outside.png"), "private");
+
+  const deliveredFiles = new DeliveredFileStore(join(root, "attachments"));
+  const publishAttempts = new Map<string, number>();
+  const conversations = new ConversationStore(
+    join(root, "conversations"),
+    async () => undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (input) => {
+      publishAttempts.set(input.path, (publishAttempts.get(input.path) ?? 0) + 1);
+      if (input.path.endsWith("f01.png")) await new Promise((resolve) => setTimeout(resolve, 20));
+      return deliveredFiles.publish(input);
+    },
+    root,
+  );
+  try {
+    const conversationId = conversations.bindPersona("persona-1", "seat-1", "Potato");
+    const first = {
+      sessionKey: "session-1",
+      entries: [{ type: "message", id: "m1", role: "agent", text: "Before." }],
+    } as const;
+    conversations.syncPersonaTranscript("persona-1", "seat-1", first, workspace);
+
+    const backfilled = {
+      sessionKey: "session-1",
+      entries: [
+        ...first.entries,
+        { type: "viewed_image", id: "i1", path: join(workspace, "frames", "f01.png") },
+        { type: "viewed_image", id: "outside", path: join(root, "outside.png") },
+        { type: "viewed_image", id: "missing", path: join(workspace, "missing.png") },
+        { type: "viewed_image", id: "not-an-image", path: join(workspace, "secret.txt") },
+        { type: "viewed_image", id: "i2", path: join(workspace, "frames", "f02.png") },
+        { type: "message", id: "m2", role: "agent", text: "After." },
+      ],
+    } as const;
+    conversations.syncPersonaTranscript("persona-1", "seat-1", backfilled, workspace);
+    conversations.syncPersonaTranscript("persona-1", "seat-1", backfilled, workspace);
+
+    await expect
+      .poll(async () => {
+        const replay = await conversations.serve({
+          op: "replay",
+          schemaVersion: 1,
+          replay: { schemaVersion: 1, conversationId, surfaceClientId: "test" },
+        });
+        const events = replay.op === "replay" && replay.result.status === "page" ? replay.result.events : [];
+        return {
+          files: events.flatMap((event) => (event.type === "file" ? [event.file.filename] : [])),
+          messages: events.flatMap((event) => (event.type === "message" ? [event.text] : [])),
+        };
+      })
+      .toEqual({ files: ["f01.png", "f02.png"], messages: ["Before.", "After."] });
+
+    conversations.syncPersonaTranscript("persona-1", "seat-1", backfilled, workspace);
+    await expect
+      .poll(() => ({
+        outside: publishAttempts.get(join(root, "outside.png")),
+        missing: publishAttempts.get(join(workspace, "missing.png")),
+      }))
+      .toEqual({ outside: 2, missing: 2 });
+    conversations.syncPersonaTranscript("persona-1", "seat-1", backfilled, workspace);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(publishAttempts.get(join(root, "outside.png"))).toBe(2);
+    expect(publishAttempts.get(join(workspace, "missing.png"))).toBe(2);
+    expect(publishAttempts.has(join(workspace, "secret.txt"))).toBe(false);
+  } finally {
+    await conversations.close();
+  }
+});

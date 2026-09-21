@@ -581,7 +581,9 @@ describe("harness-native seat transcripts", () => {
       entries.map((entry) =>
         entry.type === "message"
           ? { type: entry.type, role: entry.role, text: entry.text }
-          : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
+          : entry.type === "viewed_image"
+            ? { type: entry.type, path: entry.path }
+            : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
       ),
     ).toEqual([
       { type: "message", role: "operator", text: "Ship it" },
@@ -727,7 +729,9 @@ describe("harness-native seat transcripts", () => {
       claude.map((entry) =>
         entry.type === "message"
           ? { type: entry.type, role: entry.role, text: entry.text }
-          : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
+          : entry.type === "viewed_image"
+            ? { type: entry.type, path: entry.path }
+            : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
       ),
     ).toEqual([
       { type: "message", role: "operator", text: "Review it" },
@@ -740,7 +744,9 @@ describe("harness-native seat transcripts", () => {
       pi.map((entry) =>
         entry.type === "message"
           ? { type: entry.type, role: entry.role, text: entry.text }
-          : { type: entry.type, name: entry.name, phase: entry.phase },
+          : entry.type === "viewed_image"
+            ? { type: entry.type, path: entry.path }
+            : { type: entry.type, name: entry.name, phase: entry.phase },
       ),
     ).toEqual([
       { type: "message", role: "operator", text: "Test it" },
@@ -779,7 +785,9 @@ describe("harness-native seat transcripts", () => {
       entries.map((entry) =>
         entry.type === "message"
           ? { type: entry.type, role: entry.role, text: entry.text }
-          : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
+          : entry.type === "viewed_image"
+            ? { type: entry.type, path: entry.path }
+            : { type: entry.type, name: entry.name, phase: entry.phase, detail: entry.detail },
       ),
     ).toEqual([
       { type: "message", role: "operator", text: "Fix it" },

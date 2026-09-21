@@ -40,6 +40,17 @@ reply is untrusted model output, so it can only choose among images already
 inside the directory the seat works in, and only the owner's authorized devices
 can fetch them.
 
+Codex also records an explicit `ImageView` item when a seat inspects a local
+image. That native item is preserved as an internal transcript entry and, only
+for a supported image suffix, published through the same containment root. A
+serial queue keeps viewed images in their native order; file events append
+after prose the transcript has already folded. Its host path never enters the
+conversation protocol. Retained sessions backfill previously unprojected views
+on the next transcript fold. A view is checkpointed after the file event is
+confirmed, so an interrupted queue retries on restart; a missing or outside
+path gets one bounded retry and then stops without breaking later messages or
+images. The head seat uses its live Herdr working directory by the same rule.
+
 The app renders each event as its own block: an image shows inline, fetched
 through the same authenticated download, and every other file is a card. A tap
 downloads through the injected authenticated transport first, checks the
