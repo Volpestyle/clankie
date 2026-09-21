@@ -4,7 +4,6 @@ Description: Clankie accounts — passwordless email OTP identity for Mac enroll
 Parameters:
   SendingDomain:
     Type: String
-    Default: clankie.bot
     Description: Domain identity owned by this stack for production account mail
   SelfSignUpEnabled:
     Type: String

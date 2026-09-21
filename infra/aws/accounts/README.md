@@ -1,5 +1,8 @@
 # AWS accounts
 
+This is a reusable deployment guide. Hosted-service configuration and support
+records belong in the private operations repo; see the [boundary](../README.md).
+
 Clankie uses one Amazon Cognito Essentials user pool for passwordless Mac
 enrollment. The Mac calls Cognito's public JSON API directly, stores its rotating
 refresh token in Keychain, and presents one-hour access tokens to the public
@@ -30,6 +33,7 @@ sequenceDiagram
 
 ```bash
 export CLANKIE_AWS_REGION=us-east-1
+export CLANKIE_ACCOUNT_SENDING_DOMAIN=example.com
 export CLANKIE_ACCOUNT_EMAIL_IDENTITY=verified-sender@example.com
 export CLANKIE_ACCOUNT_ALARM_EMAIL=operator@example.com
 infra/aws/accounts/deploy.sh provision
@@ -52,14 +56,14 @@ Set `CLANKIE_ACCOUNT_SELF_SIGNUP=true` and provision the same stack when signup
 should open to any email address.
 
 Cognito passwordless email OTP requires a verified Amazon SES sender. The stack
-owns the `clankie.bot` domain identity and outputs its three Easy DKIM CNAMEs.
+owns the `example.com` domain identity and outputs its three Easy DKIM CNAMEs.
 On the first deployment, leave the existing verified address active, publish
 those CNAMEs as DNS-only records, and wait for the domain identity to report
 `SUCCESS`. Then make the production sender active:
 
 ```bash
-export CLANKIE_ACCOUNT_EMAIL_IDENTITY=clankie.bot
-export CLANKIE_ACCOUNT_EMAIL_FROM=no-reply@clankie.bot
+export CLANKIE_ACCOUNT_EMAIL_IDENTITY=example.com
+export CLANKIE_ACCOUNT_EMAIL_FROM=no-reply@example.com
 infra/aws/accounts/deploy.sh provision
 ```
 
@@ -77,17 +81,22 @@ testing included):
 
 ```bash
 infra/aws/accounts/deploy.sh ses-status        # ProductionAccess, DKIM status, the CNAMEs
-infra/aws/accounts/deploy.sh ses-production    # opens the production-access case
+export CLANKIE_ACCOUNT_WEBSITE_URL=https://example.com
+export CLANKIE_ACCOUNT_SES_USE_CASE_FILE=/absolute/path/to/private-ops/ses-use-case.txt
+infra/aws/accounts/deploy.sh ses-production    # submits that reviewed plain-text file
 ```
 
 `ses-status` reads what App Review and testers depend on: the account's
-production flag and 24-hour quota, and the `clankie.bot` identity's
+production flag and 24-hour quota, and the `example.com` identity's
 `VerifiedForSending` and `DkimStatus`. Publish the three DKIM CNAMEs as
 DNS-only records in Cloudflare (proxied records break DKIM lookups) and wait
-for `DkimStatus` to read `SUCCESS`. `ses-production` files the request with
-the transactional-OTP use case (the long form AWS asks for is
-[`ses-production-case.md`](ses-production-case.md)); AWS usually answers within a day, after which
-`ses-status` shows `ProductionAccess` true. If `ses-status` already shows
+for `DkimStatus` to read `SUCCESS`. `ses-production` reads the complete plain-text
+submission from
+`CLANKIE_ACCOUNT_SES_USE_CASE_FILE` and uses `CLANKIE_ACCOUNT_WEBSITE_URL`.
+Describe the actual sender, requested volume, recipient consent, bounce and
+complaint handling, and current email template. Keep submission text, case IDs,
+correspondence, contact addresses, and approval evidence in private operations
+storage. After approval, `ses-status` shows `ProductionAccess` true. If `ses-status` already shows
 `ReviewStatus DENIED`, do not file again blind: open the case it names in the
 AWS Support Center (the Support API needs a paid plan), read the reason, and
 reply there with the missing detail; a fresh `ses-production` only helps once

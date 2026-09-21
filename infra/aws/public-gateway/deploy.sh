@@ -92,6 +92,11 @@ case "$command_name" in
     echo "Installed Cognito account discovery on $target; release the gateway to activate it"
     ;;
   release)
+    : "${CLANKIE_GATEWAY_DOMAIN:?Set CLANKIE_GATEWAY_DOMAIN to the public gateway hostname}"
+    [[ "$CLANKIE_GATEWAY_DOMAIN" =~ ^[[:alnum:]][[:alnum:].-]*\.[[:alpha:]]{2,}$ ]] || {
+      echo "CLANKIE_GATEWAY_DOMAIN must be a domain" >&2
+      exit 2
+    }
     if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
       echo "Refusing to release an uncommitted gateway tree" >&2
       exit 1
@@ -126,11 +131,13 @@ case "$command_name" in
       --tag "$image_ref" \
       .
     docker save --output "$release_dir/gateway-image.tar" "$image_ref"
+    sed "s/__GATEWAY_DOMAIN__/$CLANKIE_GATEWAY_DOMAIN/g" \
+      infra/aws/public-gateway/Caddyfile > "$release_dir/Caddyfile"
 
     ssh "${ssh_options[@]}" "$ssh_target" "install -d -m 0700 '$remote_release_dir'"
     scp "${ssh_options[@]}" \
       "$release_dir/gateway-image.tar" \
-      infra/aws/public-gateway/Caddyfile \
+      "$release_dir/Caddyfile" \
       "$ssh_target:$remote_release_dir/"
     ssh "${ssh_options[@]}" "$ssh_target" \
       "sudo /usr/local/sbin/clankie-gateway-activate '$remote_release_dir' '$image_ref'"

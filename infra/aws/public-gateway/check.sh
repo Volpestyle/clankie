@@ -53,3 +53,45 @@ if CLANKIE_AWS_REGION=test CLANKIE_GATEWAY_KEY_PAIR_NAME=test CLANKIE_GATEWAY_PU
   echo "Invalid public SSH configuration was accepted" >&2
   exit 1
 fi
+
+# Render a self-hosted release with no Docker daemon or network access.
+work="$(mktemp -d)"
+trap 'rm -rf -- "$work"' EXIT
+export TEST_CAPTURE="$work" TEST_REPO_ROOT="$repo_root"
+cat >"$work/git" <<'GIT'
+#!/usr/bin/env bash
+case "$*" in
+  'rev-parse --show-toplevel') echo "$TEST_REPO_ROOT" ;;
+  'rev-parse --short=12 HEAD') echo abcdef123456 ;;
+  'status --porcelain --untracked-files=normal') ;;
+  *) exit 1 ;;
+esac
+GIT
+cat >"$work/ssh" <<'SSH'
+#!/usr/bin/env bash
+[[ "$*" != *'--version'* ]] || echo 3
+exit 0
+SSH
+cat >"$work/docker" <<'DOCKER'
+#!/usr/bin/env bash
+[[ "$1" != save ]] || touch "$3"
+exit 0
+DOCKER
+cat >"$work/scp" <<'SCP'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in
+    */Caddyfile) cp "$arg" "$TEST_CAPTURE/Caddyfile" ;;
+  esac
+done
+SCP
+chmod +x "$work/git" "$work/ssh" "$work/docker" "$work/scp"
+export PATH="$work:$PATH"
+export CLANKIE_GATEWAY_TARGET=gateway.example.com
+if CLANKIE_GATEWAY_DOMAIN='bad;domain' infra/aws/public-gateway/deploy.sh release >/dev/null 2>&1; then
+  echo "Invalid gateway domain was accepted" >&2
+  exit 1
+fi
+CLANKIE_GATEWAY_DOMAIN=api.example.com infra/aws/public-gateway/deploy.sh release
+sed 's/__GATEWAY_DOMAIN__/api.example.com/g' infra/aws/public-gateway/Caddyfile >"$work/expected"
+cmp "$work/expected" "$work/Caddyfile"

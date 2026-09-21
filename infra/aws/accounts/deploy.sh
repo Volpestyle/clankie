@@ -23,7 +23,7 @@ case "$command_name" in
       echo "CLANKIE_ACCOUNT_SELF_SIGNUP must be true or false" >&2
       exit 2
     }
-    sending_domain="${CLANKIE_ACCOUNT_SENDING_DOMAIN:-clankie.bot}"
+    sending_domain="${CLANKIE_ACCOUNT_SENDING_DOMAIN:?Set CLANKIE_ACCOUNT_SENDING_DOMAIN}"
     [[ "$sending_domain" =~ ^[[:alnum:]][[:alnum:].-]*\.[[:alpha:]]{2,}$ ]] || {
       echo "CLANKIE_ACCOUNT_SENDING_DOMAIN must be a domain" >&2
       exit 2
@@ -96,7 +96,11 @@ case "$command_name" in
     ;;
   ses-status)
     # Everything App Review and external testers depend on, in one read.
-    sending_domain="${CLANKIE_ACCOUNT_SENDING_DOMAIN:-clankie.bot}"
+    sending_domain="${CLANKIE_ACCOUNT_SENDING_DOMAIN:?Set CLANKIE_ACCOUNT_SENDING_DOMAIN}"
+    [[ "$sending_domain" =~ ^[[:alnum:]][[:alnum:].-]*\.[[:alpha:]]{2,}$ ]] || {
+      echo "CLANKIE_ACCOUNT_SENDING_DOMAIN must be a domain" >&2
+      exit 2
+    }
     aws sesv2 get-account \
       --region "$region" \
       --query '{ProductionAccess:ProductionAccessEnabled,SendingEnabled:SendingEnabled,Max24HourSend:SendQuota.Max24HourSend,ReviewStatus:Details.ReviewDetails.Status}' \
@@ -115,14 +119,23 @@ case "$command_name" in
       echo "Set CLANKIE_ACCOUNT_ALARM_EMAIL to the address AWS may contact about the request" >&2
       exit 2
     }
-    # The use case is the case reply itself (everything after the rule), so the
-    # API request and the Support Center answer never drift apart.
-    use_case="$(awk 'found { print } /^---$/ { found = 1 }' infra/aws/accounts/ses-production-case.md)"
+    : "${CLANKIE_ACCOUNT_WEBSITE_URL:?Set CLANKIE_ACCOUNT_WEBSITE_URL}"
+    : "${CLANKIE_ACCOUNT_SES_USE_CASE_FILE:?Set CLANKIE_ACCOUNT_SES_USE_CASE_FILE to a reviewed plain-text submission outside this repo}"
+    [[ "$CLANKIE_ACCOUNT_WEBSITE_URL" == https://* &&
+       -f "$CLANKIE_ACCOUNT_SES_USE_CASE_FILE" && -s "$CLANKIE_ACCOUNT_SES_USE_CASE_FILE" ]] || {
+      echo "SES production access requires an HTTPS website and a nonempty use-case file" >&2
+      exit 2
+    }
+    use_case="$(cat -- "$CLANKIE_ACCOUNT_SES_USE_CASE_FILE")"
+    [[ "$use_case" =~ [^[:space:]] ]] || {
+      echo "SES use-case file must contain submission text" >&2
+      exit 2
+    }
     aws sesv2 put-account-details \
       --region "$region" \
       --production-access-enabled \
       --mail-type TRANSACTIONAL \
-      --website-url https://clankie.bot \
+      --website-url "$CLANKIE_ACCOUNT_WEBSITE_URL" \
       --contact-language EN \
       --additional-contact-email-addresses "$contact" \
       --use-case-description "$use_case"

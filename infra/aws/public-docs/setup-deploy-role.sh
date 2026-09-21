@@ -6,10 +6,21 @@ set -euo pipefail
   exit 2
 }
 
-account_id=842434829012
-role_name=clankie-docs-deploy
-bucket_name=clankie-bot-docs
-distribution_id=E2SL4SXV9RAPNU
+account_id="${AWS_ACCOUNT_ID:?Set AWS_ACCOUNT_ID}"
+role_name="${DOCS_DEPLOY_ROLE_NAME:-clankie-docs-deploy}"
+bucket_name="${DOCS_BUCKET:?Set DOCS_BUCKET}"
+distribution_id="${DOCS_DISTRIBUTION_ID:?Set DOCS_DISTRIBUTION_ID}"
+repository="${DOCS_DEPLOY_REPOSITORY:?Set DOCS_DEPLOY_REPOSITORY to owner/repo}"
+[[ "$account_id" =~ ^[0-9]{12}$ && "$role_name" =~ ^[[:alnum:]_+=,.@-]+$ &&
+   "$bucket_name" =~ ^[a-z0-9][a-z0-9.-]+$ && "$distribution_id" =~ ^[A-Z0-9]+$ &&
+   "$repository" =~ ^[[:alnum:]_.-]+/[[:alnum:]_.-]+$ ]] || {
+  echo "Invalid docs deployment configuration" >&2
+  exit 2
+}
+[[ "$(aws sts get-caller-identity --query Account --output text)" == "$account_id" ]] || {
+  echo "AWS credentials do not belong to AWS_ACCOUNT_ID" >&2
+  exit 1
+}
 oidc_provider="arn:aws:iam::${account_id}:oidc-provider/token.actions.githubusercontent.com"
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
@@ -24,7 +35,7 @@ cat >"$temp_dir/trust.json" <<JSON
     "Condition": {
       "StringEquals": {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": "repo:Volpestyle/clankie:ref:refs/heads/main"
+        "token.actions.githubusercontent.com:sub": "repo:${repository}:ref:refs/heads/main"
       }
     }
   }]
@@ -60,7 +71,7 @@ if aws iam get-role --role-name "$role_name" >/dev/null 2>&1; then
 else
   aws iam create-role \
     --role-name "$role_name" \
-    --description "Deploy docs.clankie.bot from Volpestyle/clankie main" \
+    --description "Deploy public docs from ${repository} main" \
     --assume-role-policy-document "file://$temp_dir/trust.json" >/dev/null
 fi
 aws iam put-role-policy \

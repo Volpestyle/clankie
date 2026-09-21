@@ -1,13 +1,16 @@
 # AWS public gateway deployment
 
+This guide uses example deployment values. Hosted-service configuration and
+operator records live in private operations storage; see the [boundary](../README.md).
+
 The first public doorway is one 1 GB Amazon Linux 2023 Lightsail instance with
-an attached static IPv4 address. Caddy terminates HTTPS for `api.clankie.bot`
+an attached static IPv4 address. Caddy terminates HTTPS for `api.example.com`
 and reverse-proxies the existing gateway container. Cloudflare remains the
 authoritative DNS provider; the gateway does not create or mutate DNS records.
 
 ```mermaid
 flowchart LR
-  Device["iPhone / iPad"] -->|HTTPS| Caddy["Caddy<br/>api.clankie.bot"]
+  Device["iPhone / iPad"] -->|HTTPS| Caddy["Caddy<br/>api.example.com"]
   Caddy --> Gateway["one gateway container"]
   Mac["operator Mac"] -->|authenticated outbound WebSocket| Gateway
   Gateway -->|bounded exchanges| Mac
@@ -38,6 +41,7 @@ Cloudflare DNS.
 
 ```bash
 export CLANKIE_AWS_REGION=us-east-1
+export CLANKIE_GATEWAY_DOMAIN=api.example.com
 export CLANKIE_GATEWAY_KEY_PAIR_NAME=clankie-operator
 export CLANKIE_GATEWAY_OPERATOR_CIDR=203.0.113.10/32
 infra/aws/public-gateway/deploy.sh provision
@@ -53,7 +57,7 @@ The stack uses the `micro_3_0` public-IPv4 bundle and the
 equivalent to CloudFormation's `BundleId` or `BlueprintId` parameter rather
 than changing the gateway contract.
 
-Add a Cloudflare **DNS-only** A record from `api.clankie.bot` to the printed
+Add a Cloudflare **DNS-only** A record from `api.example.com` to the printed
 `GatewayIp`. DNS-only keeps the existing streaming and WebSocket semantics
 direct between the clients and Caddy. Caddy obtains and renews the public TLS
 certificate after the record resolves and ports 80 and 443 reach the instance.
@@ -98,18 +102,19 @@ infra/aws/public-gateway/deploy.sh provision
 Create a Tailscale OpenID Connect trust credential with these settings:
 
 - issuer: GitHub (`https://token.actions.githubusercontent.com`)
-- subject: `repo:Volpestyle/clankie:environment:production`
+- subject: `repo:OWNER/REPO:environment:production`
 - scope: Auth Keys write, restricted to the exact `tag:clankie-deployer` tag
 
 Tailscale generates the client id and audience. Configure the GitHub
 `production` environment with required reviewer protection, allow only `main`
-and `v*` refs, and add those values as secrets alongside this variable:
+and `v*` refs, and add those values as secrets alongside these variables:
 
-| Kind     | Name                           | Value                                            |
-| -------- | ------------------------------ | ------------------------------------------------ |
-| secret   | `TS_OAUTH_CLIENT_ID`           | Tailscale workload-identity client id            |
-| secret   | `TS_AUDIENCE`                  | audience configured on that federated credential |
-| variable | `CLANKIE_GATEWAY_TAILNET_HOST` | the gateway's full MagicDNS name                 |
+| Kind     | Name                           | Value                                                |
+| -------- | ------------------------------ | ---------------------------------------------------- |
+| secret   | `TS_OAUTH_CLIENT_ID`           | Tailscale workload-identity client id                |
+| secret   | `TS_AUDIENCE`                  | audience configured on that federated credential     |
+| variable | `CLANKIE_GATEWAY_TAILNET_HOST` | the gateway's full MagicDNS name                     |
+| variable | `CLANKIE_GATEWAY_DOMAIN`       | the public HTTPS hostname, such as `api.example.com` |
 
 The GitHub runner receives a short-lived, tagged tailnet identity. It receives
 no AWS credential and no SSH private key. See Tailscale's
@@ -122,11 +127,13 @@ Provision the separate Cognito stack, install its public discovery document on
 the gateway host, and release the account-aware gateway:
 
 ```bash
-export CLANKIE_ACCOUNT_EMAIL_IDENTITY=clankie.bot
-export CLANKIE_ACCOUNT_EMAIL_FROM=no-reply@clankie.bot
+export CLANKIE_ACCOUNT_SENDING_DOMAIN=example.com
+export CLANKIE_ACCOUNT_EMAIL_IDENTITY=example.com
+export CLANKIE_ACCOUNT_EMAIL_FROM=no-reply@example.com
+export CLANKIE_ACCOUNT_ALARM_EMAIL=operator@example.com
 infra/aws/accounts/deploy.sh provision
 infra/aws/public-gateway/deploy.sh configure-account
-infra/aws/public-gateway/deploy.sh bootstrap  # activator v2, once
+infra/aws/public-gateway/deploy.sh bootstrap  # install the matching activator, once
 infra/aws/public-gateway/deploy.sh release
 infra/aws/accounts/deploy.sh invite tester@example.com
 ```
@@ -144,17 +151,20 @@ signed in through `/gateway`.
 
 ## Release
 
-Releases require a clean committed tree. The script builds an immutable amd64
-image, copies it over the private Tailscale path, and invokes the root-owned
+Releases require a clean committed tree and `CLANKIE_GATEWAY_DOMAIN`. The release
+script renders that hostname into the Caddyfile template before uploading it,
+builds an immutable amd64 image, copies it over the private Tailscale path, and
+invokes the root-owned
 activator. The activator validates the unprivileged upload and host-token
 permissions, replaces the gateway, checks `/health`, and starts the pinned
 Caddy image. Failed gateway or Caddy startup restores the previous working
 component when one exists.
 
 ```bash
+export CLANKIE_GATEWAY_DOMAIN=api.example.com
 export CLANKIE_GATEWAY_TARGET=clankie-public-gateway.example-tailnet.ts.net
 infra/aws/public-gateway/deploy.sh release
-curl --fail https://api.clankie.bot/health
+curl --fail https://api.example.com/health
 ```
 
 Pushing a `v*` tag runs the same deployment between the release build and
@@ -193,8 +203,8 @@ it.
 
 This single process is sufficient for App Review and a small invited paid beta.
 It is not yet a general multi-tenant service: TLS terminates at Caddy, one
-instance is one failure domain, and gateway routing is in memory. Before
-unrelated customers share it, add application-layer end-to-end encryption.
+instance is one failure domain, and gateway routing is in memory. Application traffic uses device-to-Mac encryption as specified in
+[ADR 0173](../../../docs/adr/0173-the-gateway-cannot-read-device-traffic.md).
 Obtain SES production access before any unverified tester needs a login code.
 Add an external live connection broker only
 when measured load requires a second gateway process.

@@ -93,7 +93,7 @@ Resources:
 
 Outputs:
   GatewayIp:
-    Description: Add a DNS-only Cloudflare A record for api.clankie.bot to this address
+    Description: Point the public gateway hostname at this address with a DNS-only A record
     Value: !GetAtt GatewayStaticIp.IpAddress
   InstanceName:
     Description: Lightsail instance name

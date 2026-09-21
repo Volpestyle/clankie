@@ -1,32 +1,44 @@
 # AWS public docs deployment
 
-The public product docs at [`docs.clankie.bot`](https://docs.clankie.bot) use
-the existing private S3 bucket `clankie-bot-docs` behind CloudFront distribution
-`E2SL4SXV9RAPNU`. The current `Volpestyle/clankie` repository owns the site and
-deployment. The retired repository has no production role.
-
-```mermaid
-flowchart LR
-  Source["apps/docs<br/>static source"] --> Check["route-aware build + link check"]
-  Protocol["public gateway allowlist"] --> Check
-  Check --> Action["GitHub Actions<br/>main or manual"]
-  Action -->|"short-lived AWS OIDC credential"| Bucket["private S3 bucket"]
-  Bucket --> CDN["CloudFront<br/>docs.clankie.bot"]
-```
+The public docs build in `apps/docs` and deploy to an existing private S3 bucket
+behind CloudFront. This repo owns the site and reusable deployment tooling;
+production resource identifiers and operator records live in private operations
+storage. See the [infrastructure boundary](../README.md).
 
 ## Configure deployment identity
 
-An AWS administrator runs this once, and again if the repository or branch
-owner changes:
+An AWS administrator supplies the target account, bucket, distribution, and
+GitHub repository, then runs the role setup from this checkout:
 
 ```bash
+export AWS_ACCOUNT_ID=123456789012
+export DOCS_BUCKET=example-docs
+export DOCS_DISTRIBUTION_ID=EXAMPLEDISTRIBUTION
+export DOCS_DEPLOY_REPOSITORY=OWNER/REPO
+export DOCS_DEPLOY_ROLE_NAME=clankie-docs-deploy
 infra/aws/public-docs/setup-deploy-role.sh provision
 ```
 
-The script creates or updates `clankie-docs-deploy`. Its trust is limited to
-`repo:Volpestyle/clankie:ref:refs/heads/main`, and its inline policy can only
-list and synchronize the docs bucket and invalidate the one docs distribution.
-GitHub stores no reusable AWS access key.
+The account must match the current AWS credentials. The existing GitHub OIDC
+provider must be present in that account. The role trusts only
+`repo:OWNER/REPO:ref:refs/heads/main`; its policy permits synchronization of the
+one bucket and invalidation of the one distribution. The script prints the
+role ARN. It does not change DNS, certificates, or CloudFront configuration.
+
+Configure these GitHub **repository variables** from the private deployment
+configuration before enabling the Docs workflow:
+
+| Variable               | Value                               |
+| ---------------------- | ----------------------------------- |
+| `AWS_REGION`           | Bucket region                       |
+| `DOCS_BUCKET`          | Existing bucket name                |
+| `DOCS_DISTRIBUTION_ID` | Existing CloudFront distribution ID |
+| `DEPLOY_ROLE_ARN`      | ARN printed by the setup script     |
+
+These identifiers grant no access by themselves. AWS access comes from the
+restricted OIDC trust; GitHub stores no reusable AWS access key. Workflow logs
+and AWS API output can still disclose identifiers, so variables are configuration
+separation, not a secrecy boundary.
 
 ## Build and deploy
 
@@ -34,14 +46,9 @@ GitHub stores no reusable AWS access key.
 pnpm docs:public:check
 ```
 
-Pull requests build and validate the site. A docs-affecting push to `main`
-builds the same artifact, synchronizes it to S3, and invalidates CloudFront.
-The **Docs** workflow can also deploy the selected `main` commit manually. A
-docs-affecting change includes the canonical files the site renders — the CLI
-contract, the OpenAPI document, the console source and README, and the
-architecture document — as listed in the workflow's path filters. The site has
-no runtime, database, or JavaScript bundle; its only build-time dependencies
-are a Markdown renderer and a YAML parser already in the lockfile.
-
-CloudFront already owns the certificate, domain alias, and directory-index
-rewrite. This deployment does not mutate DNS or those resources.
+Pull requests build and validate the site without deployment credentials.
+A docs-affecting push to `main`, or a manual run on `main`, deploys the built
+artifact and invalidates CloudFront. The deploy job rejects missing variables
+before requesting an AWS identity. Source path filters live in the Docs workflow.
+CloudFront must already own the certificate, domain alias, and directory-index
+rewrite.

@@ -17,7 +17,8 @@ jobs:
       cancel-in-progress: false
     environment:
       name: production
-      url: https://api.clankie.bot/health
+    env:
+      CLANKIE_GATEWAY_DOMAIN: ${{ vars.CLANKIE_GATEWAY_DOMAIN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +29,7 @@ jobs:
           TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
           CLANKIE_GATEWAY_TAILNET_HOST: ${{ vars.CLANKIE_GATEWAY_TAILNET_HOST }}
         run: |
+          : "${CLANKIE_GATEWAY_DOMAIN:?Set the production CLANKIE_GATEWAY_DOMAIN variable}"
           test -n "$TS_OAUTH_CLIENT_ID" || { echo "Missing production secret TS_OAUTH_CLIENT_ID" >&2; exit 1; }
           test -n "$TS_AUDIENCE" || { echo "Missing production secret TS_AUDIENCE" >&2; exit 1; }
           test -n "$CLANKIE_GATEWAY_TAILNET_HOST" || { echo "Missing production variable CLANKIE_GATEWAY_TAILNET_HOST" >&2; exit 1; }
@@ -44,4 +46,4 @@ jobs:
           CLANKIE_GATEWAY_SSH_USER: clankie-deploy
         run: infra/aws/public-gateway/deploy.sh release
       - name: Verify the public doorway
-        run: curl --fail --show-error --silent --retry 10 --retry-all-errors --retry-delay 3 https://api.clankie.bot/health
+        run: curl --fail --show-error --silent --retry 10 --retry-all-errors --retry-delay 3 "https://${CLANKIE_GATEWAY_DOMAIN}/health"

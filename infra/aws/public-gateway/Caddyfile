@@ -1,4 +1,4 @@
-api.clankie.bot {
+__GATEWAY_DOMAIN__ {
 	reverse_proxy clankie-gateway:8080
 
 	log {
