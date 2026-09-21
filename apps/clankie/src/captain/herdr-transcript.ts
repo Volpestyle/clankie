@@ -46,7 +46,7 @@ interface HerdrTranscriptTool {
   readonly occurredAt?: string;
 }
 
-export interface HerdrTranscriptViewedImage {
+interface HerdrTranscriptViewedImage {
   readonly type: "viewed_image";
   readonly id: string;
   /** Host path only; it never crosses the conversation protocol. */
