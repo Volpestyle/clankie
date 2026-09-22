@@ -112,10 +112,12 @@ export interface DiscordRawAttachment {
   readonly size?: number | null;
 }
 
-/** The visual subset of a Discord link embed; rich cards are not images. */
+/** The visual subset of a Discord link embed, including rich-card previews. */
 export interface DiscordRawEmbed {
   readonly type?: string | null;
   readonly url?: string | null;
+  readonly imageUrl?: string | null;
+  readonly imageProxyUrl?: string | null;
   readonly thumbnailUrl?: string | null;
   readonly thumbnailProxyUrl?: string | null;
   readonly videoUrl?: string | null;
@@ -156,7 +158,13 @@ export function selectInboundImageAttachments(
     else attachments.push(selected);
   }
   for (const candidate of embeds) {
-    if (candidate.type !== "gifv") continue;
+    if (
+      candidate.imageUrl == null &&
+      candidate.imageProxyUrl == null &&
+      candidate.thumbnailUrl == null &&
+      candidate.thumbnailProxyUrl == null
+    )
+      continue;
     if (attachments.length >= DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX) {
       omitted += 1;
       continue;
@@ -196,19 +204,21 @@ function selectAttachment(candidate: DiscordRawAttachment): DiscordPresenceAttac
 }
 
 function selectEmbed(candidate: DiscordRawEmbed): DiscordPresenceAttachment | undefined {
-  // Discord GIF pickers post a page URL plus a gifv embed, not an attachment.
-  // Carry Discord's preview for fallback and its proxy video for bounded frame sampling.
-  const url = candidate.thumbnailProxyUrl ?? candidate.thumbnailUrl;
+  // Link previews are images too. Prefer the full image over the thumbnail;
+  // Video previews additionally carry motion for bounded frame sampling.
+  const imageUrl = candidate.imageUrl ?? candidate.imageProxyUrl;
+  const url =
+    imageUrl == null
+      ? (candidate.thumbnailProxyUrl ?? candidate.thumbnailUrl)
+      : (candidate.imageProxyUrl ?? imageUrl);
   if (url == null) return undefined;
-  const mediaType = imageMediaTypeFromUrl(candidate.thumbnailUrl ?? url);
-  if (mediaType === undefined) return undefined;
+  // Some previews (including X) have extensionless URLs. This is only a
+  // reference hint; the fetch boundary validates and uses the response MIME type.
+  const mediaType = imageMediaTypeFromUrl(imageUrl ?? candidate.thumbnailUrl ?? url) ?? "image/jpeg";
   if (!isHttpsUrl(url)) return undefined;
   const motionUrl = candidate.videoProxyUrl ?? candidate.videoUrl;
   return {
-    id: `embed-${createHash("sha256")
-      .update(candidate.url ?? url)
-      .digest("hex")
-      .slice(0, 24)}`,
+    id: `embed-${createHash("sha256").update(url).digest("hex").slice(0, 24)}`,
     url,
     ...(motionUrl == null || !isHttpsUrl(motionUrl) ? {} : { motionUrl }),
     mediaType,
@@ -226,7 +236,10 @@ function isHttpsUrl(value: string): boolean {
 function imageMediaTypeFromUrl(value: string): DiscordPresenceAttachment["mediaType"] | undefined {
   let pathname: string;
   try {
-    pathname = new URL(value).pathname.toLowerCase();
+    const url = new URL(value);
+    pathname = url.pathname.toLowerCase();
+    const format = url.searchParams.get("format")?.toLowerCase();
+    if (format !== undefined) pathname += `.${format}`;
   } catch {
     return undefined;
   }
@@ -468,7 +481,11 @@ export class DiscordTextIngress {
       expiresAtMs: this.clock() + (this.config.deliveryRetentionMs ?? DEFAULT_DELIVERY_RETENTION_MS),
     });
     try {
-      return await result;
+      const outcome = await result;
+      if (outcome.state === "failed" && this.deliveries.get(message.id)?.result === result) {
+        this.deliveries.delete(message.id);
+      }
+      return outcome;
     } catch (error) {
       if (this.deliveries.get(message.id)?.result === result) this.deliveries.delete(message.id);
       const code = error instanceof Error ? error.message : "discord_text_ingress_failed";

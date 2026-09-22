@@ -20,7 +20,7 @@ policy refusal from an attachment that cannot be resolved or decoded.
 carried, and shown to him under the same policy that governs the message body,
 and where it cannot be, he is told.
 
-Five consequences fix the layers in order:
+The following consequences fix the layers in order:
 
 1. **A message with only images is a real message.** Emptiness means "no
    text _and_ no images he can see". The schema enforces the same rule
@@ -46,12 +46,19 @@ Five consequences fix the layers in order:
    many attachments he cannot see — wrong type, oversized, or failed to load —
    and answers anyway. He is told a count, never a filename or a guess.
 
-5. **Discord GIF-picker embeds are moving visual messages.** A picker post is a
-   page URL plus a `gifv` embed, not a Discord attachment. Ingress carries the
-   embed's Discord-proxied WebP preview and MP4 through the same reference and
-   fetch boundary. The captain model accepts images rather than video, so the
+5. **Video and GIF embeds are moving visual messages.** Rich link previews,
+   video cards, and `gifv` picker embeds carry their Discord-proxied preview
+   and MP4 or WebM through the same reference and fetch boundary. The captain model accepts images rather than video, so the
    service uses the installed `ffmpeg` to produce chronological PNG samples;
-   if video fetch or sampling fails, the WebP preview remains the fallback.
+   if video fetch or sampling fails, the static preview remains the fallback.
+   The prompt distinguishes chronological samples from continuous playback;
+   no audio is included.
+
+6. **Link previews carry their visible image.** Rich cards such as tweet embeds
+   use the full image when present, otherwise the thumbnail. Both transports
+   carry the Discord proxy URL through the existing bounded fetch boundary;
+   text-only cards add no visual. This lets a thread reply see its opening
+   post’s preview without depending on browsing the external website.
 
 ### Where the untrusted bytes sit
 
@@ -73,9 +80,12 @@ Four images per message (Discord permits ten), 8 MB each, and
 `image/png|jpeg|gif|webp` — the intersection of what Discord serves and what
 vision models accept. Anything else is left out at ingress and counted.
 Moving embeds produce at most four chronological frames, scaled inside
-1024×1024. Their proxied video is subject to the same 8 MB fetch ceiling, a
-60-second duration ceiling, bounded process time, and temporary files removed
-after each extraction.
+1024×1024. Proxied videos have a separate 128 MiB fetch ceiling, a five-minute
+duration ceiling, and a 60-second download timeout: ordinary shared clips are
+larger than still images. Streaming reads stop at the ceiling even without a
+truthful size header. Input-side seeking avoids decoding the entire clip for
+each sample. Each process has a five-second deadline; temporary files are
+removed after extraction. Images retain their 8 MiB ceiling.
 
 Context carries only the newest visual source in the bounded message window;
 a moving source expands into chronological frames. This covers a visual

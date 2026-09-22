@@ -37,7 +37,9 @@ const ALLOWED_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
 const DISCORD_IMAGE_PROXY_HOST = /^images-ext-\d+\.discordapp\.net$/u;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MOTION_PROCESS_TIMEOUT_MS = 5_000;
-const MOTION_DURATION_MAX_SECONDS = 60;
+const MOTION_DURATION_MAX_SECONDS = 5 * 60;
+const MOTION_BYTES_MAX = 128 * 1024 * 1024;
+const MOTION_FETCH_TIMEOUT_MS = 60_000;
 const MOTION_MEDIA_TYPES = new Set(["video/mp4", "video/webm"]);
 const execFileAsync = promisify(execFile);
 
@@ -130,7 +132,8 @@ async function fetchDiscordMotionFrames(
   const { bytes } = await fetchDiscordBytes(
     attachment.motionUrl,
     (value): value is string => MOTION_MEDIA_TYPES.has(value),
-    options,
+    { ...options, timeoutMs: options.timeoutMs ?? MOTION_FETCH_TIMEOUT_MS },
+    MOTION_BYTES_MAX,
   );
   const extracted = await (options.extractMotionFrames ?? extractMotionFrames)(bytes, count);
   const frames = extracted
@@ -149,6 +152,7 @@ async function fetchDiscordBytes<T extends string>(
   rawUrl: string,
   supportsMediaType: (value: string) => value is T,
   options: DiscordAttachmentFetchOptions,
+  maximumBytes = DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX,
 ): Promise<{ readonly bytes: Buffer; readonly mediaType: T }> {
   const url = new URL(rawUrl);
   if (url.protocol !== "https:") throw new Error("discord_attachment_scheme_unsupported");
@@ -161,25 +165,42 @@ async function fetchDiscordBytes<T extends string>(
     redirect: "error",
     signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
   });
-  if (!response.ok) throw new Error("discord_attachment_fetch_failed");
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error("discord_attachment_fetch_failed");
+  }
 
   // The declared type is re-checked against the same allowlist ingress used:
   // what the CDN actually serves is the thing being handed to the model, and
   // it does not have to match what the gateway payload claimed.
   const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
   if (mediaType === undefined || !supportsMediaType(mediaType)) {
+    await response.body?.cancel();
     throw new Error("discord_attachment_media_type_unsupported");
   }
   const declaredLength = Number(response.headers.get("content-length") ?? Number.NaN);
-  if (Number.isFinite(declaredLength) && declaredLength > DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX) {
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    await response.body?.cancel();
     throw new Error("discord_attachment_too_large");
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.byteLength === 0) throw new Error("discord_attachment_empty");
-  if (bytes.byteLength > DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX) {
-    throw new Error("discord_attachment_too_large");
+  if (response.body === null) throw new Error("discord_attachment_empty");
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteLength += value.byteLength;
+      if (byteLength > maximumBytes) throw new Error("discord_attachment_too_large");
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
-  return { bytes, mediaType };
+  if (byteLength === 0) throw new Error("discord_attachment_empty");
+  return { bytes: Buffer.concat(chunks, byteLength), mediaType };
 }
 
 async function extractMotionFrames(bytes: Buffer, count: number): Promise<readonly Buffer[]> {
@@ -211,10 +232,12 @@ async function extractMotionFrames(bytes: Buffer, count: number): Promise<readon
               "-hide_banner",
               "-loglevel",
               "error",
-              "-i",
-              input,
               "-ss",
               timestamp.toFixed(3),
+              "-threads",
+              "1",
+              "-i",
+              input,
               "-frames:v",
               "1",
               "-an",

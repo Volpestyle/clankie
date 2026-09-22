@@ -80,9 +80,15 @@ describe("runDurableTurn", () => {
     const session = new StubSession();
     const lane = makeLane(session);
 
-    const first = runDurableTurn(lane, "first", []);
+    let owner: string | undefined;
+    const first = runDurableTurn(lane, "first", [], { deliveryId: "first-message" });
     session.startStreaming();
-    const second = runDurableTurn(lane, "second", []);
+    const second = runDurableTurn(lane, "second", [], {
+      deliveryId: "second-message",
+      onAbsorbed: (id) => {
+        owner = id;
+      },
+    });
     await drain();
 
     expect(session.calls).toEqual([
@@ -100,6 +106,7 @@ describe("runDurableTurn", () => {
     session.settleRun();
     await expect(first).resolves.toBe("ran");
     await expect(second).resolves.toBe("absorbed");
+    expect(owner).toBe("first-message");
   });
 
   it("waits out a run that has not started streaming yet, then runs its own turn", async () => {

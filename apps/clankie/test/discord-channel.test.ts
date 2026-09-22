@@ -75,6 +75,29 @@ describe("Discord channel turn routes", () => {
     expect(submitted[0]?.trigger).toMatchObject({ kind: "voice_event", actorId: "user-1" });
   });
 
+  it("does not cache a typed model failure as a completed delivery", async () => {
+    let calls = 0;
+    const { app } = await createClankieApp({
+      captain: createStubCaptain({
+        submitDiscordTurn: async () => {
+          calls += 1;
+          return calls === 1
+            ? { state: "failed", code: "captain_model_failed" }
+            : { state: "silent", captainSessionId: "session", turnId: "retry" };
+        },
+      }),
+      authenticateCaptain: () =>
+        Promise.resolve({ captainId: "discord-bridge", steerSourceLane: "discord_text" }),
+    });
+    expect(await (await post(app, turnRequest(), "Bearer discord-captain")).json()).toMatchObject({
+      state: "failed",
+    });
+    expect(await (await post(app, turnRequest(), "Bearer discord-captain")).json()).toMatchObject({
+      state: "silent",
+    });
+    expect(calls).toBe(2);
+  });
+
   it("answers 502 on a failed turn and lets the same delivery retry", async () => {
     let calls = 0;
     const { app } = await createClankieApp({

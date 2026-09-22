@@ -142,7 +142,9 @@ satisfy these live gates.
   sees them. Text-only input in the active voice channel instead enters that
   room's shared floor, so the realtime persona may answer aloud or stay silent
   without a second text reply ([ADR 0124](../../docs/adr/0124-one-self-has-many-local-threads.md)).
-  The bridge persists no channel transcript.
+  Pending deliveries and accepted turn results persist in the private delivery
+  journal; Discord remains the channel-history source
+  ([ADR 0177](../../docs/adr/0177-discord-delivery-survives-a-bridge-restart.md)).
 - Presence actions use a live gateway claim and the configured presence
   allowlists. Reactions and thread actions are grounded in the triggering
   message. See [ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md).

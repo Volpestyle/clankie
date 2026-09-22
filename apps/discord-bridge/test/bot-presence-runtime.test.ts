@@ -157,6 +157,9 @@ describe("DiscordBotPresenceRuntime", () => {
       messageId: "msg-out-1",
     });
     expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith(expect.any(String), {
+      body: expect.objectContaining({ nonce: expect.stringMatching(/^[a-f0-9]{24}$/u), enforce_nonce: true }),
+    });
 
     await runtime.execute(
       write({

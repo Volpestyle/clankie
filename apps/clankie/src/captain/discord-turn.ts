@@ -143,7 +143,7 @@ export async function normalizeDiscordTurn(
         ]),
     ...(sampledMotion
       ? [
-          "When several image parts come from one GIF, they are chronological samples from early to late. Compare them to understand what moves or changes; do not treat them as separate posts.",
+          "When several image parts come from one video or GIF, they are chronological samples from early to late. Compare them to understand what moves or changes; do not treat them as separate posts. These are sampled frames, not continuous playback, and no audio is included.",
         ]
       : []),
     ...(resolvedContext.length === 0 || request.contextVisual === undefined

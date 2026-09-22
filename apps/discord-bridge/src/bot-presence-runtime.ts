@@ -14,6 +14,7 @@ import {
   type DiscordPresenceWriteResult,
 } from "@clankie/protocol";
 import { MessageFlags, REST, Routes } from "discord.js";
+import { createHash } from "node:crypto";
 
 /** Discord invite target type for launching an embedded application (activity). */
 const INVITE_TARGET_TYPE_EMBEDDED_APPLICATION = 2;
@@ -105,7 +106,9 @@ export class DiscordBotPresenceRuntime {
     if (restPlan !== undefined) {
       const response = await this.rest[restPlan.method](
         restPlan.path as `/${string}`,
-        restPlan.body === undefined ? undefined : { body: restPlan.body },
+        restPlan.body === undefined
+          ? undefined
+          : { body: { ...restPlan.body, ...(payload.kind === "reply" ? replyNonce(write) : {}) } },
       );
       const ids = resolveDiscordRestActionResult(restPlan, response);
       return result(write, ids.channelId, ids.messageId);
@@ -131,6 +134,7 @@ export class DiscordBotPresenceRuntime {
         const file = await this.replyMedia(payload.artifactRef);
         const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
           body: {
+            ...replyNonce(write),
             content: file === undefined ? `${payload.content}\n\n${MEDIA_LOST_NOTE}` : payload.content,
             message_reference: { message_id: payload.messageId },
             allowed_mentions: { parse: [] },
@@ -283,4 +287,12 @@ function result(
     ...(channelId === undefined ? {} : { channelId }),
     ...(messageId === undefined ? {} : { messageId }),
   });
+}
+
+/** Discord deduplicates a retried send even when its acknowledgement was lost. */
+function replyNonce(write: DiscordPresenceWrite) {
+  return {
+    nonce: createHash("sha256").update(write.idempotencyKey).digest("hex").slice(0, 24),
+    enforce_nonce: true,
+  };
 }

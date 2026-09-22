@@ -1243,6 +1243,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     try {
       const result = await turn;
+      if (result.state === "failed" && captainTurnResults.get(deliveryKey)?.result === turn) {
+        captainTurnResults.delete(deliveryKey);
+      }
       logger.info(
         {
           correlationId: request.identity.correlationId,

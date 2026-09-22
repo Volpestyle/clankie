@@ -59,8 +59,8 @@ describe("resolving a Discord attachment into bytes", () => {
     ).resolves.toMatchObject({ mediaType: "image/webp" });
   });
 
-  it("expands a GIF-picker video into chronological image frames", async () => {
-    const motion = Buffer.from("bounded-mp4");
+  it("expands a video larger than the image ceiling into chronological image frames", async () => {
+    const motion = Buffer.alloc(DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX + 1);
     const first = Buffer.from("frame-one");
     const second = Buffer.from("frame-two");
     const resolve = createDiscordAttachmentResolver({
@@ -69,7 +69,7 @@ describe("resolving a Discord attachment into bytes", () => {
           respond(motion, { "content-type": "video/mp4", "content-length": String(motion.byteLength) }),
         ),
       extractMotionFrames: (bytes, count) => {
-        expect(bytes).toEqual(motion);
+        expect(bytes.equals(motion)).toBe(true);
         expect(count).toBe(4);
         return Promise.resolve([first, second]);
       },
@@ -145,18 +145,27 @@ describe("resolving a Discord attachment into bytes", () => {
       }),
     ).rejects.toThrow("discord_attachment_too_large");
 
-    // No content-length at all, and a body past the ceiling: the header is not
-    // allowed to be the only thing standing between the CDN and memory.
+    // Stop reading and cancel even when the header understates the stream.
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX + 1));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
     await expect(
       fetchDiscordAttachment(attachment(), {
         fetchImpl: () =>
           Promise.resolve(
-            respond(Buffer.alloc(DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX + 1), {
-              "content-type": "image/png",
+            new Response(body, {
+              headers: { "content-type": "image/png", "content-length": "1" },
             }),
           ),
       }),
     ).rejects.toThrow("discord_attachment_too_large");
+    expect(cancelled).toBe(true);
   });
 
   it("keeps the images it could read when a sibling fails", async () => {

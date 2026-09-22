@@ -916,12 +916,12 @@ describe("images are part of what was said", () => {
     expect(selection.omitted).toBe(4);
   });
 
-  it("turns a Discord GIF-picker embed into a proxied image", () => {
+  it.each(["gifv", "rich", "video"])("carries motion from a %s embed through the video proxy", (type) => {
     const selection = selectInboundImageAttachments(
       [],
       [
         {
-          type: "gifv",
+          type,
           url: "https://klipy.com/gifs/greetings-PSr",
           thumbnailUrl: "https://static.klipy.com/greeting.webp",
           thumbnailProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.webp",
@@ -940,6 +940,58 @@ describe("images are part of what was said", () => {
       },
     ]);
     expect(selection.omitted).toBe(0);
+  });
+
+  it.each([
+    "https://pbs.twimg.com/media/photo?format=jpg&name=large",
+    "https://jf.x.com/images/media-preview/2102284659464020106",
+  ])("carries a tweet preview from a thread opening post: %s", async (imageUrl) => {
+    const selection = selectInboundImageAttachments(
+      [],
+      [
+        {
+          type: "rich",
+          url: "https://x.com/example/status/123",
+          imageUrl,
+          imageProxyUrl: "https://images-ext-1.discordapp.net/external/photo?format=jpg",
+          thumbnailUrl: "https://pbs.twimg.com/profile_images/avatar.png",
+        },
+        { type: "rich", url: "https://example.com/text-only" },
+      ],
+    );
+    expect(selection).toEqual({
+      attachments: [
+        {
+          id: expect.stringMatching(/^embed-[0-9a-f]{24}$/u),
+          url: "https://images-ext-1.discordapp.net/external/photo?format=jpg",
+          mediaType: "image/jpeg",
+        },
+      ],
+      omitted: 0,
+    });
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, config());
+    await ingress.handle({
+      id: "thread-reply",
+      channelId: "dm-1",
+      authorId: "james",
+      authorIsBot: false,
+      mentionsBot: true,
+      body: "wdyt of this",
+      contextMessages: [
+        {
+          id: "thread-starter",
+          authorId: "friend",
+          body: "https://x.com/example/status/123",
+          createdAt: "2026-07-12T19:00:00.000Z",
+          attachments: selection.attachments,
+        },
+      ],
+    });
+    expect(port.turns[0]?.contextVisual).toMatchObject({
+      sourceMessageId: "thread-starter",
+      attachment: selection.attachments[0],
+    });
   });
 
   it("carries only the newest visual from bounded context", async () => {

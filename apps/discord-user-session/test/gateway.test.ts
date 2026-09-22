@@ -59,6 +59,10 @@ describe("DiscordUserGateway", () => {
           {
             type: "gifv",
             url: "https://klipy.com/gifs/greetings-PSr",
+            image: {
+              url: "https://example.com/preview.jpg",
+              proxy_url: "https://images-ext-1.discordapp.net/external/preview.jpg",
+            },
             thumbnail: {
               url: "https://static.klipy.com/greeting.webp",
               proxy_url: "https://images-ext-1.discordapp.net/external/greeting.webp",
@@ -85,6 +89,8 @@ describe("DiscordUserGateway", () => {
           {
             type: "gifv",
             url: "https://klipy.com/gifs/greetings-PSr",
+            imageUrl: "https://example.com/preview.jpg",
+            imageProxyUrl: "https://images-ext-1.discordapp.net/external/preview.jpg",
             thumbnailUrl: "https://static.klipy.com/greeting.webp",
             thumbnailProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.webp",
             videoUrl: "https://static.klipy.com/greeting.mp4",

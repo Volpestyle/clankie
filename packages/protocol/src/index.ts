@@ -3201,6 +3201,8 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
   z
     .object({
       state: z.literal("absorbed"),
+      /** The delivery whose Discord reply also answers this message. */
+      replyDeliveryId: z.string().min(1).optional(),
       captainSessionId: z.string().min(1),
       turnId: z.string().min(1),
     })

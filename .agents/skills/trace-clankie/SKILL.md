@@ -72,6 +72,12 @@ Following controls waking, not collection.
 
 ## Gotchas that cost real time
 
+- **A captain `said` line is not proof Discord received it.** Match the source
+  delivery id to `discord.text.reply` and its `responseMessageId`. The official
+  bot keeps unfinished deliveries in `discord-text-inbox.sqlite` beside its
+  receipt log; read `deliveries` and `channels` read-only to inspect pending
+  ids and scan cursors. A saved result can await posting after the model finished.
+
 - **The TUI is fullscreen** — `herdr pane read` returns only the currently
   rendered screen. The chat transcript is _not_ in terminal scrollback; read
   the conversation's `events.jsonl` instead.

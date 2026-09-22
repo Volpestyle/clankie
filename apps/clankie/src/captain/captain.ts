@@ -458,6 +458,7 @@ interface LaneSession {
   turnCounter: number;
   /** Settlement of the in-flight run, while one is active: true if it succeeded. */
   running?: Promise<boolean> | undefined;
+  runningDeliveryId?: string | undefined;
   /**
    * Operator turns hold this while they prepare (model sync, lane-log, herdr
    * census) so a concurrent human send waits and then steers instead of starting
@@ -520,11 +521,16 @@ export async function runDurableTurn(
     readonly session: Pick<AgentSession, "isStreaming" | "prompt"> & { readonly state: PiRunState };
     readonly capture: TurnContext;
     running?: Promise<boolean> | undefined;
+    runningDeliveryId?: string | undefined;
     starting?: Promise<void> | undefined;
   },
   prompt: string,
   images: ImageContent[],
-  options?: { expandPromptTemplates?: boolean },
+  options?: {
+    expandPromptTemplates?: boolean;
+    deliveryId?: string;
+    onAbsorbed?: (deliveryId: string | undefined) => void;
+  },
 ): Promise<"ran" | "absorbed"> {
   const expandPromptTemplates = options?.expandPromptTemplates ?? false;
   for (;;) {
@@ -534,6 +540,7 @@ export async function runDurableTurn(
       // with template expansion off pi reaches its own streaming check without
       // awaiting — so the state observed here is the state it acts on.
       lane.capture.media = undefined;
+      lane.runningDeliveryId = options?.deliveryId;
       const run = lane.session.prompt(prompt, { expandPromptTemplates, images });
       // A failed pi run resolves exactly like a good one, so the outcome has to
       // be read out of the lane at this run's own settlement — before the fact
@@ -554,6 +561,7 @@ export async function runDurableTurn(
       return "ran";
     }
     if (lane.session.isStreaming) {
+      options?.onAbsorbed?.(lane.runningDeliveryId);
       await lane.session.prompt(prompt, {
         expandPromptTemplates,
         streamingBehavior: "steer",
@@ -1460,6 +1468,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             }
           });
     let role: "ran" | "absorbed" = "ran";
+    let replyDeliveryId: string | undefined;
     let early: CaptainChannelTurnResult | undefined;
     let settled: TurnSettledOutcome | undefined;
     let tokensEnd: number | undefined;
@@ -1468,7 +1477,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (lane.running === undefined && !lane.session.isStreaming) await syncModel(lane);
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
         const outcome = await runTurnWithStallWatchdog(lane.session, () =>
-          runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent)),
+          runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent), {
+            deliveryId,
+            onAbsorbed: (id) => {
+              replyDeliveryId = id;
+            },
+          }),
         );
         if (!outcome.completed) {
           settled = "interrupted";
@@ -1542,7 +1556,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // message too, so the delivery says so rather than sending words of its
       // own. Distinct from silence — he did answer, just not from here.
       await toolProgress?.dismiss();
-      return { state: "absorbed", captainSessionId: normalized.sessionKey, turnId };
+      return {
+        state: "absorbed",
+        captainSessionId: normalized.sessionKey,
+        turnId,
+        ...(replyDeliveryId === undefined ? {} : { replyDeliveryId }),
+      };
     }
     const message = lane.lastAssistantText.trim();
     if (message.length === 0) {

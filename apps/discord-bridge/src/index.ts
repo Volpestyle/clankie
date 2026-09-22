@@ -8,6 +8,8 @@ import {
 } from "@clankie/credential-broker";
 import { PLAY_VOICE_PATH, startPlayVoiceListener } from "@clankie/play-voice";
 import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
+import { DiscordTextInbox, discordSnowflakeAt, scanDiscordTextChannel } from "./text-inbox.ts";
 import { createServer } from "node:http";
 import {
   ChannelType,
@@ -189,14 +191,13 @@ const roleBindings: DiscordRoleBindings = {
   ambientUserIds: parseDiscordIdSet(process.env.DISCORD_AMBIENT_USER_IDS),
 };
 const voiceJoinPolicy = parseDiscordVoiceJoinPolicy(process.env.DISCORD_VOICE_JOIN_POLICY);
-const receipts = new DiscordBridgeReceiptStore({
-  path: resolveDiscordReceiptPath({
-    configured: process.env.DISCORD_BRIDGE_RECEIPT_PATH,
-    envName: "DISCORD_BRIDGE_RECEIPT_PATH",
-    defaultFileName: "discord-live-receipts.jsonl",
-    requireOutsideWorkspace: true,
-  }),
+const receiptPath = resolveDiscordReceiptPath({
+  configured: process.env.DISCORD_BRIDGE_RECEIPT_PATH,
+  envName: "DISCORD_BRIDGE_RECEIPT_PATH",
+  defaultFileName: "discord-live-receipts.jsonl",
+  requireOutsideWorkspace: true,
 });
+const receipts = new DiscordBridgeReceiptStore({ path: receiptPath });
 const textIngressEnabled = process.env.DISCORD_TEXT_INGRESS_ENABLED === "true";
 const textIngressContextLimit = parseContextMessageLimit(process.env.DISCORD_INGRESS_CONTEXT_MESSAGES);
 const ingressGuildIds = parseDiscordIdSet(process.env.DISCORD_INGRESS_GUILD_IDS);
@@ -206,10 +207,17 @@ const ownerUserId = process.env.DISCORD_OWNER_USER_ID?.trim();
 // replies and the slash-invoked activity launch go through the same live-claim
 // and tool-exposure guards.
 const presencePort = createAdvertisedDiscordPresencePort(api, presenceSession);
+const textInbox = textIngressEnabled
+  ? new DiscordTextInbox(
+      join(dirname(receiptPath), "discord-text-inbox.sqlite"),
+      discordSnowflakeAt(Date.now() - 24 * 60 * 60_000),
+    )
+  : undefined;
+await textInbox?.seedReceipts(receiptPath);
 const toolProgressMessageIds = new Set<string>();
 const textIngress = textIngressEnabled
   ? new DiscordTextIngress(
-      presencePort,
+      textInbox!.port(presencePort),
       {
         characterId,
         credentialRef: "discord_bot",
@@ -483,7 +491,7 @@ const scheduleGuildMembershipSync = () => {
 
 client.once("ready", async () => {
   syncGuildMembership();
-  void presenceSession.gatewayReady().catch(reportPresencePhaseFailure);
+  await presenceSession.gatewayReady();
   const rest = new REST({ version: "10" }).setToken(token);
   // Guild-scoped to every server he reads, not just the home guild: a member
   // who can talk to him should see his command surface. Global registration
@@ -518,6 +526,7 @@ client.once("ready", async () => {
     // configuration provenance is exactly what wastes an hour of debugging.
     console.info({ names: settingsFilledNames }, "Discord configuration filled from operator settings");
   }
+  void recoverTextInbox();
   console.log(
     `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered /${DISCORD_COMMAND_NAME} with ${DISCORD_SUBCOMMANDS.length} subcommands, text ingress ${textIngressEnabled ? "enabled" : "disabled"}, voice ${voiceEnabled ? "enabled" : "disabled"}.`,
   );
@@ -530,7 +539,10 @@ client.on("shardReady", () => {
 
 client.on("shardResume", () => {
   syncGuildMembership();
-  void presenceSession.gatewayResumed().catch(reportPresencePhaseFailure);
+  void presenceSession
+    .gatewayResumed()
+    .then(() => recoverTextInbox())
+    .catch(reportPresencePhaseFailure);
 });
 
 // A membership change while disconnected is invisible until the next
@@ -679,13 +691,17 @@ async function takenByProjectedChannel(message: Message, authorIsBot: boolean): 
   return true;
 }
 
-client.on("messageCreate", async (message) => {
+async function handleDiscordMessage(message: Message, recovering = false): Promise<void> {
   if (shuttingDown) return;
   try {
     const authorIsBot = message.author.bot || message.author.id === client.user?.id;
     // A channel the operator projected is a room they made on purpose, so it
     // answers whether or not Clankie is also listening ambiently in this guild.
-    if (await takenByProjectedChannel(message, authorIsBot)) return;
+    if (await takenByProjectedChannel(message, authorIsBot)) {
+      textInbox?.enqueue(message.id, message.channelId, message.guildId ?? undefined);
+      textInbox?.finish(message.id);
+      return;
+    }
     if (!textIngress) return;
     const selection = selectDiscordMessageImages(message);
     const inbound = {
@@ -694,7 +710,9 @@ client.on("messageCreate", async (message) => {
       channelId: message.channelId,
       authorId: message.author.id,
       authorIsBot,
-      mentionsBot: client.user !== null && message.mentions.users.has(client.user.id),
+      mentionsBot:
+        client.user !== null &&
+        (message.mentions.users.has(client.user.id) || message.mentions.repliedUser?.id === client.user.id),
       body: message.content,
       attachments: selection.attachments,
       attachmentsOmitted: selection.omitted,
@@ -711,34 +729,44 @@ client.on("messageCreate", async (message) => {
         deliveryId: message.id,
         hasAttachments: selection.attachments.length > 0 || selection.omitted > 0,
       },
-      voiceSession,
+      recovering ? undefined : voiceSession,
     );
     // The playthrough and realtime voice room are local threads of the same
     // character. Both inherit the event; only the active voice room owns the
     // reply, so the separate text captain does not race it.
-    if (routedRoomText.text !== null) playVoiceListener?.publishUtterance(routedRoomText.text);
-    if (routedRoomText.voiceOwned) return;
+    if (!recovering && routedRoomText.text !== null) playVoiceListener?.publishUtterance(routedRoomText.text);
+    if (routedRoomText.voiceOwned) {
+      textInbox?.enqueue(message.id, message.channelId, message.guildId ?? undefined);
+      textInbox?.finish(message.id);
+      return;
+    }
     let contextRead: Promise<readonly DiscordInboundContextMessage[]> | undefined;
     const loadContextOnce = () => (contextRead ??= readDiscordContext(message, textIngressContextLimit));
-    const result = await textIngress.handle({
-      ...inbound,
-      loadContextMessages: loadContextOnce,
-    });
-    if (result.state === "failed") {
-      console.error(
-        { deliveryId: message.id, channelId: message.channelId, code: result.code },
-        "Discord text ingress failed",
-      );
-    } else if (result.state === "settled" || result.state === "waiting_user") {
-      await recordReceipt("discord.text.reply", {
-        deliveryId: message.id,
-        ...(message.guildId === null ? {} : { guildId: message.guildId }),
-        channelId: message.channelId,
-        turnId: result.turnId,
-        responseMessageId: result.responseMessageId,
-        state: result.state,
+    textInbox!.enqueue(message.id, message.channelId, message.guildId ?? undefined);
+    await textInbox!.handle(message.id, async () => {
+      const result = await textIngress.handle({
+        ...inbound,
+        ...(recovering ? { catchingUp: true } : {}),
+        loadContextMessages: loadContextOnce,
       });
-    }
+      if (result.state !== "failed" && result.state !== "buffered" && result.state !== "absorbed")
+        textInbox!.finish(message.id);
+      if (result.state === "failed") {
+        console.error(
+          { deliveryId: message.id, channelId: message.channelId, code: result.code },
+          "Discord text ingress failed",
+        );
+      } else if (result.state === "settled" || result.state === "waiting_user") {
+        await recordReceipt("discord.text.reply", {
+          deliveryId: message.id,
+          ...(message.guildId === null ? {} : { guildId: message.guildId }),
+          channelId: message.channelId,
+          turnId: result.turnId,
+          responseMessageId: result.responseMessageId,
+          state: result.state,
+        });
+      }
+    });
   } catch (error) {
     console.error(
       {
@@ -749,6 +777,9 @@ client.on("messageCreate", async (message) => {
       "Discord text ingress handler failed",
     );
   }
+}
+client.on("messageCreate", (message) => {
+  void handleDiscordMessage(message);
 });
 
 client.on("interactionCreate", async (interaction) => {
@@ -1469,6 +1500,90 @@ async function readDiscordContext(
   });
 }
 
+let recoveringText = false;
+async function recoverTextInbox(): Promise<void> {
+  if (recoveringText || shuttingDown || !client.isReady() || !textInbox || !textIngress) return;
+  recoveringText = true;
+  try {
+    const channelIds = new Set(textInbox.channels());
+    const reconciled = new Set<string>();
+    for (const guild of client.guilds.cache.values()) {
+      if (!ingressGuildIds.has(guild.id)) continue;
+      const channels = await guild.channels.fetch();
+      const threads = await guild.channels.fetchActiveThreads();
+      for (const channel of [...channels.values(), ...threads.threads.values()]) {
+        if (channel?.isTextBased() && (ingressChannelIds.size === 0 || ingressChannelIds.has(channel.id)))
+          channelIds.add(channel.id);
+      }
+    }
+    for (const id of channelIds) {
+      if (shuttingDown) return;
+      try {
+        const channel = await client.channels.fetch(id);
+        if (!channel?.isTextBased()) continue;
+        if (
+          !channel.isDMBased() &&
+          (!ingressGuildIds.has(channel.guildId) ||
+            (ingressChannelIds.size > 0 && !ingressChannelIds.has(id)))
+        )
+          continue;
+        if (
+          !channel.isDMBased() &&
+          !channel
+            .permissionsFor(client.user)
+            ?.has([
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.ReadMessageHistory,
+              ...(channel.isVoiceBased() ? [PermissionFlagsBits.Connect] : []),
+            ])
+        )
+          continue;
+        await scanDiscordTextChannel(
+          textInbox,
+          channel,
+          client.user.id,
+          characterNames(storedSettings.persona),
+        );
+        reconciled.add(id);
+      } catch (error) {
+        console.error(
+          { channelId: id, error: error instanceof Error ? error.message : String(error) },
+          "Discord inbox channel scan failed",
+        );
+      }
+    }
+    for (const delivery of textInbox.pending()) {
+      if (shuttingDown) return;
+      if (!reconciled.has(delivery.channel_id)) continue;
+      try {
+        const channel = await client.channels.fetch(delivery.channel_id);
+        if (!channel?.isTextBased()) continue;
+        const message = await channel.messages.fetch(delivery.id);
+        await handleDiscordMessage(message, true);
+      } catch (error) {
+        // Deleted messages cannot be answered. Permission/network failures remain pending.
+        if ((error as { code?: number }).code === 10008) textInbox.finish(delivery.id);
+        else
+          console.error(
+            { deliveryId: delivery.id, error: error instanceof Error ? error.message : String(error) },
+            "Discord inbox retry failed",
+          );
+      }
+    }
+  } catch (error) {
+    console.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Discord inbox recovery failed",
+    );
+  } finally {
+    recoveringText = false;
+  }
+}
+const inboxTimer = setInterval(() => {
+  void recoverTextInbox();
+}, 60_000);
+inboxTimer.unref();
+
 function selectDiscordMessageImages(message: Message) {
   return selectInboundImageAttachments(
     [...message.attachments.values()].map((attachment) => ({
@@ -1481,6 +1596,8 @@ function selectDiscordMessageImages(message: Message) {
     message.embeds.map((embed) => ({
       ...(embed.data.type === undefined ? {} : { type: embed.data.type }),
       ...(embed.url === null ? {} : { url: embed.url }),
+      ...(embed.image === null ? {} : { imageUrl: embed.image.url }),
+      ...(embed.image?.proxyURL === undefined ? {} : { imageProxyUrl: embed.image.proxyURL }),
       ...(embed.thumbnail === null ? {} : { thumbnailUrl: embed.thumbnail.url }),
       ...(embed.thumbnail?.proxyURL === undefined ? {} : { thumbnailProxyUrl: embed.thumbnail.proxyURL }),
       ...(embed.video === null ? {} : { videoUrl: embed.video.url }),
@@ -1536,6 +1653,7 @@ const shutdown = coalesceOnce(async (signal: NodeJS.Signals) => {
       voiceIdleAutoLeave?.stop();
       if (membershipSyncTimer !== undefined) clearTimeout(membershipSyncTimer);
       if (catchUpTimer !== undefined) clearInterval(catchUpTimer);
+      clearInterval(inboxTimer);
       await Promise.all([
         (async () => {
           stopPlayVoiceTranscript?.();

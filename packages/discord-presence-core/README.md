@@ -45,7 +45,7 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
 - **`transportKind` is configuration, not inference.** Both ingress paths take
   it from their host process; neither guesses.
 - **Visuals are selected here, never in a bridge.** Both transports map
-  their raw attachment and `gifv` embed shapes and call `selectInboundImageAttachments`, so one
+  their raw attachments and link-preview images (including `gifv` embeds) and call `selectInboundImageAttachments`, so one
   rule decides what he can be shown. A policy that admitted an image on one
   body and not the other would be two characters, not one
   ([ADR 0081](../../docs/adr/0081-an-image-is-part-of-what-is-said.md)).
