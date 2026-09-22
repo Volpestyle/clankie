@@ -5590,3 +5590,4 @@ export const HerdrBindingSchema = z
   })
   .strict();
 export type HerdrBinding = z.infer<typeof HerdrBindingSchema>;
+export { RivalsCommandSchema, RivalsStatusSchema, type RivalsCommand, type RivalsStatus } from "./rivals.ts";

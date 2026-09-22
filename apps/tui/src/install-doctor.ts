@@ -17,6 +17,7 @@ import {
 } from "@clankie/model-provider";
 import { SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
 import { commandHost } from "./command/io.ts";
+import { probeDoorway, type GatewayDoorwayReport } from "./command/gateway.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const PROBE_TIMEOUT_MS = 5_000;
@@ -81,6 +82,8 @@ export interface InstallDoctorReport {
   readonly herdrPlugin: HerdrPluginReport;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
   readonly laneTools: { readonly url: string; readonly reachable: boolean };
+  /** The live public doorway (ADR 0151): whether the phone can reach him at all. */
+  readonly doorway: GatewayDoorwayReport;
   readonly selectedModel: SelectedModelReport | null;
   readonly remediations: readonly string[];
 }
@@ -172,6 +175,10 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     pluginBundle,
   );
   const laneTools = await inspectLaneTools(commandHost({ env }), options.fetchImpl ?? fetch);
+  const doorway = await probeDoorway({
+    env,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
   const model = unsetToNull(config.config.model);
   const credentialIds = new Set(credentials.map((entry) => entry.id));
   const selectedModel = await inspectSelectedModel(
@@ -187,6 +194,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     commands,
     herdrPlugin,
     selectedModel,
+    doorway,
   });
 
   return {
@@ -222,6 +230,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     commands,
     herdrPlugin,
     laneTools,
+    doorway,
     selectedModel,
     remediations,
   };
@@ -397,6 +406,7 @@ function collectRemediations(input: {
   readonly commands: { readonly [name: string]: CommandPresence };
   readonly herdrPlugin: HerdrPluginReport;
   readonly selectedModel: SelectedModelReport | null;
+  readonly doorway: GatewayDoorwayReport;
 }): string[] {
   const remediations: string[] = [];
   if (input.model === null) {
@@ -432,6 +442,16 @@ function collectRemediations(input: {
     !input.credentialIds.has("discord_user_session")
   ) {
     remediations.push("Store the personal-lab Discord user token with /discord.");
+  }
+  if (input.doorway.state === "sign_in_required") {
+    remediations.push(
+      `This Mac has been signed out of the public doorway since ${input.doorway.since}; no app reaches him until you sign it back in with /gateway.`,
+    );
+  }
+  if (input.doorway.state === "unavailable") {
+    remediations.push(
+      "The public doorway is configured but this Clankie holds no connection to it, so no app reaches him and pairing refuses; read his log, then `clankie restart captain`.",
+    );
   }
   if (
     input.commands.herdr?.present === true &&

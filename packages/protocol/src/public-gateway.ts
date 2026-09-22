@@ -65,6 +65,22 @@ export const PublicGatewayHostIdSchema = z
   .regex(/^[A-Za-z0-9_-]+$/u);
 export type PublicGatewayHostId = z.infer<typeof PublicGatewayHostIdSchema>;
 
+/**
+ * What this Mac's end of the doorway is doing, so one loopback read answers
+ * "can my phone reach him right now". `sign_in_required` is the terminal one:
+ * no retry fixes a rejected account credential, so it stands until a human
+ * signs this Mac back in.
+ */
+export const PublicGatewayDoorwayStateSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("disabled") }),
+  /** Configured, but this Clankie holds no connector at all — nothing is even trying. */
+  z.object({ state: z.literal("unavailable") }),
+  z.object({ state: z.literal("connecting") }),
+  z.object({ state: z.literal("connected") }),
+  z.object({ state: z.literal("sign_in_required"), since: z.string().min(1) }),
+]);
+export type PublicGatewayDoorwayState = z.infer<typeof PublicGatewayDoorwayStateSchema>;
+
 /** Stable random identity for one Clankie installation; not a credential. */
 export const PublicGatewayInstallationIdSchema = z
   .string()

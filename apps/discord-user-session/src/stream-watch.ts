@@ -2,7 +2,7 @@ import type { ClankieApiClient } from "@clankie/api-client";
 import type { DiscordActiveStream, DiscordStreamWatchReport } from "@clankie/protocol";
 import type { VoxStreamClient } from "@clankie/vox-client";
 import type { DiscordUserGateway } from "./gateway.ts";
-import { fetchActivitySnapshot } from "./go-live-source.ts";
+import { fetchActivitySnapshot, fetchRivalsSnapshot } from "./go-live-source.ts";
 import {
   buildDiscordStreamKey,
   createDiscordStreamDiscovery,
@@ -34,7 +34,12 @@ export interface StreamWatchControllerOptions {
 export interface StreamWatchController {
   handleRaw(packet: { t: string; d: Record<string, unknown> }): void;
   publish(): void;
-  requestPublish(input: { guildId: string; channelId: string; sourceUrl?: string }): Promise<boolean>;
+  requestPublish(input: {
+    guildId: string;
+    channelId: string;
+    sourceUrl?: string;
+    snapshotUrl?: string;
+  }): Promise<boolean>;
   playSource(url: string): boolean;
   setPublishPaused(paused: boolean): void;
   stopPublish(): boolean;
@@ -52,6 +57,7 @@ interface PendingPublish {
   readonly resolve: (started: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly sourceUrl?: string;
+  readonly snapshotUrl?: string;
   opcodeSent: boolean;
   pauseAccepted: boolean;
   settled: boolean;
@@ -88,6 +94,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
   let publishReceiptSent = false;
   let transportError: string | undefined;
   let publishPump: ReturnType<typeof setInterval> | undefined;
+  let pumpGeneration = 0;
   let lastPublishDigest: string | undefined;
   let closed = false;
   const unsubscribes: (() => void)[] = [];
@@ -324,10 +331,23 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
 
   const startActivityPump = (): void => {
     if (publishPump !== undefined) return;
-    const pull = options.fetchActivitySnapshot ?? (() => fetchActivitySnapshot());
+    const generation = ++pumpGeneration;
+    const snapshotUrl = pendingPublish?.snapshotUrl;
+    const pull =
+      snapshotUrl === undefined
+        ? (options.fetchActivitySnapshot ?? (() => fetchActivitySnapshot()))
+        : () => fetchRivalsSnapshot(snapshotUrl);
+    let pulling = false;
     publishPump = setInterval(() => {
+      if (pulling) return;
+      pulling = true;
       void pull()
         .then((frame) => {
+          if (generation !== pumpGeneration) return;
+          if (snapshotUrl !== undefined && frame === undefined) {
+            failPublish();
+            return;
+          }
           if (closed || frame === undefined || !publishing || publishPaused) return;
           if (frame.sha256 === lastPublishDigest) return;
           lastPublishDigest = frame.sha256;
@@ -338,7 +358,12 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
             }),
           );
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (snapshotUrl !== undefined && generation === pumpGeneration) failPublish();
+        })
+        .finally(() => {
+          pulling = false;
+        });
     }, 100);
     publishPump.unref();
   };
@@ -354,12 +379,14 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
   const failPublish = (guildId?: string): void => {
     settlePublishStart(false);
     const pendingGuildId = guildId ?? pendingPublish?.guildId ?? publishingStream?.guildId;
+    if (publishingStream !== undefined) discovery.requestPublishStop(publishingStream.streamKey);
     pendingPublish = undefined;
     stopPublishMedia();
     options.membership.release("stream_publish", pendingGuildId);
   };
 
   const stopPublishMedia = (): void => {
+    pumpGeneration++;
     if (publishPump !== undefined) {
       clearInterval(publishPump);
       publishPump = undefined;

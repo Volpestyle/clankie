@@ -258,6 +258,68 @@ describe("public gateway Mac connector", () => {
       `${PUBLIC_GATEWAY_HOST_CONNECT_PATH}?hostId=${hostId}&installationId=${installationId}`,
     );
   });
+
+  it("parks on a credential no retry can fix and says the Mac needs signing in", async () => {
+    const target = await listen(createServer((_request, response) => response.end("{}")));
+    const gateway = await fakeGateway();
+    const logs: Array<{ readonly fields: Readonly<Record<string, unknown>>; readonly message: string }> = [];
+    let resolutions = 0;
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      installationId: "YWFhYWFhYWFhYWFhYWFhYQ",
+      resolveHostToken: () => {
+        resolutions += 1;
+        return Promise.reject(
+          Object.assign(new Error("Clankie account refused this Mac's refresh token"), {
+            name: "ClankieAccountAuthError",
+            code: "refresh_rejected",
+          }),
+        );
+      },
+      tokenErrorIsTerminal: () => true,
+      controlPlaneUrl: target,
+      relayUrl: target,
+      logger: { info: () => undefined, warn: (fields, message) => logs.push({ fields, message }) },
+      reconnectMinimumMs: 1,
+      reconnectMaximumMs: 2,
+    });
+    connectors.push(connector);
+    connector.start();
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(resolutions).toBe(1);
+    expect(logs.map(({ message }) => message)).toEqual(["public gateway needs this Mac signed in again"]);
+    // The code rides along, so the log names which failure parked the doorway.
+    expect(logs[0]?.fields).toMatchObject({ error: "ClankieAccountAuthError", code: "refresh_rejected" });
+    expect(connector.doorway).toMatchObject({ state: "sign_in_required" });
+  });
+
+  it("keeps retrying a token failure that might clear on its own", async () => {
+    const target = await listen(createServer((_request, response) => response.end("{}")));
+    const gateway = await fakeGateway();
+    let resolutions = 0;
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      installationId: "YWFhYWFhYWFhYWFhYWFhYQ",
+      resolveHostToken: () => {
+        resolutions += 1;
+        return Promise.reject(new Error("account service is unavailable"));
+      },
+      tokenErrorIsTerminal: () => false,
+      controlPlaneUrl: target,
+      relayUrl: target,
+      reconnectMinimumMs: 1,
+      reconnectMaximumMs: 2,
+    });
+    connectors.push(connector);
+    connector.start();
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(resolutions).toBeGreaterThan(1);
+    expect(connector.doorway).toEqual({ state: "connecting" });
+  });
 });
 
 interface FakeGatewayConnection {

@@ -198,6 +198,15 @@ Keychain. The non-secret doorway URL and random per-installation id live under
 `publicGateway` in `settings.json`; the public host id is derived from the
 authenticated account subject and installation id.
 
+The pool rotates refresh tokens, so each refresh kills the one it spent: the
+broker writes the replacement to Keychain before it validates anything else in
+the answer. A malformed access token then costs one retry instead of remote
+access. A refresh the pool answers with an error is terminal — including
+`Refresh token reuse detected`, which is how rotation reports a spent token and
+revokes the chain. The connector parks, `clankie gateway status` and `doctor`
+report `sign_in_required`, and `/gateway` signs this Mac back in. Only a rate
+limit or Cognito's own failure is retried.
+
 The Mac sends only the short-lived access token in its outbound WebSocket
 handshake. The token is never sent to the mobile app or forwarded with a device
 request. The gateway verifies its Cognito signature and claims without storing

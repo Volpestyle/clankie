@@ -43,6 +43,8 @@ or `/cd PATH` to select a project conversation.
 
 `--json` is required only where the default is human-readable (pairing QR,
 device table, credential-rotate sentence). Everything else is already JSON.
+`rivals connect --token-stdin` reads its bridge token from a pipe into the broker;
+the token is never an argument, settings value, or printed result.
 
 | Command                                                                                         | stdout                                                                                       |
 | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -125,6 +127,7 @@ tools are facts in `remediations`, not failures.
   "commands": { "herdr": { "present": false } },
   "herdrPlugin": { "bundled": true, "bundlePath": "…/integrations/herdr-plugin" },
   "laneTools": { "url": "http://127.0.0.1:4310/v1/mcp", "reachable": true },
+  "doorway": { "state": "connected" },
   "remediations": ["Pick a captain model with `clankie model set provider/model` or `/model`."]
 }
 ```
@@ -135,7 +138,10 @@ strings) and `herdr-lead` (PATH only — never execute `herdr-lead --version`).
 `laneTools` names the streamable-HTTP MCP route that serves a lane's tool bank
 ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)); `reachable` is
 true when it answers an unauthenticated probe with 401, so the route is served
-and wants a lane bearer.
+and wants a lane bearer. `doorway` is the live public doorway
+([ADR 0151](adr/0151-the-public-doorway-routes-home.md)) in the states
+`clankie gateway status` reports; `sign_in_required` and `unavailable` each earn
+a remediation, because until they clear no app reaches him at all.
 
 ### `restart [service]`
 
@@ -213,7 +219,10 @@ their usual per-process logs.
 
 Mint a one-time pairing offer (QR + code + deep link) for the phone/desktop
 app. Pairing reuses a healthy app relay or starts a stopped one before minting
-an offer. If the relay cannot start, no offer is minted. `--timeout` covers
+an offer. If the relay cannot start, no offer is minted. A configured public
+doorway carries the offer, so when this Mac has no live connection to it —
+`doorway.state` anything but `connected` — pairing fails `unavailable` rather
+than handing out a code the phone can only report as unrecognized. `--timeout` covers
 startup and minting together and defaults to 30 seconds; an ordinary offer
 lives five minutes. A remote `CLANKIE_CONTROL_PLANE_URL` fails with
 `unavailable`: run pairing on that host so its launcher can verify the relay.
@@ -274,8 +283,13 @@ that restart, then re-pair every device. The `/gateway` menu exposes the same
 action. [Encryption contract](adr/0173-the-gateway-cannot-read-device-traffic.md).
 
 Read the public doorway binding or disable it. JSON includes `publicGateway`,
-the derived `hostId`, `credentialPresent`, `enabled`, `settingsFile`, and the
-restart command. Use the interactive TUI `/gateway` wizard to sign in with an
+the derived `hostId`, `credentialPresent`, `enabled`, `settingsFile`, the
+restart command, and `doorway` — the running captain's own view, read over
+loopback, because stored settings never prove the socket is up. Its `state` is
+`connected`, `connecting`, `sign_in_required` (with the `since` timestamp; no
+app reaches this Mac until someone signs it back in), `unavailable` (configured,
+but this Clankie holds no connector at all), `disabled`, or `unreachable` when
+the captain does not answer. Use the interactive TUI `/gateway` wizard to sign in with an
 invited email and one-time code; the rotating account credential goes to
 Keychain and the wizard restarts Clankie automatically. `disable` signs this Mac
 out and removes its installation binding.
@@ -368,6 +382,17 @@ Operator kill-switch (`POST /v1/embodiment/sessions/live/stop`). The play host
 winds down at the next turn boundary — this is not a process kill. A live
 session returns JSON. Idle is the sentence `Nothing is playing.` (exit 0, not
 JSON).
+
+### `rivals`
+
+`rivals connect URL [--token-stdin]` / `disconnect` configure the Rivals Agent origin live; its
+token is broker-owned under `rivals-agent` (`/auth rivals-agent`). `rivals status`
+reads the current sitting. `rivals start autonomous|combat|disengage [NOTE]` starts
+a bounded sitting. `rivals objective SESSION MODE [NOTE]`, `observe SESSION`,
+`share SESSION [GUILD CHANNEL]`, and `stop SESSION` require its observed ID.
+All return JSON; a refusal exits 1. `/rivals` exposes the same commands in the TUI.
+Notes are context, not instructions the current scripted policy understands.
+See [Rivals setup and verification](rivals.md).
 
 ### `model [status]`
 

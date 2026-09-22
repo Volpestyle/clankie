@@ -28,12 +28,14 @@ import type { EmailPort } from "../email.ts";
 import type { McpHost } from "../mcp-host.ts";
 import type { FinishedRender } from "../media-generation.ts";
 import type { TldrawHost } from "../tldraw-host.ts";
+import type { RivalsClient } from "../rivals.ts";
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly rivals?: RivalsClient;
   /** Tools on his connected MCP servers. The lane is passed on every call. */
   readonly mcp: Pick<McpHost, "catalog" | "call">;
   readonly email: EmailPort;

@@ -18,6 +18,7 @@ import { runRestartCommand, runDownCommand } from "../src/command/restart.ts";
 import { runPairCommand } from "../src/command/pair.ts";
 import { runDevicesCommand } from "../src/command/devices.ts";
 import { runPlayCommand } from "../src/command/play.ts";
+import { runRivalsCommand } from "../src/command/rivals.ts";
 import { runStanceCommand } from "../src/command/stance.ts";
 import { runPromptCommand } from "../src/command/prompt.ts";
 import { runResetCommand } from "../src/command/reset.ts";
@@ -111,6 +112,11 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "play") return await runPlayCommand(rest, options);
+    if (command === "rivals") {
+      const result = await runRivalsCommand(rest, options);
+      outputJson(stdout, result);
+      return result.outcome === "refused" ? 1 : 0;
+    }
     if (command === "model") {
       const result = await runModelCommand(rest, options);
       outputJson(stdout, result);

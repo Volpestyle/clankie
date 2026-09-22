@@ -25,6 +25,7 @@ import type { HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
+import { rivalsTools } from "./rivals-tools.ts";
 
 /**
  * What the running turn is, as its tools need to see it: the last attachable
@@ -106,6 +107,7 @@ export function captainTools(
       : [],
   );
   return [
+    ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     ...(lane === "operator" && herdrWatches !== undefined ? herdrWatchTools(herdrWatches, turn) : []),
     ...(turn.publishFile !== undefined
@@ -446,7 +448,7 @@ export function captainTools(
         "while you are still in the channel; recentVoiceSpeech.currentStay is whether you have been talking.",
       parameters: Type.Object({}),
       execute: async () => {
-        const [live, sessions, voiceHistory, voiceSpeech, renders, shares] = await Promise.all([
+        const [live, sessions, voiceHistory, voiceSpeech, renders, shares, rivals] = await Promise.all([
           deps.embodiment.getLiveSession(),
           deps.presence.listSessions(),
           deps.presence.listVoiceHistory(5),
@@ -455,9 +457,11 @@ export function captainTools(
           // not this room's business, same rule as `observe_room`.
           turn.room === undefined ? [] : deps.media.finishedRenders(turn.room),
           deps.streamWatch.current(),
+          deps.rivals?.call({ action: "status" }),
         ]);
         return json({
           liveSession: live,
+          ...(rivals === undefined ? {} : { rivals }),
           presenceSessions: sessions,
           voiceHistory,
           recentVoiceSpeech: voiceSpeech,

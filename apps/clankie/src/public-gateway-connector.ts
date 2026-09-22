@@ -8,6 +8,7 @@ import {
   PublicGatewayInstallationIdSchema,
   PublicGatewayTunnelFrameSchema,
   publicGatewayTargetFor,
+  type PublicGatewayDoorwayState,
   type PublicGatewayPairingRouteFrame,
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
@@ -41,6 +42,8 @@ export interface PublicGatewayConnectorOptions {
   readonly encryptionKey?: Uint8Array;
   readonly installationId?: string;
   readonly resolveHostToken?: () => Promise<{ readonly token: string; readonly expiresAt: number }>;
+  /** Names the token failures no reconnect can clear; the doorway parks instead of looping. */
+  readonly tokenErrorIsTerminal?: (error: unknown) => boolean;
   readonly controlPlaneUrl: string;
   readonly relayUrl: string;
   readonly logger?: PublicGatewayConnectorLogger;
@@ -100,6 +103,7 @@ export class PublicGatewayConnector {
   private readonly relayUrl: string;
   private readonly logger: PublicGatewayConnectorLogger;
   private readonly fetcher: typeof globalThis.fetch;
+  private readonly tokenErrorIsTerminal: (error: unknown) => boolean;
   private readonly reconnectMinimumMs: number;
   private readonly reconnectMaximumMs: number;
   private readonly pairingRoutes = new Map<string, PublicGatewayPairingRouteFrame>();
@@ -111,6 +115,7 @@ export class PublicGatewayConnector {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private tokenRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectDelayMs: number;
+  private signInRequiredSince: string | undefined;
   private connecting = false;
   private started = false;
 
@@ -132,6 +137,7 @@ export class PublicGatewayConnector {
     }
     this.hostToken = options.hostToken;
     this.resolveHostToken = options.resolveHostToken;
+    this.tokenErrorIsTerminal = options.tokenErrorIsTerminal ?? (() => false);
     this.controlPlaneUrl = requireHttpOrigin(options.controlPlaneUrl, "Control-plane URL");
     this.relayUrl = requireHttpOrigin(options.relayUrl, "Relay URL");
     this.logger = options.logger ?? silentLogger;
@@ -165,6 +171,14 @@ export class PublicGatewayConnector {
     if (this.started) return;
     this.started = true;
     this.connect();
+  }
+
+  /** What the doorway is doing right now, for `/health` and the cards that read it. */
+  public get doorway(): PublicGatewayDoorwayState {
+    if (this.signInRequiredSince !== undefined) {
+      return { state: "sign_in_required", since: this.signInRequiredSince };
+    }
+    return this.socket?.readyState === WebSocket.OPEN ? { state: "connected" } : { state: "connecting" };
   }
 
   /**
@@ -282,8 +296,18 @@ export class PublicGatewayConnector {
       credential =
         this.resolveHostToken === undefined ? { token: this.hostToken ?? "" } : await this.resolveHostToken();
     } catch (error) {
+      if (this.tokenErrorIsTerminal(error)) {
+        // A rejected account credential outlives every retry, so the loop stops
+        // here and says so once. `clankie gateway status` and `doctor` read it.
+        this.signInRequiredSince ??= new Date().toISOString();
+        this.logger.warn(
+          { hostId: this.hostId, error: errorName(error), ...errorCode(error) },
+          "public gateway needs this Mac signed in again",
+        );
+        return;
+      }
       this.logger.warn(
-        { hostId: this.hostId, error: errorName(error) },
+        { hostId: this.hostId, error: errorName(error), ...errorCode(error) },
         "public gateway credential refresh failed",
       );
       this.scheduleReconnect();
@@ -299,6 +323,7 @@ export class PublicGatewayConnector {
     socket.once("open", () => {
       if (this.socket !== socket) return;
       this.reconnectDelayMs = this.reconnectMinimumMs;
+      this.signInRequiredSince = undefined;
       for (const waiter of this.connectionWaiters) {
         clearTimeout(waiter.deadline);
         waiter.resolve(socket);
@@ -602,4 +627,10 @@ async function sendJsonError(socket: WebSocket, requestId: string, error: string
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "UnknownError";
+}
+
+/** The broker's own code, so a parked doorway says which failure parked it. */
+function errorCode(error: unknown): { readonly code: string } | Record<never, never> {
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" ? { code } : {};
 }

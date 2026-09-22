@@ -35,6 +35,7 @@ import {
 import { describeHerdrBinding, formatCaptainContextUsage } from "./shell/footer.ts";
 import { formatHerdrJumpResult, type HerdrSessionEntry } from "./session/herdr-report.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
+import { runRivalsCommand } from "./command/rivals.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
@@ -585,6 +586,33 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           `${formatGameplaySettings(next.games)}\n\nRestart Clankie to apply this change.`,
           "success",
         );
+      },
+    },
+    {
+      name: "rivals",
+      aliases: [],
+      description: "Connect, play, observe, and share Spider-Man",
+      argumentHint: "[status|connect URL|start MODE|objective|observe|share|stop]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        try {
+          const result = await runRivalsCommand(
+            argument.trim().split(/\s+/u).filter(Boolean),
+            settings === undefined ? {} : { settings },
+          );
+          const { data: _image, ...display } = result;
+          shell.insertCommandResult(
+            "/rivals",
+            JSON.stringify(display, null, 2),
+            result.outcome === "refused" ? "error" : "success",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/rivals",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
       },
     },
     {

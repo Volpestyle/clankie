@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   beginClankieAccountLogin,
+  clankieAccountSignInRequired,
   completeClankieAccountLogin,
   createClankieAccountTokenProvider,
   derivePublicGatewayHostId,
@@ -133,6 +134,142 @@ describe("Clankie account credential", () => {
       AuthParameters: { USERNAME: "person@example.com" },
       Session: "confirmed-session",
     });
+  });
+  it("keeps the rotated refresh token when the access token it arrives with is unusable", async () => {
+    const store = new MemoryStore();
+    await store.set(CLANKIE_ACCOUNT_PROVIDER_ID, {
+      type: "oauth",
+      access: "expired-access",
+      refresh: "refresh-1",
+      expires: 1,
+      accountId: "account-1",
+      clientId: "client123",
+    });
+    let refreshes = 0;
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/gateway/v1/config")) return Response.json(accountConfig);
+      refreshes += 1;
+      return Response.json({
+        AuthenticationResult: {
+          // Rotation already burned refresh-1 on the way in; this half of the
+          // answer is the part that cannot be used.
+          AccessToken:
+            refreshes === 1
+              ? "not-a-jwt"
+              : jwt({ sub: "account-1", client_id: "client123", token_use: "access" }),
+          RefreshToken: `refresh-${String(refreshes + 1)}`,
+          ExpiresIn: 3600,
+        },
+      });
+    });
+
+    await expect(
+      createClankieAccountTokenProvider({ gatewayUrl: gateway, store, fetchImpl, now: () => 10 })(),
+    ).rejects.toMatchObject({ name: "ClankieAccountAuthError" });
+    expect(await store.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({ refresh: "refresh-2" });
+
+    // The next attempt spends the stored replacement, so one bad answer costs a
+    // retry rather than remote access until someone runs the email wizard.
+    const recovered = await createClankieAccountTokenProvider({
+      gatewayUrl: gateway,
+      store,
+      fetchImpl,
+      now: () => 10,
+    })();
+    expect(recovered.accountId).toBe("account-1");
+    expect(await store.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({ refresh: "refresh-3" });
+  });
+
+  it("treats a rotation the pool has revoked as terminal, not a passing outage", async () => {
+    const store = new MemoryStore();
+    await store.set(CLANKIE_ACCOUNT_PROVIDER_ID, {
+      type: "oauth",
+      access: "expired-access",
+      refresh: "already-spent",
+      expires: 1,
+      accountId: "account-1",
+      clientId: "client123",
+    });
+    // What the pool actually answers once rotation sees a spent token; it carries
+    // no type this code maps by name, and read as an outage it loops forever.
+    const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+      String(input).endsWith("/gateway/v1/config")
+        ? Response.json(accountConfig)
+        : Response.json(
+            { __type: "RefreshTokenReuseException", message: "Refresh token reuse detected" },
+            { status: 400 },
+          ),
+    );
+
+    const error = await createClankieAccountTokenProvider({
+      gatewayUrl: gateway,
+      store,
+      fetchImpl,
+      now: () => 10,
+    })().catch((reason: unknown) => reason);
+    expect(error).toMatchObject({ code: "refresh_rejected" });
+    expect(clankieAccountSignInRequired(error)).toBe(true);
+  });
+
+  it("keeps a rate limit and an unreachable pool retryable", async () => {
+    const store = new MemoryStore();
+    const credential = {
+      type: "oauth",
+      access: "expired-access",
+      refresh: "refresh-1",
+      expires: 1,
+      accountId: "account-1",
+      clientId: "client123",
+    } as const;
+    await store.set(CLANKIE_ACCOUNT_PROVIDER_ID, credential);
+    const limited = await createClankieAccountTokenProvider({
+      gatewayUrl: gateway,
+      store,
+      now: () => 10,
+      fetchImpl: async (input) =>
+        String(input).endsWith("/gateway/v1/config")
+          ? Response.json(accountConfig)
+          : Response.json({ __type: "TooManyRequestsException" }, { status: 429 }),
+    })().catch((reason: unknown) => reason);
+    expect(clankieAccountSignInRequired(limited)).toBe(false);
+
+    const offline = await createClankieAccountTokenProvider({
+      gatewayUrl: gateway,
+      store,
+      now: () => 10,
+      fetchImpl: () => Promise.reject(new Error("network is down")),
+    })().catch((reason: unknown) => reason);
+    expect(clankieAccountSignInRequired(offline)).toBe(false);
+  });
+
+  it("names a rejected refresh token as one only a human can clear", async () => {
+    const store = new MemoryStore();
+    await store.set(CLANKIE_ACCOUNT_PROVIDER_ID, {
+      type: "oauth",
+      access: "expired-access",
+      refresh: "revoked",
+      expires: 1,
+      accountId: "account-1",
+      clientId: "client123",
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+      String(input).endsWith("/gateway/v1/config")
+        ? Response.json(accountConfig)
+        : Response.json(
+            { __type: "NotAuthorizedException", message: "Refresh Token has expired" },
+            { status: 400 },
+          ),
+    );
+
+    const error = await createClankieAccountTokenProvider({
+      gatewayUrl: gateway,
+      store,
+      fetchImpl,
+      now: () => 10,
+    })().catch((reason: unknown) => reason);
+    expect(clankieAccountSignInRequired(error)).toBe(true);
+    // A gateway that is merely down is worth retrying, and must not read the same.
+    expect(clankieAccountSignInRequired(new Error("fetch failed"))).toBe(false);
   });
 });
 

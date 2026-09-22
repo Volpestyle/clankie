@@ -104,9 +104,11 @@ import {
   type PairingCompleteResponse,
   type PairingRedeemResponse,
 } from "@clankie/protocol";
-import { LINEAR_WEBHOOK_PATH } from "@clankie/protocol/public-gateway";
+import { LINEAR_WEBHOOK_PATH, type PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway";
 import { personaInstructions, SettingsStore, type ClankieSettings } from "@clankie/settings";
 import { Hono, type Context } from "hono";
+import { RivalsCommandSchema } from "@clankie/protocol";
+import type { RivalsClient } from "./rivals.ts";
 import { z } from "zod";
 import { CAPTAIN_PROMPT_SECTIONS, type CaptainPort, type CaptainPromptSection } from "./captain/port.ts";
 import {
@@ -334,6 +336,8 @@ export interface ClankieAppDependencies {
   herdrRuntime?: () => string | undefined;
   /** Read through: the binding changes when a bound session stops (ADR 0170). */
   herdrBinding?: () => HerdrBinding;
+  /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */
+  publicGatewayDoorway?: () => PublicGatewayDoorwayState;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
@@ -350,6 +354,7 @@ export interface ClankieAppDependencies {
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
+  rivals?: RivalsClient;
   mediaGenerator?: MediaGeneratorPort;
   /** Shared realtime voice provider composition; the app owns only loopback media transport. */
   localVoiceRealtime?: TranscriptVoiceRealtimePorts;
@@ -639,11 +644,30 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(binding);
   });
 
+  app.post("/v1/rivals", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = RivalsCommandSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_rivals_command" }, 400);
+    if (!dependencies.rivals) return context.json({ outcome: "refused", reason: "rivals_unavailable" }, 503);
+    return context.json(await dependencies.rivals.call(parsed.data));
+  });
+
+  // `ok` stays the service's own health: a shut doorway is a real problem, but
+  // the launcher must not read it as a dead captain and restart into the same wall.
   app.get("/health", (context) => {
     const herdr = dependencies.herdrRuntime?.();
+    const doorway = dependencies.publicGatewayDoorway?.();
     const ok = herdr === undefined || herdr === "healthy";
     return context.json(
-      { ok, service: "clankie", ...(herdr === undefined ? {} : { herdr }) },
+      {
+        ok,
+        service: "clankie",
+        ...(herdr === undefined ? {} : { herdr }),
+        ...(doorway === undefined ? {} : { doorway }),
+      },
       ok ? 200 : 503,
     );
   });
@@ -2062,6 +2086,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     const parsed = PairingOfferRequestSchema.safeParse((await readJson(context.req.raw)) ?? {});
     if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    // A configured doorway wins (ADR 0151), so an offer it cannot carry is a code
+    // that can never be redeemed. Refusing beats printing a QR that fails on the
+    // phone as "not recognized" with nothing on this Mac to say why.
+    const doorway = dependencies.publicGatewayDoorway?.();
+    if (dependencies.pairingOfferPublisher === undefined && doorway !== undefined) {
+      if (doorway.state !== "disabled") {
+        logger.warn({ doorway: doorway.state }, "pairing offer refused: the doorway carries nothing");
+        return context.json({ error: "public_gateway_unavailable" }, 503);
+      }
+    }
     const now = clock();
     pairingOffers.prune(now);
     const offer = mintPairingOffer({

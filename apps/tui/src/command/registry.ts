@@ -102,6 +102,16 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
+    nouns: ["rivals"],
+    lines: [
+      "  rivals connect URL [--token-stdin] | disconnect | status",
+      "  rivals start autonomous|combat|disengage [NOTE]",
+      "  rivals objective SESSION MODE [NOTE]",
+      "  rivals observe|stop SESSION | share SESSION [GUILD CHANNEL]",
+      "                           Play Spider-Man through the Rivals Agent bridge (JSON)",
+    ],
+  },
+  {
     nouns: ["fleet"],
     lines: ["  fleet status|set --notes TEXT|clear  Read or set how he routes work across his agents"],
   },
@@ -220,7 +230,7 @@ export function commandHelp(): string {
     "  operator, discord_voice, discord_presence, gameplay (default: operator).",
     "seat needs a TTY and Claude Code on PATH; mcp speaks JSON-RPC on stdout and is",
     "  for a harness's MCP config, not for people.",
-    "Secret entry lives in the console, not here: /auth, /discord, /connect, /voice. The",
+    "Secret entry uses /auth, /discord, /connect, /voice, or rivals connect --token-stdin. The",
     "credential store is shared — what /auth writes is what this CLI's services read.",
     "Local LLM servers are not launcher-owned; start them yourself.",
     "",

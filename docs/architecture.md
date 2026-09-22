@@ -320,6 +320,11 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   `EnvironmentRuntime` leases remain internal
   action/session fences within the owning runtime; they are not cross-process
   possession.
+- **Spider-Man.** Rivals Agent owns tactical decisions and the guarded real-time
+  pad loop. Clankie's `rivals` tool and operator API manage bounded sittings,
+  objectives, fresh observations, and read-only sharing; the existing Go Live
+  PNG publisher carries its video. The Pokémon seam remains unchanged in scope.
+  See [ADR 0175](adr/0175-rivals-agent-is-a-gameplay-skill.md) and [setup](rivals.md).
 - **PokeAgents boundary.** The sibling PokeAgents repository owns the
   `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and
   the MCP projection derived from that catalog. MCP carries calls; the world

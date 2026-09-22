@@ -17,6 +17,9 @@ import {
   runGatewayCommand,
 } from "../src/command/gateway.ts";
 
+/** The doorway probe is a seam: a test never reads whatever captain is running locally. */
+const offline: typeof fetch = () => Promise.reject(new Error("no probe in tests"));
+
 describe("gateway command", () => {
   const tempDirectories: string[] = [];
   afterEach(async () => {
@@ -32,7 +35,7 @@ describe("gateway command", () => {
 
     const configured = await runGatewayCommand(
       ["set", "--host-id", "mac_james_12345678", "--url", "https://api.clankie.bot"],
-      { settings, credentials, env: {} },
+      { settings, credentials, env: {}, fetchImpl: offline },
     );
     expect(configured).toMatchObject({ enabled: true, credentialPresent: true });
     expect((await settings.load()).publicGateway).toEqual({
@@ -40,8 +43,8 @@ describe("gateway command", () => {
       hostId: "mac_james_12345678",
     });
 
-    await gatewayDisable({ settings, credentials, env: {} });
-    expect(await gatewayStatus({ settings, credentials, env: {} })).toMatchObject({
+    await gatewayDisable({ settings, credentials, env: {}, fetchImpl: offline });
+    expect(await gatewayStatus({ settings, credentials, env: {}, fetchImpl: offline })).toMatchObject({
       enabled: false,
       credentialPresent: false,
       publicGateway: {},
@@ -58,6 +61,7 @@ describe("gateway command", () => {
       settings,
       credentials,
       env: {},
+      fetchImpl: offline,
     });
     const key = await credentials.get(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID);
     expect(key?.type === "api" && key.key).toMatch(/^[a-f0-9]{64}$/u);
@@ -83,15 +87,57 @@ describe("gateway command", () => {
 
     await gatewayConfigure(
       { url: "https://api.clankie.bot", installationId },
-      { settings, credentials, env: {} },
+      { settings, credentials, env: {}, fetchImpl: offline },
     );
-    expect(await gatewayStatus({ settings, credentials, env: {} })).toMatchObject({
+    expect(await gatewayStatus({ settings, credentials, env: {}, fetchImpl: offline })).toMatchObject({
       enabled: true,
       credentialPresent: true,
       hostId: derivePublicGatewayHostId(accountId, installationId),
     });
 
-    await gatewayDisable({ settings, credentials, env: {} });
+    await gatewayDisable({ settings, credentials, env: {}, fetchImpl: offline });
     expect(await credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toBeUndefined();
+  });
+
+  it("reports the doorway the captain has, not the one the settings describe", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-gateway-doorway-"));
+    tempDirectories.push(directory);
+    const settings = new SettingsStore(join(directory, "settings.json"));
+    const credentials = new FileCredentialStore(join(directory, "credentials.json"));
+    await credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, {
+      type: "oauth",
+      access: "access-token",
+      refresh: "refresh-token",
+      expires: Date.now() + 60_000,
+      accountId: "0f892112-c0d9-4221-b57b-38181aa63f4c",
+      clientId: "client-id",
+    });
+    await gatewayConfigure(
+      { url: "https://api.clankie.bot", installationId: "YWFhYWFhYWFhYWFhYWFhYQ" },
+      { settings, credentials, env: {}, fetchImpl: offline },
+    );
+
+    const signedOut = await gatewayStatus({
+      settings,
+      credentials,
+      env: {},
+      fetchImpl: () =>
+        Promise.resolve(
+          Response.json({
+            ok: true,
+            service: "clankie",
+            doorway: { state: "sign_in_required", since: "2026-09-14T10:11:40.689Z" },
+          }),
+        ),
+    });
+    // Configured and credentialled, and still nothing reaches this Mac.
+    expect(signedOut).toMatchObject({
+      enabled: true,
+      credentialPresent: true,
+      doorway: { state: "sign_in_required", since: "2026-09-14T10:11:40.689Z" },
+    });
+
+    const noCaptain = await gatewayStatus({ settings, credentials, env: {}, fetchImpl: offline });
+    expect(noCaptain.doorway).toEqual({ state: "unreachable" });
   });
 });

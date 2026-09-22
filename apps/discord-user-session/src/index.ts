@@ -944,6 +944,7 @@ const server = createServer((request, response) => {
             guildId?: string;
             channelId?: string;
             sourceUrl?: string;
+            snapshotUrl?: string;
           };
           if (typeof body.guildId !== "string" || typeof body.channelId !== "string") {
             response.writeHead(400);
@@ -954,6 +955,7 @@ const server = createServer((request, response) => {
             guildId: body.guildId,
             channelId: body.channelId,
             ...(typeof body.sourceUrl === "string" ? { sourceUrl: body.sourceUrl } : {}),
+            ...(typeof body.snapshotUrl === "string" ? { snapshotUrl: body.snapshotUrl } : {}),
           });
           response.writeHead(started ? 202 : 503);
           response.end(JSON.stringify({ ok: started }));

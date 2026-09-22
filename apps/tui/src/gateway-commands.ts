@@ -7,7 +7,13 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import { PublicGatewaySettingsSchema, SettingsStore } from "@clankie/settings";
-import { gatewayConfigure, gatewayDisable, gatewayStatus, runGatewayCommand } from "./command/gateway.ts";
+import {
+  gatewayConfigure,
+  gatewayDisable,
+  gatewayStatus,
+  runGatewayCommand,
+  type GatewayCommandResult,
+} from "./command/gateway.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export function buildGatewayCommands(services: {
@@ -41,7 +47,7 @@ async function showStatus(
   shell.insertCommandResult(
     "/gateway status",
     [
-      `doorway: ${status.enabled ? "ready" : "disabled"}`,
+      `doorway: ${doorwayLine(status)}`,
       `url: ${status.publicGateway.url ?? "—"}`,
       `host id: ${status.hostId ?? "—"}`,
       `host credential: ${status.credentialPresent ? "stored" : "missing"}`,
@@ -49,6 +55,25 @@ async function showStatus(
     ].join("\n"),
     "success",
   );
+}
+
+/** Configured is not open: the live state is the one that answers "can my phone reach him". */
+function doorwayLine(status: GatewayCommandResult): string {
+  if (!status.enabled) return "disabled";
+  switch (status.doorway.state) {
+    case "sign_in_required":
+      return `signed out since ${status.doorway.since} — run /gateway to sign this Mac back in`;
+    case "connected":
+      return "open";
+    case "connecting":
+      return "configured, reconnecting";
+    case "unavailable":
+      return "configured, but Clankie holds no connection — check his log, then `clankie restart captain`";
+    case "disabled":
+      return "configured, not started";
+    case "unreachable":
+      return "configured; Clankie is not answering";
+  }
 }
 
 async function runWizard(

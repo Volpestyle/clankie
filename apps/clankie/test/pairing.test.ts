@@ -134,6 +134,33 @@ describe("control-plane pairing offer surface", () => {
     await expect(denied.json()).resolves.toEqual({ error: "public_gateway_unavailable" });
   });
 
+  it("refuses an offer a configured doorway has no connection to carry", async () => {
+    // The captain that cannot reach the doorway has no publisher at all, and a
+    // code minted without one is redeemable nowhere: the phone reports it as
+    // unrecognized while this Mac believes it handed out a good one.
+    const shutOut = await makeApp({
+      authenticateOperator: operator,
+      publicGatewayDoorway: () => ({ state: "unavailable" }),
+    });
+    const denied = await mintOffer(shutOut, "operator-secret");
+    expect(denied.status).toBe(503);
+    await expect(denied.json()).resolves.toEqual({ error: "public_gateway_unavailable" });
+
+    const signedOut = await makeApp({
+      authenticateOperator: operator,
+      publicGatewayDoorway: () => ({ state: "sign_in_required", since: "2026-09-14T10:11:40.689Z" }),
+    });
+    expect((await mintOffer(signedOut, "operator-secret")).status).toBe(503);
+
+    // With no doorway configured at all, the direct origin is the transport and
+    // a local offer is exactly right.
+    const direct = await makeApp({
+      authenticateOperator: operator,
+      publicGatewayDoorway: () => ({ state: "disabled" }),
+    });
+    expect((await mintOffer(direct, "operator-secret")).status).toBe(200);
+  });
+
   it("records a secret-free audit event for each minted offer", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-pairing-"));
     tempDirs.push(root);

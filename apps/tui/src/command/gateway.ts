@@ -8,11 +8,23 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import {
+  PublicGatewayDoorwayStateSchema,
+  type PublicGatewayDoorwayState,
+} from "@clankie/protocol/public-gateway";
+import {
   PublicGatewaySettingsSchema,
   SettingsStore,
   defaultSettingsPath,
   type PublicGatewaySettings,
 } from "@clankie/settings";
+import { z } from "zod";
+import { commandHost } from "./io.ts";
+
+const DOORWAY_PROBE_TIMEOUT_MS = 5_000;
+const HealthSchema = z.object({ doorway: PublicGatewayDoorwayStateSchema.optional() }).passthrough();
+
+/** Configuration says a doorway should exist; this says whether one is open. */
+export type GatewayDoorwayReport = PublicGatewayDoorwayState | { readonly state: "unreachable" };
 
 const GATEWAY_USAGE = [
   "Usage: clankie gateway [status]",
@@ -26,6 +38,8 @@ export interface GatewayCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly settings?: SettingsStore;
   readonly credentials?: CredentialStore;
+  readonly host?: string;
+  readonly fetchImpl?: typeof fetch;
 }
 
 export interface GatewayCommandResult {
@@ -36,6 +50,8 @@ export interface GatewayCommandResult {
   readonly hostId?: string;
   readonly settingsFile: string;
   readonly restart: string;
+  /** Live, from the running captain: stored settings never prove the socket is up. */
+  readonly doorway: GatewayDoorwayReport;
 }
 
 function stores(options: GatewayCommandOptions): {
@@ -72,7 +88,27 @@ async function result(options: GatewayCommandOptions): Promise<GatewayCommandRes
     ...(hostId === undefined ? {} : { hostId }),
     settingsFile: settings.path,
     restart: "clankie restart captain",
+    doorway: await probeDoorway(options),
   };
+}
+
+/**
+ * Reads the captain's own view over loopback. A captain that is down, or older
+ * than this field, reads `unreachable` rather than borrowing the stored
+ * credential's word for it.
+ */
+export async function probeDoorway(options: GatewayCommandOptions = {}): Promise<GatewayDoorwayReport> {
+  const env = options.env ?? process.env;
+  const url = `${commandHost({ ...options, env }).replace(/\/+$/u, "")}/health`;
+  try {
+    const response = await (options.fetchImpl ?? fetch)(url, {
+      signal: AbortSignal.timeout(DOORWAY_PROBE_TIMEOUT_MS),
+    });
+    const body = HealthSchema.safeParse(await response.json());
+    return body.success && body.data.doorway !== undefined ? body.data.doorway : { state: "unreachable" };
+  } catch {
+    return { state: "unreachable" };
+  }
 }
 
 export async function gatewayConfigure(

@@ -17,6 +17,7 @@ import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
   LINEAR_WEBHOOK_PROVIDER_ID,
+  clankieAccountSignInRequired,
   createClankieAccountTokenProvider,
   derivePublicGatewayHostId,
   ensureDiscordBridgeCredential,
@@ -45,6 +46,7 @@ import { HostedWorldSession } from "./world/session.ts";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
+import { createRivalsClient } from "./rivals.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
@@ -141,6 +143,8 @@ const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? 4321);
 const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
 let publicGatewayConnector: PublicGatewayConnector | undefined;
+/** Set when the account credential is rejected before a connector can even exist. */
+let publicGatewaySignInRequiredSince: string | undefined;
 if (startupSettings.publicGateway.url !== undefined && startupSettings.publicGateway.hostId !== undefined) {
   try {
     const hostToken = await resolvePublicGatewayCredential({
@@ -194,13 +198,20 @@ if (
         const credential = await resolveAccountToken();
         return { token: credential.token, expiresAt: credential.expiresAt };
       },
+      tokenErrorIsTerminal: clankieAccountSignInRequired,
       controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
       relayUrl: `http://127.0.0.1:${String(relayPort)}`,
       logger,
     });
   } catch (error) {
+    if (clankieAccountSignInRequired(error)) publicGatewaySignInRequiredSince = new Date().toISOString();
     logger.warn(
-      { error: error instanceof Error ? error.name : "UnknownError" },
+      {
+        error: error instanceof Error ? error.name : "UnknownError",
+        ...(typeof (error as { readonly code?: unknown }).code === "string"
+          ? { code: (error as { readonly code: string }).code }
+          : {}),
+      },
       "Clankie account cannot connect to the public gateway; direct access remains available",
     );
   }
@@ -384,10 +395,12 @@ const email = createEmailPort({
   settings: settingsStore,
 });
 
+const rivals = createRivalsClient({ settings: settingsStore, credentials: operatorCredentialStore });
 const captain = createCaptain(
   {
     mcp: mcpHost,
     email,
+    rivals,
     browser: {
       catalog: () =>
         browserHost?.catalog() ??
@@ -555,7 +568,17 @@ const clankie = await createClankieApp({
     current: (_signal) => Promise.resolve(activityObservations.current()),
   },
   playSight,
+  rivals,
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
+  publicGatewayDoorway: () => {
+    if (publicGatewayConnector !== undefined) return publicGatewayConnector.doorway;
+    if (publicGatewaySignInRequiredSince !== undefined) {
+      return { state: "sign_in_required", since: publicGatewaySignInRequiredSince };
+    }
+    // Configured but connectorless: the credential failed to load at startup and
+    // nothing retries it, which no phone can tell apart from "he is asleep".
+    return startupSettings.publicGateway.url === undefined ? { state: "disabled" } : { state: "unavailable" };
+  },
   ...(publicGatewayConnector === undefined
     ? {}
     : {

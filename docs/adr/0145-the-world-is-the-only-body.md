@@ -38,7 +38,8 @@ hosted world does not do.
 
 ## Decision
 
-**Clankie plays in a hosted PokeAgents world, and nowhere else.**
+**Clankie plays Pokémon in a hosted PokeAgents world.** Other games have their
+own domain contracts, such as [Rivals Agent](0175-rivals-agent-is-a-gameplay-skill.md).
 
 - The local emulator is gone: `integrations/gba-emulator` loses its core
   (mGBA, FireRed RAM maps, adapter, driver, scenarios, checkpoints, boot) and

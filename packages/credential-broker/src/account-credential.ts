@@ -50,8 +50,19 @@ export type ClankieAccountAuthErrorCode =
   | "code_expired"
   | "email_invalid"
   | "rate_limited"
+  | "refresh_rejected"
   | "service_unavailable"
   | "unexpected_response";
+
+/** Codes a retry cannot clear; everything else is worth another attempt. */
+const SIGN_IN_REQUIRED_CODES = new Set<ClankieAccountAuthErrorCode>([
+  "account_not_invited",
+  "code_expired",
+  "code_invalid",
+  "email_invalid",
+  "refresh_rejected",
+  "unexpected_response",
+]);
 
 export class ClankieAccountAuthError extends Error {
   public readonly code: ClankieAccountAuthErrorCode;
@@ -221,10 +232,17 @@ export async function completeClankieAccountLogin(input: {
   }
 }
 
+/**
+ * The pool rotates refresh tokens, so the stored one dies the moment Cognito
+ * answers. `persistRotation` writes the replacement before this function can
+ * throw on anything else: a malformed access token must cost one retry, not
+ * remote access until someone notices and runs the email wizard.
+ */
 export async function refreshClankieAccountCredential(
   credential: OauthCredential,
   config: PublicGatewayConfig,
   fetchImpl: typeof fetch = fetch,
+  persistRotation?: (credential: OauthCredential) => Promise<void>,
 ): Promise<OauthCredential> {
   if (credential.clientId !== config.account.clientId) {
     throw new ClankieAccountAuthError(
@@ -241,16 +259,24 @@ export async function refreshClankieAccountCredential(
         fetchImpl,
       ),
     );
+    const refresh = response.AuthenticationResult.RefreshToken ?? credential.refresh;
+    if (refresh !== credential.refresh) await persistRotation?.({ ...credential, refresh });
     return credentialFromAuthentication(
-      {
-        ...response.AuthenticationResult,
-        RefreshToken: response.AuthenticationResult.RefreshToken ?? credential.refresh,
-      },
+      { ...response.AuthenticationResult, RefreshToken: refresh },
       config.account.clientId,
     );
   } catch (error) {
-    throw mapCognitoError(error);
+    throw mapRefreshError(error);
   }
+}
+
+/**
+ * True when only a human can fix it. Retrying a rejected or revoked account
+ * credential never succeeds, so a caller that loops on one is a doorway that
+ * looks busy while staying shut.
+ */
+export function clankieAccountSignInRequired(error: unknown): boolean {
+  return error instanceof ClankieAccountAuthError && SIGN_IN_REQUIRED_CODES.has(error.code);
 }
 
 export function createClankieAccountTokenProvider(input: {
@@ -308,7 +334,12 @@ async function resolveClankieAccountAccessToken(input: {
   let credential = stored;
   if (credential.expires < now + ACCESS_REFRESH_WINDOW_MS) {
     const config = await discoverPublicGatewayAccount(input.gatewayUrl, input.fetchImpl ?? fetch);
-    credential = await refreshClankieAccountCredential(credential, config, input.fetchImpl ?? fetch);
+    credential = await refreshClankieAccountCredential(
+      credential,
+      config,
+      input.fetchImpl ?? fetch,
+      (rotated) => input.store.set(CLANKIE_ACCOUNT_PROVIDER_ID, rotated),
+    );
     await input.store.set(CLANKIE_ACCOUNT_PROVIDER_ID, credential);
   }
   if (credential.accountId === undefined) {
@@ -391,6 +422,33 @@ async function cognitoRequest(
 
 function isCognitoError(error: unknown, code: string): boolean {
   return error instanceof Error && "cognitoCode" in error && (error as CognitoError).cognitoCode === code;
+}
+
+/**
+ * An answer from Cognito is about this Mac's credential, not the weather.
+ * Rotation revokes the whole chain when it sees a spent refresh token, so every
+ * later attempt presents the same dead one: only a rate limit or Cognito's own
+ * failure is worth retrying. A sign-in error class is not enumerated by name
+ * here because the pool adds them (`Refresh token reuse detected` arrives with
+ * no mapped type and must not read as a passing outage).
+ */
+function mapRefreshError(error: unknown): ClankieAccountAuthError {
+  if (error instanceof ClankieAccountAuthError) return error;
+  if (
+    isCognitoError(error, "TooManyRequestsException") ||
+    isCognitoError(error, "LimitExceededException") ||
+    isCognitoError(error, "InternalErrorException") ||
+    isCognitoError(error, "ServiceUnavailableException")
+  ) {
+    return mapCognitoError(error);
+  }
+  if (error instanceof Error && "cognitoCode" in error) {
+    return new ClankieAccountAuthError(
+      "refresh_rejected",
+      `Clankie account refused this Mac's refresh token: ${error.message}`,
+    );
+  }
+  return mapCognitoError(error);
 }
 
 function mapCognitoError(error: unknown): ClankieAccountAuthError {

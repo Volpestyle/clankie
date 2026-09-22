@@ -99,6 +99,39 @@ function fakeGateway(): DiscordUserGateway & {
 describe("stream watch / publish controller", () => {
   afterEach(() => vi.useRealTimers());
 
+  it("closes Go Live when a Rivals sitting revokes its frame capability", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", async () => new Response("revoked", { status: 401 }));
+    const vox = fakeVox();
+    const gateway = fakeGateway();
+    const controller = startStreamWatch({
+      gateway,
+      api: { reportDiscordStreamWatch: async () => undefined } as never,
+      allowlisted: () => true,
+      vox,
+      membership: new VoiceMembershipCoordinator(gateway),
+    });
+    try {
+      const started = controller.requestPublish({
+        guildId: GUILD,
+        channelId: CHANNEL,
+        snapshotUrl: `http://127.0.0.1:4330/frame.png?key=${"k".repeat(43)}`,
+      });
+      const key = buildDiscordStreamKey({ guildId: GUILD, channelId: CHANNEL, userId: SELF });
+      controller.handleRaw({
+        t: "STREAM_CREATE",
+        d: { stream_key: key, endpoint: "stream.discord.gg", token: "tok", rtc_server_id: "10" },
+      });
+      await expect(started).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(vox.commands).toContainEqual({ type: "stream_publish_stop" });
+      expect(gateway.payloads).toContainEqual({ op: 19, d: { stream_key: key } });
+    } finally {
+      controller.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("plays a URL through Vox and proves publish only after first accepted H264", async () => {
     const vox = fakeVox();
     const reports: unknown[] = [];

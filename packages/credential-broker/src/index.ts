@@ -45,6 +45,7 @@ export {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   ClankieAccountAuthError,
   beginClankieAccountLogin,
+  clankieAccountSignInRequired,
   completeClankieAccountLogin,
   createClankieAccountTokenProvider,
   derivePublicGatewayHostId,

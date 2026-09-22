@@ -63,6 +63,9 @@ Before submission or adding an invited user:
 - the gateway and review Mac remain live for the intended review window;
 - an invited email can complete `/gateway`, survive an access-token refresh and
   a Mac login, and connect without Tailscale, SSH, or a copied bearer;
+- `clankie gateway status` on the review Mac reports `doorway.state` of
+  `connected`; a stored credential proves nothing about whether the socket is
+  open, and `sign_in_required` means no reviewer reaches the app at all;
 - App Review receives a fresh QR or typed pairing code and exact setup notes
   (the README's Get started steps are that text; do not keep a second copy);
   the codes come from `clankie pair --review --days N` on the review Mac,

@@ -355,8 +355,23 @@ export type CaptainSettings = z.infer<typeof CaptainSettingsSchema>;
 /** Whether the captain may offer play at all. */
 export const GameplaySettingsSchema = z
   .object({
-    /** FireRed/Emerald in the hosted PokeAgent MMO — his only body. */
+    /** FireRed/Emerald in the hosted PokeAgent MMO. */
     pokeagentMmoEnabled: z.boolean().default(true),
+    /** Rivals Agent session API; its bearer lives under rivals-agent in the broker. */
+    rivalsUrl: z
+      .url()
+      .refine((value) => {
+        const url = new URL(value);
+        return (
+          ["http:", "https:"].includes(url.protocol) &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash &&
+          url.pathname === "/"
+        );
+      }, "Rivals URL must be an HTTP(S) origin without credentials")
+      .optional(),
   })
   .strict();
 export type GameplaySettings = z.infer<typeof GameplaySettingsSchema>;

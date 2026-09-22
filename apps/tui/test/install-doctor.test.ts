@@ -181,8 +181,9 @@ describe("install doctor", () => {
         },
         new FileCredentialStore(join(await installRoot(), "credentials.json")),
       );
-      // The lane-tools route is probed on every run; a builtin provider is not.
-      expect(probed).toEqual([builtin.laneTools.url]);
+      // The lane-tools route and the doorway are probed on every run; a builtin
+      // provider is not.
+      expect(probed).toEqual([builtin.laneTools.url, "http://127.0.0.1:4310/health"]);
       expect(builtin.selectedModel).toEqual({
         ref: "xai/grok-4.6",
         providerId: "xai",
@@ -214,6 +215,45 @@ describe("install doctor", () => {
 
     expect(served.laneTools).toEqual({ url: "http://127.0.0.1:4310/v1/mcp", reachable: true });
     expect(unserved.laneTools).toEqual({ url: "http://127.0.0.1:4310/v1/mcp", reachable: false });
+  });
+
+  it("asks for a sign-in when the Mac is shut out of its own doorway", async () => {
+    const root = await installRoot();
+    const env = { HOME: join(root, "home") };
+    const store = new FileCredentialStore(join(root, "credentials.json"));
+    const signedOut = await inspectInstall({
+      repoRoot: root,
+      env,
+      credentialStore: store,
+      execFileImpl: missing,
+      fetchImpl: (input) =>
+        String(input).endsWith("/health")
+          ? Promise.resolve(
+              Response.json({
+                ok: true,
+                service: "clankie",
+                doorway: { state: "sign_in_required", since: "2026-09-14T10:11:40.689Z" },
+              }),
+            )
+          : Promise.resolve(new Response("", { status: 404 })),
+    });
+    const open = await inspectInstall({
+      repoRoot: root,
+      env,
+      credentialStore: store,
+      execFileImpl: missing,
+      fetchImpl: (input) =>
+        String(input).endsWith("/health")
+          ? Promise.resolve(Response.json({ ok: true, service: "clankie", doorway: { state: "connected" } }))
+          : Promise.resolve(new Response("", { status: 404 })),
+    });
+
+    expect(signedOut.doorway).toMatchObject({ state: "sign_in_required" });
+    expect(signedOut.remediations).toContain(
+      "This Mac has been signed out of the public doorway since 2026-09-14T10:11:40.689Z; no app reaches him until you sign it back in with /gateway.",
+    );
+    expect(open.doorway).toEqual({ state: "connected" });
+    expect(open.remediations.join(" ")).not.toContain("doorway");
   });
 
   it("asks to link a bundled herdr plugin when herdr is present and the plugin is not linked", async () => {

@@ -71,6 +71,21 @@ index). Configure through the headless CLI:
 | Rotate operator credential            | `clankie operator-credential rotate --json`                                           |
 | Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                 |
 | Play session                          | `clankie play status` / `clankie play stop`                                           |
+| Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it  |
+
+Clankie's Spider-Man bridge stays disabled under [VUH-1325](https://linear.app/vuhlp/issue/VUH-1325).
+Its sources passed independent review, but the practice-range freeze lift does
+not authorize this bridge. Deployment, reconnecting and sittings await the lead's
+schedule and verification of the explicit cooldown argument; see `{repoRoot}/docs/rivals.md`.
+
+The Spider-Man `rivals` tool supports status, start, objective, observe, share,
+stop. Rivals Agent owns tactics and reflexes; you own the sitting and conversation.
+Only `running` means playing, and `execution: replay` means recorded footage with
+a fake pad. Notes are retained context (`noteApplied: false`); the scripted policy
+acts on `autonomous`, `combat`, or `disengage`. Observe for real game pixels before
+describing play. Keep a start's requestId across retries and use the returned
+session ID for later commands. The watch link grants viewing only; a Go Live
+request is not proof of delivered video. Setup: `{repoRoot}/docs/rivals.md`.
 
 Follow Linear is off by default and changes live without restarting. Configure
 its signed webhook under `/connect linear` → **Follow Linear** → **Configure
