@@ -169,16 +169,9 @@ export class OperatorConversationSelection {
     return this.selectedId;
   }
 
-  /**
-   * The console switcher is his own session list, the way `/resume` is. Persona,
-   * seat, and channel conversations belong to a counterpart who is not him
-   * (ADR 0135) — the roster reads those, and `--chat <id>` still opens one
-   * deliberately.
-   */
+  /** Every retained conversation is inspectable through the same switcher. */
   public async conversations(): Promise<readonly OperatorConversation[]> {
-    return (await this.client.list()).filter(
-      (conversation) => conversation.scope.kind === "global" || conversation.scope.kind === "workspace",
-    );
+    return this.client.list();
   }
 
   public async select(conversationId: string): Promise<OperatorConversation> {
@@ -600,6 +593,8 @@ export class OperatorConversationPromptSession {
     if (conversation === undefined) {
       throw new OperatorConversationClientError("Selected operator conversation no longer exists");
     }
+    if (conversation.scope.kind === "room")
+      throw new OperatorConversationClientError("Read-only Discord history. Send messages in Discord.");
     const herdrPaneId = this.herdrPaneId();
     const accepted = await this.client
       .send({

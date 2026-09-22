@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   appendFileSync,
   mkdirSync,
@@ -164,6 +164,7 @@ interface ConversationMeta {
   linearWokeCursor?: string;
   /** Harness-native messages already folded into this durable persona thread. */
   seatTranscript?: SeatTranscriptCheckpoint;
+  roomTranscripts?: Record<string, SeatTranscriptCheckpoint>;
   /**
    * The channel roster, in turn order. Present exactly on a `channel` scope
    * (ADR 0146); it lives on the meta so pruning the conversation takes the
@@ -586,6 +587,8 @@ export class ConversationStore {
         };
       }
       case "create":
+        if (request.scope.kind === "room")
+          throw new Error("Room conversations are discovered from their transport");
         // A channel is created with its membership or not at all — an empty
         // room nobody is in is a conversation with no counterpart. Selecting a
         // channel that already exists is just selecting it.
@@ -1049,6 +1052,41 @@ export class ConversationStore {
     this.syncConversationTranscript(conversationId, seatId, transcript, "agent", workingDirectory);
   }
 
+  /** One inspectable conversation per room, irrespective of its execution authority. */
+  public roomConversation(lane: "discord_presence" | "discord_voice", targetId: string): string {
+    const id = `room-${createHash("sha256").update(`${lane}:${targetId}`).digest("hex").slice(0, 24)}`;
+    if (!this.metas.has(id)) {
+      this.create(
+        { kind: "room", lane, targetId },
+        `Discord ${lane === "discord_voice" ? "voice" : "text"} · ${targetId}`,
+        id,
+      );
+    }
+    return id;
+  }
+
+  public syncRoomTranscript(conversationId: string, transcript: HerdrSeatTranscript): void {
+    if (this.metas.get(conversationId)?.scope.kind !== "room")
+      throw new Error("Expected a room conversation");
+    this.syncConversationTranscript(conversationId, conversationId, transcript, "captain");
+  }
+
+  public publishRoomEvent(conversationId: string, body: OperatorConversationEventBody): void {
+    const meta = this.metas.get(conversationId);
+    if (meta?.scope.kind !== "room") throw new Error("Expected a room conversation");
+    if (body.type === "turn") {
+      const count = Math.max(
+        0,
+        (this.runCounts.get(conversationId) ?? 0) + (body.phase === "accepted" ? 1 : -1),
+      );
+      this.runCounts.set(conversationId, count);
+      meta.sessionState = count > 0 ? "active" : body.phase === "failed" ? "failed" : "waiting";
+    }
+    meta.updatedAt = new Date().toISOString();
+    this.append(meta, body);
+    this.saveMeta(meta);
+  }
+
   /**
    * The seat's head is the default global conversation, the thread the app
    * pins as Clankie (ADR 0152). A seated harness's transcript folds into it
@@ -1087,7 +1125,8 @@ export class ConversationStore {
   ): void {
     const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
     if (meta === undefined || transcript.entries.length === 0) return;
-    const checkpoint = meta.seatTranscript;
+    const room = meta.scope.kind === "room";
+    const checkpoint = room ? meta.roomTranscripts?.[transcript.sessionKey] : meta.seatTranscript;
     // A persona thread seeded before native transcripts existed is rebuilt
     // from the transcript once; the head thread is his own history and only
     // ever grows.
@@ -1139,14 +1178,21 @@ export class ConversationStore {
         continue;
       }
       if (entry.type !== "message" || entry.role !== "operator" || !this.matchesRecentSeatSend(meta, entry)) {
-        this.append(meta, transcriptEventBody(entry, agentRole), entry.occurredAt);
+        const body = transcriptEventBody(entry, agentRole);
+        this.append(
+          meta,
+          room && body.type === "message" && body.role === "operator" ? { ...body, role: "external" } : body,
+          entry.occurredAt,
+        );
       }
       seen.add(entry.id);
     }
     if (!advanced) return;
     this.resettle(meta);
-    meta.seatTranscript = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
-    meta.updatedAt = new Date().toISOString();
+    const nextCheckpoint = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
+    if (room) (meta.roomTranscripts ??= {})[transcript.sessionKey] = nextCheckpoint;
+    else meta.seatTranscript = nextCheckpoint;
+    meta.updatedAt = room ? (added.at(-1)?.occurredAt ?? meta.updatedAt) : new Date().toISOString();
     this.saveMeta(meta);
     this.publishTranscriptImages(
       meta,
@@ -1624,6 +1670,8 @@ export class ConversationStore {
     if (meta === undefined) {
       throw new Error(`Unknown conversation ${turn.conversationId}`);
     }
+    if (meta.scope.kind === "room")
+      throw new Error("This is a read-only room transcript. Send messages in Discord.");
     if (meta.scope.kind === "seat") {
       return this.queueSeatSend(meta, meta.scope.seatId, turn, { seatId: meta.scope.seatId });
     }
@@ -2239,7 +2287,11 @@ export class ConversationStore {
   private trimEventLog(meta: ConversationMeta): void {
     // A persona thread and a channel are both durable rooms an agent keeps talking
     // in; Clankie's own conversations turn over with his sessions.
-    const room = meta.scope.kind === "seat" || meta.scope.kind === "persona" || meta.scope.kind === "channel";
+    const room =
+      meta.scope.kind === "room" ||
+      meta.scope.kind === "seat" ||
+      meta.scope.kind === "persona" ||
+      meta.scope.kind === "channel";
     const maximum = room ? SEAT_CONVERSATION_RETAINED_EVENTS_MAX : OPERATOR_CONVERSATION_RETAINED_EVENTS_MAX;
     const retainedCount = room
       ? SEAT_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM
@@ -2493,6 +2545,7 @@ export class ConversationStore {
     if (
       meta === undefined ||
       meta.isDefault ||
+      meta.scope.kind === "room" ||
       this.seatSends.has(conversationId) ||
       [...this.metas.values()].some((candidate) => candidate.parentConversationId === conversationId)
     ) {
@@ -2557,6 +2610,7 @@ function directoryBytes(path: string): number {
 
 function sameScope(a: OperatorConversationScope, b: OperatorConversationScope): boolean {
   if (a.kind !== b.kind) return false;
+  if (a.kind === "room" && b.kind === "room") return a.lane === b.lane && a.targetId === b.targetId;
   if (a.kind === "workspace" && b.kind === "workspace") return a.workspaceId === b.workspaceId;
   if (a.kind === "persona" && b.kind === "persona") return a.personaId === b.personaId;
   if (a.kind === "seat" && b.kind === "seat") return a.seatId === b.seatId;

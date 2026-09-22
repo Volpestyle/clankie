@@ -361,6 +361,14 @@ export type UpdateOperatorAgentPersona = z.infer<typeof UpdateOperatorAgentPerso
 
 export const OperatorConversationScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("global") }).strict(),
+  /** An external room's inspectable history; turns still enter through its authenticated transport. */
+  z
+    .object({
+      kind: z.literal("room"),
+      lane: z.enum(["discord_presence", "discord_voice"]),
+      targetId: z.string().trim().min(1).max(512),
+    })
+    .strict(),
   z.object({ kind: z.literal("workspace"), workspaceId: z.string().trim().min(1).max(512) }).strict(),
   /** One DM thread per durable fleet character (ADR 0147). */
   z.object({ kind: z.literal("persona"), personaId: OperatorAgentPersonaIdSchema }).strict(),

@@ -8,6 +8,19 @@ description: Use when tracing what Clankie said, did, or observed after the fact
 Every surface leaves a durable trail. Find the right one, read it (everything
 is append-only JSONL or plain files now), never write to it.
 
+## Start with the conversation
+
+Use `clankie conversations list`, then `clankie conversations show <id>` (or an
+unambiguous Discord channel id). Follow `nextCursor` while `hasMore`; `tail <id>`
+streams live events. The TUI's `/conversation` picker exposes the same records,
+with `Ctrl+O` for tool details. Discord rooms group their trusted, social, and
+one-shot Pi histories in a read-only conversation; source entries name the
+native journals when bounded/redacted details are insufficient. Those sessions
+keep separate authority and model context. Voice rooms show captain handoffs,
+not ambient speech. Historical discovery covers native room journals modified
+within conversation retention (30 days); older source files remain inspectable
+through the trail map below.
+
 ## The trail map
 
 | What you want                             | Where it lives                                                                                                                                 | Shape                                                                                                                                                                                                                                                                                                                                                                                                                                                      |

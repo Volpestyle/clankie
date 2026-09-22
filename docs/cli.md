@@ -684,6 +684,31 @@ bound to an external seat refuses reset: end that seat first because its
 model context belongs to the external harness. The API's `reset` operation
 requires `expectedRevision`; stale requests refuse without changing history.
 
+### `conversations list | show ID | tail ID`
+
+Inspect the same conversations as the TUI picker, including Discord text/voice
+rooms, operator chats, fleet agents, and channels. `conversation` is an alias.
+
+```bash
+clankie conversations list
+clankie conversations show 1551975693582336060
+clankie conversations show ROOM_ID --cursor 000000000100 --limit 100
+clankie conversations tail ROOM_ID --cursor 000000000100
+```
+
+`list` returns JSON metadata. `show` returns metadata plus one replay page of
+messages, tools, and lifecycle events; follow `nextCursor` while `hasMore` is
+true. `tail` streams newline-delimited JSON events, live drafts, and explicit
+cursor-recovery notices. `--limit` is 1–100 (default 100). A selector is a
+conversation id, exact title, or an unambiguous Discord channel/target id.
+
+Discord room records are read-only: use Discord to send messages. Their
+transcripts include model-visible context and bounded, redacted tool details;
+source-session entries identify the original local Pi journals for deeper
+inspection. Voice rooms contain captain handoffs, not unrecorded ambient voice.
+The existing authenticated conversation API provides these same list/get/replay/tail
+operations. See [ADR 0176](adr/0176-every-room-is-an-inspectable-conversation.md).
+
 ### `send --conversation ID [--delivery steer|queue] (MESSAGE | --stdin)`
 
 Send to an existing operator conversation through the shared service API.

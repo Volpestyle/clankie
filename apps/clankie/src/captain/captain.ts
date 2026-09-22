@@ -37,6 +37,7 @@ import {
   type AgentSession,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
+import { RoomConversations } from "./room-conversations.ts";
 import {
   ConversationResetError,
   ConversationStore,
@@ -1189,6 +1190,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     workingDirectory,
   );
 
+  const roomConversations = new RoomConversations(conversations);
+  roomConversations.discover(options.stateDir);
+
   /**
    * A pane named `clankie` is his head, never a fleet contact (ADR 0152): it is
    * watched like a seat so its transcript reaches the head conversation, and
@@ -1351,6 +1355,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     deliveryId: string,
     toolProgressEnabled: boolean,
   ): Promise<CaptainChannelTurnResult> {
+    const conversationId = conversations.roomConversation(normalized.lane, normalized.targetId);
+    const syncTranscript = (): void => roomConversations.sync(conversationId, lane.session.sessionFile);
+    syncTranscript();
     lane.turnCounter += 1;
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
     lane.capture.targetId = normalized.targetId;
@@ -1365,6 +1372,33 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       text: normalized.heard,
     });
     const live = lane.running !== undefined || lane.session.isStreaming;
+    if (!live)
+      conversations.publishRoomEvent(conversationId, { type: "turn", runId: turnId, phase: "accepted" });
+    const unsubscribeTranscript = live
+      ? () => undefined
+      : lane.session.subscribe((event) => {
+          if (
+            event.type === "tool_execution_start" ||
+            event.type === "tool_execution_end" ||
+            event.type === "message_end"
+          ) {
+            // Pi persists the native record in the same dispatch; read after its listeners finish.
+            queueMicrotask(() => {
+              try {
+                syncTranscript();
+              } catch (error) {
+                console.error("Room transcript projection failed", error);
+              }
+            });
+          }
+          if (event.type === "message_update") {
+            const partial = event.assistantMessageEvent;
+            if (partial.type === "text_start" || partial.type === "text_delta") {
+              const text = assistantText(partial.partial);
+              if (replyIsUnderway(text)) conversations.setLiveDraft(conversationId, text);
+            }
+          } else if (event.type === "message_end") conversations.setLiveDraft(conversationId, undefined);
+        });
     const discordTokensStart = contextTokenCount(lane.session.getContextUsage());
     const metrics = live
       ? undefined
@@ -1477,6 +1511,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     } finally {
       tokensEnd = contextTokenCount(lane.session.getContextUsage());
       unsubscribeEvents();
+      unsubscribeTranscript();
+      try {
+        syncTranscript();
+      } catch (error) {
+        console.error("Room transcript projection failed", error);
+      }
+      if (!live) {
+        conversations.setLiveDraft(conversationId, undefined);
+        conversations.publishRoomEvent(conversationId, {
+          type: "turn",
+          runId: turnId,
+          phase: early === undefined && lane.lastAssistantText.trim().length > 0 ? "completed" : "failed",
+          ...(early?.state === "failed"
+            ? { reasonCode: early.code }
+            : lane.lastAssistantText.trim().length === 0
+              ? { reasonCode: "captain_response_missing" }
+              : {}),
+        });
+      }
       if (!normalized.durable) lane.session.dispose();
     }
     if (early !== undefined) {

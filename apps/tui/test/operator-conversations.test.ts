@@ -215,7 +215,7 @@ describe("TUI operator conversation selection", () => {
     );
   });
 
-  it("lists only his own threads, never a counterpart's", async () => {
+  it("lists every conversation, including counterpart threads", async () => {
     const agent: OperatorConversation = {
       ...DEFAULT,
       conversationId: "persona-1",
@@ -234,8 +234,10 @@ describe("TUI operator conversation selection", () => {
     expect((await selection.conversations()).map((item) => item.conversationId)).toEqual([
       "global-default",
       "workspace-1",
+      "persona-1",
+      "channel-1",
     ]);
-    // The deliberate address still opens one; only the switcher stops offering it.
+    // Selection and discovery expose the same records.
     expect((await selection.select("persona-1")).conversationId).toBe("persona-1");
   });
 

@@ -1,6 +1,13 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["conversations", "conversation"],
+    lines: [
+      "  conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
+      "                           Inspect every conversation, including Discord tools (JSON)",
+    ],
+  },
+  {
     nouns: ["reset"],
     lines: ["  reset --conversation ID  Archive the old session and reset model context (JSON)"],
   },

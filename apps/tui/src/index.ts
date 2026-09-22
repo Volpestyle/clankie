@@ -192,7 +192,8 @@ try {
     ...(directConversationId === undefined ? {} : { directConversationId }),
   });
   const selected = await conversationSelection.select(initial.conversationId);
-  currentConversationTitle = selected.title;
+  currentConversationTitle =
+    selected.scope.kind === "room" ? `${selected.title} · read-only` : selected.title;
   currentContextUsage = selected.contextUsage;
   currentWorkspace = conversationWorkspace(selected) ?? repoRoot;
 } catch (error) {
@@ -289,7 +290,8 @@ const conversationsContext = {
 
 async function selectConversation(conversationId: string) {
   const conversation = await conversationSelection.select(conversationId);
-  currentConversationTitle = conversation.title;
+  currentConversationTitle =
+    conversation.scope.kind === "room" ? `${conversation.title} · read-only` : conversation.title;
   currentContextUsage = conversation.contextUsage;
   currentWorkspace = conversationWorkspace(conversation) ?? repoRoot;
   // The console's own shell escape, path completion, and footer follow the

@@ -206,7 +206,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     },
     {
       name: "conversation",
-      aliases: ["chat"],
+      aliases: ["chat", "conversations"],
       description: "Choose or switch persistent chat conversations",
       argumentHint: "[<name-or-path>]",
       takesArgument: true,
@@ -278,7 +278,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             ? rows.filter(
                 (item) =>
                   item.title.toLowerCase() === selector.toLowerCase() ||
-                  (item.scope.kind === "workspace" && item.scope.workspaceId === selector),
+                  (item.scope.kind === "workspace" && item.scope.workspaceId === selector) ||
+                  (item.scope.kind === "room" &&
+                    (item.scope.targetId === selector || item.scope.targetId.split(":").at(-1) === selector)),
               )
             : [byId];
         if (matches.length === 0) {
@@ -841,6 +843,8 @@ function conversationHint(conversation: {
   readonly isDefault: boolean;
 }): string {
   switch (conversation.scope.kind) {
+    case "room":
+      return `${conversation.scope.lane === "discord_voice" ? "voice" : "Discord"} · read-only`;
     case "workspace":
       return "workspace";
     case "seat":

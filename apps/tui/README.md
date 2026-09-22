@@ -136,15 +136,17 @@ credential holder.
   acknowledgement, **Delivery unconfirmed** asks you to check the conversation
   before retrying. Sends never retry automatically; an accepted turn's dropped
   observation reconnects without resending its message.
-- `/conversation` opens a searchable dialog for his own retained conversations
-  — the global and workspace threads this console holds, never a fleet agent's
-  DM thread or a channel; `/conversation <name-or-path>` switches directly, and
-  `--chat <conversationId>` still addresses any conversation by id. `/chat`
-  remains an alias.
-  Press `x` to close the highlighted inactive conversation; active and default
-  conversations stay protected. Switching rebuilds the visible transcript from
-  the retained conversation log, then continues from the console's bounded
-  replay cursor; it never creates a device-local session.
+- `/conversation` (aliases `/conversations`, `/chat`) opens a searchable dialog
+  for all retained conversations: Clankie's head and workspace threads, fleet
+  agents and channels, and Discord text/voice rooms. `/conversation <name-or-path>`
+  switches directly; a Discord channel id also selects its room.
+  Discord rooms are read-only inspection views, with expandable context and tool
+  arguments/results (`Ctrl+O` toggles tools). Their transport still owns input;
+  typing in the inspector cannot send to Discord or grant operator authority.
+  Press `x` to close an inactive operator conversation; active, default, and
+  transport-owned room conversations stay protected. Switching rebuilds the
+  transcript and follows its live tail. `--chat <conversationId>` opens the same
+  record directly; `clankie conversations list|show|tail` exposes it as JSON.
 - `/new [title]` starts and selects a conversation with fresh model context in
   the current workspace. The previous conversation remains available through
   `/conversation`.

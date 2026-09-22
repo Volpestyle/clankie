@@ -1,3 +1,4 @@
+import { runConversationsCommand } from "../src/command/conversations.ts";
 import { openHerdr, runFleetHerdr } from "../src/session/herdr-connection.ts";
 import { type CredentialStore } from "@clankie/credential-broker";
 import { type ServiceRegistryOptions } from "./services.ts";
@@ -177,6 +178,8 @@ export async function runHeadlessCaptainCommand(
       return await runPromptCommand(rest, { ...options, stdout });
     }
     if (command === "reset") return await runResetCommand(rest, options);
+    if (command === "conversations" || command === "conversation")
+      return await runConversationsCommand(rest, options);
     if (command === "send") return await runSendCommand(rest, { ...options, stdout });
     if (command === "file") return await runFileCommand(rest, { ...options, stdout });
     if (command === "memory-card") {

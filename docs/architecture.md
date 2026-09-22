@@ -156,6 +156,16 @@ inherited branch reference-only; Ctrl+X swaps between the child and its parent
 without discarding either, and Ctrl+C cancels and deletes the child, restores
 the parent transcript, and replays any parent events that arrived meanwhile
 ([ADR 0143](adr/0143-btw-is-an-ephemeral-pi-fork.md)).
+Discord text and voice captain rooms also appear in the operator conversation
+registry under `room` scopes. Their native Pi trees remain in `rooms/`, `voice/`,
+and `turns/`; the existing native-transcript projection folds context, messages,
+and tools into the same replay/tail API used by the TUI and CLI. One room groups
+its social, trusted, and one-shot session histories without merging their model
+contexts or authority. Source checkpoints prevent duplicate replay after restart.
+These records are read-only from operator surfaces: only the authenticated
+Discord transport submits room turns. See
+[ADR 0176](adr/0176-every-room-is-an-inspectable-conversation.md).
+
 Conversations are files under `~/.clankie/captain/`. Each settled operator or
 Discord captain turn also appends one metrics line to
 `~/.clankie/captain/turn-settled.jsonl`: tool-name counts, first mutating tool,
