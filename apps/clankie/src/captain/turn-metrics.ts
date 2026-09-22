@@ -236,13 +236,17 @@ export function turnSettledLogPath(stateDir: string): string {
 export class TurnSettledLog {
   public readonly path: string;
 
-  public constructor(path: string) {
+  private readonly onAppend: ((row: TurnSettledMetrics) => void) | undefined;
+
+  public constructor(path: string, onAppend?: (row: TurnSettledMetrics) => void) {
     this.path = path;
+    this.onAppend = onAppend;
   }
 
   public append(line: TurnSettledMetrics): void {
     mkdirSync(dirname(this.path), { recursive: true });
     appendFileSync(this.path, `${JSON.stringify(TurnSettledMetricsSchema.parse(line))}\n`, "utf8");
+    this.onAppend?.(line);
   }
 
   /**

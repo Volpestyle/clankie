@@ -1,3 +1,4 @@
+import { runEvaluatorCommand, formatEvaluatorStatus } from "./command/evaluator.ts";
 import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connection.ts";
 /**
  * The operator console's slash commands. Display fields feed the ported
@@ -145,6 +146,21 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   }
 
   commands.push(
+    {
+      name: "evaluator",
+      aliases: [],
+      description: "Control the independent evaluator in Herdr",
+      argumentHint: "[status|enable --harness codex|claude|disable|open|retry ID]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const result = await runEvaluatorCommand(argument.trim().split(/\s+/u).filter(Boolean));
+        shell.insertCommandResult(
+          "/evaluator",
+          result.ok ? formatEvaluatorStatus(result.evaluator) : result.error,
+          result.ok ? "success" : "error",
+        );
+      },
+    },
     {
       name: "herdr",
       aliases: [],

@@ -289,7 +289,7 @@ function runExecFile(
   });
 }
 
-function defaultRunner(): HerdrWatchRunner {
+export function createHerdrWatchRunner(): HerdrWatchRunner {
   return {
     get: async (target) => parseHerdrAgentResult(await runHerdr(["agent", "get", target])),
     resolveTerminal: async (terminalId) =>
@@ -486,7 +486,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } = {},
   ) {
     this.path = path;
-    this.runner = options.runner ?? defaultRunner();
+    this.runner = options.runner ?? createHerdrWatchRunner();
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
     this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;

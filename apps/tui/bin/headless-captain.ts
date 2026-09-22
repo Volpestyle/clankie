@@ -1,3 +1,4 @@
+import { runEvaluatorCommand } from "../src/command/evaluator.ts";
 import { runConversationsCommand } from "../src/command/conversations.ts";
 import { openHerdr, runFleetHerdr } from "../src/session/herdr-connection.ts";
 import { type CredentialStore } from "@clankie/credential-broker";
@@ -187,6 +188,11 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "memory") {
       const result = await runMemoryCommand(rest, options);
+      outputJson(stdout, result);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "evaluator") {
+      const result = await runEvaluatorCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }

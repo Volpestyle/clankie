@@ -1098,3 +1098,45 @@ Revert with `clankie model set <provider>/<model>` and another
 - [Distribution](distribution.md) — install layout and `clankie doctor` on a release
 - [Credentials](credentials.md) — bot vs user vs internal tokens
 - [Architecture canonical homes](architecture.md#canonical-homes)
+
+## Independent evaluator
+
+```sh
+clankie evaluator enable --harness codex
+clankie evaluator enable --harness claude
+clankie evaluator status
+clankie evaluator open
+clankie evaluator disable
+clankie evaluator retry EVALUATION_UUID
+```
+
+The local operator credential authorizes `GET /v1/captain/evaluator` and
+`POST /v1/captain/evaluator`. POST accepts `{ "action": "enable", "harness": "codex" }`,
+`disable`, `open`, or `{ "action": "retry", "id": "<UUID>" }`; an omitted harness
+preserves the selection. The TUI `/evaluator` accepts the same arguments and
+renders the queue, recent assessments, linked issues/MRs and errors. `open`
+focuses the evaluator in the service's active Herdr session.
+
+CLI success is `{ ok: true, evaluator: ... }`, with exit 0; transport, authentication
+or command errors exit 1. Invalid API commands return 400, missing operator
+authority 401/503, and conflicting commands 409. The status includes `enabled`,
+`harness`, evidence `directory`, optional `paneId` and `error`, `queued`, and up to
+50 recent `jobs`. An enabled evaluator can report an operational error (missing
+harness, blocked startup, unavailable Herdr); inspect `error` and the pane.
+
+The evaluator defaults off. Enabling creates its own pane and starts a harness;
+new work uses fresh agent context. Captures coalesce for a quiet minute, with
+fifteen-minute checkpoints for continuing activity. Only a schema-valid report
+from a settled agent completes an assessment. Restart resumes inspection of the
+existing assignment; uncertain failures require explicit retry. The service
+interrupts assessments after thirty minutes. Disable stops new capture and
+dispatch; in-flight work finishes. It does not change Linear following, merge
+changes or close review panes.
+
+Evidence and queue state live under `~/.clankie/captain/evaluator/`, outside
+conversation pruning. Goal identity groups continuations; otherwise captures
+are conversation checkpoints and do not assert a completed task. Pi transcript
+excerpts are bounded to 512 KiB and declare truncation; native projections retain
+their existing bounded entries. Gameplay journals are not separate triggers.
+Raw evidence remains local; findings carry redacted excerpts to Linear. See
+[the evaluator decision](adr/0178-the-evaluator-has-its-own-seat.md) for scope and limits.

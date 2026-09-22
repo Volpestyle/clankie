@@ -211,6 +211,16 @@ working a goal, written through `note_goal_decision` and returned by
 `get_goal` so a continuation resumes from what was already decided
 ([ADR 0132](adr/0132-a-goal-keeps-a-decision-journal.md)).
 
+The optional independent evaluator captures settled Pi turns and native Herdr
+reply projections under `~/.clankie/captain/evaluator/`. Its durable queue dispatches
+one Codex or Claude Code assessment at a time in a separate Herdr pane; structured
+reports retain outcome, efficiency, tool and harness judgments plus issue/MR
+links. Goal identity groups continuations, while conversation checkpoints leave
+task boundaries to the evaluator. Evaluator descendants are excluded from capture.
+`clankie evaluator` and `/evaluator` expose the operator API controls. Linear
+following remains independent. See [ADR 0178](adr/0178-the-evaluator-has-its-own-seat.md)
+for scheduling, restart recovery and evidence limits.
+
 The native macOS menu-bar app uses that same contract to list continuing Pi
 sessions and tail expanded transcripts. Its microphone opens a private local
 realtime room over an authenticated loopback WebSocket; social speech stays in

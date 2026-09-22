@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -45,6 +45,7 @@ import {
   type ConversationTurnContext,
 } from "./conversations.ts";
 import { linearActivityPrompt } from "../linear-webhook.ts";
+import { Evaluator, type EvaluationCapture } from "./evaluator.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
   readFleet,
@@ -683,7 +684,46 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       herdrTerminalControls.geometryFor(terminalId, surfaceClientId),
   });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"));
-  const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir));
+  const evaluator = new Evaluator(join(options.stateDir, "evaluator"));
+  const evaluationStarts = new Map<string, () => EvaluationCapture>();
+  const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir), (metrics) => {
+    const capture = evaluationStarts.get(metrics.runId);
+    evaluationStarts.delete(metrics.runId);
+    if (capture !== undefined) evaluator.capture({ ...capture(), metrics });
+  });
+  function captureEvaluationStart(
+    runId: string,
+    conversationId: string,
+    session: AgentSession,
+    request: string,
+  ): void {
+    if (!evaluator.isEnabled()) return;
+    const candidateGoal = autonomy.getGoal(conversationId);
+    const goal = candidateGoal?.status === "active" ? candidateGoal : undefined;
+    const scope = conversations.conversation(conversationId)?.scope;
+    const context = {
+      request,
+      workingDirectory: scope?.kind === "workspace" ? scope.workspaceId : workingDirectory,
+      goal: structuredClone(goal),
+      tools: session.getAllTools(),
+      activeTools: session.getActiveToolNames(),
+      systemPromptHash: createHash("sha256").update(session.systemPrompt).digest("hex"),
+      skills: session.resourceLoader.getSkills().skills,
+      execution: sessionExecutionIdentity(session),
+    };
+    evaluationStarts.set(runId, () => ({
+      runId,
+      conversationId,
+      ...(goal === undefined ? {} : { taskId: `goal:${conversationId}:${goal.createdAt}` }),
+      context: {
+        ...context,
+        goalAtSettlement: autonomy.getGoal(conversationId),
+        decisions: autonomy.recentDecisions(conversationId),
+        fleet: liveEdgeSeats,
+      },
+      ...(session.sessionFile === undefined ? {} : { transcriptPath: session.sessionFile }),
+    }));
+  }
   const seatLedger: SeatLedger = createSeatLedger(seatLedgerPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
   const settingsStore = options.settings ?? new SettingsStore();
@@ -940,6 +980,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             acceptedAt: context.acceptedAt,
             ...(operatorTokensStart === undefined ? {} : { contextTokensStart: operatorTokensStart }),
           });
+      if (metrics !== undefined) captureEvaluationStart(context.runId, conversationId, lane.session, message);
       const skillCalls = new Map<string, string>();
       const goalWasActive = autonomy.getGoal(conversationId)?.status === "active";
       let runTokens = 0;
@@ -1217,6 +1258,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
     const fleet = await readFleet();
     bindHeadSeat(fleet.head);
+    evaluator.observeFleet(fleet.seats);
     const seats = personas.reconcile(fleet.seats);
     liveEdgeSeats = fleet.seats.map((observed) => ({
       seatId: observed.seatId,
@@ -1294,6 +1336,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   });
 
+  evaluator.start();
   herdrWatches.start(
     (conversationId, prompt) => {
       if (!conversations.runsCaptainTurns(conversationId)) {
@@ -1305,6 +1348,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return Promise.resolve();
     },
     (seatId, projection) => {
+      if (projection.kind === "transcript") {
+        const entries = projection.transcript.entries;
+        const last = entries.at(-1);
+        if (last?.type === "message" && last.role === "agent" && !evaluator.excludesSeat(seatId)) {
+          evaluator.capture({
+            conversationId: `seat:${seatId}`,
+            runId: `${projection.transcript.sessionKey}:${last.id}`,
+            context: {
+              source: "herdr",
+              seatId,
+              head: seatId === headSeat?.seatId,
+              fleet: liveEdgeSeats,
+              seat: liveSeats.find((seat) => seat.seatId === seatId) ?? headSeat,
+              transcript: projection.transcript,
+              metrics: null,
+              toolInventory: null,
+            },
+          });
+        }
+      }
       if (seatId === headSeat?.seatId) {
         // His own words, in his own thread: the seat's transcript is the head
         // conversation the app pins, spoken as captain, never as an agent.
@@ -1417,6 +1480,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           acceptedAt: new Date().toISOString(),
           ...(discordTokensStart === undefined ? {} : { contextTokensStart: discordTokensStart }),
         });
+    if (metrics !== undefined) captureEvaluationStart(turnId, conversationId, lane.session, normalized.heard);
     const toolProgress =
       live || !toolProgressEnabled || normalized.guildId === undefined || deps.discordActions === undefined
         ? undefined
@@ -1953,6 +2017,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return laneLog.list();
     },
 
+    evaluatorStatus: () => evaluator.status(),
+    evaluatorCommand: (command) => evaluator.command(command),
+
     async readTurnMetrics(query: TurnMetricsQuery) {
       return turnSettled.read(query);
     },
@@ -2036,6 +2103,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async close(): Promise<void> {
+      evaluator.close();
       for (const mailbox of fleetMailboxes.values()) mailbox.close();
       fleetMailboxes.clear();
       seatOutbox.close();

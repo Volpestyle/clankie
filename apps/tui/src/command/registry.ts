@@ -1,6 +1,13 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["evaluator"],
+    lines: [
+      "  evaluator [status|enable [--harness codex|claude]|disable|open|retry ID]",
+      "                           Independent task assessments in Herdr (JSON)",
+    ],
+  },
+  {
     nouns: ["conversations", "conversation"],
     lines: [
       "  conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",

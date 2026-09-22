@@ -1,4 +1,6 @@
 import type {
+  EvaluatorCommand,
+  EvaluatorStatus,
   CaptainChannelTurnResult,
   CaptainLaneObservationEntry,
   CaptainSessionLaneV2,
@@ -58,6 +60,8 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  evaluatorStatus(): EvaluatorStatus;
+  evaluatorCommand(command: EvaluatorCommand): Promise<EvaluatorStatus>;
   /** One Discord text/voice message becomes one captain turn. */
   submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult>;
   /**
@@ -149,6 +153,22 @@ export interface LaneObservation {
 /** Test stand-in so the app layer can be exercised without a model. */
 export function createStubCaptain(overrides: Partial<CaptainPort> = {}): CaptainPort {
   return {
+    evaluatorStatus: () => ({
+      schemaVersion: 1,
+      enabled: false,
+      harness: "codex",
+      directory: "",
+      queued: 0,
+      jobs: [],
+    }),
+    evaluatorCommand: async () => ({
+      schemaVersion: 1,
+      enabled: false,
+      harness: "codex",
+      directory: "",
+      queued: 0,
+      jobs: [],
+    }),
     submitDiscordTurn: async () => ({
       state: "settled",
       captainSessionId: "stub-session",

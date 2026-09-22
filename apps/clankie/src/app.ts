@@ -1,3 +1,4 @@
+import { EVALUATOR_PATH, EvaluatorCommandSchema } from "@clankie/protocol";
 import { ConversationResetError, LINEAR_INBOX_CONVERSATION_ID } from "./captain/conversations.ts";
 import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@clankie/protocol";
 /**
@@ -2537,6 +2538,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
    * what the provider reported. Bounded on read; `limit` is clamped rather than
    * refused so a caller can never ask for the whole log.
    */
+  app.on(["GET", "POST"], EVALUATOR_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (context.req.method === "GET") return context.json(dependencies.captain.evaluatorStatus());
+    const parsed = EvaluatorCommandSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: "invalid_evaluator_command" }, 400);
+    try {
+      return context.json(await dependencies.captain.evaluatorCommand(parsed.data));
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
   app.get(CAPTAIN_TURN_METRICS_PATH, async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable") {

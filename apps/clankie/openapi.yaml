@@ -492,6 +492,55 @@ paths:
         "200":
           description: Lane listing
 
+  /v1/captain/evaluator:
+    get:
+      tags: [Captain, Operator]
+      operationId: getEvaluatorStatus
+      summary: Independent evaluator status, queue and recent reports
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Enabled state, harness, pane, errors, queue count and up to 50 recent jobs
+        "401":
+          description: Operator authentication required
+    post:
+      tags: [Captain, Operator]
+      operationId: commandEvaluator
+      summary: Enable, disable, focus or retry the independent evaluator
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [action]
+                  properties:
+                    action: { const: enable }
+                    harness: { type: string, enum: [codex, claude] }
+                - type: object
+                  additionalProperties: false
+                  required: [action]
+                  properties:
+                    action: { type: string, enum: [disable, open] }
+                - type: object
+                  additionalProperties: false
+                  required: [action, id]
+                  properties:
+                    action: { const: retry }
+                    id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current evaluator status; operational startup errors appear in error
+        "400":
+          description: Invalid command
+        "401":
+          description: Operator authentication required
+        "409":
+          description: Conflicting command or unavailable pane
+
   /v1/captain/turn-metrics:
     get:
       tags: [Captain, Operator]

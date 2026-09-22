@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DevicePushRequestSchema } from "./device-push.ts";
 export * from "./device-push.ts";
+export * from "./evaluator.ts";
 
 /** Frozen event-log partition key. Still serialized as `missionId`. */
 export const MissionIdSchema = z.string().min(1);
