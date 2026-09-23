@@ -14,7 +14,7 @@ export default defineConfig({
     include: packageTestPattern,
     exclude: ["**/node_modules/**", "**/.turbo/**", "**/dist/**", "artifacts/**"],
     fileParallelism: false,
-    pool: "threads",
+    pool: "forks", // threads aborts on Node 26 worker isolate teardown; see ADR 0179
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },
