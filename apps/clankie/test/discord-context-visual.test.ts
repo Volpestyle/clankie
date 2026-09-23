@@ -83,6 +83,62 @@ describe("Discord context visuals", () => {
     expect(normalized.prompt).toContain("earlier context message gif-message");
     expect(normalized.prompt).toContain("[newest context visual]");
   });
+
+  it("shows a warm lane each context visual once", async () => {
+    const request: DiscordPresenceChannelTurnRequest = {
+      schemaVersion: 1,
+      deliveryId: "next",
+      identity: {
+        presenceSessionId: "presence-1",
+        correlationId: "discord-message:next",
+        profileHash: "hash",
+        characterId: "clankie",
+        credentialRef: "discord_bot",
+        transportKind: "bot",
+      },
+      trigger: {
+        kind: "message",
+        id: "next",
+        guildId: "guild-1",
+        channelId: "channel-1",
+        actorId: "user-1",
+        body: "and another",
+        attachments: [],
+      },
+      contextMessages: [
+        {
+          id: "listing",
+          authorId: "clankie",
+          body: "https://example.com/house",
+          createdAt: "2026-09-22T16:56:43.000Z",
+        },
+      ],
+      contextVisual: { sourceMessageId: "listing", attachment: image("preview") },
+    };
+    const deps = {
+      memory: {
+        appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
+        recallEpisodeCard: () => Promise.resolve(""),
+        searchEpisodeCard: () => Promise.resolve(""),
+      },
+      resolveDiscordAttachments: (attachments: readonly { id: string; mediaType: string }[]) =>
+        Promise.resolve(
+          attachments.map((attachment) => ({
+            id: attachment.id,
+            mediaType: attachment.mediaType,
+            dataUrl: `data:${attachment.mediaType};base64,cGl4ZWxz`,
+          })),
+        ),
+    };
+    const shownContextVisuals = new Set<string>();
+
+    const first = await normalizeDiscordTurn(request, deps, { carriesHistory: true, shownContextVisuals });
+    const second = await normalizeDiscordTurn(request, deps, { carriesHistory: true, shownContextVisuals });
+
+    expect(first.images.map((attachment) => attachment.id)).toEqual(["preview"]);
+    expect(second.images).toEqual([]);
+    expect(second.prompt).not.toContain("earlier context message");
+  });
 });
 
 function image(id: string) {

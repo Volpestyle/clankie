@@ -726,6 +726,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
   const seatLedger: SeatLedger = createSeatLedger(seatLedgerPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
+  // ponytail: per-process, so a restart shows each warm room its newest visual once more;
+  // a compacted session may also lose a picture it was shown. Persist per session if either bites.
+  const shownContextVisuals = new Map<string, Set<string>>();
+  const shownContextVisualsFor = (sessionKey: string): Set<string> => {
+    let shown = shownContextVisuals.get(sessionKey);
+    if (shown === undefined) shownContextVisuals.set(sessionKey, (shown = new Set()));
+    return shown;
+  };
   const settingsStore = options.settings ?? new SettingsStore();
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
@@ -1690,6 +1698,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // gets one redundant bounded backlog once per boot.
       const heard = await normalizeDiscordTurn(request, deps, {
         carriesHistory: plan.durable && sessions.has(plan.sessionKey),
+        ...(plan.durable ? { shownContextVisuals: shownContextVisualsFor(plan.sessionKey) } : {}),
       });
       const normalized: NormalizedDiscordTurn = {
         ...heard,
