@@ -14,10 +14,16 @@
  *   profile are signed up for by hand in that window, because the sites that
  *   own them forbid automated signup
  *   ([ADR 0127](../../../docs/adr/0127-his-accounts-are-his.md)).
+ * - **A recording, when the owner wants one.** With `browser.recordSessions`
+ *   on, each burst of browsing is saved as a WebM under
+ *   `<stateRoot>/browser/recordings/`: recording starts before the first call
+ *   and stops once the browser has been idle for {@link RECORDING_IDLE_MS}.
  */
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -56,6 +62,12 @@ const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 const ARTIFACT_SUBDIRECTORY = "browser";
 const REQUEST_TIMEOUT_MS = 60_000;
 const STARTUP_TIMEOUT_MS = 30_000;
+/** A burst of browsing ends, and its recording is saved, after this long without a call. */
+const RECORDING_IDLE_MS = 60_000;
+// ponytail: count cap, not bytes; switch to a size budget if long bursts fill the disk.
+const MAX_RECORDINGS = 50;
+
+const execFileAsync = promisify(execFile);
 
 interface BrowserHostLogger {
   info(context: Record<string, unknown>, message: string): void;
@@ -78,6 +90,8 @@ export interface BrowserHostOptions {
   /** Server launch command; `CLANKIE_AGENT_BROWSER_EXECUTABLE` still overrides it. */
   command?: string;
   args?: readonly string[];
+  /** Read before each burst starts; true saves that burst as a WebM. Defaults to off. */
+  recordSessions?: () => Promise<boolean>;
 }
 
 export interface BrowserHost {
@@ -108,6 +122,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   await mkdir(socketDirectory, { recursive: true, mode: 0o700 });
   await mkdir(homeDirectory, { recursive: true, mode: 0o700 });
   await mkdir(tempDirectory, { recursive: true, mode: 0o700 });
+  const recordingsDirectory = join(options.stateRoot, "browser", "recordings");
 
   // Artifacts land under the root the Discord attachment resolver already
   // serves, so a screenshot is attachable without a second copy or a second
@@ -119,21 +134,23 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
 
   const command =
     environment.CLANKIE_AGENT_BROWSER_EXECUTABLE?.trim() || options.command || DEFAULT_BROWSER_COMMAND;
+  // The MCP server and the `record` CLI reach one browser through this environment.
+  const browserEnvironment: Record<string, string> = {
+    PATH: environment.PATH ?? "",
+    LANG: environment.LANG ?? "",
+    HOME: homeDirectory,
+    TMPDIR: tempDirectory,
+    AGENT_BROWSER_SOCKET_DIR: socketDirectory,
+    AGENT_BROWSER_PROFILE: profileDirectory,
+    AGENT_BROWSER_NAMESPACE: "clankie",
+    AGENT_BROWSER_SESSION: "clankie",
+    AGENT_BROWSER_CONTENT_BOUNDARIES: "1",
+    AGENT_BROWSER_MAX_OUTPUT: String(MAX_RESULT_CHARACTERS),
+  };
   const transport = new StdioClientTransport({
     command,
     args: [...(options.args ?? DEFAULT_BROWSER_ARGS)],
-    env: {
-      PATH: environment.PATH ?? "",
-      LANG: environment.LANG ?? "",
-      HOME: homeDirectory,
-      TMPDIR: tempDirectory,
-      AGENT_BROWSER_SOCKET_DIR: socketDirectory,
-      AGENT_BROWSER_PROFILE: profileDirectory,
-      AGENT_BROWSER_NAMESPACE: "clankie",
-      AGENT_BROWSER_SESSION: "clankie",
-      AGENT_BROWSER_CONTENT_BOUNDARIES: "1",
-      AGENT_BROWSER_MAX_OUTPUT: String(MAX_RESULT_CHARACTERS),
-    },
+    env: browserEnvironment,
     stderr: "pipe",
   });
   transport.stderr?.on("data", (chunk) => {
@@ -209,6 +226,72 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     }
   }
 
+  let recording: string | undefined;
+  let recordingIdle: NodeJS.Timeout | undefined;
+
+  function runBrowserCli(args: readonly string[]): Promise<unknown> {
+    return execFileAsync(command, [...args], { env: browserEnvironment, timeout: REQUEST_TIMEOUT_MS });
+  }
+
+  // Recording is a record of the burst, never a condition of it: every failure
+  // here is logged and the browser call goes ahead unrecorded.
+  async function startRecording(): Promise<void> {
+    if (recording !== undefined || options.recordSessions === undefined) return;
+    try {
+      if (!(await options.recordSessions())) return;
+      await mkdir(recordingsDirectory, { recursive: true, mode: 0o700 });
+      const path = join(recordingsDirectory, `${new Date().toISOString().replace(/[:.]/gu, "-")}.webm`);
+      await runBrowserCli(["record", "start", path]);
+      recording = path;
+      options.logger.info({ event: "browser.recording.started", path }, "browser recording started");
+    } catch (error) {
+      options.logger.warn(
+        {
+          event: "browser.recording.failed",
+          phase: "start",
+          detail: mcpErrorDetail(error, "record_start_failed").slice(0, 300),
+        },
+        "browser recording failed",
+      );
+    }
+  }
+
+  async function stopRecording(): Promise<void> {
+    clearTimeout(recordingIdle);
+    recordingIdle = undefined;
+    const path = recording;
+    if (path === undefined) return;
+    recording = undefined;
+    try {
+      await runBrowserCli(["record", "stop"]);
+      options.logger.info({ event: "browser.recording.saved", path }, "browser recording saved");
+      const recordings = (await readdir(recordingsDirectory)).filter((name) => name.endsWith(".webm")).sort();
+      for (const name of recordings.slice(0, Math.max(0, recordings.length - MAX_RECORDINGS))) {
+        await rm(join(recordingsDirectory, name), { force: true });
+      }
+    } catch (error) {
+      options.logger.warn(
+        {
+          event: "browser.recording.failed",
+          phase: "stop",
+          path,
+          detail: mcpErrorDetail(error, "record_stop_failed").slice(0, 300),
+        },
+        "browser recording failed",
+      );
+    }
+  }
+
+  function stopRecordingWhenIdle(): void {
+    if (recording === undefined) return;
+    clearTimeout(recordingIdle);
+    // Queued behind in-flight calls so a stop never lands in the middle of one.
+    recordingIdle = setTimeout(() => {
+      callTail = callTail.then(stopRecording);
+    }, RECORDING_IDLE_MS);
+    recordingIdle.unref();
+  }
+
   async function call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult> {
     if (Object.hasOwn(request.arguments, "extraArgs")) {
       return CallBrowserToolResultSchema.parse({
@@ -234,6 +317,8 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         detail: unavailableReason ?? "browser_host_closed",
       });
     }
+    clearTimeout(recordingIdle);
+    await startRecording();
     let result: {
       content?: { type?: unknown; text?: unknown; data?: unknown; mimeType?: unknown }[];
       isError?: unknown;
@@ -253,6 +338,8 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         reason: "browser_unavailable",
         detail: mcpErrorDetail(error, "browser_call_failed").slice(0, 500),
       });
+    } finally {
+      stopRecordingWhenIdle();
     }
     const text = (result.content ?? [])
       .filter((block) => block.type === "text" && typeof block.text === "string")
@@ -326,6 +413,8 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
 
     async close(): Promise<void> {
       if (closed) return;
+      await callTail;
+      await stopRecording();
       closed = true;
       await client.close();
     },

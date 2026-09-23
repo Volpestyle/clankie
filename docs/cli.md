@@ -46,22 +46,22 @@ device table, credential-rotate sentence). Everything else is already JSON.
 `rivals connect --token-stdin` reads its bridge token from a pipe into the broker;
 the token is never an argument, settings value, or printed result.
 
-| Command                                                                                         | stdout                                                                                       |
-| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`                                  | JSON                                                                                         |
-| `model …`, `effort …`, `image-model …`, `video-model …`                                         | JSON                                                                                         |
-| `linear …`, `persona …`, `games …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
-| `play status`                                                                                   | JSON                                                                                         |
-| `send --conversation ID …`                                                                      | JSON accepted-run receipt or refusal                                                         |
-| `file publish --conversation ID PATH …`                                                         | JSON delivered-file metadata                                                                 |
-| `memory …`, `metrics …`                                                                         | JSON                                                                                         |
-| `play stop`                                                                                     | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
-| `prompt …`, `memory-card …`                                                                     | Plain text: the prompt or card itself, verbatim                                              |
-| `seat`                                                                                          | Interactive (TTY); `seat --dry-run` is JSON                                                  |
-| `mcp`                                                                                           | JSON-RPC for a harness, never for people                                                     |
-| `pair`, `devices`, `operator-credential rotate`                                                 | Human text; pass `--json`                                                                    |
-| `help`                                                                                          | This index (plain text)                                                                      |
-| `--version`                                                                                     | `clankie <version>`                                                                          |
+| Command                                                                                                      | stdout                                                                                       |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`                                               | JSON                                                                                         |
+| `model …`, `effort …`, `image-model …`, `video-model …`                                                      | JSON                                                                                         |
+| `linear …`, `persona …`, `games …`, `browser …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
+| `play status`                                                                                                | JSON                                                                                         |
+| `send --conversation ID …`                                                                                   | JSON accepted-run receipt or refusal                                                         |
+| `file publish --conversation ID PATH …`                                                                      | JSON delivered-file metadata                                                                 |
+| `memory …`, `metrics …`                                                                                      | JSON                                                                                         |
+| `play stop`                                                                                                  | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
+| `prompt …`, `memory-card …`                                                                                  | Plain text: the prompt or card itself, verbatim                                              |
+| `seat`                                                                                                       | Interactive (TTY); `seat --dry-run` is JSON                                                  |
+| `mcp`                                                                                                        | JSON-RPC for a harness, never for people                                                     |
+| `pair`, `devices`, `operator-credential rotate`                                                              | Human text; pass `--json`                                                                    |
+| `help`                                                                                                       | This index (plain text)                                                                      |
+| `--version`                                                                                                  | `clankie <version>`                                                                          |
 
 Do not edit `~/.config/clankie/clankie.json`,
 `~/.config/clankie/settings.json`, or Keychain entries by hand.
@@ -549,6 +549,16 @@ Read or set whether the PokeAgent MMO body is available. JSON contains the
 `games.pokeagentMmoEnabled` boolean, `settingsFile`, and
 `"restart": "clankie restart captain"`. The TUI `/games` command calls this
 same writer.
+
+### `browser [status]` / `browser record on|off`
+
+Read or set `browser.recordSessions`. When on, each burst of Clankie's browsing
+is saved as a WebM under `~/.clankie/runner/browser/recordings/`: recording
+starts before the burst's first browser call and stops after 60 seconds without
+one; the newest 50 are kept. Off by default, because videos capture every page
+he opens, signed-in ones included. JSON contains `browser.recordSessions`,
+`settingsFile`, and `"appliesTo": "next_browsing_burst"` — no restart is needed.
+The TUI `/browser` command calls this same writer.
 
 ### `fleet [status]` / `fleet set --notes TEXT` / `fleet clear`
 

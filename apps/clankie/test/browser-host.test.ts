@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
@@ -188,5 +188,41 @@ describe("browser host", () => {
     await expect(
       created.call({ schemaVersion: 1, tool: "navigate", arguments: { extraArgs: ["--profile", "/tmp/x"] } }),
     ).resolves.toMatchObject({ outcome: "refused" });
+  });
+
+  it("records one burst of browsing when the owner has recording on", async () => {
+    // Stands in for agent-browser: `record` is logged, anything else is the fake MCP server.
+    const log = join(stateRoot, "record.log");
+    const executable = join(stateRoot, "agent-browser");
+    await writeFile(
+      executable,
+      `#!/bin/sh\nif [ "$1" = record ]; then echo "$*" >> '${log}'; [ "$2" = start ] && : > "$3"; exit 0; fi\nexec '${process.execPath}' '${fakeServerPath}' "$@"\n`,
+    );
+    await chmod(executable, 0o755);
+    let enabled = false;
+    host = await createBrowserHost({
+      stateRoot,
+      attachmentRoot: stateRoot,
+      logger,
+      environment: {},
+      command: executable,
+      args: [JSON.stringify({ tools: [{ name: "navigate", inputSchema: { type: "object" } }] })],
+      recordSessions: () => Promise.resolve(enabled),
+    });
+
+    await host.call({ schemaVersion: 1, tool: "navigate", arguments: {} });
+    expect(existsSync(log)).toBe(false);
+
+    enabled = true;
+    await host.call({ schemaVersion: 1, tool: "navigate", arguments: {} });
+    await host.call({ schemaVersion: 1, tool: "navigate", arguments: {} });
+    await host.close();
+
+    const recordings = await readdir(join(stateRoot, "browser", "recordings"));
+    expect(recordings).toHaveLength(1);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual([
+      `record start ${join(stateRoot, "browser", "recordings", recordings[0]!)}`,
+      "record stop",
+    ]);
   });
 });

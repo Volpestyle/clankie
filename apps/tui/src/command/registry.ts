@@ -116,6 +116,10 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
+    nouns: ["browser"],
+    lines: ["  browser [status] | record on|off  Save each burst of his browsing as a WebM (JSON)"],
+  },
+  {
     nouns: ["rivals"],
     lines: [
       "  rivals connect URL [--token-stdin] | disconnect | status",

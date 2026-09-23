@@ -7,6 +7,7 @@ import { doctorCommand, type ExecFileImpl } from "../src/command/doctor.ts";
 import { statusCommand } from "../src/command/status.ts";
 import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
+import { runBrowserCommand } from "../src/command/browser.ts";
 import { runGamesCommand } from "../src/command/games.ts";
 import { runLinearCommand } from "../src/command/linear.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
@@ -142,6 +143,10 @@ export async function runHeadlessCaptainCommand(
     if (command === "persona") {
       const result = await runPersonaCommand(rest, options);
       outputJson(stdout, result);
+      return 0;
+    }
+    if (command === "browser") {
+      outputJson(stdout, await runBrowserCommand(rest, options));
       return 0;
     }
     if (command === "games") {

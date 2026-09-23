@@ -55,6 +55,7 @@ clankie image-model set openai/gpt-image-2
 clankie video-model set xai/grok-imagine-video-1.5
 clankie persona set --display-name Clankie --chattiness balanced
 clankie games set on
+clankie browser record on
 clankie discord set --application-id 12345 --active-body bot
 ```
 
@@ -171,6 +172,9 @@ credential holder.
 - `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
   disable it. `/games on|off` remains available for direct use. Restart Clankie
   to apply a change. Saves live with the world server, not here.
+- `/browser record on|off` saves each burst of Clankie's browsing as a WebM
+  under `~/.clankie/runner/browser/recordings/`; `/browser` shows the setting.
+  It applies from his next burst, without a restart.
 - `/memory` browses and edits episodes and permitted Discord person facts through
   operator-only APIs.
 - `/vt` (aliases `/voice-log`, `/voice-transcripts`) opens a live overlay of

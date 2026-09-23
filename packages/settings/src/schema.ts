@@ -352,6 +352,19 @@ export const CaptainSettingsSchema = z
   .strict();
 export type CaptainSettings = z.infer<typeof CaptainSettingsSchema>;
 
+/** His own browser (ADR 0082). */
+export const BrowserSettingsSchema = z
+  .object({
+    /**
+     * Save each burst of browsing as a WebM under the service state root
+     * (`runner/browser/recordings/`), newest 50 kept. Off by default: videos
+     * capture every page he opens, including signed-in ones.
+     */
+    recordSessions: z.boolean().default(false),
+  })
+  .strict();
+export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
+
 /** Whether the captain may offer play at all. */
 export const GameplaySettingsSchema = z
   .object({
@@ -538,6 +551,7 @@ export const ClankieSettingsSchema = z
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
+    browser: BrowserSettingsSchema.default(() => BrowserSettingsSchema.parse({})),
     mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),
     linearWebhook: LinearWebhookSettingsSchema.default(() => LinearWebhookSettingsSchema.parse({})),

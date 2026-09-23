@@ -7,7 +7,7 @@ import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connecti
  * blocks; configurators run as guided SetupFlow wizards.
  */
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
-import type { GameplaySettings, SettingsStore } from "@clankie/settings";
+import type { BrowserSettings, GameplaySettings, SettingsStore } from "@clankie/settings";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
 import {
   formatLaneListing,
@@ -35,6 +35,7 @@ import {
 } from "./observation/herd-lead-companion.ts";
 import { describeHerdrBinding, formatCaptainContextUsage } from "./shell/footer.ts";
 import { formatHerdrJumpResult, type HerdrSessionEntry } from "./session/herdr-report.ts";
+import { browserSetRecording, browserStatus } from "./command/browser.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
@@ -607,6 +608,35 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "browser",
+      aliases: [],
+      description: "Record Clankie's browsing as video",
+      argumentHint: "[record on|off]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (settings === undefined) {
+          shell.insertCommandResult("/browser", "Browser settings are unavailable.", "error");
+          return;
+        }
+        const words = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+        if (words.length === 0 || (words.length === 1 && words[0] === "status")) {
+          const result = await browserStatus({ settings });
+          shell.insertCommandResult("/browser", formatBrowserSettings(result.browser), "success");
+          return;
+        }
+        if (words.length !== 2 || words[0] !== "record" || (words[1] !== "on" && words[1] !== "off")) {
+          shell.insertCommandResult("/browser", "Usage: /browser [record on|off]", "error");
+          return;
+        }
+        const next = await browserSetRecording(words[1] === "on", { settings });
+        shell.insertCommandResult(
+          "/browser",
+          `${formatBrowserSettings(next.browser)}\n\nApplies from his next burst of browsing.`,
+          "success",
+        );
+      },
+    },
+    {
       name: "rivals",
       aliases: [],
       description: "Connect, play, observe, and share Spider-Man",
@@ -889,6 +919,10 @@ function formatAutonomyStatus(status: OperatorAutonomyStatus): string {
       : [`Budget: ${String(goal.tokensUsed)} / ${String(goal.tokenBudget)} tokens`]),
     wake === undefined ? "Wake: none" : `Wake: ${wake.at} · ${wake.reason}`,
   ].join("\n");
+}
+
+function formatBrowserSettings(settings: BrowserSettings): string {
+  return `Record browsing: ${settings.recordSessions ? "on" : "off"}\nVideos: ~/.clankie/runner/browser/recordings/ (newest 50)`;
 }
 
 function formatGameplaySettings(settings: GameplaySettings): string {

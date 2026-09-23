@@ -50,10 +50,10 @@ enable a plane.
 
 ## Editing
 
-Use `/discord`, `/voice`, `/connect`, or `/games` in the Clankie TUI. Tokens and API keys
+Use `/discord`, `/voice`, `/connect`, `/games`, or `/browser` in the Clankie TUI. Tokens and API keys
 go to the credential broker (same destination as `/auth`). Public identifiers —
 Discord ids, an IMAP host and username, MCP server commands and URLs — and
-gameplay enablement write here.
+gameplay enablement, and browser recording write here.
 
 `voice.realtimeProvider` selects `openai` or `xai`. Provider-specific model and
 voice fields are retained when switching, so trying Grok does not erase the

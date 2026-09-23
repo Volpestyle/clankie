@@ -328,6 +328,7 @@ if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
       attachmentRoot,
       logger,
       environment: process.env,
+      recordSessions: async () => (await settingsStore.load()).browser.recordSessions,
     });
     logger.info({ event: "browser.capability.enabled" }, "in-process browser host started");
   } catch (error) {
