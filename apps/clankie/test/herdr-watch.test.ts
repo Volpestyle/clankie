@@ -621,6 +621,51 @@ describe("harness-native seat transcripts", () => {
     expect(detail?.length).toBeLessThanOrEqual(OPERATOR_CONVERSATION_TOOL_DETAIL_MAX);
   });
 
+  it("retains parallel Claude results without importing abandoned branches", () => {
+    const call = (uuid: string, parentUuid: string, id: string) => ({
+      type: "assistant",
+      uuid,
+      parentUuid,
+      message: { content: [{ type: "tool_use", id, name: "Read", input: {} }] },
+    });
+    const result = (uuid: string, parentUuid: string, id: string, isSidechain = false) => ({
+      type: "user",
+      uuid,
+      parentUuid,
+      isSidechain,
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: uuid }] },
+    });
+    const entries = parseHerdrSeatTranscript(
+      "claude",
+      [
+        { type: "user", uuid: "root", parentUuid: null, message: { content: "Review" } },
+        call("abandoned", "root", "old"),
+        result("old-result", "abandoned", "old"),
+        call("a", "root", "call-a"),
+        call("b", "a", "call-b"),
+        result("result-a", "a", "call-a"),
+        result("foreign", "a", "unknown"),
+        result("sidechain", "a", "call-a", true),
+        result("unrelated-parent", "abandoned", "call-a"),
+        result("result-b", "b", "call-b"),
+        { type: "assistant", uuid: "done", parentUuid: "result-b", message: { content: "Done" } },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n"),
+    );
+
+    expect(
+      entries
+        .filter((entry) => entry.type === "tool")
+        .map((entry) => [entry.toolCallId, entry.phase, entry.detail]),
+    ).toEqual([
+      ["call-a", "started", "{}"],
+      ["call-b", "started", "{}"],
+      ["call-a", "completed", "result-a"],
+      ["call-b", "completed", "result-b"],
+    ]);
+  });
+
   it("follows Claude and Pi's active trees with typed tool traffic", () => {
     const claude = parseHerdrSeatTranscript(
       "claude",

@@ -25,13 +25,25 @@ describe("clankie claude plugin", () => {
     expect(hooks.hooks.SessionStart?.[0]?.hooks[0]).toMatchObject({
       type: "command",
       command: "clankie",
-      args: ["prompt", "--lane", "operator", "--sections", "persona,reach,address,model"],
+      args: ["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"],
     });
     expect(hooks.hooks.UserPromptSubmit?.[0]?.hooks[0]).toMatchObject({
       type: "command",
       command: "clankie",
       args: ["memory-card", "--lane", "operator"],
     });
+    for (const event of [
+      "SessionStart",
+      "UserPromptSubmit",
+      "Stop",
+      "StopFailure",
+      "SessionEnd",
+      "PreCompact",
+    ]) {
+      expect(hooks.hooks[event]?.[0]?.hooks).toContainEqual(
+        expect.objectContaining({ command: "clankie", args: ["seat-sync"] }),
+      );
+    }
     const mcp = JSON.parse(await readFile(join(pluginRoot, ".mcp.json"), "utf8")) as {
       mcpServers: Record<string, { command: string; args: string[]; env?: unknown }>;
     };

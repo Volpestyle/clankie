@@ -8,7 +8,10 @@ start a stopped one, and mint no offer at all if it will not come up, so a
 paired device never points at a relay nobody started. A control plane that is
 not this machine runs its own relay; pairing says so instead of starting a
 local one that proves nothing. The headless command contract is
-[`docs/cli.md`](../../docs/cli.md).
+[`docs/cli.md`](../../docs/cli.md). In the
+[hosted deployment](../../infra/hosted/README.md), Compose owns the process and
+shares the captain's private state volume. Direct starts resolve the same brokered
+captain credential without a launcher-provided environment token.
 
 It listens on `CLANKIE_RELAY_PORT` (default 4321 — 4320 belongs to the
 activity surface). The origin remote devices should reach it on is
@@ -37,6 +40,12 @@ service on every request, between tail polls, and immediately before emitting a
 tail page. Expiry, revocation, and grant removal therefore take effect without a
 reconnect. It uses its own captain service credential for the upstream hop;
 device credentials never cross it.
+
+The `connections` operation requires `steer` for inventory and mutations. It
+projects bounded runtime/Swarm metadata and recorded provider identity; private
+socket paths, raw diagnostics and credentials remain on the service. Named runtime
+connect, reconnect and disconnect reuse the local API's manager. Only the operator
+captain lane can serve this operation.
 
 Terminal tails apply the same checks with the distinct `terminalObserve` grant.
 They address Herdr panes by stable terminal id and end with a typed reset when a
@@ -69,7 +78,7 @@ Configuration:
 
 - `CLANKIE_CONTROL_PLANE_URL` defaults to `http://127.0.0.1:4310` (device verification; the env name is a compatibility alias for the clankie service URL).
 - `CLANKIE_CAPTAIN_URL` defaults to `http://127.0.0.1:4310` (conversation dispatch on the same service).
-- `CLANKIE_CAPTAIN_TOKEN` enables the authenticated captain hop; conversation requests fail closed when absent, and the relay refuses to start with a token under 16 characters.
+- The captain bootstraps its service credential in the shared broker; the relay resolves it on startup. `CLANKIE_CAPTAIN_TOKEN` explicitly overrides that credential. Conversation requests fail closed when neither source is available, and the relay refuses a token under 16 characters.
 - `CLANKIE_RELAY_HOST` defaults to loopback; set it to a specific tailnet interface for direct physical-device access.
 - `CLANKIE_RELAY_PORT` defaults to `4321`; `PORT` is its deployment-platform fallback.
 

@@ -5,9 +5,9 @@ import { createDefaultCredentialStore, type CredentialStore } from "./credential
  * The captain's local bearer, brokered rather than hand-exported.
  *
  * The service authenticates captain-scoped requests against
- * `CLANKIE_CAPTAIN_TOKEN`, and trusted local clients (the launcher, the relay)
- * present the same value — one shared secret. Brokering it the way the
- * operator and Discord bridge credentials are brokered makes a fresh machine
+ * an explicit `CLANKIE_CAPTAIN_TOKEN` or its brokered credential. Trusted local
+ * clients (the launcher, the relay) resolve the same value — one shared secret.
+ * Brokering it like the operator and Discord bridge credentials makes a fresh machine
  * work with no shell setup.
  *
  * The Discord bridge deliberately refuses this variable ({@link

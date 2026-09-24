@@ -45,7 +45,9 @@ Paired devices already carry a distinct `terminalObserve` grant. The
 Terminal observation extends the existing callable operator service envelope
 with a bounded `terminal_catalog` operation and a `terminal_tail` operation.
 The catalog preserves Herdr's workspace, tab, and pane coordinates beside each
-stable terminal id. It projects Herdr's full pane list, including ordinary
+stable terminal id and execution connection. Runtime-qualified routing is defined
+in [ADR 0181](0181-clankie-is-independent-of-his-connections.md). The catalog allows
+48 panes per connection, at most 16 connections. It projects Herdr's full pane list, including ordinary
 shell panes that are absent from the agent roster. Tail bytes use the dedicated
 relay streaming path `POST /operator/v1/terminal-tail`.
 

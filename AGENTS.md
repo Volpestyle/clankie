@@ -2,10 +2,11 @@
 
 Clankie is a persistent agent with a personality: he chats in Discord (text
 and voice), plays Pokemon on stream, makes images and videos,
-browses the web, codes, and leads fleets of coding agents through the herdr
-CLI. His happy seat is a herdr pane in the same session as that fleet; the
-herdr-lead board is the companion dashboard. This repo is his body: one
-service (`apps/clankie`) plus the surfaces that reach it.
+browses the web, codes, and leads coding agents through swarm-mcp. This repo is
+his body: one persistent service (`apps/clankie`) plus the portals that reach it.
+Execution runtimes and work trackers are connections, independent of his identity
+([ADR 0181](docs/adr/0181-clankie-is-independent-of-his-connections.md)); current
+support and implementation gaps live in [the Swarm host](packages/swarm/README.md).
 
 ## Neighbor repos
 
@@ -93,6 +94,8 @@ This repository is public. Both neighbors are private and consume
   decide; don't gate behavior per trigger, script his words, or add a rule
   where volition would do. The only limits are the trust and safety
   boundaries above, never timidity.
-- Agents coordinate through the herdr CLI and plain files. There is no
-  mission protocol; say what you did, honestly. A herdr seat is a
-  conversation on the operator contract (send and projection, no pi session).
+- Agents prefer swarm-mcp for cross-session assignments, messages and handoffs.
+  Load `swarm-lead` for leadership and `swarm-mcp` for participation; `lead` owns
+  shared judgment. Use the selected runtime for terminals and process control;
+  `herdr-lead` is the explicit Herdr fallback for unenrolled agents. Never
+  duplicate uncertain dispatch.

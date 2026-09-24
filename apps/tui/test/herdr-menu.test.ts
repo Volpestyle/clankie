@@ -40,7 +40,13 @@ it("picks a listed session, saves before restarting, and allows cancellation", a
     .mockResolvedValueOnce("workers")
     .mockResolvedValueOnce("restart");
   await menu.run();
-  expect(optionValues(menu.readSelect.mock.calls[0]!)).toEqual(["session", "create", "open", "restart"]);
+  expect(optionValues(menu.readSelect.mock.calls[0]!)).toEqual([
+    "session",
+    "create",
+    "disable",
+    "open",
+    "restart",
+  ]);
   expect(optionValues(menu.readSelect.mock.calls[1]!)).toEqual(["workers", "default"]);
   expect(restartCaptain).toHaveBeenCalledTimes(1);
   expect(menu.end).toHaveBeenCalledTimes(1);
@@ -62,4 +68,11 @@ it("creates Clankie's session without asking the user to choose a runtime", asyn
   );
   expect(labels).toContain("Use an existing Herdr session");
   expect(labels).toContain("Create a session for Clankie");
+});
+
+it("can run without Herdr without closing the user's sessions", async () => {
+  const menu = herdrMenu();
+  menu.readSelect.mockResolvedValueOnce("disable");
+  await menu.run();
+  expect(menu.herdr().runtime).toBe("disabled");
 });

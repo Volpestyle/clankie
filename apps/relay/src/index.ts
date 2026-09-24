@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { resolveCaptainCredential } from "@clankie/credential-broker";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
 import { createCaptainConversationDispatch, createCaptainFileDownload } from "./conversation-upstream.ts";
 import {
@@ -10,7 +11,7 @@ import {
 const port = Number(process.env.CLANKIE_RELAY_PORT ?? process.env.PORT ?? 4321);
 const host = process.env.CLANKIE_RELAY_HOST ?? "127.0.0.1";
 
-const captainToken = process.env.CLANKIE_CAPTAIN_TOKEN;
+const captainToken = (await resolveCaptainCredential())?.token;
 const conversationLogger: RelayConversationLogger = {
   info: (fields, message) => console.log(JSON.stringify({ level: "info", ...fields, message })),
   warn: (fields, message) => console.warn(JSON.stringify({ level: "warn", ...fields, message })),

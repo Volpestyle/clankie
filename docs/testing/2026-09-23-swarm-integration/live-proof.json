@@ -1,0 +1,80 @@
+{
+  "scenario": "Real Herdr + Claude stream worker, reply withheld until idle",
+  "idleBeforeReply": true,
+  "taskId": "17705ef0-5ecd-46a9-921d-20defc51997c",
+  "taskStatus": "completed",
+  "result": {
+    "summary": "Asked requester for marker via Swarm question f84489cf; reply af726ca3 supplied SWARM_ROUND_TRIP_OK, written to proof.txt.",
+    "evidence": [
+      "Question message f84489cf-130b-44bb-9fef-0b35f1e5a4f5 sent on thread 17705ef0",
+      "Reply af726ca3-26b0-4d21-81c4-381edeb17bbe received via host delivery",
+      "proof.txt = 'SWARM_ROUND_TRIP_OK\\n' (20 bytes), artifact swarm://artifacts/c165e2d6-d04b-4f03-a2c8-3e43c5760ebb sha256 833c6bf7c1d4c8c7fe42b1e205157a8fcc24533e278be7745d68a60e09abf366"
+    ],
+    "limitations": ["proof.txt ends with a trailing newline"]
+  },
+  "deliverySummary": {
+    "total": 4,
+    "pending": 0,
+    "leased": 1,
+    "deadLetter": 0,
+    "acknowledged": 3,
+    "retries": 0,
+    "meanAcknowledgmentMs": 5288
+  },
+  "wakeAdmissions": [
+    {
+      "cursor": 21,
+      "messageId": "af726ca3-26b0-4d21-81c4-381edeb17bbe",
+      "recipient": "badc0c0c-6ebb-403d-a03a-d786f31305bc",
+      "at": 1790201512120,
+      "status": "accepted",
+      "sessionId": "4d54b207-3ed4-4cdc-86ac-154d97169918",
+      "generation": 1,
+      "taskId": null,
+      "attemptId": null,
+      "deliveryAttempt": 1
+    },
+    {
+      "cursor": 12,
+      "messageId": "d8e03e49-1dbf-4890-bef3-98a76ff2f3b6",
+      "recipient": "badc0c0c-6ebb-403d-a03a-d786f31305bc",
+      "at": 1790201494352,
+      "status": "accepted",
+      "sessionId": "4d54b207-3ed4-4cdc-86ac-154d97169918",
+      "generation": 1,
+      "taskId": "17705ef0-5ecd-46a9-921d-20defc51997c",
+      "attemptId": "1aa32be0-db41-4b53-837b-5e07deea86e4",
+      "deliveryAttempt": 1
+    }
+  ],
+  "messages": [
+    {
+      "version": 1,
+      "id": "f84489cf-130b-44bb-9fef-0b35f1e5a4f5",
+      "sender": "badc0c0c-6ebb-403d-a03a-d786f31305bc",
+      "recipient": "d89c735c-740a-4377-89df-9406762c0e8a",
+      "kind": "question",
+      "body": "Which marker should I write to /private/tmp/swarm-herdr-proof-7ve3mX/proof.txt?",
+      "taskId": "17705ef0-5ecd-46a9-921d-20defc51997c",
+      "threadId": "17705ef0-5ecd-46a9-921d-20defc51997c",
+      "createdAt": 1790201507633,
+      "expiresAt": null,
+      "idempotencyKey": "q-marker-17705ef0",
+      "audience": "direct"
+    },
+    {
+      "version": 1,
+      "id": "f36a52fd-4789-4e99-adb5-67133b8280d9",
+      "sender": "badc0c0c-6ebb-403d-a03a-d786f31305bc",
+      "recipient": "d89c735c-740a-4377-89df-9406762c0e8a",
+      "kind": "completion_notice",
+      "body": "Task 17705ef0 completed: proof.txt contains SWARM_ROUND_TRIP_OK (artifact swarm://artifacts/c165e2d6-d04b-4f03-a2c8-3e43c5760ebb, sha256 833c6bf7...). Evidence recorded on the task.",
+      "taskId": "17705ef0-5ecd-46a9-921d-20defc51997c",
+      "threadId": "17705ef0-5ecd-46a9-921d-20defc51997c",
+      "createdAt": 1790201539932,
+      "expiresAt": null,
+      "idempotencyKey": "done-17705ef0",
+      "audience": "direct"
+    }
+  ]
+}

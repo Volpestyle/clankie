@@ -1,10 +1,25 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import lockfile from "proper-lockfile";
+
+export const ProviderAccountSchema = z
+  .object({
+    provider: z.literal("linear"),
+    connectionId: z.string().uuid(),
+    userId: z.string().min(1),
+    workspaceId: z.string().min(1),
+    email: z.string().min(1),
+    name: z.string().min(1),
+    workspaceName: z.string().min(1),
+    verifiedAt: z.string().datetime(),
+  })
+  .strict();
+export type ProviderAccount = z.infer<typeof ProviderAccountSchema>;
 
 /**
  * Typed at-rest credentials for LLM providers.
@@ -18,6 +33,7 @@ export const ProviderCredentialSchema = z.discriminatedUnion("type", [
     type: z.literal("api"),
     key: z.string().min(1),
     metadata: z.record(z.string(), z.string()).optional(),
+    account: ProviderAccountSchema.optional(),
   }),
   z.object({
     type: z.literal("oauth"),
@@ -29,6 +45,7 @@ export const ProviderCredentialSchema = z.discriminatedUnion("type", [
     clientId: z.string().optional(),
     /** Dynamic-registration client secret, when the AS issued one. */
     clientSecret: z.string().optional(),
+    account: ProviderAccountSchema.optional(),
   }),
   z.object({
     type: z.literal("wellknown"),
@@ -39,20 +56,23 @@ export const ProviderCredentialSchema = z.discriminatedUnion("type", [
 export type ProviderCredential = z.infer<typeof ProviderCredentialSchema>;
 
 /** Secret-free summary of a credential, safe for `/auth list` UIs and structured logs. */
-export type RedactedCredential =
+export type RedactedCredential = (
   | { type: "api"; key: string }
   | { type: "oauth"; accountId?: string; expires: number }
-  | { type: "wellknown" };
+  | { type: "wellknown" }
+) & { account?: ProviderAccount };
 
 /** Reduces a credential to a display-safe summary. Never returns raw secrets. */
 export function redactCredential(credential: ProviderCredential): RedactedCredential {
+  const account =
+    "account" in credential && credential.account !== undefined ? { account: credential.account } : {};
   switch (credential.type) {
     case "api":
-      return { type: "api", key: `${credential.key.slice(0, 4)}…` };
+      return { type: "api", key: `${credential.key.slice(0, 4)}…`, ...account };
     case "oauth":
       return credential.accountId === undefined
-        ? { type: "oauth", expires: credential.expires }
-        : { type: "oauth", accountId: credential.accountId, expires: credential.expires };
+        ? { type: "oauth", expires: credential.expires, ...account }
+        : { type: "oauth", accountId: credential.accountId, expires: credential.expires, ...account };
     case "wellknown":
       return { type: "wellknown" };
   }
@@ -68,6 +88,15 @@ export interface CredentialStore {
   set(providerId: string, credential: ProviderCredential): Promise<void>;
   delete(providerId: string): Promise<boolean>;
   list(): Promise<Record<string, RedactedCredential>>;
+  /**
+   * Transform an existing entry under the same cross-process lock as set/delete.
+   * Missing entries stay missing. The callback must not call this store again.
+   * Stores without this capability cannot refresh provider credentials safely.
+   */
+  update?(
+    providerId: string,
+    transform: (current: ProviderCredential) => Promise<ProviderCredential>,
+  ): Promise<ProviderCredential | undefined>;
 }
 
 /** Normalizes a providerId: trim, lowercase, strip trailing "/". Throws when empty. */
@@ -99,6 +128,35 @@ function enqueueSerialized<T>(key: string, operation: () => Promise<T>): Promise
   return result;
 }
 
+/** Serializes the CLI and service as well as separate instances in one process. */
+function withCredentialLock<T>(path: string, operation: (assertHeld: () => void) => Promise<T>): Promise<T> {
+  // ponytail: one lock per store also serializes unrelated provider writes.
+  // Use provider locks plus an index lock if measured contention warrants it.
+  return enqueueSerialized(path, async () => {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    let compromised: Error | undefined;
+    const release = await lockfile.lock(path, {
+      realpath: false,
+      stale: 60_000,
+      update: 10_000,
+      retries: { retries: 12, minTimeout: 25, maxTimeout: 5_000 },
+      onCompromised: (error) => {
+        compromised = error;
+      },
+    });
+    const assertHeld = () => {
+      if (compromised !== undefined) throw compromised;
+    };
+    try {
+      const result = await operation(assertHeld);
+      assertHeld();
+      return result;
+    } finally {
+      await release();
+    }
+  });
+}
+
 /**
  * Fallback store: a single JSON file (`Record<providerId, ProviderCredential>`) with
  * 0600 permissions inside a 0700 parent directory. Writes are atomic (temp file +
@@ -107,11 +165,9 @@ function enqueueSerialized<T>(key: string, operation: () => Promise<T>): Promise
  */
 export class FileCredentialStore implements CredentialStore {
   private readonly filePath: string;
-  private readonly queueKey: string;
 
   public constructor(filePath: string) {
-    this.filePath = filePath;
-    this.queueKey = `file:${resolve(filePath)}`;
+    this.filePath = resolve(filePath);
   }
 
   public async get(providerId: string): Promise<ProviderCredential | undefined> {
@@ -122,21 +178,42 @@ export class FileCredentialStore implements CredentialStore {
   public set(providerId: string, credential: ProviderCredential): Promise<void> {
     const id = normalizeProviderId(providerId);
     const parsed = ProviderCredentialSchema.parse(credential);
-    return this.enqueue(async () => {
+    return this.enqueue(async (assertHeld) => {
       const { credentials } = await this.load();
       credentials[id] = parsed;
+      assertHeld();
       await this.persist(credentials);
     });
   }
 
   public delete(providerId: string): Promise<boolean> {
     const id = normalizeProviderId(providerId);
-    return this.enqueue(async () => {
+    return this.enqueue(async (assertHeld) => {
       const { credentials } = await this.load();
       if (!(id in credentials)) return false;
       delete credentials[id];
+      assertHeld();
       await this.persist(credentials);
       return true;
+    });
+  }
+
+  public update(
+    providerId: string,
+    transform: (current: ProviderCredential) => Promise<ProviderCredential>,
+  ): Promise<ProviderCredential | undefined> {
+    const id = normalizeProviderId(providerId);
+    return this.enqueue(async (assertHeld) => {
+      const { credentials } = await this.load();
+      const current = credentials[id];
+      if (current === undefined) return undefined;
+      const transformed = await transform(current);
+      const next = ProviderCredentialSchema.parse(transformed);
+      assertHeld();
+      if (transformed === current) return next;
+      credentials[id] = next;
+      await this.persist(credentials);
+      return next;
     });
   }
 
@@ -152,8 +229,8 @@ export class FileCredentialStore implements CredentialStore {
     return (await this.load()).issues;
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    return enqueueSerialized(this.queueKey, operation);
+  private enqueue<T>(operation: (assertHeld: () => void) => Promise<T>): Promise<T> {
+    return withCredentialLock(this.filePath, operation);
   }
 
   private async load(): Promise<{
@@ -243,12 +320,18 @@ export interface KeychainCredentialStoreOptions {
  */
 export class KeychainCredentialStore implements CredentialStore {
   private readonly service: string;
-  private readonly queueKey: string;
+  private readonly lockPath: string;
   private readonly execFile: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
   public constructor(options: KeychainCredentialStoreOptions = {}) {
     this.service = options.service ?? "bot.clankie.credentials";
-    this.queueKey = `keychain:${this.service}`;
+    this.lockPath = join(
+      homedir(),
+      ".config",
+      "clankie",
+      "credential-locks",
+      createHash("sha256").update(this.service).digest("hex"),
+    );
     this.execFile = options.execFile ?? defaultExecFile;
   }
 
@@ -260,33 +343,58 @@ export class KeychainCredentialStore implements CredentialStore {
   public set(providerId: string, credential: ProviderCredential): Promise<void> {
     const id = normalizeProviderId(providerId);
     const parsed = ProviderCredentialSchema.parse(credential);
-    return this.enqueue(async () => {
-      const previous = await this.read(id);
-      const index = await this.readIndex();
-      const indexChanged = !index.includes(id);
-      try {
-        // Publish the index before creating a new secret. If the index write
-        // fails, no unindexed credential can be orphaned in the Keychain.
-        if (indexChanged) await this.writeIndex([...index, id].sort());
-        await this.write(id, JSON.stringify(parsed));
-      } catch (error) {
-        if (indexChanged) await this.writeIndex(index).catch(() => undefined);
-        await this.restore(id, previous).catch(() => undefined);
-        throw error;
-      }
+    return this.enqueue((assertHeld) => this.setDirect(id, parsed, assertHeld));
+  }
+
+  public update(
+    providerId: string,
+    transform: (current: ProviderCredential) => Promise<ProviderCredential>,
+  ): Promise<ProviderCredential | undefined> {
+    const id = normalizeProviderId(providerId);
+    return this.enqueue(async (assertHeld) => {
+      const current = await this.getDirect(id);
+      if (current === undefined) return undefined;
+      const transformed = await transform(current);
+      const next = ProviderCredentialSchema.parse(transformed);
+      assertHeld();
+      if (transformed === current) return next;
+      await this.setDirect(id, next, assertHeld);
+      return next;
     });
+  }
+
+  private async setDirect(id: string, parsed: ProviderCredential, assertHeld: () => void): Promise<void> {
+    const previous = await this.read(id);
+    const index = await this.readIndex();
+    const indexChanged = !index.includes(id);
+    try {
+      // Publish the index before creating a new secret. If the index write
+      // fails, no unindexed credential can be orphaned in the Keychain.
+      assertHeld();
+      if (indexChanged) await this.writeIndex([...index, id].sort());
+      assertHeld();
+      await this.write(id, JSON.stringify(parsed));
+    } catch (error) {
+      assertHeld();
+      if (indexChanged) await this.writeIndex(index).catch(() => undefined);
+      assertHeld();
+      await this.restore(id, previous).catch(() => undefined);
+      throw error;
+    }
   }
 
   public delete(providerId: string): Promise<boolean> {
     const id = normalizeProviderId(providerId);
-    return this.enqueue(async () => {
+    return this.enqueue(async (assertHeld) => {
       const previous = await this.read(id);
       if (previous === undefined) return false;
       const index = await this.readIndex();
+      assertHeld();
       if (!(await this.deleteDirect(id))) return false;
       // A failed index update leaves only a stale index entry: list() skips the
       // missing item, and a future mutation repairs the index. Restoring the
       // secret here would be a more dangerous partial-failure state.
+      assertHeld();
       if (index.includes(id)) await this.writeIndex(index.filter((entry) => entry !== id));
       return true;
     });
@@ -307,8 +415,8 @@ export class KeychainCredentialStore implements CredentialStore {
     });
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    return enqueueSerialized(this.queueKey, operation);
+  private enqueue<T>(operation: (assertHeld: () => void) => Promise<T>): Promise<T> {
+    return withCredentialLock(this.lockPath, operation);
   }
 
   private async getDirect(id: string): Promise<ProviderCredential | undefined> {

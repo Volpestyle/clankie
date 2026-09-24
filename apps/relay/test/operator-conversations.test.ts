@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { once } from "node:events";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OperatorConversationServiceRequestSchema,
   OperatorConversationServiceResultSchema,
@@ -253,6 +253,67 @@ describe("authenticated operator conversation relay", () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: "chat_grant_required" });
   });
+
+  it("returns the typed connection inventory to a supervising device", async () => {
+    const inventory = {
+      observedAt: NOW,
+      runtimes: [],
+      swarms: [],
+      swarmsTruncated: false,
+      unavailableSwarms: 0,
+      linear: { status: "verified" as const, email: "clankie@example.com", workspace: "Example" },
+    };
+    const dispatch = vi.fn<OperatorConversationServiceDispatch>(async () => ({
+      op: "connections",
+      schemaVersion: 1,
+      result: { outcome: "ready", inventory },
+    }));
+    const relay = await startRelay({ dispatch });
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "connections",
+      schemaVersion: 1,
+      command: { action: "list" },
+    });
+    expect(response.status).toBe(200);
+    expect(OperatorConversationServiceResultSchema.parse(await response.json())).toMatchObject({
+      op: "connections",
+      result: { outcome: "ready", inventory },
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      op: "connections",
+      schemaVersion: 1,
+      command: { action: "list" },
+    });
+  });
+
+  it.each(["list", "connect_runtime", "disconnect_runtime", "reconnect_runtime", "disconnect_swarm"])(
+    "requires steer for connection action %s",
+    async (action) => {
+      const dispatch = vi.fn();
+      const relay = await startRelay({
+        authorizeDevice: {
+          authorize: async () => ({
+            authorized: true,
+            device: { ...activeDevice, grants: { ...activeDevice.grants, steer: false } },
+          }),
+        },
+        dispatch,
+      });
+      const command =
+        action === "list"
+          ? { action }
+          : action === "connect_runtime"
+            ? { action, id: "work", session: "work" }
+            : { action, id: "work" };
+      const response = await post(relay.url, "/operator/v1/dispatch", {
+        op: "connections",
+        schemaVersion: 1,
+        command,
+      });
+      expect(response.status).toBe(403);
+      expect(dispatch).not.toHaveBeenCalled();
+    },
+  );
 
   it("requires the steer grant to close a seat", async () => {
     const relay = await startRelay({

@@ -1,0 +1,55 @@
+{
+  "scenario": "Native Claude plugin receives selected project and fleet context from Clankie",
+  "requests": [
+    {
+      "path": "/v1/captain/seat-context",
+      "conversationId": "conv-ae6049c6-7d88-4b7c-8240-fbfa45a9acaa",
+      "sections": null
+    },
+    {
+      "path": "/v1/captain/prompt",
+      "conversationId": "conv-ae6049c6-7d88-4b7c-8240-fbfa45a9acaa",
+      "sections": "persona,reach,fleet,address,model"
+    },
+    {
+      "path": "/v1/mcp",
+      "conversationId": "conv-ae6049c6-7d88-4b7c-8240-fbfa45a9acaa",
+      "sections": null
+    },
+    {
+      "path": "/v1/mcp",
+      "conversationId": "conv-ae6049c6-7d88-4b7c-8240-fbfa45a9acaa",
+      "sections": null
+    },
+    {
+      "path": "/v1/mcp",
+      "conversationId": "conv-ae6049c6-7d88-4b7c-8240-fbfa45a9acaa",
+      "sections": null
+    },
+    {
+      "path": "/v1/mcp",
+      "conversationId": "conv-ae6049c6-7d88-4b7c-8240-fbfa45a9acaa",
+      "sections": null
+    },
+    {
+      "path": "/v1/captain/memory-card",
+      "conversationId": null,
+      "sections": null
+    }
+  ],
+  "root": "<isolated-workspace>",
+  "conversationId": "conv-ae6049c6-7d88-4b7c-8240-fbfa45a9acaa",
+  "cwd": "<isolated-workspace>/alpha",
+  "selectedEnvironment": "conv-ae6049c6-7d88-4b7c-8240-fbfa45a9acaa",
+  "response": "- Fleet marker: FLEET_606b5819-b2bc-43d7-b080-cc49207b3218\n- Project marker: ALPHA_fabd801c-651e-430f-b704-48dd9a51295b\n",
+  "stderr": "",
+  "exitCode": 0,
+  "passed": true,
+  "cleanedUp": true,
+  "limits": [
+    "Native Claude plugin-dir seat, no marketplace channel delivery",
+    "Bun source service/CLI fixture; Node 24 full repository gate verified separately",
+    "Synthetic operator credential and fixture owner/project instructions",
+    "Shared operator episode recall; automatic doctrine delivery to workers remains pending"
+  ]
+}

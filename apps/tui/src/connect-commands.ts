@@ -7,6 +7,8 @@ import { SettingsStore, type EmailSettings } from "@clankie/settings";
 import {
   LINEAR_MCP_RESOURCE,
   LINEAR_WEBHOOK_PROVIDER_ID,
+  verifyLinearApiAccount,
+  type ProviderAccount,
   type ProviderCredential,
   type RedactedCredential,
 } from "@clankie/credential-broker";
@@ -19,7 +21,6 @@ const LINEAR_PROVIDER_ID = "linear";
 const EMAIL_PROVIDER_ID = "email";
 const LINEAR_KEY_URL = "https://linear.app/settings/account/security";
 const LINEAR_WEBHOOK_SETTINGS_URL = "https://linear.app/settings/api";
-const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 
 export type EmailPresetId = "gmail" | "icloud" | "fastmail" | "outlook" | "custom";
 
@@ -173,34 +174,10 @@ export async function probeLinearMcp(
 export async function probeLinearKey(
   apiKey: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: true; viewer: string } | { ok: false; detail: string }> {
+): Promise<{ ok: true; viewer: string; account: ProviderAccount } | { ok: false; detail: string }> {
   try {
-    const response = await fetchImpl(LINEAR_GRAPHQL_URL, {
-      method: "POST",
-      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        query: `query { viewer { name } organization { name } }`,
-      }),
-    });
-    const payload = (await response.json()) as {
-      data?: {
-        viewer?: { name?: string };
-        organization?: { name?: string };
-      };
-      errors?: readonly { message?: string }[];
-    };
-    if (payload.errors !== undefined && payload.errors.length > 0) {
-      return { ok: false, detail: payload.errors.map((entry) => entry.message ?? "Linear error").join("; ") };
-    }
-    const name = payload.data?.viewer?.name;
-    if (name === undefined || name.length === 0) {
-      return {
-        ok: false,
-        detail: response.ok ? "Linear did not return a viewer" : `Linear HTTP ${String(response.status)}`,
-      };
-    }
-    const organization = payload.data?.organization?.name;
-    return { ok: true, viewer: organization === undefined ? name : `${name} · ${organization}` };
+    const account = await verifyLinearApiAccount(apiKey, fetchImpl);
+    return { ok: true, viewer: `${account.name} (${account.email}) · ${account.workspaceName}`, account };
   } catch (error) {
     return { ok: false, detail: error instanceof Error ? error.message : String(error) };
   }
@@ -561,7 +538,11 @@ async function connectLinearApiKey(shell: ClankieFaceShell, services: ConnectCom
     flow.renderLine(`Linear rejected the key (${result.detail}). Nothing was stored.`, "error");
     return;
   }
-  await services.setCredential(LINEAR_PROVIDER_ID, key.trim());
+  await services.storeProviderCredential(LINEAR_PROVIDER_ID, {
+    type: "api",
+    key: key.trim(),
+    account: result.account,
+  });
   flow.renderLine(`Connected as ${result.viewer}.`, "success");
   shell.insertCommandResult(
     "/connect linear",

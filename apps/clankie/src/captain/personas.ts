@@ -6,6 +6,8 @@ import {
   OperatorAgentNameSchema,
   OperatorAgentPersonaIdSchema,
   OperatorAgentPersonaSchema,
+  OperatorSwarmContactSchema,
+  type OperatorSwarmContact,
   UpdateOperatorAgentPersonaSchema,
   type OperatorAgentPersona,
   type OperatorConversation,
@@ -46,6 +48,7 @@ export class PersonaStore {
   private readonly avatarDir: string;
   private readonly records = new Map<string, OperatorAgentPersona>();
   private readonly bindings = new Map<string, PersonaBinding>();
+  private liveSwarm = new Set<string>();
   private unreadable = false;
 
   public constructor(stateDir: string) {
@@ -59,7 +62,10 @@ export class PersonaStore {
       for (const persona of state.personas) {
         // A seat is live state and is always rebuilt from Herdr after launch.
         const { activeSeatId: _activeSeatId, conversationId: _conversationId, ...persisted } = persona;
-        this.records.set(persona.personaId, persisted);
+        this.records.set(persona.personaId, {
+          ...persisted,
+          ...(persisted.swarm ? { swarm: { ...persisted.swarm, available: false } } : {}),
+        });
       }
       if (state.schemaVersion === 2) {
         for (const binding of state.bindings) {
@@ -149,6 +155,9 @@ export class PersonaStore {
         return {
           persona: {
             ...persona,
+            ...(persona.swarm
+              ? { swarm: { ...persona.swarm, available: this.liveSwarm.has(persona.personaId) } }
+              : {}),
             ...(activeSeatId === undefined ? {} : { activeSeatId }),
             ...(conversation === undefined ? {} : { conversationId: conversation.conversationId }),
           },
@@ -161,6 +170,46 @@ export class PersonaStore {
           left.persona.name.localeCompare(right.persona.name),
       )
       .map(({ persona }) => persona);
+  }
+
+  public reconcileSwarm(peers: readonly { contact: OperatorSwarmContact; label: string }[]): void {
+    const previous = new Map(this.records);
+    const live = new Set<string>();
+    for (const peer of peers) {
+      const contact = OperatorSwarmContactSchema.parse(peer.contact);
+      const personaId = `swarm-${createHash("sha256").update(JSON.stringify(contact)).digest("hex")}`;
+      live.add(personaId);
+      if (this.records.has(personaId) || this.records.size >= 1000) continue;
+      const now = new Date().toISOString();
+      const name = OperatorAgentNameSchema.safeParse(peer.label);
+      this.records.set(personaId, {
+        schemaVersion: 1,
+        personaId,
+        name: name.success ? name.data : "Swarm agent",
+        harness: "swarm",
+        appearance: defaultOperatorAgentAppearance("swarm", personaId),
+        swarm: { ...contact, available: false },
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    if (previous.size !== this.records.size) {
+      try {
+        this.save();
+      } catch (error) {
+        this.records.clear();
+        for (const [id, persona] of previous) this.records.set(id, persona);
+        throw error;
+      }
+    }
+    this.liveSwarm = live;
+  }
+
+  public swarmContact(personaId: string): OperatorSwarmContact | undefined {
+    const swarm = this.records.get(personaId)?.swarm;
+    if (!swarm) return undefined;
+    const { available: _available, ...contact } = swarm;
+    return contact;
   }
 
   public update(input: UpdateOperatorAgentPersona): OperatorAgentPersona {

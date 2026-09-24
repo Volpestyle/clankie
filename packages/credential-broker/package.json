@@ -11,10 +11,12 @@
   },
   "dependencies": {
     "@clankie/protocol": "workspace:*",
+    "proper-lockfile": "4.1.2",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
+    "@types/proper-lockfile": "4.1.4",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   }

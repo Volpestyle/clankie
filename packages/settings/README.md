@@ -32,6 +32,10 @@ The write path calls `assertNoSecretShapedValue` and refuses anything
 token-shaped, so a secret cannot land here by accident. `.strict()` on the schema
 is the first line of defence; the guard is depth for future free-text fields.
 
+A missing settings file uses defaults. Invalid content, permission errors and
+other read failures propagate; they never silently replace configured access
+restrictions with defaults.
+
 ## Environment precedence
 
 `resolveDiscordSettings(stored, env)` merges the two with **environment winning**.
@@ -104,3 +108,20 @@ files, and herdr. Empty means nobody — Discord stays social. It is not
 `discord.toolProgressChannelIds` is the guild channels where requested text
 turns show the content-free tool-activity card. It is empty by default and the
 owner changes it in Discord with `/clankie tools mode:on|off|status`.
+
+## Swarm connections
+
+`swarm.connections` retains named coordinator endpoints, verified actor/scope,
+conversation ownership, enabled state and a broker reference. Capabilities are
+absent from settings. Configure through `clankie swarm connect PRIVATE.json` or
+`disconnect ID` (the TUI exposes the same commands); the service verifies identity
+and prevents a retained connection ID from redirecting outstanding work.
+
+## Execution connections
+
+`execution.connections` stores up to 15 named Herdr endpoints with immutable
+socket/session identity, enabled state, capacity and capability labels. The
+default fleet keeps its existing `herdr` settings. Configure through the operator
+API or `clankie runtime`; `/runtime` exposes the same commands. Connection IDs
+cannot redirect retained work, and disconnect never stops the external runtime.
+See [runtime commands](../../docs/cli.md#connections-and-runtime).

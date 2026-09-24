@@ -1,0 +1,44 @@
+{
+  "scenario": "Single-owner hosted captain and Swarm/Herdr worker execution",
+  "verifiedAt": "2026-09-24T02:55:07.311139+00:00",
+  "image": {
+    "tag": "clankie-hosted:local",
+    "id": "sha256:50b326b7089efb3dd7f6f838e9dcd9c552d103fdfbc1bd5660952aa2a4bd582f",
+    "os": "linux",
+    "architecture": "arm64"
+  },
+  "command": "node scripts/smoke-hosted.mjs",
+  "result": {
+    "passed": true,
+    "taskId": "11415212-975f-48d9-b458-90fef682cf17",
+    "runtime": "2.1.281 (Claude Code)",
+    "writesRequested": 1,
+    "writesConfirmed": 1,
+    "captainReply": true
+  },
+  "checks": [
+    "Compiled captain completes conversation via synthetic local model",
+    "Real Claude process executes Write in a Swarm-assigned Herdr worker",
+    "Non-root execution and mode-0600 broker files",
+    "MCP rejects anonymous request",
+    "Leadership skills and SBOM ship in image",
+    "Two owners have distinct credentials and workspaces",
+    "Container replacement preserves credentials, settings and worker output",
+    "Captain and relay healthy before and after replacement",
+    "Proof containers and volumes removed"
+  ],
+  "repositoryCheck": {
+    "command": "pnpm check",
+    "testFiles": 278,
+    "testsPassed": 2372,
+    "testsSkipped": 1,
+    "voxTestsPassed": 123,
+    "voxIpcPassed": true
+  },
+  "limitations": [
+    "Synthetic model responses, no real model or provider authentication",
+    "Linux arm64 exercised; x64 build path not exercised",
+    "No live remote-app pairing or Discord/Linear operator workflow",
+    "No managed multi-tenant provisioning or media runtime"
+  ]
+}

@@ -82,6 +82,7 @@ export class HerdrTerminalStore {
 
   public constructor(
     options: {
+      readonly env?: NodeJS.ProcessEnv;
       readonly startObserver?: StartHerdrTerminalObserver;
       readonly readGrid?: ReadHerdrTerminalGrid;
       readonly readControlledGrid?: ReadControlledTerminalGrid;
@@ -94,10 +95,12 @@ export class HerdrTerminalStore {
       readonly maxFrames?: number;
     } = {},
   ) {
-    this.startObserver = options.startObserver ?? startHerdrTerminalObserver;
-    this.readGrid = options.readGrid ?? ((terminalId) => readTerminalGrid(terminalId));
+    this.startObserver =
+      options.startObserver ??
+      ((id, columns, rows) => startHerdrTerminalObserver(id, columns, rows, options.env));
+    this.readGrid = options.readGrid ?? ((terminalId) => readTerminalGrid(terminalId, options));
     this.readControlledGrid = options.readControlledGrid ?? (() => undefined);
-    this.readHistory = options.readHistory ?? readHerdrTerminalHistory;
+    this.readHistory = options.readHistory ?? ((paneId) => readHerdrTerminalHistory(paneId, options.env));
     this.scrollbackQuietMs = options.scrollbackQuietMs ?? SCROLLBACK_QUIET_MS;
     this.scrollbackMaxLatencyMs = options.scrollbackMaxLatencyMs ?? SCROLLBACK_MAX_LATENCY_MS;
     this.waitMs = options.waitMs ?? DEFAULT_WAIT_MS;
@@ -513,11 +516,12 @@ function startHerdrTerminalObserver(
   terminalId: string,
   columns: number,
   rows: number,
+  env?: NodeJS.ProcessEnv,
 ): HerdrTerminalObserver {
   const child = spawn(
     "herdr",
     ["terminal", "session", "observe", terminalId, "--cols", String(columns), "--rows", String(rows)],
-    { stdio: ["ignore", "pipe", "ignore"] },
+    { env, stdio: ["ignore", "pipe", "ignore"] },
   );
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
   const done = new Promise<UnavailableReason>((resolve) => {
@@ -534,12 +538,15 @@ function startHerdrTerminalObserver(
   };
 }
 
-async function readHerdrTerminalHistory(paneId: string): Promise<string | undefined> {
+async function readHerdrTerminalHistory(
+  paneId: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
   try {
     const { stdout } = await execFileAsync(
       "herdr",
       ["pane", "read", paneId, "--source", "recent", "--lines", String(HISTORY_LINES), "--raw"],
-      { timeout: HERDR_READ_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
+      { env, timeout: HERDR_READ_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
     );
     return String(stdout);
   } catch {

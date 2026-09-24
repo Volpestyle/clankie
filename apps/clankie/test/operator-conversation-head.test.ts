@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -129,4 +129,108 @@ describe("the seat's head conversation", () => {
       [undefined, undefined, "clankie-menu-bar-voice"],
     ]);
   });
+});
+
+it("pins native sessions to a project and deduplicates retries, resumed sessions and Herdr observation across restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-native-conversation-"));
+  roots.push(root);
+  let conversations = new ConversationStore(root, async () => {});
+  const created = await conversations.serve({
+    op: "create",
+    schemaVersion: 1,
+    scope: { kind: "workspace", workspaceId: root },
+    title: "Project",
+  });
+  if (created.op !== "create") throw new Error("create failed");
+  const id = created.conversation.conversationId;
+  const entry = {
+    type: "message" as const,
+    id: "claude:project-entry",
+    role: "agent" as const,
+    text: "Project response",
+  };
+  expect(conversations.syncNativeSeatTranscript(id, "session-1", [entry])).toBe(true);
+  expect(conversations.syncNativeSeatTranscript("global-default", "session-1", [entry])).toBe(false);
+  conversations.syncNativeSeatTranscript(id, "session-2", [
+    { ...entry, id: "claude:second-entry", text: "Next session" },
+  ]);
+  await conversations.close();
+  conversations = new ConversationStore(root, async () => {});
+  expect(conversations.syncNativeSeatTranscript(id, "session-1", [entry])).toBe(true);
+  expect(await events(conversations, id)).toHaveLength(2);
+  expect(await events(conversations, "global-default")).toHaveLength(0);
+  expect(conversations.syncNativeSeatTranscript("global-default", "session-1", [entry])).toBe(false);
+  conversations.syncHeadTranscript("head", {
+    sessionKey: "herdr-head",
+    entries: [{ ...entry, id: "claude:head-entry" }],
+  });
+  conversations.syncNativeSeatTranscript("global-default", "session-head", [
+    { ...entry, id: "claude:head-entry" },
+  ]);
+  expect(await events(conversations, "global-default")).toHaveLength(1);
+  const conversation = conversations.conversation(id)!;
+  await conversations.serve({
+    op: "reset",
+    schemaVersion: 1,
+    conversationId: id,
+    expectedRevision: conversation.revision,
+  });
+  expect(conversations.syncNativeSeatTranscript(id, "session-1", [entry])).toBe(false);
+  expect(conversations.syncNativeSeatTranscript("global-default", "session-1", [entry])).toBe(false);
+  expect(conversations.syncNativeSeatTranscript(id, "new-after-reset", [{ ...entry, id: "fresh-id" }])).toBe(
+    true,
+  );
+  expect((await readFile(join(root, id, "events.jsonl"), "utf8")).trim().split("\n")).toHaveLength(1);
+  await conversations.close();
+});
+
+it("settles native display records without ending a service run, and deduplicates hook retries", async () => {
+  let entered!: () => void;
+  let finish!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const conversations = await store(async () => {
+    entered();
+    await pending;
+  });
+  const id = conversations.defaultGlobalConversationId();
+  const entry = {
+    type: "message" as const,
+    id: "native-final",
+    role: "agent" as const,
+    text: "Checked result",
+  };
+  try {
+    conversations.syncNativeSeatTranscript(id, "native-session", [], "responding");
+    conversations.syncNativeSeatTranscript(id, "native-session", [entry], "waiting");
+    const settled = await events(conversations, id);
+    expect(settled.at(-1)).toMatchObject({ type: "activity", phase: "waiting" });
+    conversations.syncNativeSeatTranscript(id, "native-session", [entry], "waiting");
+    expect(await events(conversations, id)).toEqual(settled);
+    const sent = await conversations.serve({
+      schemaVersion: 1,
+      op: "send",
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: id,
+        surfaceClientId: "test",
+        expectedRevision: 0,
+        message: "New service work",
+      },
+    });
+    if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("send refused");
+    await started;
+    conversations.syncNativeSeatTranscript(id, "native-session", [], "waiting");
+    expect(conversations.conversation(id)?.sessionState).toBe("active");
+    finish();
+    await conversations.awaitRun(sent.result.runId);
+  } finally {
+    finish();
+    await conversations.close();
+  }
 });

@@ -321,13 +321,13 @@ export type PublicGatewaySettings = z.infer<typeof PublicGatewaySettingsSchema>;
  * Which herdr session is his (ADR 0149).
  *
  * The owner's intent, never machine state: the service resolves it again at
- * every start and writes nothing back (ADR 0170). Every console observes the
+ * every start and writes nothing back (ADR 0181). Every console observes the
  * service's fleet, regardless of its own terminal environment.
  */
 export const HerdrSettingsSchema = z
   .object({
-    /** `auto` takes the session he is launched in, else his own bundled fleet. */
-    runtime: z.enum(["auto", "bundled", "external"]).default("auto"),
+    /** `auto` uses an explicitly named session/socket, else his own bundled fleet. */
+    runtime: z.enum(["auto", "bundled", "external", "disabled"]).default("auto"),
     /** Named herdr session he leads; `default` is herdr's own default session. */
     session: z
       .string()
@@ -338,6 +338,60 @@ export const HerdrSettingsSchema = z
   })
   .strict();
 export type HerdrSettings = z.infer<typeof HerdrSettingsSchema>;
+
+/** Named execution endpoints are pinned; disabling a connection keeps its identity. */
+export const ExecutionConnectionSchema = z
+  .object({
+    id: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .refine((id) => id !== "default"),
+    kind: z.literal("herdr").default("herdr"),
+    session: z.string().regex(/^[\w][\w.-]{0,63}$/u),
+    socketPath: z
+      .string()
+      .startsWith("/")
+      .refine((path) => new TextEncoder().encode(path).length <= 102),
+    capabilities: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(128)
+          .refine((value) => !value.startsWith("runtime:")),
+      )
+      .max(32)
+      .default(["code", "review", "research"]),
+    capacity: z.number().int().min(1).max(16).default(4),
+    enabled: z.boolean().default(true),
+  })
+  .strict();
+
+/** External coordinator identities are explicit; capabilities live in the broker. */
+export const SwarmConnectionSchema = z
+  .object({
+    id: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .refine((id) => id !== "embedded"),
+    conversationId: z.string().min(1).max(256),
+    endpoint: z.string().startsWith("/").max(4096),
+    scope: z.string().min(1).max(256),
+    actor: z.string().min(1).max(256),
+    credential: z.string().min(1).max(128),
+    enabled: z.boolean().default(true),
+  })
+  .strict();
+export type SwarmConnection = z.infer<typeof SwarmConnectionSchema>;
+export const SwarmSettingsSchema = z
+  .object({
+    connections: z.array(SwarmConnectionSchema).max(32).default([]),
+  })
+  .strict()
+  .refine(
+    (value) => new Set(value.connections.map((entry) => entry.id)).size === value.connections.length,
+    "Swarm connection IDs must be unique",
+  );
 
 /** The captain's own runtime home, distinct from what he is allowed to do. */
 export const CaptainSettingsSchema = z
@@ -547,7 +601,16 @@ export const ClankieSettingsSchema = z
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
+    execution: z
+      .object({ connections: z.array(ExecutionConnectionSchema).max(15).default([]) })
+      .strict()
+      .refine(
+        (value) => new Set(value.connections.map((entry) => entry.id)).size === value.connections.length,
+        "Execution connection IDs must be unique",
+      )
+      .default(() => ({ connections: [] })),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
+    swarm: SwarmSettingsSchema.default(() => SwarmSettingsSchema.parse({})),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),

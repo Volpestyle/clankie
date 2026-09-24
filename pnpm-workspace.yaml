@@ -6,6 +6,7 @@ packages:
 engineStrict: true
 
 allowBuilds:
+  better-sqlite3: true
   "@google/genai": false
   esbuild: true
   node-pty: true

@@ -103,20 +103,31 @@ export class Evaluator {
   private readonly runner: HerdrWatchRunner;
   private readonly run: (args: string[]) => Promise<void>;
   private readonly socket: string;
+  private readonly available: () => boolean;
 
   private readonly directory: string;
 
   public constructor(
     directory: string,
-    options: { runner?: HerdrWatchRunner; run?: (args: string[]) => Promise<void>; socket?: string } = {},
+    options: {
+      runner?: HerdrWatchRunner;
+      run?: (args: string[]) => Promise<void>;
+      socket?: string;
+      available?: () => boolean;
+    } = {},
   ) {
     this.directory = directory;
-    this.runner = options.runner ?? createHerdrWatchRunner();
-    this.run =
+    this.available = options.available ?? (() => true);
+    this.runner = options.runner ?? createHerdrWatchRunner(this.available);
+    const run =
       options.run ??
       (async (args) => {
         await exec("herdr", args, { timeout: 40_000, maxBuffer: 1024 * 1024 });
       });
+    this.run = async (args) => {
+      if (!this.available()) throw new Error("Herdr execution is unavailable");
+      await run(args);
+    };
     this.socket = options.socket ?? process.env.HERDR_SOCKET_PATH ?? "";
     const path = join(directory, "state.json");
     if (existsSync(path)) {
@@ -277,6 +288,11 @@ export class Evaluator {
   /** Serialized housekeeping. Idle polling is a host process, never a model turn. */
   public async tick(open = false): Promise<void> {
     if (this.busy || this.closed || this.unreadable) return;
+    if (!this.available()) {
+      if (this.state.enabled || this.state.jobs.some((job) => job.status === "running"))
+        this.error = "Herdr execution is unavailable; evaluation work is retained until reconnected.";
+      return;
+    }
     this.busy = true;
     let starting: EvaluationJob | undefined;
     try {

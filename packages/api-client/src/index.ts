@@ -132,13 +132,16 @@ export class ClankieApiClient {
     return (await response.json()) as T;
   }
 
-  public async getHerdrBinding(): Promise<HerdrBinding> {
+  public async getHerdrBinding(connection?: string): Promise<HerdrBinding> {
     return HerdrBindingSchema.parse(
-      await this.request(HERDR_BINDING_PATH, {
-        headers: this.operatorHeaders(),
-        signal: AbortSignal.timeout(5_000),
-        redirect: "error",
-      }),
+      await this.request(
+        HERDR_BINDING_PATH + (connection ? `?connection=${encodeURIComponent(connection)}` : ""),
+        {
+          headers: this.operatorHeaders(),
+          signal: AbortSignal.timeout(connection ? 10_000 : 5_000),
+          redirect: "error",
+        },
+      ),
     );
   }
 

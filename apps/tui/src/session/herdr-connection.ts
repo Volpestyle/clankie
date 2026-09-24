@@ -7,6 +7,7 @@ import { HerdrBindingSchema, type HerdrBinding } from "@clankie/protocol";
 
 export interface HerdrConnectionOptions {
   readonly repoRoot: string;
+  readonly connectionId?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly host?: string;
   readonly fetchImpl?: typeof fetch;
@@ -30,7 +31,7 @@ export async function readHerdrBinding(options: HerdrConnectionOptions): Promise
     baseUrl: host,
     operatorToken: credential.token,
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  }).getHerdrBinding();
+  }).getHerdrBinding(options.connectionId);
 }
 
 /** Route every native fleet action using the running service, never pending settings. */

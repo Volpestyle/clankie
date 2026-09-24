@@ -19,8 +19,10 @@ request-header allowlist.
 
 The route verifies HMAC-SHA256 against the exact raw body before parsing it.
 It checks the signed `webhookTimestamp` against a 60-second freshness window.
-A bounded in-memory set remembers 512 delivery IDs; a restart or eviction can
-admit a duplicate. Invalid authenticity answers 401, malformed data answers
+A canonical hash of the signed event body, excluding its delivery timestamp,
+identifies retries independently of unsigned delivery headers. Deduplication
+commits with the durable inbox event; a failed write can be retried.
+[ADR 0168](0168-linear-awareness-is-opt-in.md) defines retention and wake recovery. Invalid authenticity answers 401, malformed data answers
 400, and authenticated activity that is ignored answers 200 to avoid retries.
 
 The webhook signing secret lives in the credential broker as `linear-webhook`,

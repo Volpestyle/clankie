@@ -304,10 +304,10 @@ conversation (`linear-inbox`) as **External activity** messages, including swarm
 posts delivered by the webhook. Following controls whether those messages wake
 Clankie:
 
-| Following     | Inbox delivery                          | Automatic model turns         |
-| ------------- | --------------------------------------- | ----------------------------- |
-| Off (default) | Events stay visible in the conversation | None from incoming events     |
-| On            | Events stay visible in the conversation | New events wake Clankie there |
+| Following     | Inbox delivery                          | Automatic model turns                |
+| ------------- | --------------------------------------- | ------------------------------------ |
+| Off (default) | Events stay visible in the conversation | None from incoming events            |
+| On            | Events stay visible in the conversation | New events wake their selected owner |
 
 Open the conversation with `clankie --chat linear-inbox`. It is created on the
 first accepted event, including while off. Ask Clankie to **check the Linear
@@ -335,9 +335,10 @@ finish. `clankie linear follow on|off` applies without a restart, and
 `clankie linear status` reads the switch. All three return JSON with `ok`,
 `following`, `conversationId` (`linear-inbox`), and `settingsFile`.
 
-The inbox has its own model context. Linear events do not enter the default
-Clankie conversation or its bound Herdr seat. Removing the webhook stops inbox
-delivery; setting following off keeps delivery enabled.
+Unbound work wakes the inbox's model context. Explicit issue bindings route new
+activity to the selected Clankie conversation or native seat. Events remain in
+one canonical inbox. Removing the webhook stops delivery; following off keeps
+delivery enabled.
 
 Configure the webhook from `/connect linear` → **Follow Linear** → **Configure
 webhook**. The flow prints the public URL and stores the signing secret in the
@@ -348,8 +349,9 @@ Setup does not enable following; **Start following** / **Stop following** is a
 separate choice under **Follow Linear**.
 
 The consumer accepts signed `create`, `update`, and `remove` activity from any
-resource type and actor, except the webhook about an object Clankie himself
-just wrote through Linear's MCP, which is dropped at ingress. A wake carries
+resource type and actor. A verified, matching revision of Clankie's own MCP write
+is dropped at ingress; matching delegated-worker updates retain their provenance
+and enter the inbox. Ambiguous events remain visible. A wake carries
 one headline per new event; the stored message carries the resource, action,
 author, URL, data and previous values as bounded untrusted context.
 Shared-account agent posts are not attributed to the human. Clankie decides
@@ -363,6 +365,42 @@ operator bearer and return `{ "schemaVersion": 1, "following": boolean,
 "conversationId": "linear-inbox" }`. The signed public ingress remains
 `POST /v1/hooks/linear`. Changing the local follow switch does not change which
 events Linear sends; the owner configures that subscription in Linear.
+
+#### Issue ownership
+
+Use provider UUIDs, not issue labels or email addresses. Bind only work the
+operator authorizes Clankie to lead:
+
+```bash
+clankie linear work list
+clankie linear work bind ORG_UUID ISSUE_UUID CONVERSATION_ID
+clankie linear work bind ORG_UUID ISSUE_UUID NEW_CONVERSATION --from CURRENT_CONVERSATION
+clankie linear work unbind ORG_UUID ISSUE_UUID CURRENT_CONVERSATION
+clankie linear inbox read --conversation CONVERSATION_ID
+clankie linear inbox ack CURSOR --conversation CONVERSATION_ID
+```
+
+The same commands are available through `/linear` in the TUI. Bindings require
+an existing Clankie global/workspace conversation and prevent its automatic
+pruning or removal until unbound. The expected owner protects a rebind from
+concurrent changes. New Issue and Comment deliveries use that owner; an already
+admitted event keeps its original destination across retries and rebinding.
+Unbound activity uses `linear-inbox`. No binding grants provider access or turns
+webhook text into operator instructions. The lead checks current Swarm ownership
+before assigning work or replying.
+
+`GET /v1/linear/work` returns `{ owners: [...] }`. Operator-authenticated `PUT`
+accepts `{ organizationId, issueId, conversationId, expectedConversationId? }`;
+`DELETE` accepts the current organization, issue and conversation. Conflicts or
+unavailable owners return 409. Inbox GET accepts `conversationId`; acknowledgment
+POST accepts the same optional field alongside `ackCursor`. Omission reads the
+whole inbox. Never acknowledge a cursor under a different conversation.
+
+Signed-event identities commit with the inbox record, surviving restart and
+history trimming for the provider retry window. Pending followed wakes resume
+on startup when following is enabled; passive backlog stays passive. A recovered
+lead reconciles existing work before repeating external side effects. Current
+storage and recovery limits live in [ADR 0168](adr/0168-linear-awareness-is-opt-in.md).
 
 ### `operator-credential rotate [--json]`
 
@@ -588,6 +626,48 @@ same values.
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
 ```
 
+### `connections` and `runtime`
+
+`clankie connections` (`/connections` in the TUI) combines execution runtime health,
+Swarm connections/diagnostics and the recorded Linear account identity. Its
+operator API is `GET /v1/connections`; the companion app does not display this
+inventory yet.
+
+```sh
+clankie runtime list
+clankie runtime connect build --session workers
+clankie runtime connect review --socket /absolute/herdr.sock
+clankie herdr --connection review agent list
+clankie herdr --connection review open
+clankie runtime disconnect review
+```
+
+`/runtime` accepts the same list/connect/disconnect commands. Connections pin an
+ID to a verified socket and session label; use a new ID for a different endpoint.
+Disconnect disables routing and retains identity without stopping any worker.
+An unavailable named connection never selects another session. Native Herdr
+commands/viewers require a local Clankie service. These managed launch routes
+share the service's filesystem and executable paths. For workers on another
+machine, connect their Swarm coordinator using the external-connection contract.
+
+For custom capacity/capabilities, `runtime connect CONNECTION.json` accepts
+`{ "id": "build", "session": "workers", "capacity": 2, "capabilities": ["code"] }`.
+A socket can replace `session`. `default` is reserved for the existing fleet;
+`runtime:` capability names are reserved for explicit routing. Up to 15 named
+connections are stored under `execution.connections`.
+The operator API is GET/POST `/v1/runtime-connections` and DELETE
+`/v1/runtime-connections/ID`; GET `/v1/herdr?connection=ID` resolves a live binding.
+
+For new routed work, `swarm_assign` accepts `runtime: "build"` beside its `routing`
+object. This is independent of the coordinator's `connection` field; runtime
+selection applies only to the embedded coordinator. Retries keep their original
+runtime, intent and payload. The coordinator reloads route configuration before
+dispatch, and connect/disconnect synchronizes existing owned coordinators. Older
+coordinator processes report `restart-required` and refuse managed route changes
+until deliberately upgraded/restarted; replacing a package does not upgrade a
+running owner. Configuration failures return an error: inspect inventory before
+retrying rather than assuming a disconnect completed.
+
 ### `herdr [status|open|create]` / `herdr use NAME`
 
 The TUI `/status` shows the active fleet binding and `/herdr` shows both the
@@ -603,21 +683,27 @@ or **Later** to keep it pending. **Apply saved changes** restarts Clankie, relay
 and Discord from the menu. Either restart then shows the binding he actually
 landed on, and warns when the saved session did not answer. Existing Herdr panes
 stay open. The same choices are available as `/herdr use NAME` and `/herdr create`.
-The older `set --session NAME` and `set --runtime auto|bundled|external` forms
+The older `set --session NAME` and `set --runtime auto|bundled|external|disabled` forms
 remain compatible for scripts; the TUI does not ask users to choose a runtime.
 
 The binding is resolved at every service start and never written back
-([ADR 0170](adr/0170-a-session-that-stops-is-unbound.md)). He leads the session
-or socket the owner named; failing that, the Herdr session the service was
-launched inside; failing that, his own private bundled Herdr
+([ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)). He leads the
+session or socket the owner explicitly named; failing that, his own private bundled Herdr
 ([ADR 0164](adr/0164-the-fleet-is-its-own-session.md)). A candidate that does
-not answer is stepped over rather than fatal, so a session that stopped since
-the last start costs a fallback and never the boot. While he runs, a bound
-session whose socket stops answering is unbound: he starts his own runtime and
-points every child he spawns from then on at it.
+not answer is stepped over. If the owned runtime also cannot start, Clankie
+continues with Herdr unavailable. A bound external session that stops stays
+unavailable until restart; it never redirects existing work to a replacement fleet.
 
-`create` (the compatible `set --runtime bundled` setting) opts out of both the
-named and surrounding sessions. It follows official stable Herdr releases,
+`clankie herdr disable` (also `/herdr disable`, or **Run without Herdr** in the
+TUI menu) saves `runtime: disabled`. Apply with `clankie restart captain`.
+Clankie starts without probing, downloading or starting Herdr. Conversations,
+connected services and Swarm peer communication remain available. Terminal actions
+for that default fleet report unavailable. Named execution connections remain
+independent; existing workers are not stopped.
+Use `herdr use NAME` or `herdr create` and restart to enable execution again.
+
+The invoking terminal's Herdr session never selects the fleet. `create` (the
+compatible `set --runtime bundled` setting) selects the owned runtime directly. It follows official stable Herdr releases,
 checking at startup and every six hours. Downloads must match the official
 SHA-256 checksum. Updates are staged separately; active workers retain their
 matching executable until their session ends. The next Clankie start without
@@ -632,20 +718,20 @@ terminal's grants; one started by the login-time autostart job may prompt for
 them once. `set --session NAME` selects external mode and resolves that named
 session on restart; `set --runtime external` keeps whichever session name is
 already saved. External mode never starts or stops the owner's server.
-`set --runtime auto` clears the named session, leaving the surrounding one or
-bundled. Apply changes with `clankie restart captain`.
+`set --runtime auto` clears the named session and selects the bundled default. Apply changes with `clankie restart captain`.
 
 `clankie herdr status` reports configured `herdr`, `settingsFile`, `restart`,
 and the running service's `active` binding (or `unavailable`). Settings hold
 the owner's intent and `active` holds what is live; the two differ whenever a
 named session is down. The authenticated operator endpoint `GET /v1/herdr`
-returns the running binding, following a fallback without a restart; pending
-settings do not redirect clients. `/health` includes owned Herdr's state and returns 503
-during recovery.
+returns the running binding while it is available; pending
+settings do not redirect clients. `/health` reports Herdr's state independently
+of service liveness: disabled, unavailable or recovering execution does not make
+the captain unhealthy. `/v1/herdr` returns 503 when no active binding is available.
 
 `clankie-herdr` with no arguments is the shortcut for `clankie herdr open`. It
 attaches a native viewer to the selected, already-running local server. With
-arguments it is the fleet's own Herdr CLI: `status`, `set`, `use`, `create`, and `open` stay
+arguments it is the fleet's own Herdr CLI: `status`, `set`, `use`, `create`, `disable`, and `open` stay
 Clankie's, and every other verb is forwarded to the runtime he is bound to,
 with its binary, its socket, and its configuration. So `clankie-herdr pane
 list` reads the fleet, and `clankie-herdr server stop` ends a bundled fleet
@@ -864,7 +950,7 @@ Filtered by lane exactly as the session's own injection is: operator-private
 episodes reach only the operator lane. Empty output means the lane has recalled
 nothing yet, which is not an error.
 
-### `seat [--resume] [--plugin-dir PATH] [--dry-run]`
+### `seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
 
 Sit in Claude Code as Clankie ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
 Needs a TTY and `claude` on `PATH`. The launcher does the things the plugin
@@ -882,7 +968,14 @@ told so on stderr. The pane is un-named again when the session ends.
 
 Every seat starts a new Claude Code session under a recorded id;
 `--resume` reopens the last one from the directory it was opened in. The
-service-side conversation the app pins is the same either way.
+selection is retained on resume, and a different `--conversation` is refused.
+`--conversation ID` selects an existing global/workspace service conversation,
+resolves its cwd through `/v1/captain/seat-context`, and opens Claude there. That
+workspace must exist on the native host. The prompt includes its agent
+instructions and the owner's persona/fleet preferences. The MCP bank and channel
+share its conversation/Swarm actor. Inherited worker capabilities and conversation
+selections do not select the seat. The default remains the global conversation.
+Selected project seats do not rename themselves as the global Herdr head.
 
 `--dry-run` prints the launch plan instead of launching:
 
@@ -915,14 +1008,16 @@ service-side conversation the app pins is the same either way.
 clankie@clankie`. The plugin README documents the install and what the plugin
 carries.
 
-### `mcp [--lane operator]`
+### `mcp [--lane operator] [--conversation ID]`
 
 The seat's stdio side: an MCP server on stdin/stdout that re-serves the
 service's lane tool bank (`/v1/mcp`), resolving the operator bearer from the
 credential broker so no secret lands in a harness config. The plugin's
 `.mcp.json` names it; a Codex MCP config names the same command. Only the
 operator lane has a bearer on this side. stdout is the wire: progress goes to
-stderr, and the process ends when the harness closes stdin.
+stderr, and the process ends when the harness closes stdin. `--conversation ID`
+or the launcher-set `CLANKIE_CONVERSATION_ID` binds tools, polls and replies to
+one service conversation; the API rejects a changed binding within an MCP session.
 
 It is also his channel. While it runs it long-polls `/v1/seat/events` and
 pushes each self-wake, herdr completion watch, and room escalation into the
@@ -932,9 +1027,11 @@ head, and with no bridge polling the same turns run the pi operator lane. A
 `reply` tool answers an escalation by `event_id`; the reply lands in the
 escalating conversation as his own message. Claude Code loads the channel
 only when `clankie seat` passes its development flag; without it the tools
-still work and the events are dropped.
+still work without consuming events, leaving those turns with the service.
 
 ### `mcp --seat`
+
+For connected-account tools in a worker, use `mcp --grant FILE` instead; see below.
 
 A fleet pane's stdio MCP server: no tools, only the channel. A message to that
 agent (a DM from the app, or a group-chat turn) arrives as
@@ -948,6 +1045,29 @@ server:clankie-seat`. `--channels server:clankie-seat` starts without the
 development-channels dialog but then rejects `server:` as not on the approved
 allowlist. The service's hire path persists the server and passes the dangerous
 flag for a claude seat.
+
+### `access`, `mcp --swarm`, `mcp --grant FILE` and `mcp --swarm-grant ID`
+
+`clankie access linear [verify]` shows or verifies the connected Linear API-key or OAuth
+account. `access list`, `access issue REQUEST.json --out GRANT.json`, and
+`access revoke ID` manage worker grants. `/access` in the TUI exposes status,
+verification and revocation. Issue from the terminal. For enrolled workers,
+the built-in Herdr route supplies `clankie mcp --swarm` automatically. External
+workers can configure it with `SWARM_SCOPE`, `SWARM_SESSION_CAPABILITY` and the
+selected `CLANKIE_CONTROL_PLANE_URL`. It starts with no tools; explicit grants
+appear through MCP tool-list notifications. Each request checks the actor's
+current account and assignment authority. No operator credentials are loaded.
+`access issue REQUEST.json --deliver swarm` prints a non-secret grant ID and
+bridge command, with no grant-file handoff. `mcp --swarm-grant ID` retrieves only
+that worker's existing grant using `SWARM_SESSION_CAPABILITY`; it uses no operator
+credential. Select a remote service with `CLANKIE_CONTROL_PLANE_URL` (HTTPS).
+
+`clankie mcp --grant FILE` serves that worker's granted connected tools. It is
+mutually exclusive with `--swarm`, `--swarm-grant`, `--seat` and `--lane`, and loads no operator bearer or
+channel. Tokens last at most 15 minutes. Swarm-bound grants with `renewable: true`
+renew automatically while the same assignment remains authorized; others need
+explicit reissue. Verified Linear API keys and MCP OAuth connections support delegation.
+See [worker access](worker-access.md) for request fields, delivery and restrictions.
 
 ### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
 
@@ -1123,8 +1243,10 @@ clankie evaluator retry EVALUATION_UUID
 The local operator credential authorizes `GET /v1/captain/evaluator` and
 `POST /v1/captain/evaluator`. POST accepts `{ "action": "enable", "harness": "codex" }`,
 `disable`, `open`, or `{ "action": "retry", "id": "<UUID>" }`; an omitted harness
-preserves the selection. The TUI `/evaluator` accepts the same arguments and
-renders the queue, recent assessments, linked issues/MRs and errors. `open`
+preserves the selection. In the TUI, bare `/evaluator` opens a menu that toggles
+the evaluator, switches its harness, opens its pane, shows recent assessments,
+and retries failed jobs; `/evaluator` also accepts the same arguments and renders
+the queue, recent assessments, linked issues/MRs and errors. `open`
 focuses the evaluator in the service's active Herdr session.
 
 CLI success is `{ ok: true, evaluator: ... }`, with exit 0; transport, authentication
@@ -1150,3 +1272,99 @@ excerpts are bounded to 512 KiB and declare truncation; native projections retai
 their existing bounded entries. Gameplay journals are not separate triggers.
 Raw evidence remains local; findings carry redacted excerpts to Linear. See
 [the evaluator decision](adr/0178-the-evaluator-has-its-own-seat.md) for scope and limits.
+
+## Native seat transcript sync
+
+`clankie seat-sync` consumes Claude hook JSON on stdin. The `clankie seat` launcher
+sets `CLANKIE_SEAT_SESSION_ID` and its selected `CLANKIE_CONVERSATION_ID`; unlaunched
+plugin use and hooks for another session are ignored. The plugin invokes sync at
+session start/end, prompt submission, stop/failure and before compaction.
+
+The CLI reads the matching native transcript locally, redacts display records,
+and posts bounded message/tool batches to `/v1/seat/transcript` with the operator
+credential. No host file path is read by the service. The session is pinned to its
+conversation; retries and resume retain the same native entry identities. The
+next hook retries retained records after a transport failure. The final page carries
+`responding` at prompt submission and `waiting` at session start/end or stop/failure;
+compaction leaves activity unchanged. Empty transcripts still carry lifecycle
+activity. These are display signals, not service-run completion or ownership. Reset retires that
+conversation's native sessions; launch a new seat afterward so old history cannot
+repopulate the cleared conversation. Sync failures never
+instruct Claude to continue or block a stop. The current 9,000-entry display tail
+is the replay bound. Image files use `clankie file publish` separately.
+
+## Swarm coordination
+
+`clankie swarm status` (or `/swarm status` in the TUI) reads the authenticated
+`GET /v1/swarm` diagnostic view: configured connections, active conversation actors
+and coordinator state. `swarm connections` is the same inventory.
+`clankie swarm contacts` lists discovered Swarm personas, including saved offline
+contacts. `clankie swarm message PERSONA TEXT` opens its DM and submits one message;
+`clankie swarm thread PERSONA` reads a bounded history page. The same commands work
+under `/swarm` in the TUI. Select the exact persona ID from the catalog. Replaced
+sessions have new contacts; old threads do not redirect. An accepted local turn
+is queued, not proof of peer processing; the thread records delivery failures.
+See [Swarm contact identity](adr/0182-swarm-peers-are-messageable-personas.md).
+
+Each operator conversation has an isolated inbox. The service delivers messages
+through its existing turn queue; processing requires explicit acknowledgment.
+`clankie seat --conversation ID` uses the selected service conversation actor
+through the Clankie MCP server; omission selects the global head. Its launch
+directory does not select another Swarm scope.
+With the plugin channel enabled, queued envelopes reach the native seat through
+that channel; processing still requires `swarm_inbox` acknowledgment. A plugin-dir
+seat has tools but no channel wakes. See the [seat plugin](../integrations/claude-plugin/README.md)
+for context, resume and native-workspace requirements.
+
+Use `swarm-lead` for the default leadership workflow, `lead` for shared judgment,
+and `swarm-mcp` for peer participation. `herdr-lead` is the explicit fallback.
+Through `clankie mcp`, Pi or the Claude seat, `swarm_assign` accepts optional
+`skills: ["installed-name"]`. Selected skills and supporting files travel with the
+assignment's pinned project context. The existing conversation composer catalog
+supplies names. See [skill selection and limits](../packages/swarm/README.md#working-preferences-and-portable-skills-slices-36).
+
+`clankie swarm connect PRIVATE.json` (also `/swarm connect PRIVATE.json`) imports
+an externally enrolled Clankie session into an existing operator conversation.
+The regular file must be private (0600) and at most 16 KiB. Its exact shape is:
+
+```json
+{
+  "id": "project-team",
+  "conversationId": "global-default",
+  "endpoint": "/private/path/coordinator.sock",
+  "capability": "<dedicated Clankie session capability from the trusted launcher>"
+}
+```
+
+Use a session enrolled for Clankie, distinct from worker sessions. The service
+verifies its actor/scope and stores only a broker reference in settings. This
+connects to the refactored coordinator protocol, not the legacy database API.
+An SSH Unix-socket forward can provide the local endpoint for a remote owner;
+Clankie does not start, modify or stop that external owner. Provisioning uses
+that coordinator's configured routes. A configured connection belongs to one
+conversation; that conversation can address several independent coordinators.
+Import starts inbox listening immediately, including before its next model turn.
+
+Pass `connection: "project-team"` on any `swarm_*` call. Omit it (or use
+`"embedded"`) for the built-in coordinator. Keep the same connection when
+replying, acknowledging, reading evidence or retrying an intent. Incoming wake
+context names the connection. Instruction snapshots come from the selected
+Clankie conversation and stay pinned to that coordinator's work. Reusing a
+connection ID for another actor, scope, endpoint or conversation is refused.
+
+`clankie swarm disconnect project-team` disables access, closes its sessions and
+removes the brokered capability. External workers and work records stay with
+their owner. Import a valid capability for the same retained identity to reconnect;
+use a new ID for a different identity. A disconnected or unreachable connection
+never falls back to another coordinator. Endpoint/tunnel lifecycle remains the
+operator's selected runtime's responsibility; connection loss does not enroll
+another session or replay uncertain assignments.
+
+For grants on external work, add `swarm.connectionId` to the issuance request.
+Enrolled workers use `CLANKIE_SWARM_CONNECTION=project-team` with
+`clankie mcp --swarm`, alongside their own `SWARM_SCOPE` and
+`SWARM_SESSION_CAPABILITY`. Their Clankie service URL must be reachable privately
+(for example over SSH); the public app gateway does not expose worker MCP routes.
+Enrollment still grants no provider tools. [Grant contract](worker-access.md).
+
+See [Swarm architecture](adr/0180-swarm-is-the-coordination-layer.md).

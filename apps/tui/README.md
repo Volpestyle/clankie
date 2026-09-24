@@ -172,6 +172,9 @@ credential holder.
 - `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
   disable it. `/games on|off` remains available for direct use. Restart Clankie
   to apply a change. Saves live with the world server, not here.
+- `/evaluator` opens a menu for the independent evaluator: turn it on or off,
+  switch harness, open its Herdr pane, read recent assessments, retry failures.
+  `/evaluator status|enable --harness codex|claude|disable|open|retry ID` still work.
 - `/browser record on|off` saves each burst of Clankie's browsing as a WebM
   under `~/.clankie/runner/browser/recordings/`; `/browser` shows the setting.
   It applies from his next burst, without a restart.

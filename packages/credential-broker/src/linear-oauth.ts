@@ -177,6 +177,7 @@ export async function refreshLinearOauth(
       credential.refresh,
     ),
     ...(credential.accountId === undefined ? {} : { accountId: credential.accountId }),
+    ...(credential.account === undefined ? {} : { account: credential.account }),
   };
 }
 
@@ -339,6 +340,8 @@ async function requestLinearTokens(
 ): Promise<z.infer<typeof TokenResponseSchema>> {
   const response = await fetchImpl(LINEAR_TOKEN_ENDPOINT, {
     method: "POST",
+    // Refresh holds the broker mutation lock; a dead endpoint must release it.
+    signal: AbortSignal.timeout(20_000),
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body: new URLSearchParams(body).toString(),
   });

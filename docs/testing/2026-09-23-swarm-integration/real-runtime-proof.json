@@ -1,0 +1,46 @@
+{
+  "scenario": "Two real Herdr runtimes selected through Clankie HTTP API and CLI",
+  "verifiedAt": "2026-09-24T07:50:34.892Z",
+  "root": "/tmp/crt-IZhLqc",
+  "checks": [
+    "CLI and paired-device inventory agree on two healthy real sessions; ambient session is ignored",
+    "Granted input reaches beta only; the same lease is refused on alpha; observed output matches beta",
+    "Service restart preserves the selected terminal address and output while invalidating its old control lease",
+    "Disconnect hides beta and refuses observation without stopping its Herdr session",
+    "Reconnect recovers the same terminal address"
+  ],
+  "catalog": [
+    {
+      "terminalId": "rt:alpha:6fd60c1a4eed3f2220cc86d8c92183bd740ec17d0adcdf3dc28a7e4e0bf556f5",
+      "runtime": {
+        "id": "alpha",
+        "session": "alpha"
+      },
+      "workspace": {
+        "id": "w1",
+        "label": "alpha",
+        "number": 1
+      }
+    },
+    {
+      "terminalId": "rt:beta:c57d08838e15747afb941d6c29c87d5e55b377c1f7a7d5ab793a0e650917f557",
+      "runtime": {
+        "id": "beta",
+        "session": "beta"
+      },
+      "workspace": {
+        "id": "w1",
+        "label": "beta",
+        "number": 1
+      }
+    }
+  ],
+  "passed": true,
+  "marker": "BETA_99b04afa86c8ff01",
+  "ownedRuntimesStopped": true,
+  "sourceFixture": "/tmp/clankie-real-runtimes.mjs",
+  "limitations": [
+    "Exercises the real HTTP service, CLI and paired-device protocol; does not include a rendered app journey or model workers.",
+    "Isolated sessions only; production runtime connections are unchanged."
+  ]
+}

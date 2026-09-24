@@ -110,8 +110,9 @@ export interface ObservedFleetSeat {
 function defaultRunner(
   command: string,
   args: readonly string[],
+  env?: NodeJS.ProcessEnv,
 ): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(command, [...args], { timeout: CENSUS_TIMEOUT_MS, maxBuffer: 1024 * 1024 }).then(
+  return execFileAsync(command, [...args], { env, timeout: CENSUS_TIMEOUT_MS, maxBuffer: 1024 * 1024 }).then(
     ({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }),
   );
 }
@@ -183,9 +184,9 @@ export interface HerdrPaneGrid {
  */
 export async function readTerminalGrid(
   terminalId: string,
-  options: { readonly runCommand?: HerdrCensusRunner } = {},
+  options: { readonly runCommand?: HerdrCensusRunner; readonly env?: NodeJS.ProcessEnv } = {},
 ): Promise<HerdrPaneGrid | undefined> {
-  const run = options.runCommand ?? defaultRunner;
+  const run = options.runCommand ?? ((command, args) => defaultRunner(command, args, options.env));
   try {
     const listed = JSON.parse((await run("herdr", ["pane", "list"])).stdout) as {
       result?: { panes?: unknown };
@@ -326,9 +327,9 @@ export function parseHerdrTerminalCatalog(stdout: string): OperatorTerminalSessi
 
 /** Bounded observable terminal catalog, in Herdr's native workspace/tab/pane order. */
 export async function readTerminalCatalog(
-  options: { readonly runCommand?: HerdrCensusRunner } = {},
+  options: { readonly runCommand?: HerdrCensusRunner; readonly env?: NodeJS.ProcessEnv } = {},
 ): Promise<OperatorTerminalSession[]> {
-  const run = options.runCommand ?? defaultRunner;
+  const run = options.runCommand ?? ((command, args) => defaultRunner(command, args, options.env));
   try {
     const { stdout } = await run("herdr", ["api", "snapshot"]);
     return parseHerdrTerminalCatalog(stdout).slice(0, MAX_AGENTS);

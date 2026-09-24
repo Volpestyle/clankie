@@ -56,7 +56,8 @@ flowchart LR
   Plugin -->|SessionStart · UserPromptSubmit| Prompt
   Outbox -->|channel events| Bridge
   Bridge -->|reply tool| Outbox
-  Pane["herdr pane named clankie"] -->|transcript projection| Head
+  Plugin -->|redacted transcript batches| Head
+  Pane["herdr pane named clankie"] -->|same native entry IDs| Head
   App["Clankie app"] --> Head
   Pi -.->|no seat open| Outbox
 ```
@@ -74,10 +75,10 @@ flowchart LR
   the tool list a connection sees is that lane's authority plan and never a
   second catalog. Each connection gets its own turn context; media a tool
   attaches rides the result the way it rides a pi reply. Operator-lane calls
-  attribute to the head conversation, so `remember_episode`, `schedule_wake`,
+  attribute to the selected conversation (the global head by default), so `remember_episode`, `schedule_wake`,
   and `herdr_watch` land where a pi turn would have landed them.
 - **The prompt and the memory card are readable headlessly.** `clankie prompt`
-  prints the sections a pi session starts from (identity, persona, reach,
+  prints the sections a pi session starts from (identity, persona, reach, fleet preferences,
   address; the model card on request), and `clankie memory-card` prints the
   card the next pi run would inject, filtered by lane so operator-private notes
   never leave the operator lane. Both take `--lane`. One assembly serves the pi
@@ -86,7 +87,7 @@ flowchart LR
   beside the herdr plugin and under its rule: a plugin carries only what a
   plugin can uniquely declare. That is the output style holding his identity
   (forced on while the plugin is enabled, coding instructions left out), a
-  `SessionStart` hook that injects persona, reach, address, and the service
+  `SessionStart` hook that injects persona, reach, fleet preferences, address, and the service
   model card, a `UserPromptSubmit` hook that injects the newest memory card, one
   stdio MCP entry (`clankie mcp`, a bridge to `/v1/mcp` that reads the operator
   bearer from the broker so no secret lands in a config file), and his product
@@ -94,8 +95,8 @@ flowchart LR
   the plugin, passes the permission allowlist for `clankie` commands and the
   channel development flag (the two things a plugin cannot carry), enables the
   plugin for its own session only (a forced output style applies wherever the
-  plugin is enabled, so it stays disabled at user scope), names the herdr pane
-  `clankie`, and starts Claude Code. Codex is not a Claude plugin;
+  plugin is enabled, so it stays disabled at user scope), names an unselected
+  global seat's Herdr pane `clankie`, and starts Claude Code. Codex is not a Claude plugin;
   it takes the same `clankie mcp` over stdio and the same skills directory.
 - **The seated pane is his head.** A herdr agent named `clankie` is never a
   fleet contact: the census binds it to Clankie's own persona, and its Claude
@@ -104,16 +105,27 @@ flowchart LR
   time: the newest seat wins, a second pane claiming the name stays an ordinary
   fleet agent with a warning, and the TUI operator lane is the head again the
   moment no seat is open.
-- **Wakes and escalations follow the head.** Goals, self-wakes, herdr
-  completion watches, and rooms handing work to the head all queue internal
-  turns into the operator conversation. While a seat is bound they go to a
-  per-head outbox that `clankie mcp` long-polls and pushes into the session as
-  channel events (`<channel source="clankie" kind="wake|watch|escalation">`);
-  Claude Code queues events while he is busy and delivers them on the next
-  turn. A `reply` tool on the same server answers an escalating room through
-  the existing API. With no seat open, the same turns run the pi lane exactly
-  as before. Only the service's own bearer-authenticated outbox pushes; Discord
-  text arrives inside the same untrusted-content fence the captain applies.
+- **Seats bind a service conversation.** `--conversation ID` selects an existing
+  global/workspace conversation and its working directory; resume retains that
+  binding. Prompt assembly loads its workspace instructions, MCP sessions pin
+  its tools/Swarm actor, and polls/replies use its own outbox. See
+  [ADR 0181](0181-clankie-is-independent-of-his-connections.md) for the connection
+  and working-preference contract. Project seats do not claim the global Herdr
+  head name. Native plugin hooks run `clankie seat-sync` on the Claude host;
+  authenticated, redacted display records append to `/v1/seat/transcript` for the
+  selected conversation. The service pins each native session to one conversation,
+  rejects a conflicting selection, and deduplicates native entry IDs across
+  retries, restarts and overlapping Herdr observations. Host image paths do not
+  cross this endpoint. The launcher session ID excludes inherited child sessions.
+  This projection also works with `--plugin-dir` and outside Herdr.
+- **Wakes and escalations follow their conversation.** Self-wakes, completion
+  watches, Linear activity and human sends reach a bound seat through that
+  conversation's outbox. Linear activity uses a wake after issue-owner routing;
+  its provider content remains untrusted and carries no new authority.
+  A `reply` tool returns escalation responses to the same conversation. A bridge
+  polls only when its Claude channel is loaded; otherwise the service runs the
+  turn. Goal continuations stay with their Pi loop. The operator's
+  bearer authenticates this outbox; room text remains untrusted context.
 - **Models.** ADR 0101 now reads: pi owns the model runtime for the pi lanes.
   The seat runs on its harness's own model. `clankie model` changes the service
   lanes; Claude Code's `/model` changes the seat, and the prompt says which is
@@ -148,7 +160,10 @@ flowchart LR
   `clankie mcp` entry and skills directory is the same seat.
 - Two heads can never answer at once. The pi operator lane still exists for
   the phone, the menu bar, and any console without a seat; while a seat is
-  bound, internal turns reach it rather than pi.
+  bound, its conversation's wakes, watches, Linear activity and human sends
+  reach it. Running Linear hooks in Pi alongside that seat would split ownership
+  of the same work, so they use the existing outbox. Goal continuations remain
+  with their Pi loop.
 - Channels are a research preview, so `clankie seat` passes the development
   flag per entry and Claude Code prompts once; the seat is owner-only until the
   preview ends.

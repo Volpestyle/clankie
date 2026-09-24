@@ -15,6 +15,7 @@
     "bench:transcript": "node bench/transcript-render.ts"
   },
   "dependencies": {
+    "@clankie/agent-transcript": "workspace:*",
     "@clankie/api-client": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/model-provider": "workspace:*",

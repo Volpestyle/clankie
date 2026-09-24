@@ -11,7 +11,7 @@
  * connector with an OAuth flow so far, and an unknown provider's expired token
  * is returned as-is rather than guessed at.
  */
-import type { CredentialStore, ProviderCredential } from "./credential-store.ts";
+import { normalizeProviderId, type CredentialStore, type ProviderCredential } from "./credential-store.ts";
 import { LINEAR_PROVIDER_ID, linearOauthNeedsRefresh, refreshLinearOauth } from "./linear-oauth.ts";
 
 type OauthCredential = Extract<ProviderCredential, { type: "oauth" }>;
@@ -24,29 +24,43 @@ const REFRESHERS: Readonly<Record<string, (credential: OauthCredential) => Promi
 /**
  * The bearer to send for `providerId`, or `undefined` when nothing is connected.
  *
- * A refresh that fails falls back to the stored access token rather than
- * refusing: the token may still have life left, and letting the service reject
- * it produces a truthful error instead of a speculative local one.
+ * Refresh reads, renews and writes under the store's cross-process mutation lock.
+ * Disconnect waits for an admitted refresh; once disconnect completes no old
+ * refresh can restore the entry. A failed refresh may use a still-valid token.
  */
 export async function resolveProviderBearer(
   providerId: string,
   credentials: CredentialStore,
   now = Date.now(),
 ): Promise<string | undefined> {
-  const stored = await credentials.get(providerId);
+  const id = normalizeProviderId(providerId);
+  const stored = await credentials.get(id);
+  const refresh = REFRESHERS[id];
+  if (stored?.type !== "oauth" || !linearOauthNeedsRefresh(stored, now) || refresh === undefined) {
+    return providerCredentialBearer(stored);
+  }
+  if (credentials.update === undefined) {
+    throw new Error(`Credential store cannot safely refresh ${id}`);
+  }
+  const current = await credentials.update(id, async (current) => {
+    // Another client may have refreshed or replaced the account while we waited.
+    if (current.type !== "oauth" || !linearOauthNeedsRefresh(current, Math.max(now, Date.now())))
+      return current;
+    try {
+      return await refresh(current);
+    } catch (error) {
+      if (current.expires !== 0 && current.expires <= Math.max(now, Date.now())) throw error;
+      return current;
+    }
+  });
+  return providerCredentialBearer(current);
+}
+
+/** Extracts a bearer from an already selected snapshot; performs no storage reads or refresh. */
+export function providerCredentialBearer(stored: ProviderCredential | undefined): string | undefined {
   if (stored === undefined) return undefined;
   if (stored.type === "api") return stored.key.trim().length > 0 ? stored.key : undefined;
   if (stored.type === "wellknown") return stored.token.trim().length > 0 ? stored.token : undefined;
   if (stored.access.trim().length === 0) return undefined;
-  if (!linearOauthNeedsRefresh(stored, now)) return stored.access;
-
-  const refresh = REFRESHERS[providerId];
-  if (refresh === undefined) return stored.access;
-  try {
-    const refreshed = await refresh(stored);
-    await credentials.set(providerId, refreshed);
-    return refreshed.access;
-  } catch {
-    return stored.access;
-  }
+  return stored.access;
 }

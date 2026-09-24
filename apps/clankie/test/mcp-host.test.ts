@@ -1,9 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
-import type { CredentialStore, ProviderCredential, RedactedCredential } from "@clankie/credential-broker";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRequire } from "node:module";
+import type {
+  CredentialStore,
+  ProviderAccount,
+  ProviderCredential,
+  RedactedCredential,
+} from "@clankie/credential-broker";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { createMcpHost, type McpConnection } from "../src/mcp-host.ts";
 
 const silent = { info: () => undefined, warn: () => undefined };
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 function credentialStore(stored: Record<string, ProviderCredential> = {}): CredentialStore {
   return {
@@ -68,8 +78,7 @@ describe("mcp host", () => {
     expect(warnings.filter((entry) => entry.event === "mcp.host.credential_missing")).toHaveLength(1);
 
     stored["linear"] = { type: "api", key: "k" };
-    // Past the resolved-server memo, so the next catalog re-reads the store.
-    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_010);
+    // No timer or restart: connecting takes effect on the next catalog read.
     expect(await host.catalog("operator")).toHaveLength(1);
     expect(notices.filter((entry) => entry.event === "mcp.host.credential_restored")).toHaveLength(1);
     vi.restoreAllMocks();
@@ -133,6 +142,56 @@ describe("mcp host", () => {
     expect(seen).toEqual([
       { server: "tracker", tool: "create_comment", content: "ran create_comment", isError: false },
     ]);
+  });
+
+  it("observes the account used for the write and preserves success when receipt storage fails", async () => {
+    const original: ProviderAccount = {
+      provider: "linear",
+      connectionId: "connection-1",
+      userId: "bot",
+      workspaceId: "org",
+      name: "Bot",
+      email: "bot@example.test",
+      workspaceName: "Test",
+      verifiedAt: new Date().toISOString(),
+    };
+    const credentials = credentialStore({ linear: { type: "api", key: "private-key", account: original } });
+    const seen: unknown[] = [],
+      warnings: unknown[] = [];
+    let writes = 0;
+    const host = createMcpHost({
+      credentials,
+      settings: settingsStore([server({ id: "linear", credential: "linear" })]),
+      logger: { info: () => undefined, warn: (context) => void warnings.push(context) },
+      curated: [],
+      connect: async () => ({
+        ...fakeConnection(["save_comment"]),
+        callTool: async () => {
+          writes++;
+          await credentials.set("linear", {
+            type: "api",
+            key: "replacement",
+            account: { ...original, userId: "another" },
+          });
+          return { content: "saved", isError: false };
+        },
+      }),
+      observeCall: (call) => {
+        seen.push(call);
+        throw new Error("disk full");
+      },
+    });
+    try {
+      expect(
+        await host.call({ lane: "operator", server: "linear", tool: "save_comment", arguments: {} }),
+      ).toEqual({ outcome: "ok", content: "saved", isError: false });
+      expect(writes).toBe(1);
+      expect(seen).toMatchObject([{ account: original }]);
+      expect(JSON.stringify(seen)).not.toContain("private-key");
+      expect(warnings).toMatchObject([{ event: "mcp.host.observer_failed" }]);
+    } finally {
+      await host.close();
+    }
   });
 
   it("offers a curated connector only once its credential is stored", async () => {
@@ -233,5 +292,257 @@ describe("mcp host", () => {
       outcome: "refused",
       reason: "unknown_server",
     });
+  });
+
+  it("immediately enforces a lane change and closes the old connection", async () => {
+    const configured = [server({ id: "tracker", lane: "everywhere" })];
+    const connection = fakeConnection(["write"]);
+    const close = vi.spyOn(connection, "close");
+    const host = createMcpHost({
+      credentials: credentialStore(),
+      settings: settingsStore(configured),
+      logger: silent,
+      curated: [],
+      connect: async () => connection,
+    });
+    await host.catalog("discord_presence");
+    configured[0] = server({ id: "tracker", lane: "operator" });
+    expect(
+      await host.call({ lane: "discord_presence", server: "tracker", tool: "write", arguments: {} }),
+    ).toMatchObject({ outcome: "refused", reason: "lane_denied" });
+    expect(connection.calls).toEqual([]);
+    expect(close).toHaveBeenCalledOnce();
+    expect(await host.catalog("discord_presence")).toEqual([]);
+  });
+
+  it("keeps a disabled owner override from falling back to the curated account", async () => {
+    const configured = [server({ id: "linear", enabled: true })];
+    const connection = fakeConnection(["write"]);
+    const close = vi.spyOn(connection, "close");
+    const host = createMcpHost({
+      credentials: credentialStore({ linear: { type: "api", key: "curated" } }),
+      settings: settingsStore(configured),
+      logger: silent,
+      curated: [server({ id: "linear", credential: "linear", lane: "everywhere" })],
+      connect: async () => connection,
+    });
+    await host.catalog("operator");
+    configured[0] = server({ id: "linear", enabled: false });
+    expect(
+      await host.call({ lane: "operator", server: "linear", tool: "write", arguments: {} }),
+    ).toMatchObject({ outcome: "refused", reason: "unknown_server" });
+    expect(await host.catalog("operator")).toEqual([]);
+    expect(close).toHaveBeenCalledOnce();
+    expect(connection.calls).toEqual([]);
+  });
+
+  it.each(["http", "stdio"] as const)(
+    "disconnect invalidates a cached %s catalog and transport",
+    async (transport) => {
+      const credentials = credentialStore({ tracker: { type: "api", key: "connected" } });
+      const connection = fakeConnection(["write"]);
+      const close = vi.spyOn(connection, "close");
+      const host = createMcpHost({
+        credentials,
+        settings: settingsStore([
+          server({ id: "tracker", transport, credential: "tracker", url: "https://example" }),
+        ]),
+        logger: silent,
+        curated: [],
+        connect: async () => connection,
+      });
+      await host.catalog("operator");
+      await credentials.delete("tracker");
+      expect(
+        await host.call({ lane: "operator", server: "tracker", tool: "write", arguments: {} }),
+      ).toMatchObject({ outcome: "refused", reason: "server_unavailable" });
+      expect(await host.catalog("operator")).toEqual([]);
+      expect(close).toHaveBeenCalledOnce();
+      expect(connection.calls).toEqual([]);
+    },
+  );
+
+  it("closes a cached transport when the broker cannot establish current credentials", async () => {
+    const credentials = credentialStore({ tracker: { type: "api", key: "connected" } });
+    const connection = fakeConnection(["write"]);
+    const close = vi.spyOn(connection, "close");
+    const host = createMcpHost({
+      credentials,
+      settings: settingsStore([server({ id: "tracker", credential: "tracker" })]),
+      logger: silent,
+      curated: [],
+      connect: async () => connection,
+    });
+    await host.catalog("operator");
+    vi.spyOn(credentials, "get").mockRejectedValue(new Error("broker unavailable"));
+    expect(
+      await host.call({ lane: "operator", server: "tracker", tool: "write", arguments: {} }),
+    ).toMatchObject({ outcome: "refused", reason: "server_unavailable" });
+    expect(close).toHaveBeenCalledOnce();
+    expect(connection.calls).toEqual([]);
+  });
+
+  it("discards a late initialize without replacing the new connection", async () => {
+    const configured = [server({ id: "tracker", command: "old" })];
+    const old = fakeConnection(["old_tool"]),
+      current = fakeConnection(["new_tool"]);
+    const close = vi.spyOn(old, "close");
+    let ready!: () => void;
+    let finish!: (value: McpConnection) => void;
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const delayed = new Promise<McpConnection>((resolve) => {
+      finish = resolve;
+    });
+    const host = createMcpHost({
+      credentials: credentialStore(),
+      settings: settingsStore(configured),
+      logger: silent,
+      curated: [],
+      connect: async (entry) => {
+        if (entry.command === "old") {
+          ready();
+          return delayed;
+        }
+        return current;
+      },
+    });
+    const staleCall = host.call({ lane: "operator", server: "tracker", tool: "old_tool", arguments: {} });
+    await started;
+    configured[0] = server({ id: "tracker", command: "new" });
+    expect((await host.catalog("operator"))[0]?.name).toBe("new_tool");
+    finish(old);
+    expect(await staleCall).toMatchObject({ outcome: "refused" });
+    expect(close).toHaveBeenCalledOnce();
+    expect(old.calls).toEqual([]);
+    expect(
+      await host.call({ lane: "operator", server: "tracker", tool: "new_tool", arguments: {} }),
+    ).toMatchObject({ outcome: "ok" });
+    expect(current.calls).toEqual(["new_tool"]);
+    await host.close();
+  });
+
+  it("closes a connection that finishes initializing during shutdown", async () => {
+    const connection = fakeConnection(["write"]);
+    const close = vi.spyOn(connection, "close");
+    let ready!: () => void;
+    let finish!: (value: McpConnection) => void;
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const delayed = new Promise<McpConnection>((resolve) => {
+      finish = resolve;
+    });
+    const host = createMcpHost({
+      credentials: credentialStore(),
+      settings: settingsStore([server({ id: "tracker" })]),
+      logger: silent,
+      curated: [],
+      connect: async () => {
+        ready();
+        return delayed;
+      },
+    });
+    const catalog = host.catalog("operator");
+    await started;
+    const closing = host.close();
+    finish(connection);
+    await closing;
+    expect(await catalog).toEqual([]);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("replaces a real stdio process when its credential changes", async () => {
+    const require = createRequire(import.meta.url);
+    const source = `
+      import { Server } from ${JSON.stringify(require.resolve("@modelcontextprotocol/sdk/server/index.js"))};
+      import { StdioServerTransport } from ${JSON.stringify(require.resolve("@modelcontextprotocol/sdk/server/stdio.js"))};
+      import { CallToolRequestSchema, ListToolsRequestSchema } from ${JSON.stringify(require.resolve("@modelcontextprotocol/sdk/types.js"))};
+      const server = new Server({ name: "test", version: "1" }, { capabilities: { tools: {} } });
+      server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [{ name: "identity", inputSchema: { type: "object" } }] }));
+      server.setRequestHandler(CallToolRequestSchema, () => ({ content: [{ type: "text", text: process.env.TEST_MCP_TOKEN }] }));
+      await server.connect(new StdioServerTransport());
+    `;
+    const credentials = credentialStore({ tracker: { type: "api", key: "first-test-account" } });
+    const host = createMcpHost({
+      credentials,
+      logger: silent,
+      curated: [],
+      settings: settingsStore([
+        server({
+          id: "tracker",
+          command: process.execPath,
+          args: ["--input-type=module", "-e", source],
+          credential: "tracker",
+          credentialEnv: "TEST_MCP_TOKEN",
+        }),
+      ]),
+    });
+    const call = () => host.call({ lane: "operator", server: "tracker", tool: "identity", arguments: {} });
+    try {
+      expect(await call()).toMatchObject({ outcome: "ok", content: "first-test-account" });
+      await credentials.set("tracker", { type: "api", key: "second-test-account" });
+      expect(await call()).toMatchObject({ outcome: "ok", content: "second-test-account" });
+      await credentials.delete("tracker");
+      expect(await call()).toMatchObject({ outcome: "refused" });
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("uses a fresh HTTP MCP session after an account change", async () => {
+    const credentials = credentialStore({ tracker: { type: "api", key: "first-test-account" } });
+    const initialized: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        if (init?.method !== "POST") return new Response(null, { status: 405 });
+        const request = JSON.parse(String(init.body));
+        const authorization = new Headers(init.headers).get("authorization")!;
+        if (request.method === "notifications/initialized") return new Response(null, { status: 202 });
+        if (request.method === "initialize") {
+          initialized.push(authorization);
+          return Response.json({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: {
+              protocolVersion: request.params.protocolVersion,
+              capabilities: { tools: {} },
+              serverInfo: { name: "test", version: "1" },
+            },
+          });
+        }
+        return Response.json({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            content: [{ type: "text", text: authorization }],
+          },
+        });
+      }),
+    );
+    const host = createMcpHost({
+      credentials,
+      logger: silent,
+      curated: [],
+      settings: settingsStore([
+        server({
+          id: "tracker",
+          transport: "http",
+          url: "https://example.test/mcp",
+          credential: "tracker",
+        }),
+      ]),
+    });
+    const call = () => host.call({ lane: "operator", server: "tracker", tool: "identity", arguments: {} });
+    try {
+      expect(await call()).toMatchObject({ outcome: "ok", content: "Bearer first-test-account" });
+      await credentials.set("tracker", { type: "api", key: "second-test-account" });
+      expect(await call()).toMatchObject({ outcome: "ok", content: "Bearer second-test-account" });
+      expect(initialized).toEqual(["Bearer first-test-account", "Bearer second-test-account"]);
+    } finally {
+      await host.close();
+    }
   });
 });

@@ -141,7 +141,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         ? "terminalObserve"
         : serviceRequest.op === "terminal_control" || serviceRequest.op === "terminal_input"
           ? "terminalControl"
-          : serviceRequest.op === "reset" ||
+          : serviceRequest.op === "connections" ||
+              serviceRequest.op === "reset" ||
               serviceRequest.op === "close_seat" ||
               serviceRequest.op === "spawn_seat" ||
               serviceRequest.op === "move_seat" ||

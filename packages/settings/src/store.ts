@@ -42,8 +42,10 @@ export class SettingsStore {
     let raw: string;
     try {
       raw = await readFile(this.filePath, "utf8");
-    } catch {
-      return emptySettings();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptySettings();
+      // Permission and I/O failures must not replace narrowed authority with defaults.
+      throw error;
     }
     let parsed: unknown;
     try {

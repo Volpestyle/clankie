@@ -1,3 +1,4 @@
+import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type {
   EvaluatorCommand,
   EvaluatorStatus,
@@ -15,7 +16,7 @@ import type {
   OperatorSeatEvent,
 } from "@clankie/protocol";
 import type { DurableMessageNotice, LinearInboxPage, LinearInboxReadOptions } from "./conversations.ts";
-import type { LinearActivityEvent } from "../linear-webhook.ts";
+import type { LinearActivityEvent, LinearWorkOwner } from "../linear-webhook.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -94,9 +95,12 @@ export interface CaptainPort {
    * session so a seat launcher or a per-turn hook can carry it into another
    * harness. Sections default to what the session itself is built with.
    */
+  syncSeatTranscript(conversationId: string, transcript: SeatTranscriptUpload): boolean;
+  seatContext(conversationId?: string): { conversationId: string; cwd: string } | undefined;
   lanePrompt(input: {
     readonly lane: CaptainSessionLaneV2;
     readonly sections?: readonly CaptainPromptSection[];
+    readonly conversationId?: string;
   }): Promise<string>;
   /** The memory card that lane's next run would inject, filtered the same way. */
   laneMemoryCard(lane: CaptainSessionLaneV2): Promise<string>;
@@ -104,7 +108,11 @@ export interface CaptainPort {
    * The seat's outbox (ADR 0152): wakes, watches, and escalations for a bound
    * head, long-polled by its bridge. Polling is what binds the head.
    */
-  pollSeatEvents(waitMs: number, signal?: AbortSignal): Promise<readonly OperatorSeatEvent[]>;
+  pollSeatEvents(
+    waitMs: number,
+    signal?: AbortSignal,
+    conversationId?: string,
+  ): Promise<readonly OperatorSeatEvent[]>;
   /**
    * A fleet seat's mailbox (ADR 0161): a DM or room turn for the agent in that
    * pane, long-polled by `clankie mcp --seat`. `undefined` when no messageable
@@ -117,13 +125,13 @@ export interface CaptainPort {
     signal?: AbortSignal,
   ): Promise<readonly OperatorSeatEvent[] | undefined>;
   /** The seat's answer to an escalation; false when nothing waits on that id. */
-  replySeatEvent(eventId: string, text: string): Promise<boolean>;
+  replySeatEvent(eventId: string, text: string, conversationId?: string): Promise<boolean>;
   /**
    * That lane's authority plan as callable tools, for a seat in another harness
    * (VUH-1085). Each call opens its own turn context, so one seat's attachments
    * and room never leak into another's.
    */
-  laneToolBank(lane: CaptainSessionLaneV2): Promise<LaneToolBank>;
+  laneToolBank(lane: CaptainSessionLaneV2, conversationId?: string): Promise<LaneToolBank>;
   /**
    * Subscribe to durable messages this captain's conversations write, for
    * delivery that happens outside the conversation (push wakes, ADR 0159). The
@@ -134,9 +142,12 @@ export interface CaptainPort {
   observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void;
   /** Offer a bounded page without consuming it. */
   readLinearInbox(options?: LinearInboxReadOptions): LinearInboxPage;
-  acknowledgeLinearInbox(cursor: string): boolean;
+  acknowledgeLinearInbox(cursor: string, conversationId?: string): boolean;
+  linearWorkOwners(): readonly LinearWorkOwner[];
+  setLinearWorkOwner(owner: LinearWorkOwner, expectedConversationId?: string, remove?: boolean): void;
+  resumeLinearActivity(): void;
   /** Store verified context in the Linear inbox and optionally queue a model turn. */
-  receiveLinearActivity(activity: LinearActivityEvent, following: boolean): void;
+  receiveLinearActivity(activity: LinearActivityEvent, following: boolean): boolean | void;
   /** Graceful shutdown: waits for in-flight turns. */
   close(): Promise<void>;
 }
@@ -182,6 +193,8 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     observeLanes: async () => [],
     readTurnMetrics: async () => [],
     voiceLaneInstructions: () => "You are in a voice room.",
+    syncSeatTranscript: () => true,
+    seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
     laneMemoryCard: async () => "",
     pollSeatEvents: async () => [],
@@ -200,7 +213,10 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       next: null,
     }),
     acknowledgeLinearInbox: () => false,
-    receiveLinearActivity: () => {},
+    receiveLinearActivity: () => true,
+    linearWorkOwners: () => [],
+    setLinearWorkOwner: () => {},
+    resumeLinearActivity: () => {},
     close: async () => {},
     ...overrides,
   };

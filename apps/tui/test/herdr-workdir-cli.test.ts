@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { parseInboxRead, runLinearCommand } from "../src/command/linear.ts";
 import { runHerdrCommand } from "../src/command/herdr.ts";
@@ -24,6 +24,8 @@ describe("clankie herdr", () => {
     expect((await settings.load()).herdr.session).toBe("clankies");
     const bundled = await runHerdrCommand(["set", "--runtime", "bundled"], { settings });
     expect(bundled.herdr).toEqual({ runtime: "bundled", session: "clankies" });
+    expect((await runHerdrCommand(["disable"], { settings })).herdr.runtime).toBe("disabled");
+    expect((await runHerdrCommand(["use", "clankies"], { settings })).herdr.runtime).toBe("external");
     await expect(runHerdrCommand(["set", "--runtime", "unknown"], { settings })).rejects.toThrow("Usage:");
   });
 
@@ -78,6 +80,51 @@ describe("clankie workdir", () => {
 });
 
 describe("clankie linear", () => {
+  it("uses authenticated service routes for issue ownership and scoped inbox reads", async () => {
+    const calls: Array<{ path: string; method: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture");
+      calls.push({
+        path: new URL(url).pathname + new URL(url).search,
+        method: init.method!,
+        body: init.body ? JSON.parse(init.body as string) : undefined,
+      });
+      return Response.json({ ok: true });
+    });
+    const options = { env: { CLANKIE_OPERATOR_TOKEN: "fixture" } };
+    try {
+      await runLinearCommand(["work", "bind", "org", "issue", "project", "--from", "previous"], options);
+      await runLinearCommand(["inbox", "read", "--conversation", "project"], options);
+      await runLinearCommand(["inbox", "ack", "000000000042", "--conversation", "project"], options);
+      await runLinearCommand(["work", "unbind", "org", "issue", "project"], options);
+      expect(calls).toEqual([
+        {
+          path: "/v1/linear/work",
+          method: "PUT",
+          body: {
+            organizationId: "org",
+            issueId: "issue",
+            conversationId: "project",
+            expectedConversationId: "previous",
+          },
+        },
+        { path: "/v1/linear/inbox?conversationId=project", method: "GET", body: undefined },
+        {
+          path: "/v1/linear/inbox",
+          method: "POST",
+          body: { ackCursor: "000000000042", conversationId: "project" },
+        },
+        {
+          path: "/v1/linear/work",
+          method: "DELETE",
+          body: { organizationId: "org", issueId: "issue", conversationId: "project" },
+        },
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("defaults off, persists live follow toggles, and rejects invalid commands", async () => {
     const settings = await tempStore();
     expect(await runLinearCommand([], { settings })).toMatchObject({

@@ -18,11 +18,17 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { build } from "esbuild";
+import { copySwarmRuntime } from "./release/swarm-runtime.mjs";
 import { buildHerdr, herdrPin, herdrSource } from "./build-herdr.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const outputDir = join(repoRoot, "dist");
-const archiveName = "clankie-darwin-arm64.tar.gz";
+const hosted = process.argv.includes("--hosted");
+const target = hosted ? `linux-${process.arch}` : "darwin-arm64";
+const cargoTarget = hosted
+  ? `${process.arch === "arm64" ? "aarch64" : "x86_64"}-unknown-linux-gnu`
+  : "aarch64-apple-darwin";
+const archiveName = `clankie-${target}.tar.gz`;
 const archivePath = join(outputDir, archiveName);
 const checksumPath = `${archivePath}.sha256`;
 const nodeVersion = "24.20.0";
@@ -61,8 +67,12 @@ const dynamicRuntimePackages = new Set([
   "require-from-string",
 ]);
 
-if (process.platform !== "darwin" || process.arch !== "arm64") {
-  throw new Error("The macOS release must be built on a darwin-arm64 host");
+if (
+  hosted
+    ? process.platform !== "linux" || !["arm64", "x64"].includes(process.arch)
+    : process.platform !== "darwin" || process.arch !== "arm64"
+) {
+  throw new Error("Build macOS releases on darwin-arm64; --hosted requires linux-arm64 or linux-x64");
 }
 if (
   process.env.GITHUB_REF_TYPE === "tag" &&
@@ -74,17 +84,19 @@ if (
   );
 }
 
+let swarmPackageRoots = [];
 const temporaryRoot = await mkdtemp(join(tmpdir(), "clankie-release-"));
 const releaseRoot = join(temporaryRoot, "clankie");
 const metafile = join(temporaryRoot, "esbuild-meta.json");
 
 try {
   await mkdir(releaseRoot, { recursive: true });
-  run("pnpm", ["--filter", "@clankie/vox", "build"]);
+  if (!hosted) run("pnpm", ["--filter", "@clankie/vox", "build"]);
   const bundle = await build({
     absWorkingDir: repoRoot,
     banner: { js: bundleBanner },
     bundle: true,
+    external: ["swarm-mcp"],
     entryPoints: entrypoints,
     format: "esm",
     logLevel: "info",
@@ -96,10 +108,19 @@ try {
   });
   await writeFile(metafile, JSON.stringify(bundle.metafile));
 
+  swarmPackageRoots = await copySwarmRuntime(repoRoot, releaseRoot);
   await copyRuntimeAssets(releaseRoot);
   await copyDynamicRuntimePackages(releaseRoot, metafile);
-  await installNodeRuntime(releaseRoot, temporaryRoot);
-  await installNativeBinaries(releaseRoot);
+  if (hosted) {
+    await mkdir(join(releaseRoot, "libexec"), { recursive: true });
+    await symlink(process.execPath, join(releaseRoot, "libexec/node"));
+    await buildHerdr(join(releaseRoot, "libexec/herdr"));
+    await mkdir(join(releaseRoot, "licenses/node"), { recursive: true });
+    await copyFile("/usr/local/LICENSE", join(releaseRoot, "licenses/node/LICENSE"));
+  } else {
+    await installNodeRuntime(releaseRoot, temporaryRoot);
+    await installNativeBinaries(releaseRoot);
+  }
   await writeReleaseInventory(releaseRoot, metafile);
   await writeFile(join(releaseRoot, "VERSION"), `${releaseVersion}\n`);
   await writeFile(
@@ -108,8 +129,8 @@ try {
       {
         schemaVersion: 1,
         version: releaseVersion,
-        target: "darwin-arm64",
-        minimumMacOSVersion: "14.0",
+        target,
+        ...(hosted ? {} : { minimumMacOSVersion: "14.0" }),
         nodeVersion,
         herdr: herdrPin,
         revision: gitRevision(),
@@ -120,15 +141,22 @@ try {
   );
 
   await mkdir(outputDir, { recursive: true });
-  await rm(archivePath, { force: true });
-  await rm(checksumPath, { force: true });
-  run("tar", ["-czf", archivePath, "-C", temporaryRoot, "clankie"], {
-    ...process.env,
-    COPYFILE_DISABLE: "1",
-  });
-  const digest = await sha256File(archivePath);
-  await writeFile(checksumPath, `${digest}  ${archiveName}\n`);
-  process.stdout.write(`${archivePath}\n${checksumPath}\n`);
+  if (hosted) {
+    const destination = join(outputDir, "hosted");
+    await rm(destination, { recursive: true, force: true });
+    await cp(releaseRoot, destination, { recursive: true });
+    process.stdout.write(`${destination}\n`);
+  } else {
+    await rm(archivePath, { force: true });
+    await rm(checksumPath, { force: true });
+    run("tar", ["-czf", archivePath, "-C", temporaryRoot, "clankie"], {
+      ...process.env,
+      COPYFILE_DISABLE: "1",
+    });
+    const digest = await sha256File(archivePath);
+    await writeFile(checksumPath, `${digest}  ${archiveName}\n`);
+    process.stdout.write(`${archivePath}\n${checksumPath}\n`);
+  }
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }
@@ -146,7 +174,7 @@ function output(command, args) {
 }
 
 function gitRevision() {
-  return output("git", ["rev-parse", "HEAD"]);
+  return hosted ? (process.env.CLANKIE_REVISION ?? "source-checkout") : output("git", ["rev-parse", "HEAD"]);
 }
 
 async function copyRuntimeAssets(targetRoot) {
@@ -156,6 +184,8 @@ async function copyRuntimeAssets(targetRoot) {
     ["LICENSE", "LICENSE"],
     ["README.md", "README.md"],
     ["docs/cli.md", "docs/cli.md"],
+    ["docs/worker-access.md", "docs/worker-access.md"],
+    ["packages/swarm/README.md", "packages/swarm/README.md"],
     ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
     ["apps/vox/LICENSE", "apps/vox/LICENSE"],
     ["apps/vox/PROVENANCE.md", "apps/vox/PROVENANCE.md"],
@@ -167,9 +197,10 @@ async function copyRuntimeAssets(targetRoot) {
     await mkdir(dirname(target), { recursive: true });
     await copyFile(join(repoRoot, source), target);
   }
-  for (const directory of [".agents/skills", "integrations/herdr-plugin"]) {
+  for (const directory of [".agents/skills", "integrations/herdr-plugin", "integrations/claude-plugin"]) {
     await cp(join(repoRoot, directory), join(targetRoot, directory), {
       recursive: true,
+      dereference: true,
       filter: (source) => basename(source) !== ".DS_Store",
     });
   }
@@ -256,9 +287,10 @@ async function writeReleaseInventory(targetRoot, metafilePath) {
   const npmPackages = await npmComponents(metafilePath);
   const cargoPackages = [
     ...new Map(
-      [...cargoComponents("apps/vox/Cargo.toml"), ...cargoComponents(join(herdrSource, "Cargo.toml"))].map(
-        (component) => [`${component.name}@${component.version}`, component],
-      ),
+      [
+        ...(hosted ? [] : cargoComponents("apps/vox/Cargo.toml")),
+        ...cargoComponents(join(herdrSource, "Cargo.toml")),
+      ].map((component) => [`${component.name}@${component.version}`, component]),
     ).values(),
   ];
   const ghostty = JSON.parse(await readFile(join(herdrSource, "vendor/libghostty-vt.vendor.json"), "utf8"));
@@ -356,6 +388,11 @@ async function npmComponents(metafilePath) {
     const component = componentMetadata(manifest, root);
     packages.set(`${component.name}@${component.version}`, component);
   }
+  for (const root of swarmPackageRoots) {
+    const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+    const component = componentMetadata(manifest, root);
+    packages.set(`${component.name}@${component.version}`, component);
+  }
   return [...packages.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
@@ -403,7 +440,7 @@ function cargoComponents(manifestPath) {
       "--format-version",
       "1",
       "--filter-platform",
-      "aarch64-apple-darwin",
+      cargoTarget,
       "--manifest-path",
       manifestPath,
     ]),

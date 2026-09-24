@@ -1,0 +1,39 @@
+# Use a distinct Compose project per owner; its volumes and network stay separate.
+services:
+  captain:
+    image: clankie-hosted:local
+    build:
+      context: ../..
+      dockerfile: scripts/release/clankie-linux.Dockerfile
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    volumes:
+      - state:/state
+      - workspace:/workspace
+    # No host ports, host home, or Docker socket. Use exec/SSH or the outbound gateway.
+
+  relay:
+    image: clankie-hosted:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      captain:
+        condition: service_healthy
+        restart: true
+    network_mode: service:captain
+    volumes:
+      - state:/state
+    command: ["node", "/opt/clankie/apps/relay/src/index.js"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4321/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+
+volumes:
+  state:
+  workspace:

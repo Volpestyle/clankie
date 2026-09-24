@@ -1,3 +1,9 @@
+import { changeRuntime, manageConnections } from "./connections.ts";
+import { SwarmConnectSchema, type SwarmHost } from "@clankie/swarm";
+import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
+import { bodyLimit } from "hono/body-limit";
+import { ExecutionConnectSchema, type ExecutionConnections, HerdrUnavailableError } from "./herdr-session.ts";
+import { WorkerGrantRequestSchema, type WorkerMcp } from "./worker-mcp.ts";
 import { EVALUATOR_PATH, EvaluatorCommandSchema } from "@clankie/protocol";
 import { ConversationResetError, LINEAR_INBOX_CONVERSATION_ID } from "./captain/conversations.ts";
 import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@clankie/protocol";
@@ -148,11 +154,7 @@ import {
   mintDeviceSessionClaims,
 } from "./device-session.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
-import {
-  LinearDeliveryMemory,
-  type LinearSelfWriteMemory,
-  classifyLinearDelivery,
-} from "./linear-webhook.ts";
+import { LinearWorkOwnerSchema, type LinearWriteReceipts, classifyLinearDelivery } from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { LocalVoiceChatSession } from "./local-voice-chat.ts";
@@ -225,6 +227,7 @@ const LOCAL_VOICE_REALTIME_SURFACE_RULES = [
 const CaptainLanePromptQuerySchema = z
   .object({
     lane: CaptainSessionLaneV2Schema.optional(),
+    conversationId: z.string().trim().min(1).max(256).optional(),
     sections: z
       .string()
       .transform((raw) =>
@@ -333,10 +336,15 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
-  /** The owned runtime's state, or undefined while he leads someone else's. */
+  workerMcp?: WorkerMcp;
+  /** Swarm communication is independent of execution runtime availability. */
+  runtimes?: ExecutionConnections;
+  swarm?: Pick<SwarmHost, "status"> &
+    Partial<Pick<SwarmHost, "connect" | "disconnect" | "syncRuntimeConnections">>;
+  /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
-  /** Read through: the binding changes when a bound session stops (ADR 0170). */
-  herdrBinding?: () => HerdrBinding;
+  /** Only a currently available connection has an active binding. */
+  herdrBinding?: () => HerdrBinding | undefined;
   /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */
   publicGatewayDoorway?: () => PublicGatewayDoorwayState;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
@@ -378,7 +386,7 @@ export interface ClankieAppDependencies {
    * webhook is configured and the route reports itself unavailable; the wake it
    * leads to belongs to the captain.
    */
-  linearWebhook?: { secret(): Promise<string | undefined>; selfWrites?: LinearSelfWriteMemory };
+  linearWebhook?: { secret(): Promise<string | undefined>; writes?: LinearWriteReceipts };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;
@@ -635,12 +643,185 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return { denial: context.json({ error: "authentication_required" }, 401) };
   };
 
+  app.get("/v1/connections", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const [runtimes, swarms, linear] = await Promise.all([
+      dependencies.runtimes?.list() ?? [],
+      dependencies.swarm?.status() ?? { mode: "unavailable" },
+      dependencies.workerMcp?.linearAccount() ?? { status: "unavailable" },
+    ]);
+    return context.json({ runtimes, swarms, accounts: { linear } });
+  });
+
+  app.get("/v1/runtime-connections", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    return context.json({ connections: (await dependencies.runtimes?.list()) ?? [] });
+  });
+  app.post("/v1/runtime-connections", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.runtimes) return context.json({ error: "runtimes_unavailable" }, 503);
+    const input = ExecutionConnectSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!input.success) return context.json({ error: "invalid_runtime_connection" }, 400);
+    try {
+      const connected = await changeRuntime(dependencies, "connect", input.data);
+      return context.json(connected);
+    } catch (error) {
+      return context.json(
+        {
+          error: "runtime_connection_refused",
+          detail: error instanceof Error ? error.message : "Connection refused",
+        },
+        409,
+      );
+    }
+  });
+  app.delete("/v1/runtime-connections/:id", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.runtimes) return context.json({ error: "runtimes_unavailable" }, 503);
+    try {
+      await changeRuntime(dependencies, "disconnect", context.req.param("id"));
+      return context.json({ ok: true });
+    } catch (error) {
+      return context.json(
+        {
+          error: "runtime_disconnect_refused",
+          detail: error instanceof Error ? error.message : "Disconnect refused",
+        },
+        409,
+      );
+    }
+  });
+
+  app.get("/v1/swarm", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    return context.json(dependencies.swarm ? await dependencies.swarm.status() : { mode: "unavailable" });
+  });
+
+  app.post("/v1/swarm/connections", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.swarm?.connect) return context.json({ error: "swarm_unavailable" }, 503);
+    const parsed = SwarmConnectSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_swarm_connection" }, 400);
+    const binding = dependencies.captain.seatContext(parsed.data.conversationId);
+    if (!binding) return context.json({ error: "unknown_captain_conversation" }, 404);
+    try {
+      return context.json(await dependencies.swarm.connect(parsed.data, binding.cwd));
+    } catch {
+      return context.json({ error: "swarm_connection_refused" }, 409);
+    }
+  });
+
+  app.delete("/v1/swarm/connections/:id", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.swarm?.disconnect) return context.json({ error: "swarm_unavailable" }, 503);
+    try {
+      await dependencies.swarm.disconnect(context.req.param("id"));
+      return context.json({ ok: true });
+    } catch {
+      return context.json({ error: "swarm_disconnect_refused" }, 409);
+    }
+  });
+
+  app.all("/v1/worker-mcp", async (context) =>
+    dependencies.workerMcp
+      ? dependencies.workerMcp.handle(context.req.raw)
+      : context.json({ error: "worker_mcp_unavailable" }, 503),
+  );
+  app.all("/v1/worker-mcp/swarm/:scope", async (context) =>
+    dependencies.workerMcp
+      ? dependencies.workerMcp.handleSwarm(context.req.param("scope"), context.req.raw)
+      : context.json({ error: "worker_mcp_unavailable" }, 503),
+  );
+  app.post("/v1/worker-mcp/renew", async (context) =>
+    dependencies.workerMcp
+      ? dependencies.workerMcp.renew(context.req.raw)
+      : context.json({ error: "worker_mcp_unavailable" }, 503),
+  );
+  app.post("/v1/worker-mcp/claim/:id", async (context) =>
+    dependencies.workerMcp
+      ? dependencies.workerMcp.claim(context.req.param("id"), context.req.raw)
+      : context.json({ error: "worker_mcp_unavailable" }, 503),
+  );
+
+  app.use("/v1/worker-grants/*", async (context, next) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.workerMcp) return context.json({ error: "worker_mcp_unavailable" }, 503);
+    context.header("Cache-Control", "no-store");
+    return next();
+  });
+  app.get("/v1/worker-grants/", async (context) => context.json(await dependencies.workerMcp!.list()));
+  app.post("/v1/worker-grants/", async (context) => {
+    const parsed = WorkerGrantRequestSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_worker_grant" }, 400);
+    try {
+      return context.json(await dependencies.workerMcp!.issue(parsed.data), 201);
+    } catch (error) {
+      return context.json(
+        {
+          error: "worker_grant_refused",
+          detail: error instanceof Error ? error.message : "Grant unavailable",
+        },
+        409,
+      );
+    }
+  });
+  app.delete("/v1/worker-grants/:id", async (context) => {
+    try {
+      return context.json(await dependencies.workerMcp!.revoke(context.req.param("id")));
+    } catch {
+      return context.json({ error: "worker_grant_unavailable" }, 404);
+    }
+  });
+  app.get("/v1/worker-grants/linear/account", async (context) =>
+    context.json(await dependencies.workerMcp!.linearAccount()),
+  );
+  app.post("/v1/worker-grants/linear/account", async (context) => {
+    try {
+      return context.json(await dependencies.workerMcp!.linearAccount(true));
+    } catch (error) {
+      return context.json(
+        {
+          error: "account_verification_failed",
+          detail: error instanceof Error ? error.message : "Verification failed",
+        },
+        409,
+      );
+    }
+  });
+
   app.get(HERDR_BINDING_PATH, async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    const binding = dependencies.herdrBinding?.();
+    const connection = context.req.query("connection");
+    const binding = connection
+      ? await dependencies.runtimes?.binding(connection)
+      : dependencies.herdrBinding?.();
     if (!binding) return context.json({ error: "herdr_binding_unavailable" }, 503);
     return context.json(binding);
   });
@@ -656,21 +837,50 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(await dependencies.rivals.call(parsed.data));
   });
 
-  // `ok` stays the service's own health: a shut doorway is a real problem, but
-  // the launcher must not read it as a dead captain and restart into the same wall.
+  // Optional execution and doorway failures do not make the captain unhealthy.
   app.get("/health", (context) => {
     const herdr = dependencies.herdrRuntime?.();
     const doorway = dependencies.publicGatewayDoorway?.();
-    const ok = herdr === undefined || herdr === "healthy";
-    return context.json(
-      {
-        ok,
-        service: "clankie",
-        ...(herdr === undefined ? {} : { herdr }),
-        ...(doorway === undefined ? {} : { doorway }),
-      },
-      ok ? 200 : 503,
-    );
+    return context.json({
+      ok: true,
+      service: "clankie",
+      ...(herdr === undefined ? {} : { herdr }),
+      ...(doorway === undefined ? {} : { doorway }),
+    });
+  });
+
+  const seatBinding = (
+    context: Context,
+    lane: string,
+  ): { conversationId?: string; cwd?: string } | { denial: Response } => {
+    const raw = context.req.query("conversationId");
+    if (raw !== undefined && !z.string().trim().min(1).max(256).safeParse(raw).success)
+      return { denial: context.json({ error: "invalid_conversation" }, 400) };
+    if (lane !== "operator")
+      return raw === undefined ? {} : { denial: context.json({ error: "lane_forbidden" }, 403) };
+    const binding = dependencies.captain.seatContext(raw?.trim());
+    return binding ?? { denial: context.json({ error: "unknown_captain_conversation" }, 404) };
+  };
+
+  app.get("/v1/captain/seat-context", async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const binding = seatBinding(context, auth.lane);
+    return "denial" in binding ? binding.denial : context.json(binding);
+  });
+
+  app.post("/v1/seat/transcript", bodyLimit({ maxSize: 1024 * 1024 }), async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const binding = seatBinding(context, auth.lane);
+    if ("denial" in binding) return binding.denial;
+    const parsed = SeatTranscriptUploadSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_seat_transcript" }, 400);
+    if (!dependencies.captain.syncSeatTranscript(binding.conversationId!, parsed.data))
+      return context.json({ error: "seat_session_conflict" }, 409);
+    return context.json({ ok: true });
   });
 
   // The lane's prompt and memory card, readable outside a pi session so a seat
@@ -683,9 +893,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!query.success) return context.json({ error: "invalid_request" }, 400);
     const lane = query.data.lane ?? auth.lane;
     if (lane !== auth.lane) return context.json({ error: "lane_forbidden" }, 403);
+    const binding = seatBinding(context, lane);
+    if ("denial" in binding) return binding.denial;
     const sections: readonly CaptainPromptSection[] | undefined = query.data.sections;
     return context.text(
-      await dependencies.captain.lanePrompt({ lane, ...(sections === undefined ? {} : { sections }) }),
+      await dependencies.captain.lanePrompt({
+        lane,
+        ...(sections === undefined ? {} : { sections }),
+        ...(query.data.conversationId === undefined ? {} : { conversationId: binding.conversationId! }),
+      }),
     );
   });
 
@@ -700,7 +916,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const waitMs = Number.isFinite(wait)
       ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
       : 0;
-    const events = await dependencies.captain.pollSeatEvents(waitMs, context.req.raw.signal);
+    const binding = seatBinding(context, auth.lane);
+    if ("denial" in binding) return binding.denial;
+    const events = await dependencies.captain.pollSeatEvents(
+      waitMs,
+      context.req.raw.signal,
+      binding.conversationId,
+    );
     const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
     return context.json(page);
   });
@@ -711,7 +933,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
     const parsed = OperatorSeatReplySchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
-    const replied = await dependencies.captain.replySeatEvent(context.req.param("id"), parsed.data.text);
+    const binding = seatBinding(context, auth.lane);
+    if ("denial" in binding) return binding.denial;
+    const replied = await dependencies.captain.replySeatEvent(
+      context.req.param("id"),
+      parsed.data.text,
+      binding.conversationId,
+    );
     return replied
       ? context.json({ schemaVersion: 1 as const, replied: true as const })
       : context.json({ error: "unknown_event" }, 404);
@@ -754,7 +982,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.all("/v1/mcp", async (context) => {
     const auth = await authenticateLane(context);
     if ("denial" in auth) return auth.denial;
-    return laneMcp.handle(context.req.raw, auth.lane);
+    const binding = seatBinding(context, auth.lane);
+    if ("denial" in binding) return binding.denial;
+    return laneMcp.handle(context.req.raw, auth.lane, binding.conversationId);
   });
 
   app.get("/v1/discord/readiness", async (context) => {
@@ -1970,17 +2200,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         body === null ||
         typeof body !== "object" ||
         Array.isArray(body) ||
-        Object.keys(body).length !== 1 ||
+        Object.keys(body).some((key) => !["ackCursor", "conversationId"].includes(key)) ||
+        ("conversationId" in body && typeof body.conversationId !== "string") ||
         !("ackCursor" in body) ||
         typeof body.ackCursor !== "string"
       )
         return context.json({ error: "ack_cursor_required" }, 400);
-      if (!dependencies.captain.acknowledgeLinearInbox(body.ackCursor)) {
+      if (
+        !dependencies.captain.acknowledgeLinearInbox(
+          body.ackCursor,
+          "conversationId" in body ? (body.conversationId as string) : undefined,
+        )
+      ) {
         return context.json({ error: "cursor_not_offered" }, 409);
       }
       return context.json({ schemaVersion: 1, acknowledged: body.ackCursor });
     }
     const query = context.req.query();
+    if (query.conversationId !== undefined && !dependencies.captain.seatContext(query.conversationId))
+      return context.json({ error: "unknown_captain_conversation" }, 404);
     const limit = query.limit === undefined ? undefined : Number.parseInt(query.limit, 10);
     if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= 100))
       return context.json({ error: "limit_out_of_range" }, 400);
@@ -1992,8 +2230,37 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         ...(limit === undefined ? {} : { limit }),
         ...(query.before === undefined ? {} : { before: query.before }),
         headlines: query.headlines === "1" || query.headlines === "true",
+        ...(query.conversationId === undefined ? {} : { conversationId: query.conversationId }),
       }),
     });
+  });
+
+  app.on(["GET", "PUT", "DELETE"], "/v1/linear/work", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (context.req.method === "GET")
+      return context.json({ owners: dependencies.captain.linearWorkOwners() });
+    const input = LinearWorkOwnerSchema.extend({
+      expectedConversationId: z.string().min(1).max(256).optional(),
+    }).safeParse(await readJson(context.req.raw));
+    if (!input.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
+    const { expectedConversationId, ...owner } = input.data;
+    owner.organizationId = owner.organizationId.toLowerCase();
+    owner.issueId = owner.issueId.toLowerCase();
+    try {
+      dependencies.captain.setLinearWorkOwner(owner, expectedConversationId, context.req.method === "DELETE");
+      return context.json({ owners: dependencies.captain.linearWorkOwners() });
+    } catch (error) {
+      return context.json(
+        {
+          error: "linear_work_owner_refused",
+          detail: error instanceof Error ? error.message : "Unavailable",
+        },
+        409,
+      );
+    }
   });
 
   // Local operator control, independent of the publicly reachable signed webhook.
@@ -2021,6 +2288,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } else {
       current = await settingsSource.load();
     }
+    if (context.req.method === "PUT" && current.linearWebhook.following)
+      dependencies.captain.resumeLinearActivity();
     return context.json({
       schemaVersion: 1 as const,
       following: current.linearWebhook.following,
@@ -2030,7 +2299,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   // Linear authenticates with an HMAC over the raw body, not our operator bearer.
   // Authentic deliveries receive 200 even when follow mode is off.
-  const linearDeliveries = new LinearDeliveryMemory();
 
   app.post(LINEAR_WEBHOOK_PATH, async (context) => {
     const hook = dependencies.linearWebhook;
@@ -2051,8 +2319,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
       secret,
       now: clock(),
-      deliveries: linearDeliveries,
-      ...(hook.selfWrites === undefined ? {} : { selfWrites: hook.selfWrites }),
+      ...(hook.writes === undefined ? {} : { writes: hook.writes }),
     });
 
     if (outcome.kind === "rejected") {
@@ -2067,11 +2334,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
 
     // Persist first; following controls model turns, not inbox delivery.
-    dependencies.captain.receiveLinearActivity(
+    const ingested = dependencies.captain.receiveLinearActivity(
       outcome.activity,
       (await settingsSource.load()).linearWebhook.following,
     );
-    return context.json({ schemaVersion: 1 as const, ingested: true as const });
+    return context.json({ schemaVersion: 1 as const, ingested: ingested !== false });
   });
 
   // Mint a one-time pairing offer. The offer secret appears once in the
@@ -2434,6 +2701,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const body = await readJson(context.req.raw);
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (parsed.data.op === "connections") {
+      if (captain.steerSourceLane !== "api")
+        return context.json({ error: "operator_authority_required" }, 403);
+      try {
+        return context.json({
+          op: "connections",
+          schemaVersion: 1,
+          result: { outcome: "ready", inventory: await manageConnections(dependencies, parsed.data.command) },
+        });
+      } catch {
+        return context.json({
+          op: "connections",
+          schemaVersion: 1,
+          result: {
+            outcome: "refused",
+            message:
+              "Connection change or inventory unavailable. Refresh to inspect current state; check the host's connection diagnostics before retrying.",
+          },
+        });
+      }
+    }
     // Pane IDs are local to their source session, in both runtime modes.
     const binding = dependencies.herdrBinding?.();
     const sameHerdrSession =
@@ -2449,6 +2737,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     try {
       return context.json(await dependencies.captain.serveOperatorConversation(parsed.data));
     } catch (error) {
+      if (error instanceof HerdrUnavailableError)
+        return context.json({ error: "herdr_unavailable", message: error.message }, 503);
       if (error instanceof ConversationResetError)
         return context.json({ error: "reset_refused", message: error.message }, 409);
       throw error;
@@ -2644,6 +2934,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       pushDispatcher?.close();
       captainPresence.close();
       void laneMcp.close();
+      void dependencies.workerMcp?.close();
     },
   };
 }

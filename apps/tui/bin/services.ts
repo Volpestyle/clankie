@@ -205,8 +205,8 @@ const CLANKIE: ManagedService = {
    * prefix. Guild and channel allowlists are deliberately absent: settings.json
    * is their source of truth and `@clankie/settings` fills the unset env.
    *
-   * The captain token is half of the shared captain secret. Without it the
-   * service builds no captain authenticator and answers every dispatch call 401.
+   * The captain token preserves explicit launcher overrides. Direct service
+   * starts bootstrap the same credential from the broker.
    */
   serviceEnv: ({ env, repoRoot, captainToken }) => ({
     ...env,

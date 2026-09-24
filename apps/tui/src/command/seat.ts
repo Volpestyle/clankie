@@ -15,10 +15,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { readHerdrBinding } from "../session/herdr-connection.ts";
 import { clankieStateHome } from "../state-home.ts";
-import { outputJson, type Writable } from "./io.ts";
+import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const execFileAsync = promisify(execFileCallback);
-const SEAT_USAGE = "Usage: clankie seat [--resume] [--plugin-dir PATH] [--dry-run]";
+const SEAT_USAGE = "Usage: clankie seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -44,11 +45,13 @@ export interface SeatPlan {
   readonly channel: boolean;
   readonly sessionId: string;
   readonly resumed: boolean;
+  readonly conversationId?: string;
   readonly cwd: string;
   readonly herdrPaneId?: string;
 }
 
 interface SeatRecord {
+  readonly conversationId?: string;
   readonly sessionId: string;
   readonly cwd: string;
   readonly startedAt: string;
@@ -56,12 +59,20 @@ interface SeatRecord {
 
 export interface SeatCommandOptions {
   readonly repoRoot: string;
+  readonly host?: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly operatorCredentialStore?: CredentialStore;
   readonly env?: NodeJS.ProcessEnv;
   readonly execFileImpl?: (
     command: string,
     args: readonly string[],
   ) => Promise<{ readonly stdout: string; readonly stderr: string }>;
-  readonly spawnImpl?: (command: string, args: readonly string[], cwd: string) => Promise<number>;
+  readonly spawnImpl?: (
+    command: string,
+    args: readonly string[],
+    cwd: string,
+    env?: NodeJS.ProcessEnv,
+  ) => Promise<number>;
   readonly sleepImpl?: (ms: number) => Promise<void>;
   /** Test seam: the socket of the session the service leads; undefined when it cannot be read. */
   readonly fleetSocketPath?: () => Promise<string | undefined>;
@@ -70,12 +81,14 @@ export interface SeatCommandOptions {
 }
 
 interface SeatFlags {
+  readonly conversationId?: string;
   readonly resume: boolean;
   readonly dryRun: boolean;
   readonly pluginDir?: string;
 }
 
 export function parseSeatArgs(args: readonly string[]): SeatFlags {
+  let conversationId: string | undefined;
   let resume = false;
   let dryRun = false;
   let pluginDir: string | undefined;
@@ -83,14 +96,23 @@ export function parseSeatArgs(args: readonly string[]): SeatFlags {
     const arg = args[index];
     if (arg === "--resume") resume = true;
     else if (arg === "--dry-run") dryRun = true;
-    else if (arg === "--plugin-dir") {
+    else if (arg === "--conversation") {
+      const value = args[++index]?.trim();
+      if (!value || value.startsWith("--")) throw new Error(SEAT_USAGE);
+      conversationId = value;
+    } else if (arg === "--plugin-dir") {
       const value = args[index + 1];
       if (value === undefined || value.length === 0) throw new Error(SEAT_USAGE);
       pluginDir = value;
       index += 1;
     } else throw new Error(SEAT_USAGE);
   }
-  return { resume, dryRun, ...(pluginDir === undefined ? {} : { pluginDir }) };
+  return {
+    resume,
+    dryRun,
+    ...(conversationId === undefined ? {} : { conversationId }),
+    ...(pluginDir === undefined ? {} : { pluginDir }),
+  };
 }
 
 function seatRecordPath(env: NodeJS.ProcessEnv): string {
@@ -101,7 +123,12 @@ function readSeatRecord(env: NodeJS.ProcessEnv): SeatRecord | undefined {
   try {
     const parsed = JSON.parse(readFileSync(seatRecordPath(env), "utf8")) as Partial<SeatRecord>;
     return typeof parsed.sessionId === "string" && typeof parsed.cwd === "string"
-      ? { sessionId: parsed.sessionId, cwd: parsed.cwd, startedAt: parsed.startedAt ?? "" }
+      ? {
+          sessionId: parsed.sessionId,
+          cwd: parsed.cwd,
+          startedAt: parsed.startedAt ?? "",
+          ...(typeof parsed.conversationId === "string" ? { conversationId: parsed.conversationId } : {}),
+        }
       : undefined;
   } catch {
     return undefined;
@@ -122,9 +149,14 @@ async function defaultExecFile(
   return { stdout: String(result.stdout), stderr: String(result.stderr) };
 }
 
-function defaultSpawn(command: string, args: readonly string[], cwd: string): Promise<number> {
+function defaultSpawn(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [...args], { cwd, stdio: "inherit" });
+    const child = spawn(command, [...args], { cwd, stdio: "inherit", ...(env === undefined ? {} : { env }) });
     child.once("error", reject);
     child.once("exit", (code, signal) => resolve(code ?? (signal === null ? 1 : 128)));
   });
@@ -199,7 +231,33 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     throw new Error("No seat to resume; `clankie seat` first.");
   }
   const sessionId = previous?.sessionId ?? randomUUID();
-  const cwd = previous?.cwd ?? process.cwd();
+  if (
+    previous !== undefined &&
+    flags.conversationId !== undefined &&
+    flags.conversationId !== previous.conversationId
+  )
+    throw new Error("A resumed seat keeps its conversation; start a new seat to select another one.");
+  const conversationId = previous?.conversationId ?? flags.conversationId;
+  let cwd = previous?.cwd ?? process.cwd();
+  if (conversationId !== undefined) {
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (credential === undefined)
+      throw new Error("No operator credential is available; start Clankie first.");
+    const url = new URL("/v1/captain/seat-context", commandHost({ ...options, env }));
+    url.searchParams.set("conversationId", conversationId);
+    const response = await (options.fetchImpl ?? fetch)(url, {
+      headers: { authorization: `Bearer ${credential.token}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(`Seat conversation unavailable (${response.status})`);
+    const binding = (await response.json()) as { conversationId?: unknown; cwd?: unknown };
+    if (binding.conversationId !== conversationId || typeof binding.cwd !== "string" || !binding.cwd)
+      throw new Error("Invalid service seat context");
+    cwd = binding.cwd;
+  }
   // Channels are a research preview: the development flag is per plugin entry
   // and only a marketplace-installed plugin has one, so a checkout loaded with
   // --plugin-dir gets his tools and skills but not his wakes.
@@ -215,7 +273,8 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   ];
   // This pane is his head only inside the fleet the service leads (ADR 0164):
   // a seat opened in any other Herdr session names no pane there.
-  const paneId = env.HERDR_ENV === "1" ? env.HERDR_PANE_ID?.trim() : undefined;
+  const paneId =
+    conversationId === undefined && env.HERDR_ENV === "1" ? env.HERDR_PANE_ID?.trim() : undefined;
   const fleetSocket =
     paneId === undefined || paneId.length === 0
       ? undefined
@@ -231,6 +290,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     channel,
     sessionId,
     resumed: previous !== undefined,
+    ...(conversationId === undefined ? {} : { conversationId }),
     cwd,
     ...(herdrPaneId === undefined || herdrPaneId.length === 0 ? {} : { herdrPaneId }),
   };
@@ -283,11 +343,28 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
     return 0;
   }
   if (!plan.resumed) {
-    writeSeatRecord(env, { sessionId: plan.sessionId, cwd: plan.cwd, startedAt: new Date().toISOString() });
+    writeSeatRecord(env, {
+      sessionId: plan.sessionId,
+      cwd: plan.cwd,
+      startedAt: new Date().toISOString(),
+      ...(plan.conversationId === undefined ? {} : { conversationId: plan.conversationId }),
+    });
   }
   const execFile = options.execFileImpl ?? defaultExecFile;
   const sleep = options.sleepImpl ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-  const running = (options.spawnImpl ?? defaultSpawn)(plan.command, plan.args, plan.cwd);
+  // The service owns the lead actor. A portal never inherits a worker's Swarm
+  // session from the terminal it happened to launch in.
+  const seatEnv = { ...env };
+  for (const key of Object.keys(seatEnv)) if (key.startsWith("SWARM_")) delete seatEnv[key];
+  delete seatEnv.CLANKIE_CONVERSATION_ID;
+  seatEnv.CLANKIE_SEAT_SESSION_ID = plan.sessionId;
+  if (plan.conversationId !== undefined) seatEnv.CLANKIE_CONVERSATION_ID = plan.conversationId;
+  const running = (options.spawnImpl ?? defaultSpawn)(
+    plan.command,
+    [...plan.args, "--permission-mode", "auto"],
+    plan.cwd,
+    seatEnv,
+  );
   const claim =
     plan.herdrPaneId === undefined
       ? Promise.resolve()

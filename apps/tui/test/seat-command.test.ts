@@ -1,3 +1,4 @@
+import type { CredentialStore } from "@clankie/credential-broker";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -161,17 +162,19 @@ describe("clankie seat", () => {
       HERDR_ENV: "1",
       HERDR_PANE_ID: "w1:p2",
       HERDR_SOCKET_PATH: "/tmp/fleet.sock",
+      SWARM_SESSION_CAPABILITY: "inherited-worker",
+      SWARM_COORDINATOR_ENDPOINT: "/tmp/other-coordinator.sock",
     });
     const calls: string[][] = [];
-    const spawned: { args: readonly string[]; cwd: string }[] = [];
+    const spawned: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv | undefined }[] = [];
     const stderr = outputBuffer();
     const exit = await runSeatCommand([], {
       repoRoot,
       env,
       execFileImpl: fakeExec({ paneAgent: "claude", calls }),
       fleetSocketPath: async () => "/tmp/fleet.sock",
-      spawnImpl: async (_command, args, cwd) => {
-        spawned.push({ args, cwd });
+      spawnImpl: async (_command, args, cwd, childEnv) => {
+        spawned.push({ args, cwd, env: childEnv });
         return 0;
       },
       sleepImpl: async () => undefined,
@@ -189,6 +192,12 @@ describe("clankie seat", () => {
     const sessionArg = spawned[0]!.args[spawned[0]!.args.indexOf("--session-id") + 1];
     expect(record.sessionId).toBe(sessionArg);
     expect(record.cwd).toBe(spawned[0]!.cwd);
+    expect(spawned[0]!.args).toContain("auto");
+    expect(spawned[0]!.env?.SWARM_SESSION_CAPABILITY).toBeUndefined();
+    expect(spawned[0]!.env?.SWARM_COORDINATOR_ENDPOINT).toBeUndefined();
+    expect(spawned[0]!.args).not.toContain("--mcp-config");
+    expect(spawned[0]!.args.join(" ")).not.toContain("inherited-worker");
+    expect(env.SWARM_SESSION_CAPABILITY).toBe("inherited-worker");
 
     const resumed = await planSeat(
       { resume: true, dryRun: true },
@@ -251,4 +260,48 @@ describe("clankie seat", () => {
       planSeat({ resume: true, dryRun: true }, { repoRoot, env, execFileImpl: fakeExec({}) }),
     ).rejects.toThrow("No seat to resume");
   });
+});
+
+it("selects service project context, preserves it on resume and strips inherited selection", async () => {
+  const env = await stateEnv({ CLANKIE_CONVERSATION_ID: "inherited-worker-project" });
+  const requests: string[] = [];
+  const launches: Array<{ cwd: string; conversationId?: string }> = [];
+  const options = {
+    repoRoot,
+    env,
+    execFileImpl: fakeExec({}),
+    operatorCredentialStore: {
+      get: async () => ({ type: "api", key: `clankie_op_${"a".repeat(43)}` }),
+    } as unknown as CredentialStore,
+    fetchImpl: (async (url: URL) => {
+      requests.push(url.searchParams.get("conversationId")!);
+      return Response.json({ conversationId: "project-a", cwd: "/selected/project-a" });
+    }) as typeof fetch,
+    spawnImpl: async (
+      _command: string,
+      _args: readonly string[],
+      cwd: string,
+      childEnv?: NodeJS.ProcessEnv,
+    ) => {
+      launches.push({
+        cwd,
+        ...(childEnv?.CLANKIE_CONVERSATION_ID === undefined
+          ? {}
+          : { conversationId: childEnv.CLANKIE_CONVERSATION_ID }),
+      });
+      return 0;
+    },
+  };
+  await runSeatCommand(["--conversation", "project-a"], options);
+  await runSeatCommand(["--resume"], options);
+  expect(requests).toEqual(["project-a", "project-a"]);
+  expect(launches).toEqual([
+    { cwd: "/selected/project-a", conversationId: "project-a" },
+    { cwd: "/selected/project-a", conversationId: "project-a" },
+  ]);
+  await expect(runSeatCommand(["--resume", "--conversation", "project-b"], options)).rejects.toThrow(
+    "keeps its conversation",
+  );
+  await runSeatCommand([], options);
+  expect(launches.at(-1)?.conversationId).toBeUndefined();
 });

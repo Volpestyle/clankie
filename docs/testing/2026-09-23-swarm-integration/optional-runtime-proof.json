@@ -1,0 +1,19 @@
+{
+  "checkedAt": "2026-09-23T23:18:15.687Z",
+  "node": "v24.21.0",
+  "execution": "isolated real service process",
+  "path": "/usr/bin:/bin",
+  "runtime": "disabled",
+  "health": {
+    "ok": true,
+    "service": "clankie",
+    "herdr": "disabled",
+    "doorway": {
+      "state": "disabled"
+    }
+  },
+  "bindingStatus": 503,
+  "swarmStatus": 200,
+  "conversationStatus": 200,
+  "productionRestarted": false
+}

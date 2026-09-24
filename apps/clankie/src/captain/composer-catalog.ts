@@ -141,10 +141,7 @@ function discoverCodexSkills(cwd: string): Promise<OperatorComposerCatalog["skil
   });
 }
 
-export function captainComposerCatalog(input: {
-  readonly cwd: string;
-  readonly repoRoot: string;
-}): OperatorComposerCatalog {
+export function captainSkills(input: { readonly cwd: string; readonly repoRoot: string }) {
   const agentDir = getAgentDir();
   // The same roots his session loads, so the composer offers what he can run.
   const skillPaths = clankieSkillRoots({
@@ -159,10 +156,17 @@ export function captainComposerCatalog(input: {
     skillPaths,
     includeDefaults: false,
   });
+  return skills;
+}
+
+export function captainComposerCatalog(input: {
+  readonly cwd: string;
+  readonly repoRoot: string;
+}): OperatorComposerCatalog {
   return {
     schemaVersion: 1,
     commands: [],
-    skills: catalogSkills(skills, "clankie", (name) => `/skill:${name}`),
+    skills: catalogSkills(captainSkills(input), "clankie", (name) => `/skill:${name}`),
   };
 }
 

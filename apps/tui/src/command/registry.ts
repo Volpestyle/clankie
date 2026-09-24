@@ -1,6 +1,36 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["connections"],
+    lines: ["  connections              Inspect runtime, Swarm and connected-account inventory (JSON)"],
+  },
+  {
+    nouns: ["runtime"],
+    lines: [
+      "  runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID",
+      "                           Manage named execution connections (JSON)",
+    ],
+  },
+  {
+    nouns: ["seat-sync"],
+    lines: ["  seat-sync                Project the launched Claude seat transcript (hook stdin)"],
+  },
+  {
+    nouns: ["access"],
+    lines: [
+      "  access list | issue REQUEST.json (--out GRANT.json | --deliver swarm) | revoke ID | linear [verify]",
+      "                           Delegate connected MCP tools to a worker (JSON)",
+    ],
+  },
+  {
+    nouns: ["swarm"],
+    lines: [
+      "  swarm [status|connections] | connect PRIVATE.json | disconnect ID",
+      "  swarm contacts | thread PERSONA | message PERSONA TEXT",
+      "                           Inspect or connect an authorized Swarm coordinator (JSON)",
+    ],
+  },
+  {
     nouns: ["evaluator"],
     lines: [
       "  evaluator [status|enable [--harness codex|claude]|disable|open|retry ID]",
@@ -112,6 +142,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["linear"],
     lines: [
       "  linear [status] | follow on|off | inbox [read | ack CURSOR]  Linear awareness and unread activity",
+      "  linear work list | bind ORG ISSUE CONVERSATION [--from ID] | unbind ORG ISSUE CONVERSATION",
     ],
   },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
@@ -136,9 +167,9 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["herdr"],
     lines: [
-      "  herdr [status|open] | set --runtime auto|bundled|external | set --session NAME",
+      "  herdr [status|open|disable] | set --runtime auto|bundled|external|disabled | set --session NAME",
       "                           Bundled runtime or an external Herdr session",
-      "  herdr <herdr command>    Run it against the fleet's own runtime (clankie-herdr …)",
+      "  herdr [--connection ID] <herdr command>    Run against a selected runtime",
     ],
   },
   {
@@ -190,15 +221,18 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["seat"],
     lines: [
-      "  seat [--resume] [--plugin-dir PATH] [--dry-run]",
+      "  seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
       "                           Sit in Claude Code as Clankie (TTY); --dry-run prints the launch plan (JSON)",
     ],
   },
   {
     nouns: ["mcp"],
     lines: [
-      "  mcp [--lane operator]    Serve Clankie's lane tool bank over stdio for a seated harness",
+      "  mcp [--lane operator] [--conversation ID] Serve Clankie's lane tool bank over stdio for a seated harness",
       "  mcp --seat               Serve a fleet pane's message channel over stdio (no tools)",
+      "  mcp --grant FILE         Serve only a worker's granted connected tools over stdio",
+      "  mcp --swarm              Serve an enrolled worker's explicit grants; no operator access",
+      "  mcp --swarm-grant ID     Retrieve a worker grant using its enrolled Swarm session",
     ],
   },
   {

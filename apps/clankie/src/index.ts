@@ -1,9 +1,11 @@
+import { SwarmHost } from "@clankie/swarm";
+import { WorkerMcp } from "./worker-mcp.ts";
 /**
  * Composition root for the merged Clankie service: the surviving control-plane
  * surface plus its in-process capabilities (play host, browser,
  * activity observation), one process, one port (4310).
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -25,6 +27,7 @@ import {
   ensureDiscordUserVoiceBridgeCredential,
   ensureDiscordVoiceBridgeCredential,
   ensureOperatorCredential,
+  ensureCaptainCredential,
   resolvePublicGatewayCredential,
 } from "@clankie/credential-broker";
 import { createLogger } from "@clankie/observability";
@@ -38,8 +41,7 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
-import { resolveHerdrBinding } from "./herdr-session.ts";
-import { startHerdrRuntime, watchHerdrSocket } from "./herdr-runtime.ts";
+import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "./world/session.ts";
@@ -51,7 +53,7 @@ import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
-import { LinearSelfWriteMemory, recordLinearWrite } from "./linear-webhook.ts";
+import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -102,38 +104,13 @@ const settingsFilledNames = [
 const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
 // Workers inherit private Herdr XDG paths; Clankie commands still use this owner settings file.
 process.env.CLANKIE_SETTINGS_FILE = settingsStore.path;
-// The binding is chosen fresh at every start and never written back
-// (ADR 0170): settings carry the owner's intent, `GET /v1/herdr` and
-// `clankie herdr status` carry what is live.
-let herdrBinding = await resolveHerdrBinding(startupSettings.herdr);
-let herdrRuntime =
-  herdrBinding.runtime === "external"
-    ? undefined
-    : await startHerdrRuntime({ repoRoot, stateRoot, env: process.env });
-// A bound session that stops takes his fleet with it, so he unbinds and falls
-// back to his own runtime rather than leading a socket nobody answers.
-const herdrWatch =
-  herdrBinding.runtime === "external" && process.env.HERDR_SOCKET_PATH !== undefined
-    ? watchHerdrSocket({
-        socketPath: process.env.HERDR_SOCKET_PATH,
-        onLost: () => {
-          const stopped = { session: herdrBinding.session, socketPath: process.env.HERDR_SOCKET_PATH };
-          void startHerdrRuntime({ repoRoot, stateRoot, env: process.env }).then(
-            (runtime) => {
-              herdrRuntime = runtime;
-              herdrBinding = { runtime: "bundled", session: herdrBinding.session };
-              logger.warn(stopped, "herdr session stopped; the fleet fell back to Clankie's own runtime");
-            },
-            (error: unknown) => {
-              logger.error(
-                { ...stopped, error: error instanceof Error ? error.message : String(error) },
-                "herdr session stopped and his own runtime would not start; the fleet is unavailable",
-              );
-            },
-          );
-        },
-      })
-    : undefined;
+const herdr = await startHerdrConnection({
+  settings: startupSettings.herdr,
+  repoRoot,
+  stateRoot,
+  env: process.env,
+  warn: (message) => logger.warn({ event: "herdr.unavailable" }, message),
+});
 // Keep the existing on-disk directory so browser profiles survive the process merge.
 const capabilityStateRoot = join(stateRoot, "runner");
 const eventLogPath = process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "events.jsonl");
@@ -267,17 +244,15 @@ const authenticateDiscordUserVoiceBridge = createBearerAuthenticator(discordUser
   steerSourceLane: "discord_voice" as const,
   discordTransportKind: "user_session" as const,
 });
-const captainToken = process.env.CLANKIE_CAPTAIN_TOKEN;
+const captainToken = (await ensureCaptainCredential({ env: process.env, store: operatorCredentialStore }))
+  .token;
 const captainSteerSourceLane = parseCaptainSteerSourceLane(
   process.env.CLANKIE_CAPTAIN_STEER_SOURCE_LANE ?? "api",
 );
-const authenticateConfiguredCaptain =
-  captainToken === undefined
-    ? undefined
-    : createBearerAuthenticator(captainToken, {
-        captainId: "captain-clankie",
-        steerSourceLane: captainSteerSourceLane,
-      });
+const authenticateConfiguredCaptain = createBearerAuthenticator(captainToken, {
+  captainId: "captain-clankie",
+  steerSourceLane: captainSteerSourceLane,
+});
 
 const deviceSessionKeyPath = process.env.CLANKIE_DEVICE_SESSION_KEY_PATH
   ? resolve(process.env.CLANKIE_DEVICE_SESSION_KEY_PATH)
@@ -380,14 +355,14 @@ const boundApp = (): ClankieApp => {
 // His connected services (ADR 0109). Servers are connected up front so no turn
 // pays for a handshake; one that is unreachable costs him that server's tools
 // and nothing else.
-// What he writes to Linear is remembered briefly so the webhook about it is
-// dropped at ingress rather than waking him about his own post (ADR 0168).
-const linearSelfWrites = new LinearSelfWriteMemory();
+// Durable revision receipts distinguish captain echoes from delegated worker
+// activity without hiding another writer's changes to the same issue (ADR 0168).
+const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 const mcpHost = createMcpHost({
   credentials: operatorCredentialStore,
   settings: settingsStore,
   logger,
-  observeCall: (call) => recordLinearWrite(linearSelfWrites, call, new Date()),
+  observeCall: (call) => linearWrites.record(call, new Date()),
 });
 await mcpHost.warm();
 
@@ -397,8 +372,28 @@ const email = createEmailPort({
 });
 
 const rivals = createRivalsClient({ settings: settingsStore, credentials: operatorCredentialStore });
+const compiledWorkerCli = join(repoRoot, "apps/tui/bin/clankie.js");
+const runtimes = new ExecutionConnections({ settings: settingsStore, primary: herdr });
+const swarm = new SwarmHost({
+  stateDirectory: join(stateRoot, "swarm"),
+  connections: { settings: settingsStore, credentials: operatorCredentialStore },
+  socketPath: herdr.binding()?.socketPath,
+  runtimeConnections: () => runtimes.list(),
+  workerMcp: {
+    command: process.execPath,
+    args: [
+      existsSync(compiledWorkerCli) ? compiledWorkerCli : compiledWorkerCli.replace(/\.js$/u, ".ts"),
+      "mcp",
+      "--swarm",
+    ],
+    env: { CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${String(port)}` },
+  },
+  warn: (message) => logger.warn({ event: "swarm.unavailable" }, message),
+});
 const captain = createCaptain(
   {
+    herdrAvailable: herdr.available,
+    runtimes,
     mcp: mcpHost,
     email,
     rivals,
@@ -538,6 +533,7 @@ const captain = createCaptain(
       ? {}
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
+    swarm,
     settings: settingsStore,
     deliveredFiles,
     discordEnvironment: captainDiscordEnvironment,
@@ -548,16 +544,18 @@ const captain = createCaptain(
 );
 
 const clankie = await createClankieApp({
-  captain,
-  deliveredFiles,
-  // Read through, both of them: a fallback after a session stops must reach
-  // every client that asks which Herdr is his, and its health, without a restart.
-  herdrRuntime: () => herdrRuntime?.status(),
-  herdrBinding: () => ({
-    runtime: herdrBinding.runtime === "external" ? "external" : "bundled",
-    session: herdrBinding.session,
-    socketPath: process.env.HERDR_SOCKET_PATH!,
+  workerMcp: new WorkerMcp({
+    directory: join(stateRoot, "worker-grants"),
+    credentials: operatorCredentialStore,
+    host: mcpHost,
+    swarm,
   }),
+  captain,
+  swarm,
+  deliveredFiles,
+  herdrRuntime: herdr.status,
+  herdrBinding: herdr.binding,
+  runtimes,
   memory,
   settings: settingsStore,
   mediaGenerator,
@@ -610,10 +608,11 @@ const clankie = await createClankieApp({
       const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
       return credential?.type === "api" ? credential.key : undefined;
     },
-    selfWrites: linearSelfWrites,
+    writes: linearWrites,
   },
 });
 clankieRef = clankie;
+if (startupSettings.linearWebhook.following) captain.resumeLinearActivity();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.
@@ -684,8 +683,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await captain.close().catch(() => undefined);
-    herdrWatch?.close();
-    await herdrRuntime?.close();
+    await herdr.close();
     await browserHost?.close().catch(() => undefined);
     await mcpHost.close().catch(() => undefined);
     clankie.close();

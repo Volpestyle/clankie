@@ -3,6 +3,10 @@
 Clankie is one service plus the surfaces that reach it. The service owns the
 captain (a [pi](https://pi.dev)-based agent with durable sessions), his tools,
 his game bodies, and the HTTP API every surface speaks.
+[ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md) defines how
+portals, runtime connections, Swarm and optional trackers compose. The
+[Swarm host README](../packages/swarm/README.md#connection-contract-status) records
+current support and the implementation sequence.
 
 ```mermaid
 flowchart LR
@@ -28,6 +32,10 @@ flowchart LR
   Harness["every other harness"] --> OtherParent["parent conversation"] --> OtherDriver["driver: MCP Task · subagent · CLI"] --> Doors["@pokeagents/world-mcp<br/>world-cli · pokeagent-mmo skill"] --> OtherSeat["its own seat"]
   Service --> State["Keychain + bounded local state"]
   Service --> External["models, browser, Linear, email, Herdr"]
+  Service <--> Swarm["per-conversation Swarm MCP actors<br/>durable coordinator per repository"]
+  Swarm <--> Workers["enrolled agents"]
+  Swarm --> Dispatch["trusted Herdr route<br/>Claude stream workers"]
+  Dispatch --> Workers
 ```
 
 This Mermaid diagram, [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md),
@@ -288,23 +296,16 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   screen, so he can hand over the window for a signup, a CAPTCHA, or a phone
   check rather than grinding at it. A headed session is exempt from the
   browser's idle timeout ([ADR 0127](adr/0127-his-accounts-are-his.md)).
-- **Leading agents.** Clankie leads coding agents through the herdr CLI over
-  bash, guided by skills — there is no worker protocol. The service is his
-  durable body. On first startup, `auto` starts the private bundled runtime
-  and saves the binding; the fleet is Clankie's own session, never one the
-  service was launched inside, and a pane joins it by being created there
-  ([ADR 0164](adr/0164-the-fleet-is-its-own-session.md)). Every later console
-  and restart follows that choice; a session the owner named selects an
-  external one ([ADR 0157](adr/0157-herdr-is-an-owned-runtime.md)).
-  The service subscribes to the chosen socket's native events to wake fleet
-  readers across all of its workspaces
-  ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)). Any
-  operator turn whose session is up attaches a live agent census so he can
-  lead, route, and harvest without rediscovering the room; a turn from the
-  operator console sitting in a pane is additionally a join — that pane is
-  him. The herdr-lead board is the companion dashboard
-  ([ADR 0097](adr/0097-herdr-lead-is-the-companion-dashboard.md)). Agents
-  coordinate through herdr and plain files.
+- **Leading agents.** Swarm MCP owns cross-session messages and task ownership,
+  guided by `lead` and `swarm-lead`. The per-conversation host and supported
+  worker delivery paths live in [the Swarm package](../packages/swarm/README.md).
+  Herdr supplies terminals and process control for the built-in worker route;
+  `herdr-lead` is the explicit fallback for unenrolled agents. The service's
+  selected runtime supplies every console's fleet view. Current binding and
+  fallback behavior live in [the CLI reference](cli.md#herdr-statusopencreate--herdr-use-name).
+  Native Herdr events wake fleet readers across workspaces
+  ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)); the optional herdr-lead
+  board is a view, not a second coordination authority.
 - **His body.** `runFreePlay` drives one seam, `GbaDriverIo`
   ([`packages/play`](../packages/play/README.md)); its mind, voice, progress,
   learned transitions, and behavior loop hold no emulator and never learn what
@@ -411,8 +412,9 @@ Clankie uses pi's `ModelRuntime` and `createAgentSession` for the captain's
 models, sessions, tools, skills, and compaction. The captain, HTTP surface, and
 play host share one service
 ([ADR 0101](adr/0101-pi-owns-the-captain-model-runtime.md)).
-Herdr exposes the coding-agent fleet as visible panes coordinated through its CLI
-and plain files. Untrusted input stays fenced, secrets stay in the credential
+Swarm owns cross-session task coordination and messages. Herdr exposes the
+current built-in workers as visible panes through its CLI; `herdr-lead` supplies
+the fallback for unenrolled agents. Untrusted input stays fenced, secrets stay in the credential
 broker, and every report describes observed outcomes rather than intentions.
 
 [`adr/`](adr/) records the active decisions for play mechanics, voice, presence,

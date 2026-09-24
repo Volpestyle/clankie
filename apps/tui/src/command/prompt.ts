@@ -13,12 +13,12 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { CaptainSessionLaneV2Schema, type CaptainSessionLaneV2 } from "@clankie/protocol";
 import { commandHost, type Writable } from "./io.ts";
 
-const PROMPT_SECTIONS = ["identity", "persona", "reach", "address", "model"] as const;
+const PROMPT_SECTIONS = ["identity", "persona", "reach", "fleet", "address", "model"] as const;
 const LANES = CaptainSessionLaneV2Schema.options;
 const LANE_READ_TIMEOUT_MS = 10_000;
 
 const PROMPT_USAGE = [
-  `Usage: clankie prompt [--lane <${LANES.join("|")}>] [--sections <${PROMPT_SECTIONS.join(",")}>]`,
+  `Usage: clankie prompt [--lane <${LANES.join("|")}>] [--sections <${PROMPT_SECTIONS.join(",")}>] [--conversation ID]`,
   "",
   "Prints the system prompt that lane's session starts from. Default lane: operator.",
 ].join("\n");
@@ -84,12 +84,18 @@ export async function runPromptCommand(
 ): Promise<number> {
   let lane: CaptainSessionLaneV2 = "operator";
   let sections: string | undefined;
+  let conversationId = (options.env ?? process.env).CLANKIE_CONVERSATION_ID;
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
     const value = args[index + 1];
     if (value === undefined) throw new Error(PROMPT_USAGE);
     if (flag === "--lane") {
       lane = parseLane(value, PROMPT_USAGE);
+      continue;
+    }
+    if (flag === "--conversation") {
+      if (!value.trim() || value.startsWith("--")) throw new Error(PROMPT_USAGE);
+      conversationId = value.trim();
       continue;
     }
     if (flag === "--sections") {
@@ -100,7 +106,11 @@ export async function runPromptCommand(
   }
   return await readLaneText(
     "/v1/captain/prompt",
-    { lane, ...(sections === undefined ? {} : { sections }) },
+    {
+      lane,
+      ...(sections === undefined ? {} : { sections }),
+      ...(conversationId === undefined ? {} : { conversationId }),
+    },
     options,
   );
 }

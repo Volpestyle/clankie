@@ -28,27 +28,35 @@ describe("the Herdr the service leads", () => {
     });
   });
 
-  it("is the session he was launched inside, named as Herdr names it (ADR 0170)", async () => {
-    const env: NodeJS.ProcessEnv = current();
-    expect(await resolveHerdrBinding(settings, env, runner(["/tmp/current.sock"]))).toEqual({
-      runtime: "external",
-      session: "default",
-      socketPath: "/tmp/current.sock",
-    });
-    expect(env.HERDR_PANE_ID).toBeUndefined();
-    expect(env.HERDR_SOCKET_PATH).toBe("/tmp/current.sock");
-  });
+  it.each([undefined, "/tmp/current.sock", "/tmp/other.sock"])(
+    "uses the owned runtime regardless of launch socket %s",
+    async (launchSocket) => {
+      const env: NodeJS.ProcessEnv = { ...current(), HERDR_SOCKET_PATH: launchSocket };
+      expect(
+        await resolveHerdrBinding(settings, env, async () => {
+          throw new Error("an unnamed runtime must not probe ambient sessions");
+        }),
+      ).toEqual({ runtime: "bundled", session: "default" });
+      expect(env.HERDR_PANE_ID).toBeUndefined();
+      expect(env.HERDR_SOCKET_PATH).toBeUndefined();
+    },
+  );
 
-  it("is the session the owner named, over the terminal he happened to start in", async () => {
-    const env: NodeJS.ProcessEnv = current();
-    const named = { ...settings, runtime: "external", session: "chosen" } as const;
-    expect(await resolveHerdrBinding(named, env, runner(["/tmp/current.sock", "/tmp/chosen.sock"]))).toEqual({
-      runtime: "external",
-      session: "chosen",
-      socketPath: "/tmp/chosen.sock",
-    });
-    expect(env.HERDR_SOCKET_PATH).toBe("/tmp/chosen.sock");
-  });
+  it.each([undefined, "/tmp/current.sock", "/tmp/other.sock"])(
+    "keeps the named session with launch socket %s",
+    async (launchSocket) => {
+      const env: NodeJS.ProcessEnv = { ...current(), HERDR_SOCKET_PATH: launchSocket };
+      const named = { ...settings, runtime: "external", session: "chosen" } as const;
+      expect(
+        await resolveHerdrBinding(named, env, runner(["/tmp/current.sock", "/tmp/chosen.sock"])),
+      ).toEqual({
+        runtime: "external",
+        session: "chosen",
+        socketPath: "/tmp/chosen.sock",
+      });
+      expect(env.HERDR_SOCKET_PATH).toBe("/tmp/chosen.sock");
+    },
+  );
 
   it("never leaves his own runtime when the owner asked for it", async () => {
     expect(
@@ -60,15 +68,14 @@ describe("the Herdr the service leads", () => {
 });
 
 describe("a bound session that is not there", () => {
-  it("falls back to the session he was launched inside, and never refuses the boot", async () => {
+  it("falls back to his own runtime when the named session is down, ignoring a live launch session", async () => {
     const named = { runtime: "external", session: "chosen", socketPath: "/tmp/chosen.sock" } as const;
     const env: NodeJS.ProcessEnv = current();
     expect(await resolveHerdrBinding(named, env, runner(["/tmp/current.sock"]))).toEqual({
-      runtime: "external",
-      session: "default",
-      socketPath: "/tmp/current.sock",
+      runtime: "bundled",
+      session: "chosen",
     });
-    expect(env.HERDR_SOCKET_PATH).toBe("/tmp/current.sock");
+    expect(env.HERDR_SOCKET_PATH).toBeUndefined();
   });
 
   it("falls back to his own runtime when nothing else answers", async () => {
@@ -89,7 +96,7 @@ describe("a bound session that is not there", () => {
 
   it("reads an answerless snapshot as a session that is not there", async () => {
     expect(
-      await resolveHerdrBinding(settings, current(), async (_command, args) =>
+      await resolveHerdrBinding({ ...settings, runtime: "external" }, current(), async (_command, args) =>
         args[0] === "session" ? { stdout: sessions } : { stdout: '{"error":{}}' },
       ),
     ).toEqual({ runtime: "bundled", session: "default" });

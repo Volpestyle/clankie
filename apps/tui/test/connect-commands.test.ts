@@ -65,17 +65,30 @@ describe("email presets", () => {
 
 describe("linear probe", () => {
   it("maps a viewer payload and surfaces GraphQL errors", async () => {
-    const ok = await probeLinearKey("lin_api_test", async () =>
-      Response.json({
-        data: { viewer: { name: "Ada" }, organization: { name: "Acme" } },
-      }),
-    );
-    expect(ok).toEqual({ ok: true, viewer: "Ada · Acme" });
+    const ok = await probeLinearKey("lin_api_test", async (_url, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("lin_api_test");
+      return Response.json({
+        data: {
+          viewer: { id: "u1", name: "Ada", email: "ada@example.com" },
+          organization: { id: "w1", name: "Acme" },
+        },
+      });
+    });
+    expect(ok).toMatchObject({
+      ok: true,
+      viewer: "Ada (ada@example.com) · Acme",
+      account: { userId: "u1", workspaceId: "w1", email: "ada@example.com" },
+    });
 
     const failed = await probeLinearKey("lin_api_test", async () =>
       Response.json({ errors: [{ message: "invalid key" }] }),
     );
     expect(failed).toEqual({ ok: false, detail: "invalid key" });
+    expect(
+      await probeLinearKey("key", async () =>
+        Response.json({ data: { viewer: { name: "Ada" }, organization: { name: "Acme" } } }),
+      ),
+    ).toMatchObject({ ok: false });
   });
 });
 

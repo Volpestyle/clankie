@@ -47,6 +47,7 @@ export class HerdrTerminalControlStore {
 
   public constructor(
     options: {
+      readonly env?: NodeJS.ProcessEnv;
       readonly log?: HerdrTerminalControlLog;
       readonly startController?: StartHerdrTerminalController;
       readonly readGrid?: ReadHerdrTerminalGrid;
@@ -58,8 +59,9 @@ export class HerdrTerminalControlStore {
     // Default to the service log stream: these lines are the only record of
     // which control action a surface sent and what it got back.
     this.log = options.log ?? ((fields) => console.info(JSON.stringify({ service: "clankie", ...fields })));
-    this.startController = options.startController ?? startHerdrTerminalController;
-    this.readGrid = options.readGrid ?? ((terminalId) => readTerminalGrid(terminalId));
+    this.startController =
+      options.startController ?? ((id, grid) => startHerdrTerminalController(id, grid, options.env));
+    this.readGrid = options.readGrid ?? ((terminalId) => readTerminalGrid(terminalId, options));
     this.leaseTtlMs = options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
     this.maxControllers = options.maxControllers ?? DEFAULT_MAX_CONTROLLERS;
     this.clock = options.clock ?? Date.now;
@@ -309,9 +311,11 @@ function unavailableControl(
 function startHerdrTerminalController(
   terminalId: string,
   grid: HerdrPaneGrid | undefined,
+  env?: NodeJS.ProcessEnv,
 ): HerdrTerminalController {
   const geometry = grid === undefined ? [] : ["--cols", String(grid.columns), "--rows", String(grid.rows)];
   const child = spawn("herdr", ["terminal", "session", "control", terminalId, ...geometry], {
+    env,
     stdio: ["pipe", "pipe", "ignore"],
   });
   // The control stream echoes rendered frames; drain them so the pipe never

@@ -1,0 +1,171 @@
+{
+  "scenario": "Live Claude/Herdr worker receives and loses explicit connected-tool access",
+  "root": "<isolated worktree>",
+  "session": "grant-proof-17456ef7",
+  "calls": [
+    {
+      "name": "record",
+      "args": {
+        "issueId": "fixture-issue",
+        "marker": "GRANT_WORKS"
+      }
+    }
+  ],
+  "http": [
+    {
+      "method": "initialize",
+      "at": 1790213902340
+    },
+    {
+      "method": "notifications/initialized",
+      "at": 1790213902350
+    },
+    {
+      "method": "tools/list",
+      "at": 1790213902361,
+      "tools": []
+    },
+    {
+      "method": "tools/list",
+      "at": 1790213924798,
+      "tools": ["fixture_record"]
+    },
+    {
+      "method": "tools/call",
+      "at": 1790213930517,
+      "tool": "fixture_record",
+      "isError": false
+    },
+    {
+      "method": "tools/list",
+      "at": 1790213939895,
+      "tools": []
+    },
+    {
+      "method": "ping",
+      "at": 1790213962356
+    }
+  ],
+  "messages": [
+    {
+      "version": 1,
+      "id": "9ccc4713-46cd-48eb-87a9-e14df49e154f",
+      "sender": "1b1c7839-da4f-4835-a762-abe80366493b",
+      "recipient": "4264cc6d-0f02-4b2f-a8e3-cba11a1a7553",
+      "kind": "question",
+      "body": "READY_FOR_GRANT",
+      "taskId": "a96fe6bd-dbf6-4781-acd2-14d823f4394c",
+      "threadId": "a96fe6bd-dbf6-4781-acd2-14d823f4394c",
+      "createdAt": 1790213921993,
+      "expiresAt": null,
+      "idempotencyKey": "q-ready-for-grant-a96fe6bd",
+      "audience": "direct"
+    },
+    {
+      "version": 1,
+      "id": "7cea495d-d49a-41ca-81bf-7f7974e36fae",
+      "sender": "1b1c7839-da4f-4835-a762-abe80366493b",
+      "recipient": "4264cc6d-0f02-4b2f-a8e3-cba11a1a7553",
+      "kind": "question",
+      "body": "READY_FOR_REVOCATION",
+      "taskId": "a96fe6bd-dbf6-4781-acd2-14d823f4394c",
+      "threadId": "a96fe6bd-dbf6-4781-acd2-14d823f4394c",
+      "createdAt": 1790213936871,
+      "expiresAt": null,
+      "idempotencyKey": "q-ready-for-revocation-a96fe6bd",
+      "audience": "direct"
+    },
+    {
+      "version": 1,
+      "id": "2c3f7b42-5b81-4109-8862-0e348e34fbf9",
+      "sender": "1b1c7839-da4f-4835-a762-abe80366493b",
+      "recipient": "4264cc6d-0f02-4b2f-a8e3-cba11a1a7553",
+      "kind": "completion_notice",
+      "body": "Task a96fe6bd completed. GRANT_WORKS recorded once via clankie_worker fixture_record; after REVOKED the tool is absent from the catalog (no restart, no bypass). proof.txt artifact: swarm://artifacts/55515033-31c5-440f-ba48-aac57687c887",
+      "taskId": "a96fe6bd-dbf6-4781-acd2-14d823f4394c",
+      "threadId": "a96fe6bd-dbf6-4781-acd2-14d823f4394c",
+      "createdAt": 1790213975919,
+      "expiresAt": null,
+      "idempotencyKey": "done-a96fe6bd",
+      "audience": "direct"
+    }
+  ],
+  "runtime": {
+    "herdr": "herdr 0.9.1",
+    "claude": "2.1.281 (Claude Code)"
+  },
+  "assignment": {
+    "status": "bound",
+    "taskId": "a96fe6bd-dbf6-4781-acd2-14d823f4394c",
+    "attemptId": "9ff10f7a-4d0e-4525-a501-0c4efbe00148",
+    "fence": 1,
+    "existing": false
+  },
+  "emptyBeforeGrant": true,
+  "grantId": "893fbfc9-70cd-4099-a1b4-9602884454b0",
+  "provenance": {
+    "grantId": "893fbfc9-70cd-4099-a1b4-9602884454b0",
+    "principalId": "1b1c7839-da4f-4835-a762-abe80366493b",
+    "workId": "fixture-issue"
+  },
+  "revokedAt": 1790213939890,
+  "task": {
+    "taskId": "a96fe6bd-dbf6-4781-acd2-14d823f4394c",
+    "scope": "145de2d3ae721ec9e4273da35328f6f407fc465ad8a3e55f2b02fe204d403bf4",
+    "title": "Exercise delegated fixture tool",
+    "status": "completed",
+    "version": 3,
+    "creator": "4264cc6d-0f02-4b2f-a8e3-cba11a1a7553",
+    "createdAt": 1790213901053,
+    "updatedAt": 1790213970008,
+    "contract": {
+      "objective": "Isolated integration test. You are not alone; preserve all other files. Read the supplied swarm-mcp skill, sync, and acknowledge your assignment. Send a Swarm question to 4264cc6d-0f02-4b2f-a8e3-cba11a1a7553 with body READY_FOR_GRANT and end your turn. Do not poll. When the reply GRANT_READY arrives, discover and call the clankie_worker MCP tool fixture_record with issueId=fixture-issue and marker=GRANT_WORKS. Use only that tool for the write, no shell HTTP or global provider. Send a question with body READY_FOR_REVOCATION and end the turn, keeping the task active. When REVOKED arrives, verify fixture_record is no longer available (or is refused), do not bypass it. Write a brief report to <isolated worktree>/proof.txt. Finish the original task with evidence and send a completion notice. Do not inspect unrelated directories or call any live provider.",
+      "worktree": "<isolated worktree>",
+      "acceptanceCriteria": [
+        "Fixture tool writes only once through the delegated MCP",
+        "Revocation removes or refuses tool access without worker restart",
+        "Task finishes with evidence"
+      ],
+      "expectedArtifacts": ["proof.txt"],
+      "constraints": [
+        "Only supplied worktree",
+        "Synthetic fixture provider only",
+        "No fallback credentials or direct provider calls"
+      ]
+    },
+    "dependencies": [],
+    "owner": null,
+    "result": {
+      "summary": "Delegated fixture_record wrote GRANT_WORKS once for fixture-issue; after REVOKED the tool vanished from the worker's catalog without restart. proof.txt written.",
+      "evidence": [
+        "fixture_record(issueId=fixture-issue, marker=GRANT_WORKS) -> {\"stored\":true,\"marker\":\"GRANT_WORKS\"} (single call)",
+        "Post-revocation ToolSearch '+clankie_worker fixture_record' -> No matching deferred tools found; host reported clankie_worker disconnected",
+        "Artifact swarm://artifacts/55515033-31c5-440f-ba48-aac57687c887 (proof.txt, sha256 f967aafe...)"
+      ],
+      "limitations": [
+        "Revocation verified by tool absence; did not attempt a second call since the tool was not mounted",
+        "Did not independently read the fixture provider's store"
+      ]
+    },
+    "retention": "retained",
+    "reason": null
+  },
+  "report": "Task a96fe6bd-dbf6-4781-acd2-14d823f4394c \u2014 delegated fixture tool proof\n\n1. Grant: after GRANT_READY, discovered mcp__clankie_worker__fixture_record via ToolSearch.\n   Called once: issueId=fixture-issue marker=GRANT_WORKS -> {\"stored\":true,\"marker\":\"GRANT_WORKS\"}\n   No other write path used (no shell HTTP, no global provider, no Linear).\n2. Revocation: after REVOKED, ToolSearch \"+clankie_worker fixture_record\" returned\n   \"No matching deferred tools found\"; host reported the tool no longer available\n   (clankie_worker MCP disconnected). Same worker session, no restart. Not bypassed.\n",
+  "emptyAfterRevocation": true,
+  "shellStarts": 1,
+  "promptObserved": "w1:p1\n",
+  "passed": true,
+  "herdrStopped": true,
+  "workerPane": "w1:p2",
+  "taskElapsedMs": 68955,
+  "shellFixture": {
+    "configOverride": "HERDR_CONFIG_PATH points to the private config",
+    "behavior": "Print Startup prompt: waiting for input, then consume stdin without executing it",
+    "barrier": "CLI wrapper waits for the prompt in the new shell pane before returning workspace.create"
+  },
+  "limits": [
+    "Synthetic provider and credentials; no live Linear writes",
+    "Revocation observed through empty MCP discovery; post-revocation calls covered separately by service tests",
+    "No token-expiry renewal boundary crossed in this live scenario"
+  ]
+}

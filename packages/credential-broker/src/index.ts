@@ -13,6 +13,8 @@ export {
   KeychainCredentialStore,
   normalizeProviderId,
   ProviderCredentialSchema,
+  ProviderAccountSchema,
+  type ProviderAccount,
   redactCredential,
   type CredentialLoadIssue,
   type CredentialStore,
@@ -21,6 +23,7 @@ export {
   type ProviderCredential,
   type RedactedCredential,
 } from "./credential-store.ts";
+export { verifyLinearApiAccount } from "./linear-account.ts";
 export {
   LINEAR_AUTHORIZE_ENDPOINT,
   LINEAR_MCP_RESOURCE,
@@ -40,7 +43,7 @@ export {
   runLinearBrowserLogin,
   type LinearBrowserLoginOptions,
 } from "./linear-oauth.ts";
-export { resolveProviderBearer } from "./provider-bearer.ts";
+export { resolveProviderBearer, providerCredentialBearer } from "./provider-bearer.ts";
 export {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   ClankieAccountAuthError,

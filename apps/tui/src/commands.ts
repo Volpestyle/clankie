@@ -1,3 +1,7 @@
+import { runRuntimeCommand } from "./command/runtime.ts";
+import { runLinearCommand } from "./command/linear.ts";
+import { runSwarmCommand } from "./command/swarm.ts";
+import { runAccessCommand } from "./command/access.ts";
 import { runEvaluatorCommand, formatEvaluatorStatus } from "./command/evaluator.ts";
 import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connection.ts";
 /**
@@ -22,6 +26,7 @@ import type {
   OperatorAutonomyStatus,
   OperatorConversationContextUsage,
   OperatorConversationSessionState,
+  EvaluatorStatus,
   OperatorConversationScope,
 } from "@clankie/protocol";
 import type { PresenceSnapshot } from "./observation/presence.ts";
@@ -154,7 +159,12 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[status|enable --harness codex|claude|disable|open|retry ID]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
-        const result = await runEvaluatorCommand(argument.trim().split(/\s+/u).filter(Boolean));
+        const args = argument.trim().split(/\s+/u).filter(Boolean);
+        if (args.length === 0) {
+          await runEvaluatorMenu(shell);
+          return;
+        }
+        const result = await runEvaluatorCommand(args);
         shell.insertCommandResult(
           "/evaluator",
           result.ok ? formatEvaluatorStatus(result.evaluator) : result.error,
@@ -163,11 +173,87 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "linear",
+      aliases: [],
+      description: "Read Linear activity and bind issues to Clankie conversations",
+      takesArgument: true,
+      argumentHint: "[status|follow on/off|inbox read|work list/bind/unbind]",
+      async run(argument, shell): Promise<void> {
+        const result = await runLinearCommand(argument.trim().split(/\s+/u).filter(Boolean));
+        shell.insertCommandResult("/linear", JSON.stringify(result, null, 2), "success");
+      },
+    },
+    {
+      name: "connections",
+      aliases: [],
+      description: "Inspect runtime, Swarm and connected-account inventory",
+      takesArgument: false,
+      async run(_argument, shell): Promise<void> {
+        const result = await runRuntimeCommand(["inventory"]);
+        shell.insertCommandResult("/connections", JSON.stringify(result, null, 2), "success");
+      },
+    },
+    {
+      name: "runtime",
+      aliases: [],
+      description: "Inspect, connect or disconnect named execution runtimes",
+      argumentHint: "[list | connect ID --session NAME | disconnect ID]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        try {
+          const result = await runRuntimeCommand(argument.trim().split(/\s+/u).filter(Boolean));
+          shell.insertCommandResult("/runtime", JSON.stringify(result, null, 2), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/runtime",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
+      name: "swarm",
+      aliases: [],
+      description: "Inspect or connect authorized Swarm coordinators",
+      takesArgument: true,
+      argumentHint:
+        "[status|contacts|thread PERSONA|message PERSONA TEXT|connections|connect PRIVATE.json|disconnect ID]",
+      async run(argument, shell): Promise<void> {
+        const result = await runSwarmCommand(argument.trim().split(/\s+/u).filter(Boolean));
+        shell.insertCommandResult("/swarm", JSON.stringify(result, null, 2), "success");
+      },
+    },
+    {
+      name: "access",
+      aliases: [],
+      description: "Inspect and revoke worker access to connected accounts",
+      takesArgument: true,
+      argumentHint: "[list | revoke ID | linear [verify]]",
+      async run(argument, shell): Promise<void> {
+        try {
+          const args = argument.trim().split(/\s+/u).filter(Boolean);
+          if (args[0] === "issue")
+            throw new Error(
+              "Issue from your terminal: clankie access issue REQUEST.json --deliver swarm (or --out GRANT.json for private file delivery)",
+            );
+          const result = await runAccessCommand(args);
+          shell.insertCommandResult("/access", JSON.stringify(result, null, 2), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/access",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
       name: "herdr",
       aliases: [],
       description: "Use an existing Herdr session or create one for Clankie",
       takesArgument: true,
-      argumentHint: "[status | open | create | use NAME]",
+      argumentHint: "[status | open | create | disable | use NAME]",
       async run(argument, shell): Promise<void> {
         try {
           if (argument.trim() === "") {
@@ -929,6 +1015,79 @@ function formatGameplaySettings(settings: GameplaySettings): string {
   return `PokeAgent MMO: ${settings.pokeagentMmoEnabled ? "enabled" : "disabled"}`;
 }
 
+/** `/evaluator` with no arguments: the same controls as the CLI, as a menu. */
+async function runEvaluatorMenu(shell: ClankieFaceShell): Promise<void> {
+  const flow = shell.setupFlow;
+  flow.begin("evaluator");
+  try {
+    let result = await runEvaluatorCommand([]);
+    while (result.ok) {
+      const status: EvaluatorStatus = result.evaluator;
+      const failed = status.jobs.filter((job) => job.status === "failed").slice(0, 5);
+      const selected = await flow.readSelect({
+        message: [
+          `Evaluator: ${status.enabled ? "on" : "off"} · ${status.harness} · ${status.queued} queued`,
+          ...(status.error === undefined ? [] : [`Attention: ${status.error}`]),
+        ].join("\n"),
+        options: [
+          {
+            value: "toggle",
+            label: `${status.enabled ? "✓" : "○"} Independent evaluator`,
+            hint: status.enabled ? "on" : "off",
+            description: "Assesses finished tasks from a Herdr pane.",
+          },
+          {
+            value: "harness",
+            label: `Harness: ${status.harness}`,
+            hint: status.enabled ? "switch" : "switch and turn on",
+            description: "Which agent runs the assessments.",
+          },
+          ...(status.paneId === undefined
+            ? []
+            : [{ value: "open", label: "Open evaluator pane", hint: status.paneId }]),
+          { value: "report", label: "Show recent assessments", hint: `${status.jobs.length} jobs` },
+          ...failed.map((job) => ({
+            value: `retry:${job.id}`,
+            label: `Retry ${job.taskId}`,
+            hint: "failed",
+            ...(job.error === undefined ? {} : { description: job.error }),
+          })),
+        ],
+        statusActions: [{ value: "done", label: "Done" }],
+        initialValue: "toggle",
+      });
+      if (selected === undefined || selected === "done") break;
+      if (selected === "report") {
+        flow.renderLine(formatEvaluatorStatus(status));
+        continue;
+      }
+      let args: string[];
+      if (selected === "toggle") args = [status.enabled ? "disable" : "enable"];
+      else if (selected === "open") args = ["open"];
+      else if (selected.startsWith("retry:")) args = ["retry", selected.slice("retry:".length)];
+      else {
+        const harness = await flow.readSelect({
+          message: "Evaluator harness",
+          options: [
+            { value: "codex", label: "Codex" },
+            { value: "claude", label: "Claude Code" },
+          ],
+          currentValue: status.harness,
+          initialValue: status.harness,
+          allowBack: true,
+        });
+        if (harness === undefined) continue;
+        args = ["enable", "--harness", harness];
+      }
+      result = await runEvaluatorCommand(args);
+      if (result.ok) flow.renderLine(`Evaluator: ${args.join(" ")} done.`, "success");
+    }
+    if (!result.ok) flow.renderLine(result.error, "error");
+  } finally {
+    flow.end();
+  }
+}
+
 async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStore): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin("games");
@@ -1000,7 +1159,7 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
   try {
     const current = await runHerdrCommand(["status"], options);
     flow.renderLine(
-      `Selected: ${current.herdr.runtime === "bundled" ? "Clankie’s own session" : current.herdr.runtime === "auto" ? "Use the launch session, or create one for Clankie" : current.herdr.session}`,
+      `Selected: ${current.herdr.runtime === "disabled" ? "No Herdr runtime" : current.herdr.runtime === "bundled" ? "Clankie’s own session" : current.herdr.runtime === "auto" ? "Use the saved connection, or Clankie’s own session" : current.herdr.session}`,
     );
     flow.renderLine(herdrActiveLine(current));
     flow.renderLine(
@@ -1019,6 +1178,11 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
           label: "Create a session for Clankie",
           hint: "His own workers, separate from your other sessions",
         },
+        {
+          value: "disable",
+          label: "Run without Herdr",
+          hint: "Keep conversations and Swarm; no terminal runtime",
+        },
         { value: "open", label: "Open active session" },
         ...(context.restartCaptain
           ? [{ value: "restart", label: "Apply saved changes", hint: "Restart Clankie, relay and Discord" }]
@@ -1035,7 +1199,7 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
       if (code !== 0) throw new Error(`Herdr viewer exited with status ${code}`);
       return;
     }
-    if (action === "create") await runHerdrCommand(["create"], options);
+    if (action === "create" || action === "disable") await runHerdrCommand([action], options);
     if (action === "session") {
       const sessions = [...((await context.herdrSessions?.()) ?? [])].sort(
         (left, right) => Number(right.running) - Number(left.running),
@@ -1057,7 +1221,7 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
       await runHerdrCommand(["use", session], options);
     }
     if (action !== "restart") {
-      flow.renderLine("Saved. Restart to use this session.", "success");
+      flow.renderLine("Saved. Restart to apply the runtime selection.", "success");
       if (!context.restartCaptain) return;
       const apply = await flow.readSelect({
         message: "Apply Herdr changes?",
@@ -1076,13 +1240,12 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
     flow.setStatus("Restarting Clankie…");
     await context.restartCaptain?.();
     await context.refreshHerdrBinding?.();
-    // The binding resolves at start and steps over a session that does not
-    // answer (ADR 0170), so report where he landed rather than what was saved.
+    // Report active capability separately from saved intent.
     const applied = await runHerdrCommand(["status"], options);
     const missed =
       applied.herdr.runtime === "external" &&
       applied.active !== undefined &&
-      applied.active.session !== applied.herdr.session;
+      (applied.active.runtime !== "external" || applied.active.session !== applied.herdr.session);
     flow.renderLine(
       missed
         ? `${herdrActiveLine(applied)} (${applied.herdr.session} did not answer)`
@@ -1095,7 +1258,9 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
 }
 
 function herdrActiveLine(status: HerdrCommandResult): string {
-  return status.active
-    ? `Active: ${describeHerdrBinding(status.active)}`
-    : (status.unavailable ?? "Active session unavailable");
+  return status.herdr.runtime === "disabled" && status.active === undefined
+    ? "Herdr disabled in settings; restart to apply any pending change"
+    : status.active
+      ? `Active: ${describeHerdrBinding(status.active)}`
+      : (status.unavailable ?? "Active session unavailable");
 }

@@ -21,11 +21,12 @@ interface LaneMcpSession {
   readonly transport: WebStandardStreamableHTTPServerTransport;
   readonly server: Server;
   readonly lane: CaptainSessionLaneV2;
+  readonly conversationId?: string;
   lastSeenAt: number;
 }
 
 export interface LaneMcpEndpoint {
-  handle(request: Request, lane: CaptainSessionLaneV2): Promise<Response>;
+  handle(request: Request, lane: CaptainSessionLaneV2, conversationId?: string): Promise<Response>;
   close(): Promise<void>;
 }
 
@@ -70,8 +71,8 @@ export function createLaneMcpEndpoint({
     }
   };
 
-  const open = async (lane: CaptainSessionLaneV2): Promise<LaneMcpSession> => {
-    const bank = await captain.laneToolBank(lane);
+  const open = async (lane: CaptainSessionLaneV2, conversationId?: string): Promise<LaneMcpSession> => {
+    const bank = await captain.laneToolBank(lane, conversationId);
     const byName = new Map<string, LaneTool>(bank.tools.map((tool) => [tool.name, tool]));
     const server = new Server(
       { name: "clankie", version: "0.2.0" },
@@ -103,17 +104,24 @@ export function createLaneMcpEndpoint({
     // `exactOptionalPropertyTypes`, the same way the client transports do not
     // in `mcp-host.ts`. The cast stays at this one boundary.
     await server.connect(transport as unknown as Transport);
-    return { transport, server, lane, lastSeenAt: Date.now() };
+    return {
+      transport,
+      server,
+      lane,
+      ...(conversationId === undefined ? {} : { conversationId }),
+      lastSeenAt: Date.now(),
+    };
   };
 
   return {
-    async handle(request, lane) {
+    async handle(request, lane, conversationId) {
       sweep();
       const sessionId = request.headers.get("mcp-session-id");
       if (sessionId !== null) {
         const session = sessions.get(sessionId);
         if (session === undefined) return Response.json({ error: "unknown_session" }, { status: 404 });
-        if (session.lane !== lane) return Response.json({ error: "lane_forbidden" }, { status: 403 });
+        if (session.lane !== lane || session.conversationId !== conversationId)
+          return Response.json({ error: "lane_forbidden" }, { status: 403 });
         session.lastSeenAt = Date.now();
         const response = await session.transport.handleRequest(request);
         if (request.method === "DELETE" && response.ok) await dispose(sessionId, session);
@@ -122,7 +130,7 @@ export function createLaneMcpEndpoint({
       if (request.method !== "POST") {
         return Response.json({ error: "session_required" }, { status: 400 });
       }
-      const session = await open(lane);
+      const session = await open(lane, conversationId);
       const response = await session.transport.handleRequest(request);
       const opened = session.transport.sessionId;
       // A rejected initialize leaves no session id; that server is dead weight.

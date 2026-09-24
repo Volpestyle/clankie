@@ -16,17 +16,29 @@
  *
  * - **Lane.** Every server declares which rooms may reach it, and the gate is
  *   checked when the catalog is built *and* again at call time.
- * - **Credentials.** Secrets stay broker-owned. An http server's bearer is
- *   resolved per request, so a token that expires mid-session refreshes instead
- *   of failing; a stdio server's is injected into its environment at spawn.
+ * - **Credentials.** Secrets stay broker-owned. Refresh happens before selecting
+ *   a connection; each HTTP request checks the selected credential snapshot.
+ *   Stdio receives that snapshot at spawn. Credential changes replace either
+ *   transport instead of changing the account inside an existing MCP session.
  * - **Untrusted text.** A server's own tool descriptions become prompt text, so
  *   they are length-capped here rather than trusted to be reasonable.
  */
+import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { LINEAR_MCP_RESOURCE, resolveProviderBearer, type CredentialStore } from "@clankie/credential-broker";
+import {
+  LINEAR_MCP_RESOURCE,
+  ProviderAccountSchema,
+  linearOauthNeedsRefresh,
+  providerCredentialBearer,
+  resolveProviderBearer,
+  type CredentialStore,
+  type ProviderCredential,
+  type ProviderAccount,
+} from "@clankie/credential-broker";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 
@@ -43,8 +55,6 @@ const REQUEST_TIMEOUT_MS = 60_000;
  * who fixes the typo would have to restart the service to be believed.
  */
 const FAILURE_COOLDOWN_MS = 60_000;
-/** How long the resolved server list is reused before settings are read again. */
-const SERVER_LIST_TTL_MS = 5_000;
 
 interface McpHostLogger {
   info(context: Record<string, unknown>, message: string): void;
@@ -71,6 +81,7 @@ type McpCallResult =
   | { readonly outcome: "refused"; readonly reason: McpRefusalReason; readonly detail: string };
 
 export interface McpHost {
+  account(server: string, lane: CaptainSessionLaneV2): Promise<{ account: ProviderAccount; binding: string }>;
   /**
    * Connects every active server up front, so no conversational turn pays for
    * it. Failures are logged, never thrown: a server that is down costs him that
@@ -84,6 +95,7 @@ export interface McpHost {
     readonly server: string;
     readonly tool: string;
     readonly arguments: Record<string, unknown>;
+    readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -136,6 +148,8 @@ export interface McpHostOptions {
     readonly tool: string;
     readonly content: string;
     readonly isError: boolean;
+    readonly account?: ProviderAccount;
+    readonly worker?: { grantId: string; principalId: string; workId: string };
   }) => void;
 }
 
@@ -147,12 +161,12 @@ export interface McpConnection {
 }
 
 interface ServerState {
+  readonly configuration: string;
+  readonly credential: string;
   connection?: McpConnection;
   connecting?: Promise<McpConnection>;
   tools?: readonly McpToolDescriptor[];
   failure?: { reason: string; at: number };
-  /** Whether the last resolve hid this curated server for a missing credential. */
-  credentialMissing?: boolean;
 }
 
 /** Whether a server declared for `lane` may be reached from this room. */
@@ -160,11 +174,17 @@ function laneAllows(server: McpServerSettings, lane: CaptainSessionLaneV2): bool
   return server.lane === "everywhere" || lane === "operator";
 }
 
+function credentialDigest(credential: ProviderCredential): string {
+  return createHash("sha256").update(JSON.stringify(credential)).digest("hex");
+}
+
 export function createMcpHost(options: McpHostOptions): McpHost {
   const connectImpl = options.connect ?? connectServer;
   const curated = options.curated ?? CURATED_MCP_SERVERS;
   const states = new Map<string, ServerState>();
-  let resolved: { servers: readonly McpServerSettings[]; at: number } | undefined;
+  const missingCredentials = new Set<string>();
+  const opening = new Set<Promise<McpConnection>>();
+  let closed = false;
 
   /**
    * The servers in play right now: curated ones whose credential exists, plus
@@ -172,77 +192,113 @@ export function createMcpHost(options: McpHostOptions): McpHost {
    * connecting a service mid-session works without a restart, exactly as the
    * authored connector tools already did.
    *
-   * The short memo matters more than it looks: resolving this reads the
-   * Keychain once per curated connector, and on macOS each read is a `security`
-   * subprocess. Without it a single turn's tool calls spawn a handful.
+   * Configuration is authority, so it is never cached. Transports and catalogs
+   * remain cached while their configuration and selected credential match.
    */
-  async function activeServers(now: number): Promise<readonly McpServerSettings[]> {
-    if (resolved !== undefined && now - resolved.at < SERVER_LIST_TTL_MS) return resolved.servers;
-    const servers = await computeActiveServers();
-    resolved = { servers, at: now };
+  async function activeServers(): Promise<readonly McpServerSettings[]> {
+    if (closed) throw new Error("MCP host is closed");
+    const settings = await options.settings.load();
+    // An explicitly disabled owner entry suppresses the curated default too.
+    const authoredIds = new Set(settings.mcp.servers.map((server) => server.id));
+    const servers = [
+      ...curated.filter((server) => !authoredIds.has(server.id)),
+      ...settings.mcp.servers,
+    ].filter((server) => server.enabled);
+    await Promise.all(
+      [...states].map(async ([id, state]) => {
+        const server = servers.find((entry) => entry.id === id);
+        if (server === undefined || JSON.stringify(server) !== state.configuration) await retire(id, state);
+      }),
+    );
     return servers;
   }
 
-  async function computeActiveServers(): Promise<readonly McpServerSettings[]> {
-    const settings = await options.settings.load();
-    const authored = settings.mcp.servers.filter((server) => server.enabled);
-    const authoredIds = new Set(authored.map((server) => server.id));
-    const available: McpServerSettings[] = [];
-    for (const server of curated) {
-      // An owner entry with the same id wins: that is how a curated default
-      // gets overridden rather than duplicated.
-      if (authoredIds.has(server.id)) continue;
-      if (server.credential !== undefined) {
-        const stored = await options.credentials.get(server.credential);
-        // A curated connector with no credential is not an error — it is the
-        // un-connected state, and most of them are un-connected most of the
-        // time. But a credential that goes missing after being used reads from
-        // the inside as the server never having existed: its tools vanish from
-        // the catalog with nothing said, and he answers as though the service
-        // were not one of his. Say it once per transition so the disappearance
-        // leaves a trace without a line per resolve.
-        if (stored === undefined) {
-          const state = stateFor(server.id);
-          if (state.credentialMissing !== true) {
-            state.credentialMissing = true;
-            options.logger.warn(
-              { event: "mcp.host.credential_missing", server: server.id, credential: server.credential },
-              "mcp server hidden: no stored credential",
-            );
-          }
-          continue;
-        }
-        const state = stateFor(server.id);
-        if (state.credentialMissing === true) {
-          state.credentialMissing = false;
-          options.logger.info(
-            { event: "mcp.host.credential_restored", server: server.id, credential: server.credential },
-            "mcp server credential restored",
-          );
-        }
-      }
-      available.push(server);
-    }
-    return [...available, ...authored];
+  async function retire(id: string, state: ServerState): Promise<void> {
+    if (states.get(id) === state) states.delete(id);
+    // A pending connection checks its generation when it settles and closes
+    // itself. Retiring it must not wait for a stalled initialize to finish.
+    await state.connection?.close().catch(() => undefined);
   }
 
-  function stateFor(id: string): ServerState {
-    const existing = states.get(id);
-    if (existing !== undefined) return existing;
-    const created: ServerState = {};
-    states.set(id, created);
+  async function credentialFingerprint(server: McpServerSettings, refresh = false): Promise<string> {
+    if (server.credential === undefined) return "none";
+    let stored = await options.credentials.get(server.credential);
+    if (refresh && stored?.type === "oauth" && linearOauthNeedsRefresh(stored)) {
+      await resolveProviderBearer(server.credential, options.credentials);
+      stored = await options.credentials.get(server.credential);
+    }
+    if (stored === undefined) {
+      const state = states.get(server.id);
+      if (state !== undefined) await retire(server.id, state);
+      if (!missingCredentials.has(server.id)) {
+        missingCredentials.add(server.id);
+        options.logger.warn(
+          { event: "mcp.host.credential_missing", server: server.id, credential: server.credential },
+          "mcp server hidden: no stored credential",
+        );
+      }
+      throw new Error(`${server.id} needs stored credential ${server.credential}`);
+    }
+    if (missingCredentials.delete(server.id)) {
+      options.logger.info(
+        { event: "mcp.host.credential_restored", server: server.id, credential: server.credential },
+        "mcp server credential restored",
+      );
+    }
+    return credentialDigest(stored);
+  }
+
+  async function stateFor(server: McpServerSettings): Promise<ServerState> {
+    let credential: string;
+    try {
+      credential = await credentialFingerprint(server, true);
+    } catch (error) {
+      const previous = states.get(server.id);
+      if (previous !== undefined) await retire(server.id, previous);
+      throw error;
+    }
+    if (closed) throw new Error("MCP host is closed");
+    const configuration = JSON.stringify(server);
+    const existing = states.get(server.id);
+    if (existing?.configuration === configuration && existing.credential === credential) return existing;
+    const created: ServerState = { configuration, credential };
+    // Publish the new generation before closing the old one; concurrent callers
+    // must not replace each other's pending connection during that await.
+    states.set(server.id, created);
+    if (existing !== undefined) await retire(server.id, existing);
     return created;
   }
 
-  async function connection(server: McpServerSettings, now: number): Promise<McpConnection> {
-    const state = stateFor(server.id);
+  async function assertCurrent(server: McpServerSettings, state: ServerState): Promise<void> {
+    const selected = (await activeServers()).find((entry) => entry.id === server.id);
+    if (
+      selected === undefined ||
+      JSON.stringify(selected) !== state.configuration ||
+      (await credentialFingerprint(selected)) !== state.credential ||
+      states.get(server.id) !== state ||
+      closed
+    ) {
+      await retire(server.id, state);
+      throw new Error(`${server.id} connection changed; inspect current configuration before retrying`);
+    }
+  }
+
+  async function connection(
+    server: McpServerSettings,
+    state: ServerState,
+    now: number,
+  ): Promise<McpConnection> {
     if (state.connection !== undefined) return state.connection;
     if (state.connecting !== undefined) return state.connecting;
     if (state.failure !== undefined && now - state.failure.at < FAILURE_COOLDOWN_MS) {
       throw new Error(state.failure.reason);
     }
-    const attempt = connectImpl(server, options.credentials)
-      .then((client) => {
+    const attempt = connectImpl(server, options.credentials, state.credential)
+      .then(async (client) => {
+        if (closed || states.get(server.id) !== state) {
+          await client.close().catch(() => undefined);
+          throw new Error(`${server.id} connection superseded`);
+        }
         state.connection = client;
         delete state.failure;
         options.logger.info({ event: "mcp.host.ready", server: server.id }, "mcp server ready");
@@ -259,17 +315,23 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       })
       .finally(() => {
         delete state.connecting;
+        opening.delete(attempt);
       });
     state.connecting = attempt;
+    opening.add(attempt);
     return attempt;
   }
 
   async function toolsFor(server: McpServerSettings, now: number): Promise<readonly McpToolDescriptor[]> {
-    const state = stateFor(server.id);
-    if (state.tools !== undefined) return state.tools;
-    const client = await connection(server, now);
+    const state = await stateFor(server);
+    if (state.tools !== undefined) {
+      await assertCurrent(server, state);
+      return state.tools;
+    }
+    const client = await connection(server, state, now);
     const initial = new Set(server.initialTools);
     const listed = await client.listTools();
+    await assertCurrent(server, state);
     const projected = listed
       .filter((tool) => typeof tool.name === "string" && tool.name.length > 0)
       .map((tool) => ({
@@ -292,11 +354,40 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     return projected;
   }
 
+  async function account(server: McpServerSettings, expectedCredential?: string) {
+    const stored =
+      server.credential === undefined ? undefined : await options.credentials.get(server.credential);
+    if (stored === undefined || !("account" in stored) || stored.account === undefined)
+      throw new Error(`${server.id} has no verified connected account`);
+    if (expectedCredential !== undefined && credentialDigest(stored) !== expectedCredential)
+      throw new Error(`${server.id} credential changed`);
+    return {
+      account: stored.account,
+      binding: createHash("sha256")
+        .update(
+          JSON.stringify([
+            server,
+            stored.account.connectionId,
+            stored.account.provider,
+            stored.account.userId,
+            stored.account.workspaceId,
+          ]),
+        )
+        .digest("hex"),
+    };
+  }
+
   return {
+    async account(id, lane) {
+      const server = (await activeServers()).find((entry) => entry.id === id);
+      if (server === undefined || !laneAllows(server, lane))
+        throw new Error("Connected account unavailable in this lane");
+      return account(server);
+    },
     async warm() {
       const now = Date.now();
       await Promise.all(
-        (await activeServers(now)).map(async (server) => {
+        (await activeServers()).map(async (server) => {
           try {
             await toolsFor(server, now);
           } catch {
@@ -309,7 +400,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     async catalog(lane) {
       const now = Date.now();
       const collected: McpToolDescriptor[] = [];
-      for (const server of await activeServers(now)) {
+      for (const server of await activeServers()) {
         if (!laneAllows(server, lane)) continue;
         try {
           collected.push(...(await toolsFor(server, now)));
@@ -323,7 +414,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
 
     async call(input) {
       const now = Date.now();
-      const server = (await activeServers(now)).find((entry) => entry.id === input.server);
+      const server = (await activeServers()).find((entry) => entry.id === input.server);
       if (server === undefined) {
         return {
           outcome: "refused",
@@ -340,19 +431,62 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           detail: `${server.id} stays at the console. Ask from the operator TUI, not from this room.`,
         };
       }
+      let state: ServerState | undefined;
       try {
-        const client = await connection(server, now);
+        state = await stateFor(server);
+        const client = await connection(server, state, now);
+        const connectedAccount =
+          input.delegation !== undefined || options.observeCall !== undefined
+            ? await account(server, state.credential).catch((error: unknown) => {
+                if (input.delegation !== undefined) throw error;
+                return undefined;
+              })
+            : undefined;
+        if (input.delegation !== undefined && connectedAccount?.binding !== input.delegation.binding)
+          throw new Error("Delegated account binding changed; a new grant is required");
+        await assertCurrent(server, state);
         const result = await client.callTool(input.tool, input.arguments);
         options.logger.info(
-          { event: "mcp.host.call", server: server.id, tool: input.tool },
+          {
+            event: "mcp.host.call",
+            server: server.id,
+            tool: input.tool,
+            ...(input.delegation === undefined
+              ? {}
+              : {
+                  worker: {
+                    grantId: input.delegation.grantId,
+                    principalId: input.delegation.principalId,
+                    workId: input.delegation.workId,
+                  },
+                }),
+          },
           "mcp tool called",
         );
-        options.observeCall?.({
-          server: server.id,
-          tool: input.tool,
-          content: result.content,
-          isError: result.isError,
-        });
+        try {
+          options.observeCall?.({
+            server: server.id,
+            tool: input.tool,
+            content: result.content,
+            isError: result.isError,
+            ...(connectedAccount === undefined ? {} : { account: connectedAccount.account }),
+            ...(input.delegation === undefined
+              ? {}
+              : {
+                  worker: {
+                    grantId: input.delegation.grantId,
+                    principalId: input.delegation.principalId,
+                    workId: input.delegation.workId,
+                  },
+                }),
+          });
+        } catch {
+          // The provider already settled. A receipt failure must not invite a duplicate write.
+          options.logger.warn(
+            { event: "mcp.host.observer_failed", server: server.id, tool: input.tool },
+            "MCP call settled but its receipt could not be recorded",
+          );
+        }
         return {
           outcome: "ok",
           content: result.content.slice(0, MAX_RESULT_CHARACTERS),
@@ -361,9 +495,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       } catch (error) {
         // A call that fails may have killed the process; drop the connection so
         // the next attempt reconnects instead of writing to a closed pipe.
-        const state = stateFor(server.id);
-        delete state.connection;
-        delete state.tools;
+        if (state !== undefined && state.failure === undefined) await retire(server.id, state);
         return {
           outcome: "refused",
           reason: "server_unavailable",
@@ -373,31 +505,75 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     },
 
     async close() {
-      const closing = [...states.values()].map(async (state) => {
-        try {
-          await state.connection?.close();
-        } catch {
-          // Shutdown is best-effort; a server that already died is fine.
-        }
-      });
-      states.clear();
-      await Promise.all(closing);
+      closed = true;
+      await Promise.all([...states].map(([id, state]) => retire(id, state)));
+      await Promise.allSettled(opening);
     },
   };
+}
+
+/** Verify one locked credential snapshot at its OAuth audience, independent of owner-authored servers. */
+export async function verifyLinearMcpAccount(
+  credential: Extract<ProviderCredential, { type: "oauth" }>,
+): Promise<ProviderAccount> {
+  const client = await connectServer(
+    {
+      id: "linear",
+      transport: "http",
+      url: LINEAR_MCP_RESOURCE,
+      credential: "linear",
+      args: [],
+      lane: "operator",
+      initialTools: [],
+      enabled: true,
+    },
+    { get: async () => credential },
+    credentialDigest(credential),
+  );
+  try {
+    const read = async (tool: string, args: Record<string, unknown>) => {
+      const result = await client.callTool(tool, args);
+      if (result.isError) throw new Error(`Linear identity verification failed: ${tool}`);
+      return JSON.parse(result.content) as unknown;
+    };
+    const identity = z.object({ id: z.string().uuid(), name: z.string().min(1) });
+    const user = identity
+      .extend({ email: z.string().email() })
+      .parse(await read("get_user", { query: "me" }));
+    const workspace = identity.parse(await read("get_workspace", {}));
+    return ProviderAccountSchema.parse({
+      provider: "linear",
+      connectionId: randomUUID(),
+      verifiedAt: new Date().toISOString(),
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+    });
+  } finally {
+    await client.close().catch(() => undefined);
+  }
 }
 
 /** Connects one configured server and adapts the SDK client to {@link McpConnection}. */
 async function connectServer(
   server: McpServerSettings,
-  credentials: CredentialStore,
+  credentials: Pick<CredentialStore, "get">,
+  expectedCredential: string,
 ): Promise<McpConnection> {
   const client = new Client({ name: "clankie", version: "1" }, { capabilities: {} });
   // The SDK's own transports do not satisfy its `Transport` interface under
   // `exactOptionalPropertyTypes` — their `onmessage` drops the generic and the
   // `extra` parameter the interface declares. The cast is at this one boundary
   // rather than loosening the repo's strictness for everyone.
-  const transport = (await createTransport(server, credentials)) as unknown as Transport;
-  await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+  const transport = (await createTransport(server, credentials, expectedCredential)) as unknown as Transport;
+  try {
+    await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+  } catch (error) {
+    await client.close().catch(() => undefined);
+    throw error;
+  }
   return {
     async listTools() {
       const collected: { name: string; description?: string | undefined; inputSchema?: unknown }[] = [];
@@ -441,23 +617,33 @@ async function connectServer(
 
 async function createTransport(
   server: McpServerSettings,
-  credentials: CredentialStore,
+  credentials: Pick<CredentialStore, "get">,
+  expectedCredential: string,
 ): Promise<StdioClientTransport | StreamableHTTPClientTransport> {
+  const selectedBearer = async (): Promise<string> => {
+    const stored = server.credential === undefined ? undefined : await credentials.get(server.credential);
+    if (stored === undefined || credentialDigest(stored) !== expectedCredential) {
+      throw new Error(`${server.id} credential changed; reconnect before calling tools`);
+    }
+    if (stored.type === "oauth" && stored.expires !== 0 && stored.expires <= Date.now()) {
+      throw new Error(`${server.id} credential expired; reconnect to refresh`);
+    }
+    const bearer = providerCredentialBearer(stored);
+    if (bearer === undefined) throw new Error(`${server.id} has no usable stored credential`);
+    return bearer;
+  };
   if (server.transport === "http") {
     if (server.url === undefined) throw new Error(`mcp server ${server.id} has no url`);
     const providerId = server.credential;
     return new StreamableHTTPClientTransport(new URL(server.url), {
-      // The bearer is resolved per request, not captured at connect: an OAuth
-      // token that expires mid-session is refreshed by the broker on the next
-      // call rather than failing until someone restarts him.
+      // Validate the selected credential on every wire request. A live MCP
+      // session must never adopt a replacement account halfway through a call.
+      // Logical calls refresh before connection selection; changed credentials
+      // establish a fresh transport, without replaying an uncertain tool call.
       fetch: async (url, init) => {
         const headers = new Headers(init?.headers);
         if (providerId !== undefined) {
-          const bearer = await resolveProviderBearer(providerId, credentials);
-          if (bearer === undefined) {
-            throw new Error(`${server.id} is not connected — run /connect ${server.id}`);
-          }
-          headers.set("authorization", `Bearer ${bearer}`);
+          headers.set("authorization", `Bearer ${await selectedBearer()}`);
         }
         return fetch(url, { ...init, headers });
       },
@@ -471,11 +657,7 @@ async function createTransport(
     LANG: process.env.LANG ?? "",
   };
   if (server.credential !== undefined && server.credentialEnv !== undefined) {
-    const bearer = await resolveProviderBearer(server.credential, credentials);
-    if (bearer === undefined) {
-      throw new Error(`${server.id} needs credential ${server.credential}, which is not stored`);
-    }
-    environment[server.credentialEnv] = bearer;
+    environment[server.credentialEnv] = await selectedBearer();
   }
   return new StdioClientTransport({
     command: server.command,

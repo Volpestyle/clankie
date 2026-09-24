@@ -1,0 +1,76 @@
+Swarm session, MCP and output-schema regressions
+bun test v1.3.14 (d1632b29)
+
+test/coordination-mcp-output.test.ts:
+(pass) output schemas require receipt metadata or a complete structured error [1.73ms]
+(pass) wait schema requires a resumable reference and a recognized outcome [0.29ms]
+
+test/coordination-sessions.test.ts:
+(pass) restart adoption preserves identity and inbox but supersedes old session commands and reads [7.13ms]
+(pass) generation-pinned messages expire on replace without retargeting or losing durable mail [7.43ms]
+(pass) generation-pinned messages expire on session.suspend without retargeting or losing durable mail [6.43ms]
+(pass) generation-pinned messages expire on session.close without retargeting or losing durable mail [6.44ms]
+(pass) schema 11 inboxes migrate without pinning or losing existing deliveries [5.53ms]
+(pass) lost enrollment response replays without a new incarnation or persisted plaintext secrets [4.12ms]
+(pass) launcher identity canonicalizes paths and preserves configured profile roots [0.47ms]
+(pass) project/profile binding is independent of labels and enrolled agents cannot omit session fencing [4.30ms]
+(pass) transport, runtime and progress observations remain independent through long tools and suspension [3.92ms]
+
+test/coordination-mcp.test.ts:
+(pass) compact MCP executes durable workflows through the Node owner (modern) [887.86ms]
+(pass) compact MCP executes durable workflows through the Node owner (legacy) [753.07ms]
+(pass) pinned MCP sends refuse owners without generation fencing [11.40ms]
+
+ 14 pass
+ 0 fail
+ 279 expect() calls
+Ran 14 tests across 3 files. [1.78s]
+
+
+Swarm package verification
+
+> swarm-mcp@2.0.0-rc.1 verify:package
+> node scripts/verify-package.mjs
+
+{
+  "name": "swarm-mcp",
+  "version": "2.0.0-rc.1",
+  "files": 70,
+  "unpackedBytes": 1301627,
+  "generatedFilesExcluded": true,
+  "productionEntriesPresent": true
+}
+
+
+Clankie bundled Swarm integration
+$ vitest run
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  2 passed (2)
+      Tests  5 passed (5)
+   Start at  01:12:43
+   Duration  4.05s (transform 116ms, setup 0ms, import 173ms, tests 3.78s, environment 0ms)
+
+
+
+Swarm complete test suite
+
+ 416 pass
+ 0 fail
+ 2408 expect() calls
+Ran 416 tests across 60 files. [86.40s]
+...............................................[swarm-mcp] runtime with env prefix TEST: session has no AGENT_IDENTITY / SWARM_TEST_IDENTITY / SWARM_IDENTITY env set; swarm registration skipped. Raw binaries don't join the swarm — launch via a per-profile worker/gateway alias from swarm-mcp/env/launchers.zsh.example (or your own copy) to coordinate. Set SWARM_MCP_ALLOW_UNLABELED=1 to opt back in to unlabeled registration from a trusted shell.
+.
+----------------------------------------------------------------------
+Ran 48 tests in 0.032s
+
+OK
+
+
+Clankie complete repository gate (exit 0)
+ Test Files  282 passed (282)
+      Tests  2391 passed | 1 skipped (2392)
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox

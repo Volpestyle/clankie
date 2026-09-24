@@ -1,6 +1,8 @@
 # ADR 0170: A session that stops is unbound
 
-Status: accepted (James, 2026-09-08). Amends
+Status: accepted (James, 2026-09-08). Ambient startup selection and automatic replacement of a lost session are superseded by
+[ADR 0181](0181-clankie-is-independent-of-his-connections.md); current binding
+behavior lives in [the CLI reference](../cli.md#herdr-statusopencreate--herdr-use-name). Amends
 [ADR 0164](0164-the-fleet-is-its-own-session.md): the fleet is still its own
 session, but `auto` now follows the session the service was launched inside,
 and no binding is saved back to settings. Everything else 0164 decided — the

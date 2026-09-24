@@ -9,6 +9,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@clankie/credential-broker": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "24.12.4",
     "tsx": "4.23.0",

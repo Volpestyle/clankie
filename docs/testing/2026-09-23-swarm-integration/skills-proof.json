@@ -1,0 +1,182 @@
+{
+  "skillMarker": "SKILL_38d38348-9401-43d4-979c-aaa955f66ac3",
+  "scenario": "Live Claude materializes and runs an explicitly selected skill after source removal",
+  "root": "/private/tmp/clankie skills-QDYFoj",
+  "session": "grant-proof-61094660",
+  "calls": [
+    {
+      "name": "record",
+      "args": {
+        "issueId": "fixture-issue",
+        "marker": "GRANT_WORKS"
+      }
+    }
+  ],
+  "http": [
+    {
+      "method": "initialize",
+      "at": 1790216278381
+    },
+    {
+      "method": "notifications/initialized",
+      "at": 1790216278393
+    },
+    {
+      "method": "tools/list",
+      "at": 1790216278404,
+      "tools": []
+    },
+    {
+      "method": "tools/list",
+      "at": 1790216305847,
+      "tools": ["fixture_record"]
+    },
+    {
+      "method": "tools/call",
+      "at": 1790216310982,
+      "tool": "fixture_record",
+      "isError": false
+    },
+    {
+      "method": "tools/list",
+      "at": 1790216319940,
+      "tools": []
+    },
+    {
+      "method": "ping",
+      "at": 1790216338397
+    }
+  ],
+  "messages": [
+    {
+      "version": 1,
+      "id": "fca62138-3ba0-45d7-a7a6-a61f3fe26f63",
+      "sender": "d20fe57c-4ade-4e71-b481-2e9163695ce7",
+      "recipient": "bbdcd7d5-3ab5-4b19-8eb2-625517f44c0d",
+      "kind": "question",
+      "body": "READY_FOR_GRANT",
+      "taskId": "a1e35ef6-e05c-4d51-aefc-e123ee311e20",
+      "threadId": "a1e35ef6-e05c-4d51-aefc-e123ee311e20",
+      "createdAt": 1790216300617,
+      "expiresAt": null,
+      "idempotencyKey": "q-ready-for-grant-a1e35ef6",
+      "audience": "direct"
+    },
+    {
+      "version": 1,
+      "id": "25700ceb-d3ed-427a-bdbf-5aec2d552bb0",
+      "sender": "d20fe57c-4ade-4e71-b481-2e9163695ce7",
+      "recipient": "bbdcd7d5-3ab5-4b19-8eb2-625517f44c0d",
+      "kind": "question",
+      "body": "READY_FOR_REVOCATION",
+      "taskId": "a1e35ef6-e05c-4d51-aefc-e123ee311e20",
+      "threadId": "a1e35ef6-e05c-4d51-aefc-e123ee311e20",
+      "createdAt": 1790216316605,
+      "expiresAt": null,
+      "idempotencyKey": "q-ready-for-revocation-a1e35ef6",
+      "audience": "direct"
+    },
+    {
+      "version": 1,
+      "id": "efa55d46-7363-4759-94db-bacafb207608",
+      "sender": "d20fe57c-4ade-4e71-b481-2e9163695ce7",
+      "recipient": "bbdcd7d5-3ab5-4b19-8eb2-625517f44c0d",
+      "kind": "completion_notice",
+      "body": "Task a1e35ef6 completed. Skill hashes verified; helper output SKILL_38d38348-9401-43d4-979c-aaa955f66ac3. fixture_record wrote GRANT_WORKS once ({\"stored\":true}); after REVOKED the tool is no longer discoverable in the same session (not bypassed). Report in proof.txt.",
+      "taskId": "a1e35ef6-e05c-4d51-aefc-e123ee311e20",
+      "threadId": "a1e35ef6-e05c-4d51-aefc-e123ee311e20",
+      "createdAt": 1790216341456,
+      "expiresAt": null,
+      "idempotencyKey": "done-a1e35ef6",
+      "audience": "direct"
+    }
+  ],
+  "runtime": {
+    "herdr": "herdr 0.9.1",
+    "claude": "2.1.281 (Claude Code)"
+  },
+  "sourceRemovedBeforeDispatch": true,
+  "assignment": {
+    "status": "bound",
+    "taskId": "a1e35ef6-e05c-4d51-aefc-e123ee311e20",
+    "attemptId": "ed7952ed-e01a-45e1-ada3-2b8088c095d3",
+    "fence": 1,
+    "existing": false
+  },
+  "emptyBeforeGrant": true,
+  "grantId": "b09e0c11-d2d7-4c71-b3ff-195feb787e93",
+  "provenance": {
+    "grantId": "b09e0c11-d2d7-4c71-b3ff-195feb787e93",
+    "principalId": "d20fe57c-4ade-4e71-b481-2e9163695ce7",
+    "workId": "fixture-issue"
+  },
+  "revokedAt": 1790216319935,
+  "task": {
+    "taskId": "a1e35ef6-e05c-4d51-aefc-e123ee311e20",
+    "scope": "75bb6ad29e724a00c45180db47a58997089344f95ef0bdacc83d1e8bfc8e2adc",
+    "title": "Exercise delegated fixture tool and portable skill",
+    "status": "completed",
+    "version": 3,
+    "creator": "bbdcd7d5-3ab5-4b19-8eb2-625517f44c0d",
+    "createdAt": 1790216277152,
+    "updatedAt": 1790216335668,
+    "contract": {
+      "objective": "Read all contract.instructions artifacts with swarm_evidence read. Materialize the selected portable-fixture skill, verify its hashes and run its helper as authorized for this isolated test. Include the exact helper output in proof.txt. Its original source is removed before dispatch; use only the attached snapshot. Isolated integration test. You are not alone; preserve all other files. Read the supplied swarm-mcp skill, sync, and acknowledge your assignment. Send a Swarm question to bbdcd7d5-3ab5-4b19-8eb2-625517f44c0d with body READY_FOR_GRANT and end your turn. Do not poll. When the reply GRANT_READY arrives, discover and call the clankie_worker MCP tool fixture_record with issueId=fixture-issue and marker=GRANT_WORKS. Use only that tool for the write, no shell HTTP or global provider. Send a question with body READY_FOR_REVOCATION and end the turn, keeping the task active. When REVOKED arrives, verify fixture_record is no longer available (or is refused), do not bypass it. Write a brief report to /private/tmp/clankie skills-QDYFoj/proof.txt. Finish the original task with evidence and send a completion notice. Do not inspect unrelated directories or call any live provider.",
+      "worktree": "/private/tmp/clankie skills-QDYFoj",
+      "acceptanceCriteria": [
+        "Fixture tool writes only once through the delegated MCP",
+        "Revocation removes or refuses tool access without worker restart",
+        "Task finishes with evidence"
+      ],
+      "expectedArtifacts": ["proof.txt"],
+      "constraints": [
+        "Only supplied worktree",
+        "Synthetic fixture provider only",
+        "No fallback credentials or direct provider calls"
+      ],
+      "instructions": ["swarm://artifacts/9d035bfb-b3f5-4458-be5b-60a56e252cf8"]
+    },
+    "dependencies": [],
+    "owner": null,
+    "result": {
+      "summary": "Portable skill materialized and hash-verified; helper output SKILL_38d38348-9401-43d4-979c-aaa955f66ac3. fixture_record wrote GRANT_WORKS once via delegated MCP; after REVOKED the tool was no longer discoverable in the same session. proof.txt written.",
+      "evidence": [
+        "proof.txt",
+        "sha256 match: SKILL.md 2164e310..., assets/value.txt 3154b6ca..., helper.sh 5845661b...",
+        "helper.sh output: SKILL_38d38348-9401-43d4-979c-aaa955f66ac3",
+        "fixture_record(fixture-issue, GRANT_WORKS) -> {\"stored\":true,\"marker\":\"GRANT_WORKS\"}",
+        "post-revocation ToolSearch: no match; host reported mcp__clankie_worker__fixture_record no longer available"
+      ],
+      "limitations": [
+        "Revocation verified via discovery absence; no post-revocation call attempted to avoid a second write",
+        "Materialized bundle left at ./portable-fixture.p5Nq"
+      ]
+    },
+    "retention": "retained",
+    "reason": null
+  },
+  "report": "Task a1e35ef6-e05c-4d51-aefc-e123ee311e20 \u2014 delegated fixture tool + portable skill\n\nPortable skill (portable-fixture)\n- Materialized from attached snapshot (artifact 9d035bfb-...) into ./portable-fixture.p5Nq\n- SHA-256 verified (all match snapshot):\n  2164e3105b893f8364795ade1eee20b0ca91d759d82be696205714d9280c6deb  SKILL.md\n  3154b6ca0d3c258e6aebc44a7482081a901c9738dce30cf927e139597e9473ac  assets/value.txt\n  5845661bec9d6bde390fc36ad8cb1bbcb0d424608a79c89ae0e20d12ecfe57fa  helper.sh\n- ./helper.sh exact output:\nSKILL_38d38348-9401-43d4-979c-aaa955f66ac3\n\nGrant\n- After GRANT_READY, discovered mcp__clankie_worker__fixture_record and called it once:\n  fixture_record(issueId=fixture-issue, marker=GRANT_WORKS) -> {\"stored\":true,\"marker\":\"GRANT_WORKS\"}\n- No shell HTTP, global provider, or fallback credentials used.\n\nRevocation\n- After REVOKED, tool discovery for fixture_record returned no match; the host reported\n  mcp__clankie_worker__fixture_record no longer available (server disconnected).\n- Same worker session throughout (no restart). Not bypassed; no further write attempted.\n",
+  "emptyAfterRevocation": true,
+  "shellStarts": 1,
+  "promptObserved": "w1:p1\n",
+  "passed": true,
+  "herdrStopped": true,
+  "materializedFilesVerified": [
+    {
+      "path": "SKILL.md",
+      "sha256": "2164e3105b893f8364795ade1eee20b0ca91d759d82be696205714d9280c6deb",
+      "executable": false
+    },
+    {
+      "path": "assets/value.txt",
+      "sha256": "3154b6ca0d3c258e6aebc44a7482081a901c9738dce30cf927e139597e9473ac",
+      "executable": false
+    },
+    {
+      "path": "helper.sh",
+      "sha256": "5845661bec9d6bde390fc36ad8cb1bbcb0d424608a79c89ae0e20d12ecfe57fa",
+      "executable": true
+    }
+  ],
+  "helperOutputVerified": "SKILL_38d38348-9401-43d4-979c-aaa955f66ac3\n"
+}

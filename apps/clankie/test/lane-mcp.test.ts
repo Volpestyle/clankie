@@ -1,5 +1,13 @@
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SettingsStore } from "@clankie/settings";
+import type { SwarmHost } from "@clankie/swarm";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { TSchema } from "typebox";
+import { createCaptain } from "../src/captain/captain.ts";
+import { describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { buildLaneToolBank } from "../src/captain/lane-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
@@ -129,6 +137,17 @@ describe("lane MCP endpoint", () => {
       operator,
     );
     expect(crossed.status).toBe(403);
+    const moved = await app.app.request("/v1/mcp?conversationId=another-project", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer operator",
+        "mcp-session-id": operator,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 33, method: "tools/list" }),
+    });
+    expect(moved.status).toBe(403);
     await expect(crossed.json()).resolves.toEqual({ error: "lane_forbidden" });
 
     app.close();
@@ -262,4 +281,168 @@ describe("a lane's tool bank", () => {
     expect(refused.content[0]).toMatchObject({ type: "text" });
     expect(JSON.stringify(refused.content)).toContain("Invalid arguments");
   });
+});
+
+it("binds native tools, project doctrine and channel delivery to selected service conversations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-swarm-"));
+  let callbacks!: Parameters<SwarmHost["start"]>[0];
+  const execute = vi.fn(async () => ({
+    content: [{ type: "text" as const, text: "shared actor" }],
+    details: {},
+  }));
+  const tools = vi.fn(
+    async () =>
+      [
+        {
+          name: "swarm_sync",
+          label: "swarm_sync",
+          description: "Sync",
+          parameters: {
+            type: "object",
+            properties: { checkpoint: { type: "string" } },
+            required: ["checkpoint"],
+          } as TSchema,
+          execute,
+        },
+      ] satisfies ToolDefinition[],
+  );
+  const settled = vi.fn();
+  const ownerSettings = new SettingsStore(join(root, "settings.json"));
+  await ownerSettings.update((settings) => ({
+    ...settings,
+    persona: { ...settings.persona, characterNotes: "Owner style marker" },
+    fleet: { ...settings.fleet, notes: "Owner fleet marker" },
+  }));
+  const captain = createCaptain(
+    { ...bankDeps(), herdrAvailable: () => false },
+    {
+      repoRoot: root,
+      stateDir: root,
+      workingDirectory: root,
+      settings: ownerSettings,
+      swarm: {
+        start: async (input: typeof callbacks) => {
+          callbacks = input;
+        },
+        tools,
+        settled,
+        close: async () => {},
+      } as unknown as SwarmHost,
+    },
+  );
+  try {
+    const bank = await captain.laneToolBank("operator");
+    const binding = tools.mock.calls[0] as unknown as [{ conversationId: string; cwd: string }];
+    expect(binding[0].cwd).toBe(root);
+    const sync = bank.tools.find((tool) => tool.name === "swarm_sync")!;
+    expect((await sync.call({})).isError).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+    expect(await sync.call({ checkpoint: "known" })).toMatchObject({ content: [{ text: "shared actor" }] });
+    expect(
+      (await captain.laneToolBank("discord_presence")).tools.some((tool) => tool.name === "swarm_sync"),
+    ).toBe(false);
+    expect(tools).toHaveBeenCalledTimes(1);
+    const id = binding[0].conversationId;
+    expect(callbacks.ready(id)).toBe(false);
+    const waiting = captain.pollSeatEvents(1000);
+    expect(callbacks.ready(id)).toBe(true);
+    expect(settled).toHaveBeenCalledWith(id);
+    settled.mockClear();
+    await callbacks.wake(id, "Swarm peer envelope");
+    expect(await waiting).toMatchObject([
+      { conversationId: id, kind: "watch", content: "Swarm peer envelope" },
+    ]);
+    // Taking a channel event settles the service turn; Swarm acknowledgment remains explicit.
+    await captain.pollSeatEvents(0);
+    await expect.poll(() => callbacks.ready(id)).toBe(true);
+    const projects: Array<{ conversationId: string; cwd: string }> = [];
+    for (const name of ["alpha", "beta"]) {
+      const cwd = join(root, name);
+      await mkdir(cwd);
+      await writeFile(join(cwd, "AGENTS.md"), `Project ${name} doctrine marker`);
+      const skillDir = join(cwd, ".agents/skills/project-fixture");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        `---\nname: project-fixture\ndescription: Project-specific fixture\n---\n${name} selected skill marker`,
+      );
+      const created = await captain.serveOperatorConversation({
+        op: "create",
+        schemaVersion: 1,
+        scope: { kind: "workspace", workspaceId: cwd },
+        title: name,
+      });
+      if (created.op !== "create") throw new Error("Create failed");
+      const conversationId = created.conversation.conversationId;
+      projects.push({ conversationId, cwd });
+      expect(captain.seatContext(conversationId)).toEqual({ conversationId, cwd });
+      await captain.laneToolBank("operator", conversationId);
+      expect(tools).toHaveBeenLastCalledWith({ conversationId, cwd });
+      const prompt = await captain.lanePrompt({ lane: "operator", conversationId, sections: ["fleet"] });
+      expect(prompt).toContain(`Project ${name} doctrine marker`);
+      const instructions = await callbacks.instructions!({ conversationId, cwd });
+      expect(instructions).toContain(`Project ${name} doctrine marker`);
+      expect(instructions).not.toContain(`Project ${name === "alpha" ? "beta" : "alpha"} doctrine marker`);
+      expect(instructions).toContain("You remain your own worker");
+      expect(instructions).toContain("Owner style marker");
+      expect(instructions).toContain("Owner fleet marker");
+      expect(instructions).not.toContain("selected skill marker");
+      const withSkill = await callbacks.instructions!({ conversationId, cwd }, ["project-fixture"]);
+      expect(withSkill).toContain(`${name} selected skill marker`);
+      expect(withSkill).not.toContain(`${name === "alpha" ? "beta" : "alpha"} selected skill marker`);
+      await expect(callbacks.instructions!({ conversationId, cwd: root })).rejects.toThrow("Unknown captain");
+      expect(prompt).not.toContain(`Project ${name === "alpha" ? "beta" : "alpha"} doctrine marker`);
+    }
+    const a = projects[0]!.conversationId,
+      b = projects[1]!.conversationId;
+    const alpha = captain.pollSeatEvents(1000, undefined, a);
+    const beta = captain.pollSeatEvents(1000, undefined, b);
+    await callbacks.wake(a, "Only alpha");
+    expect(await alpha).toMatchObject([{ conversationId: a, content: "Only alpha" }]);
+    await captain.pollSeatEvents(0, undefined, a);
+    await callbacks.wake(b, "Only beta");
+    expect(await beta).toMatchObject([{ conversationId: b, content: "Only beta" }]);
+    await captain.pollSeatEvents(0, undefined, b);
+    expect(await captain.pollSeatEvents(0)).toEqual([]);
+    await ownerSettings.update((settings) => ({
+      ...settings,
+      linearWebhook: { following: true },
+    }));
+    const owner = {
+      organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
+      issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
+      conversationId: a,
+    };
+    captain.setLinearWorkOwner(owner);
+    const activity = {
+      eventId: "a".repeat(64),
+      deliveryId: "linear-project-seat",
+      type: "Comment" as const,
+      action: "create" as const,
+      actorName: "Human",
+      actorEmail: undefined,
+      actorId: "human",
+      organizationId: owner.organizationId,
+      createdAt: new Date().toISOString(),
+      url: undefined,
+      updatedFrom: undefined,
+      data: { id: "comment", issueId: owner.issueId, body: "Check the existing work" },
+    };
+    const linearWake = captain.pollSeatEvents(1000, undefined, a);
+    expect(captain.receiveLinearActivity(activity, true)).toBe(true);
+    expect(await linearWake).toMatchObject([
+      { conversationId: a, kind: "wake", content: expect.stringContaining(`--conversation ${a}`) },
+    ]);
+    await captain.pollSeatEvents(0, undefined, a);
+    expect(captain.receiveLinearActivity(activity, true)).toBe(false);
+    expect(await captain.pollSeatEvents(0, undefined, b)).toEqual([]);
+    expect(await captain.pollSeatEvents(0)).toEqual([]);
+    expect(captain.seatContext("missing-project")).toBeUndefined();
+    await expect(captain.laneToolBank("operator", "missing-project")).rejects.toThrow(
+      "Unknown captain conversation",
+    );
+  } finally {
+    await captain.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
-import { isAbsolute } from "node:path";
-import { promisify } from "node:util";
-import type { HerdrSettings } from "@clankie/settings";
+import { isAbsolute, join } from "node:path";
+import { isDeepStrictEqual, promisify } from "node:util";
+import { ExecutionConnectionSchema, type SettingsStore, type HerdrSettings } from "@clankie/settings";
+import type { HerdrBinding } from "@clankie/protocol";
+import { startHerdrRuntime, watchHerdrSocket } from "./herdr-runtime.ts";
 
 const exec = promisify(execFile);
 type HerdrSessionRunner = (
@@ -54,9 +56,9 @@ async function listSessions(
 }
 
 /** One Herdr for every child Clankie spawns, whatever identity the launch env carried. */
-function pin(env: NodeJS.ProcessEnv, socketPath: string): NodeJS.ProcessEnv {
+export function pinHerdrEnvironment(env: NodeJS.ProcessEnv, socketPath?: string): NodeJS.ProcessEnv {
   for (const name of Object.keys(env)) if (name.startsWith("HERDR_")) delete env[name];
-  env.HERDR_SOCKET_PATH = socketPath;
+  if (socketPath !== undefined) env.HERDR_SOCKET_PATH = socketPath;
   delete env.HERD_LEAD_SUMMARIES_CACHE;
   return env;
 }
@@ -71,7 +73,7 @@ async function answers(
   run: HerdrSessionRunner,
 ): Promise<boolean> {
   try {
-    const { stdout } = await run("herdr", ["api", "snapshot"], pin({ ...env }, socketPath));
+    const { stdout } = await run("herdr", ["api", "snapshot"], pinHerdrEnvironment({ ...env }, socketPath));
     return Boolean((JSON.parse(stdout) as { result?: { snapshot?: unknown } }).result?.snapshot);
   } catch {
     return false;
@@ -79,11 +81,9 @@ async function answers(
 }
 
 /**
- * Which Herdr the service leads, decided fresh at every start (ADR 0170):
- * the session the owner named, else the session the service was launched
- * inside, else his own bundled fleet. A candidate that does not answer is
- * skipped, never fatal — a session that stopped between two starts costs a
- * fallback rather than the boot.
+ * Settings select the runtime, never the launch terminal (ADR 0181).
+ * A named session that does not answer falls back to the owned runtime;
+ * configured intent remains in settings and active status exposes the fallback.
  */
 export async function resolveHerdrBinding(
   settings: HerdrSettings,
@@ -91,35 +91,249 @@ export async function resolveHerdrBinding(
   run: HerdrSessionRunner = (command, args, childEnv) =>
     exec(command, [...args], { env: childEnv, timeout: 5_000, maxBuffer: 8 * 1024 * 1024 }),
 ): Promise<HerdrSettings> {
+  pinHerdrEnvironment(env);
+  if (settings.runtime === "disabled") return { runtime: "disabled", session: settings.session };
   const bundled = { runtime: "bundled", session: settings.session } as const;
   if (settings.runtime === "bundled") return bundled;
-  let sessions: readonly HerdrSessionRow[] | undefined;
-  const candidates: (HerdrSettings & { socketPath: string })[] = [];
-  // The owner's own words first: a named session or socket is a standing
-  // instruction, and it outranks whatever terminal the service was started from.
   const named =
     settings.runtime === "external" || settings.session !== "default" || settings.socketPath !== undefined;
-  if (named) {
+  if (!named) return bundled;
+  const socketPath =
+    usableSocket(settings.socketPath) ??
+    (await listSessions(run, env)).find((row) => row.name === settings.session)?.socketPath;
+  if (socketPath === undefined || !(await answers(socketPath, env, run))) return bundled;
+  pinHerdrEnvironment(env, socketPath);
+  return { runtime: "external", session: settings.session, socketPath };
+}
+
+export class HerdrUnavailableError extends Error {
+  constructor() {
+    super("Herdr is unavailable; connect a runtime with clankie herdr use NAME or clankie herdr create");
+    this.name = "HerdrUnavailableError";
+  }
+}
+
+/** Optional execution capability. Losing it never replaces the selected fleet. */
+export async function startHerdrConnection(
+  input: {
+    settings: HerdrSettings;
+    repoRoot: string;
+    stateRoot: string;
+    env: NodeJS.ProcessEnv;
+    warn(message: string): void;
+  },
+  dependencies: {
+    resolve?: typeof resolveHerdrBinding;
+    start?: typeof startHerdrRuntime;
+    watch?: typeof watchHerdrSocket;
+  } = {},
+) {
+  const selected = await (dependencies.resolve ?? resolveHerdrBinding)(input.settings, input.env);
+  let owned: Awaited<ReturnType<typeof startHerdrRuntime>> | undefined;
+  let watcher: ReturnType<typeof watchHerdrSocket> | undefined;
+  let state = selected.runtime === "disabled" ? "disabled" : "unavailable";
+  if (selected.runtime !== "disabled") {
+    try {
+      if (selected.runtime !== "external") {
+        owned = await (dependencies.start ?? startHerdrRuntime)(input);
+      }
+      if (!input.env.HERDR_SOCKET_PATH) throw new Error("Herdr supplied no socket");
+      state = "healthy";
+      if (selected.runtime === "external") {
+        watcher = (dependencies.watch ?? watchHerdrSocket)({
+          socketPath: input.env.HERDR_SOCKET_PATH,
+          onLost: () => {
+            state = "unavailable";
+            input.warn("Herdr connection lost; conversations and Swarm remain active. Reconnect on restart.");
+          },
+        });
+      }
+    } catch (error) {
+      state = "unavailable";
+      input.warn(`Herdr unavailable; Clankie continues without terminals: ${String(error)}`);
+    }
+  }
+  // Even a shell command must not fall through to Herdr's ambient/default session.
+  const socketPath =
+    state === "healthy" ? input.env.HERDR_SOCKET_PATH! : join(input.stateRoot, "herdr", "unavailable.sock");
+  if (state !== "healthy") pinHerdrEnvironment(input.env, socketPath);
+  const status = () => owned?.status() ?? state;
+  const binding = (): HerdrBinding | undefined =>
+    status() === "healthy"
+      ? {
+          runtime: selected.runtime === "external" ? "external" : "bundled",
+          session: selected.session,
+          socketPath,
+        }
+      : undefined;
+  return {
+    status,
+    binding,
+    available: () => binding() !== undefined,
+    async close() {
+      watcher?.close();
+      await owned?.close();
+    },
+  };
+}
+
+export const ExecutionConnectSchema = ExecutionConnectionSchema.omit({ enabled: true })
+  .partial({ socketPath: true, session: true })
+  .refine(
+    (value) => value.socketPath !== undefined || value.session !== undefined,
+    "Select a session or socket",
+  );
+
+/** Named external runtimes are never started, stopped or replaced by connection management. */
+export class ExecutionConnections {
+  private readonly changes = new Set<(id: string) => void>();
+
+  onChange(listener: (id: string) => void): () => void {
+    this.changes.add(listener);
+    return () => {
+      this.changes.delete(listener);
+    };
+  }
+
+  private readonly options: {
+    settings: SettingsStore;
+    primary: Pick<Awaited<ReturnType<typeof startHerdrConnection>>, "binding" | "status">;
+    env?: NodeJS.ProcessEnv;
+    run?: HerdrSessionRunner;
+  };
+  constructor(options: {
+    settings: SettingsStore;
+    primary: Pick<Awaited<ReturnType<typeof startHerdrConnection>>, "binding" | "status">;
+    env?: NodeJS.ProcessEnv;
+    run?: HerdrSessionRunner;
+  }) {
+    this.options = options;
+  }
+
+  private run: HerdrSessionRunner = (command, args, env) =>
+    this.options.run
+      ? this.options.run(command, args, env)
+      : exec(command, [...args], { env, timeout: 5_000, maxBuffer: 8 * 1024 * 1024 });
+
+  async connect(raw: unknown) {
+    const input = ExecutionConnectSchema.parse(raw);
+    const env = pinHerdrEnvironment({ ...(this.options.env ?? process.env) });
     const socketPath =
-      usableSocket(settings.socketPath) ??
-      (sessions ??= await listSessions(run, env)).find((row) => row.name === settings.session)?.socketPath;
-    if (socketPath !== undefined)
-      candidates.push({ runtime: "external", session: settings.session, socketPath });
+      input.socketPath ??
+      (await listSessions(this.run, env)).find((row) => row.name === input.session)?.socketPath;
+    if (!socketPath || !(await answers(socketPath, env, this.run)))
+      throw new Error("Herdr runtime did not answer");
+    const connection = ExecutionConnectionSchema.parse({
+      ...input,
+      socketPath,
+      session: input.session ?? input.id,
+      enabled: true,
+    });
+    await this.options.settings.update((current) => {
+      const previous = current.execution.connections.find((entry) => entry.id === connection.id);
+      if (previous && (previous.socketPath !== socketPath || previous.session !== connection.session))
+        throw new Error("Runtime connection ID is pinned to another session/socket; use a new ID");
+      if (
+        current.execution.connections.some(
+          (entry) => entry.id !== connection.id && entry.socketPath === socketPath,
+        ) ||
+        this.options.primary.binding()?.socketPath === socketPath
+      )
+        throw new Error("This runtime already has a connection");
+      return {
+        ...current,
+        execution: {
+          connections: [
+            ...current.execution.connections.filter((entry) => entry.id !== connection.id),
+            connection,
+          ],
+        },
+      };
+    });
+    for (const listener of this.changes) listener(connection.id);
+    return connection;
   }
-  // Then the session he was launched in: starting Clankie from a pane is the
-  // owner saying "lead this one", and it costs no configuration.
-  const surrounding = usableSocket(env.HERDR_SOCKET_PATH);
-  if (surrounding !== undefined && !candidates.some((entry) => entry.socketPath === surrounding)) {
-    const name =
-      (sessions ??= await listSessions(run, env)).find((row) => row.socketPath === surrounding)?.name ??
-      usableSession(env.HERDR_SESSION) ??
-      "default";
-    candidates.push({ runtime: "external", session: name, socketPath: surrounding });
+
+  async disconnect(id: string) {
+    await this.options.settings.update((current) => {
+      if (!current.execution.connections.some((entry) => entry.id === id))
+        throw new Error("Unknown runtime connection");
+      return {
+        ...current,
+        execution: {
+          connections: current.execution.connections.map((entry) =>
+            entry.id === id ? { ...entry, enabled: false } : entry,
+          ),
+        },
+      };
+    });
+    for (const listener of this.changes) listener(id);
   }
-  for (const candidate of candidates) {
-    if (!(await answers(candidate.socketPath, env, run))) continue;
-    pin(env, candidate.socketPath);
-    return candidate;
+
+  async list() {
+    const settings = await this.options.settings.load();
+    const configured = settings.execution.connections;
+    const checked = await Promise.all(
+      configured.map(async (connection) => ({
+        ...connection,
+        state: !connection.enabled
+          ? "disabled"
+          : (await answers(connection.socketPath, this.options.env ?? process.env, this.run))
+            ? "healthy"
+            : "unavailable",
+      })),
+    );
+    const current = (await this.options.settings.load()).execution.connections;
+    const primary = this.options.primary.binding();
+    return [
+      {
+        id: "default",
+        kind: "herdr" as const,
+        session: primary?.session ?? settings.herdr.session,
+        configured: settings.herdr,
+        socketPath: primary?.socketPath,
+        state: this.options.primary.status(),
+        enabled: primary !== undefined,
+        capacity: 4,
+        capabilities: ["code", "review", "research"],
+      },
+      ...checked.map((connection) =>
+        isDeepStrictEqual(
+          configured.find((entry) => entry.id === connection.id),
+          current.find((entry) => entry.id === connection.id),
+        )
+          ? connection
+          : { ...connection, enabled: false, state: "changed" },
+      ),
+    ];
   }
-  return bundled;
+
+  /** Current admission, without a health probe on every terminal input packet. */
+  async configuredBinding(id: string): Promise<HerdrBinding | undefined> {
+    if (id === "default") return this.options.primary.binding();
+    const connection = (await this.options.settings.load()).execution.connections.find(
+      (entry) => entry.id === id,
+    );
+    return connection?.enabled
+      ? { runtime: "external", session: connection.session, socketPath: connection.socketPath }
+      : undefined;
+  }
+
+  async binding(id: string): Promise<HerdrBinding | undefined> {
+    if (id === "default") return this.options.primary.binding();
+    const connection = (await this.options.settings.load()).execution.connections.find(
+      (entry) => entry.id === id,
+    );
+    if (
+      !connection?.enabled ||
+      !(await answers(connection.socketPath, this.options.env ?? process.env, this.run))
+    )
+      return undefined;
+    const current = (await this.options.settings.load()).execution.connections.find(
+      (entry) => entry.id === id,
+    );
+    return isDeepStrictEqual(connection, current)
+      ? { runtime: "external", session: connection.session, socketPath: connection.socketPath }
+      : undefined;
+  }
 }

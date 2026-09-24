@@ -109,7 +109,9 @@ export function captainTools(
   return [
     ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
-    ...(lane === "operator" && herdrWatches !== undefined ? herdrWatchTools(herdrWatches, turn) : []),
+    ...(lane === "operator" && herdrWatches !== undefined
+      ? herdrWatchTools(herdrWatches, turn, deps.herdrAvailable)
+      : []),
     ...(turn.publishFile !== undefined
       ? [
           defineTool({
@@ -528,7 +530,11 @@ export function captainTools(
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
 }
 
-function herdrWatchTools(watches: HerdrWatchPort, turn: TurnContext): ToolDefinition[] {
+function herdrWatchTools(
+  watches: HerdrWatchPort,
+  turn: TurnContext,
+  available?: () => boolean,
+): ToolDefinition[] {
   const conversationId = (): string => {
     if (turn.targetId === undefined) throw new Error("Operator conversation attribution is unavailable");
     return turn.targetId;
@@ -556,7 +562,11 @@ function herdrWatchTools(watches: HerdrWatchPort, turn: TurnContext): ToolDefini
       }),
       executionMode: "sequential",
       execute: async (_id, params) =>
-        json(await watches.watch(conversationId(), params.agent, params.reason)),
+        json(
+          available?.() === false
+            ? { outcome: "refused", reason: "herdr_unavailable" }
+            : await watches.watch(conversationId(), params.agent, params.reason),
+        ),
     }),
   ];
 }

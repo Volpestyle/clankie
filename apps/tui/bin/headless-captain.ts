@@ -1,3 +1,7 @@
+import { runRuntimeCommand } from "../src/command/runtime.ts";
+import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
+import { runSwarmCommand } from "../src/command/swarm.ts";
+import { runAccessCommand } from "../src/command/access.ts";
 import { runEvaluatorCommand } from "../src/command/evaluator.ts";
 import { runConversationsCommand } from "../src/command/conversations.ts";
 import { openHerdr, runFleetHerdr } from "../src/session/herdr-connection.ts";
@@ -158,12 +162,38 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await runLinearCommand(rest, options));
       return 0;
     }
+    if (command === "connections") {
+      outputJson(stdout, await runRuntimeCommand(["inventory"], options));
+      return 0;
+    }
+    if (command === "runtime") {
+      outputJson(stdout, await runRuntimeCommand(rest, options));
+      return 0;
+    }
+    if (command === "swarm") {
+      outputJson(stdout, await runSwarmCommand(rest, options));
+      return 0;
+    }
+    if (command === "access") {
+      outputJson(stdout, await runAccessCommand(rest, options));
+      return 0;
+    }
     if (command === "fleet") {
       const result = await runFleetCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }
     if (command === "herdr") {
+      if (rest[0] === "--connection") {
+        const connectionId = rest[1];
+        if (!connectionId || !/^[a-z][a-z0-9-]{0,63}$/u.test(connectionId))
+          throw new Error("Select a runtime connection ID");
+        const target = { ...options, connectionId };
+        const args = rest.slice(2);
+        if (args.length === 1 && args[0] === "open") return await openHerdr(target);
+        if (!args.length) throw new Error("Supply a Herdr command or open");
+        return await runFleetHerdr(args, target);
+      }
       if (rest.length === 1 && rest[0] === "open") return await openHerdr(options);
       if (forwardsToFleetHerdr(rest)) return await runFleetHerdr(rest, options);
       const result = await runHerdrCommand(rest, options);
@@ -208,6 +238,7 @@ export async function runHeadlessCaptainCommand(
     }
     // The seat: Claude Code as Clankie (ADR 0152). `mcp` is its stdio side and
     // speaks JSON-RPC on stdout, so it never goes through outputJson.
+    if (command === "seat-sync") return await runSeatSyncCommand(rest, options);
     if (command === "seat") {
       return await runSeatCommand(rest, {
         repoRoot: options.repoRoot,

@@ -1,3 +1,4 @@
+import type { ExecutionConnections } from "../herdr-session.ts";
 import type {
   ActivityObservationRead,
   PlayStillRead,
@@ -35,6 +36,9 @@ import type { RivalsClient } from "../rivals.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  /** Execution is optional; checked again when a terminal tool is called. */
+  readonly herdrAvailable?: () => boolean;
+  readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
   readonly rivals?: RivalsClient;
   /** Tools on his connected MCP servers. The lane is passed on every call. */
   readonly mcp: Pick<McpHost, "catalog" | "call">;

@@ -241,7 +241,7 @@ function runClaude(args: readonly string[]): Promise<ClaudeMcpResult> {
   });
 }
 
-function runHerdr(args: readonly string[], signal?: AbortSignal): Promise<string> {
+function execHerdr(args: readonly string[], signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       "herdr",
@@ -289,7 +289,11 @@ function runExecFile(
   });
 }
 
-export function createHerdrWatchRunner(): HerdrWatchRunner {
+export function createHerdrWatchRunner(available?: () => boolean): HerdrWatchRunner {
+  const runHerdr = (args: readonly string[], signal?: AbortSignal): Promise<string> =>
+    available?.() === false
+      ? Promise.reject(new Error("Herdr execution is unavailable"))
+      : execHerdr(args, signal);
   return {
     get: async (target) => parseHerdrAgentResult(await runHerdr(["agent", "get", target])),
     resolveTerminal: async (terminalId) =>
@@ -480,13 +484,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
     path: string,
     options: {
       readonly runner?: HerdrWatchRunner;
+      readonly available?: () => boolean;
       readonly summariesPath?: string;
       readonly summaryWatchIntervalMs?: number;
       readonly seatTranscriptTailMs?: number;
     } = {},
   ) {
     this.path = path;
-    this.runner = options.runner ?? createHerdrWatchRunner();
+    this.runner = options.runner ?? createHerdrWatchRunner(options.available);
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
     this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;

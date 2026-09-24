@@ -3,7 +3,7 @@ import type { HerdrBinding } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath, type HerdrSettings } from "@clankie/settings";
 
 const HERDR_USAGE =
-  "Usage: clankie herdr [status|open|create]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external";
+  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled";
 
 export interface HerdrCommandOptions extends Partial<HerdrConnectionOptions> {
   readonly env?: NodeJS.ProcessEnv;
@@ -56,7 +56,7 @@ async function herdrSet(
           ? { runtime: "auto", session: "default" }
           : patch.runtime === "external"
             ? { ...current.herdr, runtime: "external" }
-            : { runtime: "bundled", session: current.herdr.session },
+            : { runtime: patch.runtime, session: current.herdr.session },
   }));
   return {
     ok: true,
@@ -78,6 +78,7 @@ export function forwardsToFleetHerdr(args: readonly string[]): boolean {
     verb !== "set" &&
     verb !== "open" &&
     verb !== "create" &&
+    verb !== "disable" &&
     verb !== "use"
   );
 }
@@ -88,6 +89,7 @@ export async function runHerdrCommand(
 ): Promise<HerdrCommandResult> {
   const verb = args[0];
   if (verb === undefined || verb === "status") return await herdrStatus(options);
+  if (verb === "disable" && args.length === 1) return await herdrSet({ runtime: "disabled" }, options);
   if (verb === "create" && args.length === 1) return await herdrSet({ runtime: "bundled" }, options);
   if (verb === "use" && args.length === 2 && args[1] !== undefined)
     return await herdrSet({ session: args[1] }, options);
@@ -96,7 +98,7 @@ export async function runHerdrCommand(
   }
   if (verb === "set" && args.length === 3 && args[1] === "--runtime") {
     const runtime = args[2];
-    if (runtime === "auto" || runtime === "bundled" || runtime === "external") {
+    if (runtime === "auto" || runtime === "bundled" || runtime === "external" || runtime === "disabled") {
       return await herdrSet({ runtime }, options);
     }
   }

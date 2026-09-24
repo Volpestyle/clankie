@@ -69,12 +69,9 @@ fallback. See [ADR 0172](adr/0172-herdr-sessions-follow-official-releases.md).
 The service owns its headless process and private state under
 `$CLANKIE_STATE/herdr` (default `~/.clankie/herdr`), with health and crash
 recovery through a child supervisor. See [ADR 0157](adr/0157-herdr-is-an-owned-runtime.md).
-`auto` leads the session the service was launched inside, and private bundled
-Herdr when it was launched outside every session; the binding is resolved again
-at every start, and a session that stops is unbound rather than fatal
-([ADR 0170](adr/0170-a-session-that-stops-is-unbound.md)). The fleet is
-Clankie's own session either way
-([ADR 0164](adr/0164-the-fleet-is-its-own-session.md)).
+Runtime selection follows saved settings, independent of the launch terminal
+([ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)). Current
+binding and fallback behavior live in [the CLI reference](cli.md#herdr-statusopencreate--herdr-use-name).
 Source checkouts download the official release on first use; `pnpm herdr:build`
 prepares the pinned offline fallback and license source. `clankie herdr use NAME`
 selects an existing session; `clankie herdr create` selects Clankie’s own.
@@ -124,8 +121,10 @@ Shared provider registration includes Pi's static OAuth flows in the bundle;
 `apps/tui/test/packaged-oauth.test.ts` checks auth derivation outside the checkout.
 
 `pnpm herdr:linux:smoke` builds and exercises the same pinned Herdr runtime
-inside Docker. This proves the native Linux boundary; the complete hosted
-service image and provisioning system are separate work.
+inside Docker. `pnpm hosted:build` builds the single-owner Linux captain,
+Swarm/Herdr worker and relay image; `pnpm hosted:smoke` checks isolated execution
+and persistence. The [hosted deployment guide](../infra/hosted/README.md) owns
+setup, supported capabilities and remaining managed-hosting requirements.
 
 Pushing a version tag matching `package.json` (for example `v0.2.0`) runs the
 full repository check, builds and smoke-tests the archive on an Apple silicon

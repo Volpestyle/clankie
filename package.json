@@ -28,7 +28,9 @@
     "clean": "turbo run clean --filter=@clankie/menu-bar --filter=@clankie/vox && rm -rf .turbo .data",
     "play:live": "pnpm --filter @clankie/clankie free-play-live",
     "discord:readiness": "pnpm --filter @clankie/discord-bridge readiness",
-    "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness"
+    "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness",
+    "hosted:build": "docker build -f scripts/release/clankie-linux.Dockerfile -t clankie-hosted:local .",
+    "hosted:smoke": "node scripts/smoke-hosted.mjs"
   },
   "devDependencies": {
     "esbuild": "0.28.1",

@@ -37,14 +37,461 @@ tags:
   - name: Media
   - name: Pairing
   - name: Devices
+  - name: Workers
 security: []
 
 paths:
+  /v1/connections:
+    get:
+      tags: [Operator]
+      operationId: getConnectionInventory
+      summary: Inspect execution runtimes, Swarm coordinators and verified Linear identity
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Current runtime health, Swarm diagnostics and recorded account identity }
+        "401": { description: Operator authentication required }
+        "503": { description: Operator authentication unavailable }
+  /v1/runtime-connections:
+    get:
+      tags: [Operator]
+      operationId: listRuntimeConnections
+      summary: Inspect the default fleet and named execution connections
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Configured endpoints and freshly probed health }
+        "401": { description: Operator authentication required }
+        "503": { description: Operator authentication unavailable }
+    post:
+      tags: [Operator]
+      operationId: connectRuntime
+      summary: Connect a named Herdr runtime without starting or stopping its processes
+      description: Resolves an explicit session or socket and pins that endpoint to the ID. Reconnection cannot retarget an existing ID. Live coordinator configuration is synchronized before success.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id]
+              anyOf: [{ required: [session] }, { required: [socketPath] }]
+              properties:
+                id: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$", description: "default is reserved" }
+                kind: { type: string, enum: [herdr], default: herdr }
+                session: { type: string, maxLength: 64 }
+                socketPath:
+                  {
+                    type: string,
+                    maxLength: 102,
+                    description: "Absolute Unix socket path, at most 102 UTF-8 bytes",
+                  }
+                capacity: { type: integer, minimum: 1, maximum: 16, default: 4 }
+                capabilities:
+                  { type: array, maxItems: 32, items: { type: string }, default: [code, review, research] }
+      responses:
+        "200": { description: Persisted connection }
+        "400": { description: Invalid connection }
+        "401": { description: Operator authentication required }
+        "409":
+          {
+            description: "Endpoint unavailable, identity conflict or coordinator synchronization failed; inspect state before retrying",
+          }
+        "503": { description: Execution management or authentication unavailable }
+  /v1/runtime-connections/{id}:
+    delete:
+      tags: [Operator]
+      operationId: disconnectRuntime
+      summary: Disable a named execution connection while preserving workers and route identity
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Connection disabled and coordinator routes synchronized }
+        "401": { description: Operator authentication required }
+        "409":
+          { description: Unknown connection or synchronization unconfirmed; inspect state before retrying }
+        "503": { description: Execution management or authentication unavailable }
+  /v1/linear/work:
+    get:
+      tags: [Operator]
+      operationId: listLinearWorkOwners
+      summary: List explicit organization and issue ownership
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Owners in an owners array }
+        "401": { description: Operator authentication required }
+    put:
+      tags: [Operator]
+      operationId: bindLinearWorkOwner
+      summary: Bind new issue activity to an existing Clankie conversation
+      description: Rebinding requires the expected current conversation. Already admitted events keep their original owner.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinearWorkOwnerRequest" }
+      responses:
+        "200": { description: Updated owners array }
+        "400": { description: Invalid UUIDs or request shape }
+        "401": { description: Operator authentication required }
+        "409": { description: Unknown conversation or ownership conflict }
+    delete:
+      tags: [Operator]
+      operationId: unbindLinearWorkOwner
+      summary: Unbind the current issue owner for future deliveries
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinearWorkOwnerRequest" }
+      responses:
+        "200": { description: Updated owners array }
+        "400": { description: Invalid request }
+        "401": { description: Operator authentication required }
+        "409": { description: Current owner does not match }
+  /v1/linear/inbox:
+    get:
+      tags: [Operator]
+      operationId: readLinearInbox
+      summary: Read a bounded page without consuming it
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - {
+            name: conversationId,
+            in: query,
+            schema: { type: string },
+            description: Optional owner filter; omitted reads the whole inbox,
+          }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: before, in: query, schema: { type: string, pattern: "^[0-9]{12}$" } }
+        - { name: headlines, in: query, schema: { type: boolean } }
+      responses:
+        "200": { description: Items, unread count, continuation and acknowledgment cursor }
+        "400": { description: Invalid cursor or limit }
+        "401": { description: Operator authentication required }
+        "404": { description: Unknown owner conversation }
+    post:
+      tags: [Operator]
+      operationId: acknowledgeLinearInbox
+      summary: Acknowledge only events already offered under the selected owner
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ackCursor]
+              properties:
+                ackCursor: { type: string, pattern: "^[0-9]{12}$" }
+                conversationId: { type: string }
+      responses:
+        "200": { description: Acknowledged cursor }
+        "400": { description: Invalid acknowledgment }
+        "401": { description: Operator authentication required }
+        "409": { description: Cursor was not offered for this owner }
+  /v1/linear/follow:
+    get:
+      tags: [Operator]
+      operationId: inspectLinearFollowing
+      summary: Inspect whether Linear activity can wake Clankie
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Following switch and canonical inbox conversation }
+        "401": { description: Operator authentication required }
+    put:
+      tags: [Operator]
+      operationId: setLinearFollowing
+      summary: Enable or disable event-triggered turns
+      description: Enabling resumes previously accepted pending wakes; it does not wake passive backlog. Disabling leaves inbox delivery enabled.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [following]
+              properties:
+                following: { type: boolean }
+      responses:
+        "200": { description: Following switch and canonical inbox conversation }
+        "400": { description: Invalid request }
+        "401": { description: Operator authentication required }
+  /v1/swarm:
+    get:
+      tags: [Operator]
+      operationId: inspectSwarmConnections
+      summary: Inspect configured connections and active conversation actors
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Non-secret connection configuration and coordinator observations }
+        "401": { description: Operator authentication required }
+        "503": { description: Operator authentication unavailable }
+  /v1/swarm/connections:
+    post:
+      tags: [Operator]
+      operationId: connectSwarmCoordinator
+      summary: Connect an externally enrolled Clankie session
+      description: Verifies the actor and scope at an explicit local socket, including an owner-managed SSH socket forward. Capabilities stay in the broker. A retained ID cannot change coordinator identity or owning conversation. Maximum body size is 16 KiB.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, conversationId, endpoint, capability]
+              properties:
+                id:
+                  {
+                    type: string,
+                    pattern: "^[a-z][a-z0-9-]{0,63}$",
+                    description: External name; embedded is reserved,
+                  }
+                conversationId: { type: string, minLength: 1, maxLength: 256 }
+                endpoint: { type: string, pattern: "^/", maxLength: 4096 }
+                capability: { type: string, minLength: 32, maxLength: 512, writeOnly: true }
+      responses:
+        "200": { description: Verified actor, scope, endpoint, conversation and non-secret broker reference }
+        "400": { description: Invalid connection request }
+        "401": { description: Operator authentication required }
+        "404": { description: Unknown or unsupported conversation }
+        "409": { description: Connection refused or retained identity conflicts }
+        "413": { description: Request exceeds 16 KiB }
+        "503": { description: External connection management unavailable }
+  /v1/swarm/connections/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [Operator]
+      operationId: disconnectSwarmCoordinator
+      summary: Disable a named connection without redirecting its work
+      description: Closes Clankie's sessions and removes its brokered capability. Retains the identity and work binding; does not stop the external coordinator or workers.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Connection disabled }
+        "401": { description: Operator authentication required }
+        "409": { description: Unknown connection or disconnect refused }
+        "503": { description: External connection management unavailable }
+  /v1/worker-grants/:
+    get:
+      tags: [Operator]
+      operationId: listWorkerGrants
+      summary: List worker grant records without bearer tokens
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Grant records including account identity and revocation status }
+        "401": { description: Operator authentication required }
+        "503": { description: Worker access service unavailable }
+    post:
+      tags: [Operator]
+      operationId: issueWorkerGrant
+      summary: Issue a scoped grant for one verified connected account
+      description: Work ID is provenance. Exact top-level argument restrictions enforce resource boundaries; omitted arguments remain unrestricted. An optional Swarm binding requires the live enrolled task owner, creator conversation and unchanged attempt/fence on every request.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [principalId, workId, server, tools]
+              properties:
+                principalId: { type: string, minLength: 1, maxLength: 256 }
+                workId: { type: string, minLength: 1, maxLength: 256 }
+                server: { type: string, minLength: 1, maxLength: 128 }
+                ttlSeconds: { type: integer, minimum: 1, maximum: 900, default: 900 }
+                renewable:
+                  type: boolean
+                  default: false
+                  description: Requires swarm. Permits renewal of the same authority while its assignment remains active; expired tokens cannot renew.
+                swarm:
+                  type: object
+                  additionalProperties: false
+                  required: [conversationId, taskId]
+                  properties:
+                    conversationId: { type: string, minLength: 1, maxLength: 256 }
+                    connectionId:
+                      {
+                        type: string,
+                        pattern: "^[a-z][a-z0-9-]{0,63}$",
+                        description: Named external connection; omit for embedded,
+                      }
+                    taskId: { type: string, minLength: 1, maxLength: 128 }
+                tools:
+                  type: array
+                  minItems: 1
+                  maxItems: 64
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [name]
+                    properties:
+                      name: { type: string, minLength: 1, maxLength: 128 }
+                      arguments: { type: object, additionalProperties: true, default: {} }
+                      forbiddenArguments:
+                        type: array
+                        maxItems: 64
+                        default: []
+                        description: Top-level arguments that must be absent, including null values
+                        items: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "201": { description: Grant record and private worker bearer token; Cache-Control no-store }
+        "400": { description: Invalid grant request }
+        "401": { description: Operator authentication required }
+        "409": { description: Account unverified or tool unavailable }
+        "503": { description: Worker access service unavailable }
+  /v1/worker-grants/{id}:
+    delete:
+      tags: [Operator]
+      operationId: revokeWorkerGrant
+      summary: Durably revoke one worker grant and close its sessions
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Revoked grant record }
+        "401": { description: Operator authentication required }
+        "404": { description: Grant unavailable }
+  /v1/worker-grants/linear/account:
+    get:
+      tags: [Operator]
+      operationId: getWorkerLinearAccount
+      summary: Inspect disconnected, unverified or verified Linear account identity
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Account status and verified identity when available }
+        "401": { description: Operator authentication required }
+    post:
+      tags: [Operator]
+      operationId: verifyWorkerLinearAccount
+      summary: Verify the stored Linear account's provider user and workspace
+      description: Verifies API keys via GraphQL and OAuth via Linear's official MCP identity tools. Credentials are never migrated automatically.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Verified account identity }
+        "401": { description: Operator authentication required }
+        "409": { description: Verification unavailable or failed }
+  /v1/worker-mcp/swarm/{scope}:
+    parameters:
+      - in: path
+        name: scope
+        required: true
+        schema: { type: string }
+      - {
+          name: connection,
+          in: query,
+          required: false,
+          schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" },
+          description: Named external connection; omit for embedded,
+        }
+    post:
+      tags: [Workers]
+      operationId: enrolledWorkerMcpRequest
+      summary: Connect an enrolled worker and use its explicitly granted tools
+      description: Authenticates the Swarm session at a known service scope. Starts with no tools; issuance and revocation send MCP tool-list notifications. Every request rechecks actor, scope, grants, account and task bindings. Renewable grants require a live runtime and assignment; nonrenewable grants retain their initial expiry. No provider secret or operator channel is exposed.
+      security: [{ swarmWorkerBearer: [] }]
+      responses:
+        "200": { description: MCP response }
+        "202": { description: MCP notification accepted }
+        "401": { description: Swarm session bearer required }
+        "403": { description: Runtime unavailable or session belongs to another principal }
+        "404": { description: MCP session unavailable }
+        "503": { description: Worker service unavailable }
+    get:
+      tags: [Workers]
+      operationId: enrolledWorkerMcpStream
+      summary: Stream tool-list changes to an authenticated enrolled worker
+      security: [{ swarmWorkerBearer: [] }]
+      responses:
+        "200": { description: MCP stream }
+        "403": { description: Swarm runtime unavailable }
+    delete:
+      tags: [Workers]
+      operationId: closeEnrolledWorkerMcpSession
+      summary: Close an enrolled worker MCP session
+      security: [{ swarmWorkerBearer: [] }]
+      responses:
+        "200": { description: Session closed }
+        "403": { description: Swarm runtime unavailable }
+  /v1/worker-mcp/claim/{id}:
+    post:
+      tags: [Workers]
+      operationId: claimWorkerGrant
+      summary: Privately retrieve an existing grant using the enrolled Swarm session
+      description: Authenticates at the grant's selected coordinator and verifies actor, scope, live assignment and account. A grant ID alone grants no access. Renewable grants permit fresh delivery after prior token expiry; nonrenewable grants retain their original expiry. No new authority is issued.
+      security: [{ swarmWorkerBearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Private worker token, grant metadata and renewal flag; Cache-Control no-store }
+        "401": { description: Swarm session bearer required }
+        "403": { description: Worker or grant unavailable or unauthorized }
+        "503": { description: Worker access service unavailable }
+  /v1/worker-mcp/renew:
+    post:
+      tags: [Workers]
+      operationId: renewWorkerToken
+      summary: Renew an unexpired token for opted-in live Swarm work
+      description: Preserves grant ID, account, worker, work, task attempt, restrictions and token lifetime. Revocation invalidates all tokens for this grant. No provider credential is returned. Issuance records retain the initial token timestamps.
+      security: [{ workerBearer: [] }]
+      responses:
+        "200": { description: Fresh worker token, grant metadata and renewable true; Cache-Control no-store }
+        "401": { description: Worker bearer required }
+        "403": { description: Expired, revoked, nonrenewable or no longer authorized }
+        "503": { description: Worker access service unavailable }
+  /v1/worker-mcp:
+    post:
+      tags: [Workers]
+      operationId: workerMcpRequest
+      summary: Initialize a worker MCP session or list/call its granted tools
+      security: [{ workerBearer: [] }]
+      description: Standard Streamable HTTP MCP. Every request validates expiry, durable revocation and account binding. MCP sessions are bound to one grant. No operator tools or channel capabilities are exposed.
+      responses:
+        "200": { description: MCP response }
+        "202": { description: MCP notification accepted }
+        "401": { description: Worker bearer required }
+        "403": { description: Grant unavailable or session belongs to another grant }
+        "404": { description: MCP session unavailable }
+    get:
+      operationId: workerMcpStream
+      tags: [Workers]
+      summary: MCP session stream
+      security: [{ workerBearer: [] }]
+      responses:
+        "200": { description: MCP stream }
+        "403": { description: Worker grant unavailable }
+    delete:
+      operationId: closeWorkerMcpSession
+      tags: [Workers]
+      summary: Close an authenticated worker MCP session
+      security: [{ workerBearer: [] }]
+      responses:
+        "200": { description: Session closed }
+        "403": { description: Worker grant unavailable }
   /health:
     get:
       tags: [Health]
       operationId: getHealth
       summary: Public liveness
+      description: Optional Herdr or gateway failures are reported separately and do not change service liveness.
       security: []
       responses:
         "200":
@@ -58,7 +505,12 @@ paths:
       tags: [Operator]
       operationId: getHerdrBinding
       summary: Running service's worker-runtime binding
-      description: Pending settings do not change this binding until service restart.
+      description: Without a connection ID, pending default-fleet settings apply on service restart. Named connections resolve their pinned endpoint and current health. No unavailable connection falls back to the default fleet.
+      parameters:
+        - in: query
+          name: connection
+          schema: { type: string }
+          description: Named runtime connection, or default
       security: [{ operatorBearer: [] }]
       responses:
         "200":
@@ -383,7 +835,20 @@ paths:
         into an ephemeral child conversation. Pane-scoped `send` and
         `state_stance` requests qualify their pane ID with the source socket.
         A mismatched `send` loses its pane association; a mismatched stance
-        returns 409 without changing a worker.
+        returns 409 without changing a worker. Seat-control operations
+        return 503 with herdr_unavailable when the default runtime is unavailable;
+        ordinary conversations and their durable records remain accessible.
+        `terminal_catalog` lists up to 48 panes per execution connection (16 connections).
+        Each row carries runtime identity separately from Herdr workspace/tab IDs.
+        Named terminal addresses pin their endpoint; tail, control and input refuse
+        disabled or changed connections with a typed unavailable result, without
+        falling back to the default fleet. Terminal catalog/tail require the relay's
+        `terminalObserve` grant; control/input require `terminalControl`.
+        `connections` reads bounded runtime, Swarm and account metadata or manages
+        named runtime connections. Commands are `list`, `connect_runtime` (id,
+        session), `reconnect_runtime`, `disconnect_runtime`, and `disconnect_swarm`
+        (id). It requires the operator captain lane; the device relay requires
+        `steer`. No provider credential, socket path or session capability is returned.
       parameters:
         - in: header
           name: x-clankie-herdr-socket
@@ -575,6 +1040,105 @@ paths:
         "401":
           description: Operator authentication required
 
+  /v1/captain/seat-context:
+    get:
+      tags: [Captain, Operator]
+      operationId: getCaptainSeatContext
+      summary: Resolve an operator seat to its service conversation and workspace
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: query
+          name: conversationId
+          description: Existing global or workspace conversation; defaults to the global head.
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "200":
+          description: The service-owned conversationId and cwd
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversationId, cwd]
+                properties:
+                  conversationId: { type: string }
+                  cwd: { type: string }
+        "400":
+          description: Invalid conversation ID
+        "403":
+          description: Operator lane required
+        "404":
+          description: Unknown conversation or a scope that does not run Clankie
+
+  /v1/seat/transcript:
+    post:
+      tags: [Captain, Operator]
+      operationId: syncOperatorSeatTranscript
+      summary: Append redacted native seat display records to its selected conversation
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: query
+          name: conversationId
+          description: Existing global or workspace conversation; defaults to the global head.
+          schema: { type: string, maxLength: 256 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sessionId, entries]
+              properties:
+                sessionId: { type: string, format: uuid }
+                activity:
+                  type: string
+                  enum: [responding, waiting]
+                  description: Native hook activity, supplied on the final transcript page. Display only; does not complete a service run.
+                entries:
+                  type: array
+                  maxItems: 100
+                  description: Normalized message or tool display records; host image paths are rejected. Total request limit is 1 MiB.
+                  items:
+                    oneOf:
+                      - type: object
+                        additionalProperties: false
+                        required: [type, id, role, text]
+                        properties:
+                          type: { type: string, enum: [message] }
+                          id: { type: string, minLength: 1, maxLength: 256 }
+                          role: { type: string, enum: [operator, agent] }
+                          text: { type: string, maxLength: 16384 }
+                          occurredAt: { type: string, maxLength: 64 }
+                      - type: object
+                        additionalProperties: false
+                        required: [type, id, toolCallId, name, phase]
+                        properties:
+                          type: { type: string, enum: [tool] }
+                          id: { type: string, minLength: 1, maxLength: 256 }
+                          toolCallId: { type: string, minLength: 1, maxLength: 512 }
+                          name: { type: string, minLength: 1, maxLength: 512 }
+                          phase: { type: string, enum: [started, completed, failed] }
+                          detail: { type: string, maxLength: 16384 }
+                          occurredAt: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: Accepted; repeated native entry IDs do not append duplicate events
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } }, required: [ok] }
+        "400":
+          description: Invalid transcript or conversation ID
+        "401":
+          description: Authentication required
+        "403":
+          description: Operator lane required
+        "404":
+          description: Unknown captain conversation
+        "409":
+          description: Native session is pinned to another conversation or retired by reset
+        "413":
+          description: Request exceeds 1 MiB
+
   /v1/captain/prompt:
     get:
       tags: [Captain, Operator]
@@ -582,13 +1146,18 @@ paths:
       summary: The system prompt a lane's session starts from
       description: |
         Plain text, for a seat launcher in another harness. `sections` is a
-        comma-separated subset of `identity`, `persona`, `reach`, `address`,
-        `model`; omitted, it is the four a pi session starts with (`model` is
+        comma-separated subset of `identity`, `persona`, `reach`, `fleet`, `address`,
+        `model`; omitted, it is the session's standard sections (`model` is
         the per-run card, asked for by name). The lane must be the bearer's
         own — the operator credential and the console captain token are
-        `operator`, a Discord bridge bearer is the lane it serves.
+        `operator`, a Discord bridge bearer is the lane it serves. An explicit
+        conversationId adds that workspace's agent instructions with source paths.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
+        - in: query
+          name: conversationId
+          description: Existing operator global/workspace conversation; omitted selects the global head.
+          schema: { type: string, minLength: 1, maxLength: 256 }
         - in: query
           name: lane
           description: Defaults to the bearer's own lane.
@@ -633,6 +1202,11 @@ paths:
           description: Lane is not the bearer's own
 
   /v1/mcp:
+    parameters:
+      - in: query
+        name: conversationId
+        description: Operator conversation binding; every request in a session retains it. Omitted selects the global head.
+        schema: { type: string, minLength: 1, maxLength: 256 }
     post:
       tags: [Captain]
       operationId: laneMcp
@@ -645,7 +1219,7 @@ paths:
         plan (authored tools, the browser catalog, and the connected-service
         tools that lane may reach). An `initialize` POST opens a session and
         returns its id in `mcp-session-id`; every later request must carry that
-        header and resolve to the same lane. `DELETE` ends the session.
+        header and resolve to the same lane and conversation. `DELETE` ends the session.
         `clankie mcp` is the stdio bridge to this route (ADR 0152).
       security:
         [{ operatorBearer: [] }, { captainBearer: [] }, { discordTextBearer: [] }, { discordVoiceBearer: [] }]
@@ -655,7 +1229,7 @@ paths:
         "400":
           description: No session id on a non-initialize request
         "403":
-          description: The session belongs to another lane
+          description: The session belongs to another lane or conversation
         "404":
           description: Unknown or expired session
     get:
@@ -671,7 +1245,7 @@ paths:
         "400":
           description: No session id
         "403":
-          description: The session belongs to another lane
+          description: The session belongs to another lane or conversation
         "404":
           description: Unknown or expired session
     delete:
@@ -684,7 +1258,7 @@ paths:
         "200":
           description: Session closed
         "403":
-          description: The session belongs to another lane
+          description: The session belongs to another lane or conversation
         "404":
           description: Unknown or expired session
 
@@ -701,6 +1275,10 @@ paths:
         bridge bearer is 403. `wait` is capped at 30000 ms.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
+        - in: query
+          name: conversationId
+          description: Existing operator global/workspace conversation; omitted selects the global head.
+          schema: { type: string, minLength: 1, maxLength: 256 }
         - in: query
           name: wait
           schema: { type: integer, minimum: 0, maximum: 30000, default: 0 }
@@ -730,6 +1308,10 @@ paths:
       description: The reply lands in the escalating conversation as his own message and settles that run.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
+        - in: query
+          name: conversationId
+          description: Existing operator global/workspace conversation; omitted selects the global head.
+          schema: { type: string, minLength: 1, maxLength: 256 }
         - in: path
           name: id
           required: true
@@ -1334,6 +1916,16 @@ paths:
           description: New token; relayUrl republishes the host-scoped gateway base when configured
 
 components:
+  schemas:
+    LinearWorkOwnerRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, issueId, conversationId]
+      properties:
+        organizationId: { type: string, format: uuid }
+        issueId: { type: string, format: uuid }
+        conversationId: { type: string, maxLength: 256, pattern: "^[a-zA-Z0-9_-]+$" }
+        expectedConversationId: { type: string, minLength: 1, maxLength: 256 }
   parameters:
     guildId:
       in: path
@@ -1356,6 +1948,14 @@ components:
       required: true
       schema: { type: string }
   securitySchemes:
+    swarmWorkerBearer:
+      type: http
+      scheme: bearer
+      description: Runtime's enrolled SWARM_SESSION_CAPABILITY, verified at the grant's selected coordinator; never an operator or provider credential
+    workerBearer:
+      type: http
+      scheme: bearer
+      description: Individual short-lived grant issued by POST /v1/worker-grants/; never an operator or provider credential
     operatorBearer:
       type: http
       scheme: bearer

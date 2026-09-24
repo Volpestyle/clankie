@@ -1,0 +1,43 @@
+{
+  "scenario": "Independent Linux Swarm over SSH with a delegated synthetic provider MCP",
+  "at": "2026-09-24T03:27:29.219Z",
+  "calls": [
+    {
+      "name": "record",
+      "args": {
+        "issueId": "fixture-issue",
+        "marker": "REMOTE_GRANT_WORKS"
+      }
+    }
+  ],
+  "limitations": [
+    "Controlled remote worker client, not an LLM session",
+    "Service fixture uses the real API, Swarm host and worker MCP with a stub captain",
+    "Synthetic provider and credentials; no live Linear request",
+    "Loopback Docker SSH server; no user SSH configuration or keys"
+  ],
+  "checks": {
+    "apiImport": true,
+    "wakeBeforeModelTurn": true,
+    "remoteDoctrineRead": true,
+    "emptyBeforeGrant": true,
+    "crossConnectionDenied": true,
+    "argumentRestriction": true,
+    "revocationSameSession": true,
+    "disconnectDenied": true,
+    "externalOwnerSurvivesDisconnect": true,
+    "brokerOnlyCapability": true
+  },
+  "runtime": {
+    "node": "v24.20.0",
+    "platform": "linux"
+  },
+  "taskId": "b1defbf9-de0d-4634-83b6-ffdd3c43d270",
+  "provenance": {
+    "grantId": "4b145ad9-8bd0-4120-9d87-67b73157b0b8",
+    "principalId": "cad48862-5c5a-478f-9039-91e3c4bff666",
+    "workId": "fixture-issue"
+  },
+  "passed": true,
+  "cleanedUp": true
+}

@@ -298,7 +298,12 @@ describe("install doctor", () => {
     await writeFile(join(configHome, "clankie", "settings.json"), JSON.stringify({ schemaVersion: 1 }));
     const owned = await inspectInstall({
       repoRoot: root,
-      env: { HOME: join(root, "home"), XDG_CONFIG_HOME: configHome },
+      env: {
+        HOME: join(root, "home"),
+        XDG_CONFIG_HOME: configHome,
+        HERDR_ENV: "1",
+        HERDR_SOCKET_PATH: "/tmp/unrelated.sock",
+      },
       execFileImpl: async (command, args) => {
         if (command === join(root, "libexec/herdr")) {
           expect(args).toEqual(["--version"]);

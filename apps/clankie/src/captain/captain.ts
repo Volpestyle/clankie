@@ -1,3 +1,5 @@
+import { HerdrUnavailableError } from "../herdr-session.ts";
+import type { SwarmHost } from "@clankie/swarm";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -44,14 +46,12 @@ import {
   LINEAR_INBOX_CONVERSATION_ID,
   type ConversationTurnContext,
 } from "./conversations.ts";
-import { linearActivityPrompt } from "../linear-webhook.ts";
 import { Evaluator, type EvaluationCapture } from "./evaluator.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
   readFleet,
   readHerdrSessionCensus,
   readSeatIdForHerdrPane,
-  readTerminalCatalog,
   type HerdrSessionCensus,
   type ObservedHeadSeat,
 } from "./herdr-census.ts";
@@ -59,9 +59,9 @@ import { deliverFleetSeatMessage, fleetSeatMailbox } from "./fleet-seat.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { createStanceStore } from "./stances.ts";
+import { assignmentSkills } from "./assignment-skills.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
-import { HerdrTerminalStore } from "./herdr-terminal.ts";
-import { HerdrTerminalControlStore } from "./herdr-terminal-control.ts";
+import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import {
@@ -421,6 +421,7 @@ export function resolveOperatorPrompt(
 }
 
 export interface CaptainOptions {
+  readonly swarm?: SwarmHost;
   /** Repo root: instructions.md lives here, skills are discovered here. */
   readonly repoRoot: string;
   /**
@@ -659,15 +660,15 @@ export async function runOneShotDiscordTurn(
  * caller.
  */
 /**
- * Wakes and watches reach the bound seat; human sends do so only in the head
- * conversation. Linear hooks stay in their own service conversation, and goal
- * continuations stay with their Pi loop.
+ * Wakes, watches, Linear activity and human sends reach their conversation
+ * seat. Goal continuations stay with their Pi loop.
  */
 export function seatEventKindFor(
   context: Pick<ConversationTurnContext, "internal" | "origin">,
   isHeadConversation: boolean,
 ): OperatorSeatEventKind | undefined {
   if (context.internal === true) {
+    if (context.origin === "hook") return "wake";
     if (context.origin === "wake" || context.origin === "watch") return context.origin;
     return undefined;
   }
@@ -678,13 +679,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const workingDirectory = options.workingDirectory ?? homedir();
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
   const autonomy = new AutonomyStore(join(options.stateDir, "autonomy.json"));
-  const herdrTerminalControls = new HerdrTerminalControlStore();
-  const herdrTerminals = new HerdrTerminalStore({
-    readControlledGrid: (terminalId, surfaceClientId) =>
-      herdrTerminalControls.geometryFor(terminalId, surfaceClientId),
+  const terminals = new RuntimeTerminals({
+    ...(deps.runtimes ? { connections: deps.runtimes } : {}),
+    ...(deps.herdrAvailable ? { defaultAvailable: deps.herdrAvailable } : {}),
   });
-  const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"));
-  const evaluator = new Evaluator(join(options.stateDir, "evaluator"));
+  const herdrWatches = new HerdrWatchStore(
+    join(options.stateDir, "herdr-watches.json"),
+    deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable },
+  );
+  const evaluator = new Evaluator(
+    join(options.stateDir, "evaluator"),
+    deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable },
+  );
   const evaluationStarts = new Map<string, () => EvaluationCapture>();
   const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir), (metrics) => {
     const capture = evaluationStarts.get(metrics.runId);
@@ -754,15 +760,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // Messages the captain carried between seats itself, and the replies they
   // drew. Same bounds and the same volatility as the prompt ring (ADR 0163).
   const seatMessages = new SeatMessageWindow();
-  const stopFleetChanges = watchHerdrFleetChanges(fleetChanges, {
-    onPromptEdge: (edge) => promptEdges.record(edge),
-  });
+  const stopFleetChanges =
+    deps.herdrAvailable?.() === false
+      ? () => fleetChanges.close()
+      : watchHerdrFleetChanges(fleetChanges, {
+          onPromptEdge: (edge) => promptEdges.record(edge),
+        });
   /** Pane join for the current roster, rebuilt with it on every census. */
   let liveEdgeSeats: readonly EdgeSeat[] = [];
   let modelRuntime: Promise<CaptainModelRuntime> | undefined;
   // The seat (ADR 0152): the herdr pane holding his name, and the outbox its
   // bridge polls. The head conversation is always the default global one.
-  const seatOutbox = new SeatOutbox();
+  const seatOutboxes = new Map<string, SeatOutbox>();
+  function seatOutbox(conversationId: string): SeatOutbox {
+    let outbox = seatOutboxes.get(conversationId);
+    if (outbox === undefined) {
+      outbox = new SeatOutbox();
+      seatOutboxes.set(conversationId, outbox);
+    }
+    return outbox;
+  }
+  function seatContext(conversationId = conversations.defaultGlobalConversationId()) {
+    const conversation = conversations.conversation(conversationId);
+    if (conversation === undefined || !conversations.runsCaptainTurns(conversationId)) return undefined;
+    return {
+      conversationId,
+      cwd: conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : workingDirectory,
+    };
+  }
   // Fleet seats (ADR 0161): one mailbox per herdr terminal id, created when
   // that pane's bridge first polls. A bound mailbox takes a DM or room turn
   // as a channel event; an unbound one still types into the pty.
@@ -783,6 +808,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return `${prompt}${sideConversation ? SIDE_CONVERSATION_INSTRUCTIONS : ""}`;
   }
 
+  async function projectInstructions(cwd: string) {
+    const loader = new DefaultResourceLoader({
+      cwd,
+      agentDir: getAgentDir(),
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      settingsManager: SettingsManager.inMemory(),
+    });
+    await loader.reload();
+    return loader.getAgentsFiles().agentsFiles;
+  }
+
   /**
    * Where a session's tools run. A workspace-scoped operator conversation
    * works in its own directory, so the project resources it picks up (AGENTS.md,
@@ -796,6 +835,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     systemTools: boolean,
     cwd: string,
     sideConversation = false,
+    conversationId?: string,
   ): Promise<LaneSession> {
     const capture: TurnContext = {};
     if (systemTools && options.deliveredFiles !== undefined) {
@@ -824,6 +864,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         captainModelExtension(resolveSelection),
         browserExtension(deps, capture),
         mcpExtension(deps, lane),
+        ...(lane === "operator" && conversationId !== undefined && options.swarm !== undefined
+          ? [options.swarm.extension({ conversationId, cwd })]
+          : []),
       ],
       noPromptTemplates: true,
       // Every root explicitly: the loader is given in-memory settings and
@@ -907,7 +950,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       } catch {
         manager = SessionManager.create(cwd, dir);
       }
-      return buildSession(lane, manager, systemTools, cwd, sideConversation);
+      return buildSession(
+        lane,
+        manager,
+        systemTools,
+        cwd,
+        sideConversation,
+        key.startsWith("operator:") ? key.slice("operator:".length) : undefined,
+      );
     })();
     sessions.set(key, created);
     created.catch(() => sessions.delete(key));
@@ -918,8 +968,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     conversationId: string,
     context: Pick<ConversationTurnContext, "internal" | "origin">,
   ): OperatorSeatEventKind | undefined {
-    if (!seatOutbox.bound()) return undefined;
-    return seatEventKindFor(context, conversationId === conversations.defaultGlobalConversationId());
+    if (!seatOutboxes.get(conversationId)?.bound()) return undefined;
+    return seatEventKindFor(context, true);
   }
 
   const conversations = new ConversationStore(
@@ -928,11 +978,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // Turning follow off also drops activity still queued behind a live turn.
       if (context.origin === "hook" && !(await settings()).linearWebhook.following) return;
       // A hook wake is worded when it starts, from whatever arrived until now.
-      const message = context.origin === "hook" ? conversations.linearWakePrompt() : incoming;
+      const message =
+        context.origin === "hook" ? conversations.linearWakePrompt(conversationId, context.runId) : incoming;
       if (message === undefined) return;
       const kind = seatEventKind(conversationId, context);
       if (kind !== undefined) {
-        const delivery = await seatOutbox.deliver({
+        const delivery = await seatOutbox(conversationId).deliver({
           kind,
           conversationId,
           source: context.surfaceClientId ?? "service",
@@ -1097,7 +1148,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // nothing rather than herdr noise. The Linear inbox is a reading room,
         // not a lead room (ADR 0168): no census there.
         const census =
-          live || conversationId === LINEAR_INBOX_CONVERSATION_ID
+          live || deps.herdrAvailable?.() === false || conversationId === LINEAR_INBOX_CONVERSATION_ID
             ? undefined
             : await readHerdrSessionCensus(paneId);
         const prompt = resolveOperatorPrompt(
@@ -1158,6 +1209,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
     },
     (conversationId, scope) => {
+      seatOutboxes.get(conversationId)?.close();
+      seatOutboxes.delete(conversationId);
       autonomy.clearConversation(conversationId);
       herdrWatches.cancelConversation(conversationId);
       void options.deliveredFiles?.removeConversation(conversationId).catch(() => undefined);
@@ -1202,7 +1255,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         cwd,
         join(options.stateDir, "conversations", conversationId, "pi"),
       );
-      const created = buildSession("operator", manager, true, cwd, true);
+      const created = buildSession("operator", manager, true, cwd, true, conversationId);
       sessions.set(`operator:${conversationId}`, created);
       created.catch(() => sessions.delete(`operator:${conversationId}`));
       await created;
@@ -1245,6 +1298,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     options.deliveredFiles === undefined ? undefined : (input) => options.deliveredFiles!.publish(input),
     workingDirectory,
+    (personaId) => {
+      const contact = personas.swarmContact(personaId);
+      if (!contact) return undefined;
+      return async (conversationId, message, _publish, context) => {
+        if (!options.swarm) throw new Error("Swarm unavailable");
+        await options.swarm.sendContact(contact, message, context.runId, conversationId);
+      };
+    },
   );
 
   const roomConversations = new RoomConversations(conversations);
@@ -1263,11 +1324,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (head !== undefined) herdrWatches.trackSeat(head.seatId);
   }
 
+  let swarmRoster = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
-    const fleet = await readFleet();
+    const fleet = deps.herdrAvailable?.() === false ? { seats: [], head: undefined } : await readFleet();
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const seats = personas.reconcile(fleet.seats);
+    const peers = (await options.swarm?.contacts()) ?? [];
+    personas.reconcileSwarm(peers);
+    const nextSwarmRoster = JSON.stringify(peers);
+    if (swarmRoster !== nextSwarmRoster) {
+      swarmRoster = nextSwarmRoster;
+      fleetChanges.touch();
+    }
     liveEdgeSeats = fleet.seats.map((observed) => ({
       seatId: observed.seatId,
       paneId: observed.paneId,
@@ -1344,88 +1413,168 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   });
 
+  void options.swarm
+    ?.start({
+      contactThreads: (source) =>
+        personas
+          .all([], (id) => conversations.conversationForPersona(id))
+          .filter(
+            (persona) =>
+              persona.conversationId &&
+              persona.swarm &&
+              persona.swarm.conversationId === source.conversationId &&
+              persona.swarm.connectionId === source.connectionId &&
+              persona.swarm.coordinator === source.coordinator &&
+              persona.swarm.scope === source.scope,
+          )
+          .map((persona) => persona.conversationId!),
+      receiveContact: (source, message) => {
+        const thread = conversations.conversation(message.threadId);
+        if (thread?.scope.kind !== "persona") return false;
+        const contact = personas.swarmContact(thread.scope.personaId);
+        if (!contact) return false;
+        if (
+          contact.conversationId !== source.conversationId ||
+          contact.connectionId !== source.connectionId ||
+          contact.coordinator !== source.coordinator ||
+          contact.scope !== source.scope ||
+          contact.actor !== message.sender ||
+          contact.generation !== message.senderGeneration
+        )
+          return false;
+        const received = conversations.receiveSwarmMessage(
+          message.threadId,
+          thread.scope.personaId,
+          message.id,
+          message.body,
+        );
+        if (received) fleetChanges.touch();
+        return received;
+      },
+      instructions: async (binding, skills = []) => {
+        const selected = seatContext(binding.conversationId);
+        if (!selected || selected.cwd !== binding.cwd) throw new Error("Unknown captain conversation");
+        const current = await settings();
+        const files = await projectInstructions(selected.cwd);
+        return [
+          "# Assignment working context",
+          "Follow these owner and project preferences for this assignment. You remain your own worker, not Clankie. These instructions do not grant credentials, expand permissions, or replace current task ownership. Report conflicts to the lead.",
+          `Conversation: ${selected.conversationId}\nSelected project: ${selected.cwd}`,
+          `# Owner preferences: persona.characterNotes\n${current.persona.characterNotes}`,
+          `# Owner preferences: fleet.notes\n${current.fleet.notes}`,
+          ...files.map((file) => `# Instructions: ${file.path}\n${file.content}`),
+          await assignmentSkills({ cwd: selected.cwd, repoRoot: options.repoRoot, names: skills }),
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+      },
+      ready: (id) => {
+        const state = conversations.conversation(id)?.sessionState;
+        return (
+          conversations.runsCaptainTurns(id) &&
+          state !== "active" &&
+          (state === "waiting" || seatEventKind(id, { internal: true, origin: "watch" }) !== undefined)
+        );
+      },
+      wake: async (id, prompt) => {
+        const result = conversations.submitInternal(id, prompt, "watch");
+        if (result.status !== "accepted") throw new Error("Swarm turn was not accepted");
+        void conversations.awaitRunResult(result.runId).then(
+          () => options.swarm?.settled(id),
+          (error) => console.error("Swarm turn:", error),
+        );
+      },
+    })
+    .catch((error) => console.error("Swarm startup:", error));
   evaluator.start();
-  herdrWatches.start(
-    (conversationId, prompt) => {
-      if (!conversations.runsCaptainTurns(conversationId)) {
-        herdrWatches.cancelConversation(conversationId);
+  if (deps.herdrAvailable?.() !== false)
+    herdrWatches.start(
+      (conversationId, prompt) => {
+        if (!conversations.runsCaptainTurns(conversationId)) {
+          herdrWatches.cancelConversation(conversationId);
+          return Promise.resolve();
+        }
+        const result = conversations.submitInternal(conversationId, prompt, "watch");
+        if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
         return Promise.resolve();
-      }
-      const result = conversations.submitInternal(conversationId, prompt, "watch");
-      if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
-      return Promise.resolve();
-    },
-    (seatId, projection) => {
-      if (projection.kind === "transcript") {
-        const entries = projection.transcript.entries;
-        const last = entries.at(-1);
-        if (last?.type === "message" && last.role === "agent" && !evaluator.excludesSeat(seatId)) {
-          evaluator.capture({
-            conversationId: `seat:${seatId}`,
-            runId: `${projection.transcript.sessionKey}:${last.id}`,
-            context: {
-              source: "herdr",
-              seatId,
-              head: seatId === headSeat?.seatId,
-              fleet: liveEdgeSeats,
-              seat: liveSeats.find((seat) => seat.seatId === seatId) ?? headSeat,
-              transcript: projection.transcript,
-              metrics: null,
-              toolInventory: null,
-            },
-          });
-        }
-      }
-      if (seatId === headSeat?.seatId) {
-        // His own words, in his own thread: the seat's transcript is the head
-        // conversation the app pins, spoken as captain, never as an agent.
+      },
+      (seatId, projection) => {
         if (projection.kind === "transcript") {
-          conversations.syncHeadTranscript(seatId, projection.transcript, headSeat.workingDirectory);
-        } else if (projection.kind === "status") {
-          conversations.publishHeadEvent({
-            type: "activity",
-            phase: projection.status === "working" ? "responding" : "waiting",
-          });
-        } else {
-          conversations.publishHeadEvent({
-            type: "message",
-            role: "captain",
-            text: projection.text,
-            streaming: false,
-          });
+          const entries = projection.transcript.entries;
+          const last = entries.at(-1);
+          if (last?.type === "message" && last.role === "agent" && !evaluator.excludesSeat(seatId)) {
+            evaluator.capture({
+              conversationId: `seat:${seatId}`,
+              runId: `${projection.transcript.sessionKey}:${last.id}`,
+              context: {
+                source: "herdr",
+                seatId,
+                head: seatId === headSeat?.seatId,
+                fleet: liveEdgeSeats,
+                seat: liveSeats.find((seat) => seat.seatId === seatId) ?? headSeat,
+                transcript: projection.transcript,
+                metrics: null,
+                toolInventory: null,
+              },
+            });
+          }
         }
-        return;
-      }
-      if (projection.kind === "status") {
-        // A pane that was working and has stopped is this seat's run, and the
-        // status it stopped at is the only thing the host knows about how it
-        // went (ADR 0162). Recorded before the persona lookup: the ledger is
-        // keyed by seat, and a seat with no bound character still ran.
-        const previous = seatStatuses.get(seatId);
-        seatStatuses.set(seatId, projection.status);
-        const result = runResultForSeatStatus(previous, projection.status);
-        if (result !== undefined) {
-          seatLedger.runSettled(seatId, result);
-          fleetChanges.touch();
+        if (seatId === headSeat?.seatId) {
+          // His own words, in his own thread: the seat's transcript is the head
+          // conversation the app pins, spoken as captain, never as an agent.
+          if (projection.kind === "transcript") {
+            conversations.syncHeadTranscript(seatId, projection.transcript, headSeat.workingDirectory);
+          } else if (projection.kind === "status") {
+            conversations.publishHeadEvent({
+              type: "activity",
+              phase: projection.status === "working" ? "responding" : "waiting",
+            });
+          } else {
+            conversations.publishHeadEvent({
+              type: "message",
+              role: "captain",
+              text: projection.text,
+              streaming: false,
+            });
+          }
+          return;
         }
-      }
-      const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
-      const personaId = seat?.personaId;
-      if (personaId === undefined) return;
-      if (projection.kind === "transcript") {
-        conversations.syncPersonaTranscript(personaId, seatId, projection.transcript, seat?.workingDirectory);
-        return;
-      }
-      conversations.publishPersonaEvent(
-        personaId,
-        seatId,
-        projection.kind === "status"
-          ? { type: "activity", phase: projection.status === "working" ? "responding" : "waiting" }
-          : { type: "message", role: "agent", text: projection.text, streaming: false },
-      );
-    },
-  );
-  for (const seatId of conversations.seatIds()) herdrWatches.trackSeat(seatId);
+        if (projection.kind === "status") {
+          // A pane that was working and has stopped is this seat's run, and the
+          // status it stopped at is the only thing the host knows about how it
+          // went (ADR 0162). Recorded before the persona lookup: the ledger is
+          // keyed by seat, and a seat with no bound character still ran.
+          const previous = seatStatuses.get(seatId);
+          seatStatuses.set(seatId, projection.status);
+          const result = runResultForSeatStatus(previous, projection.status);
+          if (result !== undefined) {
+            seatLedger.runSettled(seatId, result);
+            fleetChanges.touch();
+          }
+        }
+        const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
+        const personaId = seat?.personaId;
+        if (personaId === undefined) return;
+        if (projection.kind === "transcript") {
+          conversations.syncPersonaTranscript(
+            personaId,
+            seatId,
+            projection.transcript,
+            seat?.workingDirectory,
+          );
+          return;
+        }
+        conversations.publishPersonaEvent(
+          personaId,
+          seatId,
+          projection.kind === "status"
+            ? { type: "activity", phase: projection.status === "working" ? "responding" : "waiting" }
+            : { type: "message", role: "agent", text: projection.text, streaming: false },
+        );
+      },
+    );
+  if (deps.herdrAvailable?.() !== false)
+    for (const seatId of conversations.seatIds()) herdrWatches.trackSeat(seatId);
   void refreshFleet().catch(() => undefined);
 
   async function runDiscordTurn(
@@ -1750,33 +1899,36 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       request: OperatorConversationServiceRequest,
     ): Promise<OperatorConversationServiceResult> {
       if (
-        request.op === "reset" &&
-        request.conversationId === conversations.defaultGlobalConversationId() &&
-        seatOutbox.bound()
-      ) {
+        deps.herdrAvailable?.() === false &&
+        ["spawn_seat", "move_seat", "close_seat", "state_stance"].includes(request.op)
+      )
+        throw new HerdrUnavailableError();
+      if (deps.herdrAvailable?.() === false && request.op === "create" && request.scope.kind === "seat")
+        throw new HerdrUnavailableError();
+      if (request.op === "reset" && seatOutboxes.get(request.conversationId)?.bound()) {
         throw new ConversationResetError(
-          "The default conversation is bound to an external seat; end that seat before resetting its service context",
+          "The conversation is bound to an external seat; end that seat before resetting its service context",
         );
       }
       if (request.op === "terminal_tail") {
         return {
           op: "terminal_tail",
           schemaVersion: 1,
-          result: await herdrTerminals.tail(request.observation),
+          result: await terminals.tail(request.observation),
         };
       }
       if (request.op === "terminal_control") {
         return {
           op: "terminal_control",
           schemaVersion: 1,
-          result: await herdrTerminalControls.control(request.control),
+          result: await terminals.control(request.control),
         };
       }
       if (request.op === "terminal_input") {
         return {
           op: "terminal_input",
           schemaVersion: 1,
-          result: herdrTerminalControls.input(request.input),
+          result: await terminals.input(request.input),
         };
       }
       if (request.op === "autonomy") {
@@ -1909,7 +2061,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return {
           op: "terminal_catalog",
           schemaVersion: 1,
-          sessions: await readTerminalCatalog(),
+          sessions: await terminals.catalog(),
         };
       }
       if (request.op === "close_seat") {
@@ -2001,12 +2153,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         fleetChanges.touch();
         return { op: "move_seat", schemaVersion: 1, result: { outcome: "moved", seat: rehired } };
       }
+      if (request.op === "connections")
+        throw new Error("Connections are served by the authenticated app boundary");
       const result = await conversations.serve(request);
       if (request.op === "create" && request.scope.kind === "seat") {
         herdrWatches.trackSeat(request.scope.seatId);
       } else if (request.op === "create" && request.scope.kind === "persona") {
         const seatId = seatByPersona.get(request.scope.personaId);
         if (seatId !== undefined) herdrWatches.trackSeat(seatId);
+        const contact = personas.swarmContact(request.scope.personaId);
+        if (contact) options.swarm?.settled(contact.conversationId);
       }
       // A round hears a member answer through the same seat watch that feeds
       // that agent's own thread, so joining a channel starts one (ADR 0146).
@@ -2041,7 +2197,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
     },
 
-    async lanePrompt({ lane, sections = SESSION_PROMPT_SECTIONS }) {
+    seatContext,
+    syncSeatTranscript: (id, transcript) =>
+      conversations.syncNativeSeatTranscript(
+        id,
+        transcript.sessionId,
+        transcript.entries,
+        transcript.activity,
+      ),
+
+    async lanePrompt({ lane, sections = SESSION_PROMPT_SECTIONS, conversationId }) {
       const currentSettings = await settings();
       // The model card is per run in pi, so it is only assembled when asked for;
       // a selection that cannot be resolved leaves the section out, as the
@@ -2049,29 +2214,40 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const selection = sections.includes("model")
         ? await (await runtime()).resolveSelection().catch(() => undefined)
         : undefined;
-      return assembleLanePrompt(
+      const prompt = assembleLanePrompt(
         lane,
         laneHoldsSystemTools(lane),
         currentSettings,
         sections,
         selection === undefined ? {} : { model: modelCard(selection) },
       );
+      if (conversationId === undefined) return prompt;
+      const binding = lane === "operator" ? seatContext(conversationId) : undefined;
+      if (binding === undefined) throw new Error("Unknown captain conversation");
+      const files = await projectInstructions(binding.cwd);
+      return [
+        prompt,
+        `# Selected conversation\n${binding.conversationId}\nWorkspace: ${binding.cwd}`,
+        ...files.map((file) => `# Instructions: ${file.path}\n${file.content}`),
+      ].join("\n\n");
     },
 
     async laneMemoryCard(lane) {
       return renderEpisodeCard(await deps.memory.recallEpisodeCard(lane));
     },
 
-    async laneToolBank(lane) {
+    async laneToolBank(lane, conversationId) {
       // One turn context per bank, so a seat's attachments and room stay its
-      // own. The operator seat's head is the default global conversation — the
-      // room `remember_episode`, `schedule_wake`, and `herdr_watch` attribute
-      // to. A social lane gets none: its attribution comes from a Discord
+      // own. The selected operator conversation is the room `remember_episode`,
+      // `schedule_wake`, and `herdr_watch` attribute to. A social lane gets none:
+      // its attribution comes from a Discord
       // delivery, which a bare bearer does not carry, and the tools that need
       // one already say so.
       const capture: TurnContext = {};
       if (lane === "operator") {
-        const targetId = conversations.defaultGlobalConversationId();
+        const binding = seatContext(conversationId);
+        if (binding === undefined) throw new Error("Unknown captain conversation");
+        const targetId = binding.conversationId;
         capture.room = roomKey("operator", targetId);
         capture.targetId = targetId;
       }
@@ -2084,21 +2260,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         currentSettings.gameplay,
         autonomy,
         herdrWatches,
+        lane === "operator" && options.swarm !== undefined
+          ? await options.swarm.tools({
+              ...seatContext(conversationId)!,
+            })
+          : [],
       );
     },
 
-    pollSeatEvents(waitMs, signal) {
-      return seatOutbox.poll(waitMs, signal);
+    pollSeatEvents(waitMs, signal, conversationId) {
+      const binding = seatContext(conversationId);
+      if (binding === undefined) throw new Error("Unknown captain conversation");
+      const events = seatOutbox(binding.conversationId).poll(waitMs, signal);
+      options.swarm?.settled(binding.conversationId);
+      return events;
     },
 
     async pollFleetSeatEvents(paneId, waitMs, signal) {
+      if (deps.herdrAvailable?.() === false) return undefined;
       const seatId = await herdrWatches.seatIdForPane(paneId);
       if (seatId === undefined) return undefined;
       return fleetSeatMailbox(fleetMailboxes, seatId).poll(waitMs, signal);
     },
 
-    replySeatEvent(eventId, text) {
-      return Promise.resolve(seatOutbox.reply(eventId, text));
+    replySeatEvent(eventId, text, conversationId) {
+      const binding = seatContext(conversationId);
+      return Promise.resolve(
+        binding !== undefined && (seatOutboxes.get(binding.conversationId)?.reply(eventId, text) ?? false),
+      );
     },
 
     observeDurableMessages(listener) {
@@ -2106,18 +2295,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     readLinearInbox: (options) => conversations.readLinearInbox(options),
-    acknowledgeLinearInbox: (cursor) => conversations.acknowledgeLinearInbox(cursor),
-    receiveLinearActivity(activity, following) {
-      conversations.receiveLinearActivity(linearActivityPrompt(activity), following);
-    },
+    acknowledgeLinearInbox: (cursor, conversationId) =>
+      conversations.acknowledgeLinearInbox(cursor, conversationId),
+    linearWorkOwners: () => conversations.linearWorkOwners(),
+    setLinearWorkOwner: (owner, expected, remove) =>
+      conversations.setLinearWorkOwner(owner, expected, remove),
+    resumeLinearActivity: () => conversations.resumeLinearActivity(),
+    receiveLinearActivity: (activity, following) => conversations.receiveLinearActivity(activity, following),
 
     async close(): Promise<void> {
+      await options.swarm?.close();
       evaluator.close();
       for (const mailbox of fleetMailboxes.values()) mailbox.close();
       fleetMailboxes.clear();
-      seatOutbox.close();
-      herdrTerminals.close();
-      herdrTerminalControls.close();
+      for (const outbox of seatOutboxes.values()) outbox.close();
+      seatOutboxes.clear();
+      terminals.close();
       herdrWatches.close();
       stopFleetChanges();
       autonomy.close();

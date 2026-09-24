@@ -190,3 +190,11 @@ describe("the headless nouns", () => {
     expect(errors.join("")).toContain("Usage: clankie prompt");
   });
 });
+
+it("carries a seat's selected project to the prompt service and allows explicit override", async () => {
+  const { fetchImpl, requests } = recorder("project context");
+  const opts = { ...options(fetchImpl, []), env: { CLANKIE_CONVERSATION_ID: "project-a" } };
+  await runPromptCommand(["--sections", "fleet"], opts);
+  await runPromptCommand(["--conversation", "project-b"], opts);
+  expect(requests.map((r) => r.url.searchParams.get("conversationId"))).toEqual(["project-a", "project-b"]);
+});

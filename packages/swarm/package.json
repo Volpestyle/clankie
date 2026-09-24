@@ -1,0 +1,29 @@
+{
+  "name": "@clankie/swarm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clankie/credential-broker": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "@clankie/settings": "workspace:*",
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@volpestyle/lead-skills": "file:../../vendor/volpestyle-lead-skills-0.1.0.tgz",
+    "swarm-mcp": "file:../../vendor/swarm-mcp-2.0.0-rc.1.tgz",
+    "typebox": "1.3.7",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

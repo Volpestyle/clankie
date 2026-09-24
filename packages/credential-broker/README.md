@@ -12,17 +12,36 @@ account credentials and local Clankie bearers.
 ## Credential storage
 
 - `KeychainCredentialStore` stores one generic-password item per provider and a
-  serialized provider index. Operations sharing a service are queued across
-  in-process store instances. Creation writes the index before the secret, and
+  serialized provider index. Operations sharing a service are locked across
+  CLI/service processes and in-process store instances. Creation writes the index before the secret, and
   deletion removes the secret before pruning the index, so a partial failure
   cannot leave an unindexed credential behind.
 - `FileCredentialStore` is the non-macOS/CI fallback. It writes atomically with
-  collision-proof temporary names, serializes same-path writers, enforces mode
+  collision-proof temporary names, locks same-path writers across processes, enforces mode
   `0600` inside a mode-`0700` directory, and never returns secrets from `list()`.
 - `createDefaultCredentialStore()` selects Keychain on macOS. Setting
   `CLANKIE_CREDENTIALS_FILE` explicitly selects the file backend.
 - Credential summaries pass through `redactCredential()` before entering a UI
   or structured log.
+
+Both stores implement `update(providerId, transform)`: read, transform and persist
+an existing credential while holding the same lock as set/delete. Missing entries
+remain missing. The transform returns a new credential to change it, or the
+unchanged input; it must not call back into the store. Linear MCP bearer refresh
+uses this operation, rechecking expiry after taking the lock. Concurrent clients
+spend one rotating refresh token once. A failed refresh only falls back to an
+access token that has not expired; storage/locking failures propagate.
+
+Disconnect waits for an admitted refresh, then deletes its result. Once disconnect
+completes, that refresh cannot restore the account. Replacement follows the same
+ordering. Token requests have a 20-second deadline. One lock covers the whole file
+or Keychain service, so a refresh can briefly delay unrelated credential writes.
+`proper-lockfile` (also used by Pi) maintains and releases the lock; Keychain lock
+directories under `~/.config/clankie/credential-locks` contain no credentials.
+All writer processes must run this implementation; restart older CLI/service
+processes to activate this boundary. This protects broker mutations, not calls
+already admitted to a provider. The service's MCP host separately checks the
+selected credential and replaces existing HTTP/stdio transports when it changes.
 
 The broker is canonical, but provider consumers retain a compatibility fallback:
 when no broker entry exists they may read the provider's declared API-key
@@ -115,6 +134,15 @@ there is no path from owning an emulator process to hearing or speaking in
 Clankie's room ([ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md)).
 
 ## Capability boundary
+
+API and OAuth records optionally carry a verified provider account: connection
+UUID, provider user/workspace IDs, email, names and verification time. `verifyLinearApiAccount` uses Linear's API-key GraphQL identity query. The MCP
+host verifies MCP-audience OAuth through the official server's `get_user` and
+`get_workspace` tools under the broker mutation lock. Display names alone do
+not establish identity. Redacted summaries include account metadata; refresh
+preserves it. Clankie's worker MCP boundary reuses `CapabilityTokenIssuer`, with
+its signing key stored as `clankie_worker_mcp_signing`. Grant records and durable
+revocation live in service state. See [worker access](../../docs/worker-access.md).
 
 `CapabilityTokenIssuer` signs and verifies bounded HMAC grants. Resource-scoped
 grants require the caller to present an exact resource; omitting a resource does

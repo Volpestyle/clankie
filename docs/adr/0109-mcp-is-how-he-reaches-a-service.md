@@ -61,10 +61,18 @@ to everyone who can type at him. Linear keeps `everywhere`, which is what
 ADR 0093 chose and why anyone connects a tracker. The gate is checked when the
 catalog is built _and_ again at call time, so a session cannot outlive it.
 
-**Secrets stay broker-owned and are resolved late.** An http server's bearer is
-resolved per request, so an OAuth token that expires mid-session refreshes
-instead of failing until someone restarts him. A stdio server's is injected into
-its environment at spawn.
+**Secrets stay broker-owned and are resolved late.** Before selecting a connection,
+the host refreshes expiring OAuth credentials through the broker. Each HTTP
+request checks and uses the selected credential snapshot; stdio receives it at
+spawn. Changed credentials replace the transport, so one MCP session cannot
+silently switch accounts. A missing credential blocks both transport types.
+
+Configuration and credential checks run on each catalog read and tool call;
+only transports and tool schemas are cached. Disabling an owner override also
+disables the curated connector with that id. Changing a URL, command, lane or
+credential invalidates the old connection. A connection that finishes opening
+after replacement or shutdown closes itself. Calls already sent to a provider
+may have taken effect; invalidation never silently replays them.
 
 ```mermaid
 flowchart TD

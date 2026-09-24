@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  OperatorConnectionCommandSchema,
+  OperatorConnectionResultSchema,
+  type OperatorConnectionCommand,
+} from "./connections.ts";
+export * from "./connections.ts";
 import { DevicePushRequestSchema } from "./device-push.ts";
 export * from "./device-push.ts";
 export * from "./evaluator.ts";
@@ -326,6 +332,19 @@ export function defaultOperatorAgentAppearance(
   choice = Math.floor(choice / accessories.length);
   return { variant, accessory, shape: shapes[choice % shapes.length]! };
 }
+/** One peer session at one already connected coordinator; never a network address. */
+export const OperatorSwarmContactSchema = z
+  .object({
+    conversationId: OperatorConversationIdSchema,
+    connectionId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+    coordinator: z.string().regex(/^[a-f0-9]{64}$/u),
+    scope: z.string().min(1).max(128),
+    actor: z.string().min(1).max(128),
+    generation: z.number().int().positive(),
+  })
+  .strict();
+export type OperatorSwarmContact = z.infer<typeof OperatorSwarmContactSchema>;
+
 export const OperatorAgentPersonaSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -336,6 +355,8 @@ export const OperatorAgentPersonaSchema = z
     harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     /** Present while this character occupies a live Herdr seat. */
     activeSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    /** A Swarm peer is messageable without occupying any terminal. */
+    swarm: OperatorSwarmContactSchema.extend({ available: z.boolean() }).optional(),
     /** Present once the persona's durable DM exists. */
     conversationId: OperatorConversationIdSchema.optional(),
     /** SHA-256 of the current host-served PNG; also busts Discord's avatar cache. */
@@ -978,9 +999,17 @@ export const OperatorComposerCatalogSchema = z
   .strict();
 export type OperatorComposerCatalog = z.infer<typeof OperatorComposerCatalogSchema>;
 
+/** Up to 16 execution connections, each with 48 observable panes. */
+export const OPERATOR_TERMINAL_CATALOG_MAX = 16 * 48;
+
 /** Herdr's native workspace → tab → pane location for one observable terminal. */
 export const OperatorTerminalSessionSchema = z
   .object({
+    /** Runtime identity is separate from Herdr's local workspace and tab IDs. */
+    runtime: z
+      .object({ id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u), session: z.string().min(1).max(64) })
+      .strict()
+      .optional(),
     terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     label: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
     workspace: OperatorHerdrLevelSchema,
@@ -1126,6 +1155,17 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     role: z.enum(["operator", "captain", "agent", "external"]),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
+    /** Coordinator message identity, retained for duplicate delivery recovery. */
+    swarmMessageId: z.string().min(1).max(128).optional(),
+    /** Durable Linear admission and owner selection; never operator authority. */
+    linear: z
+      .object({
+        eventId: z.string().regex(/^[a-f0-9]{64}$/u),
+        conversationId: OperatorConversationIdSchema,
+        following: z.boolean(),
+      })
+      .strict()
+      .optional(),
     /**
      * Which persona spoke. Absent in a persona thread, where the counterpart is
      * the conversation's own scope; present in a channel, where several agents
@@ -1920,6 +1960,13 @@ export type LocalVoiceChatServerEvent = z.infer<typeof LocalVoiceChatServerEvent
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   z
     .object({
+      op: z.literal("connections"),
+      schemaVersion: z.literal(1),
+      command: OperatorConnectionCommandSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("list"),
       schemaVersion: z.literal(1),
       scope: OperatorConversationScopeSchema.optional(),
@@ -2167,6 +2214,13 @@ export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversa
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
   z
     .object({
+      op: z.literal("connections"),
+      schemaVersion: z.literal(1),
+      result: OperatorConnectionResultSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("list"),
       schemaVersion: z.literal(1),
       conversations: z.array(OperatorConversationSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
@@ -2325,7 +2379,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .object({
       op: z.literal("terminal_catalog"),
       schemaVersion: z.literal(1),
-      sessions: z.array(OperatorTerminalSessionSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+      sessions: z.array(OperatorTerminalSessionSchema).max(OPERATOR_TERMINAL_CATALOG_MAX),
     })
     .strict(),
   z
@@ -2419,6 +2473,7 @@ export type OperatorConversationTailItem =
  * captain-runtime internals — so every surface calls one identical contract.
  */
 export interface OperatorConversationServiceClient {
+  connections?(command?: OperatorConnectionCommand): Promise<z.infer<typeof OperatorConnectionResultSchema>>;
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
   /** Park until the fleet cursor changes, then return one coherent snapshot. */
@@ -2536,6 +2591,11 @@ export function createOperatorConversationServiceClient(
   const fleetWaitMs = Math.min(options.fleetWaitMs ?? 20_000, OPERATOR_FLEET_WAIT_MS_MAX);
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   return {
+    async connections(command = { action: "list" }) {
+      const result = await dispatch({ op: "connections", schemaVersion: 1, command });
+      if (result.op !== "connections") throw new Error(`Unexpected ${result.op} result for connections`);
+      return result.result;
+    },
     async list(scope) {
       const result = await dispatch({
         op: "list",

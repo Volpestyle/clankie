@@ -1,5 +1,9 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import type { ProviderAccount } from "@clankie/credential-broker";
 import { z } from "zod";
+import { canonicalJson } from "@clankie/play";
 
 // Signed Linear activity supplies context, never operator instructions.
 // Verify the raw bytes before parsing: serialization changes the signature.
@@ -7,20 +11,12 @@ import { z } from "zod";
 /** Linear's own tolerance for replayed deliveries; the timestamp is inside the signed body. */
 const TIMESTAMP_SKEW_MS = 60_000;
 
-/**
- * Delivery ids remembered for idempotency. Linear retries at 1m/1h/6h, so this
- * only has to outlive a burst, not a day — and it is deliberately a bounded
- * in-memory ring rather than durable state: a delivery re-seen after a restart
- * costs one duplicate wake, which is a smaller failure than a growing file.
- */
-const DELIVERY_MEMORY_MAX = 512;
-
 type LinearWebhookRejection = "bad_signature" | "stale" | "malformed";
 
 /** Authenticated deliveries we pass over still receive 200 so Linear does not retry. */
 export type LinearWebhookOutcome =
   | { readonly kind: "activity"; readonly activity: LinearActivityEvent }
-  | { readonly kind: "ignored"; readonly reason: "duplicate" | "other_event" | "self_echo" }
+  | { readonly kind: "ignored"; readonly reason: "other_event" | "self_echo" }
   | { readonly kind: "rejected"; readonly reason: LinearWebhookRejection };
 
 // The envelope is stable; each resource owns its data shape. New fields and
@@ -33,18 +29,24 @@ const LinearActivityPayloadSchema = z.looseObject({
   url: z.string().max(2_048).optional(),
   actor: z
     .looseObject({
+      id: z.string().max(256).nullish(),
       name: z.string().max(256).nullish(),
       email: z.string().max(320).nullish(),
     })
     .nullish(),
   data: z.record(z.string(), z.unknown()).optional(),
   updatedFrom: z.record(z.string(), z.unknown()).optional(),
+  organizationId: z.string().max(256).optional(),
 });
 
 export interface LinearActivityEvent {
+  readonly eventId?: string;
   readonly deliveryId: string | undefined;
   readonly type: string;
   readonly action: string;
+  readonly actorId?: string | undefined;
+  readonly organizationId?: string | undefined;
+  readonly worker?: { grantId: string; principalId: string; workId: string } | undefined;
   readonly actorName: string | undefined;
   readonly actorEmail: string | undefined;
   readonly createdAt: string | undefined;
@@ -59,83 +61,156 @@ export interface LinearWebhookHeaders {
   readonly event: string | undefined;
 }
 
-/**
- * Remembers the delivery ids already acted on, newest last, bounded.
- *
- * A `Set` preserves insertion order, so eviction is the first key it yields —
- * no timestamps and no second structure to keep in step.
- */
-export class LinearDeliveryMemory {
-  private readonly seen = new Set<string>();
+const WRITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const WRITE_MAX = 500;
+const WRITE_TYPES: Record<string, string> = {
+  issue: "Issue",
+  comment: "Comment",
+  project: "Project",
+  project_update: "ProjectUpdate",
+  document: "Document",
+};
+const REVISION_FIELDS = [
+  "body",
+  "title",
+  "description",
+  "stateId",
+  "assigneeId",
+  "projectId",
+  "teamId",
+  "archivedAt",
+] as const;
+const fieldHash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const WorkerProvenanceSchema = z
+  .object({
+    grantId: z.string().min(1).max(256),
+    principalId: z.string().min(1).max(256),
+    workId: z.string().min(1).max(256),
+  })
+  .strict();
+const WriteReceiptSchema = z
+  .object({
+    organizationId: z.string().min(1).max(256),
+    actorId: z.string().min(1).max(256),
+    connectionId: z.string().min(1).max(256),
+    type: z.string().min(1).max(64),
+    id: z.string().uuid(),
+    updatedAt: z.string().datetime({ offset: true }),
+    recordedAt: z.number().int().nonnegative(),
+    fields: z
+      .partialRecord(z.enum(REVISION_FIELDS), z.string().regex(/^[a-f0-9]{64}$/u))
+      .refine((fields) => Object.keys(fields).length > 0),
+    worker: WorkerProvenanceSchema.optional(),
+  })
+  .strict();
+type WriteReceipt = z.infer<typeof WriteReceiptSchema>;
+const ReturnedRevisionSchema = z.looseObject({
+  id: z.string().uuid(),
+  updatedAt: z.string().datetime({ offset: true }),
+});
 
-  /** True the first time a delivery is offered, false every time after. */
-  public admit(deliveryId: string | undefined): boolean {
-    // An unsigned-for delivery id is not a replay claim, so it cannot dedupe.
-    // Linear always sends one; a missing header means the delivery is admitted
-    // rather than silently swallowed.
-    if (deliveryId === undefined || deliveryId.length === 0) return true;
-    if (this.seen.has(deliveryId)) return false;
-    this.seen.add(deliveryId);
-    if (this.seen.size > DELIVERY_MEMORY_MAX) {
-      const oldest = this.seen.values().next();
-      if (!oldest.done) this.seen.delete(oldest.value);
+/** Exact returned revisions, never every UUID mentioned in a tool response.
+ * Worker writes retain provenance and enter the inbox; only captain echoes are quiet.
+ * Missing identity/revision evidence admits the event rather than guessing. */
+export class LinearWriteReceipts {
+  private written: WriteReceipt[] = [];
+  private readonly path: string | undefined;
+  constructor(path?: string) {
+    this.path = path;
+    if (path === undefined) return;
+    try {
+      this.written = z
+        .array(WriteReceiptSchema)
+        .max(WRITE_MAX)
+        .parse(JSON.parse(readFileSync(path, "utf8")));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    return true;
   }
-}
 
-const SELF_WRITE_TTL_MS = 90_000;
-const SELF_WRITE_MAX = 500;
-const LINEAR_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu;
-const LINEAR_WRITE_TOOL = /^(create|update|save|delete|archive|unarchive)_/u;
-
-/**
- * Objects Clankie just wrote through Linear's MCP, so the webhook Linear fires
- * back about them is dropped at ingress instead of waking him about himself.
- * He posts through the owner's account, so the actor cannot tell them apart;
- * the object id can. A short TTL keeps a human's later edit to the same object
- * from being mistaken for the echo.
- */
-export class LinearSelfWriteMemory {
-  private readonly written = new Map<string, number>();
-
-  public record(ids: Iterable<string>, now: Date): void {
-    for (const id of ids) {
-      this.written.delete(id);
-      this.written.set(id.toLowerCase(), now.getTime());
+  public record(
+    call: {
+      readonly server: string;
+      readonly tool: string;
+      readonly content: string;
+      readonly isError: boolean;
+      readonly account?: ProviderAccount | undefined;
+      readonly worker?: WriteReceipt["worker"];
+    },
+    now: Date,
+  ): void {
+    const match = /^(?:create|update|save)_(.+)$/u.exec(call.tool);
+    const type = match && WRITE_TYPES[match[1]!];
+    if (call.server !== "linear" || call.isError || !type || call.account?.provider !== "linear") return;
+    let result: z.infer<typeof ReturnedRevisionSchema>;
+    try {
+      result = ReturnedRevisionSchema.parse(JSON.parse(call.content));
+    } catch {
+      return; // An ambiguous or unstructured response cannot prove a particular echo.
     }
-    while (this.written.size > SELF_WRITE_MAX) {
-      const oldest = this.written.keys().next();
-      if (oldest.done) break;
-      this.written.delete(oldest.value);
+    const fields = Object.fromEntries(
+      REVISION_FIELDS.filter(
+        (key) =>
+          Object.hasOwn(result, key) &&
+          (result[key] === null || ["string", "number", "boolean"].includes(typeof result[key])),
+      ).map((key) => [key, fieldHash(result[key])]),
+    );
+    if (!Object.keys(fields).length) return;
+    const receipt = WriteReceiptSchema.parse({
+      organizationId: call.account.workspaceId,
+      actorId: call.account.userId,
+      connectionId: call.account.connectionId,
+      type,
+      fields,
+      id: result.id.toLowerCase(),
+      updatedAt: new Date(result.updatedAt).toISOString(),
+      recordedAt: now.getTime(),
+      ...(call.worker ? { worker: call.worker } : {}),
+    });
+    const next = this.written.filter((entry) => now.getTime() - entry.recordedAt <= WRITE_TTL_MS);
+    next.push(receipt);
+    const retained = next.slice(-WRITE_MAX);
+    if (this.path !== undefined) {
+      mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
+      writeFileSync(this.path + ".tmp", JSON.stringify(retained), { mode: 0o600 });
+      renameSync(this.path + ".tmp", this.path);
     }
+    this.written = retained;
   }
 
-  public matches(id: unknown, now: Date): boolean {
-    if (typeof id !== "string") return false;
-    const at = this.written.get(id.toLowerCase());
-    return at !== undefined && now.getTime() - at <= SELF_WRITE_TTL_MS;
+  public match(payload: z.infer<typeof LinearActivityPayloadSchema>, now: Date): WriteReceipt | undefined {
+    if (!["create", "update"].includes(payload.action)) return;
+    if (payload.action === "update" && !payload.updatedFrom) return;
+    const revision = ReturnedRevisionSchema.safeParse(payload.data);
+    if (!revision.success) return;
+    const matches = this.written.filter(
+      (entry) =>
+        now.getTime() >= entry.recordedAt &&
+        now.getTime() - entry.recordedAt <= WRITE_TTL_MS &&
+        entry.organizationId === payload.organizationId &&
+        entry.actorId === payload.actor?.id &&
+        entry.type === payload.type &&
+        entry.id === revision.data.id.toLowerCase() &&
+        entry.updatedAt === new Date(revision.data.updatedAt).toISOString() &&
+        (payload.action !== "update" ||
+          Object.keys(payload.updatedFrom!).every(
+            (key) => key === "updatedAt" || Object.hasOwn(entry.fields, key),
+          )) &&
+        Object.entries(entry.fields).every(
+          ([key, digest]) => Object.hasOwn(revision.data, key) && fieldHash(revision.data[key]) === digest,
+        ),
+    );
+    // Repeated responses with conflicting provenance are not proof of authorship.
+    if (
+      matches.length &&
+      matches.every(
+        (entry) =>
+          entry.connectionId === matches[0]!.connectionId &&
+          JSON.stringify(entry.worker) === JSON.stringify(matches[0]!.worker),
+      )
+    )
+      return matches[0];
   }
-}
-
-/** Every Linear id a write's result names: the object itself and what it hangs off. */
-export function linearIdsInResult(content: string): string[] {
-  return [...new Set(content.match(LINEAR_ID) ?? [])];
-}
-
-/** Feed a settled MCP call to the memory; reads and failures leave no trace. */
-export function recordLinearWrite(
-  memory: LinearSelfWriteMemory,
-  call: {
-    readonly server: string;
-    readonly tool: string;
-    readonly content: string;
-    readonly isError: boolean;
-  },
-  now: Date,
-): void {
-  if (call.server !== "linear" || call.isError || !LINEAR_WRITE_TOOL.test(call.tool)) return;
-  memory.record(linearIdsInResult(call.content), now);
 }
 
 function signatureMatches(rawBody: Uint8Array, secret: string, presentedHex: string): boolean {
@@ -152,10 +227,9 @@ export function classifyLinearDelivery(input: {
   readonly headers: LinearWebhookHeaders;
   readonly secret: string;
   readonly now: Date;
-  readonly deliveries: LinearDeliveryMemory;
-  readonly selfWrites?: LinearSelfWriteMemory;
+  readonly writes?: LinearWriteReceipts;
 }): LinearWebhookOutcome {
-  const { rawBody, headers, secret, now, deliveries } = input;
+  const { rawBody, headers, secret, now } = input;
   if (headers.signature === undefined || !signatureMatches(rawBody, secret, headers.signature)) {
     return { kind: "rejected", reason: "bad_signature" };
   }
@@ -176,16 +250,20 @@ export function classifyLinearDelivery(input: {
     return { kind: "ignored", reason: "other_event" };
   }
 
-  if (!deliveries.admit(headers.delivery)) return { kind: "ignored", reason: "duplicate" };
-  if (input.selfWrites?.matches(payload.data?.id, now) === true)
-    return { kind: "ignored", reason: "self_echo" };
+  const receipt = input.writes?.match(payload, now);
+  if (receipt && !receipt.worker) return { kind: "ignored", reason: "self_echo" };
 
+  const { webhookTimestamp: _sentAt, ...event } = payload;
   return {
     kind: "activity",
     activity: {
+      eventId: createHash("sha256").update(canonicalJson(event)).digest("hex"),
       deliveryId: headers.delivery,
       type: payload.type,
       action: payload.action,
+      actorId: payload.actor?.id ?? undefined,
+      organizationId: payload.organizationId,
+      ...(receipt?.worker ? { worker: receipt.worker } : {}),
       actorName: payload.actor?.name ?? undefined,
       actorEmail: payload.actor?.email ?? undefined,
       createdAt: payload.createdAt,
@@ -233,4 +311,29 @@ export function linearActivityPrompt(activity: LinearActivityEvent): string {
     "",
     ...quoted.split("\n").map((line) => `> ${line}`),
   ].join("\n");
+}
+
+/** Explicit issue ownership lives with the durable service conversation, not provider credentials. */
+export const LinearWorkOwnerSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    issueId: z.string().uuid(),
+    conversationId: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]+$/u)
+      .max(256),
+  })
+  .strict();
+export type LinearWorkOwner = z.infer<typeof LinearWorkOwnerSchema>;
+export function linearIssueId(activity: LinearActivityEvent): string | undefined {
+  const issue = activity.data.issue;
+  const raw =
+    activity.type === "Issue"
+      ? activity.data.id
+      : activity.type === "Comment"
+        ? (activity.data.issueId ??
+          (issue && typeof issue === "object" ? (issue as Record<string, unknown>).id : undefined))
+        : undefined;
+  const result = z.string().uuid().safeParse(raw);
+  return result.success ? result.data.toLowerCase() : undefined;
 }

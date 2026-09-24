@@ -1,0 +1,84 @@
+{
+  "scenario": "Native Claude projects its settled project transcript without Herdr",
+  "requests": [
+    {
+      "path": "/v1/captain/seat-context",
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "sections": null
+    },
+    {
+      "path": "/v1/captain/prompt",
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "sections": "persona,reach,fleet,address,model"
+    },
+    {
+      "path": "/v1/mcp",
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "sections": null
+    },
+    {
+      "path": "/v1/mcp",
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "sections": null
+    },
+    {
+      "path": "/v1/mcp",
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "sections": null
+    },
+    {
+      "path": "/v1/mcp",
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "sections": null
+    },
+    {
+      "path": "/v1/captain/memory-card",
+      "conversationId": null,
+      "sections": null
+    },
+    {
+      "path": "/v1/seat/transcript",
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "sections": null
+    },
+    {
+      "path": "/v1/seat/transcript",
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "sections": null
+    }
+  ],
+  "root": "/private/tmp/clankie-seat-sync-H9mIPq",
+  "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+  "cwd": "/private/tmp/clankie-seat-sync-H9mIPq/alpha",
+  "selectedEnvironment": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+  "response": "- Fleet marker: FLEET_2db94644-2637-43a7-b44b-3cc85fe33aeb\n- Project marker: ALPHA_d66be7d0-4ec8-4e75-a18b-7b4093dc7def\n",
+  "stderr": "",
+  "exitCode": 0,
+  "projectEvents": [
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "cursor": "000000000001",
+      "revision": 0,
+      "occurredAt": "2026-09-24T02:28:32.580Z",
+      "type": "message",
+      "role": "operator",
+      "text": "Report only the fleet marker and the project marker supplied in startup context. Do not use any tools or inspect files. If either marker is absent, say MISSING.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-3c956074-e3a8-43eb-a677-964de314c125",
+      "cursor": "000000000002",
+      "revision": 0,
+      "occurredAt": "2026-09-24T02:28:37.646Z",
+      "type": "message",
+      "role": "captain",
+      "text": "- Fleet marker: FLEET_2db94644-2637-43a7-b44b-3cc85fe33aeb\n- Project marker: ALPHA_d66be7d0-4ec8-4e75-a18b-7b4093dc7def",
+      "streaming": false
+    }
+  ],
+  "globalEvents": [],
+  "passed": true,
+  "cleanedUp": true
+}

@@ -1,5 +1,5 @@
 {
-  "description": "Clankie's seat context: the owner persona, reach, address, and service model card at session start; the newest memory card on every turn.",
+  "description": "Clankie seat context, memory and settled transcript projection to the selected conversation.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,13 @@
           {
             "type": "command",
             "command": "clankie",
-            "args": ["prompt", "--lane", "operator", "--sections", "persona,reach,address,model"],
+            "args": ["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"],
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["seat-sync"],
             "timeout": 20
           }
         ]
@@ -21,6 +27,60 @@
             "command": "clankie",
             "args": ["memory-card", "--lane", "operator"],
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["seat-sync"],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["seat-sync"],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["seat-sync"],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["seat-sync"],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["seat-sync"],
+            "timeout": 20
           }
         ]
       }

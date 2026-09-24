@@ -1,3 +1,5 @@
+import { cpSync } from "node:fs";
+import type { LinearActivityEvent } from "../src/linear-webhook.ts";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,6 +49,93 @@ async function drain(): Promise<void> {
 }
 
 describe("operator conversation context", () => {
+  it("pins issue deliveries to explicit owners and recovers interrupted wakes without replaying passive backlog", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-linear-owners-"));
+    const snapshot = await mkdtemp(join(tmpdir(), "clankie-linear-restart-"));
+    roots.push(root, snapshot);
+    const store = new ConversationStore(root, async () => {});
+    const created = await store.serve({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "workspace", workspaceId: root },
+      title: "Project",
+    });
+    if (created.op !== "create") throw new Error("create failed");
+    const project = created.conversation.conversationId;
+    const owner = {
+      organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
+      issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
+      conversationId: project,
+    };
+    store.setLinearWorkOwner(owner);
+    expect(() => store.setLinearWorkOwner({ ...owner, conversationId: "global-default" })).toThrow(
+      "expected owner",
+    );
+    const activity = (n: number): LinearActivityEvent => ({
+      eventId: n.toString(16).padStart(64, "0"),
+      deliveryId: `delivery-${n}`,
+      type: "Comment",
+      action: "create",
+      actorName: "Human",
+      actorEmail: undefined,
+      actorId: "human",
+      organizationId: owner.organizationId,
+      createdAt: new Date().toISOString(),
+      url: undefined,
+      updatedFrom: undefined,
+      data: { id: `comment-${n}`, issueId: owner.issueId, body: `Change ${n}` },
+    });
+    expect(store.receiveLinearActivity(activity(1), false)).toBe(true);
+    expect(store.receiveLinearActivity(activity(2), true)).toBe(true);
+    const interrupted = store.linearWakePrompt(project);
+    expect(interrupted).toContain("1 new event");
+    expect(interrupted).toContain(`--conversation ${project}`);
+    cpSync(root, snapshot, { recursive: true }); // A crash after checkpointing, before the turn settles.
+    await store.close();
+    const wakes: Array<{ owner: string; prompt: string | undefined }> = [];
+    const reopened = new ConversationStore(snapshot, async (id) => {
+      wakes.push({ owner: id, prompt: reopened.linearWakePrompt(id) });
+    });
+    expect(reopened.linearWorkOwners()).toEqual([owner]);
+    reopened.resumeLinearActivity();
+    await drain();
+    expect(wakes).toMatchObject([{ owner: project, prompt: expect.stringContaining("1 new event") }]);
+    expect(reopened.receiveLinearActivity(activity(2), true)).toBe(false);
+    reopened.setLinearWorkOwner({ ...owner, conversationId: "global-default" }, project);
+    expect(reopened.receiveLinearActivity(activity(2), true)).toBe(false); // A rebind does not move an admitted event.
+    reopened.receiveLinearActivity(activity(3), true);
+    reopened.receiveLinearActivity({ ...activity(4), organizationId: "another-workspace" }, true);
+    await reopened.close();
+    expect(wakes.map((entry) => entry.owner)).toEqual([project, "global-default", "linear-inbox"]);
+    const page = reopened.readLinearInbox({ conversationId: project });
+    expect(page.unreadCount).toBe(2);
+    expect(reopened.readLinearInbox({ conversationId: "global-default" }).unreadCount).toBe(1);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, "global-default")).toBe(false);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, project)).toBe(true);
+    expect(() => reopened.setLinearWorkOwner(owner, project)).toThrow("changed");
+    // A completed turn already in the log wins over a stale checkpoint after a crash.
+    const metaPath = join(snapshot, "global-default", "meta.json");
+    const meta = JSON.parse(await readFile(metaPath, "utf8"));
+    const completed = (await readFile(join(snapshot, "global-default", "events.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .findLast((event) => event.type === "turn" && event.phase === "completed");
+    meta.linearWakePending = {
+      previous: "000000000000",
+      cursor: meta.linearWokeCursor,
+      runId: completed.runId,
+    };
+    await writeFile(metaPath, JSON.stringify(meta));
+    const finalWakes: string[] = [];
+    const settled = new ConversationStore(snapshot, async (id) => {
+      finalWakes.push(id);
+    });
+    settled.resumeLinearActivity();
+    await settled.close();
+    expect(finalWakes).toEqual([]);
+  });
+
   it("queues internal turns without forging an operator message", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-conversation-internal-"));
     roots.push(root);

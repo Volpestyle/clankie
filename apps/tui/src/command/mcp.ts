@@ -47,9 +47,11 @@ import {
   type OperatorSeatEvent,
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
+import { runWorkerMcp, runSwarmWorkerMcp, runEnrolledWorkerMcp } from "./worker-mcp.ts";
 
 const execFileAsync = promisify(execFileCallback);
-const MCP_USAGE = "Usage: clankie mcp [--lane operator | --seat]";
+const MCP_USAGE =
+  "Usage: clankie mcp [--lane operator [--conversation ID] | --seat | --grant FILE | --swarm-grant ID | --swarm]";
 const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
@@ -95,7 +97,10 @@ export interface McpCommandOptions {
   readonly host?: string;
   readonly operatorCredentialStore?: CredentialStore;
   /** Test seam: the upstream to bridge instead of the live service. */
-  readonly connectUpstream?: (input: { readonly lane: CaptainSessionLaneV2 }) => Promise<LaneToolUpstream>;
+  readonly connectUpstream?: (input: {
+    readonly lane: CaptainSessionLaneV2;
+    readonly conversationId?: string;
+  }) => Promise<LaneToolUpstream>;
   /** Test seam: the fleet mailbox to poll instead of the live service. */
   readonly connectSeatUpstream?: (input: { readonly paneId: string }) => Promise<FleetMailboxUpstream>;
   /** Test seam: the transport to serve instead of stdio. */
@@ -109,15 +114,30 @@ export interface McpCommandOptions {
   readonly readParentArgv?: () => Promise<string | undefined>;
 }
 
-export type McpArgs = { readonly lane: CaptainSessionLaneV2 } | { readonly seat: true };
+export type McpArgs =
+  | { readonly lane: CaptainSessionLaneV2; readonly conversationId?: string }
+  | { readonly seat: true }
+  | { readonly swarm: true }
+  | { readonly swarmGrant: string }
+  | { readonly grantFile: string };
 
 export function parseMcpArgs(args: readonly string[]): McpArgs {
+  if (args.length === 1 && args[0] === "--swarm") return { swarm: true };
+  if (args.length === 2 && args[0] === "--swarm-grant" && args[1]?.trim()) return { swarmGrant: args[1] };
+  if (args.length === 2 && args[0] === "--grant" && args[1]?.trim()) return { grantFile: args[1] };
+  let conversationId: string | undefined;
   let seat = false;
   let lane: CaptainSessionLaneV2 | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
     if (flag === "--seat") {
       seat = true;
+      continue;
+    }
+    if (flag === "--conversation") {
+      const value = args[++index]?.trim();
+      if (!value || value.startsWith("--")) throw new Error(MCP_USAGE);
+      conversationId = value;
       continue;
     }
     if (flag === "--lane") {
@@ -131,9 +151,9 @@ export function parseMcpArgs(args: readonly string[]): McpArgs {
     }
     throw new Error(MCP_USAGE);
   }
-  if (seat && lane !== undefined) throw new Error(MCP_USAGE);
+  if (seat && (lane !== undefined || conversationId !== undefined)) throw new Error(MCP_USAGE);
   if (seat) return { seat: true };
-  return { lane: lane ?? "operator" };
+  return { lane: lane ?? "operator", ...(conversationId === undefined ? {} : { conversationId }) };
 }
 
 /**
@@ -144,18 +164,25 @@ export function parseMcpArgs(args: readonly string[]): McpArgs {
  * rejects `server:` entries under it, so polling there is a black hole.
  */
 export function parentArgvLoadsFleetChannel(argv: string | undefined): boolean {
+  return parentArgvLoadsChannel(argv, FLEET_CHANNEL_SERVER);
+}
+
+function parentArgvLoadsChannel(argv: string | undefined, entry: string): boolean {
   if (argv === undefined) return false;
   const tokens = argv
     .trim()
     .split(/\s+/u)
     .filter((token) => token.length > 0);
+  // Claude's print mode connects MCP tools but does not register channel
+  // notifications. Polling there would consume mail without delivering it.
+  if (tokens.includes("--print") || tokens.includes("-p")) return false;
   const flag = "--dangerously-load-development-channels";
   const assigned = `${flag}=`;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (token === undefined) continue;
-    if (token.startsWith(assigned)) return token.slice(assigned.length) === FLEET_CHANNEL_SERVER;
-    if (token === flag) return tokens[index + 1] === FLEET_CHANNEL_SERVER;
+    if (token.startsWith(assigned)) return token.slice(assigned.length) === entry;
+    if (token === flag) return tokens[index + 1] === entry;
   }
   return false;
 }
@@ -290,12 +317,18 @@ export async function pumpSeatEvents(
 async function connectLaneUpstream(input: {
   readonly host: string;
   readonly bearer: string;
+  readonly conversationId?: string;
   readonly fetchImpl?: typeof fetch;
 }): Promise<LaneToolUpstream> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const headers = { authorization: `Bearer ${input.bearer}` };
+  const urlFor = (path: string) => {
+    const url = new URL(path, input.host);
+    if (input.conversationId !== undefined) url.searchParams.set("conversationId", input.conversationId);
+    return url;
+  };
   const client = new Client(SEAT_CLIENT, { capabilities: {} });
-  const transport = new StreamableHTTPClientTransport(new URL("/v1/mcp", input.host), {
+  const transport = new StreamableHTTPClientTransport(urlFor("/v1/mcp"), {
     requestInit: { headers },
   });
   // Same boundary cast as the service's own MCP host: the SDK's transports do
@@ -327,16 +360,16 @@ async function connectLaneUpstream(input: {
     async pollEvents(waitMs, signal) {
       // The harness closing the bridge must not wait out a parked poll.
       const deadline = AbortSignal.timeout(waitMs + 10_000);
-      const response = await fetchImpl(
-        new URL(`${OPERATOR_SEAT_EVENTS_PATH}?wait=${String(waitMs)}`, input.host),
-        { headers, signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]) },
-      );
+      const response = await fetchImpl(urlFor(`${OPERATOR_SEAT_EVENTS_PATH}?wait=${String(waitMs)}`), {
+        headers,
+        signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]),
+      });
       if (!response.ok) throw new Error(`seat outbox answered ${String(response.status)}`);
       return OperatorSeatEventsPageSchema.parse(await response.json()).events;
     },
     async reply(eventId, text) {
       const response = await fetchImpl(
-        new URL(`${OPERATOR_SEAT_EVENTS_PATH}/${encodeURIComponent(eventId)}/reply`, input.host),
+        urlFor(`${OPERATOR_SEAT_EVENTS_PATH}/${encodeURIComponent(eventId)}/reply`),
         {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
@@ -480,12 +513,25 @@ export async function runMcpCommand(
   options: McpCommandOptions = {},
 ): Promise<number> {
   const parsed = parseMcpArgs(args);
+  if ("swarm" in parsed) return runEnrolledWorkerMcp(options);
+  if ("swarmGrant" in parsed) return runSwarmWorkerMcp(parsed.swarmGrant, options);
+  if ("grantFile" in parsed) return runWorkerMcp(parsed.grantFile, options.transport);
   if ("seat" in parsed) return runFleetSeatMcp(options);
 
   const env = options.env ?? process.env;
   const { lane } = parsed;
+  const conversationId = parsed.conversationId ?? env.CLANKIE_CONVERSATION_ID;
+  if (conversationId !== undefined && (lane !== "operator" || !conversationId.trim()))
+    throw new Error(MCP_USAGE);
   const stderr = options.stderr ?? process.stderr;
-  const upstream = await (options.connectUpstream ?? defaultUpstream)({ lane });
+  const parentArgv = await (options.readParentArgv ?? defaultReadParentArgv)().catch(() => undefined);
+  const channel =
+    parentArgvLoadsChannel(parentArgv, "plugin:clankie@clankie") ||
+    parentArgvLoadsChannel(parentArgv, "server:clankie");
+  const upstream = await (options.connectUpstream ?? defaultUpstream)({
+    lane,
+    ...(conversationId === undefined ? {} : { conversationId }),
+  });
   const server = createSeatBridge(upstream, lane);
   const transport = options.transport ?? new StdioServerTransport();
   const closing = new AbortController();
@@ -498,7 +544,7 @@ export async function runMcpCommand(
   await server.connect(transport);
   stderr.write(`clankie mcp: serving the ${lane} lane over stdio\n`);
   const pump =
-    lane === "operator"
+    lane === "operator" && channel
       ? pumpSeatEvents(server, upstream, closing.signal, {
           ...pollCadence(options),
           onError: (error) => {
@@ -514,7 +560,10 @@ export async function runMcpCommand(
   await upstream.close().catch(() => undefined);
   return 0;
 
-  async function defaultUpstream(input: { readonly lane: CaptainSessionLaneV2 }): Promise<LaneToolUpstream> {
+  async function defaultUpstream(input: {
+    readonly lane: CaptainSessionLaneV2;
+    readonly conversationId?: string;
+  }): Promise<LaneToolUpstream> {
     // Only the operator's own bearer lives in this broker; a social lane's
     // bearer belongs to the Discord bridge process and is never handed out here.
     if (input.lane !== "operator") {
@@ -529,7 +578,11 @@ export async function runMcpCommand(
     if (credential === undefined) {
       throw new Error("No operator credential is available; start the clankie service once first.");
     }
-    return connectLaneUpstream({ host: commandHost({ ...options, env }), bearer: credential.token });
+    return connectLaneUpstream({
+      host: commandHost({ ...options, env }),
+      bearer: credential.token,
+      ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
+    });
   }
 }
 

@@ -1,16 +1,17 @@
 import { createHmac } from "node:crypto";
+import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { join } from "node:path";
+import type { ProviderAccount } from "@clankie/credential-broker";
 import { ClankieSettingsSchema, type ClankieSettings } from "@clankie/settings";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { seatEventKindFor } from "../src/captain/captain.ts";
+import { ConversationStore } from "../src/captain/conversations.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import {
-  LinearDeliveryMemory,
-  LinearSelfWriteMemory,
+  LinearWriteReceipts,
   linearActivityHeadline,
   linearActivityPrompt,
-  linearIdsInResult,
-  recordLinearWrite,
   type LinearActivityEvent,
 } from "../src/linear-webhook.ts";
 
@@ -46,14 +47,28 @@ function sign(body: string, secret = SECRET): string {
   return createHmac("sha256", secret).update(Buffer.from(body, "utf8")).digest("hex");
 }
 
-async function hookApp(following = true, selfWrites?: LinearSelfWriteMemory) {
+const hookStores: Array<{ root: string; store: ConversationStore; close(): void }> = [];
+afterEach(async () => {
+  for (const { root, store, close } of hookStores.splice(0)) {
+    await store.close();
+    close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+async function hookApp(following = true, writes?: LinearWriteReceipts, existingRoot?: string) {
+  const root = existingRoot ?? (await mkdtemp("/tmp/clankie-linear-ingress-"));
+  const store = new ConversationStore(root, async () => {});
   const wakes: LinearActivityEvent[] = [];
   const inbox: LinearActivityEvent[] = [];
   const clankie = await createClankieApp({
     captain: createStubCaptain({
       receiveLinearActivity: (comment, following) => {
-        inbox.push(comment);
-        if (following) wakes.push(comment);
+        const accepted = store.receiveLinearActivity(comment, following);
+        if (accepted) {
+          inbox.push(comment);
+          if (following) wakes.push(comment);
+        }
+        return accepted;
       },
     }),
     settings: {
@@ -67,7 +82,7 @@ async function hookApp(following = true, selfWrites?: LinearSelfWriteMemory) {
     },
     linearWebhook: {
       secret: () => Promise.resolve(SECRET),
-      ...(selfWrites === undefined ? {} : { selfWrites }),
+      ...(writes === undefined ? {} : { writes }),
     },
     clock: () => NOW,
   });
@@ -83,7 +98,8 @@ async function hookApp(following = true, selfWrites?: LinearSelfWriteMemory) {
       },
       body,
     });
-  return { post, wakes, inbox };
+  hookStores.push({ root, store, close: () => clankie.close() });
+  return { post, wakes, inbox, root, store };
 }
 
 describe("linear activity ingress", () => {
@@ -103,39 +119,96 @@ describe("linear activity ingress", () => {
     });
   });
 
-  it("drops the webhook about a comment he just wrote, and only that one, only for a while", async () => {
-    const selfWrites = new LinearSelfWriteMemory();
+  it("correlates exact revisions across restart without hiding human or worker activity", async () => {
+    const root = await mkdtemp("/tmp/clankie-linear-receipts-");
+    const path = join(root, "writes.json");
     const own = "0f5a2d1e-7c3b-4a1d-9e2f-1234567890ab";
-    recordLinearWrite(
-      selfWrites,
-      {
-        server: "linear",
-        tool: "create_comment",
-        content: JSON.stringify({ id: own, issue: { identifier: "VUH-1234" } }),
-        isError: false,
-      },
-      new Date(NOW.getTime() - 5_000),
-    );
-    // A read names ids too, and must not turn them into echoes.
-    recordLinearWrite(
-      selfWrites,
-      {
-        server: "linear",
-        tool: "list_comments",
-        content: JSON.stringify({ id: "comment-abc" }),
-        isError: false,
-      },
-      NOW,
-    );
-    const { post, inbox } = await hookApp(true, selfWrites);
-
-    const echoed = await post(commentBody({}, { id: own }));
-    await expect(echoed.json()).resolves.toMatchObject({ ingested: false });
-    const human = await post(commentBody({}, { id: "comment-abc" }), { "linear-delivery": "delivery-2" });
-    await expect(human.json()).resolves.toMatchObject({ ingested: true });
-    expect(inbox.map((event) => event.data.id)).toEqual(["comment-abc"]);
-    expect(selfWrites.matches(own, new Date(NOW.getTime() + 120_000))).toBe(false);
-    expect(linearIdsInResult(`${own} and ${own.toUpperCase()} again`)).toHaveLength(2);
+    const issue = "a06a1c92-8a14-4240-8802-a0bb868d639c";
+    const account: ProviderAccount = {
+      provider: "linear",
+      connectionId: "account-1",
+      userId: "bot",
+      workspaceId: "org",
+      name: "Clankie",
+      email: "bot@example.test",
+      workspaceName: "Test",
+      verifiedAt: NOW.toISOString(),
+    };
+    const revision = { id: own, updatedAt: NOW.toISOString(), body: "Worker result" };
+    const call = {
+      server: "linear",
+      tool: "create_comment",
+      content: JSON.stringify({ ...revision, issue: { id: issue } }),
+      isError: false,
+      account,
+    };
+    try {
+      const writes = new LinearWriteReceipts(path);
+      writes.record(call, NOW);
+      const persisted = await readFile(path, "utf8");
+      expect(persisted).not.toContain("Worker result");
+      expect(persisted).not.toContain(issue);
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      const resumed = new LinearWriteReceipts(path);
+      const { post, inbox } = await hookApp(true, resumed);
+      let delivery = 0;
+      const send = (overrides: Record<string, unknown> = {}, data: Record<string, unknown> = {}) =>
+        post(
+          commentBody(
+            { actor: { id: "bot" }, organizationId: "org", ...overrides },
+            { ...revision, ...data },
+          ),
+          { "linear-delivery": `echo-${delivery++}` },
+        );
+      await expect((await send()).json()).resolves.toMatchObject({ ingested: false });
+      await expect(
+        (await send({ action: "update", updatedFrom: { body: "Before" } })).json(),
+      ).resolves.toMatchObject({ ingested: false });
+      expect(
+        resumed.match(
+          JSON.parse(commentBody({ actor: { id: "bot" }, organizationId: "org" }, revision)),
+          new Date(NOW.getTime() + 8 * 24 * 60 * 60 * 1000),
+        ),
+      ).toBeUndefined();
+      for (const [overrides, data] of [
+        [{ actor: { id: "human", name: "Clankie", email: account.email } }, {}],
+        [{ organizationId: "other-org" }, {}],
+        [{ type: "Issue" }, {}],
+        [{ action: "remove" }, {}],
+        [{ action: "update", updatedFrom: { unknownField: "before" } }, {}],
+        [{}, { updatedAt: new Date(NOW.getTime() + 1).toISOString() }],
+        [{}, { body: "Human correction in the same millisecond" }],
+        [{}, { id: issue }],
+        [{ actor: null }, {}],
+      ] as const)
+        await expect((await send(overrides, data)).json()).resolves.toMatchObject({ ingested: true });
+      expect(inbox).toHaveLength(9);
+      const provenance = { grantId: "grant", principalId: "worker-1", workId: issue };
+      const workerRevision = { ...revision, id: "24c07157-d8de-4f24-aaac-8118d3c2c969" };
+      resumed.record({ ...call, content: JSON.stringify(workerRevision), worker: provenance }, NOW);
+      const workerApp = await hookApp(true, new LinearWriteReceipts(path));
+      await workerApp.post(commentBody({ actor: { id: "bot" }, organizationId: "org" }, workerRevision));
+      expect(workerApp.inbox).toMatchObject([{ actorId: "bot", organizationId: "org", worker: provenance }]);
+      resumed.record({ ...call, worker: provenance }, NOW);
+      await expect((await send()).json()).resolves.toMatchObject({ ingested: true });
+      expect(inbox.at(-1)?.worker).toBeUndefined();
+      // Reads, unverified accounts, errors and incomplete/ambiguous outputs do not suppress anything.
+      const empty = new LinearWriteReceipts();
+      for (const change of [
+        { tool: "get_comment" },
+        { account: undefined },
+        { isError: true },
+        { content: JSON.stringify({ id: own, body: revision.body }) },
+        { content: `Saved ${own}` },
+        { content: JSON.stringify({ id: own, updatedAt: revision.updatedAt }) },
+      ])
+        empty.record({ ...call, ...change }, NOW);
+      const uncorrelated = await hookApp(true, empty);
+      await uncorrelated.post(commentBody({ actor: { id: "bot" }, organizationId: "org" }, revision));
+      expect(uncorrelated.inbox).toHaveLength(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("refuses a body the signature does not cover", async () => {
@@ -213,6 +286,40 @@ describe("linear activity ingress", () => {
     expect(wakes).toEqual([]);
   });
 
+  it("deduplicates signed event identity across restart and trimming, and retries failed storage", async () => {
+    const first = await hookApp(false);
+    const path = join(first.root, "linear-inbox", "events.jsonl");
+    first.store.linearInboxConversationId();
+    await mkdir(path);
+    expect((await first.post(commentBody())).status).toBe(500);
+    await rm(path, { recursive: true });
+    expect(await (await first.post(commentBody())).json()).toMatchObject({ ingested: true });
+    await first.store.close();
+    const second = await hookApp(false, undefined, first.root);
+    expect(
+      await (
+        await second.post(commentBody({ webhookTimestamp: NOW.getTime() + 1000 }), {
+          "linear-delivery": "another-header",
+        })
+      ).json(),
+    ).toMatchObject({ ingested: false });
+    expect(second.store.readLinearInbox().unreadCount).toBe(1);
+    expect(await (await second.post(commentBody({}, { body: "A new change" }))).json()).toMatchObject({
+      ingested: true,
+    });
+    for (let i = 0; i < 600; i++) second.store.receiveLinearActivity(`fixture ${i}`, false);
+    for (;;) {
+      const page = second.store.readLinearInbox({ limit: 100 });
+      if (!page.ackCursor) break;
+      second.store.acknowledgeLinearInbox(page.ackCursor);
+    }
+    second.store.receiveLinearActivity("trigger retention", false);
+    expect(await readFile(join(first.root, "linear-inbox", "meta.json"), "utf8")).toContain("linearSeen");
+    await second.store.close();
+    const third = await hookApp(false, undefined, first.root);
+    expect(await (await third.post(commentBody())).json()).toMatchObject({ ingested: false });
+  });
+
   it("wakes him once when Linear retries the same delivery", async () => {
     const { post, wakes } = await hookApp();
     const body = commentBody();
@@ -270,16 +377,50 @@ describe("linear activity ingress", () => {
   });
 });
 
-describe("linear delivery memory", () => {
-  it("forgets the oldest delivery rather than growing without bound", () => {
-    const deliveries = new LinearDeliveryMemory();
-    for (let index = 0; index < 600; index += 1) expect(deliveries.admit(`d-${index}`)).toBe(true);
-
-    // Evicted, so a very old retry is admitted again — one duplicate wake is the
-    // deliberate price of a bounded memory.
-    expect(deliveries.admit("d-0")).toBe(true);
-    expect(deliveries.admit("d-599")).toBe(false);
+it("requires operator authority and an expected owner to rebind Linear work", async () => {
+  const fixture = await hookApp(false);
+  const store = fixture.store;
+  store.linearInboxConversationId();
+  const app = await createClankieApp({
+    captain: createStubCaptain({
+      linearWorkOwners: () => store.linearWorkOwners(),
+      setLinearWorkOwner: (owner, expected, remove) => store.setLinearWorkOwner(owner, expected, remove),
+    }),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
   });
+  const binding = {
+    organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
+    issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
+    conversationId: "global-default",
+  };
+  const request = (body: unknown, method = "PUT", token = "owner") =>
+    app.app.request("/v1/linear/work", {
+      method,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  try {
+    expect((await request(binding, "PUT", "social")).status).toBe(401);
+    expect((await request({ ...binding, issueId: "VUH-123" })).status).toBe(400);
+    expect((await request({ ...binding, conversationId: "missing" })).status).toBe(409);
+    expect((await request(binding)).status).toBe(200);
+    expect((await request({ ...binding, conversationId: "linear-inbox" })).status).toBe(409);
+    expect(
+      (
+        await request({
+          ...binding,
+          conversationId: "linear-inbox",
+          expectedConversationId: "global-default",
+        })
+      ).status,
+    ).toBe(200);
+    expect((await request(binding, "DELETE")).status).toBe(409);
+    expect((await request({ ...binding, conversationId: "linear-inbox" }, "DELETE")).status).toBe(200);
+    expect(store.linearWorkOwners()).toEqual([]);
+  } finally {
+    app.close();
+  }
 });
 
 describe("the prompt an activity becomes", () => {
@@ -327,9 +468,9 @@ describe("the prompt an activity becomes", () => {
 });
 
 describe("where a hook is delivered", () => {
-  it("keeps hooks out of the bound head seat and preserves other wake routing", () => {
-    expect(seatEventKindFor({ internal: true, origin: "hook" }, true)).toBeUndefined();
-    expect(seatEventKindFor({ internal: true, origin: "hook" }, false)).toBeUndefined();
+  it("routes hooks to the bound conversation seat and preserves other wake routing", () => {
+    expect(seatEventKindFor({ internal: true, origin: "hook" }, true)).toBe("wake");
+    expect(seatEventKindFor({ internal: true, origin: "hook" }, false)).toBe("wake");
     expect(seatEventKindFor({ internal: true, origin: "watch" }, false)).toBe("watch");
     expect(seatEventKindFor({ internal: true, origin: "wake" }, false)).toBe("wake");
     expect(seatEventKindFor({ internal: true, origin: "goal" }, true)).toBeUndefined();

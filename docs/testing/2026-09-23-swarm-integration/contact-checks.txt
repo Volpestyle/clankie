@@ -1,0 +1,26 @@
+clankie-contacts-check
+ Test Files  283 passed (283)
+      Tests  2394 passed | 1 skipped (2395)
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox
+clankie-app-contacts-check
+packages/skin-contract test:  Test Files  1 passed (1)
+packages/skin-contract test:       Tests  9 passed (9)
+packages/device-session test:  Test Files  2 passed (2)
+packages/device-session test:       Tests  44 passed (44)
+packages/default-skin test:  Test Files  1 passed (1)
+packages/default-skin test:       Tests  3 passed (3)
+packages/command-center test:  Test Files  109 passed (109)
+packages/command-center test:       Tests  800 passed (800)
+apps/macos test:  Test Files  1 passed (1)
+apps/macos test:       Tests  1 passed (1)
+apps/mobile test:  Test Files  13 passed (13)
+apps/mobile test:       Tests  97 passed (97)
+swarm-contacts-final-test
+ 417 pass
+ 0 fail
+Ran 417 tests across 60 files. [88.22s]
+Ran 48 tests in 0.031s
+swarm-contacts-final-package
+  "generatedFilesExcluded": true,
+  "productionEntriesPresent": true

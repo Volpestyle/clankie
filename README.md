@@ -6,10 +6,13 @@
 
 **Your persistent lead. Your choice of worker harnesses.**
 
-Start with Clankie's terminal console: give him work, choose his model, and
-let him coordinate Claude Code, Codex, or other supported coding agents in
-Herdr. He keeps the conversation and ongoing goals on your machine. You
-choose the workers' harnesses and can inspect and steer their real sessions.
+Clankie keeps conversations and ongoing goals in a persistent service on your
+machine, reached through the terminal console, app and Discord. Swarm MCP carries
+agent coordination; the built-in worker route uses Herdr. His
+[connection architecture](docs/adr/0181-clankie-is-independent-of-his-connections.md)
+keeps portals, execution runtimes and optional work trackers independent.
+[Current support](packages/swarm/README.md#connection-contract-status) distinguishes
+the implemented integrations from the remaining work.
 
 The companion app brings that same work into three views: **Messages** to
 talk to Clankie and the team, **Terminal** to reach their Herdr panes, and

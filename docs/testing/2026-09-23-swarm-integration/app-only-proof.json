@@ -1,0 +1,57 @@
+{
+  "scenario": "Paired native app sends work to an independent Claude Swarm contact",
+  "startedAt": "2026-09-24T06:52:47.651Z",
+  "verifiedAt": "2026-09-24T07:02:06.097753+00:00",
+  "worker": {
+    "harness": "Claude Code",
+    "runtime": "independently owned stream process",
+    "actor": "f1d1fc91-c13e-4619-b86f-d44285be9c51",
+    "personaId": "swarm-70974d8c42267b877a960db4966c1c64bfcf0cf1e01028c0caa6d8fa06a3bc23"
+  },
+  "checks": {
+    "pairedDeviceRelay": true,
+    "noHerdr": true,
+    "noLinearOrDiscord": true,
+    "sameThreadReply": true,
+    "projectOnlyMarker": true,
+    "bothDeliveriesAcknowledgedOnce": true,
+    "moduleTestsPassed": true,
+    "appRestartRestoresReplyWithoutNewMessage": true,
+    "ownedWorkerHostRelayAndSimulatorsStopped": true
+  },
+  "messages": [
+    {
+      "id": "52e7f504-b772-45a7-a5dd-cbc21a150f40",
+      "sender": "b210b6e9-0c8f-41f4-9363-1aebd7b10f71",
+      "kind": "question",
+      "body": "Create add.mjs exporting add(a,b), and add.test.mjs covering negative numbers and zero with node:test. Run the tests. Reply here with the result and the project doctrine marker. Work only in your supplied directory.",
+      "thread_id": "conv-78c90a65-4d04-4938-b648-f0a8ee72d3c0",
+      "sender_generation": 1,
+      "recipient": "f1d1fc91-c13e-4619-b86f-d44285be9c51",
+      "recipient_generation": 1,
+      "state": "acknowledged",
+      "attempts": 1
+    },
+    {
+      "id": "ee1b2440-0fe0-48f3-b966-52473b38e9b1",
+      "sender": "f1d1fc91-c13e-4619-b86f-d44285be9c51",
+      "kind": "reply",
+      "body": "Done. Created add.mjs (export const add = (a, b) => a + b) and add.test.mjs with node:test tests for negative numbers (-2+-3=-5, -2+5=3) and zero (0+0, 0+7, -4+0). `node --test add.test.mjs` passed 2 of 2 tests, with 0 failures. DOCTRINE_d8450817-e4eb-4048-b4cd-eb1a0e8d824a",
+      "thread_id": "conv-78c90a65-4d04-4938-b648-f0a8ee72d3c0",
+      "sender_generation": 1,
+      "recipient": "b210b6e9-0c8f-41f4-9363-1aebd7b10f71",
+      "recipient_generation": 1,
+      "state": "acknowledged",
+      "attempts": 1
+    }
+  ],
+  "marker": "DOCTRINE_d8450817-e4eb-4048-b4cd-eb1a0e8d824a",
+  "verification": "\u2714 negative numbers (0.256458ms)\n\u2714 zero (0.048917ms)\n\u2139 tests 2\n\u2139 suites 0\n\u2139 pass 2\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 36.577\n",
+  "relayRequests": ["/operator/v1/dispatch"],
+  "limitations": [
+    "iOS simulator Debug client and local loopback relay",
+    "Isolated host assembled from production modules; captain model is unbound",
+    "Worker idle delivery uses exported RuntimeDelivery and observeInbox in the proof harness",
+    "No provider-account, hosted ingress or captain-led orchestration claim"
+  ]
+}

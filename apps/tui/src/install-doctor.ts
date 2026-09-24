@@ -158,7 +158,9 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   );
   const herdrBinary =
     settings.herdr.runtime === "bundled" ||
-    (settings.herdr.runtime === "auto" && settings.herdr.session === "default" && env.HERDR_ENV !== "1")
+    (settings.herdr.runtime === "auto" &&
+      settings.herdr.session === "default" &&
+      settings.herdr.socketPath === undefined)
       ? existsSync(activeHerdr)
         ? activeHerdr
         : join(options.repoRoot, kind === "release" ? "libexec/herdr" : ".data/herdr/bin/herdr")
@@ -170,7 +172,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   const bundled = existsSync(join(pluginBundle, "herdr-plugin.toml"));
   const herdrPlugin = await inspectHerdrPlugin(
     execFile,
-    herdrBinary === "herdr" && commands.herdr?.present === true,
+    settings.herdr.runtime !== "disabled" && herdrBinary === "herdr" && commands.herdr?.present === true,
     bundled,
     pluginBundle,
   );

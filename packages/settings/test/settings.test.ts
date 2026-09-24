@@ -425,6 +425,12 @@ describe("voice settings resolution", () => {
 });
 
 describe("mcp and email settings", () => {
+  it("does not reset authority to defaults when the settings path is unreadable", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-unreadable-settings-"));
+    await expect(new SettingsStore(directory).load()).rejects.toMatchObject({ code: "EISDIR" });
+    expect(await new SettingsStore(join(directory, "missing.json")).load()).toEqual(emptySettings());
+  });
+
   it("closes the lane by default and requires the field the transport needs", () => {
     // Deny-by-default: a server the owner did not place in a room stays at the
     // console, so forgetting `lane` never widens who can reach it.
