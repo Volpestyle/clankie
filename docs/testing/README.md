@@ -27,7 +27,6 @@ all other capabilities from the files present.
 - [2026-09-06 Agent-to-agent edges, proved from a real Herdr to a real fleet snapshot](2026-09-06-fleet-agent-edges/README.md)
 - [2026-09-20 Delivered files through a real isolated host, relay, and mobile app](2026-09-20-delivered-files-live/README.md)
 - [2026-09-05 PokeAgent evidence sweep: every journal this machine has kept](2026-09-05-pokeagent-evidence-sweep/README.md)
-- [2026-09-05 The push delivery boundary, proved against the real gateway](2026-09-05-push-delivery-boundary/README.md)
 - [2026-08-16 PokeAgent performance](2026-08-16-pokeagent-performance/README.md)
 - [2026-08-18 PokeAgents trial run](2026-08-18-pokeagents-trial-run/README.md)
 - [2026-08-30 Hosted FireRed intro on current Clankie](2026-08-30-hosted-firered-intro/README.md)

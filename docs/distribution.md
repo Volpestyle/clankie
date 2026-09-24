@@ -91,16 +91,12 @@ are on PATH. The headless command contract is
 skills under `.agents/dev-skills` stay out of the archive. The rest of
 `docs/` does not ship.
 
-The AWS public gateway is a separate deployment, not part of the Mac release.
+The public gateway is Clankie's hosted service, not part of the Mac release;
+its source, Cognito accounts, and deployment live in the private `clankie-ops`
+repository ([ADR 0183](adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
 The release contains the outbound connector, passwordless `/gateway` setup
-wizard, and launch-at-login command. Cognito account provisioning lives under
-[`infra/aws/accounts`](../infra/aws/accounts/README.md); the
-single-instance Lightsail/Caddy deployment procedure lives under
-[`infra/aws/public-gateway`](../infra/aws/public-gateway/README.md). The
-[public gateway launch gate](public-gateway-launch.md) joins hosting,
-user-perceived metrics, scaling triggers, and the App Store review journey.
-Tailscale remains an optional direct development lane and is not required by an
-App Store client.
+wizard, and launch-at-login command. Tailscale remains an optional direct
+development lane and is not required by an App Store client.
 
 Public documentation lives in [`apps/docs`](../apps/docs/README.md) and
 deploys to [`docs.clankie.bot`](https://docs.clankie.bot) from `main`: setup,

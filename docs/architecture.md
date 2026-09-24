@@ -439,8 +439,7 @@ release so he can describe and set up this machine without a git tree
 | Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                                     |
 | Herdr plugin (board, console)     | [`integrations/herdr-plugin/README.md`](../integrations/herdr-plugin/README.md)                   |
 | Claude Code seat plugin           | [`integrations/claude-plugin/README.md`](../integrations/claude-plugin/README.md)                 |
-| Public doorway (AWS gateway)      | [`apps/gateway/README.md`](../apps/gateway/README.md)                                             |
-| Account sign-in (Cognito)         | [`infra/aws/accounts/README.md`](../infra/aws/accounts/README.md)                                 |
+| Hosted gateway and accounts       | [ADR 0183](adr/0183-the-harness-is-public-the-hosted-service-is-private.md)                       |
 | Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                         |
 | Public docs site                  | [`apps/docs/README.md`](../apps/docs/README.md)                                                   |
 | Install card (`clankie doctor`)   | [`docs/adr/0142-the-install-tells-him-the-truth.md`](adr/0142-the-install-tells-him-the-truth.md) |

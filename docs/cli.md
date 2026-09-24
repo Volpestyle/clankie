@@ -269,7 +269,7 @@ enabled delivery reference, otherwise `off`. This is the host's registration
 state, not proof that Apple delivered a notification. JSON includes the optional
 `push` object with `registrationId`, `sequence`, and `enabled`; disabled records
 retain their last version. The phone authorizes delivery and controls notification
-permission. Signing/storage setup is in the [gateway guide](../apps/gateway/README.md).
+permission. The hosted gateway holds the APNs signing key and delivery registrations.
 
 ### `devices revoke <id> [--json]`
 

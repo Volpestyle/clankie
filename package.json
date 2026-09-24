@@ -15,7 +15,7 @@
     "docs:public:build": "pnpm --filter @clankie/docs build",
     "docs:public:check": "pnpm --filter @clankie/docs check",
     "docs:check": "node scripts/check-doc-links.mjs && pnpm docs:public:check",
-    "infra:check": "infra/aws/accounts/check.sh && infra/aws/public-gateway/check.sh && infra/aws/public-docs/check.sh",
+    "infra:check": "infra/aws/public-docs/check.sh",
     "testing:view": "node docs/testing/serve-archive.mjs",
     "check": "pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test",
     "doctor": "node scripts/doctor.mjs",

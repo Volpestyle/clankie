@@ -1,8 +1,0 @@
-__GATEWAY_DOMAIN__ {
-	reverse_proxy clankie-gateway:8080
-
-	log {
-		output stdout
-		format json
-	}
-}

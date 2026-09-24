@@ -39,16 +39,8 @@ jobs:
             dist/clankie-darwin-arm64.tar.gz.sha256
           if-no-files-found: error
 
-  deploy-gateway:
-    needs: build
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/deploy-gateway.yml
-    secrets: inherit
-
   publish:
-    needs: [build, deploy-gateway]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write

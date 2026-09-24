@@ -9,8 +9,15 @@ service (`apps/clankie`) plus the surfaces that reach it.
 
 ## Neighbor repos
 
-`~/dev/clankie-app` holds the React Native app built on top of Clankie's
-foundation.
+This repository is public. Both neighbors are private and consume
+`packages/protocol` as a sibling checkout, so a protocol change here reaches them
+([ADR 0183](docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
+
+- `~/dev/clankie-app` holds the React Native app built on top of Clankie's
+  foundation.
+- `~/dev/clankie-ops` holds the hosted service: the public gateway behind
+  `api.clankie.bot`, Cognito accounts, their AWS templates and deploys, and
+  production, App Store and launch records.
 
 ## Map
 
@@ -23,9 +30,6 @@ foundation.
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/relay` — remote access for the phone/desktop app.
-- `apps/gateway` — the public AWS doorway (ADR 0151); routes back to a
-  configured Mac over its outbound socket. Optional APNs delivery owns only
-  device-authorized routing registrations (ADR 0159), never conversations or grants.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
 - `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
   actions); all other herdr integration is vanilla CLI/socket (ADR 0139).
@@ -60,6 +64,9 @@ foundation.
   regenerate the Claude seat with `node integrations/claude-plugin/build.mjs`
   after instruction changes. Episode memory preserves experiences, not standing
   operating instructions. Keep project-specific procedures in that project's repo.
+- Keep the public/private boundary: code that runs only on Clankie's hosted
+  service (gateway, accounts, managed-hosting control plane), its deployment,
+  and business, App Store or production records go to `clankie-ops`, never here.
 - The repository is Apache-2.0 except `apps/vox`, which retains its own
   AGPL-3.0-or-later license and provenance record.
 - The credential broker (Keychain on macOS) is the canonical secret store.

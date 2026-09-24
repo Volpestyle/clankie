@@ -109,9 +109,8 @@ From here, use Messages to direct the work, Terminal to inspect or control a
 worker pane, and Commons to follow activity across the fleet. The app and TUI
 reach the same Clankie service on your Mac.
 
-To invite someone, an operator runs `infra/aws/accounts/deploy.sh invite <email>`
-before that person reaches step 1
-([`infra/aws/accounts`](infra/aws/accounts/README.md)).
+Gateway sign-in is invite-only during the beta: step 1 needs the email an
+invitation was sent to.
 
 ### Reference
 
@@ -146,8 +145,11 @@ The steps above are the same from a checkout.
 | [`apps/discord-user-session`](apps/discord-user-session/README.md) | Personal-lab voice, screen-watch, and Go Live body (off by default)                         |
 | [`apps/discord-activity`](apps/discord-activity/README.md)         | The watch-me-play surface                                                                   |
 | [`apps/relay`](apps/relay/README.md)                               | Remote access for the phone/desktop app                                                     |
-| [`apps/gateway`](apps/gateway/README.md)                           | The public AWS doorway that routes back to a configured Mac                                 |
 | [`apps/vox`](apps/vox/README.md)                                   | Sole native Discord media owner behind an AGPL process boundary                             |
+
+The companion app and the hosted gateway behind `api.clankie.bot` live in
+private repositories; this one holds everything that runs on your machine
+([ADR 0183](docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
 
 [`packages/play`](packages/play/README.md) is the play mind above the body
 seam; `packages/` holds the shared contracts. The body itself is his seat in a
