@@ -71,6 +71,48 @@ describe("HerdrWatchStore", () => {
     store.close();
   });
 
+  it("carries a Discord origin through a restart to the wake", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-discord-"));
+    roots.push(root);
+    const path = join(root, "herdr-watches.json");
+    const origin = {
+      baseSessionKey: "discord:clankie:discord:guild:channel",
+      targetId: "guild:channel",
+      actorId: "actor",
+      guildId: "guild",
+      channelId: "channel",
+      messageId: "message",
+      transportKind: "bot" as const,
+    };
+    const first = new HerdrWatchStore(path, {
+      runner: {
+        get: vi.fn(() => Promise.resolve(working)),
+        resolveTerminal: vi.fn(() => Promise.resolve(working)),
+        wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      },
+    });
+    first.start(() => Promise.resolve());
+    await first.watch("discord_presence:guild:channel", "w18:p1", "Report the publish result", origin);
+    first.close();
+
+    const wake = vi.fn(() => Promise.resolve());
+    const second = new HerdrWatchStore(path, {
+      runner: {
+        get: vi.fn(() => Promise.resolve(done)),
+        resolveTerminal: vi.fn(() => Promise.resolve(done)),
+        wait: vi.fn(() => Promise.resolve(done)),
+      },
+    });
+    second.start(wake);
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
+    expect(wake).toHaveBeenCalledWith(
+      "discord_presence:guild:channel",
+      expect.stringContaining("Report the publish result"),
+      origin,
+    );
+    second.close();
+  });
+
   it("resolves a messageable pane to its seat id and not a shell", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-pane-seat-"));
     roots.push(root);

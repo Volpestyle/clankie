@@ -26,7 +26,7 @@ import type { GameplaySettings } from "@clankie/settings";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
-import type { HerdrWatchPort } from "./herdr-watch.ts";
+import type { DiscordWatchOrigin, HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
@@ -57,6 +57,8 @@ export interface TurnContext {
   messageId?: string | undefined;
   /** Host-stamped: this session holds shell tools under its authority plan. */
   shell?: boolean | undefined;
+  /** Host-stamped Discord message a `herdr_watch` from this turn answers. */
+  discordOrigin?: DiscordWatchOrigin | undefined;
   /** True for a host-authored goal continuation or scheduled wake. */
   autonomous?: boolean | undefined;
   /** Bound by an operator conversation to publish one deliberate finished file into its transcript. */
@@ -120,7 +122,10 @@ export function captainTools(
   return [
     ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
-    ...(lane === "operator" && herdrWatches !== undefined
+    // A Discord room with a shell can start workers, so it watches and
+    // harvests its own; its report belongs in the room that asked (ADR 0186).
+    ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
+    herdrWatches !== undefined
       ? herdrWatchTools(herdrWatches, turn, deps.herdrAvailable)
       : []),
     // Hiring starts a process on the operator's machine, so it rides the same
@@ -589,9 +594,13 @@ function herdrWatchTools(
   turn: TurnContext,
   available?: () => boolean,
 ): ToolDefinition[] {
-  const conversationId = (): string => {
+  const arm = (agent: string, reason: string) => {
+    if (turn.discordOrigin !== undefined) {
+      if (turn.room === undefined) throw new Error("Discord room attribution is unavailable");
+      return watches.watch(turn.room, agent, reason, turn.discordOrigin);
+    }
     if (turn.targetId === undefined) throw new Error("Operator conversation attribution is unavailable");
-    return turn.targetId;
+    return watches.watch(turn.targetId, agent, reason);
   };
   return [
     defineTool({
@@ -599,7 +608,8 @@ function herdrWatchTools(
       label: "Watch Herdr agent",
       description:
         "Arm a persisted, event-driven one-shot watcher on a working Herdr agent pane. When the agent settles, " +
-        "this same operator conversation wakes so you can inspect and harvest it. Use this after agreeing to " +
+        "this same conversation wakes so you can inspect and harvest it; in Discord, your reply to that wake " +
+        "posts in this channel, answering the message you are on now. Use this after agreeing to " +
         "harvest or after dispatching work; do not poll with schedule_wake or block the current turn with " +
         "`herdr agent wait`. A settled status is only a cue to inspect, not proof the work is correct.",
       parameters: Type.Object({
@@ -619,7 +629,7 @@ function herdrWatchTools(
         json(
           available?.() === false
             ? { outcome: "refused", reason: "herdr_unavailable" }
-            : await watches.watch(conversationId(), params.agent, params.reason),
+            : await arm(params.agent, params.reason),
         ),
     }),
   ];

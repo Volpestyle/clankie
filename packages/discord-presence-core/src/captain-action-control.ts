@@ -65,7 +65,9 @@ export function admitCaptainDiscordAction(input: {
         message:
           input.action.action === "react" || input.action.action === "unreact"
             ? "That message is outside my admitted Discord channels."
-            : input.action.action === "send_text_update" || input.action.action === "tool_progress"
+            : input.action.action === "send_text_update" ||
+                input.action.action === "send_reply" ||
+                input.action.action === "tool_progress"
               ? "That channel is outside my admitted Discord channels."
               : "Threads only work in my admitted server channels.",
       },
@@ -137,6 +139,12 @@ export function planNonWatchCaptainDiscordAction(
         payload: { kind: "send_message", channelId, replyToMessageId: messageId, content: input.text },
         successMessage:
           "I posted that text update. Keep working; your final text reply still posts when the turn ends.",
+      };
+    case "send_reply":
+      return {
+        action: "discord.presence.send_message",
+        payload: { kind: "send_message", channelId, replyToMessageId: messageId, content: input.text },
+        successMessage: "I posted the reply.",
       };
     case "tool_progress":
       return {

@@ -27,6 +27,7 @@ export {
   DiscordTextIngress,
   addressesCharacter,
   CATCH_UP_INTERVAL_MS,
+  boundedDiscordReply,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   parseDiscordReplyPolicy,

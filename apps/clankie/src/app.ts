@@ -5,7 +5,11 @@ import { bodyLimit } from "hono/body-limit";
 import { ExecutionConnectSchema, type ExecutionConnections, HerdrUnavailableError } from "./herdr-session.ts";
 import { WorkerGrantRequestSchema, type WorkerMcp } from "./worker-mcp.ts";
 import { EVALUATOR_PATH, EvaluatorCommandSchema } from "@clankie/protocol";
-import { ConversationResetError, LINEAR_INBOX_CONVERSATION_ID } from "./captain/conversations.ts";
+import {
+  ConversationRefusedError,
+  ConversationResetError,
+  LINEAR_INBOX_CONVERSATION_ID,
+} from "./captain/conversations.ts";
 import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@clankie/protocol";
 /**
  * The Clankie service's HTTP surface. Local capabilities are wired in-process.
@@ -2741,6 +2745,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return context.json({ error: "herdr_unavailable", message: error.message }, 503);
       if (error instanceof ConversationResetError)
         return context.json({ error: "reset_refused", message: error.message }, 409);
+      if (error instanceof ConversationRefusedError)
+        return context.json({ error: "refused", message: error.message }, 409);
       throw error;
     }
   });

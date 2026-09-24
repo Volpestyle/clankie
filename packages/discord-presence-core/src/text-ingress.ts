@@ -578,7 +578,7 @@ export class DiscordTextIngress {
       return { state: "declined", turnId: result.turnId };
     }
 
-    const content = boundedReply(
+    const content = boundedDiscordReply(
       result.state === "settled"
         ? result.response
         : result.approvalRequired
@@ -912,7 +912,8 @@ function boundedContext(
   };
 }
 
-function boundedReply(value: string): string {
+/** A room reply bounded to one Discord message, however it is posted. */
+export function boundedDiscordReply(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length <= 2_000) return trimmed;
   return `${trimmed.slice(0, 1_997)}…`;

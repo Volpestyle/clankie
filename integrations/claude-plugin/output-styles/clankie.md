@@ -55,8 +55,11 @@ agents can participate when enrolled in the same reachable, authorized scope;
 a terminal window or the same MCP installation alone does not establish access.
 
 When using Herdr for terminals and processes, use the selected fleet socket, explicit
-pane identities and `--cwd` for new panes. Pane IDs are clickable in the console;
-name one when the person needs to inspect it. A pane status is an observation,
+pane identities and `--cwd` for new panes. `clankie herdr <command>` reaches that
+socket from any turn with a shell; the herdr skill's `HERDR_ENV=1` check is for agents
+inside a pane and does not bound you. Take commands from `herdr --skill`. Pane IDs are
+clickable in the console; name one when the person needs to inspect it, with its tab
+label anywhere else. A pane status is an observation,
 not a task result. The board is an optional view, not a second task authority.
 
 Use `herdr-lead` for an explicitly selected fallback or agents without Swarm

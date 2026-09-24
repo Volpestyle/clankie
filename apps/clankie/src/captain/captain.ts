@@ -1,4 +1,5 @@
 import { HerdrUnavailableError } from "../herdr-session.ts";
+import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import type { SwarmHost } from "@clankie/swarm";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -62,7 +63,7 @@ import { createStanceStore } from "./stances.ts";
 import { assignmentSkills } from "./assignment-skills.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
-import { HerdrWatchStore } from "./herdr-watch.ts";
+import { HerdrWatchStore, type DiscordWatchOrigin } from "./herdr-watch.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import {
   deriveFleetEdges,
@@ -837,7 +838,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     sideConversation = false,
     conversationId?: string,
   ): Promise<LaneSession> {
-    const capture: TurnContext = {};
+    const capture: TurnContext = { shell: systemTools };
     if (systemTools && options.deliveredFiles !== undefined) {
       capture.publishFile = async (input) => {
         if (capture.room === undefined) throw new Error("Delivered files need an active room");
@@ -1507,7 +1508,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   evaluator.start();
   if (deps.herdrAvailable?.() !== false)
     herdrWatches.start(
-      (conversationId, prompt) => {
+      (conversationId, prompt, discord) => {
+        if (discord !== undefined) {
+          // Accepted once started: the room turn owns its own failures, and a
+          // retry would harvest the same pane twice.
+          void runDiscordWatchTurn(discord, prompt).catch((error) =>
+            console.error("Herdr watch Discord turn failed:", error),
+          );
+          return Promise.resolve();
+        }
         if (!conversations.runsCaptainTurns(conversationId)) {
           herdrWatches.cancelConversation(conversationId);
           return Promise.resolve();
@@ -1595,11 +1604,106 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     for (const seatId of conversations.seatIds()) herdrWatches.trackSeat(seatId);
   void refreshFleet().catch(() => undefined);
 
+  /** The session a planned Discord turn runs in, whether a message or a watch woke it. */
+  function discordLane(normalized: NormalizedDiscordTurn, systemTools: boolean): Promise<LaneSession> {
+    if (!normalized.durable) {
+      // One-shot for context, durable for evidence: a fresh session per turn
+      // (nothing carries forward), but written to disk under the room's own
+      // directory so what he actually did — every tool call and result — is
+      // readable afterwards. This is the only trail a privileged turn's shell
+      // leaves; the receipts above it are content-free by design.
+      // ponytail: one file per turn, unbounded; prune by mtime if a busy room
+      // ever makes the directory unwieldy.
+      return buildSession(
+        normalized.lane,
+        SessionManager.create(
+          workingDirectory,
+          join(options.stateDir, "turns", laneKey(normalized.lane, normalized.targetId)),
+        ),
+        systemTools,
+        workingDirectory,
+      );
+    }
+    // Voice keeps the directory it has always written to; text rooms get
+    // their own beside it rather than moving in under a name that means
+    // something else.
+    return durableSession(
+      normalized.sessionKey,
+      normalized.lane,
+      join(
+        options.stateDir,
+        normalized.lane === "discord_voice" ? "voice" : "rooms",
+        encodeURIComponent(normalized.sessionKey),
+      ),
+      systemTools,
+      workingDirectory,
+    );
+  }
+
+  /**
+   * A Herdr watch armed from Discord settled (ADR 0186). The room that started
+   * the worker harvests it and answers the message it was armed from. Authority
+   * is planned again for that actor now — a grant revoked since the watch was
+   * armed runs nothing — and no body holds this delivery, so the reply posts
+   * through the Discord action port.
+   */
+  async function runDiscordWatchTurn(origin: DiscordWatchOrigin, notification: string): Promise<void> {
+    const { settings: discord } = resolveDiscordSettings(
+      (await settings()).discord,
+      options.discordEnvironment,
+    );
+    const plan = planDiscordTurnSession({
+      baseSessionKey: origin.baseSessionKey,
+      durable: true,
+      actorId: origin.actorId,
+      ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
+      channelId: origin.channelId,
+      transportKind: origin.transportKind,
+      settings: discord,
+    });
+    if (!plan.systemTools) {
+      console.warn("Herdr watch dropped: its Discord actor no longer holds machine access");
+      return;
+    }
+    const prompt = [
+      "A Herdr watch you armed from this Discord channel fired. Your reply posts in the channel, answering the message you armed it from.",
+      `If there is nothing worth saying, reply with exactly ${CAPTAIN_SILENT_REPLY_SENTINEL}.`,
+      notification,
+    ].join("\n\n");
+    const normalized: NormalizedDiscordTurn = {
+      sessionKey: plan.sessionKey,
+      durable: plan.durable,
+      lane: "discord_presence",
+      targetId: origin.targetId,
+      prompt,
+      images: [],
+      heard: "[Herdr watch settled]",
+      actorId: origin.actorId,
+      ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
+      channelId: origin.channelId,
+      messageId: origin.messageId,
+    };
+    const lane = await discordLane(normalized, true);
+    const result = await runDiscordTurn(lane, normalized, `watch-${randomUUID()}`, false, origin);
+    if (result.state !== "settled" || deps.discordActions === undefined) return;
+    const posted = await deps.discordActions.execute({
+      action: "send_reply",
+      callId: result.turnId,
+      actorId: origin.actorId,
+      ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
+      channelId: origin.channelId,
+      messageId: origin.messageId,
+      text: boundedDiscordReply(result.response),
+    });
+    if (!posted.ok) console.error("Herdr watch reply was not posted:", posted.message);
+  }
+
   async function runDiscordTurn(
     lane: LaneSession,
     normalized: Awaited<ReturnType<typeof normalizeDiscordTurn>>,
     deliveryId: string,
     toolProgressEnabled: boolean,
+    origin: DiscordWatchOrigin,
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = conversations.roomConversation(normalized.lane, normalized.targetId);
     const syncTranscript = (): void => roomConversations.sync(conversationId, lane.session.sessionFile);
@@ -1611,6 +1715,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane.capture.guildId = normalized.guildId;
     lane.capture.channelId = normalized.channelId;
     lane.capture.messageId = normalized.messageId;
+    lane.capture.discordOrigin = normalized.lane === "discord_presence" ? origin : undefined;
     const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
     await laneLog.append(normalized.lane, normalized.targetId, {
       at: new Date().toISOString(),
@@ -1877,40 +1982,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         request.trigger.unprompted !== true &&
         normalized.guildId !== undefined &&
         discord.toolProgressChannelIds.includes(normalized.channelId);
-      if (!normalized.durable) {
-        // One-shot for context, durable for evidence: a fresh session per turn
-        // (nothing carries forward), but written to disk under the room's own
-        // directory so what he actually did — every tool call and result — is
-        // readable afterwards. This is the only trail a privileged turn's shell
-        // leaves; the receipts above it are content-free by design.
-        // ponytail: one file per turn, unbounded; prune by mtime if a busy room
-        // ever makes the directory unwieldy.
-        const lane = await buildSession(
-          normalized.lane,
-          SessionManager.create(
-            workingDirectory,
-            join(options.stateDir, "turns", laneKey(normalized.lane, normalized.targetId)),
-          ),
-          plan.systemTools,
-          workingDirectory,
-        );
-        return runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled);
-      }
-      // Voice keeps the directory it has always written to; text rooms get
-      // their own beside it rather than moving in under a name that means
-      // something else.
-      const lane = await durableSession(
-        normalized.sessionKey,
-        normalized.lane,
-        join(
-          options.stateDir,
-          normalized.lane === "discord_voice" ? "voice" : "rooms",
-          encodeURIComponent(normalized.sessionKey),
-        ),
-        plan.systemTools,
-        workingDirectory,
-      );
-      return runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled);
+      const origin: DiscordWatchOrigin = {
+        baseSessionKey: discordTurnSessionKey(request),
+        targetId: normalized.targetId,
+        actorId: normalized.actorId,
+        ...(normalized.guildId === undefined ? {} : { guildId: normalized.guildId }),
+        channelId: normalized.channelId,
+        messageId: normalized.messageId,
+        transportKind: request.identity.transportKind,
+      };
+      const lane = await discordLane(normalized, plan.systemTools);
+      return runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled, origin);
     },
 
     async serveOperatorConversation(

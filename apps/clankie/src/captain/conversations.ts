@@ -402,6 +402,8 @@ export interface DurableMessageNotice {
 }
 
 export class ConversationResetError extends Error {}
+/** A request the conversation understood and declines; its message is the answer. */
+export class ConversationRefusedError extends Error {}
 
 /**
  * File-backed conversation registry: `meta.json` + append-only `events.jsonl`
@@ -1898,7 +1900,9 @@ export class ConversationStore {
       throw new Error(`Unknown conversation ${turn.conversationId}`);
     }
     if (meta.scope.kind === "room")
-      throw new Error("This is a read-only room transcript. Send messages in Discord.");
+      throw new ConversationRefusedError(
+        "This is a read-only room transcript. Send messages in Discord; work started from a Discord room reports back through that room.",
+      );
     if (meta.scope.kind === "seat") {
       return this.queueSeatSend(meta, meta.scope.seatId, turn, { seatId: meta.scope.seatId });
     }

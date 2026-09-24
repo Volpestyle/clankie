@@ -3394,6 +3394,14 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
     text: z.string().trim().min(1).max(600),
   }).strict(),
   /**
+   * A finished reply no body is holding a delivery for: a room turn woken by a
+   * Herdr watch it armed answers the message it was armed from (ADR 0186).
+   */
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("send_reply"),
+    text: z.string().trim().min(1).max(2_000),
+  }).strict(),
+  /**
    * "He has started writing" — the mid-turn signal ADR 0118 left unbuilt.
    * Host-stamped from the reply stream, never a model tool: it carries no
    * content and posts nothing, it only lets the body light the indicator on a

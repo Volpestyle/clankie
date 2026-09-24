@@ -108,7 +108,7 @@ export function createCaptainOperatorConversationClient(
       ...(signal === undefined ? {} : { signal }),
     });
     if (!response.ok) {
-      if (request.op === "reset" && response.status === 409) {
+      if (response.status === 409) {
         const body: unknown = await response.json();
         if (
           typeof body === "object" &&
