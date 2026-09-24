@@ -339,7 +339,7 @@ describe("world play execution", () => {
 });
 
 describe("joinWorld captain ask", () => {
-  it("submits a world venue and maps each join refusal onto join_refused", async () => {
+  it("maps each join refusal onto join_refused", async () => {
     const reasons: WorldJoinRefusalReason[] = [
       "play_session_active",
       "no_credential",
@@ -385,22 +385,6 @@ describe("joinWorld captain ask", () => {
       action: "joined",
       sessionId: running.sessionId,
       environmentId: running.environmentId,
-    });
-  });
-
-  it("reports an already-active session as join_refused", async () => {
-    const note = await askJoinWorld(
-      {
-        submitEmbodimentIntent: () => Promise.resolve({ outcome: "refused", reason: "play_session_active" }),
-        getEmbodimentSession: () => Promise.resolve(undefined),
-        getLiveEmbodimentSession: () => Promise.resolve(undefined),
-      },
-      { environmentId: "pokemon-firered", originLane: "discord_presence", requestedBy: "user-1" },
-    );
-    expect(note).toEqual({
-      action: "join_refused",
-      environmentId: "pokemon-firered",
-      reason: "play_session_active",
     });
   });
 });

@@ -24,7 +24,7 @@ describe("createStanceStore", () => {
     const stance = stances.state("seat-a", {
       herdrPaneId: "w1:p1",
       pose: "working",
-      ttlMs: OPERATOR_AGENT_STANCE_MAX_MS,
+      ttlMs: OPERATOR_AGENT_STANCE_MAX_MS + 1,
     });
     expect(Date.parse(stance.expiresAt) - now).toBe(OPERATOR_AGENT_STANCE_MAX_MS);
   });
