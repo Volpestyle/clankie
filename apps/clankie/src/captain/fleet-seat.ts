@@ -20,6 +20,41 @@ export function fleetSeatClaudeStartArgs(): readonly string[] {
   return ["--dangerously-load-development-channels", `server:${FLEET_SEAT_MCP_SERVER}`];
 }
 
+/**
+ * The argv a chosen model becomes on each harness's own CLI (ADR 0185).
+ * Undefined means the harness has no wired model flag — a typed failure at
+ * hire time, never a silently dropped choice.
+ */
+export function fleetSeatModelArgs(harness: string, model: string): readonly string[] | undefined {
+  switch (harness) {
+    case "pi":
+    case "claude":
+    case "codex":
+      return ["--model", model];
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The argv a chosen reasoning effort becomes on each harness's own CLI (ADR
+ * 0185): pi's `--thinking`, claude's `--effort`, codex's config override (it
+ * has no launch flag; the quoted value is what its TOML-style `-c` parses).
+ * Undefined means no wired effort flag — a typed failure, as with model.
+ */
+export function fleetSeatEffortArgs(harness: string, effort: string): readonly string[] | undefined {
+  switch (harness) {
+    case "pi":
+      return ["--thinking", effort];
+    case "claude":
+      return ["--effort", effort];
+    case "codex":
+      return ["-c", `model_reasoning_effort="${effort}"`];
+    default:
+      return undefined;
+  }
+}
+
 /** `claude mcp add -s user` as the hire path sees it. */
 export interface ClaudeMcpResult {
   readonly status: number;

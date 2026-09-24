@@ -1095,6 +1095,114 @@ describe("hiring a seat", () => {
     store.close();
   });
 
+  it("passes a chosen model to the harness as its own --model flag", async () => {
+    const startAgent = vi.fn(
+      (_options: { name: string; kind: string; paneId: string; args?: readonly string[] }) =>
+        Promise.resolve(),
+    );
+    const piHired: HerdrAgentSnapshot = {
+      ...hired,
+      agent: "pi",
+      session: { source: "herdr:pi", kind: "id", value: "session-pi" },
+    };
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(piHired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(piHired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+      model: "anthropic/claude-opus-4-5",
+    });
+
+    expect(result.outcome).toBe("spawned");
+    expect(startAgent.mock.calls[0]?.[0].args).toEqual(["--model", "anthropic/claude-opus-4-5"]);
+    store.close();
+  });
+
+  it("passes a chosen effort as the harness's own flag", async () => {
+    const startAgent = vi.fn(
+      (_options: { name: string; kind: string; paneId: string; args?: readonly string[] }) =>
+        Promise.resolve(),
+    );
+    const piHired: HerdrAgentSnapshot = {
+      ...hired,
+      agent: "pi",
+      session: { source: "herdr:pi", kind: "id", value: "session-pi" },
+    };
+    const codexHired: HerdrAgentSnapshot = { ...hired, agent: "codex" };
+    let agent = piHired;
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(agent)),
+      resolveTerminal: vi.fn(() => Promise.resolve(agent)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+      effort: "xhigh",
+    });
+    expect(startAgent.mock.calls[0]?.[0].args).toEqual(["--thinking", "xhigh"]);
+
+    agent = codexHired;
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "codex",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+      model: "gpt-5.3-codex",
+      effort: "high",
+    });
+    expect(startAgent.mock.calls[1]?.[0].args).toEqual([
+      "--model",
+      "gpt-5.3-codex",
+      "-c",
+      'model_reasoning_effort="high"',
+    ]);
+    store.close();
+  });
+
+  it("fails a model hire typed when the harness has no wired model flag", async () => {
+    const startAgent = vi.fn(() => Promise.resolve());
+    const closePane = vi.fn(() => Promise.resolve());
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(hired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(hired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      closePane,
+      startAgent,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "gemini",
+      title: "Release prep",
+      workingDirectory: tmpdir(),
+      model: "gemini-3-pro",
+    });
+
+    expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    expect(startAgent).not.toHaveBeenCalled();
+    // The pane opened for the failed hire is closed on the way out.
+    expect(closePane).toHaveBeenCalledWith("w1C:p9");
+    store.close();
+  });
+
   it("registers clankie-seat at user scope before a claude hire", async () => {
     const addClaudeMcp = vi.fn(() => Promise.resolve());
     const startAgent = vi.fn(() => Promise.resolve());

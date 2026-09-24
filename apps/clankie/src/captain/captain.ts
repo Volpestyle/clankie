@@ -86,7 +86,7 @@ import {
 import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
-import type { CaptainPort, CaptainPromptSection } from "./port.ts";
+import type { CaptainPort, CaptainPromptSection, HireSeat } from "./port.ts";
 import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
@@ -894,6 +894,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         currentSettings.gameplay,
         autonomy,
         herdrWatches,
+        hireSeat,
       ),
       resourceLoader: loader,
       sessionManager,
@@ -1307,6 +1308,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       };
     },
   );
+
+  // One hire path for the compose page and the captain's own `hire_agent`
+  // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
+  // persona thread created through `create` is — otherwise its first reply
+  // lands in a thread nothing is listening to.
+  const hireSeat: HireSeat = async (request) => {
+    const result = await herdrWatches.spawnSeat(request);
+    if (result.outcome !== "spawned") return result;
+    const seat = personas.adoptSpawn(result.seat, request.title);
+    conversations.bindPersona(seat.personaId, seat.seatId, request.title);
+    liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
+    seatByPersona.set(seat.personaId, seat.seatId);
+    herdrWatches.trackSeat(seat.seatId);
+    seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
+    fleetChanges.touch();
+    return { outcome: "spawned", seat };
+  };
 
   const roomConversations = new RoomConversations(conversations);
   roomConversations.discover(options.stateDir);
@@ -2080,21 +2098,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
       if (request.op === "spawn_seat") {
-        const result = await herdrWatches.spawnSeat(request.seat);
-        // A hired agent is watched the moment it exists, the way a persona thread
-        // created through `create` is — otherwise its first reply lands in a
-        // thread nothing is listening to.
-        if (result.outcome === "spawned") {
-          const seat = personas.adoptSpawn(result.seat, request.seat.title);
-          conversations.bindPersona(seat.personaId, seat.seatId, request.seat.title);
-          liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
-          seatByPersona.set(seat.personaId, seat.seatId);
-          herdrWatches.trackSeat(seat.seatId);
-          seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
-          fleetChanges.touch();
-          return { op: "spawn_seat", schemaVersion: 1, result: { outcome: "spawned", seat } };
-        }
-        return { op: "spawn_seat", schemaVersion: 1, result };
+        return { op: "spawn_seat", schemaVersion: 1, result: await hireSeat(request.seat) };
       }
       if (request.op === "move_seat") {
         const seat = liveSeats.find((current) => current.seatId === request.move.seatId);
@@ -2260,6 +2264,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         currentSettings.gameplay,
         autonomy,
         herdrWatches,
+        hireSeat,
         lane === "operator" && options.swarm !== undefined
           ? await options.swarm.tools({
               ...seatContext(conversationId)!,

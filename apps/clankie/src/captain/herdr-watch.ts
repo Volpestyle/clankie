@@ -27,7 +27,13 @@ import {
   type HerdrForegroundProcess,
 } from "./codex-seat.ts";
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
-import { fleetSeatClaudeStartArgs, fleetSeatMcpAddSucceeded, type ClaudeMcpResult } from "./fleet-seat.ts";
+import {
+  fleetSeatClaudeStartArgs,
+  fleetSeatMcpAddSucceeded,
+  fleetSeatModelArgs,
+  fleetSeatEffortArgs,
+  type ClaudeMcpResult,
+} from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import {
   readHerdrSeatTranscript,
@@ -588,12 +594,24 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       if (input.harness === "claude") await this.ensureClaudeSeatMcp();
       const subject = subjectOverride ?? herdrAgentName(input.title);
+      // A model or effort the harness cannot take fails the hire typed, before
+      // herdr is asked to start anything — the alternative is a hire that
+      // silently launches the default the operator did not pick (ADR 0185).
+      const modelArgs = input.model === undefined ? [] : fleetSeatModelArgs(input.harness, input.model);
+      if (modelArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired model flag`);
+      const effortArgs = input.effort === undefined ? [] : fleetSeatEffortArgs(input.harness, input.effort);
+      if (effortArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired effort flag`);
+      const args = [
+        ...(input.harness === "claude" ? fleetSeatClaudeStartArgs() : []),
+        ...modelArgs,
+        ...effortArgs,
+      ];
       try {
         await startAgent({
           name: subject,
           kind: input.harness,
           paneId,
-          ...(input.harness === "claude" ? { args: fleetSeatClaudeStartArgs() } : {}),
+          ...(args.length === 0 ? {} : { args }),
         });
       } catch (caught) {
         if (

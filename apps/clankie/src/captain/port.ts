@@ -14,6 +14,8 @@ import type {
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
   OperatorSeatEvent,
+  OperatorSeatSpawnResult,
+  SpawnOperatorSeat,
 } from "@clankie/protocol";
 import type { DurableMessageNotice, LinearInboxPage, LinearInboxReadOptions } from "./conversations.ts";
 import type { LinearActivityEvent, LinearWorkOwner } from "../linear-webhook.ts";
@@ -39,6 +41,13 @@ export interface LaneTool {
   readonly inputSchema: Record<string, unknown>;
   call(args: Record<string, unknown>): Promise<LaneToolResult>;
 }
+
+/**
+ * A hire with the captain's wiring around it: persona adoption, conversation
+ * binding, and a watch from the first breath (ADR 0187) — never a bare
+ * `herdr agent start`, which lands a stranger the roster has to notice.
+ */
+export type HireSeat = (seat: SpawnOperatorSeat) => Promise<OperatorSeatSpawnResult>;
 
 export interface LaneToolResult {
   readonly content: readonly (

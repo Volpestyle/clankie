@@ -2,6 +2,11 @@ import {
   CAPTAIN_EPISODE_SUMMARY_MAX,
   DrawErDiagramRequestSchema,
   DrawSequenceDiagramRequestSchema,
+  OPERATOR_SEAT_DIRECTORY_MAX,
+  OPERATOR_SEAT_EFFORT_MAX,
+  OPERATOR_SEAT_HARNESSES,
+  OPERATOR_SEAT_MODEL_MAX,
+  SpawnOperatorSeatSchema,
   type CaptainSessionLaneV2,
   type CaptainTurnMedia,
   type DrawDiagramResult,
@@ -23,6 +28,7 @@ import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
 import type { HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
+import type { HireSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { rivalsTools } from "./rivals-tools.ts";
@@ -49,6 +55,8 @@ export interface TurnContext {
   /** Discord channel and trigger message for grounded social actions. */
   channelId?: string | undefined;
   messageId?: string | undefined;
+  /** Host-stamped: this session holds shell tools under its authority plan. */
+  shell?: boolean | undefined;
   /** True for a host-authored goal continuation or scheduled wake. */
   autonomous?: boolean | undefined;
   /** Bound by an operator conversation to publish one deliberate finished file into its transcript. */
@@ -84,8 +92,10 @@ const json = toolJson;
  * The captain's authored tool bank. Coding tools (read/bash/edit/write) are
  * pi built-ins and are not defined here. They attach to the operator console
  * and to Discord turns authorized by the machine-access policy. Herdr leadership
- * goes through bash + the herdr skill; only the asynchronous completion wake
- * has a captain tool because a shell wait cannot resume a finished model turn.
+ * goes through bash + the herdr skill, with two exceptions that a shell command
+ * cannot cover: the asynchronous completion wake, because a shell wait cannot
+ * resume a finished model turn, and hiring, because a seat must land in the
+ * persona roster and conversation bindings atomically with its pane (ADR 0187).
  */
 export function captainTools(
   deps: CaptainDeps,
@@ -95,6 +105,7 @@ export function captainTools(
   gameplay: GameplaySettings = { pokeagentMmoEnabled: true },
   autonomy?: AutonomyStore,
   herdrWatches?: HerdrWatchPort,
+  hireSeat?: HireSeat,
 ): ToolDefinition[] {
   const playPorts = {
     submitEmbodimentIntent: deps.embodiment.submitIntent,
@@ -111,6 +122,13 @@ export function captainTools(
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     ...(lane === "operator" && herdrWatches !== undefined
       ? herdrWatchTools(herdrWatches, turn, deps.herdrAvailable)
+      : []),
+    // Hiring starts a process on the operator's machine, so it rides the same
+    // authority as starting one by shell: the operator lane, or a Discord room
+    // holding the machine-access grant (ADR 0187).
+    ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
+    hireSeat !== undefined
+      ? [hireAgentTool(hireSeat, turn, deps.herdrAvailable)]
       : []),
     ...(turn.publishFile !== undefined
       ? [
@@ -528,6 +546,42 @@ export function captainTools(
       },
     }),
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
+}
+
+function hireAgentTool(hire: HireSeat, turn: TurnContext, available?: () => boolean): ToolDefinition {
+  return defineTool({
+    name: "hire_agent",
+    label: "Hire an agent",
+    description:
+      "Hire a fleet seat: Herdr opens a pane in the working directory and starts the harness there, and the " +
+      "seat lands watched and messageable as a persona the moment it exists — never a bare `herdr agent start`, " +
+      "which drops a stranger the roster has to notice. model and effort are spelled the harness's own way " +
+      "(pi, claude and codex take --model; effort is pi's --thinking, claude's --effort, codex's " +
+      "model_reasoning_effort); omit both for the harness default. Outcomes are typed: unknown_directory, " +
+      "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
+      "spelling or never came up), herdr_unreachable. Once spawned, brief the seat through the ordinary " +
+      "conversation lane and watch it with herdr_watch.",
+    parameters: Type.Object({
+      harness: StringEnum(OPERATOR_SEAT_HARNESSES),
+      title: Type.String({ minLength: 1, maxLength: 80, description: "What the roster calls it." }),
+      workingDirectory: Type.String({
+        minLength: 1,
+        maxLength: OPERATOR_SEAT_DIRECTORY_MAX,
+        description: "Absolute path it starts in.",
+      }),
+      model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
+      effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+    }),
+    executionMode: "sequential",
+    execute: async (_id, params) => {
+      if (turn.autonomous === true) throw new Error("Autonomous turns may propose a hire, not execute one");
+      return json(
+        available?.() === false
+          ? { outcome: "failed", reason: "herdr_unreachable" }
+          : await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...params })),
+      );
+    },
+  });
 }
 
 function herdrWatchTools(

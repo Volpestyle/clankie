@@ -18,7 +18,7 @@ import { connectionTools } from "./connect-tools.ts";
 import type { CaptainDeps } from "./deps.ts";
 import type { HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
-import type { LaneTool, LaneToolBank, LaneToolResult } from "./port.ts";
+import type { HireSeat, LaneTool, LaneToolBank, LaneToolResult } from "./port.ts";
 import { captainTools, toolJson, type TurnContext } from "./tools.ts";
 
 type McpToolDescriptor = Awaited<ReturnType<CaptainDeps["mcp"]["catalog"]>>[number];
@@ -37,9 +37,10 @@ export function laneAuthoredTools(
   gameplay?: GameplaySettings,
   autonomy?: AutonomyStore,
   herdrWatches?: HerdrWatchPort,
+  hireSeat?: HireSeat,
 ): ToolDefinition[] {
   return [
-    ...captainTools(deps, turn, laneLog, lane, gameplay, autonomy, herdrWatches),
+    ...captainTools(deps, turn, laneLog, lane, gameplay, autonomy, herdrWatches, hireSeat),
     ...(lane === "operator" ? connectionTools(deps, lane) : []),
   ];
 }
@@ -58,6 +59,7 @@ export async function buildLaneToolBank(
   gameplay?: GameplaySettings,
   autonomy?: AutonomyStore,
   herdrWatches?: HerdrWatchPort,
+  hireSeat?: HireSeat,
   swarmTools: readonly ToolDefinition[] = [],
 ): Promise<LaneToolBank> {
   const tools: LaneTool[] = laneAuthoredTools(
@@ -68,6 +70,7 @@ export async function buildLaneToolBank(
     gameplay,
     autonomy,
     herdrWatches,
+    hireSeat,
   ).map((tool) => authoredLaneTool(tool, turn));
   const browser = await deps.browser.catalog();
   for (const tool of browser.available ? browser.tools : []) {
