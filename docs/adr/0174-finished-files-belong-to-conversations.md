@@ -29,27 +29,19 @@ its encrypted envelope. No download URL contains a bearer, device secret, or
 artifact capability. The host revalidates the manifest, size, and hash before
 returning the exact bytes and published content type.
 
-A seat in a DM has no `deliver_file` tool; it is a vanilla harness that names
-paths in prose, which is exactly the delivery this decision rejects. When a
-seat's reply folds into its persona thread, each image it names (png, jpeg,
-gif, webp; at most four per reply) is published through the same store with the
-seat's working directory as the containment root, and follows the message as a
-`file` event. A name that is not a file, escapes that directory, or exceeds the
-cap stays prose, and an artifact already in the thread is not repeated. The
-reply is untrusted model output, so it can only choose among images already
-inside the directory the seat works in, and only the owner's authorized devices
-can fetch them.
+External native chats read their own source history on demand
+([ADR 0188](0188-native-agent-chats-read-their-own-history.md)). When a requested
+page contains an image path in an agent reply (png, jpeg, gif, webp; at most four
+per reply), or an explicit Codex `ImageView`, the image is published through the
+same store with the seat's working directory as its containment root. File events
+appear in native order in the returned page; its text and tools are not copied
+into the host log. Missing, outside-root or oversized files remain prose or are
+skipped. Source paths never enter file events.
 
-Codex also records an explicit `ImageView` item when a seat inspects a local
-image. That native item is preserved as an internal transcript entry and, only
-for a supported image suffix, published through the same containment root. A
-serial queue keeps viewed images in their native order; file events append
-after prose the transcript has already folded. Its host path never enters the
-conversation protocol. Retained sessions backfill previously unprojected views
-on the next transcript fold. A view is checkpointed after the file event is
-confirmed, so an interrupted queue retries on restart; a missing or outside
-path gets one bounded retry and then stops without breaking later messages or
-images. The head seat uses its live Herdr working directory by the same rule.
+Clankie's own native head retains durable transcript folding. Its image delivery
+is serialized, deduplicated and checkpointed after publication, with a bounded
+retry for unavailable paths. The head's live Herdr working directory is its
+containment root. All downloads require the owner's authorized device identity.
 
 The app renders each event as its own block: an image shows inline, fetched
 through the same authenticated download, and every other file is a card. The

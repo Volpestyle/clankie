@@ -1229,6 +1229,18 @@ Revert with `clankie model set <provider>/<model>` and another
 - [Credentials](credentials.md) — bot vs user vs internal tokens
 - [Architecture canonical homes](architecture.md#canonical-homes)
 
+## External native agent chats
+
+Herdr discovery provides agent identity, routing and status. It does not import
+external conversations or create chat threads. Opening a persona chat and using
+the existing `replay`/`tail` operations reads the harness session on demand,
+including messages, tools, typing state and contained images. Native cursors are
+opaque; clients follow the returned recovery cursor after a session or history
+change. The host persists the source locator, not a second native transcript.
+Explicit app sends and Swarm exchanges remain durable host communications.
+Clankie can inspect panes and arm completion watches independently of chat views.
+See [the native chat decision](adr/0188-native-agent-chats-read-their-own-history.md).
+
 ## Independent evaluator
 
 ```sh
@@ -1256,7 +1268,9 @@ authority 401/503, and conflicting commands 409. The status includes `enabled`,
 50 recent `jobs`. An enabled evaluator can report an operational error (missing
 harness, blocked startup, unavailable Herdr); inspect `error` and the pane.
 
-The evaluator defaults off. Enabling creates its own pane and starts a harness;
+The evaluator defaults off and captures only Clankie’s Pi turns and native
+head-seat replies while enabled. Other Herdr agents do not trigger assessments.
+Enabling creates its own pane and starts a harness;
 new work uses fresh agent context. Captures coalesce for a quiet minute, with
 fifteen-minute checkpoints for continuing activity. Only a schema-valid report
 from a settled agent completes an assessment. Restart resumes inspection of the

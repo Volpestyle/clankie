@@ -291,11 +291,11 @@ describe("seat conversations", () => {
     await store.close();
   });
 
-  it("ends a settled seat's thread settled when its harness flushes entries late", async () => {
+  it("ends the settled head thread settled when its harness flushes entries late", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-seat-resettle-"));
     roots.push(root);
     const store = new ConversationStore(root, () => Promise.resolve());
-    const conversationId = store.bindPersona("persona-1", "term-potato", "Potato");
+    const conversationId = store.defaultGlobalConversationId();
     const shape = async () => {
       let result = await store.serve({
         op: "replay",
@@ -327,22 +327,22 @@ describe("seat conversations", () => {
     });
 
     // The watcher folds the transcript before it publishes status.
-    store.syncPersonaTranscript("persona-1", "term-potato", {
+    store.syncHeadTranscript("term-potato", {
       sessionKey: "s1",
       entries: [entry("a0", "Earlier")],
     });
 
     // Working: output lands behind `responding` and the turn stays open.
-    store.publishPersonaEvent("persona-1", "term-potato", { type: "activity", phase: "responding" });
-    store.syncPersonaTranscript("persona-1", "term-potato", {
+    store.publishHeadEvent({ type: "activity", phase: "responding" });
+    store.syncHeadTranscript("term-potato", {
       sessionKey: "s1",
       entries: [entry("a0", "Earlier"), entry("a1", "First")],
     });
     expect(await shape()).toEqual(["Earlier", "responding", "First"]);
 
     // Settled, then the harness flushes one more entry with no status change to follow it.
-    store.publishPersonaEvent("persona-1", "term-potato", { type: "activity", phase: "waiting" });
-    store.syncPersonaTranscript("persona-1", "term-potato", {
+    store.publishHeadEvent({ type: "activity", phase: "waiting" });
+    store.syncHeadTranscript("term-potato", {
       sessionKey: "s1",
       entries: [entry("a0", "Earlier"), entry("a1", "First"), entry("a2", "Late")],
     });

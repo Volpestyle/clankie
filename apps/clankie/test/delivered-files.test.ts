@@ -157,14 +157,14 @@ it("follows a seat's reply with the images it names inside its working directory
     root,
   );
   try {
-    const conversationId = conversations.bindPersona("persona-1", "seat-1", "Potato");
+    const conversationId = conversations.defaultGlobalConversationId();
     const reply = `Rendered ${join(workspace, "shots", "after.png")} and \`with space.jpg\`; compare ${join(root, "outside.png")} and missing.png.`;
     const transcript = {
       sessionKey: "session-1",
       entries: [{ type: "message", id: "m1", role: "agent", text: reply }],
     } as const;
-    conversations.syncPersonaTranscript("persona-1", "seat-1", transcript, workspace);
-    conversations.syncPersonaTranscript("persona-1", "seat-1", transcript, workspace);
+    conversations.syncHeadTranscript("seat-1", transcript, workspace);
+    conversations.syncHeadTranscript("seat-1", transcript, workspace);
     await expect
       .poll(async () => {
         const replay = await conversations.serve({
@@ -212,12 +212,12 @@ it("backfills explicit Codex image views once, in order, without breaking on ref
     root,
   );
   try {
-    const conversationId = conversations.bindPersona("persona-1", "seat-1", "Potato");
+    const conversationId = conversations.defaultGlobalConversationId();
     const first = {
       sessionKey: "session-1",
       entries: [{ type: "message", id: "m1", role: "agent", text: "Before." }],
     } as const;
-    conversations.syncPersonaTranscript("persona-1", "seat-1", first, workspace);
+    conversations.syncHeadTranscript("seat-1", first, workspace);
 
     const backfilled = {
       sessionKey: "session-1",
@@ -231,8 +231,8 @@ it("backfills explicit Codex image views once, in order, without breaking on ref
         { type: "message", id: "m2", role: "agent", text: "After." },
       ],
     } as const;
-    conversations.syncPersonaTranscript("persona-1", "seat-1", backfilled, workspace);
-    conversations.syncPersonaTranscript("persona-1", "seat-1", backfilled, workspace);
+    conversations.syncHeadTranscript("seat-1", backfilled, workspace);
+    conversations.syncHeadTranscript("seat-1", backfilled, workspace);
 
     await expect
       .poll(async () => {
@@ -249,14 +249,14 @@ it("backfills explicit Codex image views once, in order, without breaking on ref
       })
       .toEqual({ files: ["f01.png", "f02.png"], messages: ["Before.", "After."] });
 
-    conversations.syncPersonaTranscript("persona-1", "seat-1", backfilled, workspace);
+    conversations.syncHeadTranscript("seat-1", backfilled, workspace);
     await expect
       .poll(() => ({
         outside: publishAttempts.get(join(root, "outside.png")),
         missing: publishAttempts.get(join(workspace, "missing.png")),
       }))
       .toEqual({ outside: 2, missing: 2 });
-    conversations.syncPersonaTranscript("persona-1", "seat-1", backfilled, workspace);
+    conversations.syncHeadTranscript("seat-1", backfilled, workspace);
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(publishAttempts.get(join(root, "outside.png"))).toBe(2);
     expect(publishAttempts.get(join(workspace, "missing.png"))).toBe(2);

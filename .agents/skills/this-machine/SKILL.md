@@ -43,10 +43,20 @@ Finish active turns and close side conversations first. An externally bound
 root must end its seat first; resetting service storage cannot reset that
 harness's context. Full contract: `{repoRoot}/docs/cli.md`.
 
+## External agent history
+
+Herdr discovery is identity and status, not transcript enrollment. Inspect panes
+through Herdr and coordinate through Swarm. The app's native agent chats read the
+harness history on demand through replay/tail; viewing one does not call Clankie
+or copy its transcript into his event log. Explicit sends and Swarm messages are
+host-owned communications. Only Clankie's own traces belong in his evaluator.
+
 ## Independent evaluator
 
 `clankie evaluator enable --harness codex` (or `claude`) enables independent
-assessments in a dedicated Herdr pane. `status` reports the queue, recent results,
+assessments of Clankie’s own Pi turns and native head-seat replies in a dedicated
+Herdr pane. Other observed agents do not trigger assessments. Capture requires
+the evaluator toggle to be on. `status` reports the queue, recent results,
 issues/MRs and errors; `open` focuses its pane; `disable` stops new capture and
 dispatch while an active assessment finishes. The TUI has the same `/evaluator`
 commands. Linear following is a separate switch.

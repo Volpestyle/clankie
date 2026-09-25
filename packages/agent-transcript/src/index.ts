@@ -30,6 +30,8 @@ export interface HerdrTranscriptMessage {
   readonly type: "message";
   readonly id: string;
   readonly role: "operator" | "agent";
+  /** Internal channel delivery identity; never rendered as operator chat. */
+  readonly internal?: true;
   readonly text: string;
   readonly occurredAt?: string | undefined;
 }
@@ -153,7 +155,7 @@ export function readHerdrSeatTranscript(
     // ponytail: Claude and Pi re-walk a parent chain that an append can re-root,
     // so they re-parse on change; give them a checkpointed chain to tail too if
     // a long seat on those starts costing real CPU here.
-    tail.entries = parseHerdrSeatTranscript(agent, readFileSync(path, "utf8")).slice(-MAX_ENTRIES);
+    tail.entries = parseHerdrSeatTranscript(agent, readFileSync(path, "utf8"), true).slice(-MAX_ENTRIES);
     tail.parsedBytes = stats.size;
   }
   tail.size = stats.size;
@@ -202,10 +204,14 @@ function readRecordsFrom(
 }
 
 /** Normalize the words and expandable tool executions the harness TUI renders. */
-export function parseHerdrSeatTranscript(agent: string, jsonl: string): HerdrTranscriptEntry[] {
+export function parseHerdrSeatTranscript(
+  agent: string,
+  jsonl: string,
+  includeChannelPrompts = false,
+): HerdrTranscriptEntry[] {
   const records = parseRecords(jsonl);
   if (tailableAgent(agent)) return flatEntries(agent, records, freshState());
-  if (agent === "claude") return claudeEntries(records);
+  if (agent === "claude") return claudeEntries(records, includeChannelPrompts);
   if (agent === "pi") return piEntries(records);
   return [];
 }
@@ -374,7 +380,10 @@ function codexEntries(
   );
 }
 
-function claudeEntries(entries: readonly Record<string, unknown>[]): HerdrTranscriptEntry[] {
+function claudeEntries(
+  entries: readonly Record<string, unknown>[],
+  includeChannelPrompts: boolean,
+): HerdrTranscriptEntry[] {
   const chain = activeChain(
     entries,
     "uuid",
@@ -469,6 +478,11 @@ function claudeEntries(entries: readonly Record<string, unknown>[]): HerdrTransc
         ];
       }
       const text = messageText(message.content);
+      if (includeChannelPrompts && /^<channel[ >]/u.test(text.trimStart()))
+        return transcriptMessage(`claude:${nativeId}`, "operator", text, at).map((item) => ({
+          ...item,
+          internal: true as const,
+        }));
       if (/^<(?:local-command-|command-name>|system-reminder>|channel[ >])/u.test(text.trimStart()))
         return [];
       return transcriptMessage(`claude:${nativeId}`, "operator", text, at);
