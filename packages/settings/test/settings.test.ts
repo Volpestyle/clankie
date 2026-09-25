@@ -43,10 +43,10 @@ describe("settings store", () => {
     });
   });
 
-  it("enables PokeAgent play by default and lets the owner turn it off", () => {
-    expect(GameplaySettingsSchema.parse({})).toEqual({ pokeagentMmoEnabled: true });
-    expect(GameplaySettingsSchema.parse({ pokeagentMmoEnabled: false })).toEqual({
-      pokeagentMmoEnabled: false,
+  it("leaves PokeAgent play off until the owner turns it on", () => {
+    expect(GameplaySettingsSchema.parse({})).toEqual({ pokeagentMmoEnabled: false });
+    expect(GameplaySettingsSchema.parse({ pokeagentMmoEnabled: true })).toEqual({
+      pokeagentMmoEnabled: true,
     });
   });
 

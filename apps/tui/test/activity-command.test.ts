@@ -105,9 +105,9 @@ describe("games console command", () => {
 
     await gamesCommand(settings).run("", shell);
 
-    expect((await settings.load()).gameplay).toEqual({ pokeagentMmoEnabled: false });
-    expect(menus[0]?.options.map((option) => option.label)).toEqual(["✓ PokeAgent MMO"]);
-    expect(menus[1]?.options[0]?.label).toBe("○ PokeAgent MMO");
+    expect((await settings.load()).gameplay).toEqual({ pokeagentMmoEnabled: true });
+    expect(menus[0]?.options.map((option) => option.label)).toEqual(["○ PokeAgent MMO"]);
+    expect(menus[1]?.options[0]?.label).toBe("✓ PokeAgent MMO");
   });
 
   it("turns PokeAgent play off and on from an argument", async () => {

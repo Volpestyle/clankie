@@ -9,6 +9,9 @@ import {
   buildProviderCommands,
   formatAuthStatus,
   formatModelBanner,
+  newestFirst,
+  readinessFooter,
+  runThinkingSetup,
   validateApiKey,
   type ProviderServices,
 } from "../src/provider-commands.ts";
@@ -816,5 +819,73 @@ describe("model banner", () => {
       "openai-codex/gpt-5.6-sol (high effort)",
     );
     await expect(formatModelBanner({}, captainModels)).resolves.toBeUndefined();
+  });
+});
+
+describe("thinking setup", () => {
+  it("goes from nothing to a ready model in two answers and a key", async () => {
+    const { credentials, env, services } = await testServices();
+    const view = testShell(["api", "openai", "gpt-5.5"], ["sk-valid-api-key"]);
+
+    const readiness = await runThinkingSetup(view.shell, services);
+
+    expect(view.selects[0]?.message).toBe("How should Clankie think?");
+    // Setup's key picker is only providers that can be his model; service keys stay in /auth.
+    expect(view.selects[1]?.options.map((option) => option.value)).not.toContain("elevenlabs");
+    expect(view.selects[2]?.message).toContain("Which model?");
+    expect(credentials.get("openai")).toEqual({ type: "api", key: "sk-valid-api-key" });
+    expect((await loadConfig({ cwd: services.cwd, env })).config.model).toBe("openai/gpt-5.5");
+    expect(readiness).toEqual({
+      ready: true,
+      model: "openai/gpt-5.5",
+      providerId: "openai",
+      auth: "credential",
+    });
+  });
+
+  it("offers a provider that is already signed in without asking to sign in again", async () => {
+    const fixture = await testServices();
+    fixture.credentials.set("xai", oauthCredential);
+    const view = testShell(["provider:xai", "grok-test"]);
+
+    const readiness = await runThinkingSetup(view.shell, fixture.services);
+
+    expect(view.selects[0]?.options[0]).toMatchObject({ value: "provider:xai", label: "Use xAI" });
+    expect(readiness).toMatchObject({ ready: true, model: "xai/grok-test" });
+  });
+
+  it("returns to the first question when a model is not picked, and reports not ready on cancel", async () => {
+    const { services } = await testServices();
+    const view = testShell(["api", "openai", undefined, undefined], ["sk-valid-api-key"]);
+
+    const readiness = await runThinkingSetup(view.shell, services);
+
+    expect(view.selects.map((select) => select.message)).toEqual([
+      "How should Clankie think?",
+      "Provider",
+      expect.stringContaining("Which model?"),
+      "How should Clankie think?",
+    ]);
+    expect(readiness).toEqual({ ready: false, reason: "no_model" });
+    expect(readinessFooter(readiness)).toBe("no model yet · /setup");
+  });
+});
+
+describe("model order", () => {
+  it("puts the newest release first and keeps undated models after, in catalog order", () => {
+    const entry = (id: string, release_date?: string) => ({
+      id,
+      name: id,
+      limit: { context: 1, output: 1 },
+      ...(release_date === undefined ? {} : { release_date }),
+    });
+    expect(
+      newestFirst([
+        entry("a-old", "2025-01-01"),
+        entry("undated-1"),
+        entry("b-new", "2026-09-01"),
+        entry("undated-2"),
+      ] as never).map((model) => model.id),
+    ).toEqual(["b-new", "a-old", "undated-1", "undated-2"]);
   });
 });

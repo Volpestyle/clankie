@@ -672,6 +672,14 @@ export class ClankieFaceShell {
     };
   }
 
+  /** Places text in the composer for the owner to edit or send; nothing is sent. */
+  setDraft(text: string): void {
+    this.editor.setText(text);
+    this.refreshCommandSurface(text);
+    this.tui.setFocus(this.editor);
+    this.requestRender();
+  }
+
   insertCommandResult(prompt: string, message: string, tone: CommandLogTone): void {
     this.appendChatBlock(new ClankieCommandTextResultComponent(prompt, message, tone, this.theme.ansi));
   }

@@ -199,6 +199,12 @@ credential holder.
 - `/connect` configures Linear and email and can open Discord setup; use direct
   `/discord` for the complete lab-user opt-in flow and either body's non-secret ids
   ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
+- `/setup` is where a new owner starts, and the console opens it on its own
+  while Clankie cannot take a turn: how he should think (subscription, API key,
+  local model, or a provider already signed in), then which model. Once he is
+  ready it lists his optional rooms with their state and opens the owning
+  command, or drafts a message asking Clankie to walk you through them
+  ([ADR 0190](../../docs/adr/0190-setup-asks-one-question-then-clankie-takes-over.md)).
 - `/auth` writes provider keys and OAuth credentials to the credential broker.
   `/auth status` may also report compatibility provider environment fallbacks;
   Discord and body credentials remain broker-only except documented

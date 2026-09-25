@@ -55,6 +55,7 @@ describe("canonical owner command layer", () => {
       version: "0.2.0",
       repoRoot: "/repo",
       model: "xai/grok-4.6",
+      captain: { ready: true, model: "xai/grok-4.6", providerId: "xai", auth: "credential" },
       imageModel: null,
       videoModel: null,
       persona: { displayName: "Clankie" },

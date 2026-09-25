@@ -15,16 +15,12 @@ import {
   type CredentialStore,
   type RedactedCredential,
 } from "@clankie/credential-broker";
-import {
-  createModelRegistry,
-  loadBundledCatalog,
-  type Catalog,
-  type ModelEntry,
-} from "@clankie/model-registry";
+import { createModelRegistry, type Catalog, type ModelEntry } from "@clankie/model-registry";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   ANTHROPIC_PROVIDER_ID,
+  captainReadiness,
   CODEX_PROVIDER_ID,
   XAI_PROVIDER_ID,
   formatModelRef,
@@ -34,6 +30,7 @@ import {
   piModelFor,
   piModelsFor,
   probeLocalModels,
+  providerEnvConnected,
   resolvePiModelSelection,
   registerConfiguredPiProviders,
   runAnthropicBrowserLogin,
@@ -43,6 +40,7 @@ import {
   subscriptionRefFor,
   validateLocalBaseUrl,
   validateLocalProviderId,
+  type CaptainReadiness,
   type ClankieConfig,
   type PiModelSelection,
   type ProbedLocalModel,
@@ -112,7 +110,14 @@ export function createProviderServices(options: {
         return (await runtime()).getProviders().map(({ id, name }) => ({ id, name }));
       },
       async models(providerId) {
-        return piModelsFor(await runtime(), providerId, await selectionCatalog()).map(piModelEntry);
+        const selection = await selectionCatalog();
+        const known = selection.catalog[providerId]?.models ?? {};
+        return newestFirst(
+          piModelsFor(await runtime(), providerId, selection).map((model) => {
+            const released = known[model.id]?.release_date;
+            return { ...piModelEntry(model), ...(released === undefined ? {} : { release_date: released }) };
+          }),
+        );
       },
       async thinkingLevels(providerId, modelId) {
         const model = piModelFor(await runtime(), providerId, modelId, await selectionCatalog());
@@ -144,6 +149,16 @@ export function createProviderServices(options: {
     },
     onConfigChanged: options.onConfigChanged ?? (() => {}),
   };
+}
+
+/** Pickers promise newest first; models.dev dates the release, and undated ids keep their catalog order after. */
+export function newestFirst(models: readonly ModelEntry[]): ModelEntry[] {
+  const dated = models.filter((model) => model.release_date !== undefined);
+  const undated = models.filter((model) => model.release_date === undefined);
+  return [
+    ...dated.toSorted((left, right) => (right.release_date ?? "").localeCompare(left.release_date ?? "")),
+    ...undated,
+  ];
 }
 
 function piModelEntry(model: Model<any>): ModelEntry {
@@ -396,10 +411,6 @@ function mediaModelCommand(
   };
 }
 
-function providerEnvConnected(providerId: string, env: NodeJS.ProcessEnv): boolean {
-  return (loadBundledCatalog()[providerId]?.env ?? []).some((variable) => (env[variable] ?? "") !== "");
-}
-
 /** Same wording as `/auth status`, so `/provider` shows SuperGrok vs API key. */
 function providerConnectionHint(
   id: string,
@@ -621,7 +632,12 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
   flow.end();
 }
 
-async function addApiKeyFlow(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
+/** Stores an API key; resolves to the provider id it was stored under, or undefined when abandoned. */
+async function addApiKeyFlow(
+  shell: ClankieFaceShell,
+  services: ProviderServices,
+  options: { readonly modelProvidersOnly?: boolean } = {},
+): Promise<string | undefined> {
   const flow = shell.setupFlow;
   const catalog = await services.registry.catalog();
   const listed = await services.store.list();
@@ -630,10 +646,13 @@ async function addApiKeyFlow(shell: ClankieFaceShell, services: ProviderServices
     label: catalog[id]?.name ?? id,
     ...(listed[id] !== undefined ? { hint: "configured" } : {}),
   }));
-  const featuredServices: MenuOption[] = FEATURED_SERVICE_PROVIDERS.map((option) => ({
-    ...option,
-    ...(listed[option.value] !== undefined ? { hint: "configured" } : {}),
-  }));
+  const featuredServices: MenuOption[] =
+    options.modelProvidersOnly === true
+      ? []
+      : FEATURED_SERVICE_PROVIDERS.map((option) => ({
+          ...option,
+          ...(listed[option.value] !== undefined ? { hint: "configured" } : {}),
+        }));
   const picked = await flow.readSelect({
     message: "Provider",
     options: [
@@ -644,21 +663,21 @@ async function addApiKeyFlow(shell: ClankieFaceShell, services: ProviderServices
     allowBack: true,
   });
   let providerId = picked;
-  if (providerId === undefined) return;
+  if (providerId === undefined) return undefined;
   if (providerId === "__other__") {
     const typed = await flow.readText({
       message: "Provider id (as listed on models.dev, or a custom id for local endpoints)",
       placeholder: "e.g. openrouter, fireworks-ai, ollama",
       validate: (value) => (value.trim().length === 0 ? "Provider id is required." : undefined),
     });
-    if (typed === undefined) return;
+    if (typed === undefined) return undefined;
     providerId = typed.trim().toLowerCase();
   }
   const key = await flow.readSecret({
     message: `API key for ${providerId}`,
     validate: validateApiKey,
   });
-  if (key === undefined) return;
+  if (key === undefined) return undefined;
   await services.store.set(providerId, { type: "api", key: key.trim() });
   flow.renderLine(`Stored API key for ${providerId}.`, "success");
   shell.insertCommandResult(
@@ -669,9 +688,13 @@ async function addApiKeyFlow(shell: ClankieFaceShell, services: ProviderServices
     ].join("\n"),
     "success",
   );
+  return providerId;
 }
 
-async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
+async function codexOauthFlow(
+  shell: ClankieFaceShell,
+  services: ProviderServices,
+): Promise<string | undefined> {
   const flow = shell.setupFlow;
   const method = await flow.readSelect({
     message: "ChatGPT / Codex OAuth",
@@ -682,7 +705,7 @@ async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderService
     allowBack: true,
   });
   const pickedMethod = method;
-  if (pickedMethod === undefined) return;
+  if (pickedMethod === undefined) return undefined;
   const interrupt = flow.waitForInterrupt();
   try {
     if (pickedMethod === "browser") {
@@ -693,7 +716,7 @@ async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderService
       ]);
       if (credential === undefined) {
         flow.renderLine("Sign-in cancelled.", "warning");
-        return;
+        return undefined;
       }
       await services.store.set(CODEX_PROVIDER_ID, credential);
     } else {
@@ -708,7 +731,7 @@ async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderService
       ]);
       if (credential === undefined) {
         flow.renderLine("Sign-in cancelled.", "warning");
-        return;
+        return undefined;
       }
       await services.store.set(CODEX_PROVIDER_ID, credential);
     }
@@ -716,11 +739,13 @@ async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderService
     flow.renderLine("ChatGPT subscription connected.", "success");
     shell.insertCommandResult(
       "/auth",
-      `ChatGPT subscription connected (stored as ${CODEX_PROVIDER_ID}). Pick it via /provider, then /model.`,
+      `ChatGPT subscription connected (stored as ${CODEX_PROVIDER_ID}).`,
       "success",
     );
+    return CODEX_PROVIDER_ID;
   } catch {
     renderOauthFailure(flow, "ChatGPT");
+    return undefined;
   } finally {
     interrupt.dispose();
   }
@@ -728,7 +753,10 @@ async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderService
 
 class AuthFlowCancelled extends Error {}
 
-async function anthropicOauthFlow(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
+async function anthropicOauthFlow(
+  shell: ClankieFaceShell,
+  services: ProviderServices,
+): Promise<string | undefined> {
   const flow = shell.setupFlow;
   const method = await flow.readSelect({
     message: "Claude Pro / Max OAuth",
@@ -744,7 +772,7 @@ async function anthropicOauthFlow(shell: ClankieFaceShell, services: ProviderSer
     allowBack: true,
   });
   const pickedMethod = method;
-  if (pickedMethod === undefined) return;
+  if (pickedMethod === undefined) return undefined;
 
   try {
     flow.setStatus("starting Claude Pro / Max sign-in…");
@@ -778,16 +806,21 @@ async function anthropicOauthFlow(shell: ClankieFaceShell, services: ProviderSer
       `Claude Pro / Max subscription connected (stored as ${ANTHROPIC_PROVIDER_ID}).`,
       "success",
     );
+    return ANTHROPIC_PROVIDER_ID;
   } catch (error) {
     if (error instanceof AuthFlowCancelled) {
       flow.renderLine("Sign-in cancelled.", "warning");
-      return;
+      return undefined;
     }
     renderOauthFailure(flow, "Claude Pro / Max");
+    return undefined;
   }
 }
 
-async function xaiOauthFlow(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
+async function xaiOauthFlow(
+  shell: ClankieFaceShell,
+  services: ProviderServices,
+): Promise<string | undefined> {
   const flow = shell.setupFlow;
   const interrupt = flow.waitForInterrupt();
   try {
@@ -802,7 +835,7 @@ async function xaiOauthFlow(shell: ClankieFaceShell, services: ProviderServices)
     ]);
     if (credential === undefined) {
       flow.renderLine("Sign-in cancelled.", "warning");
-      return;
+      return undefined;
     }
     await services.store.set(XAI_PROVIDER_ID, credential);
     flow.renderLine("SuperGrok / X Premium connected.", "success");
@@ -811,8 +844,10 @@ async function xaiOauthFlow(shell: ClankieFaceShell, services: ProviderServices)
       `SuperGrok / X Premium connected (stored as ${XAI_PROVIDER_ID}). Pictures and video use this credential over an API key.`,
       "success",
     );
+    return XAI_PROVIDER_ID;
   } catch {
     renderOauthFailure(flow, "SuperGrok / X Premium");
+    return undefined;
   } finally {
     interrupt.dispose();
   }
@@ -1313,4 +1348,121 @@ async function captainProviders(
         config.provider?.[provider.id] !== undefined,
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+// --- /setup: how Clankie thinks ---
+
+/** The one required piece of setup, read the same way `doctor` and the service read it. */
+export async function readCaptainReadiness(services: ProviderServices): Promise<CaptainReadiness> {
+  const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
+  return captainReadiness({
+    config,
+    credentialIds: Object.keys(await services.store.list()),
+    env: services.env,
+  });
+}
+
+/** Footer copy for an install that cannot take a turn yet. */
+export function readinessFooter(readiness: CaptainReadiness): string | undefined {
+  if (readiness.ready) return undefined;
+  return readiness.reason === "no_model"
+    ? "no model yet · /setup"
+    : `${readiness.providerId ?? "provider"} not signed in · /setup`;
+}
+
+/**
+ * The required half of `/setup`: sign in to something, then pick the model
+ * from exactly that provider. It chains what `/auth`, `/provider`, and `/model`
+ * do separately, so a first run is two questions instead of three commands
+ * that each assume you know the next one. Effort keeps its default.
+ */
+export async function runThinkingSetup(
+  shell: ClankieFaceShell,
+  services: ProviderServices,
+  options: { readonly restartCaptain?: (() => Promise<void>) | undefined } = {},
+): Promise<CaptainReadiness> {
+  const flow = shell.setupFlow;
+  flow.begin("set up Clankie");
+  try {
+    for (;;) {
+      const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
+      const listed = await services.store.list();
+      const signedIn = (await captainProviders(services, config, Object.keys(listed))).filter(
+        (provider) => provider.connected,
+      );
+      const current = config.model === undefined ? undefined : parseModelRef(config.model);
+      const choice = await flow.readSelect({
+        message: "How should Clankie think?",
+        options: [
+          ...signedIn.map((provider) => ({
+            value: `provider:${provider.id}`,
+            label: `Use ${provider.name}`,
+            hint: providerConnectionHint(provider.id, listed, services.env),
+          })),
+          {
+            value: "anthropic-oauth",
+            label: "Claude Pro / Max subscription",
+            hint: "sign in with Anthropic",
+          },
+          { value: "codex", label: "ChatGPT Plus / Pro subscription", hint: "sign in with OpenAI" },
+          { value: "xai-oauth", label: "SuperGrok / X Premium", hint: "sign in with xAI" },
+          { value: "api", label: "An API key", hint: "anthropic, openai, google, openrouter, …" },
+          { value: "local", label: "A model on this Mac", hint: "Ollama, LM Studio, vLLM" },
+        ],
+      });
+      if (choice === undefined) return await readCaptainReadiness(services);
+      let providerId: string | undefined;
+      let addedEndpoint = false;
+      if (choice.startsWith("provider:")) providerId = choice.slice("provider:".length);
+      else if (choice === "anthropic-oauth") providerId = await anthropicOauthFlow(shell, services);
+      else if (choice === "codex") providerId = await codexOauthFlow(shell, services);
+      else if (choice === "xai-oauth") providerId = await xaiOauthFlow(shell, services);
+      else if (choice === "api")
+        providerId = await addApiKeyFlow(shell, services, { modelProvidersOnly: true });
+      else if (choice === "local") {
+        providerId = await addLocalProviderFlow(shell, services);
+        addedEndpoint = providerId !== undefined;
+      }
+      if (providerId === undefined) continue;
+
+      const models = await services.captainModels.models(providerId);
+      const newest = models[0];
+      if (newest === undefined) {
+        flow.renderLine(`${providerId} lists no models Clankie can use; choose another.`, "warning");
+        continue;
+      }
+      const modelId = await flow.readSelect({
+        message: `Which model? (${models.length} from ${providerId}, newest first — type to filter)`,
+        options: models.map((model) => ({
+          value: model.id,
+          label: model.id,
+          hint: modelHint(model),
+          description: model.name,
+        })),
+        // Changing an existing choice starts on it; a first choice starts on the newest.
+        initialValue:
+          current?.providerId === providerId && models.some((model) => model.id === current.modelId)
+            ? current.modelId
+            : newest.id,
+        allowBack: true,
+      });
+      if (modelId === undefined) continue;
+      const ref = formatModelRef({ providerId, modelId });
+      await modelSet(ref, { env: services.env, cwd: services.cwd });
+      await notifyModelSelectionChanged(services);
+      // The service registers declared endpoints at boot; a new one needs it to look again.
+      if (addedEndpoint && options.restartCaptain !== undefined) {
+        flow.setStatus("restarting Clankie so he can reach the new endpoint…");
+        await options.restartCaptain();
+      }
+      const readiness = await readCaptainReadiness(services);
+      if (readiness.ready) return readiness;
+      flow.renderLine(
+        `${ref} still has nothing to sign it in; choose how to connect ${providerId}.`,
+        "warning",
+      );
+    }
+  } finally {
+    flow.end();
+  }
 }

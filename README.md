@@ -64,12 +64,17 @@ clankie
 ```
 
 The launcher starts the service and opens the console, the primary place to
-work with Clankie as your lead. In it, `/auth` stores a
-provider key or OAuth login in the Keychain-backed credential broker and
-`/model` picks the captain model. That is the whole setup; talk to him.
-`/persona`, `/image-model`, `/discord`, and `/connect` are optional.
-`clankie doctor` prints the install card whenever you want to know what is
-configured.
+work with Clankie as your lead. The first time, the console opens `/setup`,
+which asks two things: how Clankie should think (a Claude, ChatGPT or SuperGrok
+subscription, an API key, or a local model) and which model. Sign-ins go to the
+Keychain-backed credential broker. That is the whole required setup; talk to
+him.
+
+Everything else is optional. `/setup` lists it with what is already on:
+his name and character, starting at login, your phone, Discord, voice,
+pictures and video, Pokémon, Linear and email, and worker agents. Or ask
+Clankie to walk you through it; he can see what is configured and set anything
+that is not a secret himself. `clankie doctor` prints the install card.
 
 Ask him to use the worker harnesses you prefer; those harnesses need to be
 installed and authenticated on the host. For ongoing work, `/goal <objective>`

@@ -10,8 +10,10 @@ import {
   type RedactedCredential,
 } from "@clankie/credential-broker";
 import {
+  captainReadiness,
   loadConfig,
   parseModelRef,
+  type CaptainReadiness,
   type ClankieConfig,
   type LoadConfigResult,
 } from "@clankie/model-provider";
@@ -28,8 +30,12 @@ const VERSION_PROBES = [
   ["yt-dlp", ["--version"]],
 ] as const;
 
-/** `herdr-lead --version` opens the board TUI; presence is PATH-only. */
-const PATH_ONLY_COMMANDS = ["herdr-lead"] as const;
+/**
+ * `herdr-lead --version` opens the board TUI; presence is PATH-only. The
+ * worker harnesses are too: whether he can hire one is a PATH question, and
+ * their logins are their own.
+ */
+const PATH_ONLY_COMMANDS = ["herdr-lead", "codex", "claude"] as const;
 
 export type InstallKind = "checkout" | "release";
 
@@ -57,6 +63,8 @@ export interface InstallDoctorReport {
   readonly version: string;
   readonly repoRoot: string;
   readonly model: string | null;
+  /** Whether Clankie can take a turn at all: a model, and something to authenticate it. */
+  readonly captain: CaptainReadiness;
   readonly imageModel: string | null;
   readonly videoModel: string | null;
   readonly persona: { readonly displayName: string };
@@ -189,8 +197,10 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     credentialIds,
     options.fetchImpl ?? fetch,
   );
+  const captain = captainReadiness({ config: config.config, credentialIds, env });
   const remediations = collectRemediations({
     model,
+    captain,
     discord: settings.discord,
     credentialIds,
     commands,
@@ -205,6 +215,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     version: await readInstallVersion(options.repoRoot, kind),
     repoRoot: options.repoRoot,
     model,
+    captain,
     imageModel: unsetToNull(config.config.image_model),
     videoModel: unsetToNull(config.config.video_model),
     persona: { displayName: settings.persona.displayName },
@@ -403,6 +414,7 @@ interface HerdrPluginListEntry {
 
 function collectRemediations(input: {
   readonly model: string | null;
+  readonly captain: CaptainReadiness;
   readonly discord: ClankieSettings["discord"];
   readonly credentialIds: ReadonlySet<string>;
   readonly commands: { readonly [name: string]: CommandPresence };
@@ -412,7 +424,12 @@ function collectRemediations(input: {
 }): string[] {
   const remediations: string[] = [];
   if (input.model === null) {
-    remediations.push("Pick a captain model with `clankie model set provider/model` or `/model`.");
+    remediations.push("Pick a captain model with `clankie model set provider/model` or `/setup`.");
+  }
+  if (!input.captain.ready && input.captain.reason === "no_credential") {
+    remediations.push(
+      `Every turn on ${input.captain.model} fails until ${input.captain.providerId} is signed in; run \`/setup\` or \`/auth\` in the console.`,
+    );
   }
   const endpoint = input.selectedModel?.endpoint;
   const selectedProvider = input.selectedModel?.providerId;

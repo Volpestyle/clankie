@@ -108,6 +108,7 @@ tools are facts in `remediations`, not failures.
   "version": "0.2.0",
   "repoRoot": "/path/to/this/install",
   "model": "xai/grok-4.6",
+  "captain": { "ready": true, "model": "xai/grok-4.6", "providerId": "xai", "auth": "credential" },
   "imageModel": null,
   "videoModel": null,
   "persona": { "displayName": "Clankie" },
@@ -128,13 +129,19 @@ tools are facts in `remediations`, not failures.
   "herdrPlugin": { "bundled": true, "bundlePath": "…/integrations/herdr-plugin" },
   "laneTools": { "url": "http://127.0.0.1:4310/v1/mcp", "reachable": true },
   "doorway": { "state": "connected" },
-  "remediations": ["Pick a captain model with `clankie model set provider/model` or `/model`."]
+  "remediations": ["Pick a captain model with `clankie model set provider/model` or `/setup`."]
 }
 ```
 
-`kind` is `checkout` or `release`. Credential entries are ids and types, never
-secrets. `commands` currently probes `herdr`, `ffmpeg`, `yt-dlp` (version
-strings) and `herdr-lead` (PATH only — never execute `herdr-lead --version`).
+`kind` is `checkout` or `release`. `captain` says whether Clankie can take a
+turn at all ([ADR 0190](adr/0190-setup-asks-one-question-then-clankie-takes-over.md)):
+`{ "ready": true, "model", "providerId", "auth" }` with `auth` one of
+`credential`, `env`, `endpoint` or `subscription`, or `{ "ready": false,
+"reason": "no_model" | "no_credential" }`, naming the model and provider when
+one is chosen. A chosen model with nothing to sign it in earns a remediation.
+Credential entries are ids and types, never secrets. `commands` currently
+probes `herdr`, `ffmpeg`, `yt-dlp` (version strings) and `herdr-lead`, `codex`,
+`claude` (PATH only — never execute `herdr-lead --version`).
 `laneTools` names the streamable-HTTP MCP route that serves a lane's tool bank
 ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)); `reachable` is
 true when it answers an unauthenticated probe with 401, so the route is served
@@ -1207,6 +1214,8 @@ Unknown names fail closed without signalling any process.
 These carry secrets, external consent, or live session chrome, so entry stays
 interactive in the console. The capability exists — only the flag does not:
 
+- `/setup` — first-run sign-in and model choice, then a checklist that opens
+  the other wizards; `doctor`'s `captain` field is its headless readiness
 - `/auth` and `/connect` secret entry — provider keys, OAuth, Linear (MCP token
   and webhook signing secret), and email
 - `/discord` secret entry and lab-user ToS opt-in — Discord tokens never become flags

@@ -21,7 +21,15 @@ import { SettingsStore } from "@clankie/settings";
 import type { HerdrBinding, OperatorConversationContextUsage } from "@clankie/protocol";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
-import { buildProviderCommands, createProviderServices, formatModelBanner } from "./provider-commands.ts";
+import {
+  buildProviderCommands,
+  createProviderServices,
+  formatModelBanner,
+  readCaptainReadiness,
+  readinessFooter,
+} from "./provider-commands.ts";
+import { buildSetupCommands, runFirstSetup, type SetupCommandServices } from "./setup-commands.ts";
+import { runAutostartCommand } from "./command/autostart.ts";
 import { buildConnectCommands } from "./connect-commands.ts";
 import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
@@ -366,7 +374,21 @@ async function restartCaptain(): Promise<void> {
   if (failed !== undefined) throw new Error(failed.error ?? `${failed.label} failed to restart`);
 }
 
+const setupServices: SetupCommandServices = {
+  provider: services,
+  doctor: () => doctorCommand({ repoRoot, env: process.env }),
+  autostart: (verb) => runAutostartCommand([verb], { env: process.env }),
+  commands: () => commands,
+  restartCaptain,
+  onReady: () => {
+    void loadConfig({ env: process.env, cwd: repoRoot })
+      .then(({ config }) => applyModelDisplay(config))
+      .catch(() => undefined);
+  },
+};
+
 const commands = [
+  ...buildSetupCommands(setupServices),
   ...buildConsoleCommands({
     settings: settingsStore,
     commandStatus: () =>
@@ -553,7 +575,10 @@ async function returnFromSideConversation(): Promise<void> {
 
 async function applyModelDisplay(config: ClankieConfig): Promise<void> {
   try {
-    currentModelDisplay = await formatModelBanner(config, services.captainModels);
+    // An install that cannot take a turn says so where the model would be.
+    currentModelDisplay =
+      readinessFooter(await readCaptainReadiness(services)) ??
+      (await formatModelBanner(config, services.captainModels));
   } catch {
     currentModelDisplay = undefined;
   }
@@ -614,10 +639,15 @@ shell.insertMarkdown(
       ? []
       : [`Conversation: ${currentConversationTitle ?? "current"} · /conversation to list or switch.`]),
     ...(conversationNotice === undefined ? [] : [conversationNotice]),
-    "Try /auth, /provider, /model, /status, /board — or type a prompt.",
+    "Type a prompt, or /setup for what he can do. /status and /board show what's running.",
   ].join("\n"),
 );
 shell.refreshStatus("ready");
+// A fresh install opens on the one thing it needs; a ready one is left alone.
+// Setup writes only local config and the broker, so it does not wait on the service.
+void readCaptainReadiness(services)
+  .then((readiness) => (readiness.ready ? undefined : runFirstSetup(shell, setupServices)))
+  .catch(() => undefined);
 if (conversationSelection.conversationId !== undefined) {
   void conversationPrompt
     .restoreHistory(conversationShellSink())

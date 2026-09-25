@@ -89,6 +89,8 @@ index). Configure through the headless CLI:
 | Job                                   | Command                                                                               |
 | ------------------------------------- | ------------------------------------------------------------------------------------- |
 | This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                     |
+| Can he take a turn                    | `clankie doctor` → `captain` (`ready`, or `no_model` / `no_credential`)               |
+| Start at login                        | `clankie autostart status`, `clankie autostart enable`                                |
 | Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                 |
 | Captain + local providers             | `clankie model status`                                                                |
 | Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`             |
@@ -201,7 +203,13 @@ sitting in. `--for` defaults to 15 minutes, caps at an hour, and then lapses
 back to observed behavior. `{"outcome":"unseated"}` means this pane holds no
 fleet seat — normal in a plain shell, not an error.
 
-The person at the console can still use slash commands (`/auth`, `/provider`,
+`/setup` is the console's front door: while he cannot take a turn it asks how
+he should think and which model, and afterwards it lists every optional room
+with its state. When someone asks you to walk them through setup, read
+`doctor`, set the non-secret rooms here, and name the console command for the
+secret ones.
+
+The person at the console can still use slash commands (`/setup`, `/auth`, `/provider`,
 `/model`, `/effort`, `/image-model`, `/video-model`, `/games`, `/discord`,
 `/connect`, `/persona`, `/voice`). Their modals are chrome over the commands
 above for non-secret configuration. Secrets still go through `/auth`, the

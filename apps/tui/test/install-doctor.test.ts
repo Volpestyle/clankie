@@ -79,7 +79,7 @@ describe("install doctor", () => {
       bundlePath: join(root, "integrations", "herdr-plugin"),
     });
     expect(report.remediations).toEqual([
-      "Pick a captain model with `clankie model set provider/model` or `/model`.",
+      "Pick a captain model with `clankie model set provider/model` or `/setup`.",
       "Store a Discord bot token with /discord.",
     ]);
     expect(JSON.stringify(report)).not.toContain(secret);
@@ -189,7 +189,16 @@ describe("install doctor", () => {
         providerId: "xai",
         modelId: "grok-4.6",
       });
-      expect(builtin.remediations).toEqual([]);
+      // No key is stored for xai, so every turn would fail; the card says so.
+      expect(builtin.captain).toEqual({
+        ready: false,
+        reason: "no_credential",
+        model: "xai/grok-4.6",
+        providerId: "xai",
+      });
+      expect(builtin.remediations).toEqual([
+        "Every turn on xai/grok-4.6 fails until xai is signed in; run `/setup` or `/auth` in the console.",
+      ]);
     });
   });
 
@@ -282,9 +291,13 @@ describe("install doctor", () => {
       throw Object.assign(new Error("not found"), { code: "ENOENT" });
     };
 
+    // A signed-in model, so the only thing this install still needs is the plugin link.
+    const credentialStore = new FileCredentialStore(join(root, "credentials.json"));
+    await credentialStore.set("xai", { type: "api", key: "xai-test-key" });
     const report = await inspectInstall({
       repoRoot: root,
       env: { HOME: join(root, "home"), XDG_CONFIG_HOME: configHome },
+      credentialStore,
       execFileImpl,
       fetchImpl: offline,
     });
@@ -311,6 +324,7 @@ describe("install doctor", () => {
         }
         return missing(command, args);
       },
+      credentialStore,
       fetchImpl: offline,
     });
     expect(owned.commands.herdr).toEqual({ present: true, detail: "herdr 0.8.2" });

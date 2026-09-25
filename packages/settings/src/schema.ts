@@ -423,7 +423,7 @@ export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
 export const GameplaySettingsSchema = z
   .object({
     /** FireRed/Emerald in the hosted PokeAgent MMO. */
-    pokeagentMmoEnabled: z.boolean().default(true),
+    pokeagentMmoEnabled: z.boolean().default(false),
     /** Rivals Agent session API; its bearer lives under rivals-agent in the broker. */
     rivalsUrl: z
       .url()
