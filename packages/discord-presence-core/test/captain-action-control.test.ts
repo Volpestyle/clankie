@@ -39,6 +39,12 @@ describe("captain Discord action control", () => {
       action: "discord.presence.tool_progress",
       payload: { kind: "tool_progress", replyToMessageId: "message-1", categories: ["browsing"] },
     });
+    expect(
+      planNonWatchCaptainDiscordAction({ ...context, action: "send_reply", text: "Published." }),
+    ).toMatchObject({
+      action: "discord.presence.send_message",
+      payload: { kind: "send_message", replyToMessageId: "message-1", content: "Published." },
+    });
     expect(planNonWatchCaptainDiscordAction({ ...context, action: "watch_start" })).toBeUndefined();
   });
 

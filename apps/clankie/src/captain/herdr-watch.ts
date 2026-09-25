@@ -27,13 +27,36 @@ import {
   type HerdrForegroundProcess,
 } from "./codex-seat.ts";
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
-import { fleetSeatClaudeStartArgs, fleetSeatMcpAddSucceeded, type ClaudeMcpResult } from "./fleet-seat.ts";
+import {
+  fleetSeatClaudeStartArgs,
+  fleetSeatMcpAddSucceeded,
+  fleetSeatModelArgs,
+  fleetSeatEffortArgs,
+  type ClaudeMcpResult,
+} from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import {
   readHerdrSeatTranscript,
   type HerdrAgentSession,
   type HerdrSeatTranscript,
 } from "./herdr-transcript.ts";
+
+/**
+ * The Discord message a watch was armed from. The settled wake answers there,
+ * under whatever machine grant that actor holds when it fires (ADR 0186).
+ */
+const DiscordWatchOriginSchema = z
+  .object({
+    baseSessionKey: z.string().min(1),
+    targetId: z.string().min(1),
+    actorId: z.string().min(1),
+    guildId: z.string().min(1).optional(),
+    channelId: z.string().min(1),
+    messageId: z.string().min(1),
+    transportKind: z.enum(["bot", "user_session"]),
+  })
+  .strict();
+export type DiscordWatchOrigin = z.infer<typeof DiscordWatchOriginSchema>;
 
 const HerdrWatchRecordSchema = z
   .object({
@@ -43,6 +66,7 @@ const HerdrWatchRecordSchema = z
     terminalId: z.string().min(1),
     reason: z.string().min(1),
     createdAt: z.string().min(1),
+    discord: DiscordWatchOriginSchema.optional(),
   })
   .strict();
 
@@ -128,10 +152,15 @@ export type HerdrWatchArmResult =
     };
 
 export interface HerdrWatchPort {
-  watch(conversationId: string, target: string, reason: string): Promise<HerdrWatchArmResult>;
+  watch(
+    conversationId: string,
+    target: string,
+    reason: string,
+    discord?: DiscordWatchOrigin,
+  ): Promise<HerdrWatchArmResult>;
 }
 
-type InternalWake = (conversationId: string, prompt: string) => Promise<void>;
+type InternalWake = (conversationId: string, prompt: string, discord?: DiscordWatchOrigin) => Promise<void>;
 type HerdrSeatProjection =
   | { readonly kind: "status"; readonly status: string }
   | { readonly kind: "summary"; readonly text: string }
@@ -588,12 +617,24 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       if (input.harness === "claude") await this.ensureClaudeSeatMcp();
       const subject = subjectOverride ?? herdrAgentName(input.title);
+      // A model or effort the harness cannot take fails the hire typed, before
+      // herdr is asked to start anything — the alternative is a hire that
+      // silently launches the default the operator did not pick (ADR 0185).
+      const modelArgs = input.model === undefined ? [] : fleetSeatModelArgs(input.harness, input.model);
+      if (modelArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired model flag`);
+      const effortArgs = input.effort === undefined ? [] : fleetSeatEffortArgs(input.harness, input.effort);
+      if (effortArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired effort flag`);
+      const args = [
+        ...(input.harness === "claude" ? fleetSeatClaudeStartArgs() : []),
+        ...modelArgs,
+        ...effortArgs,
+      ];
       try {
         await startAgent({
           name: subject,
           kind: input.harness,
           paneId,
-          ...(input.harness === "claude" ? { args: fleetSeatClaudeStartArgs() } : {}),
+          ...(args.length === 0 ? {} : { args }),
         });
       } catch (caught) {
         if (
@@ -770,7 +811,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.seatControllers.size === 0) this.stopSummaryWatch();
   }
 
-  public async watch(conversationId: string, target: string, reason: string): Promise<HerdrWatchArmResult> {
+  public async watch(
+    conversationId: string,
+    target: string,
+    reason: string,
+    discord?: DiscordWatchOrigin,
+  ): Promise<HerdrWatchArmResult> {
     if (this.closed || this.wake === undefined) throw new Error("Herdr watcher is not running");
     if (this.stateUnreadable) throw new Error("Herdr watcher state is unreadable");
     const agent = await this.runner.get(target);
@@ -807,6 +853,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       terminalId: agent.terminalId,
       reason: reason.trim(),
       createdAt: new Date().toISOString(),
+      ...(discord === undefined ? {} : { discord }),
     };
     this.state.watches.push(record);
     this.save();
@@ -1043,7 +1090,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     if (signal.aborted) return;
     try {
-      await this.wake?.(record.conversationId, prompt);
+      await (record.discord === undefined
+        ? this.wake?.(record.conversationId, prompt)
+        : this.wake?.(record.conversationId, prompt, record.discord));
       this.remove(record.id);
     } catch {
       if (this.closed) return;

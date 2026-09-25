@@ -219,6 +219,10 @@ export const OPERATOR_DELIVERED_FILE_BYTES_MAX = 15 * 1024 * 1024;
 export const OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH = "/operator/v1/artifacts/download";
 /** A filesystem path, bounded well under PATH_MAX so it never truncates a real one. */
 export const OPERATOR_SEAT_DIRECTORY_MAX = 1024;
+/** A model spelling is a harness CLI value — `provider/id`, a pattern, an alias — never a path. */
+export const OPERATOR_SEAT_MODEL_MAX = 256;
+/** An effort spelling is a short level word — low, high, xhigh — in the harness's own vocabulary. */
+export const OPERATOR_SEAT_EFFORT_MAX = 64;
 export const OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX = 32;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX = 500;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_DEFAULT = 200;
@@ -892,6 +896,18 @@ export const SpawnOperatorSeatSchema = z
     title: OperatorAgentNameSchema,
     /** Absolute path it starts in — the district it joins (ADR 0022). */
     workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX),
+    /**
+     * Model the harness launches with, spelled the harness's own way (pi's
+     * `--model` pattern, claude's, codex's) (ADR 0185). Absent means the
+     * harness default, which is what an unopinionated hire should get.
+     */
+    model: z.string().trim().min(1).max(OPERATOR_SEAT_MODEL_MAX).optional(),
+    /**
+     * Reasoning effort the harness launches with, in the harness's own level
+     * vocabulary (pi's `--thinking`, claude's `--effort`, codex's
+     * `model_reasoning_effort`) (ADR 0185). Absent means the harness default.
+     */
+    effort: z.string().trim().min(1).max(OPERATOR_SEAT_EFFORT_MAX).optional(),
   })
   .strict();
 export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;
@@ -3376,6 +3392,14 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("send_text_update"),
     text: z.string().trim().min(1).max(600),
+  }).strict(),
+  /**
+   * A finished reply no body is holding a delivery for: a room turn woken by a
+   * Herdr watch it armed answers the message it was armed from (ADR 0186).
+   */
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("send_reply"),
+    text: z.string().trim().min(1).max(2_000),
   }).strict(),
   /**
    * "He has started writing" — the mid-turn signal ADR 0118 left unbuilt.

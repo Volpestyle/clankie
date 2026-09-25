@@ -25,13 +25,26 @@ describe("captain model card", () => {
   });
 
   it("refreshes the card per run and stays silent when the model cannot be resolved", async () => {
-    const resolved = await beforeAgentStartHandler(() => Promise.resolve(SELECTION));
+    let selection: PiModelSelection | undefined = SELECTION;
+    const resolved = await beforeAgentStartHandler(() =>
+      selection === undefined ? Promise.reject(new Error("no model")) : Promise.resolve(selection),
+    );
     await expect(resolved({ systemPrompt: "base" })).resolves.toEqual({
       systemPrompt: `base\n\n${modelCard(SELECTION)}`,
     });
 
-    const failing = await beforeAgentStartHandler(() => Promise.reject(new Error("no model")));
-    await expect(failing({ systemPrompt: "base" })).resolves.toBeUndefined();
+    selection = {
+      ...SELECTION,
+      ref: "openai-codex/gpt-5.6-sol",
+      thinkingLevel: "high",
+      model: { ...SELECTION.model, name: "GPT-5.6 Sol" },
+    };
+    await expect(resolved({ systemPrompt: "base" })).resolves.toEqual({
+      systemPrompt: `base\n\n${modelCard(selection)}`,
+    });
+
+    selection = undefined;
+    await expect(resolved({ systemPrompt: "base" })).resolves.toBeUndefined();
   });
 });
 

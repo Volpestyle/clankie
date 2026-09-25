@@ -169,7 +169,7 @@ describe("Embodiment play note", () => {
   it("rejects a refusal without a typed reason", () => {
     expect(
       EmbodimentPlayNoteSchema.safeParse({
-        action: "start_refused",
+        action: "join_refused",
         environmentId: "pokemon-firered",
       }).success,
     ).toBe(false);

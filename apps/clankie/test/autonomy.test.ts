@@ -100,6 +100,64 @@ describe("captain autonomy", () => {
     autonomy.close();
   });
 
+  it("lets a Discord room with a shell watch its own worker and answer where it was asked", async () => {
+    const deps = {
+      embodiment: {
+        submitIntent: () => Promise.reject(new Error("unused")),
+        getSession: () => Promise.resolve(undefined),
+        getLiveSession: () => Promise.resolve(undefined),
+      },
+    } as unknown as CaptainDeps;
+    const herdrWatches = {
+      watch: vi.fn((_conversationId: string, target: string) =>
+        Promise.resolve({
+          outcome: "watching" as const,
+          watchId: "watch-1",
+          target,
+          paneId: target,
+          terminalId: "term-1",
+          alreadyWatching: false,
+          createdAt: "2026-09-24T22:57:45.000Z",
+        }),
+      ),
+    };
+    const discordOrigin = {
+      baseSessionKey: "discord:clankie:discord:guild:channel",
+      targetId: "guild:channel",
+      actorId: "actor",
+      guildId: "guild",
+      channelId: "channel",
+      messageId: "message",
+      transportKind: "bot" as const,
+    };
+    const room = (shell: boolean) =>
+      captainTools(
+        deps,
+        { room: "discord_presence:guild:channel", shell, discordOrigin },
+        {} as LaneLog,
+        "discord_presence",
+        undefined,
+        undefined,
+        herdrWatches,
+      ).find((tool) => tool.name === "herdr_watch");
+    expect(room(false)).toBeUndefined();
+    const watch = room(true);
+    if (watch === undefined) throw new Error("herdr_watch is missing");
+    await watch.execute(
+      "call-watch",
+      { agent: "w2H:pQ", reason: "Report the publish result" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(herdrWatches.watch).toHaveBeenCalledWith(
+      "discord_presence:guild:channel",
+      "w2H:pQ",
+      "Report the publish result",
+      discordOrigin,
+    );
+  });
+
   it("persists goals, enforces their budget, and wakes only while autonomy is enabled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));

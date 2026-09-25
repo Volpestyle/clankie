@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
@@ -15,6 +15,9 @@ it.skipIf(process.platform !== "darwin" || process.arch !== "arm64")(
     const commands = join(root, "commands");
     const installation = join(root, "install");
     const bin = join(root, "bin");
+    const home = join(root, "home");
+    const configHome = join(home, ".config");
+    const stateHome = join(home, ".local", "state");
     const archiveName = "clankie-darwin-arm64.tar.gz";
     try {
       await mkdir(commands);
@@ -35,14 +38,24 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
       await chmod(curl, 0o755);
       const env = {
         ...process.env,
+        HOME: home,
+        XDG_CONFIG_HOME: configHome,
+        XDG_STATE_HOME: stateHome,
+        CLANKIE_STATE_HOME: stateHome,
+        CLANKIE_SETTINGS_FILE: join(configHome, "clankie", "settings.json"),
         PATH: `${commands}:${process.env.PATH}`,
         CLANKIE_INSTALL_ROOT: installation,
         CLANKIE_BIN_DIR: bin,
         INSTALL_TEST_DOWNLOADS: downloads,
       };
-      const state = join(root, "user-state.json");
-      const originalState = '{"identity":"same-device","credential":"fixture","conversation":"retained"}\n';
-      await writeFile(state, originalState);
+      const userFiles = [
+        [env.CLANKIE_SETTINGS_FILE, '{"schemaVersion":1,"persona":{"displayName":"Clankie"}}\n'],
+        [join(stateHome, "clankie", "tui", "prompt-history.jsonl"), '"remember this conversation"\n'],
+      ] as const;
+      for (const [path, contents] of userFiles) {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, contents);
+      }
       for (const version of ["v0.1.0", "v0.2.0"]) {
         const source = join(root, version);
         const destination = join(downloads, version);
@@ -65,7 +78,7 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
         expect(await readlink(join(installation, "current"))).toBe(`releases/${version}`);
         expect(await readFile(join(bin, "clankie"), "utf8")).toBe(version);
         expect(await readFile(join(bin, "clankie-herdr"), "utf8")).toBe(version);
-        expect(await readFile(state, "utf8")).toBe(originalState);
+        for (const [path, contents] of userFiles) expect(await readFile(path, "utf8")).toBe(contents);
       }
       const retained = join(installation, "releases", "v0.1.0", "retained");
       await writeFile(retained, "immutable directory");
@@ -74,7 +87,7 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
       await writeFile(join(downloads, "v0.2.0", archiveName), "corrupt download");
       expect(spawnSync("sh", [installer, "--version", "v0.2.0"], { env }).status).not.toBe(0);
       expect(await readlink(join(installation, "current"))).toBe("releases/v0.1.0");
-      expect(await readFile(state, "utf8")).toBe(originalState);
+      for (const [path, contents] of userFiles) expect(await readFile(path, "utf8")).toBe(contents);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
