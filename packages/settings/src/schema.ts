@@ -591,6 +591,19 @@ export const LinearWebhookSettingsSchema = z
   .strict();
 export type LinearWebhookSettings = z.infer<typeof LinearWebhookSettingsSchema>;
 
+/** Read-only transcript sources. SSH authentication stays in the owner's SSH configuration. */
+export const AgentHostConnectionSchema = z
+  .object({
+    id: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .refine((value) => value !== "local", "local is reserved"),
+    ssh: z.string().regex(/^(?:[a-zA-Z0-9_.-]+@)?[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u),
+    shell: z.enum(["posix", "powershell"]),
+  })
+  .strict();
+export type AgentHostConnection = z.infer<typeof AgentHostConnectionSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
@@ -601,6 +614,14 @@ export const ClankieSettingsSchema = z
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
+    agentHosts: z
+      .object({ connections: z.array(AgentHostConnectionSchema).max(15).default([]) })
+      .strict()
+      .refine(
+        (value) => new Set(value.connections.map((entry) => entry.id)).size === value.connections.length,
+        "Agent host IDs must be unique",
+      )
+      .default(() => ({ connections: [] })),
     execution: z
       .object({ connections: z.array(ExecutionConnectionSchema).max(15).default([]) })
       .strict()

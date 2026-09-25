@@ -1,4 +1,6 @@
 export {
+  AgentHostConnectionSchema,
+  type AgentHostConnection,
   CaptainSettingsSchema,
   ClankieSettingsSchema,
   DiscordSettingsSchema,
