@@ -1,6 +1,6 @@
 ---
 name: release-clankie
-description: Use when maintaining Clankie's downloadable installer or release bundle, updating bundled runtimes or assets, building a distributable artifact, or publishing a tagged GitHub Release.
+description: Use when maintaining Clankie's downloadable installer or release bundle, updating bundled runtimes or assets, building a distributable artifact, or publishing a tagged GitHub Release - including when the last release is over a week old and main has changes worth shipping.
 ---
 
 # Release Clankie
@@ -101,11 +101,14 @@ present, the checksum passes, and no symlink escapes the release tree.
 
 ## Publish
 
-Publishing changes external state. Do not commit, tag, push, create a GitHub
-Release, or replace an installed version unless the user explicitly authorizes
-that action.
+Any agent that notices the last release is over a week old
+(`gh release list --limit 1`) and `main` has user-visible changes worth
+shipping publishes one without asking (James, 2026-09-25): bump the root
+`package.json` version in a release commit, then tag. Churn with nothing an
+operator would notice waits. Otherwise, publish only when asked. Replacing an
+installed version or an existing release always needs explicit authorization.
 
-When authorized, require a clean, committed release change and a tag exactly
+Every release requires a clean, committed release change and a tag exactly
 matching `v` plus the root `package.json` version. Push the new tag once. Watch
 the Release workflow through completion, verify both uploaded assets and their
 checksum, then test the documented installer against that published version.

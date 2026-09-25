@@ -58,6 +58,9 @@ This repository is public. Both neighbors are private and consume
 - Project planning and issue tracking live in the [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview).
 - Match the surrounding code. Run the narrowest relevant check first, then
   `pnpm check` before handoff.
+- Release without asking when the last release is over a week old and `main`
+  has user-visible changes worth shipping (`release-clankie`). The private
+  `~/dev/clankie-app` follows the same rule for TestFlight (`release-app`).
 - Build every feature API- and CLI-first, expose any settings it needs in the
   TUI, and update the relevant agent-facing skill and human-facing docs.
 - Reusable lessons about how Clankie works belong in
