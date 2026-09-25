@@ -36,7 +36,9 @@ reimplemented. The last entry, and the end of first setup, drafts a message
 asking Clankie to walk the owner through the rest. The owner edits or sends it.
 Clankie reads `clankie doctor`, sets what is not secret through his launcher,
 and sends the owner to the console wizard for anything secret. This is his
-agency, not a script: he decides what to offer and when.
+agency, not a script: he decides what to offer and when. When the console
+cannot reach his service, setup says so and drafts nothing, because that
+message could not be delivered.
 
 Gameplay defaults to off. A fresh install has no world credential, so an
 advertised game only failed. `/games on` or `clankie games set on` enables it.

@@ -17,6 +17,8 @@ import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface SetupCommandServices {
   readonly provider: ProviderServices;
+  /** Whether this console reaches his service with a conversation to talk in. */
+  readonly canTalk: () => boolean;
   readonly doctor: () => Promise<InstallDoctorReport>;
   readonly autostart: (verb: "status" | "enable") => Promise<AutostartCommandResult>;
   /** Every console command, read when an entry opens one, so `/setup` never duplicates a wizard. */
@@ -66,6 +68,18 @@ export async function runFirstSetup(shell: ClankieFaceShell, services: SetupComm
     return;
   }
   services.onReady?.();
+  if (!services.canTalk()) {
+    // Ready to think is not reachable: inviting a message here would only fail.
+    shell.insertMarkdown(
+      [
+        "**Clankie can think, but this console can't reach him**",
+        "",
+        `He'll think with \`${readiness.model}\` once his service answers.`,
+        "`clankie status` shows what's down and `clankie restart` starts it; then reopen the console and say hi.",
+      ].join("\n"),
+    );
+    return;
+  }
   shell.insertMarkdown(
     [
       "**Clankie is ready**",
@@ -123,6 +137,14 @@ async function runSetupChecklist(
   }
   if (picked === undefined) return;
   if (picked === "ask") {
+    if (!services.canTalk()) {
+      shell.insertCommandResult(
+        "/setup",
+        "This console can't reach Clankie's service, so he can't answer yet. `clankie status` shows what's down.",
+        "error",
+      );
+      return;
+    }
     shell.setDraft(WALKTHROUGH_DRAFT);
     return;
   }

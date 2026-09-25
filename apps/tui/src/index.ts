@@ -376,6 +376,7 @@ async function restartCaptain(): Promise<void> {
 
 const setupServices: SetupCommandServices = {
   provider: services,
+  canTalk: () => conversationSelection.conversationId !== undefined,
   doctor: () => doctorCommand({ repoRoot, env: process.env }),
   autostart: (verb) => runAutostartCommand([verb], { env: process.env }),
   commands: () => commands,

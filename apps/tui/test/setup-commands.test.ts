@@ -54,6 +54,7 @@ const report: InstallDoctorReport = {
 async function fixture(options: {
   readonly model?: string;
   readonly credentials?: readonly string[];
+  readonly canTalk?: boolean;
 }): Promise<{
   readonly services: SetupCommandServices;
   readonly opened: string[];
@@ -116,6 +117,7 @@ async function fixture(options: {
     autostartCalls,
     services: {
       provider,
+      canTalk: () => options.canTalk ?? true,
       doctor: async () => report,
       autostart: async (verb) => {
         autostartCalls.push(verb);
@@ -227,5 +229,19 @@ describe("/setup", () => {
       command: "gateway",
       hint: "signed out",
     });
+  });
+
+  it("does not invite a message the console cannot deliver", async () => {
+    const { services } = await fixture({
+      model: "openai/gpt-5.5",
+      credentials: ["openai"],
+      canTalk: false,
+    });
+    const view = testShell(["ask"]);
+
+    await setup(services).run("", view.shell);
+
+    expect(view.drafts).toEqual([]);
+    expect(view.results.join("\n")).toContain("can't reach Clankie's service");
   });
 });
