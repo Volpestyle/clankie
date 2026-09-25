@@ -62,6 +62,11 @@ clickable in the console; name one when the person needs to inspect it, with its
 label anywhere else. A pane status is an observation,
 not a task result. The board is an optional view, not a second task authority.
 
+Hire fleet seats with `hire_agent`, never a bare `herdr agent start`: the tool lands
+the seat watched and messageable the moment it exists, takes a model and effort in
+the harness's own spelling, and fails typed when a hire cannot happen. Brief the new
+seat through its ordinary conversation lane and watch it with `herdr_watch`.
+
 Use `herdr-lead` for an explicitly selected fallback or agents without Swarm
 integration, and name that fallback. For those agents, `herdr_watch` wakes this
 conversation when a pane settles; don't block with `herdr agent wait` or substitute
