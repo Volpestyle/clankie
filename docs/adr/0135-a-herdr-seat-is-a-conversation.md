@@ -116,9 +116,8 @@ identity, so the spawn waits out that gap rather than reading identity once.
 The harness is an enum, not a string, because it reaches an exec. Failure is
 typed rather than thrown: a surface renders it and keeps the operator's draft,
 and a start that fails closes the pane it opened so retries do not accumulate
-empty tabs. The new seat is tracked the moment it exists, the way a `create`
-with a persona scope tracks one, or its first reply lands in a thread nothing is
-listening to.
+empty tabs. The new seat is observed for status immediately. Its native chat history is
+read when a client opens or follows it, without a standing transcript import.
 
 `create` with a persona scope is idempotent per persona, like the default global
 conversation. `send` to a persona conversation resolves its current seat and
@@ -141,75 +140,42 @@ lane; terminal-only menus remain in the terminal.
 
 ### What becomes bubbles
 
-A pty stream is not messages. The persona thread carries the _readable
-projection_, built from signals the service already has:
+The app reads native messages and tools on demand through the existing replay
+and tail API ([ADR 0188](0188-native-agent-chats-read-their-own-history.md)).
+The harness session file owns this history. Discovery supplies identities and
+status, without creating chat threads or copying transcripts into the host log.
 
-- `activity` events from agent-status transitions — `working` is literally a
-  typing indicator; `done`/`blocked`/`idle` are delivery states. A surface reads
-  everything after the last `waiting` as a turn in progress, so a thread that
-  was settled stays settled: an entry a harness flushes after its pane went
-  idle, or a named image delivered behind a reply (ADR 0174), is followed by
-  `waiting` again. The chat and the commons therefore agree that a seat is idle.
-- `message` and `tool` events from the harness-native session tree. Herdr's resume
-  identity selects Claude Code, Codex, and Pi sessions. Grok's exact foreground
-  PID selects the matching entry in its native active-session registry, so two
-  panes in the same working directory cannot cross-wire. Each active branch is
-  folded in full, in order, with user text attributed to `operator`, assistant
-  text attributed to `agent`, and every tool start/result joined by its native
-  call id. Tool arguments and results are redacted and bounded before they enter
-  the durable log; the short row stays compact while every surface can expand
-  the typed `tool.detail`. Injected instructions and reasoning never enter the
-  public stream. Raw PTY parsing remains outside this lane.
-- Stable native entry ids checkpoint each session. A working pane's session
-  tree is re-read on a short tail as well as on status changes, so each message
-  and tool call reaches the thread while the agent is still working rather than
-  when it settles. Re-reading is idempotent, the subject binding keeps a
-  replacement session on the durable persona, and the first native import
-  replaces the old one-answer seed behind a typed cursor-recovery boundary.
-- The tail costs the append, not the session. Codex and Grok rollouts are
-  append-only logs whose records normalize independently of their neighbours, so
-  the reader remembers the byte offset of the last complete line and folds in only
-  the new bytes — carrying tool names, the dedupe set, and the positional id base
-  across chunks, which keeps a tailed read identical to a whole-file parse. Claude
-  and Pi transcripts are walked as a parent chain that an append can re-root, so
-  they rebuild from the whole file when it changes and do no work at all when it
-  has not. A shrunk file, a new inode, or a same-length rewrite in place is
-  rewritten history rather than an append, and resets the tail.
-- A harness without a native transcript normalizer retains the bounded
-  summary/final-answer projection. Adding its normalizer upgrades the same
-  conversation without changing the relay or app.
-- The operator's own sends publish immediately and reconcile with the same
-  prompt when it appears in the native session tree.
+Opening or following a chat returns bounded, redacted native entries, with
+operator and agent attribution, complete tool details, and the current typing
+state. Native cursors recover after session changes, branch rewrites and shifts
+in the retained window. Images are delivered through the existing containment
+checks when their page is requested. A saved source locator supports reads after
+a pane closes while its session file remains available. Unsupported harnesses
+supply their bounded terminal answer on demand.
 
-Raw scrollback never enters the message lane. Full-screen alternate buffers and
-primary-screen scrollback therefore behave the same: session history supplies
-chat, while the terminal destination remains the raw-truth path over its
-existing transport, one tap from the thread.
+Explicit app sends, Swarm messages, reactions, delivered files and room exchanges
+remain host-owned records. A room prompt starts a temporary matching reply watch;
+it does not enroll the pane's entire history. Clankie's own head and Pi turns
+remain durable conversations. The evaluator only captures those turns while enabled.
 
 ### Transparency
 
-Persona conversations are not side channels. The captain can list and replay
-them like any conversation — the lead sees everything his branches do, he is
-just no longer a mandatory relay hop for steering them.
+Clankie can inspect agents through Herdr, communicate through Swarm, and read a
+native chat when needed. Seeing a pane does not enroll its conversation in his
+history or prompt his model. Terminal inspection and explicitly armed completion
+watches remain independent capabilities.
 
 ```mermaid
 flowchart LR
-  App["App: messages home"] -->|"dispatch (personas, roster, composer catalog, send, close seat) / tail"| Relay
-  Relay -->|captain credential| Registry["Operator-conversation registry"]
-  Registry -->|"persona → current seat send / close"| Pane["herdr pane (any harness)"]
-  Registry -->|"conversation → harness + cwd"| Catalog["composer commands + skills"]
-  Catalog --> App
-  Pane -->|"agent-status + native session identity"| Proj["Seat projection"]
-  Proj -->|"bounded events"| Registry
-  Registry -.->|"list / replay"| Captain["Clankie (head of staff)"]
+  App -->|replay or tail| Read[Native chat reader]
+  Session[Harness session file] --> Read
+  Read -->|bounded native events| App
+  App -->|explicit send| Delivery[Swarm or Herdr]
+  Delivery --> Agent[External agent]
+  Herdr -->|identity and status| Roster
+  Roster --> App
+  Clankie -->|inspect when needed| Herdr
 ```
-
-The full cross-repo picture — both repos, the trust boundary, the send and
-projection loops, and the retired terminal transport:
-
-![Seat conversation architecture](../diagrams/0135-a-herdr-seat-is-a-conversation.jpg)
-
-[Editable turbopuffer tldraw source](../diagrams/seat-conversations.tldraw)
 
 Channels and compose-to-spawn reuse the same persona, scope, roster, and direct
 send machinery. A channel contains personas; only its live routing resolves
@@ -239,14 +205,15 @@ through seats.
 - The app's per-agent send gap (its ADR 0012) closes with no new backend
   surface: configuring live captain chat configures the fleet lane.
 - Any harness gets a messageable DM from the pane contract. Claude Code,
-  Codex, Pi, and Grok also supply complete native message and tool history; other harnesses retain
-  their safe summary projection until they gain a transcript normalizer.
+  Codex, Pi, and Grok supply native message and tool history on demand; other
+  harnesses supply a bounded terminal answer.
 - Closing an agent is a seat operation guarded by the device's `steer` grant:
   it closes the current Herdr pane and removes the live roster entry while the
-  persona and durable thread remain available offline.
+  persona and host-owned exchanges remain available offline; native history
+  remains in the harness session file.
 - ADR 0097's "no general herdr tool suite" holds for captain _tools_; the
-  service's herdr machinery nonetheless grows a standing projection loop
-  (roster cache, seat watchers, native transcript folding) that must fail soft the way
+  service's herdr machinery nonetheless grows status observation and on-demand native reads
+  (roster cache, status watches, native transcript adapters) that must fail soft the way
   the census does — a down herdr socket renders seats offline, never a failed
   conversation surface.
 - Message role gains a third variant, so older app builds render seat messages

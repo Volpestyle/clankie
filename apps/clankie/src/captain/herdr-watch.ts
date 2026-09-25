@@ -88,6 +88,7 @@ export interface HerdrAgentSnapshot {
   readonly status: string;
   readonly title: string;
   readonly session?: HerdrAgentSession;
+  readonly workingDirectory?: string;
 }
 
 export interface HerdrWatchRunner {
@@ -498,6 +499,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly seatStatuses = new Map<string, string>();
   private readonly seatSummaries = new Map<string, string>();
   private readonly transcriptSeats = new Set<string>();
+  private readonly headSeats = new Set<string>();
   private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
   private readonly summariesPath: string;
   private readonly summaryWatchIntervalMs: number;
@@ -546,6 +548,99 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch {
       return undefined;
     }
+  }
+
+  /** Read only the answer to an explicitly sent room prompt, never prior pane activity. */
+  public async sendAndWatchReply(
+    seatId: string,
+    text: string,
+    deliver: () => Promise<boolean>,
+  ): Promise<boolean> {
+    const before = await this.readNativeChat(seatId);
+    const priorIds = new Set(before?.transcript.entries.map((entry) => entry.id));
+    const sent = await deliver();
+    if (!sent) return false;
+    const deadline = Date.now() + 10 * 60_000;
+    void (async () => {
+      while (!this.closed && Date.now() < deadline) {
+        await delay(this.seatTranscriptTailMs);
+        if (this.closed) return;
+        const snapshot = await this.readNativeChat(seatId);
+        if (snapshot === undefined) return;
+        if (before !== undefined && snapshot.transcript.sessionKey !== before.transcript.sessionKey) return;
+        const entries = snapshot.transcript.entries;
+        if (snapshot.transcript.sessionKey.startsWith("terminal:")) {
+          // ponytail: transcriptless harnesses compare against the pre-send answer;
+          // native prompt IDs replace this fallback when their adapter exists.
+          const last = entries.at(-1);
+          if (
+            REPLY_STATUSES.has(snapshot.agent.status) &&
+            last?.type === "message" &&
+            last.text !==
+              (before?.transcript.entries.at(-1)?.type === "message"
+                ? (before.transcript.entries.at(-1) as { text: string }).text
+                : undefined)
+          ) {
+            this.projectSeat?.(seatId, { kind: "reply", text: last.text });
+            return;
+          }
+          continue;
+        }
+        const asked = entries.findIndex(
+          (entry) =>
+            !priorIds.has(entry.id) &&
+            entry.type === "message" &&
+            entry.role === "operator" &&
+            (entry.text.trim() === text.trim() ||
+              (entry.text.startsWith("<channel") && entry.text.includes(text))),
+        );
+        if (asked < 0) continue;
+        const subsequent = entries.slice(asked + 1);
+        const nextPrompt = subsequent.findIndex(
+          (entry) => entry.type === "message" && entry.role === "operator",
+        );
+        const answer = nextPrompt < 0 ? subsequent : subsequent.slice(0, nextPrompt);
+        const last = answer.at(-1);
+        if (
+          (nextPrompt >= 0 || REPLY_STATUSES.has(snapshot.agent.status)) &&
+          last?.type === "message" &&
+          last.role === "agent"
+        ) {
+          this.projectSeat?.(seatId, { kind: "reply", text: last.text });
+          return;
+        }
+        if (nextPrompt >= 0) return;
+      }
+    })().catch(() => undefined);
+    return true;
+  }
+
+  public async readNativeChat(
+    seatId: string,
+    previous?: HerdrAgentSnapshot,
+  ): Promise<
+    | {
+        agent: HerdrAgentSnapshot;
+        transcript: HerdrSeatTranscript;
+      }
+    | undefined
+  > {
+    const live = await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    const agent = live ?? previous;
+    if (agent === undefined || (live === undefined && agent.session === undefined)) return undefined;
+    const transcript = await this.runner.transcript?.(agent);
+    if (transcript === undefined) {
+      if (live === undefined) return undefined;
+      const reply = await this.readSeatReply(live, "recent-unwrapped");
+      return {
+        agent,
+        transcript: {
+          sessionKey: `terminal:${seatId}`,
+          entries: reply === undefined ? [] : [{ type: "message", id: "latest", role: "agent", text: reply }],
+        },
+      };
+    }
+    return { agent: live === undefined ? { ...agent, status: "offline" } : agent, transcript };
   }
 
   public async sendToSeat(seatId: string, text: string): Promise<boolean> {
@@ -791,18 +886,24 @@ export class HerdrWatchStore implements HerdrWatchPort {
     );
   }
 
-  public trackSeat(seatId: string): void {
-    if (this.closed || this.projectSeat === undefined || this.seatControllers.has(seatId)) return;
+  public trackSeat(seatId: string, mode: "status" | "head" = "status"): void {
+    if (this.closed || this.projectSeat === undefined) return;
+    if (this.seatControllers.has(seatId)) {
+      if (mode !== "head" || this.headSeats.has(seatId)) return;
+      this.untrackSeat(seatId);
+    }
     const controller = new AbortController();
+    if (mode === "head") this.headSeats.add(seatId);
     this.seatControllers.set(seatId, controller);
-    this.ensureSummaryWatch();
-    void this.runSeat(seatId, controller.signal).finally(() => {
+    if (mode === "head") this.ensureSummaryWatch();
+    void this.runSeat(seatId, controller.signal, mode).finally(() => {
       if (this.seatControllers.get(seatId) === controller) this.seatControllers.delete(seatId);
-      if (this.seatControllers.size === 0) this.stopSummaryWatch();
+      if (this.headSeats.size === 0) this.stopSummaryWatch();
     });
   }
 
   public untrackSeat(seatId: string): void {
+    this.headSeats.delete(seatId);
     this.seatControllers.get(seatId)?.abort();
     this.seatControllers.delete(seatId);
     this.seatStatuses.delete(seatId);
@@ -886,12 +987,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     for (const controller of this.seatControllers.values()) controller.abort();
     this.seatControllers.clear();
     this.transcriptSeats.clear();
+    this.headSeats.clear();
     this.stopSummaryWatch();
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
   }
 
-  private async runSeat(seatId: string, signal: AbortSignal): Promise<void> {
+  private async runSeat(seatId: string, signal: AbortSignal, mode: "status" | "head"): Promise<void> {
     let seeded = false;
     while (!signal.aborted) {
       try {
@@ -899,6 +1001,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
         if (!isMessageableSeat(current)) {
           this.publishSeatStatus(seatId, "offline");
           await delay(RETRY_ADMISSION_MS);
+          continue;
+        }
+        if (mode === "status") {
+          this.publishSeatStatus(seatId, current.status);
+          if (this.runner.waitForChange === undefined) return;
+          await this.runner.waitForChange(current.paneId, current.status, signal);
           continue;
         }
         const hasTranscript = await this.publishSeatTranscript(seatId, current);
@@ -1048,7 +1156,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   private readonly onSummariesChanged = (): void => {
     const summaries = readHerdrSummariesFile(this.summariesPath).agents;
-    for (const seatId of this.seatControllers.keys()) {
+    for (const seatId of this.headSeats) {
       if (this.transcriptSeats.has(seatId)) continue;
       void this.runner
         .resolveTerminal(seatId)

@@ -1,3 +1,4 @@
+import { nativeConversationPage } from "./native-conversation.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import type { SwarmHost } from "@clankie/swarm";
@@ -1223,13 +1224,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       void pending?.then((lane) => lane.session.dispose()).catch(() => undefined);
     },
     async (seatId, message, context) => {
-      const sent = await deliverFleetSeatMessage(
-        fleetMailboxes,
-        (id, text) => herdrWatches.sendToSeat(id, text),
-        seatId,
-        message,
-        context,
-      );
+      const deliver = () =>
+        deliverFleetSeatMessage(
+          fleetMailboxes,
+          (id, text) => herdrWatches.sendToSeat(id, text),
+          seatId,
+          message,
+          context,
+        );
+      const sent =
+        context.source === "room"
+          ? await herdrWatches.sendAndWatchReply(seatId, message, deliver)
+          : await deliver();
       // What a seat has been asked to do today is a fact about the seat, so the
       // roster's cursor moves for it the way it moves for a stance (ADR 0150).
       if (sent) {
@@ -1340,7 +1346,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (head?.seatId === headSeat?.seatId) return;
     if (headSeat !== undefined) herdrWatches.untrackSeat(headSeat.seatId);
     headSeat = head;
-    if (head !== undefined) herdrWatches.trackSeat(head.seatId);
+    if (head !== undefined) herdrWatches.trackSeat(head.seatId, "head");
   }
 
   let swarmRoster = "";
@@ -1372,7 +1378,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     seatByPersona.clear();
     for (const seat of seats) {
       seatByPersona.set(seat.personaId, seat.seatId);
-      conversations.bindPersona(seat.personaId, seat.seatId, names.get(seat.personaId) ?? seat.title);
+      if (
+        conversations.conversationIdForPersona(seat.personaId) !== undefined ||
+        conversations.conversationIdForSeat(seat.seatId) !== undefined
+      )
+        conversations.bindPersona(seat.personaId, seat.seatId, names.get(seat.personaId) ?? seat.title);
       herdrWatches.trackSeat(seat.seatId);
     }
     liveSeats = seats;
@@ -1526,7 +1536,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return Promise.resolve();
       },
       (seatId, projection) => {
-        if (projection.kind === "transcript") {
+        if (seatId === headSeat?.seatId && projection.kind === "transcript") {
           const entries = projection.transcript.entries;
           const last = entries.at(-1);
           if (last?.type === "message" && last.role === "agent" && !evaluator.excludesSeat(seatId)) {
@@ -1536,9 +1546,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               context: {
                 source: "herdr",
                 seatId,
-                head: seatId === headSeat?.seatId,
+                head: true,
                 fleet: liveEdgeSeats,
-                seat: liveSeats.find((seat) => seat.seatId === seatId) ?? headSeat,
+                seat: headSeat,
                 transcript: projection.transcript,
                 metrics: null,
                 toolInventory: null,
@@ -1582,22 +1592,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
         const personaId = seat?.personaId;
         if (personaId === undefined) return;
-        if (projection.kind === "transcript") {
-          conversations.syncPersonaTranscript(
-            personaId,
-            seatId,
-            projection.transcript,
-            seat?.workingDirectory,
-          );
-          return;
-        }
-        conversations.publishPersonaEvent(
-          personaId,
-          seatId,
-          projection.kind === "status"
-            ? { type: "activity", phase: projection.status === "working" ? "responding" : "waiting" }
-            : { type: "message", role: "agent", text: projection.text, streaming: false },
-        );
+        // Discovered seats contribute status to the roster, never conversation history.
+        if (projection.kind === "reply")
+          conversations.publishPersonaEvent(personaId, seatId, {
+            type: "message",
+            role: "agent",
+            text: projection.text,
+            streaming: false,
+          });
       },
     );
   if (deps.herdrAvailable?.() !== false)
@@ -2241,6 +2243,83 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       if (request.op === "connections")
         throw new Error("Connections are served by the authenticated app boundary");
+      if (request.op === "replay" || request.op === "tail" || request.op === "react") {
+        const input =
+          request.op === "replay"
+            ? request.replay
+            : request.op === "tail"
+              ? request.tail
+              : {
+                  schemaVersion: 1 as const,
+                  conversationId: request.conversationId,
+                  surfaceClientId: "reaction",
+                  cursor: request.entryRef,
+                };
+        const conversation = conversations.conversation(input.conversationId);
+        const scope = conversation?.scope;
+        if (
+          conversation !== undefined &&
+          (scope?.kind === "seat" ||
+            (scope?.kind === "persona" && personas.swarmContact(scope.personaId) === undefined))
+        ) {
+          const previous = conversations.nativeSource(input.conversationId);
+          const seatId =
+            scope.kind === "seat"
+              ? scope.seatId
+              : (seatByPersona.get(scope.personaId) ?? previous?.terminalId);
+          if (seatId !== undefined) {
+            const deadline = Date.now() + (request.op === "tail" ? Math.min(input.waitMs ?? 0, 25_000) : 0);
+            for (;;) {
+              const snapshot = await herdrWatches.readNativeChat(seatId, previous);
+              if (snapshot === undefined) break;
+              const cwd =
+                liveSeats.find((seat) => seat.seatId === seatId)?.workingDirectory ??
+                previous?.workingDirectory;
+              const source = { ...snapshot.agent, ...(cwd === undefined ? {} : { workingDirectory: cwd }) };
+              conversations.rememberNativeSource(input.conversationId, source);
+              const page = await nativeConversationPage(
+                conversation,
+                snapshot.transcript,
+                snapshot.agent.status,
+                input,
+                cwd === undefined || options.deliveredFiles === undefined
+                  ? undefined
+                  : (path) =>
+                      options.deliveredFiles!.publish({
+                        conversationId: input.conversationId,
+                        sourceRoot: cwd,
+                        path,
+                      }),
+                conversations.nativeAnnotations(input.conversationId),
+              );
+              if (request.op === "react")
+                return {
+                  op: "react",
+                  schemaVersion: 1,
+                  conversationId: request.conversationId,
+                  entryRef: request.entryRef,
+                  reacted:
+                    page.status === "page" &&
+                    conversations.reactToNativeEntry(
+                      request.conversationId,
+                      request.entryRef,
+                      request.emoji,
+                      request.remove,
+                    ),
+                };
+              if (
+                page.status !== "page" ||
+                page.events.length > 0 ||
+                page.hasMore ||
+                page.nextCursor !== input.cursor ||
+                Date.now() >= deadline
+              )
+                return { op: request.op, schemaVersion: 1, result: page };
+              await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, deadline - Date.now())));
+            }
+          }
+        }
+      }
       const result = await conversations.serve(request);
       if (request.op === "create" && request.scope.kind === "seat") {
         herdrWatches.trackSeat(request.scope.seatId);
@@ -2250,8 +2329,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const contact = personas.swarmContact(request.scope.personaId);
         if (contact) options.swarm?.settled(contact.conversationId);
       }
-      // A round hears a member answer through the same seat watch that feeds
-      // that agent's own thread, so joining a channel starts one (ADR 0146).
+      // Channel membership keeps roster status current; only an explicit room
+      // prompt starts a bounded reply watch (ADR 0146).
       if (result.op === "channel") {
         for (const member of result.channel.members) {
           const seatId = seatByPersona.get(member.personaId);

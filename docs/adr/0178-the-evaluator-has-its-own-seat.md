@@ -22,7 +22,7 @@ is independent and is never changed by evaluator controls.
 ```mermaid
 flowchart TD
   Pi[Settled Pi turn and execution context] --> Capture[Private evidence snapshot]
-  Seats[Herdr transcript projection] --> Capture
+  Seats[Clankie native head transcript] --> Capture
   Capture --> Queue[Durable checkpoint queue]
   Queue --> Agent[Independent Codex or Claude evaluator]
   Agent --> Report[Validated report with evidence references]
@@ -34,7 +34,9 @@ flowchart TD
   Later --> Report
 ```
 
-Evidence is collected at settled Pi turns and native agent replies. Captures
+While enabled, evidence is collected only from Clankie’s settled Pi turns and
+his native head-seat replies. Other observed Herdr agents do not trigger
+assessments: visibility in the fleet does not make a trace Clankie’s. Captures
 coalesce by active goal identity, or by conversation when no goal identifies the
 task. One quiet minute releases a checkpoint; a continuously growing queue item
 releases after fifteen minutes. A checkpoint is not a task-completion claim:

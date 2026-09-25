@@ -229,7 +229,7 @@ describe("HerdrWatchStore", () => {
       summaryWatchIntervalMs: 10,
     });
     store.start(() => Promise.resolve(), project);
-    store.trackSeat("term-potato");
+    store.trackSeat("term-potato", "head");
 
     await vi.waitFor(() =>
       expect(project).toHaveBeenCalledWith("term-potato", { kind: "status", status: "working" }),
@@ -423,7 +423,7 @@ describe("HerdrWatchStore", () => {
       },
     });
     store.start(() => Promise.resolve(), project);
-    store.trackSeat("term-potato");
+    store.trackSeat("term-potato", "head");
 
     await vi.waitFor(() =>
       expect(project).toHaveBeenCalledWith("term-potato", {
@@ -457,7 +457,7 @@ describe("HerdrWatchStore", () => {
       },
     });
     store.start(() => Promise.resolve(), project);
-    store.trackSeat("term-potato");
+    store.trackSeat("term-potato", "head");
 
     await vi.waitFor(() =>
       expect(project).toHaveBeenCalledWith("term-potato", { kind: "status", status: "working" }),
@@ -493,7 +493,7 @@ describe("HerdrWatchStore", () => {
       },
     });
     store.start(() => Promise.resolve(), project);
-    store.trackSeat("term-potato");
+    store.trackSeat("term-potato", "head");
 
     await vi.waitFor(() =>
       expect(project).toHaveBeenCalledWith("term-potato", { kind: "transcript", transcript }),
@@ -526,7 +526,7 @@ describe("HerdrWatchStore", () => {
       },
     });
     store.start(() => Promise.resolve(), project);
-    store.trackSeat("term-potato");
+    store.trackSeat("term-potato", "head");
 
     await vi.waitFor(() => expect(transcript).toHaveBeenCalled());
     entries.push({ type: "message", id: "claude:a2", role: "agent", text: "Shipped." });
@@ -1634,4 +1634,128 @@ describe("founding a workspace on a fresh owned session", () => {
     expect(isHerdrWorkspaceMissing(new Error("connection refused"))).toBe(false);
     expect(isHerdrWorkspaceMissing("workspace_not_found")).toBe(false);
   });
+});
+
+it("observes discovered seat status without reading native history or terminal replies", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-status-only-"));
+  roots.push(root);
+  const transcript = vi.fn();
+  const read = vi.fn();
+  const project = vi.fn();
+  const store = new HerdrWatchStore(join(root, "watches.json"), {
+    runner: {
+      get: async () => done,
+      resolveTerminal: async () => done,
+      wait: async () => done,
+      transcript,
+      read,
+    },
+  });
+  store.start(async () => {}, project);
+  store.trackSeat("term-potato");
+  await vi.waitFor(() =>
+    expect(project).toHaveBeenCalledWith("term-potato", { kind: "status", status: "done" }),
+  );
+  expect(transcript).not.toHaveBeenCalled();
+  expect(read).not.toHaveBeenCalled();
+  expect(project).toHaveBeenCalledTimes(1);
+  store.close();
+});
+
+it("reads the saved native session on demand after its pane closes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-offline-native-"));
+  roots.push(root);
+  const agent = { ...done, session: { source: "herdr:codex", kind: "id" as const, value: "session" } };
+  const transcript = vi.fn(async () => ({ sessionKey: "session", entries: [] }));
+  const store = new HerdrWatchStore(join(root, "watches.json"), {
+    runner: {
+      get: async () => done,
+      resolveTerminal: async () => undefined,
+      wait: async () => done,
+      transcript,
+    },
+  });
+  expect(await store.readNativeChat("term-potato", agent)).toMatchObject({ agent: { status: "offline" } });
+  expect(transcript).toHaveBeenCalledWith(agent);
+  store.close();
+});
+
+it("captures only the reply following an explicit room prompt, not old or unrelated activity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-explicit-reply-"));
+  roots.push(root);
+  const entries = [
+    {
+      type: "message" as const,
+      id: "old",
+      role: "agent" as "agent" | "operator",
+      text: "Unrelated old answer",
+    },
+  ];
+  const project = vi.fn();
+  const store = new HerdrWatchStore(join(root, "watches.json"), {
+    seatTranscriptTailMs: 5,
+    runner: {
+      get: async () => done,
+      resolveTerminal: async () => done,
+      wait: async () => done,
+      transcript: async () => ({ sessionKey: "session", entries: [...entries] }),
+    },
+  });
+  store.start(async () => {}, project);
+  await store.sendAndWatchReply("term-potato", "Room question", async () => {
+    entries.push(
+      { type: "message", id: "prompt", role: "operator", text: "Room question" },
+      { type: "message", id: "answer", role: "agent", text: "Room answer" },
+    );
+    return true;
+  });
+  await vi.waitFor(() =>
+    expect(project).toHaveBeenCalledWith("term-potato", { kind: "reply", text: "Room answer" }),
+  );
+  expect(project).toHaveBeenCalledTimes(1);
+  store.close();
+});
+
+it("keeps channel delivery prompts internal while allowing an explicit reply watch to match them", async () => {
+  const records = [
+    {
+      type: "user",
+      uuid: "question",
+      parentUuid: null,
+      message: { role: "user", content: '<channel source="room">Room question</channel>' },
+    },
+    {
+      type: "assistant",
+      uuid: "answer",
+      parentUuid: "question",
+      message: { role: "assistant", content: [{ type: "text", text: "Room answer" }] },
+    },
+  ]
+    .map((record) => JSON.stringify(record))
+    .join("\n");
+  expect(parseHerdrSeatTranscript("claude", records)).toHaveLength(1);
+  const entries = parseHerdrSeatTranscript("claude", records, true);
+  expect(entries[0]).toMatchObject({ role: "operator", internal: true });
+  const root = await mkdtemp(join(tmpdir(), "clankie-channel-reply-"));
+  roots.push(root);
+  let delivered = false;
+  const project = vi.fn();
+  const store = new HerdrWatchStore(join(root, "watches.json"), {
+    seatTranscriptTailMs: 5,
+    runner: {
+      get: async () => done,
+      resolveTerminal: async () => done,
+      wait: async () => done,
+      transcript: async () => ({ sessionKey: "session", entries: delivered ? entries : [] }),
+    },
+  });
+  store.start(async () => {}, project);
+  await store.sendAndWatchReply("term-potato", "Room question", async () => {
+    delivered = true;
+    return true;
+  });
+  await vi.waitFor(() =>
+    expect(project).toHaveBeenCalledWith("term-potato", { kind: "reply", text: "Room answer" }),
+  );
+  store.close();
 });

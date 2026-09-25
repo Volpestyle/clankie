@@ -5,8 +5,9 @@ Status: accepted (James, 2026-08-30). Extends
 [ADR 0147](0147-an-agent-persona-outlives-its-herdr-seat.md) — a persona keeps
 one direct conversation; a channel is a conversation several personas share. Inherits the
 Discord identity boundary from [ADR 0024](0024-discord-dual-plane-presence.md)
-and [ADR 0048](0048-discord-user-session-transport.md). Built on 0135's native
-harness transcript, which is how a member's reply reaches the round.
+and [ADR 0048](0048-discord-user-session-transport.md). Each explicit room prompt uses a bounded native reply watch
+([ADR 0188](0188-native-agent-chats-read-their-own-history.md)); passive discovery
+does not import a member's private chat.
 
 ## Context
 

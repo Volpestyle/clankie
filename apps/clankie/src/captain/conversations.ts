@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import { z } from "zod";
 import {
   LinearWorkOwnerSchema,
@@ -156,6 +157,7 @@ interface SeatTranscriptCheckpoint {
 }
 
 interface ConversationMeta {
+  nativeSource?: HerdrAgentSnapshot;
   readonly conversationId: string;
   scope: OperatorConversationScope;
   title: string;
@@ -1232,15 +1234,35 @@ export class ConversationStore {
     this.saveMeta(meta);
   }
 
-  /** Fold one harness session's complete active chat branch into its durable persona thread. */
-  public syncPersonaTranscript(
-    personaId: string,
-    seatId: string,
-    transcript: HerdrSeatTranscript,
-    workingDirectory?: string,
-  ): void {
-    const conversationId = this.conversationIdForPersona(personaId);
-    this.syncConversationTranscript(conversationId, seatId, transcript, "agent", workingDirectory);
+  public nativeAnnotations(conversationId: string): readonly OperatorConversationStreamEvent[] {
+    return this.readEvents(conversationId).filter(
+      (event) => event.type === "reaction" || event.type === "file",
+    );
+  }
+
+  public reactToNativeEntry(
+    conversationId: string,
+    entryRef: string,
+    emoji: string,
+    remove: boolean,
+  ): boolean {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined) return false;
+    this.append(meta, { type: "reaction", entryRef, emoji, reactor: { kind: "operator" }, removed: remove });
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+    return true;
+  }
+
+  public nativeSource(conversationId: string): HerdrAgentSnapshot | undefined {
+    return this.metas.get(conversationId)?.nativeSource;
+  }
+
+  public rememberNativeSource(conversationId: string, source: HerdrAgentSnapshot): void {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined || JSON.stringify(meta.nativeSource) === JSON.stringify(source)) return;
+    meta.nativeSource = source;
+    this.saveMeta(meta);
   }
 
   /** One inspectable conversation per room, irrespective of its execution authority. */
@@ -1349,6 +1371,10 @@ export class ConversationStore {
   ): void {
     const meta = conversationId === undefined ? undefined : this.metas.get(conversationId);
     if (meta === undefined || transcript.entries.length === 0) return;
+    transcript = {
+      ...transcript,
+      entries: transcript.entries.filter((entry) => entry.type !== "message" || !entry.internal),
+    };
     const room = meta.scope.kind === "room";
     const checkpoint = room ? meta.roomTranscripts?.[transcript.sessionKey] : meta.seatTranscript;
     // A persona thread seeded before native transcripts existed is rebuilt
@@ -2039,6 +2065,11 @@ export class ConversationStore {
         // is drawn from them — captured before the send, because the send is
         // what makes it the previous line.
         const answering = this.lastSeatEntry(conversationId);
+        const replyController = new AbortController();
+        const pendingReply =
+          seatId === undefined
+            ? undefined
+            : this.awaitSeatReply(seatId, AbortSignal.any([context.signal, replyController.signal]));
         const asked =
           seatId !== undefined &&
           (await this.sendToSeat?.(seatId, prompt, { conversationId, source: "room" })) === true;
@@ -2057,7 +2088,9 @@ export class ConversationStore {
             });
           }
         }
-        const reply = asked ? await this.awaitSeatReply(seatId, context.signal) : undefined;
+        if (!asked) replyController.abort();
+        const reply = await pendingReply;
+        replyController.abort();
         const spokenText = channelTurnReply(reply);
         if (spokenText === undefined) {
           if (!asked || reply === undefined) unreachable.push(names.get(personaId) ?? personaId);
