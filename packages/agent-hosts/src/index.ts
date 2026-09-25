@@ -1,3 +1,11 @@
+import {
+  runLocalAgentTurn,
+  runSshAgentTurn,
+  type AgentTurnInput,
+  type AgentTurnResult,
+  type TurnOptions,
+} from "./turn.ts";
+export type { AgentTurnInput, AgentTurnResult } from "./turn.ts";
 import { execFile } from "node:child_process";
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -5,13 +13,14 @@ import { join, relative, isAbsolute } from "node:path";
 import { promisify } from "node:util";
 
 export interface AgentSessionFile {
-  harness: "claude" | "codex";
+  harness: "claude" | "codex" | "grok" | "pi";
   path: string;
   size: number;
   mtimeMs: number;
 }
 export interface AgentHost {
   id: string;
+  runAgentTurn(input: AgentTurnInput, signal?: AbortSignal): Promise<AgentTurnResult>;
   list(opts?: { limit?: number }): Promise<AgentSessionFile[]>;
   readBytes(path: string, from: number, maxBytes: number): Promise<{ bytes: Buffer; size: number }>;
 }
@@ -39,14 +48,17 @@ function within(root: string, path: string) {
     !isAbsolute(rel)
   );
 }
-export function createLocalAgentHost(options: { home?: string } = {}): AgentHost {
+export function createLocalAgentHost(options: { home?: string } & TurnOptions = {}): AgentHost {
   const home = options.home ?? homedir();
   const roots = [
     { harness: "claude" as const, path: join(home, ".claude", "projects") },
     { harness: "codex" as const, path: join(home, ".codex", "sessions") },
+    { harness: "grok" as const, path: join(home, ".grok", "sessions") },
+    { harness: "pi" as const, path: join(home, ".pi", "agent", "sessions") },
   ];
   return {
     id: "local",
+    runAgentTurn: (input, signal) => runLocalAgentTurn(input, signal, options),
     async list(opts) {
       const count = limit(opts?.limit);
       const files: AgentSessionFile[] = [];
@@ -61,7 +73,11 @@ export function createLocalAgentHost(options: { home?: string } = {}): AgentHost
         for (const entry of entries) {
           const file = join(path, entry.name);
           if (entry.isDirectory()) await walk(file, harness);
-          else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+          else if (
+            entry.isFile() &&
+            entry.name.endsWith(".jsonl") &&
+            (harness !== "grok" || entry.name === "chat_history.jsonl")
+          ) {
             try {
               const info = await stat(file);
               files.push({ harness, path: file, size: info.size, mtimeMs: info.mtimeMs });
@@ -103,7 +119,7 @@ export function createLocalAgentHost(options: { home?: string } = {}): AgentHost
 const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 const psQuote = (text: string) => `'${text.replaceAll("'", "''")}'`;
 const psRoots =
-  "$roots = @(@{h='claude';p=(Join-Path $env:USERPROFILE '.claude\\projects')}, @{h='codex';p=(Join-Path $env:USERPROFILE '.codex\\sessions')})";
+  "$roots = @(@{h='claude';p=(Join-Path $env:USERPROFILE '.claude\\projects')}, @{h='codex';p=(Join-Path $env:USERPROFILE '.codex\\sessions')}, @{h='grok';p=(Join-Path $env:USERPROFILE '.grok\\sessions')}, @{h='pi';p=(Join-Path $env:USERPROFILE '.pi\\agent\\sessions')})";
 function powershell(script: string) {
   return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from("$ErrorActionPreference='Stop'; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; " + script, "utf16le").toString("base64")}`;
 }
@@ -113,13 +129,20 @@ function posix(script: string) {
 function listCommand(shell: AgentHostConfig["shell"], count: number) {
   if (shell === "powershell")
     return powershell(
-      `${psRoots}; $rows = @(foreach ($r in $roots) { if (Test-Path -LiteralPath $r.p) { Get-ChildItem -LiteralPath $r.p -Recurse -File -Filter '*.jsonl' | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } | ForEach-Object { [PSCustomObject]@{harness=$r.h; path=$_.FullName; size=$_.Length; mtimeMs=([DateTimeOffset]$_.LastWriteTimeUtc).ToUnixTimeMilliseconds()} } } }); ConvertTo-Json -Compress -InputObject @($rows | Sort-Object mtimeMs -Descending | Select-Object -First ${count})`,
+      `${psRoots}; $rows = @(foreach ($r in $roots) { if (Test-Path -LiteralPath $r.p) { Get-ChildItem -LiteralPath $r.p -Recurse -File -Filter '*.jsonl' | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($r.h -ne 'grok' -or $_.Name -eq 'chat_history.jsonl') } | ForEach-Object { [PSCustomObject]@{harness=$r.h; path=$_.FullName; size=$_.Length; mtimeMs=([DateTimeOffset]$_.LastWriteTimeUtc).ToUnixTimeMilliseconds()} } } }); ConvertTo-Json -Compress -InputObject @($rows | Sort-Object mtimeMs -Descending | Select-Object -First ${count})`,
     );
   return posix(`set -eu
-for h in claude codex; do
-  if [ "$h" = claude ]; then root="$HOME/.claude/projects"; else root="$HOME/.codex/sessions"; fi
+for h in claude codex grok pi; do
+  case "$h" in
+    claude) root="$HOME/.claude/projects";;
+    codex) root="$HOME/.codex/sessions";;
+    grok) root="$HOME/.grok/sessions";;
+    pi) root="$HOME/.pi/agent/sessions";;
+  esac
+  pattern='*.jsonl'
+  [ "$h" != grok ] || pattern=chat_history.jsonl
   [ -d "$root" ] || continue
-  find "$root" -type f -name '*.jsonl' -exec sh -c '
+  find "$root" -type f -name "$pattern" -exec sh -c '
     h=$1; shift
     for p do
       meta=$(stat -c "%s %Y" "$p" 2>/dev/null || stat -f "%z %m" "$p")
@@ -141,7 +164,7 @@ case "$p" in /*.jsonl) ;; *) exit 2;; esac
 dir=$(CDPATH= cd -P -- "$(dirname "$p")" && pwd)
 p="$dir/$(basename "$p")"
 ok=false
-for root in "$HOME/.claude/projects" "$HOME/.codex/sessions"; do
+for root in "$HOME/.claude/projects" "$HOME/.codex/sessions" "$HOME/.grok/sessions" "$HOME/.pi/agent/sessions"; do
   [ -d "$root" ] || continue
   root=$(CDPATH= cd -P -- "$root" && pwd)
   case "$p" in "$root"/*) ok=true;; esac
@@ -153,7 +176,7 @@ tail -c +${from + 1} "$p" | head -c ${max} | base64`);
 }
 export function createSshAgentHost(
   config: AgentHostConfig,
-  options: {
+  options: TurnOptions & {
     run?: (command: string, args: string[]) => Promise<string>;
   } = {},
 ): AgentHost {
@@ -176,6 +199,7 @@ export function createSshAgentHost(
     run("ssh", ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", config.ssh, command]);
   return {
     id: config.id,
+    runAgentTurn: (input, signal) => runSshAgentTurn(config, input, signal, options),
     async list(opts) {
       const count = limit(opts?.limit);
       const output = await call(listCommand(config.shell, count));
@@ -200,7 +224,7 @@ export function createSshAgentHost(
         const r = row as AgentSessionFile;
         if (
           !r ||
-          !["claude", "codex"].includes(r.harness) ||
+          !["claude", "codex", "grok", "pi"].includes(r.harness) ||
           typeof r.path !== "string" ||
           !r.path.endsWith(".jsonl") ||
           !Number.isSafeInteger(r.size) ||

@@ -119,3 +119,29 @@ test("remote malformed listings and byte responses fail closed", async () => {
     await expect(host.readBytes("C:\\file.jsonl", 0, 100)).rejects.toThrow("Invalid remote");
   }
 });
+
+test("Grok and Pi roots are discovered locally and over POSIX; unrelated Grok JSONL is excluded", async () => {
+  const f = await fixture();
+  const grok = join(f.home, ".grok", "sessions", "%2Fwork", "session", "chat_history.jsonl");
+  const pi = join(f.home, ".pi", "agent", "sessions", "--work--", "session.jsonl");
+  for (const path of [grok, pi]) {
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, "{}\n");
+  }
+  await writeFile(join(grok, "..", "other.jsonl"), "{}\n");
+  const local = createLocalAgentHost({ home: f.home });
+  const remote = createSshAgentHost(
+    { id: "test", ssh: "test", shell: "posix" },
+    {
+      run: async (_command, args) =>
+        (await promisify(execFile)("sh", ["-c", args.at(-1)!], { env: { ...process.env, HOME: f.home } }))
+          .stdout,
+    },
+  );
+  for (const host of [local, remote]) {
+    const files = await host.list();
+    expect(files.map((file) => file.harness).sort()).toEqual(["claude", "grok", "pi"]);
+    expect((await host.readBytes(grok, 0, 10)).bytes.toString()).toBe("{}\n");
+    expect((await host.readBytes(pi, 0, 10)).bytes.toString()).toBe("{}\n");
+  }
+});
