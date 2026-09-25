@@ -126,6 +126,27 @@ Everything before this boundary is inherited history from the parent conversatio
 Only messages submitted after this boundary are active operator instructions for this side conversation. If there is no message after the boundary yet, wait for one.`;
 
 /** Pi's native current-leaf clone, with one hidden boundary appended to the child. */
+/** Above this the Linear inbox compacts before a wake, keeping each headline cheap. */
+export const LINEAR_INBOX_CONTEXT_TOKENS = 30_000;
+
+/**
+ * The inbox is one durable room woken by one-line headlines; unbounded, every
+ * wake would resend its whole history (VUH-1362). Pi compacts it before the
+ * wake, so what he tracks carries over as a summary. A failed compaction still
+ * wakes him, with the full context.
+ */
+export async function boundLinearInboxContext(
+  session: Pick<AgentSession, "getContextUsage" | "compact">,
+  conversationId: string,
+  origin: ConversationTurnContext["origin"],
+): Promise<void> {
+  if (origin !== "hook" || conversationId !== LINEAR_INBOX_CONVERSATION_ID) return;
+  if ((contextTokenCount(session.getContextUsage()) ?? 0) <= LINEAR_INBOX_CONTEXT_TOKENS) return;
+  await session.compact().catch((error: unknown) => {
+    console.warn("Linear inbox compaction failed; waking with the full context", error);
+  });
+}
+
 export function cloneSideConversationSession(
   source: string,
   cwd: string,
@@ -1032,6 +1053,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
 
       const live = lane.running !== undefined || lane.session.isStreaming;
+      if (!live) await boundLinearInboxContext(lane.session, conversationId, context.origin);
       const operatorTokensStart = contextTokenCount(lane.session.getContextUsage());
       const metrics = live
         ? undefined

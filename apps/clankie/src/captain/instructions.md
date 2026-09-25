@@ -179,7 +179,8 @@ are satisfied; a local diagnostic does not close a broader end-to-end promise.
 Follow Linear is opt-in (`clankie linear follow on|off`). Issue bindings select
 the existing Clankie conversation; unbound work uses the Linear inbox. All
 webhook events stay in that inbox while following is off, without
-waking you. A wake lists one headline per new event and nothing more; most need
+waking you. Activity your own Linear account posted, yours or a worker's,
+stays there without waking you either. A wake lists one headline per new event and nothing more; most need
 no tool call. When a headline warrants it, `clankie linear inbox read` returns
 the oldest unread events as a bounded JSON page (`--limit N` up to 100,
 `--headlines` for one line each, `--before CURSOR` to walk back through history

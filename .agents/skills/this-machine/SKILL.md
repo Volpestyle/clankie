@@ -128,7 +128,8 @@ Follow Linear is off by default and changes live without restarting. Configure
 its signed webhook under `/connect linear` → **Follow Linear** → **Configure
 webhook**, selecting all activity events in Linear. Events always reach the
 **Linear inbox** conversation as **External activity**; open it with
-`clankie --chat linear-inbox`. `clankie linear work list` shows explicit issue
+`clankie --chat linear-inbox`. Activity by his own Linear account never wakes
+him. `clankie linear work list` shows explicit issue
 owners; `work bind ORG_UUID ISSUE_UUID CONVERSATION_ID` routes new activity to an
 existing Clankie conversation. A rebind requires `--from CURRENT_CONVERSATION`.
 For routed work retain `--conversation ID` on inbox reads and acknowledgments.

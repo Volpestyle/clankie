@@ -55,7 +55,12 @@ afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
-async function hookApp(following = true, writes?: LinearWriteReceipts, existingRoot?: string) {
+async function hookApp(
+  following = true,
+  writes?: LinearWriteReceipts,
+  existingRoot?: string,
+  ownAccount?: () => Promise<{ userId: string; workspaceId: string } | undefined>,
+) {
   const root = existingRoot ?? (await mkdtemp("/tmp/clankie-linear-ingress-"));
   const store = new ConversationStore(root, async () => {});
   const wakes: LinearActivityEvent[] = [];
@@ -83,6 +88,7 @@ async function hookApp(following = true, writes?: LinearWriteReceipts, existingR
     linearWebhook: {
       secret: () => Promise.resolve(SECRET),
       ...(writes === undefined ? {} : { writes }),
+      ...(ownAccount === undefined ? {} : { ownAccount }),
     },
     clock: () => NOW,
   });
@@ -318,6 +324,32 @@ describe("linear activity ingress", () => {
     await second.store.close();
     const third = await hookApp(false, undefined, first.root);
     expect(await (await third.post(commentBody())).json()).toMatchObject({ ingested: false });
+  });
+
+  it("keeps his own account's activity in the inbox without waking him", async () => {
+    const own = { userId: "user-clankie", workspaceId: "org-1" };
+    const { post, wakes, inbox } = await hookApp(true, undefined, undefined, async () => own);
+    const clankie = { id: "user-clankie", name: "clankie", email: "clankie@example.com" };
+
+    await post(commentBody({ organizationId: "org-1", actor: clankie }, { id: "comment-own" }));
+    await post(commentBody({ organizationId: "org-1" }, { id: "comment-james" }));
+    await post(commentBody({ organizationId: "org-2", actor: clankie }, { id: "comment-elsewhere" }));
+
+    expect(inbox.map((event) => event.data.id)).toEqual([
+      "comment-own",
+      "comment-james",
+      "comment-elsewhere",
+    ]);
+    expect(wakes.map((event) => event.data.id)).toEqual(["comment-james", "comment-elsewhere"]);
+  });
+
+  it("wakes him when his own identity cannot be verified", async () => {
+    const clankie = { id: "user-clankie", name: "clankie" };
+    for (const ownAccount of [async () => undefined, () => Promise.reject(new Error("disconnected"))]) {
+      const { post, wakes } = await hookApp(true, undefined, undefined, ownAccount);
+      await post(commentBody({ organizationId: "org-1", actor: clankie }));
+      expect(wakes).toHaveLength(1);
+    }
   });
 
   it("wakes him once when Linear retries the same delivery", async () => {

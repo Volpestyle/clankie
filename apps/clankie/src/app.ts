@@ -390,7 +390,12 @@ export interface ClankieAppDependencies {
    * webhook is configured and the route reports itself unavailable; the wake it
    * leads to belongs to the captain.
    */
-  linearWebhook?: { secret(): Promise<string | undefined>; writes?: LinearWriteReceipts };
+  linearWebhook?: {
+    secret(): Promise<string | undefined>;
+    writes?: LinearWriteReceipts;
+    /** His own verified Linear identity; activity it authors is kept without a wake. */
+    ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
+  };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;
@@ -2338,9 +2343,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
 
     // Persist first; following controls model turns, not inbox delivery.
+    // Anything his own account wrote, captain or worker, is kept but never wakes him.
+    const own = await hook.ownAccount?.().catch(() => undefined);
+    const selfAuthored =
+      own !== undefined &&
+      outcome.activity.actorId === own.userId &&
+      outcome.activity.organizationId === own.workspaceId;
     const ingested = dependencies.captain.receiveLinearActivity(
       outcome.activity,
-      (await settingsSource.load()).linearWebhook.following,
+      (await settingsSource.load()).linearWebhook.following && !selfAuthored,
     );
     return context.json({ schemaVersion: 1 as const, ingested: ingested !== false });
   });

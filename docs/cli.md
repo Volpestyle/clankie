@@ -309,6 +309,10 @@ Clankie:
 | Off (default) | Events stay visible in the conversation | None from incoming events            |
 | On            | Events stay visible in the conversation | New events wake their selected owner |
 
+Activity authored by Clankie's own verified Linear account, his or a
+worker's, is collected but never wakes him ([ADR 0189](adr/0189-his-own-linear-activity-does-not-wake-him.md)).
+Before a wake, a Linear inbox context above 30k tokens is compacted.
+
 Open the conversation with `clankie --chat linear-inbox`. It is created on the
 first accepted event, including while off. Ask Clankie to **check the Linear
 inbox** when you want him to read its retained messages; collecting them does

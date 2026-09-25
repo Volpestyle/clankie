@@ -609,6 +609,8 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
+    // Unverified or disconnected means unknown authorship, which still wakes him.
+    ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
   },
 });
 clankieRef = clankie;
