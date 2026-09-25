@@ -216,10 +216,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "agents",
       aliases: [],
-      description: "List and read Claude/Codex sessions here or on SSH hosts",
+      description: "List, read or resume Claude/Codex/Grok/Pi sessions here or on SSH hosts",
       takesArgument: true,
       argumentHint:
-        "[list [--host ID]|read HOST:SESSION [--tail N]|hosts|hosts add ID --ssh TARGET [--shell powershell]|hosts remove ID]",
+        "[list [--host ID]|read HOST:SESSION [--tail N]|send HOST:SESSION MESSAGE|runs [RUN]|cancel RUN|release RUN|hosts|hosts add ID --ssh TARGET [--shell powershell]|hosts remove ID]",
       async run(argument, shell): Promise<void> {
         try {
           const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));

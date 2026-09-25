@@ -17,7 +17,7 @@ export interface AgentTranscriptHost {
 }
 
 export interface AgentSessionFile {
-  readonly harness: "claude" | "codex";
+  readonly harness: "claude" | "codex" | "grok" | "pi";
   /** Host-native path; it stays inside the host layer's transcript roots. */
   readonly path: string;
   readonly size: number;
@@ -65,9 +65,9 @@ export interface AgentSessionPage {
 
 /** The caller asked for something wrong, as opposed to the host failing to answer. */
 export class AgentSessionRequestError extends Error {
-  public readonly status: 400 | 404;
+  public readonly status: 400 | 404 | 409;
 
-  public constructor(message: string, status: 400 | 404 = 400) {
+  public constructor(message: string, status: 400 | 404 | 409 = 400) {
     super(message);
     this.status = status;
   }
@@ -88,18 +88,53 @@ const AFTER_MAX_BYTES = READ_MAX_BYTES - OVERLAP_BYTES;
 const MAX_REAIMS = 3;
 
 export function sessionIdFromPath(file: AgentSessionFile): string {
-  const name = file.path
-    .split(/[\\/]/)
-    .at(-1)!
-    .replace(/\.jsonl$/, "");
-  // Codex names rollouts `rollout-<timestamp>-<uuid>`; Claude names the file the session id.
+  const parts = file.path.split(/[\\/]/);
+  // Grok keeps each session in a directory named for it, as `<id>/chat_history.jsonl`.
+  if (file.harness === "grok") return parts.at(-2) ?? "";
+  const name = parts.at(-1)!.replace(/\.jsonl$/, "");
+  // Codex names rollouts `rollout-<timestamp>-<uuid>`, Pi `<timestamp>_<uuid>`; Claude
+  // names the file the session id.
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.exec(name);
   return uuid?.[0] ?? name;
 }
 
+/** The launch directory as the harness encoded it into the path, where it does. */
+function projectFromPath(file: AgentSessionFile): string | undefined {
+  const parts = file.path.split(/[\\/]/);
+  if (file.harness === "claude" || file.harness === "pi") return parts.at(-2);
+  if (file.harness !== "grok") return undefined;
+  try {
+    return decodeURIComponent(parts.at(-3) ?? "");
+  } catch {
+    return parts.at(-3);
+  }
+}
+
+/**
+ * The directory the session ran in, which a resumed turn must start from: Grok
+ * encodes it in the path; the others record it as `cwd` near the top of the file.
+ */
+export async function agentSessionCwd(
+  host: AgentTranscriptHost,
+  file: AgentSessionFile,
+): Promise<string | undefined> {
+  if (file.harness === "grok") return projectFromPath(file);
+  const { bytes } = await host.readBytes(file.path, 0, 64 * 1024);
+  for (const line of bytes.toString("utf8", 0, bytes.lastIndexOf(0x0a) + 1).split("\n")) {
+    try {
+      const record = JSON.parse(line) as { cwd?: unknown; payload?: { cwd?: unknown } };
+      const cwd = record.cwd ?? record.payload?.cwd;
+      if (typeof cwd === "string" && cwd.length > 0) return cwd;
+    } catch {
+      // a torn or foreign line
+    }
+  }
+  return undefined;
+}
+
 function summarize(host: AgentTranscriptHost, file: AgentSessionFile): AgentSessionSummary {
   const sessionId = sessionIdFromPath(file);
-  const project = file.harness === "claude" ? file.path.split(/[\\/]/).at(-2) : undefined;
+  const project = projectFromPath(file);
   return {
     ref: `${host.id}:${sessionId}`,
     host: host.id,

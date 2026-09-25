@@ -42,7 +42,7 @@ export interface CaptainDeps {
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
   readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */
-  readonly agentSessions?: Pick<AgentSessions, "list" | "read">;
+  readonly agentSessions?: Pick<AgentSessions, "list" | "read" | "send" | "run" | "cancel" | "release">;
   /** Tools on his connected MCP servers. The lane is passed on every call. */
   readonly mcp: Pick<McpHost, "catalog" | "call">;
   readonly email: EmailPort;

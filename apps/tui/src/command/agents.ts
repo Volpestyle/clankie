@@ -4,6 +4,7 @@ import { commandHost } from "./io.ts";
 const AGENTS_USAGE =
   "Usage: clankie agents [list] [--host ID] [--limit N]\n" +
   "       clankie agents read HOST:SESSION [--tail N | --after CURSOR]\n" +
+  "       clankie agents send HOST:SESSION MESSAGE | runs [RUN] | cancel RUN | release RUN\n" +
   "       clankie agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID";
 
 /** Read `--flag value` pairs; anything else is a usage error. */
@@ -44,6 +45,18 @@ export async function runAgentsCommand(
     if (values.has("--tail")) query.set("tail", values.get("--tail")!);
     if (values.has("--after")) query.set("after", values.get("--after")!);
     path = `/v1/agent-sessions/read?${query}`;
+  } else if (verb === "send" && args[1] !== undefined && args.length > 2) {
+    path = "/v1/agent-sessions/send";
+    method = "POST";
+    body = JSON.stringify({ ref: args[1], message: args.slice(2).join(" ") });
+  } else if (verb === "runs" && args.length <= 2) {
+    path = `/v1/agent-sessions/runs${args[1] === undefined ? "" : `/${encodeURIComponent(args[1])}`}`;
+  } else if (verb === "cancel" && args[1] !== undefined && args.length === 2) {
+    path = `/v1/agent-sessions/runs/${encodeURIComponent(args[1])}`;
+    method = "DELETE";
+  } else if (verb === "release" && args[1] !== undefined && args.length === 2) {
+    path = `/v1/agent-sessions/runs/${encodeURIComponent(args[1])}/release`;
+    method = "POST";
   } else if (verb === "hosts" && args.length === 1) {
     path = "/v1/agent-hosts";
   } else if (verb === "hosts" && args[1] === "add" && args[2] !== undefined) {

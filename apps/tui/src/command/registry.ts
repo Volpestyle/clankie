@@ -26,8 +26,9 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["agents"],
     lines: [
       "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",
+      "  agents send HOST:SESSION MESSAGE | runs [RUN] | cancel RUN | release RUN",
       "  agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID",
-      "                           Read any Claude/Codex session here or on an SSH host (JSON)",
+      "                           Read or resume any Claude/Codex/Grok/Pi session, here or over SSH (JSON)",
     ],
   },
   {

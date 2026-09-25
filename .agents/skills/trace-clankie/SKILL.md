@@ -112,7 +112,7 @@ Following controls waking, not collection.
   Inside Herdr the console lists panes from `herdr pane list` as
   `[<agent> · herdr]` rows; outside Herdr an empty roster only means "no
   visibility" — check `herdr pane list` yourself. The roster is not the limit of
-  what can be read: `clankie agents` lists and reads any Claude/Codex session by
+  what can be read: `clankie agents` lists, reads and resumes any Claude/Codex/Grok/Pi session by
   its transcript, here or on a configured SSH host such as the PC, whatever
   terminal it runs in (ADR 0189). Only the 200 newest transcripts per host
   resolve by ref.

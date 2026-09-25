@@ -18,7 +18,7 @@ Reading, messaging and execution are separate connections: transcripts for
 reading, Swarm for messages, and Herdr or another launcher only for starting
 processes.
 
-A host exposes two primitives: list its Claude/Codex transcript files and return
+A host exposes two primitives: list its Claude, Codex, Grok and Pi transcript files and return
 a byte range of one. The local host uses the filesystem; an SSH host runs one
 POSIX or PowerShell command per call over the owner's SSH configuration, with
 nothing installed remotely. Reads are confined to the harnesses' transcript roots
@@ -49,8 +49,21 @@ flowchart LR
   current; two shell commands suffice.
 - Copying transcripts to the Mac: duplicates private history (ADR 0188).
 
+## Resumed turns (step 2)
+
+Clankie can also continue a Claude, Codex, Grok or Pi session by running that
+harness headless, resumed onto the saved history, over the same host connection.
+This is a new process, not delivery into an open tab, so it can fork a session a
+tab still holds. A one-minute quiet window and one turn per session reduce that
+risk without removing it. A run whose connection was lost is `unknown`, and keeps
+the session locked until an operator releases it. The turn gets the harness's
+default permissions; granting more is a later owner setting.
+
+This needs no Swarm enrollment and no install, so it reaches agents that were
+never set up for Clankie. Agents enrolled in Swarm are still messaged through
+Swarm.
+
 ## Not yet decided
 
-Binding a read session to its Swarm identity, and waking an idle Claude or Codex
-process with a Swarm message, need per-harness verification before Clankie can
-lead PC agents without Herdr.
+Binding a read session to its Swarm identity, and waking an idle enrolled Claude
+or Codex process with a Swarm message, need per-harness verification.

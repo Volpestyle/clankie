@@ -391,7 +391,9 @@ const swarm = new SwarmHost({
   },
   warn: (message) => logger.warn({ event: "swarm.unavailable" }, message),
 });
-const agentSessions = createAgentSessions(settingsStore);
+const agentSessions = createAgentSessions(settingsStore, undefined, {
+  runsPath: join(stateRoot, "agent-session-runs.json"),
+});
 const captain = createCaptain(
   {
     herdrAvailable: herdr.available,

@@ -681,9 +681,10 @@ retrying rather than assuming a disconnect completed.
 
 ### `agents [list]` / `agents read` / `agents hosts`
 
-Clankie reads any Claude Code or Codex session from the agent's own transcript,
-on this machine or an owner-configured SSH host. No terminal host is involved: a
-session in Herdr, tmux, or a bare PowerShell tab reads the same way
+Clankie reads and resumes any Claude Code, Codex, Grok or Pi session from the
+agent's own transcript, on this machine or an owner-configured SSH host. No
+terminal host is involved: a session in Herdr, tmux, or a bare PowerShell tab
+reads the same way
 ([ADR 0189](adr/0189-agent-sessions-read-from-their-transcripts.md)).
 
 ```sh
@@ -697,8 +698,8 @@ clankie agents hosts remove pc
 
 A remote host needs only sshd and its default shell; nothing is installed there.
 Authentication is the owner's SSH configuration (keys, `~/.ssh/config` aliases).
-Reads are confined to `~/.claude/projects` and `~/.codex/sessions` on that host
-and capped at 4 MiB per call. `local` is always present. Hosts are stored under
+Reads are confined to `~/.claude/projects`, `~/.codex/sessions`, `~/.grok/sessions`
+and `~/.pi/agent/sessions` on that host and capped at 4 MiB per call. `local` is always present. Hosts are stored under
 `agentHosts.connections` (up to 15).
 
 `list` reports `ref` (`host:sessionId`), harness, size and `modifiedAt`; a recent
@@ -712,11 +713,35 @@ was appended. A cursor is bound to its session; `reset: true` means the transcri
 was replaced and the page restarted from its tail, and `skippedBytes` means one
 record was too large for a single read and was stepped over.
 
+```sh
+clankie agents send pc:01a0da31 "Where did you leave the migration?"
+clankie agents runs RUN
+clankie agents read pc:01a0da31 --after CURSOR   # the reply
+clankie agents cancel RUN
+```
+
+`send` continues a session by starting a **new headless process** of its harness
+resumed onto the saved history, with the message on stdin or in a private
+prompt file rather than the command line, in the directory the transcript recorded. It is
+not delivered into a tab that has the session open: that tab does not see the turn
+and can later write its own branch. `send` refuses a session written in the last
+60 seconds, which lowers but does not remove that risk; use it on sessions that
+have gone quiet or that Clankie started. The turn gets the harness's default
+permissions, so it may decline tools that need approval.
+
+`send` returns at once with a `runId` and a `cursor`; read the reply with
+`--after` that cursor. One turn runs per session at a time. A run ends `finished`,
+`failed`, `aborted`, `timeout`, or `unknown`: the connection was lost, so the
+remote turn may still be running and the session stays locked until `cancel`
+releases it. Runs live in the service process and are forgotten on restart.
+
 `/agents` in the TUI takes the same arguments. The operator API is
 GET `/v1/agent-sessions?host=&limit=`, GET `/v1/agent-sessions/read?ref=&tail=|after=`,
-GET/POST `/v1/agent-hosts` and DELETE `/v1/agent-hosts/ID`. Clankie's own tools are
-`agent_sessions` and `agent_session_read`, available where he has machine access.
-Reading is not messaging: send to an agent through Swarm.
+GET/POST `/v1/agent-hosts`, DELETE `/v1/agent-hosts/ID`, POST `/v1/agent-sessions/send`
+`{ref, message}`, and GET/DELETE `/v1/agent-sessions/runs[/ID]`. Clankie's own tools
+are `agent_sessions`, `agent_session_read`, `agent_session_send` and
+`agent_session_run`, available where he has machine access. For agents enrolled in
+Swarm, message them through Swarm instead.
 
 ### `herdr [status|open|create]` / `herdr use NAME`
 

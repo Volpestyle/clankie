@@ -25,6 +25,11 @@ it("maps agents verbs onto the operator session and host routes", async () => {
     options,
   );
   await runAgentsCommand(["hosts", "remove", "pc"], options);
+  await runAgentsCommand(["send", "pc:01a0", "are", "you", "done?"], options);
+  await runAgentsCommand(["runs"], options);
+  await runAgentsCommand(["runs", "r1"], options);
+  await runAgentsCommand(["cancel", "r1"], options);
+  await runAgentsCommand(["release", "r1"], options);
   expect(calls).toEqual([
     { path: "/v1/agent-sessions", method: "GET" },
     { path: "/v1/agent-sessions?host=pc&limit=5", method: "GET" },
@@ -36,6 +41,15 @@ it("maps agents verbs onto the operator session and host routes", async () => {
       body: { id: "pc", ssh: "volpe@supedupsilly", shell: "powershell" },
     },
     { path: "/v1/agent-hosts/pc", method: "DELETE" },
+    {
+      path: "/v1/agent-sessions/send",
+      method: "POST",
+      body: { ref: "pc:01a0", message: "are you done?" },
+    },
+    { path: "/v1/agent-sessions/runs", method: "GET" },
+    { path: "/v1/agent-sessions/runs/r1", method: "GET" },
+    { path: "/v1/agent-sessions/runs/r1", method: "DELETE" },
+    { path: "/v1/agent-sessions/runs/r1/release", method: "POST" },
   ]);
 });
 
@@ -49,6 +63,8 @@ it("refuses malformed arguments before any request", async () => {
     ["hosts", "add", "pc"],
     ["list", "--bogus", "1"],
     ["list", "--host"],
+    ["send", "pc:01a0"],
+    ["cancel"],
   ])
     await expect(runAgentsCommand(args, { env: { CLANKIE_OPERATOR_TOKEN: "t" }, fetchImpl })).rejects.toThrow(
       /Usage: clankie agents/,
