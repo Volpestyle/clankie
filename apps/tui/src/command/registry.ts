@@ -23,6 +23,14 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["agents"],
+    lines: [
+      "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",
+      "  agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID",
+      "                           Read any Claude/Codex session here or on an SSH host (JSON)",
+    ],
+  },
+  {
     nouns: ["swarm"],
     lines: [
       "  swarm [status|connections] | connect PRIVATE.json | disconnect ID",

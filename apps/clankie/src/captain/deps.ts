@@ -1,3 +1,4 @@
+import type { AgentSessions } from "../agent-sessions.ts";
 import type { ExecutionConnections } from "../herdr-session.ts";
 import type {
   ActivityObservationRead,
@@ -40,6 +41,8 @@ export interface CaptainDeps {
   readonly herdrAvailable?: () => boolean;
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
   readonly rivals?: RivalsClient;
+  /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */
+  readonly agentSessions?: Pick<AgentSessions, "list" | "read">;
   /** Tools on his connected MCP servers. The lane is passed on every call. */
   readonly mcp: Pick<McpHost, "catalog" | "call">;
   readonly email: EmailPort;

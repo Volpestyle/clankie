@@ -15,6 +15,7 @@
     "comparison-check-loop": "tsx scripts/comparison-check-loop.ts"
   },
   "dependencies": {
+    "@clankie/agent-hosts": "workspace:*",
     "@clankie/agent-transcript": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/discord-presence-core": "workspace:*",

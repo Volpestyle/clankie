@@ -124,6 +124,11 @@ export function captainTools(
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     // A Discord room with a shell can start workers, so it watches and
     // harvests its own; its report belongs in the room that asked (ADR 0186).
+    // Another agent's transcript is the operator's machine, so it rides shell authority.
+    ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
+    deps.agentSessions !== undefined
+      ? agentSessionTools(deps.agentSessions)
+      : []),
     ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
     herdrWatches !== undefined
       ? herdrWatchTools(herdrWatches, turn, deps.herdrAvailable)
@@ -587,6 +592,58 @@ function hireAgentTool(hire: HireSeat, turn: TurnContext, available?: () => bool
       );
     },
   });
+}
+
+function agentSessionTools(sessions: NonNullable<CaptainDeps["agentSessions"]>): ToolDefinition[] {
+  return [
+    defineTool({
+      name: "agent_sessions",
+      label: "List agent sessions",
+      description:
+        "List Claude Code and Codex sessions by their own transcripts, on this machine and on the owner's " +
+        "configured SSH hosts (such as a Windows PC). Works for any session, whether it runs in Herdr, tmux, " +
+        "or a bare PowerShell tab. Newest first. A recent modifiedAt means recently active, not that the " +
+        "process is still running. Hosts that could not be reached are listed under errors.",
+      parameters: Type.Object({
+        host: Type.Optional(
+          Type.String({
+            minLength: 1,
+            maxLength: 64,
+            description: "One host id, such as local or pc. Omit for all.",
+          }),
+        ),
+        limit: Type.Optional(
+          Type.Integer({ minimum: 1, maximum: 100, description: "Per host; default 20." }),
+        ),
+      }),
+      execute: async (_id, params) => json(await sessions.list(params)),
+    }),
+    defineTool({
+      name: "agent_session_read",
+      label: "Read agent session",
+      description:
+        "Read an agent session's messages and tool calls from its transcript. Give tail for the latest entries, " +
+        "or pass the cursor from a previous read as after to get only what happened since. reset means the " +
+        "transcript was replaced and this page restarted from its tail. To talk to the agent, use Swarm, not this.",
+      parameters: Type.Object({
+        ref: Type.String({
+          minLength: 1,
+          maxLength: 200,
+          description: "host:sessionId from agent_sessions; a unique prefix of the id is enough.",
+        }),
+        tail: Type.Optional(
+          Type.Integer({ minimum: 1, maximum: 500, description: "Latest entries; default 50." }),
+        ),
+        after: Type.Optional(
+          Type.String({ minLength: 1, maxLength: 512, description: "Cursor from a previous read." }),
+        ),
+      }),
+      execute: async (_id, params) => {
+        const { ref, ...options } = params;
+        return json(await sessions.read(ref, options));
+      },
+    }),
+  ];
 }
 
 function herdrWatchTools(

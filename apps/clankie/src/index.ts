@@ -1,5 +1,6 @@
 import { SwarmHost } from "@clankie/swarm";
 import { WorkerMcp } from "./worker-mcp.ts";
+import { createAgentSessions } from "./agent-sessions.ts";
 /**
  * Composition root for the merged Clankie service: the surviving control-plane
  * surface plus its in-process capabilities (play host, browser,
@@ -390,9 +391,11 @@ const swarm = new SwarmHost({
   },
   warn: (message) => logger.warn({ event: "swarm.unavailable" }, message),
 });
+const agentSessions = createAgentSessions(settingsStore);
 const captain = createCaptain(
   {
     herdrAvailable: herdr.available,
+    agentSessions,
     runtimes,
     mcp: mcpHost,
     email,
@@ -544,6 +547,7 @@ const captain = createCaptain(
 );
 
 const clankie = await createClankieApp({
+  agentSessions,
   workerMcp: new WorkerMcp({
     directory: join(stateRoot, "worker-grants"),
     credentials: operatorCredentialStore,

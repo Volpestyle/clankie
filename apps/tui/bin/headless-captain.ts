@@ -1,6 +1,7 @@
 import { runRuntimeCommand } from "../src/command/runtime.ts";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 import { runSwarmCommand } from "../src/command/swarm.ts";
+import { runAgentsCommand } from "../src/command/agents.ts";
 import { runAccessCommand } from "../src/command/access.ts";
 import { runEvaluatorCommand } from "../src/command/evaluator.ts";
 import { runConversationsCommand } from "../src/command/conversations.ts";
@@ -172,6 +173,10 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "swarm") {
       outputJson(stdout, await runSwarmCommand(rest, options));
+      return 0;
+    }
+    if (command === "agents") {
+      outputJson(stdout, await runAgentsCommand(rest, options));
       return 0;
     }
     if (command === "access") {

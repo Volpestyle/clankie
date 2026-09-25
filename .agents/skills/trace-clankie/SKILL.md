@@ -111,7 +111,11 @@ Following controls waking, not collection.
   through the herdr CLI; there is no worker protocol reporting to the service.
   Inside Herdr the console lists panes from `herdr pane list` as
   `[<agent> · herdr]` rows; outside Herdr an empty roster only means "no
-  visibility" — check `herdr pane list` yourself.
+  visibility" — check `herdr pane list` yourself. The roster is not the limit of
+  what can be read: `clankie agents` lists and reads any Claude/Codex session by
+  its transcript, here or on a configured SSH host such as the PC, whatever
+  terminal it runs in (ADR 0189). Only the 200 newest transcripts per host
+  resolve by ref.
 - **A turn with no tree never answered.** Pi holds a session file back until the
   first assistant message, so a one-shot that timed out or failed before he
   replied leaves nothing under `turns/`. Absence is evidence; pair it with the

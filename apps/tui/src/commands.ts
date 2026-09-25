@@ -1,6 +1,7 @@
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
 import { runSwarmCommand } from "./command/swarm.ts";
+import { runAgentsCommand } from "./command/agents.ts";
 import { runAccessCommand } from "./command/access.ts";
 import { runEvaluatorCommand, formatEvaluatorStatus } from "./command/evaluator.ts";
 import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connection.ts";
@@ -206,6 +207,26 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         } catch (error) {
           shell.insertCommandResult(
             "/runtime",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
+      name: "agents",
+      aliases: [],
+      description: "List and read Claude/Codex sessions here or on SSH hosts",
+      takesArgument: true,
+      argumentHint:
+        "[list [--host ID]|read HOST:SESSION [--tail N]|hosts|hosts add ID --ssh TARGET [--shell powershell]|hosts remove ID]",
+      async run(argument, shell): Promise<void> {
+        try {
+          const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
+          shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/agents",
             error instanceof Error ? error.message : String(error),
             "error",
           );

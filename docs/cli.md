@@ -672,6 +672,45 @@ until deliberately upgraded/restarted; replacing a package does not upgrade a
 running owner. Configuration failures return an error: inspect inventory before
 retrying rather than assuming a disconnect completed.
 
+### `agents [list]` / `agents read` / `agents hosts`
+
+Clankie reads any Claude Code or Codex session from the agent's own transcript,
+on this machine or an owner-configured SSH host. No terminal host is involved: a
+session in Herdr, tmux, or a bare PowerShell tab reads the same way
+([ADR 0189](adr/0189-agent-sessions-read-from-their-transcripts.md)).
+
+```sh
+clankie agents hosts add pc --ssh volpe@supedupsilly --shell powershell
+clankie agents                          # every host, newest first
+clankie agents list --host pc --limit 5
+clankie agents read pc:01a0da31 --tail 20
+clankie agents read pc:01a0da31 --after CURSOR
+clankie agents hosts remove pc
+```
+
+A remote host needs only sshd and its default shell; nothing is installed there.
+Authentication is the owner's SSH configuration (keys, `~/.ssh/config` aliases).
+Reads are confined to `~/.claude/projects` and `~/.codex/sessions` on that host
+and capped at 4 MiB per call. `local` is always present. Hosts are stored under
+`agentHosts.connections` (up to 15).
+
+`list` reports `ref` (`host:sessionId`), harness, size and `modifiedAt`; a recent
+write means recently active, not that a process is running. `--limit` is 1–100
+per host (default 20). Hosts that fail are reported under `errors` instead of
+failing the listing. `read` takes a ref or any unique prefix of its session id,
+resolved among that host's 200 most recently written transcripts; older sessions
+are not reachable by ref. It returns normalized, redacted messages and
+tool calls plus an opaque `cursor`. Passing it back as `--after` returns only what
+was appended. A cursor is bound to its session; `reset: true` means the transcript
+was replaced and the page restarted from its tail, and `skippedBytes` means one
+record was too large for a single read and was stepped over.
+
+`/agents` in the TUI takes the same arguments. The operator API is
+GET `/v1/agent-sessions?host=&limit=`, GET `/v1/agent-sessions/read?ref=&tail=|after=`,
+GET/POST `/v1/agent-hosts` and DELETE `/v1/agent-hosts/ID`. Clankie's own tools are
+`agent_sessions` and `agent_session_read`, available where he has machine access.
+Reading is not messaging: send to an agent through Swarm.
+
 ### `herdr [status|open|create]` / `herdr use NAME`
 
 The TUI `/status` shows the active fleet binding and `/herdr` shows both the
