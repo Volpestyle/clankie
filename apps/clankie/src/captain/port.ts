@@ -73,7 +73,10 @@ export interface CaptainPort {
   evaluatorStatus(): EvaluatorStatus;
   evaluatorCommand(command: EvaluatorCommand): Promise<EvaluatorStatus>;
   /** One Discord text/voice message becomes one captain turn. */
-  submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult>;
+  submitDiscordTurn(
+    request: DiscordPresenceChannelTurnRequest,
+    authority?: { readonly verifiedOwner: boolean },
+  ): Promise<CaptainChannelTurnResult>;
   /**
    * One message from a guild channel a Clankie channel is projected onto
    * (ADR 0146). Answers whether this service took it: a channel projected here

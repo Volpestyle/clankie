@@ -1,3 +1,4 @@
+import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
 import { createModelKeyRoutes } from "./model-key-routes.ts";
 import type { ModelKeysPort } from "./model-keys.ts";
 import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
@@ -353,6 +354,7 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
+  discordIngress?: DiscordIngress;
   modelKeys?: ModelKeysPort;
   hostedPairing?: HostedPairing;
   onHostedPairing?: () => void;
@@ -640,6 +642,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ error: "device_authentication_required" }, 401);
   };
 
+  app.route("/", createDiscordIngressRoutes(dependencies.discordIngress));
   app.route(
     "/",
     createModelKeyRoutes(dependencies.modelKeys, async (request) => {

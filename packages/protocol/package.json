@@ -8,7 +8,9 @@
     "./gateway-encryption": "./src/gateway-encryption.ts",
     "./model-keys": "./src/model-keys.ts",
     "./wake": "./src/wake.ts",
-    "./app-telemetry": "./src/app-telemetry.ts"
+    "./app-telemetry": "./src/app-telemetry.ts",
+    "./discord-ingress": "./src/discord-ingress.ts",
+    "./discord-ingress-crypto": "./src/discord-ingress-crypto.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

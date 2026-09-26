@@ -1,3 +1,4 @@
+import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
@@ -636,7 +637,18 @@ const captain = createCaptain(
   },
 );
 
+const hostedDiscord =
+  hostedBody === undefined
+    ? undefined
+    : await createHostedDiscordIngress({
+        client: hostedBody,
+        store: operatorCredentialStore,
+        statePath: join(stateRoot, "discord-ingress.json"),
+        captain,
+        onWork: () => hostedHeartbeat?.interactive(),
+      });
 const clankie = await createClankieApp({
+  ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   modelKeys: createModelKeys({
     store: operatorCredentialStore,
     cwd: repoRoot,
@@ -802,6 +814,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
   server.close();
+  hostedDiscord?.close();
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await captain.close().catch(() => undefined);

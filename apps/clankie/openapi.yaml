@@ -41,6 +41,41 @@ tags:
 security: []
 
 paths:
+  /v1/discord/ingress:
+    post:
+      summary: Admit an encrypted, fleet-permitted addressed Discord turn
+      description: >-
+        Remote connection API, not an operator bearer. P-256 ECDH and AES-GCM
+        protect request and response; a 60-second Ed25519 fleet permit binds the
+        tenant, installation, event digest and ephemeral response recipient.
+        Durable delivery dedupe prevents repeated captain effects. See docs/discord-ingress.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, permit, ephemeralPublicKey, nonce, sealed]
+              properties:
+                version: { type: integer, enum: [1] }
+                permit: { type: string, maxLength: 4096 }
+                ephemeralPublicKey: { type: string, minLength: 87, maxLength: 87 }
+                nonce: { type: string, minLength: 22, maxLength: 22 }
+                sealed: { type: string, maxLength: 100000 }
+      responses:
+        "200":
+          description: Sealed pending, reply, silent or failed result
+        "401":
+          description: Invalid, expired, unsealed or wrongly scoped event
+        "409":
+          description: Delivery id already binds another event
+        "413":
+          description: Envelope exceeds the byte limit
+        "429":
+          description: Durable inbox is at capacity
+        "503":
+          description: Durable admission unavailable
   /v1/model-keys:
     get:
       tags: [Operator]

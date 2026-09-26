@@ -1,3 +1,4 @@
+import { DISCORD_INGRESS_PATH } from "@clankie/protocol/discord-ingress";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_IN_FLIGHT_MAX,
@@ -482,7 +483,9 @@ export class PublicGatewayConnector {
     const body = frame.bodyBase64 === undefined ? undefined : Buffer.from(frame.bodyBase64, "base64");
     try {
       const response =
-        frame.path === "/v1/hooks/linear" || frame.path === "/v1/hosted/pair-offer"
+        frame.path === "/v1/hooks/linear" ||
+        frame.path === "/v1/hosted/pair-offer" ||
+        frame.path === DISCORD_INGRESS_PATH
           ? await this.fetcher(new URL(frame.path, baseUrl), {
               method: frame.method,
               headers,

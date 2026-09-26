@@ -399,3 +399,16 @@ renewal and signs each request. `pairing_key_required` triggers one
 re-registration attempt. Persistent `body_signature_invalid` after three
 attempts indicates clock skew beyond five minutes or a pairing-key mismatch;
 inspect those conditions without exposing tokens, signatures or private keys.
+
+## Managed Discord connection
+
+Hosted Discord installation, channel permissions, status and disconnect belong
+to the fleet account page. The shared official bot token never belongs in this
+body's broker or bootstrap. Do not start a local official bridge with that token.
+Remote addressed text reaches the same Discord captain through the sealed
+`/v1/discord/ingress` connection API (`docs/discord-ingress.md`); it accepts neither
+an operator bearer nor arbitrary grants. Mentions, DMs, replies and commands
+can wake a sleeping body; other channel chatter is not replayed later. Without
+Message Content access, unmentioned follow-ups and ping-disabled replies may
+need a mention or DM. A failed delivery marked interrupted was admitted before
+a restart: inspect effects before explicitly retrying it.

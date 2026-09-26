@@ -324,7 +324,7 @@ export class HostedBodyClient {
     this.credential = credential;
   }
   async post(
-    path: "wake-keys" | "wake-keys/revoke" | "heartbeat",
+    path: "wake-keys" | "wake-keys/revoke" | "heartbeat" | "discord-key",
     body: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     const credential = await this.resolveHostToken();

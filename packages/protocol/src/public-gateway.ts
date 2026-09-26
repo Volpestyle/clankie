@@ -1,3 +1,4 @@
+import { DISCORD_INGRESS_PATH } from "./discord-ingress.ts";
 import {
   MODEL_KEYS_PATH,
   MODEL_KEY_SET_PATH,
@@ -34,6 +35,7 @@ export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
 export const HOSTED_PAIR_OFFER_PATH = "/v1/hosted/pair-offer";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  { method: "POST", path: DISCORD_INGRESS_PATH, target: "control" },
   { method: "GET", path: MODEL_KEYS_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_SET_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_VALIDATE_PATH, target: "control" },

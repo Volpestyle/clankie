@@ -1985,7 +1985,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ? { schemaVersion: 1 as const, state: "not_projected" as const }
         : { schemaVersion: 1 as const, state: "accepted" as const, ...accepted };
     },
-    async submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult> {
+    async submitDiscordTurn(
+      request: DiscordPresenceChannelTurnRequest,
+      authority?: { readonly verifiedOwner: boolean },
+    ): Promise<CaptainChannelTurnResult> {
       const { settings: discord } = resolveDiscordSettings(
         (await settings()).discord,
         options.discordEnvironment,
@@ -1997,7 +2000,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
         channelId: request.trigger.channelId,
         transportKind: request.identity.transportKind,
-        settings: discord,
+        settings:
+          authority?.verifiedOwner === true
+            ? { ...discord, systemActorUserIds: [...discord.systemActorUserIds, request.trigger.actorId] }
+            : discord,
       });
       // Whether this exact authority lane is already live decides what he needs
       // to be told. A one-shot never owns history, even when the social lane in
