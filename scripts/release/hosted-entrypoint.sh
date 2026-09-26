@@ -1,9 +1,10 @@
 #!/bin/sh
 set -eu
 umask 077
-# Only the default captain command initializes an absent workdir preference.
-# CLI/relay overrides must not rewrite owner configuration.
-if [ "$#" -eq 2 ] && [ "$2" = /opt/clankie/apps/clankie/src/index.js ]; then
+# Only the default captain command and the whole-body command initialize an
+# absent workdir preference. CLI/relay overrides must not rewrite owner configuration.
+if { [ "$#" -eq 2 ] && [ "$2" = /opt/clankie/apps/clankie/src/index.js ]; } ||
+  { [ "$#" -eq 1 ] && [ "$1" = clankie-body ]; }; then
   workdir=$(clankie workdir status)
   configured=$(printf '%s' "$workdir" | node -pe 'JSON.parse(require("node:fs").readFileSync(0,"utf8")).workingDirectory !== null')
   if [ "$configured" = false ]; then

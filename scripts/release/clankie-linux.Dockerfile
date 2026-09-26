@@ -20,6 +20,7 @@ RUN apt-get update \
 RUN npm install --global @anthropic-ai/claude-code@2.1.281 && npm cache clean --force
 COPY --from=build /clankie/dist/hosted /opt/clankie
 COPY --chmod=755 scripts/release/hosted-entrypoint.sh /usr/local/bin/clankie-hosted
+COPY --chmod=755 scripts/release/hosted-body.sh /usr/local/bin/clankie-body
 RUN printf '#!/bin/sh\nexec node /opt/clankie/apps/tui/bin/clankie.js "$@"\n' > /usr/local/bin/clankie \
  && chmod 755 /usr/local/bin/clankie \
  && mkdir -p /state/home /state/config /state/runtime /workspace \
@@ -36,6 +37,7 @@ ENV HOME=/state/home \
     CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE=/opt/clankie/apps/discord-user-session/src/presence-runtime-module.js \
     CLANKIE_BROWSER_ENABLED=false \
     CLANKIE_TLDRAW_ENABLED=false \
+    CLANKIE_SERVICES=clankie,relay \
     DISABLE_AUTOUPDATER=1
 ENV PATH=/opt/clankie/libexec:$PATH
 USER node

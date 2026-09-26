@@ -679,6 +679,53 @@ describe("service targets", () => {
     expect(outcomes).toEqual([expect.objectContaining({ id: candidate.outcome, ok: true })]);
   });
 
+  it("starts only the loadout and stops a leftover outside it", async () => {
+    // A hosted body runs `clankie,relay`: the Discord bridge that `restart
+    // clankie` otherwise carries has nothing to talk to and keeps the body awake.
+    const env = { ...(await stateEnv()), CLANKIE_SERVICES: "clankie, relay" };
+    await writeRecord(env, "discord-bridge", 9_701);
+    const alive = new Set([9_701]);
+    const order: string[] = [];
+    const started = new Set<string>();
+    let nextPid = 9_702;
+
+    const outcomes = await restartTarget("clankie", {
+      repoRoot: "/repo",
+      env,
+      processIsAliveImpl: (pid) => alive.has(pid),
+      readProcessCommandImpl: () => "pnpm --filter @clankie/discord-bridge start",
+      listPortOwnersImpl: () => [],
+      killImpl: (pid) => {
+        order.push(`stop:${String(pid)}`);
+        alive.delete(pid);
+      },
+      listProcessCommandsImpl: noProcesses,
+      fetchImpl: (async (input: unknown) =>
+        started.has(String(input).includes(":4321/") ? "@clankie/relay" : "@clankie/clankie")
+          ? Response.json({ ok: true })
+          : Promise.reject(new Error("connection refused"))) as typeof fetch,
+      spawnImpl: ((_command: string, args: string[]) => {
+        started.add(args[1] ?? "unknown");
+        order.push(`start:${args[1] ?? "unknown"}`);
+        const pid = nextPid++;
+        alive.add(pid);
+        return runningChild(pid);
+      }) as unknown as typeof spawn,
+    });
+
+    expect(order).toEqual(["stop:9701", "start:@clankie/clankie", "start:@clankie/relay"]);
+    expect(outcomes.map((outcome) => outcome.id)).toEqual(["clankie", "relay"]);
+    expect(managedService("activity").enabled?.(env)).toBe(false);
+    expect(managedService("discord-bridge").enabled?.({})).toBe(true);
+    const status = await inspectService(managedService("discord-bridge"), {
+      repoRoot: "/repo",
+      env,
+      listProcessCommandsImpl: noProcesses,
+      fetchImpl: (async () => Promise.reject(new Error("unused"))) as typeof fetch,
+    });
+    expect(status).toMatchObject({ state: "healthy", detail: "off in this loadout" });
+  });
+
   it("leaves both Discord bodies stopped and reports a selected-body EADDRINUSE failure", async () => {
     const env = {
       ...(await stateEnv()),

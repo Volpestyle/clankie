@@ -465,13 +465,39 @@ const TUNNEL: ManagedService = {
   },
 };
 
+/**
+ * A deployment's service loadout: a comma-separated list of service ids. Unset,
+ * every service runs as its own configuration says. Set — a hosted body runs
+ * `clankie,relay` — a service outside the list is never spawned, is stopped if
+ * a leftover is running, and reports itself off rather than unreachable. Image
+ * policy, not a preference: settings cannot widen it.
+ */
+const SERVICE_LOADOUT_ENV = "CLANKIE_SERVICES";
+
+function inLoadout(id: ServiceId, env: NodeJS.ProcessEnv): boolean {
+  const raw = env[SERVICE_LOADOUT_ENV]?.trim();
+  if (raw === undefined || raw.length === 0) return true;
+  return raw.split(",").some((entry) => entry.trim() === id);
+}
+
+function withLoadout(service: ManagedService): ManagedService {
+  return {
+    ...service,
+    enabled: (env) => inLoadout(service.id, env) && (service.enabled?.(env) ?? true),
+    probe: async (input) =>
+      inLoadout(service.id, input.env)
+        ? await service.probe(input)
+        : { state: "healthy", detail: "off in this loadout" },
+  };
+}
+
 const SERVICES: Readonly<Record<ServiceId, ManagedService>> = {
-  clankie: CLANKIE,
-  relay: RELAY,
-  "discord-bridge": DISCORD_BRIDGE,
-  "discord-user-session": DISCORD_USER_SESSION,
-  activity: ACTIVITY,
-  tunnel: TUNNEL,
+  clankie: withLoadout(CLANKIE),
+  relay: withLoadout(RELAY),
+  "discord-bridge": withLoadout(DISCORD_BRIDGE),
+  "discord-user-session": withLoadout(DISCORD_USER_SESSION),
+  activity: withLoadout(ACTIVITY),
+  tunnel: withLoadout(TUNNEL),
 };
 
 export function managedService(id: ServiceId): ManagedService {

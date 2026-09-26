@@ -73,6 +73,22 @@ docker compose -p my-clankie -f infra/hosted/compose.yaml restart
 docker compose -p my-clankie -f infra/hosted/compose.yaml down
 ```
 
+A VM that runs one owner's body without Compose can run the whole stack in one
+container under the launcher, which starts Clankie and its relay and keeps
+them healthy:
+
+```sh
+docker run -d --init --name clankie --cap-drop ALL --security-opt no-new-privileges \
+  -v clankie-state:/state -v clankie-workspace:/workspace clankie-hosted:local clankie-body
+```
+
+`--init` is required: the launcher's services are reparented to PID 1, which
+must reap them. `docker stop` runs `clankie down`, so every service settles
+before the container exits. The image's `CLANKIE_SERVICES=clankie,relay` is its
+loadout: the launcher never starts Discord bodies, the activity surface or its
+tunnel, which would keep a body busy without a paired device asking for
+anything. Set it to another comma-separated list of service ids to widen it.
+
 `down` preserves named volumes; adding `--volumes` destroys that owner's stored
 work and credentials. Upgrade with `up -d --build --wait`. Back up both volumes
 with the deployment stopped. Replacing a container ends its live processes;
