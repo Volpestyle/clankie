@@ -78,6 +78,33 @@ describe("loadBundledCatalog", () => {
     expect(opus.limit.context).toBeGreaterThan(0);
     expect(opus.reasoning).toBe(true);
   });
+
+  // The hosted default model (VUH-1371). Prices per 1M tokens, checked
+  // 2026-09-26 against https://developers.openai.com/api/docs/pricing and
+  // https://developers.openai.com/api/docs/models/gpt-6-luna: prompts over 272K
+  // input tokens pay 2x input and cache rates and 1.5x output.
+  it("ships gpt-6-luna at OpenAI's published prices", () => {
+    const luna = must(loadBundledCatalog()["openai"]?.models["gpt-6-luna"], "gpt-6-luna");
+    expect(luna.cost).toMatchObject({
+      input: 0.1,
+      cache_read: 0.01,
+      cache_write: 0.125,
+      output: 0.5,
+      tiers: [
+        {
+          input: 0.2,
+          cache_read: 0.02,
+          cache_write: 0.25,
+          output: 0.75,
+          tier: { type: "context", size: 272_000 },
+        },
+      ],
+    });
+    expect(luna.limit).toMatchObject({ context: 1_050_000, output: 128_000 });
+    expect(luna.reasoning_options).toEqual([
+      { type: "effort", values: ["none", "low", "medium", "high", "xhigh", "max"] },
+    ]);
+  });
 });
 
 describe("createModelRegistry", () => {

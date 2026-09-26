@@ -32,3 +32,10 @@ curl https://models.dev/api.json > packages/model-registry/data/models-dev-snaps
 ```
 
 Run that command from the repository root.
+
+The vendored snapshot predates some current models. `openai/gpt-6-luna`, the
+hosted default, was added by hand on 2026-09-26 from models.dev's entry, with
+prices checked against [OpenAI's pricing page](https://developers.openai.com/api/docs/pricing):
+$0.10 input, $0.01 cached input, $0.125 cache write and $0.50 output per 1M
+tokens, with 2x input/cache and 1.5x output above 272K input tokens. A full
+re-vendor supersedes it.
