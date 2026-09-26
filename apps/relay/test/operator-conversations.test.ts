@@ -239,6 +239,54 @@ describe("authenticated operator conversation relay", () => {
     expect(dispatches).toBe(1);
   });
 
+  it("revalidates live grants after admission before dispatch", async () => {
+    let calls = 0;
+    const dispatch = vi.fn();
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, chat: ++calls === 1 } },
+        }),
+      },
+      dispatch,
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", { op: "list", schemaVersion: 1 });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "chat_grant_required" });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each(["dispatch", "download"])(
+    "revalidates after a pending %s before returning private data",
+    async (kind) => {
+      let revoked = false;
+      const relay = await startRelay({
+        authorizeDevice: {
+          authorize: async () =>
+            revoked ? { authorized: false, denial: "revoked" } : { authorized: true, device: activeDevice },
+        },
+        dispatch: async () => {
+          revoked = true;
+          return { op: "list", schemaVersion: 1, conversations: [conversation] };
+        },
+        downloadFile: async () => {
+          revoked = true;
+          return new Response("private bytes");
+        },
+      });
+      const response = await post(
+        relay.url,
+        kind === "dispatch" ? "/operator/v1/dispatch" : OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
+        kind === "dispatch"
+          ? { op: "list", schemaVersion: 1 }
+          : { schemaVersion: 1, conversationId: "global-default", artifactId: "file-1" },
+      );
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "revoked" });
+    },
+  );
+
   it("requires the current chat grant", async () => {
     const relay = await startRelay({
       authorizeDevice: {
@@ -711,7 +759,7 @@ describe("Eve NDJSON replay/tail", () => {
       authorizeDevice: {
         authorize: async () => {
           authCalls += 1;
-          return authCalls === 1
+          return authCalls <= 2
             ? { authorized: true, device: activeDevice }
             : { authorized: false, denial: "revoked" };
         },
@@ -727,7 +775,7 @@ describe("Eve NDJSON replay/tail", () => {
     expect(parseNdjson(await response.text())).toEqual([
       { kind: "auth_failure", failure: { schemaVersion: 1, outcome: "auth_failed", reason: "revoked" } },
     ]);
-    expect(authCalls).toBe(2);
+    expect(authCalls).toBe(3);
     expect(dispatches).toBe(1);
   });
 
@@ -840,7 +888,7 @@ describe("native terminal NDJSON tail", () => {
             authorized: true,
             device: {
               ...activeDevice,
-              grants: { ...activeDevice.grants, terminalObserve: authCalls === 1 },
+              grants: { ...activeDevice.grants, terminalObserve: authCalls <= 2 },
             },
           };
         },
@@ -861,7 +909,7 @@ describe("native terminal NDJSON tail", () => {
         },
       },
     ]);
-    expect(authCalls).toBe(2);
+    expect(authCalls).toBe(3);
   });
 
   it("gates terminal_control and terminal_input on the terminalControl grant (ADR 0144)", async () => {

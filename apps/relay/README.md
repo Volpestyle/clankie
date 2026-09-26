@@ -35,10 +35,14 @@ The HTTP surface composes the strict `@clankie/protocol` operator service contra
 - `POST /operator/v1/tail` accepts the same strict `tail` request and emits newline-delimited `{ kind: "event", event }`, `{ kind: "recovery", recovery }`, or terminal `{ kind: "auth_failure", failure }` frames.
 - `POST /operator/v1/terminal-tail` accepts a strict `terminal_tail` request and emits bounded native-consumable ANSI `frame`, `reset`, `unavailable`, or `auth_failure` items.
 
-The relay checks the current device record and `chat` grant against the clankie
-service on every request, between tail polls, and immediately before emitting a
-tail page. Expiry, revocation, and grant removal therefore take effect without a
-reconnect. It uses its own captain service credential for the upstream hop;
+The relay verifies the ordinary device bearer and current operation grant against
+`GET /v1/devices/self` after reading each request and before dispatch, between tail
+polls, and before returning upstream results, file bytes, or tail pages. It also
+rejects an invalid bearer before reading the request. Authorization from before a
+sleep or a control-plane restart is never reused to admit a delayed request or
+release a pending result. If verification is unavailable, traffic fails closed;
+a valid device can reconnect once control has replayed its durable device records.
+Expiry, revocation, and grant removal therefore take effect without a reconnect. It uses its own captain service credential for the upstream hop;
 device credentials never cross it.
 
 The `connections` operation requires `steer` for inventory and mutations. It

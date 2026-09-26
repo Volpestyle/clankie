@@ -90,6 +90,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         writeJson(response, 400, { error: "invalid_artifact_request" });
         return true;
       }
+      if (!(await authorizeGrant(options, token, response, "chat"))) return true;
       try {
         if (options.downloadFile === undefined) throw new Error("artifact upstream unavailable");
         const upstream = await options.downloadFile(parsed.data);
@@ -103,6 +104,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           writeJson(response, 502, { error: "artifact_upstream_too_large" });
           return true;
         }
+        if (!(await authorizeGrant(options, token, response, "chat"))) return true;
         response.statusCode = upstream.status;
         for (const header of [
           "cache-control",
@@ -157,10 +159,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               // chat-only device never enumerates the owner's server.
               "steer"
             : "chat";
-    if (!authorization.device.grants[grant]) {
-      writeGrantDenial(response, grant);
-      return true;
-    }
+    // Reading a request may span sleep or a control-plane restart. Admission
+    // before that await is not authority to dispatch after it.
+    const currentAuthorization = await authorizeGrant(options, token, response, grant);
+    if (currentAuthorization === undefined) return true;
     if (path === OPERATOR_CONVERSATION_TAIL_PATH) {
       if (serviceRequest.op !== "tail") {
         writeJson(response, 400, { error: "tail_request_required" });
@@ -170,7 +172,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         response,
         request: serviceRequest,
         token,
-        initialAuthorization: authorization,
+        initialAuthorization: currentAuthorization,
         options,
         logger,
       });
@@ -185,7 +187,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         response,
         request: serviceRequest,
         token,
-        initialAuthorization: authorization,
+        initialAuthorization: currentAuthorization,
         options,
         logger,
       });
@@ -199,10 +201,13 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     try {
       const result =
         serviceRequest.op === "send"
-          ? await idempotency.run(authorization.device.deviceId, serviceRequest, () =>
+          ? await idempotency.run(currentAuthorization.device.deviceId, serviceRequest, () =>
               options.dispatch(serviceRequest),
             )
           : await options.dispatch(serviceRequest);
+      // A pending upstream request can also span a wake. Do not release its
+      // result (including a retained idempotent result) to a revoked device.
+      if (!(await authorizeGrant(options, token, response, grant))) return true;
       const publicResult = publicServiceResult(result);
       writeJson(response, 200, publicResult);
       logger.info(logFields(authorization, serviceRequest, 200, publicResult), "conversation relay request");
@@ -212,6 +217,25 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     }
     return true;
   };
+}
+
+/** Recheck both the ordinary bearer and live operation grant; never cache either. */
+async function authorizeGrant(
+  options: OperatorConversationRelayOptions,
+  token: string,
+  response: ServerResponse,
+  grant: "chat" | "steer" | "terminalObserve" | "terminalControl",
+): Promise<Extract<RelayDeviceAuthorization, { authorized: true }> | undefined> {
+  const authorization = await options.authorizeDevice.authorize(token);
+  if (!authorization.authorized) {
+    writeAuthDenial(response, authorization.denial);
+    return undefined;
+  }
+  if (!authorization.device.grants[grant]) {
+    writeGrantDenial(response, grant);
+    return undefined;
+  }
+  return authorization;
 }
 
 interface StreamTailInput {
