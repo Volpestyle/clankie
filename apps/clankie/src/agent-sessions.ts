@@ -184,6 +184,7 @@ export function createAgentSessions(
           `Could not record the end of this run (${error instanceof Error ? error.message : String(error)}); ${run.output ?? ""}`,
         ).slice(-OUTPUT_TAIL),
       });
+      options.onWorkingChanged?.([...runs.values()].some((item) => item.state === "running"));
     }
   };
   const assertIdle = (ref: string) => {

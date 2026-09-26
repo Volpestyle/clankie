@@ -20,6 +20,7 @@ const BootstrapSchema = z
     accountId: z.string().min(1).max(128),
     installationId: PublicGatewayInstallationIdSchema,
     fleetVerifyKeysJson: z.string().min(1).max(4096),
+    pairingKeyRegistrationToken: z.string().min(1).max(2048).optional(),
   })
   .strict();
 export type HostedBodyBootstrap = z.infer<typeof BootstrapSchema>;
@@ -84,7 +85,13 @@ const ClaimsBase = {
   exp: z.number().int().positive(),
 };
 const PairClaimsSchema = z
-  .object({ ...ClaimsBase, aud: z.literal("clankie-body"), jti: z.string().regex(/^[A-Za-z0-9_-]{22}$/u) })
+  .object({
+    ...ClaimsBase,
+    aud: z.literal("clankie-body"),
+    jti: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
+    bkh: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
+    non: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
+  })
   .strict();
 const HostClaimsSchema = z
   .object({
@@ -148,8 +155,14 @@ export class HostedBodyClient {
     return { token, expiresAt, refreshAt: (claims.iat + (claims.exp - claims.iat) / 2) * 1000 - 1000 };
   }
 
-  verifyPairTicket(ticket: string) {
+  verifyPairTicket(ticket: string, browserPublicKey: string, nonce: string) {
     const claims = PairClaimsSchema.parse(signedClaims(ticket, "clankie-pair", this.keys));
+    if (
+      claims.bkh !==
+        createHash("sha256").update(Buffer.from(browserPublicKey, "base64url")).digest("base64url") ||
+      claims.non !== nonce
+    )
+      throw new Error("Pair ticket binds another browser");
     const now = Math.floor(this.clock() / 1000);
     if (
       claims.tid !== this.bootstrap.tenantId ||
@@ -174,6 +187,12 @@ export class HostedBodyClient {
     return this.credential;
   }
 
+  reject(): void {
+    if (this.denied) return;
+    this.denied = true;
+    this.onDenied?.();
+  }
+
   private async request(path: string, body: unknown, token: string): Promise<Response> {
     if (this.denied) throw new HostedBodyDeniedError();
     const response = await this.fetcher(new URL(`/fleet/v1/body/${path}`, this.bootstrap.gatewayOrigin), {
@@ -184,8 +203,7 @@ export class HostedBodyClient {
       redirect: "error",
     });
     if (response.status === 403) {
-      this.denied = true;
-      this.onDenied?.();
+      this.reject();
       throw new HostedBodyDeniedError();
     }
     if (!response.ok) throw new Error(`Fleet request failed (${response.status})`);
@@ -203,7 +221,7 @@ export class HostedBodyClient {
     this.credential = credential;
   }
   async post(
-    path: "wake-keys" | "wake-keys/revoke" | "heartbeat",
+    path: "wake-keys" | "wake-keys/revoke" | "heartbeat" | "pairing-key",
     body: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     const credential = await this.resolveHostToken();

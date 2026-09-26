@@ -42,6 +42,8 @@ export interface PublicGatewayConnectorOptions {
   readonly encryptionKey?: Uint8Array;
   /** Authenticated customer work observed after decrypting and dispatching. */
   readonly onCustomerWork?: () => void;
+  /** Managed bodies stop after a forbidden host upgrade as well as a failed renewal. */
+  readonly onHostRejected?: () => void;
   readonly installationId?: string;
   readonly resolveHostToken?: () => Promise<{
     readonly token: string;
@@ -119,6 +121,7 @@ export class PublicGatewayConnector {
   private readonly reconnectMinimumMs: number;
   private readonly reconnectMaximumMs: number;
   private readonly onDoorwayChange: ((change: PublicGatewayDoorwayChange) => void) | undefined;
+  private readonly onHostRejected: (() => void) | undefined;
   private lastCloseCode: number | undefined;
   private readonly pairingRoutes = new Map<string, PublicGatewayPairingRouteFrame>();
   private readonly inFlight = new Map<string, AbortController>();
@@ -159,6 +162,7 @@ export class PublicGatewayConnector {
     this.reconnectMinimumMs = options.reconnectMinimumMs ?? RECONNECT_MIN_MS;
     this.reconnectMaximumMs = options.reconnectMaximumMs ?? RECONNECT_MAX_MS;
     this.onDoorwayChange = options.onDoorwayChange;
+    this.onHostRejected = options.onHostRejected;
     this.reconnectDelayMs = this.reconnectMinimumMs;
     this.hostBaseUrl = new URL(`/h/${this.hostId}`, gatewayOrigin).toString().replace(/\/$/u, "");
     const connect = new URL(PUBLIC_GATEWAY_HOST_CONNECT_PATH, gatewayOrigin);
@@ -336,6 +340,16 @@ export class PublicGatewayConnector {
       maxPayload: WEBSOCKET_PAYLOAD_BYTES_MAX,
     });
     this.socket = socket;
+    if (this.onHostRejected !== undefined)
+      socket.once("unexpected-response", (_request, response) => {
+        response.resume();
+        if (response.statusCode === 403) {
+          this.signInRequiredSince ??= new Date().toISOString();
+          this.close();
+          this.onHostRejected?.();
+          this.onDoorwayChange?.({ state: "sign_in_required" });
+        } else socket.terminate();
+      });
     socket.once("open", () => {
       if (this.socket !== socket) return;
       this.reconnectDelayMs = this.reconnectMinimumMs;

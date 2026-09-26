@@ -1877,6 +1877,51 @@ paths:
         "200":
           description: Self row
 
+  /v1/hosted/pair-offer:
+    post:
+      tags: [Pairing]
+      operationId: hostedPairOffer
+      summary: Mint an authenticated encrypted offer for the hosted account page
+      description: |
+        Managed bodies only. Plain gateway exchange carrying a single-use signed
+        fleet ticket, not an account bearer. Version 2 binds the browser P-256
+        public-key hash and nonce into the ticket. The body signs the encrypted
+        answer with its fleet-registered Ed25519 key. Replay refusal and the
+        five-per-minute rate limit survive a service restart. See the hosted
+        deployment README for the exact transcript and key derivation.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, pairTicket, browserPublicKey, nonce]
+              properties:
+                version:
+                  const: 2
+                pairTicket:
+                  type: string
+                  maxLength: 4096
+                browserPublicKey:
+                  type: string
+                  pattern: "^[A-Za-z0-9_-]{87}$"
+                nonce:
+                  type: string
+                  pattern: "^[A-Za-z0-9_-]{22}$"
+      responses:
+        "200":
+          description: Signed encrypted offer, with no plaintext link
+        "401":
+          description: Invalid, expired, misbound, or consumed ticket
+        "404":
+          description: Self-hosted body
+        "429":
+          description: Too many offers; Retry-After is 60 seconds
+        "503":
+          description: Pairing publication or replay persistence unavailable
+
   /v1/devices/wake-key:
     post:
       tags: [Devices]

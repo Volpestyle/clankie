@@ -1,3 +1,4 @@
+import { createHostedPairing } from "./hosted-pairing.ts";
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { watchHostedHerdrWork } from "./hosted-work.ts";
 import { SwarmHost } from "@clankie/swarm";
@@ -169,6 +170,7 @@ if (hostedBody !== undefined) {
     gatewayUrl: hostedBody.bootstrap.gatewayOrigin,
     hostId: hostedBody.hostId,
     onCustomerWork: () => hostedHeartbeat?.interactive(),
+    onHostRejected: () => hostedBody.reject(),
     installationId: hostedBody.bootstrap.installationId,
     resolveHostToken: () => hostedBody.resolveHostToken(),
     tokenErrorIsTerminal: (error) => error instanceof HostedBodyDeniedError,
@@ -622,7 +624,18 @@ const captain = createCaptain(
   },
 );
 
+const hostedPairing =
+  hostedBody === undefined
+    ? undefined
+    : await createHostedPairing(
+        hostedBody,
+        operatorCredentialStore,
+        join(stateRoot, "hosted-pair-tickets.json"),
+      );
 const clankie = await createClankieApp({
+  ...(hostedPairing === undefined
+    ? {}
+    : { hostedPairing, onHostedPairing: () => hostedHeartbeat?.interactive() }),
   ...(hostedBody === undefined
     ? {}
     : {

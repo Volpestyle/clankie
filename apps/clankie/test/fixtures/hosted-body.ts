@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, createECDH, randomBytes, generateKeyPairSync, sign } from "node:crypto";
 import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 export function hostedFixture() {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -28,10 +28,20 @@ export function hostedFixture() {
       iat,
       exp: iat + 21600,
     });
+  const browserPublicKey = createECDH("prime256v1").generateKeys().toString("base64url");
+  const nonce = randomBytes(16).toString("base64url");
   const pair = (claims: Record<string, unknown> = {}) =>
-    token("clankie-pair", { aud: "clankie-body", jti: "j".repeat(22), exp: now / 1000 + 120, ...claims });
+    token("clankie-pair", {
+      aud: "clankie-body",
+      jti: "j".repeat(22),
+      bkh: createHash("sha256").update(Buffer.from(browserPublicKey, "base64url")).digest("base64url"),
+      non: nonce,
+      exp: now / 1000 + 120,
+      ...claims,
+    });
   const bootstrap = {
     hostCredential: host(),
+    pairingKeyRegistrationToken: "bootstrap-only-registration-token",
     credentialExpiresAtMs: now + 21600000,
     gatewayOrigin: "https://api.example.test",
     accountId,
@@ -41,5 +51,5 @@ export function hostedFixture() {
       keys: [{ publicKeyPem: publicKey.export({ type: "spki", format: "pem" }) }],
     }),
   };
-  return { now, bootstrap, host, pair, hostId };
+  return { now, bootstrap, host, pair, hostId, browserPublicKey, nonce };
 }

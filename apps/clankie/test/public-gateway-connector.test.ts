@@ -295,6 +295,35 @@ describe("public gateway Mac connector", () => {
     expect(connector.doorway).toMatchObject({ state: "sign_in_required" });
   });
 
+  it("parks a managed connector when the gateway rejects its host upgrade", async () => {
+    let attempts = 0,
+      rejections = 0;
+    const gateway = await listen(
+      createServer((_request, response) => {
+        attempts++;
+        response.writeHead(403).end();
+      }),
+    );
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway,
+      hostId,
+      hostToken,
+      controlPlaneUrl: gateway,
+      relayUrl: gateway,
+      reconnectMinimumMs: 1,
+      reconnectMaximumMs: 2,
+      onHostRejected: () => {
+        rejections++;
+      },
+    });
+    connectors.push(connector);
+    connector.start();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(rejections).toBe(1);
+    expect(attempts).toBe(1);
+    expect(connector.doorway).toMatchObject({ state: "sign_in_required" });
+  });
+
   it("keeps retrying a token failure that might clear on its own", async () => {
     const target = await listen(createServer((_request, response) => response.end("{}")));
     const gateway = await fakeGateway();

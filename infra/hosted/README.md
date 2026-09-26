@@ -134,6 +134,7 @@ layers, user data, command arguments or logs. Its exact fields are:
 ```json
 {
   "hostCredential": "<fleet-signed Ed25519 host credential>",
+  "pairingKeyRegistrationToken": "<single-use fleet registration token>",
   "credentialExpiresAtMs": 1790021600000,
   "gatewayOrigin": "https://api.clankie.bot",
   "tenantId": "tn_<20 lowercase base32 characters>",
@@ -194,3 +195,32 @@ fleet reads and token refresh do not. Reports go out on changes, each minute
 while busy, and every five minutes while idle. The fleet remains responsible for
 sleep and budget enforcement; the service records its returned desired state and
 uses the ordinary graceful shutdown when the instance stops.
+
+## Managed web pairing
+
+The body keeps an Ed25519 pairing signing key in the volume-backed credential
+broker and registers its public half directly over HTTPS with
+`POST /fleet/v1/body/pairing-key` at service startup. The first registration or
+a key replacement requires the bootstrap’s `pairingKeyRegistrationToken`;
+confirmation of the same persisted key requires only the current host credential.
+A provisioned boot delivers a fresh registration token; it is optional on a
+service restart that retains the same key. It never enters the gateway socket,
+logs, or an offer response.
+
+`POST /v1/hosted/pair-offer` accepts only protocol v2:
+`{ version: 2, pairTicket, browserPublicKey, nonce }`. The body verifies the
+fleet’s Ed25519 signature, audience, tenant, host, lifetime, browser public-key
+hash (`bkh`) and nonce (`non`). Ticket consumption and the five-per-minute mint
+limit persist across service restarts. Ordinary ADR 0173 pairing offers remain
+single-use and short-lived.
+
+The response is `{ version: 2, ephemeralPublicKey, iv, ciphertext, signature }`.
+ECDH P-256 and HKDF-SHA256 derive the AES-256-GCM key using the decoded nonce as
+salt and `clankie-hosted-pair-v2\n<hostId>` as info and additional data. The
+plaintext is `{ link, expiresAtMs }`. The Ed25519 signature covers the newline
+join of the domain, host id, ticket `jti`, browser public key, nonce, ephemeral
+public key, IV and ciphertext. The account page obtains the body’s public
+signing key directly from the fleet and verifies the signature before decrypting.
+This prevents an active gateway relay from substituting either party’s key.
+It does not protect against compromise of the fleet or the origin serving the
+account page. No ticket, link or private key is logged.

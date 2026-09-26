@@ -313,7 +313,12 @@ describe("agent session send", () => {
   const piText = `${JSON.stringify({ type: "session", id: "01a0d5af", cwd: "/home/v/game" })}\n`;
 
   function harness(
-    options: { mtimeMs?: number; run?: AgentTurnRunner["runAgentTurn"]; runsPath?: string } = {},
+    options: {
+      mtimeMs?: number;
+      run?: AgentTurnRunner["runAgentTurn"];
+      runsPath?: string;
+      onWorkingChanged?: (working: boolean) => void;
+    } = {},
   ) {
     const memory = memoryHost({
       [PI]: { harness: "pi", text: piText, mtimeMs: options.mtimeMs ?? 0 },
@@ -335,6 +340,7 @@ describe("agent session send", () => {
     const settings = { agentHosts: { connections: [{ id: "pc", ssh: "box", shell: "posix" as const }] } };
     const sessions = createAgentSessions({ load: async () => settings as never }, () => host, {
       clock: () => 120_000,
+      ...(options.onWorkingChanged === undefined ? {} : { onWorkingChanged: options.onWorkingChanged }),
       ...(options.runsPath === undefined ? {} : { runsPath: options.runsPath }),
     });
     return {
@@ -448,7 +454,8 @@ describe("agent session send", () => {
 
   it("keeps the lock when the end of a run cannot be saved, without an unhandled rejection", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-runs-"));
-    const { sessions, settle } = harness({ runsPath: join(dir, "runs.json") });
+    const onWorkingChanged = vi.fn();
+    const { sessions, settle } = harness({ runsPath: join(dir, "runs.json"), onWorkingChanged });
     const run = await sessions.send("pc:01a0d5af", "one");
     chmodSync(dir, 0o500);
     try {
@@ -460,6 +467,7 @@ describe("agent session send", () => {
         }),
       );
       await expect(sessions.send("pc:01a0d5af", "two")).rejects.toThrow(/unknown/);
+      expect(onWorkingChanged.mock.calls).toEqual([[true], [false]]);
     } finally {
       chmodSync(dir, 0o700);
     }

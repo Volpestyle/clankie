@@ -1,3 +1,5 @@
+import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
+import type { HostedPairing } from "./hosted-pairing.ts";
 import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
 import type { HostedBodyClient } from "./hosted-body.ts";
 import { changeRuntime, manageConnections } from "./connections.ts";
@@ -349,6 +351,8 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
+  hostedPairing?: HostedPairing;
+  onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
@@ -2546,6 +2550,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const raw = dependencies.publicGatewayHostBaseUrl ?? process.env.CLANKIE_RELAY_URL?.trim();
     return raw === undefined || raw.length === 0 ? {} : { relayUrl: raw };
   };
+
+  app.post(HOSTED_PAIR_OFFER_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
+    if (dependencies.hostedPairing === undefined) return context.json({ error: "not_found" }, 404);
+    return dependencies.hostedPairing.offer(await readJson(context.req.raw), async () => {
+      const publisher = dependencies.pairingOfferPublisher;
+      if (publisher?.protectPairingOffer === undefined) throw new Error("Encrypted pairing unavailable");
+      const now = clock();
+      pairingOffers.prune(now);
+      const offer = mintPairingOffer({ now, mintedBy: "hosted-account", idFactory });
+      await publisher.publishPairingOffer(offer);
+      const protectedOffer = publisher.protectPairingOffer(offer);
+      pairingOffers.add(pairingOfferRecord(offer));
+      recordEvent("pairing.offer.minted", `pairing:${offer.offerId}`, offer.createdAt, {
+        offerId: offer.offerId,
+        operatorId: offer.mintedBy,
+        expiresAt: offer.expiresAt,
+      });
+      dependencies.onHostedPairing?.();
+      return { link: protectedOffer.deepLink, expiresAtMs: Date.parse(offer.expiresAt) };
+    });
+  });
 
   app.post(DEVICE_WAKE_KEY_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
     if (dependencies.hostedBody === undefined) return context.json({ error: "not_found" }, 404);

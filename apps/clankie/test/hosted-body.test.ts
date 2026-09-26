@@ -65,7 +65,7 @@ describe("managed hosted credential", () => {
   it("checks signature, audience, tenant, host, expiry and bounded lifetime of pair tickets", () => {
     const f = hostedFixture(),
       client = new HostedBodyClient(f.bootstrap, { clock: () => f.now });
-    expect(client.verifyPairTicket(f.pair()).jti).toBe("j".repeat(22));
+    expect(client.verifyPairTicket(f.pair(), f.browserPublicKey, f.nonce).jti).toBe("j".repeat(22));
     for (const claims of [
       { aud: "clankie-gateway" },
       { tid: `tn_${"b".repeat(20)}` },
@@ -74,7 +74,7 @@ describe("managed hosted credential", () => {
       { exp: f.now / 1000 + 121 },
       { iat: f.now / 1000 + 61 },
     ])
-      expect(() => client.verifyPairTicket(f.pair(claims))).toThrow();
-    expect(() => client.verifyPairTicket(hostedFixture().pair())).toThrow();
+      expect(() => client.verifyPairTicket(f.pair(claims), f.browserPublicKey, f.nonce)).toThrow();
+    expect(() => client.verifyPairTicket(hostedFixture().pair(), f.browserPublicKey, f.nonce)).toThrow();
   });
 });
