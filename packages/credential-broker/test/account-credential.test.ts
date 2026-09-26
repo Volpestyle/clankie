@@ -242,6 +242,88 @@ describe("Clankie account credential", () => {
     expect(clankieAccountSignInRequired(offline)).toBe(false);
   });
 
+  describe("sign-up and sign-in limits (clankie-ops accounts stack)", () => {
+    const openConfig = { ...accountConfig, account: { ...accountConfig.account, selfSignUpEnabled: true } };
+    const TOO_MANY = "Too many attempts; try again in a few minutes";
+    /** The accounts stack's WAF answer, verbatim from its custom response body. */
+    const waf = () =>
+      Response.json(
+        {
+          __type: "TooManyRequestsException",
+          message: "rate_limited: too many attempts from this network; try again in a few minutes",
+        },
+        { status: 429 },
+      );
+    /** The limiter trigger's refusal, as Cognito returns a thrown "rate_limited". */
+    const trigger = (name: string) => () =>
+      Response.json(
+        { __type: "UserLambdaValidationException", message: `${name} failed with error rate_limited.` },
+        { status: 400 },
+      );
+    /** A 429 whose body is not Cognito's (a WAF default, a proxy page). */
+    const bare429 = () => new Response("Too Many Requests", { status: 429 });
+    const begin = (refusal: () => Response) =>
+      beginClankieAccountLogin({
+        gatewayUrl: gateway,
+        email: "person@example.com",
+        fetchImpl: async (input) =>
+          String(input).endsWith("/gateway/v1/config") ? Response.json(openConfig) : refusal(),
+      });
+
+    it.each([
+      ["the per-IP WAF limit", waf],
+      ["a 429 without Cognito's body", bare429],
+      ["the per-email sign-up limit", trigger("PreSignUp")],
+      ["the per-email code-email limit", trigger("CustomMessage")],
+    ])("says to try again in a few minutes for %s", async (_name, refusal) => {
+      const error = await begin(refusal).catch((reason: unknown) => reason);
+      expect(error).toMatchObject({ code: "rate_limited", message: TOO_MANY });
+      // Worth another attempt later, never a reason to sign in again.
+      expect(clankieAccountSignInRequired(error)).toBe(false);
+    });
+
+    it("says the same when the sign-in limit refuses the code", async () => {
+      const challenge = await begin(() => Response.json({ Session: "signup-session" }));
+      const error = await completeClankieAccountLogin({
+        challenge,
+        code: "123456",
+        fetchImpl: async () => trigger("PreAuthentication")(),
+      }).catch((reason: unknown) => reason);
+      expect(error).toMatchObject({ code: "rate_limited", message: TOO_MANY });
+    });
+
+    it("leaves other trigger refusals as they were", async () => {
+      const error = await begin(() =>
+        Response.json(
+          { __type: "UserLambdaValidationException", message: "PreSignUp failed with error domain_blocked." },
+          { status: 400 },
+        ),
+      ).catch((reason: unknown) => reason);
+      expect(error).toMatchObject({ code: "service_unavailable" });
+    });
+
+    it("keeps a refresh that meets a bare 429 retryable instead of signing the Mac out", async () => {
+      const store = new MemoryStore();
+      await store.set(CLANKIE_ACCOUNT_PROVIDER_ID, {
+        type: "oauth",
+        access: "expired-access",
+        refresh: "refresh-1",
+        expires: 1,
+        accountId: "account-1",
+        clientId: "client123",
+      });
+      const error = await createClankieAccountTokenProvider({
+        gatewayUrl: gateway,
+        store,
+        now: () => 10,
+        fetchImpl: async (input) =>
+          String(input).endsWith("/gateway/v1/config") ? Response.json(accountConfig) : bare429(),
+      })().catch((reason: unknown) => reason);
+      expect(error).toMatchObject({ code: "rate_limited" });
+      expect(clankieAccountSignInRequired(error)).toBe(false);
+    });
+  });
+
   it("names a rejected refresh token as one only a human can clear", async () => {
     const store = new MemoryStore();
     await store.set(CLANKIE_ACCOUNT_PROVIDER_ID, {

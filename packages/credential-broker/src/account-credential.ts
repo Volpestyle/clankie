@@ -390,6 +390,7 @@ function parseAccessTokenClaims(token: string): z.infer<typeof AccessTokenClaims
 
 interface CognitoError extends Error {
   readonly cognitoCode: string;
+  readonly status: number;
 }
 
 async function cognitoRequest(
@@ -417,11 +418,36 @@ async function cognitoRequest(
     typeof raw.message === "string" ? raw.message : "Cognito request failed",
   ) as CognitoError;
   Object.defineProperty(error, "cognitoCode", { value: headerCode ?? bodyCode ?? "UnknownError" });
+  Object.defineProperty(error, "status", { value: response.status });
   throw error;
 }
 
 function isCognitoError(error: unknown, code: string): boolean {
   return error instanceof Error && "cognitoCode" in error && (error as CognitoError).cognitoCode === code;
+}
+
+const RATE_LIMITED_MESSAGE = "Too many attempts; try again in a few minutes";
+
+/**
+ * The accounts stack refuses too many attempts in two shapes, and both mean
+ * "wait", never "sign in again" (clankie-ops accounts README, "Clients"):
+ * - per IP, AWS WAF on the pool answers HTTP 429. Its body is Cognito-shaped
+ *   today, but any 429 is a rate limit, whatever the body says.
+ * - per email or domain, the limiter trigger throws `rate_limited`, which
+ *   Cognito returns as HTTP 400 `UserLambdaValidationException` with the
+ *   message `<Trigger> failed with error rate_limited.`
+ * Cognito's own throttles (`TooManyRequestsException`, `LimitExceededException`)
+ * mean the same.
+ */
+function isRateLimited(error: unknown): boolean {
+  if (!(error instanceof Error) || !("cognitoCode" in error)) return false;
+  const cognito = error as CognitoError;
+  return (
+    cognito.status === 429 ||
+    cognito.cognitoCode === "TooManyRequestsException" ||
+    cognito.cognitoCode === "LimitExceededException" ||
+    (cognito.cognitoCode === "UserLambdaValidationException" && /\brate_limited\b/u.test(cognito.message))
+  );
 }
 
 /**
@@ -435,8 +461,7 @@ function isCognitoError(error: unknown, code: string): boolean {
 function mapRefreshError(error: unknown): ClankieAccountAuthError {
   if (error instanceof ClankieAccountAuthError) return error;
   if (
-    isCognitoError(error, "TooManyRequestsException") ||
-    isCognitoError(error, "LimitExceededException") ||
+    isRateLimited(error) ||
     isCognitoError(error, "InternalErrorException") ||
     isCognitoError(error, "ServiceUnavailableException")
   ) {
@@ -462,9 +487,7 @@ function mapCognitoError(error: unknown): ClankieAccountAuthError {
   if (isCognitoError(error, "UserNotFoundException") || isCognitoError(error, "NotAuthorizedException")) {
     return new ClankieAccountAuthError("account_not_invited", "This email does not have Clankie access yet");
   }
-  if (isCognitoError(error, "TooManyRequestsException") || isCognitoError(error, "LimitExceededException")) {
-    return new ClankieAccountAuthError("rate_limited", "Too many code requests; wait a moment and try again");
-  }
+  if (isRateLimited(error)) return new ClankieAccountAuthError("rate_limited", RATE_LIMITED_MESSAGE);
   return new ClankieAccountAuthError(
     "service_unavailable",
     error instanceof Error ? error.message : "Clankie account service is unavailable",
