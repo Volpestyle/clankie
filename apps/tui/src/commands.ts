@@ -2,6 +2,11 @@ import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
 import { runSwarmCommand } from "./command/swarm.ts";
 import { runAgentsCommand } from "./command/agents.ts";
+import {
+  runConnectionsMenu,
+  runConnectionsSection,
+  type ConnectionsMenuServices,
+} from "./connections-menu.ts";
 import { runAccessCommand } from "./command/access.ts";
 import { runEvaluatorCommand, formatEvaluatorStatus } from "./command/evaluator.ts";
 import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connection.ts";
@@ -122,6 +127,12 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   const focusBoard = herdLead?.focus ?? (() => focusHerdLeadCompanion());
   const closeBoard = herdLead?.close ?? (() => closeHerdLeadCompanion());
   const commands: FaceShellCommand[] = [];
+  const connectionServices = (shell: ClankieFaceShell): ConnectionsMenuServices => ({
+    runtime: (args) => runRuntimeCommand(args),
+    swarm: (args) => runSwarmCommand(args),
+    agents: (args) => runAgentsCommand(args),
+    openHerdrSettings: () => showHerdrMenu(shell, context),
+  });
 
   const statusHelpers = (shell: ClankieFaceShell) => {
     const { ansi } = shell.theme;
@@ -187,9 +198,14 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "connections",
       aliases: [],
-      description: "Inspect runtime, Swarm and connected-account inventory",
-      takesArgument: false,
-      async run(_argument, shell): Promise<void> {
+      description: "See and manage runtimes, Swarm, agent sessions and accounts",
+      argumentHint: "[json]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (argument.trim() === "") {
+          await runConnectionsMenu(shell, connectionServices(shell));
+          return;
+        }
         const result = await runRuntimeCommand(["inventory"]);
         shell.insertCommandResult("/connections", JSON.stringify(result, null, 2), "success");
       },
@@ -201,6 +217,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[list | connect ID --session NAME | disconnect ID]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
+        if (argument.trim() === "") {
+          await runConnectionsSection("runtimes", shell, connectionServices(shell));
+          return;
+        }
         try {
           const result = await runRuntimeCommand(argument.trim().split(/\s+/u).filter(Boolean));
           shell.insertCommandResult("/runtime", JSON.stringify(result, null, 2), "success");
@@ -221,6 +241,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint:
         "[list [--host ID]|read HOST:SESSION [--tail N]|send HOST:SESSION MESSAGE|runs [RUN]|cancel RUN|release RUN|hosts|hosts add ID --ssh TARGET [--shell powershell]|hosts remove ID]",
       async run(argument, shell): Promise<void> {
+        if (argument.trim() === "") {
+          await runConnectionsSection("agents", shell, connectionServices(shell));
+          return;
+        }
         try {
           const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
           shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
@@ -241,8 +265,20 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint:
         "[status|contacts|thread PERSONA|message PERSONA TEXT|connections|connect PRIVATE.json|disconnect ID]",
       async run(argument, shell): Promise<void> {
-        const result = await runSwarmCommand(argument.trim().split(/\s+/u).filter(Boolean));
-        shell.insertCommandResult("/swarm", JSON.stringify(result, null, 2), "success");
+        if (argument.trim() === "") {
+          await runConnectionsSection("swarm", shell, connectionServices(shell));
+          return;
+        }
+        try {
+          const result = await runSwarmCommand(argument.trim().split(/\s+/u).filter(Boolean));
+          shell.insertCommandResult("/swarm", JSON.stringify(result, null, 2), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/swarm",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
       },
     },
     {

@@ -639,10 +639,17 @@ clankie fleet set --notes "codex is the workhorse. claude when it needs skills o
 
 ### `connections` and `runtime`
 
-`clankie connections` (`/connections` in the TUI) combines execution runtime health,
-Swarm connections/diagnostics and the recorded Linear account identity. Its
+`clankie connections` combines execution runtime health, Swarm
+connections/diagnostics and the recorded Linear account identity as JSON. Its
 operator API is `GET /v1/connections`; the companion app does not display this
 inventory yet.
+
+In the TUI, `/connections` opens a menu over the same data: execution runtimes
+(details, connect, disconnect, Herdr settings), Swarm (contacts, one row per
+actor, and messaging; external coordinators), agent sessions (hosts → sessions →
+read or send, add or remove SSH hosts), and accounts. `/runtime`, `/swarm` and
+`/agents` with no argument open their own section; with arguments they print JSON
+as before, and `/connections json` prints the raw inventory.
 
 ```sh
 clankie runtime list
@@ -735,7 +742,8 @@ permissions, so it may decline tools that need approval.
 remote turn may still be running and the session stays locked until `cancel`
 releases it. Runs live in the service process and are forgotten on restart.
 
-`/agents` in the TUI takes the same arguments. The operator API is
+`/agents` in the TUI takes the same arguments, or opens the agent sessions menu
+with none. The operator API is
 GET `/v1/agent-sessions?host=&limit=`, GET `/v1/agent-sessions/read?ref=&tail=|after=`,
 GET/POST `/v1/agent-hosts`, DELETE `/v1/agent-hosts/ID`, POST `/v1/agent-sessions/send`
 `{ref, message}`, and GET/DELETE `/v1/agent-sessions/runs[/ID]`. Clankie's own tools
