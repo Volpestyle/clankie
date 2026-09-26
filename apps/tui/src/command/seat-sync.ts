@@ -91,6 +91,9 @@ export async function runSeatSyncCommand(
   for (const entry of transcript?.entries ?? []) {
     // A remote service must never resolve an image path from another host.
     if (entry.type === "viewed_image") continue;
+    // Channel envelopes are native delivery metadata, not operator chat.
+    // Keep the display-only upload compatible with the service's strict schema.
+    if (entry.type === "message" && entry.internal) continue;
     const size = Buffer.byteLength(JSON.stringify(entry));
     if (page.length && (page.length === 100 || bytes + size > 512 * 1024)) {
       await send(page);

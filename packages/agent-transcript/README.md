@@ -7,7 +7,10 @@ on the Claude host. No service request reads that path remotely.
 
 `SeatTranscriptUploadSchema` permits at most 100 normalized messages/tools per
 request and optional native hook activity on the final page. It excludes host image
-paths. The native reader retains the existing 9,000-entry display tail, follows the
+paths and internal channel delivery records. The seat-sync host filters those
+internal entries before upload while preserving visible replies, tools and final
+hook activity; the upload schema remains strict. The native reader retains the
+existing 9,000-entry display tail, follows the
 active Claude/Pi parent chain (including parallel Claude tool results), and tails
 flat Codex/Grok records incrementally. Native-seat hooks publish settled history,
 not live model drafts. Older records outside that tail are not a full transcript

@@ -109,3 +109,71 @@ test("native hooks report activity even before a transcript exists, but compacti
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("seat sync omits internal channel deliveries but keeps queued human prompts and channel replies", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-channel-"));
+  const sessionId = randomUUID();
+  const path = join(root, `${sessionId}.jsonl`);
+  const records = [
+    { uuid: "human", parentUuid: null, type: "user", message: { content: "Visible question" } },
+    {
+      uuid: "channel-user",
+      parentUuid: "human",
+      type: "user",
+      message: { content: '<channel source="clankie">Private wake envelope</channel>' },
+    },
+    {
+      uuid: "channel-queued",
+      parentUuid: "channel-user",
+      type: "attachment",
+      attachment: {
+        type: "queued_command",
+        origin: { kind: "channel" },
+        prompt: '<channel source="clankie">Private watch envelope</channel>',
+      },
+    },
+    {
+      uuid: "human-queued",
+      parentUuid: "channel-queued",
+      type: "attachment",
+      attachment: { type: "queued_command", origin: { kind: "human" }, prompt: "Visible follow-up" },
+    },
+    {
+      uuid: "reply",
+      parentUuid: "human-queued",
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Visible answer after the wake" }] },
+    },
+  ];
+  const bodies: Array<{ entries: Array<{ text: string }>; activity: string }> = [];
+  const sync = () =>
+    runSeatSyncCommand([], {
+      env: { CLANKIE_SEAT_SESSION_ID: sessionId, CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43) },
+      stdin: Readable.from([
+        JSON.stringify({ session_id: sessionId, transcript_path: path, hook_event_name: "Stop" }),
+      ]),
+      fetchImpl: async (_url, options) => {
+        bodies.push(JSON.parse(String(options?.body)));
+        return Response.json({ ok: true });
+      },
+    });
+  try {
+    await writeFile(path, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+    expect(await sync()).toBe(0);
+    expect(bodies[0]!.entries.map((entry) => entry.text)).toEqual([
+      "Visible question",
+      "Visible follow-up",
+      "Visible answer after the wake",
+    ]);
+    expect(bodies[0]!.activity).toBe("waiting");
+    expect(JSON.stringify(bodies)).not.toContain("Private");
+    expect(JSON.stringify(bodies)).not.toContain('"internal"');
+
+    // An internal-only turn still settles the display activity.
+    await writeFile(path, JSON.stringify({ ...records[1], parentUuid: null }) + "\n");
+    expect(await sync()).toBe(0);
+    expect(bodies[1]).toMatchObject({ entries: [], activity: "waiting" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
