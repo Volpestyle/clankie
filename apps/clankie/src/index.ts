@@ -1,3 +1,4 @@
+import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
@@ -88,6 +89,7 @@ import {
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { startHostedModelForwarder } from "./hosted-model-forwarder.ts";
 import { createWorkItemsService } from "./work-items.ts";
+import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 /** Hosted bodies only: `clankie-body` names the spool; a Mac never does. */
@@ -508,11 +510,14 @@ const agentSessions = createAgentSessions(settingsStore, undefined, {
   },
 });
 // Work items in each repo's own convention (ADR 0191): Linear rides his
-// connected account, GitHub the owner's gh login, files the repo itself.
+// connected account, GitHub the owner's GitHub connection or gh login (a
+// hosted body has only the connection, ADR 0196), files the repo itself.
 const workItems = createWorkItemsService({
   stateDirectory: stateRoot,
   workspace: () => startupSettings.captain.workingDirectory ?? process.cwd(),
   mcpHost,
+  githubToken: () => githubConnectionToken(operatorCredentialStore),
+  hosted: hostedBody !== undefined,
 });
 const captain = createCaptain(
   {
@@ -692,6 +697,10 @@ const hostedDiscord =
       });
 const clankie = await createClankieApp({
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
+  accounts: createAccounts({
+    store: operatorCredentialStore,
+    apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
+  }),
   modelKeys: createModelKeys({
     store: operatorCredentialStore,
     cwd: repoRoot,
@@ -705,6 +714,7 @@ const clankie = await createClankieApp({
     ? {}
     : {
         hostedBody,
+        hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
       }),
   agentSessions,
   workItems,

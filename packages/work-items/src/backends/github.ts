@@ -10,13 +10,87 @@ import {
 import { parseBody, patchBody } from "../format.ts";
 
 /**
- * The repo's GitHub issues, through the owner's own `gh` login: no new token.
+ * The repo's GitHub issues, through the owner's own `gh` login on a Mac, or the
+ * body's GitHub account connection (ADR 0196) where there is no `gh` login.
  * Open or closed (with GitHub's state reason) is the issue's own state; the
  * two in-between statuses ride a `status:` label, the lightest mark GitHub has.
  */
 
 /** Runs `gh` with arguments and optional stdin; resolves stdout, rejects on a non-zero exit. */
 export type GhRunner = (args: readonly string[], stdin?: string) => Promise<string>;
+
+/** The GitHub REST calls the backend makes. A rejection whose message names 404 means not found. */
+export interface GithubApi {
+  request(method: string, path: string, body?: unknown): Promise<unknown>;
+  /** Every page of a list endpoint, flattened. */
+  list(path: string): Promise<unknown[]>;
+}
+
+export function ghCliApi(gh: GhRunner): GithubApi {
+  return {
+    async request(method, path, body) {
+      const args = ["api", "-X", method, path, "-H", "Accept: application/vnd.github+json"];
+      const output = await gh(
+        body === undefined ? args : [...args, "--input", "-"],
+        body === undefined ? undefined : JSON.stringify(body),
+      );
+      return output.trim().length === 0 ? undefined : JSON.parse(output);
+    },
+    async list(path) {
+      const output = await gh(["api", "--paginate", "--slurp", path]);
+      return (JSON.parse(output) as unknown[][]).flat();
+    },
+  };
+}
+
+const MAX_PAGES = 50;
+
+/**
+ * GitHub's REST API with a token, for a body with no `gh` login. Errors carry
+ * only the method, path and status: the token is a header and never echoed.
+ */
+export function githubRestApi(options: {
+  readonly token: string;
+  readonly baseUrl?: string;
+  readonly fetch?: typeof fetch;
+}): GithubApi {
+  const base = (options.baseUrl ?? "https://api.github.com").replace(/\/+$/u, "");
+  const request = options.fetch ?? fetch;
+  const call = async (method: string, url: string, body?: unknown) => {
+    const response = await request(url, {
+      method,
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${options.token}`,
+        "x-github-api-version": "2022-11-28",
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok)
+      throw new Error(`GitHub ${method} ${new URL(url).pathname}: HTTP ${String(response.status)}`);
+    const text = await response.text();
+    return { response, value: text.trim().length === 0 ? undefined : (JSON.parse(text) as unknown) };
+  };
+  return {
+    async request(method, path, body) {
+      return (await call(method, `${base}/${path.replace(/^\/+/u, "")}`, body)).value;
+    },
+    async list(path) {
+      const items: unknown[] = [];
+      let url: string | undefined = `${base}/${path.replace(/^\/+/u, "")}`;
+      for (let page = 0; url !== undefined && page < MAX_PAGES; page += 1) {
+        const { response, value } = await call("GET", url);
+        if (Array.isArray(value)) items.push(...(value as unknown[]));
+        const next = /<([^>]+)>;\s*rel="next"/u.exec(response.headers.get("link") ?? "")?.[1];
+        // The token follows a next link only to the API origin it was issued for.
+        url = next !== undefined && new URL(next).origin === new URL(base).origin ? next : undefined;
+      }
+      return items;
+    },
+  };
+}
 
 interface Issue {
   readonly number: number;
@@ -55,16 +129,12 @@ function numberOf(id: string): number {
   return Number(match[1]);
 }
 
-export function createGithubBackend(options: { readonly repo: string; readonly gh: GhRunner }): WorkBackend {
+export function createGithubBackend(
+  options: { readonly repo: string } & ({ readonly gh: GhRunner } | { readonly api: GithubApi }),
+): WorkBackend {
   const base = `repos/${options.repo}/issues`;
-  const api = async (method: string, path: string, body?: unknown): Promise<unknown> => {
-    const args = ["api", "-X", method, path, "-H", "Accept: application/vnd.github+json"];
-    const output = await options.gh(
-      body === undefined ? args : [...args, "--input", "-"],
-      body === undefined ? undefined : JSON.stringify(body),
-    );
-    return output.trim().length === 0 ? undefined : JSON.parse(output);
-  };
+  const github = "api" in options ? options.api : ghCliApi(options.gh);
+  const api = (method: string, path: string, body?: unknown) => github.request(method, path, body);
 
   const toItem = (issue: Issue): WorkItem => {
     const parsed = parseBody(issue.body ?? "");
@@ -113,8 +183,7 @@ export function createGithubBackend(options: { readonly repo: string; readonly g
   return {
     kind: "github",
     async list(filter) {
-      const output = await options.gh(["api", "--paginate", "--slurp", `${base}?state=all&per_page=100`]);
-      const pages = (JSON.parse(output) as Issue[][]).flat();
+      const pages = (await github.list(`${base}?state=all&per_page=100`)) as Issue[];
       const items = pages.filter((issue) => issue.pull_request === undefined).map(toItem);
       const matching = items.filter((item) => matchesFilter(item, filter));
       return matching.slice(0, filter?.limit ?? matching.length);

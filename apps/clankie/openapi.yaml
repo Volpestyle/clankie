@@ -225,6 +225,194 @@ paths:
         "403": { description: forbidden — terminalControl required }
         "413": { description: malformed — body exceeds 16 KiB }
         "503": { description: unavailable }
+  /v1/accounts:
+    get:
+      tags: [Operator]
+      operationId: listAccounts
+      summary: List GitHub and Linear account connections
+      description: |
+        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        gateway calls require the encrypted envelope. Never returns or logs a token or
+        provider error text. Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountsResponse" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
+  /v1/accounts/github/start:
+    post:
+      tags: [Operator]
+      operationId: startGithubAccount
+      summary: Start a GitHub device flow; return the user code and verification URL
+      description: |
+        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        gateway calls require the encrypted envelope. Never returns or logs a token or
+        provider error text. Cache-Control no-store.
+        The device code stays on the body. Unconfigured without a GitHub OAuth client ID.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "400":
+          description: A closed error code (malformed, unconfigured, unknown_flow, expired, denied, provider_rejected)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
+  /v1/accounts/github/poll:
+    post:
+      tags: [Operator]
+      operationId: pollGithubAccount
+      summary: Poll a GitHub device flow; returns pending, connected or a closed error
+      description: |
+        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        gateway calls require the encrypted envelope. Never returns or logs a token or
+        provider error text. Cache-Control no-store.
+        Polls faster than GitHub's interval are answered by the body without calling GitHub.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [flowId],
+                additionalProperties: false,
+                properties: { flowId: { type: string } },
+              }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "400":
+          description: A closed error code (malformed, unconfigured, unknown_flow, expired, denied, provider_rejected)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
+  /v1/accounts/linear/start:
+    post:
+      tags: [Operator]
+      operationId: startLinearAccount
+      summary: Start Linear OAuth with PKCE; return the authorize URL
+      description: |
+        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        gateway calls require the encrypted envelope. Never returns or logs a token or
+        provider error text. Cache-Control no-store.
+        The PKCE verifier stays on the body. Unconfigured without a redirect URI.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "400":
+          description: A closed error code (malformed, unconfigured, unknown_flow, expired, denied, provider_rejected)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
+  /v1/accounts/linear/complete:
+    post:
+      tags: [Operator]
+      operationId: completeLinearAccount
+      summary: Hand back Linear's redirect code; the body exchanges it with its verifier
+      description: |
+        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        gateway calls require the encrypted envelope. Never returns or logs a token or
+        provider error text. Cache-Control no-store.
+        state is single use.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [state, code],
+                additionalProperties: false,
+                properties: { state: { type: string }, code: { type: string } },
+              }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "400":
+          description: A closed error code (malformed, unconfigured, unknown_flow, expired, denied, provider_rejected)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
+  /v1/accounts/disconnect:
+    post:
+      tags: [Operator]
+      operationId: disconnectAccount
+      summary: Revoke a connection at the provider and delete its token
+      description: |
+        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        gateway calls require the encrypted envelope. Never returns or logs a token or
+        provider error text. Cache-Control no-store.
+        revoked is false when the provider could not revoke; the token is deleted either way
+        and manageUrl names where to revoke it by hand.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [provider],
+                additionalProperties: false,
+                properties: { provider: { type: string, enum: [github, linear] } },
+              }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "400":
+          description: A closed error code (malformed, unconfigured, unknown_flow, expired, denied, provider_rejected)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
   /v1/connections:
     get:
       tags: [Operator]
@@ -2313,6 +2501,46 @@ components:
       required: [providerId]
       properties:
         providerId: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }
+    AccountConnection:
+      type: object
+      additionalProperties: false
+      required: [provider, status, scopes]
+      properties:
+        provider: { type: string, enum: [github, linear] }
+        status: { type: string, enum: [connected, not_connected, unconfigured] }
+        account: { type: string }
+        scopes: { type: array, items: { type: string } }
+        connectedAt: { type: string, format: date-time }
+        manageUrl: { type: string, format: uri }
+    AccountsResponse:
+      type: object
+      additionalProperties: false
+      required: [connections]
+      properties:
+        connections: { type: array, items: { $ref: "#/components/schemas/AccountConnection" } }
+    AccountResult:
+      type: object
+      description: |
+        ok true with the operation's fields (flowId, userCode, verificationUri, interval,
+        status, authorizeUrl, redirectUri, expiresAt, connection, revoked, manageUrl), or
+        ok false with a closed error code. See @clankie/protocol/accounts.
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        error:
+          type: string
+          enum:
+            [
+              authentication_required,
+              forbidden,
+              malformed,
+              unconfigured,
+              unknown_flow,
+              expired,
+              denied,
+              provider_rejected,
+              unavailable,
+            ]
     ModelKeysResponse:
       type: object
       additionalProperties: false

@@ -185,6 +185,48 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/accounts",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "List GitHub and Linear account connections with account, scopes and status, never tokens.",
+      },
+    ],
+    [
+      "POST /v1/accounts/github/start",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Start a GitHub device flow on the body; return the user code and verification URL.",
+      },
+    ],
+    [
+      "POST /v1/accounts/github/poll",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Poll a pending GitHub device flow; the body stores the token in its credential broker.",
+      },
+    ],
+    [
+      "POST /v1/accounts/linear/start",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Start a Linear OAuth PKCE flow; the verifier stays on the body.",
+      },
+    ],
+    [
+      "POST /v1/accounts/linear/complete",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Hand the Linear authorization code to the body, which exchanges it with its verifier.",
+      },
+    ],
+    [
+      "POST /v1/accounts/disconnect",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Revoke an account connection at the provider and delete its token from the body.",
+      },
+    ],
+    [
       "POST /operator/v1/artifacts/download",
       {
         access: "Encrypted device bearer plus chat grant",

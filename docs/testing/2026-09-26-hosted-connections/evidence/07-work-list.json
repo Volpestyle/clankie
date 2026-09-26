@@ -1,0 +1,15 @@
+{
+  "repo": { "id": "repo-686d32cd", "name": "repo", "backend": "github", "needsDecision": false },
+  "items": [
+    {
+      "id": "#1",
+      "title": "Hosted connection proof",
+      "status": "todo",
+      "dependsOn": [],
+      "summary": "",
+      "criteria": [{ "text": "Token stays on the body", "done": false }],
+      "evidence": [],
+      "location": "https://github.com/proof/repo/issues/1"
+    }
+  ]
+}

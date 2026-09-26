@@ -10,7 +10,8 @@ Work items in the repo's own tracking convention ([ADR 0191](../../docs/adr/0191
   it records only when a write is about to happen. Ambiguity raises
   `ConventionNeededError` with the owner's one question.
 - Backends: `createFilesBackend` (`default` at `.clankie/work/`, or `markdown`
-  in the repo's directory), `createGithubBackend` (the owner's `gh`), and
+  in the repo's directory), `createGithubBackend` (the owner's `gh`, or `githubRestApi` with the
+  body's GitHub account connection, ADR 0196), and
   `createLinearBackend` (a Linear MCP tool call; the service supplies Clankie's
   connected account).
 - `parseBody` / `patchBody`: the shared Markdown. Criteria are a checklist under

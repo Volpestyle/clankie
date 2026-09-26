@@ -1,0 +1,7 @@
+fake-github POST /login/device/code
+fake-github POST /login/oauth/access_token
+fake-github POST /login/oauth/access_token
+fake-github GET /user
+fake-github POST /repos/proof/repo/issues
+fake-github GET /repos/proof/repo/issues
+fake-github DELETE /applications/Ov23liProofClient/grant

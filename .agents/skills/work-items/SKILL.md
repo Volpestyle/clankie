@@ -53,6 +53,7 @@ and `work_item_write` tools.
 
 ## When the backend is unavailable
 
-`backend_unavailable` names the recorded convention: Linear is not connected to
-Clankie, or `gh` is signed out. Report that to your lead. Do not fall back to
+`backend_unavailable` names the recorded convention: Linear or GitHub is not
+connected to Clankie (`clankie accounts`), or `gh` is signed out. Report that to
+your lead. Do not fall back to
 files, which would fork the record.

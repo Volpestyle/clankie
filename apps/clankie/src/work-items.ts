@@ -21,6 +21,7 @@ import {
   resolveTracker,
   writeConvention,
   type CommandRunner,
+  githubRestApi,
   type GhRunner,
   type LinearToolCall,
   type TrackerDeps,
@@ -110,9 +111,17 @@ export interface WorkItemsServiceOptions {
   /** The captain's working directory, always readable as `workspace`. */
   readonly workspace?: () => string | undefined;
   readonly mcpHost?: Pick<McpHost, "call">;
-  /** Test seams; production shells out to git and gh. */
+  /**
+   * The body's GitHub account connection token (ADR 0196). When present it is
+   * used instead of `gh`; a hosted body has no `gh` login to fall back on.
+   */
+  readonly githubToken?: () => Promise<string | undefined>;
+  readonly hosted?: boolean;
+  /** Test seams; production shells out to git and gh and calls api.github.com. */
   readonly run?: CommandRunner;
   readonly gh?: GhRunner;
+  readonly fetch?: typeof fetch;
+  readonly githubApiBase?: string;
   readonly clock?: () => Date;
 }
 
@@ -129,7 +138,13 @@ export type WorkResult =
   | { readonly repo: WorkRepo; readonly item: WorkItem };
 
 export class WorkRequestError extends Error {
-  readonly code: "unknown_repo" | "not_found" | "needs_decision" | "backend_unavailable" | "invalid";
+  readonly code:
+    | "unknown_repo"
+    | "not_found"
+    | "needs_decision"
+    | "backend_unavailable"
+    | "invalid"
+    | "result_too_large";
   readonly question: string | undefined;
   readonly signals: WorkSignal[] | undefined;
   constructor(
@@ -186,7 +201,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             server: "linear",
             tool,
             arguments: args,
+            resultMode: "data",
           });
+          if (result.outcome === "refused" && result.reason === "result_too_large")
+            throw new WorkRequestError("result_too_large", `Linear ${tool}: ${result.detail}`);
           if (result.outcome !== "ok") throw new Error(`Linear ${tool}: ${result.detail}`);
           if (result.isError) throw new Error(`Linear ${tool}: ${result.content.slice(0, 500)}`);
           return result.content.trim().length === 0 ? undefined : (JSON.parse(result.content) as unknown);
@@ -248,16 +266,28 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
-  const deps = (path: string): TrackerDeps => ({
-    run,
-    gh: options.gh ?? defaultGh(path),
-    ...(linear === undefined ? {} : { linear }),
-    clock,
-  });
+  const deps = async (path: string): Promise<TrackerDeps> => {
+    const token = await options.githubToken?.();
+    return {
+      run,
+      ...(options.hosted === true ? {} : { gh: options.gh ?? defaultGh(path) }),
+      ...(token === undefined
+        ? {}
+        : {
+            github: githubRestApi({
+              token,
+              ...(options.githubApiBase === undefined ? {} : { baseUrl: options.githubApiBase }),
+              ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+            }),
+          }),
+      ...(linear === undefined ? {} : { linear }),
+      clock,
+    };
+  };
 
   const tracker = async (path: string, record: boolean) => {
     try {
-      return await resolveTracker(path, deps(path), { record });
+      return await resolveTracker(path, await deps(path), { record });
     } catch (error) {
       if (error instanceof ConventionNeededError)
         throw new WorkRequestError("needs_decision", error.message, {

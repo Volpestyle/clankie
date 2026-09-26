@@ -1,0 +1,31 @@
+== 01-work-init: clankie work init --backend github --github-repo proof/repo --repo /var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/hosted-connections-proof-qAMw2U/repo
+{"repo":{"id":"repo-686d32cd","name":"repo","backend":"github","needsDecision":false},"convention":{"schemaVersion":1,"backend":"github","github":{"repo":"proof/repo"},"decidedBy":"owner","decidedAt":"2026-09-26T20:51:53.667Z"}}
+
+== 02-list-before: clankie accounts
+{"connections":[{"provider":"github","status":"not_connected","scopes":[]},{"provider":"linear","status":"unconfigured","scopes":[]}]}
+
+== 03-work-without-connection: clankie work list --repo /var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/hosted-connections-proof-qAMw2U/repo
+{"error":"backend_unavailable","detail":"This repo tracks work in GitHub issues (proof/repo); connect GitHub to Clankie to use it"}
+
+== 04-connect: clankie accounts connect github
+{"ok":true,"status":"connected","connection":{"provider":"github","status":"connected","account":"proof-owner","scopes":["repo"],"connectedAt":"2026-09-26T20:52:00.957Z","manageUrl":"https://github.com/settings/connections/applications/Ov23liProofClient"}}
+Open https://github.com/login/device and enter PRUF-2026
+
+== 05-list-connected: clankie accounts
+{"connections":[{"provider":"github","status":"connected","account":"proof-owner","scopes":["repo"],"connectedAt":"2026-09-26T20:52:00.957Z","manageUrl":"https://github.com/settings/connections/applications/Ov23liProofClient"},{"provider":"linear","status":"unconfigured","scopes":[]}]}
+
+== 06-work-create: clankie work create Hosted connection proof --criterion Token stays on the body --repo /var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/hosted-connections-proof-qAMw2U/repo
+{"repo":{"id":"repo-686d32cd","name":"repo","backend":"github","needsDecision":false},"item":{"id":"#1","title":"Hosted connection proof","status":"todo","dependsOn":[],"summary":"","criteria":[{"text":"Token stays on the body","done":false}],"evidence":[],"location":"https://github.com/proof/repo/issues/1"}}
+
+== 07-work-list: clankie work list --repo /var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/hosted-connections-proof-qAMw2U/repo
+{"repo":{"id":"repo-686d32cd","name":"repo","backend":"github","needsDecision":false},"items":[{"id":"#1","title":"Hosted connection proof","status":"todo","dependsOn":[],"summary":"","criteria":[{"text":"Token stays on the body","done":false}],"evidence":[],"location":"https://github.com/proof/repo/issues/1"}]}
+
+== 10-disconnect: clankie accounts disconnect github
+{"ok":true,"revoked":true}
+
+== 11-list-after: clankie accounts
+{"connections":[{"provider":"github","status":"not_connected","scopes":[]},{"provider":"linear","status":"unconfigured","scopes":[]}]}
+
+== 12-work-after-disconnect: clankie work list --repo /var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/hosted-connections-proof-qAMw2U/repo
+{"error":"backend_unavailable","detail":"This repo tracks work in GitHub issues (proof/repo); connect GitHub to Clankie to use it"}
+

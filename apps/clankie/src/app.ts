@@ -1,9 +1,12 @@
 import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
 import { createModelKeyRoutes } from "./model-key-routes.ts";
+import { createAccountRoutes } from "./account-routes.ts";
+import type { AccountsPort } from "./accounts.ts";
 import type { ModelKeysPort } from "./model-keys.ts";
 import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
 import type { HostedPairing } from "./hosted-pairing.ts";
 import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
+import type { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import type { HostedBodyClient } from "./hosted-body.ts";
 import { changeRuntime, manageConnections } from "./connections.ts";
 import { SwarmConnectSchema, type SwarmHost } from "@clankie/swarm";
@@ -362,9 +365,12 @@ const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 export interface ClankieAppDependencies {
   discordIngress?: DiscordIngress;
   modelKeys?: ModelKeysPort;
+  /** The owner's GitHub and Linear account connections (ADR 0196). */
+  accounts?: AccountsPort;
   hostedPairing?: HostedPairing;
   onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
+  hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */
@@ -561,10 +567,41 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   const deviceLocks = new Map<string, Promise<unknown>>();
   const discordPresenceLocks = new Map<string, Promise<unknown>>();
   const discordPresenceSessionLocks = new Map<string, Promise<unknown>>();
-  const deviceSessionSigner =
-    dependencies.deviceSessionKey === undefined
+  let deviceSessionSigner =
+    dependencies.hostedBody !== undefined || dependencies.deviceSessionKey === undefined
       ? undefined
       : new DeviceSessionSigner(dependencies.deviceSessionKey);
+  let securityClosed = false;
+  const reconcileHostedSecurity = async () => {
+    if (securityClosed || deviceSessionSigner !== undefined) return;
+    try {
+      if (dependencies.hostedDeviceSecurity === undefined) throw new Error("Hosted security unavailable");
+      const restored = await dependencies.hostedDeviceSecurity.prepare(
+        dependencies.deviceSessionKey,
+        [...devices.values()].filter(record => record.status === "revoked").map(record => record.deviceId),
+      );
+      if (securityClosed) return;
+      for (const tombstone of restored.revocations) {
+        const record = devices.get(tombstone.dev);
+        if (record === undefined || record.status === "revoked") continue;
+        const event = recordEvent("device.revoked", `device:${tombstone.dev}`, new Date(tombstone.at).toISOString(), {
+          schemaVersion: 1, deviceId: tombstone.dev, revokedBy: "hosted-fleet",
+        });
+        applyDeviceEvent(devices, event);
+      }
+      // Publish the signer last. Pairing, refresh and relay self-authorize
+      // remain unavailable throughout reconciliation or any failed retry.
+      deviceSessionSigner = new DeviceSessionSigner(restored.key);
+    } catch {
+      logger.warn({ event: "hosted.security.unavailable" }, "hosted device admission unavailable");
+    }
+  };
+  let securityRetry: Promise<void> | undefined;
+  const retryHostedSecurity = () => securityRetry ??= reconcileHostedSecurity().finally(() => { securityRetry = undefined; });
+  if (dependencies.hostedBody !== undefined) await retryHostedSecurity();
+  const securityRetryTimer = dependencies.hostedBody === undefined ? undefined
+    : setInterval(() => { void retryHostedSecurity(); }, 30_000);
+  securityRetryTimer?.unref();
   const discordPresenceResults = new Map<
     string,
     { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
@@ -651,16 +688,18 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   };
 
   app.route("/", createDiscordIngressRoutes(dependencies.discordIngress));
-  app.route(
-    "/",
-    createModelKeyRoutes(dependencies.modelKeys, async (request) => {
-      const operator = await authenticateOperator(request, dependencies);
-      if (operator && operator !== "unavailable") return true;
-      const device = await authenticateDevice(request);
-      if (device === "unavailable" || "denied" in device) return "authentication_required";
-      return device.grants.terminalControl ? true : "forbidden";
-    }),
-  );
+  /** Owner operator or a current Take Control device: model keys and account connections. */
+  const authorizeOwnerSecrets = async (
+    request: Request,
+  ): Promise<true | "authentication_required" | "forbidden"> => {
+    const operator = await authenticateOperator(request, dependencies);
+    if (operator && operator !== "unavailable") return true;
+    const device = await authenticateDevice(request);
+    if (device === "unavailable" || "denied" in device) return "authentication_required";
+    return device.grants.terminalControl ? true : "forbidden";
+  };
+  app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
+  app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets));
 
   /** Captain or authenticated operator, for reads the owner should never have to authorize. */
   const authenticateCaptainOrOperator = async (
@@ -2775,6 +2814,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.post("/v1/pairing/complete", async (context) => {
     if (deviceSessionSigner === undefined)
       return context.json({ error: "device_authentication_unavailable" }, 503);
+    const signer = deviceSessionSigner;
     const parsed = PairingCompleteRequestSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "malformed" }, 400);
     const now = clock();
@@ -2799,7 +2839,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         deviceId: pending.deviceId,
         nowEpochSeconds: Math.floor(now.getTime() / 1000),
       });
-      const deviceToken = deviceSessionSigner.issue(claims);
+      const deviceToken = signer.issue(claims);
       const sessionExpiresAt = new Date(claims.expiresAt * 1000).toISOString();
       const activated = recordEvent("device.activated", `device:${pending.deviceId}`, now.toISOString(), {
         schemaVersion: 1,
@@ -2946,6 +2986,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   );
   const revokeWakeKey = async (deviceId: string): Promise<boolean> => {
     try {
+      if (dependencies.hostedBody !== undefined) {
+        if (dependencies.hostedDeviceSecurity === undefined) throw new Error("Hosted security unavailable");
+        await dependencies.hostedDeviceSecurity.revokeDevice(deviceId);
+      }
       await dependencies.hostedBody?.revokeWakeKey(deviceId);
       pendingWakeRevocations.delete(deviceId);
       return true;
@@ -3326,6 +3370,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     },
     close: () => {
+      securityClosed = true;
+      if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);
       if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);
       stopObservingMessages?.();
       pushDispatcher?.close();

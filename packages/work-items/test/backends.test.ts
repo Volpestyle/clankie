@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFilesBackend } from "../src/backends/files.ts";
-import { createGithubBackend, type GhRunner } from "../src/backends/github.ts";
+import { createGithubBackend, githubRestApi, type GhRunner } from "../src/backends/github.ts";
 import { createLinearBackend, descriptionPatch, pickLinearState } from "../src/backends/linear.ts";
 
 const clock = () => new Date("2026-09-26T12:00:00.000Z");
@@ -263,5 +263,37 @@ describe("the Linear backend", () => {
       },
       { op: "append", text: "\n\n## Evidence\n\n- link: [run](https://x)" },
     ]);
+  });
+});
+
+describe("the GitHub REST client", () => {
+  it("pages through the API origin only, and errors carry no token", async () => {
+    const seen: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      seen.push(`${url} ${new Headers(init?.headers).get("authorization") ?? ""}`);
+      if (url.endsWith("/fail")) return new Response("secret-token echoed", { status: 500 });
+      const page = url.includes("page=2") ? 2 : 1;
+      return Response.json([{ page }], {
+        headers: {
+          link:
+            page === 1
+              ? '<https://api.github.test/repos/o/r/issues?page=2>; rel="next"'
+              : '<https://evil.example/steal?page=3>; rel="next"',
+        },
+      });
+    };
+    const api = githubRestApi({
+      token: "secret-token",
+      baseUrl: "https://api.github.test",
+      fetch: fetchImpl,
+    });
+    expect(await api.list("repos/o/r/issues")).toEqual([{ page: 1 }, { page: 2 }]);
+    expect(seen).toEqual([
+      "https://api.github.test/repos/o/r/issues Bearer secret-token",
+      "https://api.github.test/repos/o/r/issues?page=2 Bearer secret-token",
+    ]);
+    const failure = await api.request("GET", "fail").catch((error: unknown) => String(error));
+    expect(failure).toBe("Error: GitHub GET /fail: HTTP 500");
   });
 });

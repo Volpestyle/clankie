@@ -1,7 +1,7 @@
 import type { WorkConvention } from "@clankie/protocol/work-items";
 import type { WorkBackend } from "./backend.ts";
 import { createFilesBackend } from "./backends/files.ts";
-import { createGithubBackend, type GhRunner } from "./backends/github.ts";
+import { createGithubBackend, type GhRunner, type GithubApi } from "./backends/github.ts";
 import { createLinearBackend, type LinearToolCall } from "./backends/linear.ts";
 import {
   DEFAULT_WORK_DIRECTORY,
@@ -15,6 +15,8 @@ import {
 export interface TrackerDeps {
   readonly run?: CommandRunner;
   readonly gh?: GhRunner;
+  /** A GitHub account connection (ADR 0196); preferred over `gh` when present. */
+  readonly github?: GithubApi;
   readonly linear?: LinearToolCall;
   readonly clock?: () => Date;
 }
@@ -55,9 +57,11 @@ export function backendFor(root: string, convention: WorkConvention, deps: Track
       });
     case "github":
       if (convention.github === undefined) throw new Error("A github convention names its repo");
+      if (deps.github !== undefined)
+        return createGithubBackend({ repo: convention.github.repo, api: deps.github });
       if (deps.gh === undefined)
         throw new BackendUnavailableError(
-          `This repo tracks work in GitHub issues (${convention.github.repo}); gh is unavailable here`,
+          `This repo tracks work in GitHub issues (${convention.github.repo}); connect GitHub to Clankie to use it`,
         );
       return createGithubBackend({ repo: convention.github.repo, gh: deps.gh });
     case "linear":

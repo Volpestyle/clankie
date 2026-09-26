@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "status": "connected",
+  "connection": {
+    "provider": "github",
+    "status": "connected",
+    "account": "proof-owner",
+    "scopes": ["repo"],
+    "connectedAt": "2026-09-26T20:52:00.957Z",
+    "manageUrl": "https://github.com/settings/connections/applications/Ov23liProofClient"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "github-oauth-app": {
+    "type": "api",
+    "key": "<redacted 21 chars>"
+  },
+  "github": {
+    "type": "api",
+    "key": "<redacted 33 chars>",
+    "metadata": {
+      "clientId": "Ov23liProofClient",
+      "scopes": "repo",
+      "connectedAt": "2026-09-26T20:52:00.957Z",
+      "login": "proof-owner"
+    }
+  }
+}

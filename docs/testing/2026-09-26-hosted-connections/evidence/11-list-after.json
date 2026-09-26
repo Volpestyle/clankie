@@ -1,0 +1,6 @@
+{
+  "connections": [
+    { "provider": "github", "status": "not_connected", "scopes": [] },
+    { "provider": "linear", "status": "unconfigured", "scopes": [] }
+  ]
+}

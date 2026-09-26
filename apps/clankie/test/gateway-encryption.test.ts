@@ -1,4 +1,5 @@
 import type { ModelKeysPort } from "../src/model-keys.ts";
+import type { AccountsPort } from "../src/accounts.ts";
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@clankie/protocol";
@@ -40,6 +41,7 @@ async function account(
     }),
   modelKeys?: ModelKeysPort,
   grants: DeviceGrantSet = SUPERVISE_GRANTS,
+  accounts?: AccountsPort,
 ) {
   const hostId = derivePublicGatewayHostId(accountId, "i".repeat(22));
   const master = randomBytes(32);
@@ -50,6 +52,7 @@ async function account(
   const app = await createClankieApp({
     captain: createStubCaptain(),
     ...(modelKeys === undefined ? {} : { modelKeys }),
+    ...(accounts === undefined ? {} : { accounts }),
     deviceSessionKey: randomBytes(32),
     publicGatewayHostBaseUrl: base,
     authenticateOperator: async (request) =>
@@ -367,4 +370,46 @@ it("carries model keys only in the encrypted envelope and still checks machine a
     ).toBe(426);
   }
   expect(set).toHaveBeenCalledExactlyOnceWith("openai", marker);
+});
+
+it("carries account-connection codes only in the encrypted envelope and never returns a token", async () => {
+  const code = "MARKER_linear_code_encrypted_only_5120";
+  const completeLinear = vi.fn(async () => ({
+    ok: true as const,
+    connection: { provider: "linear" as const, status: "connected" as const, scopes: ["read", "write"] },
+  }));
+  const accounts: AccountsPort = {
+    list: async () => ({
+      connections: [{ provider: "github", status: "connected", account: "octo-owner", scopes: ["repo"] }],
+    }),
+    startGithub: async () => ({ ok: false, error: "unconfigured" }),
+    pollGithub: async () => ({ ok: false, error: "unknown_flow" }),
+    startLinear: async () => ({ ok: false, error: "unconfigured" }),
+    completeLinear,
+    disconnect: async () => ({ ok: true, revoked: true }),
+  };
+  const state = "s".repeat(32);
+  for (const grants of [SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS]) {
+    const own = await account("accounts-account", undefined, undefined, grants, accounts);
+    const response = await own.client(`${own.base}/v1/accounts/linear/complete`, {
+      method: "POST",
+      headers: own.headers,
+      body: JSON.stringify({ state, code }),
+    });
+    expect(response.status).toBe(grants.terminalControl ? 200 : 403);
+    const listed = await own.client(`${own.base}/v1/accounts`, { headers: own.headers });
+    expect(listed.status).toBe(grants.terminalControl ? 200 : 403);
+    expect(JSON.stringify(own.outerRequests)).not.toContain(code);
+    expect(JSON.stringify(own.outerRequests)).not.toContain("octo-owner");
+    expect(
+      (
+        await own.raw(`${own.base}/v1/accounts/linear/complete`, {
+          method: "POST",
+          headers: own.headers,
+          body: JSON.stringify({ state, code }),
+        })
+      ).status,
+    ).toBe(426);
+  }
+  expect(completeLinear).toHaveBeenCalledExactlyOnceWith(state, code);
 });

@@ -115,6 +115,12 @@ shell arguments, logs or telemetry. The stored key is validated with a bounded
 provider call that may incur a small charge; selection applies on the next
 captain turn without a restart. The same API works on a self-hosted Mac.
 
+The same devices link the owner's GitHub and Linear accounts through
+`/v1/accounts` (ADR 0196; `clankie accounts` on the CLI): a GitHub device flow
+and Linear OAuth with PKCE, run by the body, tokens only in its broker. Never
+ask for a GitHub or Linear token in chat; send the owner to the app or
+`clankie accounts connect github`.
+
 ## Launcher control
 
 This skill is the installed agent companion to the canonical launcher command

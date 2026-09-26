@@ -1,5 +1,13 @@
 import { DISCORD_INGRESS_PATH } from "./discord-ingress.ts";
 import {
+  ACCOUNTS_PATH,
+  ACCOUNT_DISCONNECT_PATH,
+  ACCOUNT_GITHUB_POLL_PATH,
+  ACCOUNT_GITHUB_START_PATH,
+  ACCOUNT_LINEAR_COMPLETE_PATH,
+  ACCOUNT_LINEAR_START_PATH,
+} from "./accounts.ts";
+import {
   MODEL_KEYS_PATH,
   MODEL_KEY_SET_PATH,
   MODEL_KEY_VALIDATE_PATH,
@@ -41,6 +49,12 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: MODEL_KEY_VALIDATE_PATH, target: "control" },
   { method: "POST", path: MODEL_SELECT_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_REMOVE_PATH, target: "control" },
+  { method: "GET", path: ACCOUNTS_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_GITHUB_START_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_GITHUB_POLL_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_LINEAR_START_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_LINEAR_COMPLETE_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_DISCONNECT_PATH, target: "control" },
   { method: "GET", path: "/v1/gateway/challenge", target: "control" },
   { method: "POST", path: "/v1/gateway/encrypted", target: "control" },
   { method: "POST", path: "/v1/gateway/push-authorize", target: "control" },

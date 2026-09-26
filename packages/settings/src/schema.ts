@@ -635,6 +635,38 @@ export const LinearWebhookSettingsSchema = z
   .strict();
 export type LinearWebhookSettings = z.infer<typeof LinearWebhookSettingsSchema>;
 
+/**
+ * The OAuth clients account connections use (ADR 0196). Client IDs are public;
+ * secrets and tokens stay in the credential broker. A hosted body may get them
+ * from its environment instead (`CLANKIE_GITHUB_OAUTH_CLIENT_ID`, …).
+ */
+export const OauthAppsSettingsSchema = z
+  .object({
+    github: z
+      .object({
+        clientId: z
+          .string()
+          .regex(/^[A-Za-z0-9._-]{1,128}$/u)
+          .optional(),
+      })
+      .strict()
+      .default(() => ({})),
+    linear: z
+      .object({
+        /** A registered client; unset registers one dynamically at Linear's MCP server. */
+        clientId: z
+          .string()
+          .regex(/^[A-Za-z0-9._-]{1,128}$/u)
+          .optional(),
+        /** Where Linear sends the owner back, caught by the app and handed to the body sealed. */
+        redirectUri: z.url().max(512).optional(),
+      })
+      .strict()
+      .default(() => ({})),
+  })
+  .strict();
+export type OauthAppsSettings = z.infer<typeof OauthAppsSettingsSchema>;
+
 /** Read-only transcript sources. SSH authentication stays in the owner's SSH configuration. */
 export const AgentHostConnectionSchema = z
   .object({
@@ -688,6 +720,7 @@ export const ClankieSettingsSchema = z
     mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),
     linearWebhook: LinearWebhookSettingsSchema.default(() => LinearWebhookSettingsSchema.parse({})),
+    oauthApps: OauthAppsSettingsSchema.default(() => OauthAppsSettingsSchema.parse({})),
   })
   .strict();
 export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;

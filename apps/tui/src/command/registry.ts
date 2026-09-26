@@ -157,6 +157,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["accounts"],
+    lines: [
+      "  accounts [list] | connect github | disconnect github|linear   Owner's GitHub and Linear connections (JSON)",
+      "  accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]",
+    ],
+  },
+  {
     nouns: ["work"],
     lines: [
       "  work [status] | repos | init [--backend B ...] | list [--status S] [--owner O] | show ID",

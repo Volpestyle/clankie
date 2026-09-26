@@ -90,7 +90,9 @@ device cannot name an arbitrary filesystem path.
 - No writes from paired devices. The app reads; agents and the owner write
   through the CLI and tools, where the repo's own git history applies.
 - No new Linear or GitHub credentials. Linear rides the account already
-  connected to Clankie; GitHub rides the owner's `gh` login.
+  connected to Clankie; GitHub rides the owner's `gh` login. A body without a
+  `gh` login uses its GitHub account connection instead
+  ([ADR 0196](0196-account-connections-keep-tokens-on-the-body.md)).
 
 ## Consequences
 

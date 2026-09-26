@@ -414,6 +414,28 @@ on startup when following is enabled; passive backlog stays passive. A recovered
 lead reconciles existing work before repeating external side effects. Current
 storage and recovery limits live in [ADR 0168](adr/0168-linear-awareness-is-opt-in.md).
 
+### `accounts [list]` / `accounts connect github` / `accounts disconnect PROVIDER` / `accounts apps`
+
+The owner's own GitHub and Linear accounts, linked to this body
+([ADR 0196](adr/0196-account-connections-keep-tokens-on-the-body.md)). The
+service runs each flow and keeps the token in the credential broker (`github`,
+`linear`); nothing here prints or accepts one. `accounts` lists each provider's
+`status` (`connected`, `not_connected`, `unconfigured`), account, scopes and
+where to manage it. `accounts connect github` prints the code to type at
+GitHub on stderr, polls at GitHub's interval, and returns the connection.
+`accounts disconnect github|linear` revokes at the provider when it can and
+always deletes the local token; `revoked: false` comes with the `manageUrl`
+to revoke by hand. Linear connects from `/connect linear` on a Mac, or from the
+app through `/v1/accounts/linear/start` and `/complete`.
+
+`accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID]
+[--linear-redirect-uri URL]` reads or writes the public OAuth client settings
+(`oauthApps` in `settings.json`); they apply without a restart.
+`CLANKIE_GITHUB_OAUTH_CLIENT_ID`, `CLANKIE_LINEAR_OAUTH_CLIENT_ID` and
+`CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them, which is how a hosted body
+is configured. GitHub revocation needs the OAuth app's client secret as the
+broker entry `github-oauth-app`.
+
 ### `work [status]` / `work init` / `work list|show|create|update|close|attach`
 
 Tracks work where the repo already does ([ADR 0191](adr/0191-work-is-tracked-where-the-repo-tracks-it.md)):
