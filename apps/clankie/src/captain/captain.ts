@@ -728,6 +728,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const capture = evaluationStarts.get(metrics.runId);
     evaluationStarts.delete(metrics.runId);
     if (capture !== undefined) evaluator.capture({ ...capture(), metrics });
+    deps.onTurnSettled?.(metrics);
   });
   function captureEvaluationStart(
     runId: string,

@@ -35,6 +35,7 @@ import { runFileCommand } from "../src/command/file.ts";
 import { runMemoryCardCommand } from "../src/command/memory-card.ts";
 import { runMemoryCommand } from "../src/command/memory.ts";
 import { runMetricsCommand } from "../src/command/metrics.ts";
+import { runTelemetryCommand } from "../src/command/telemetry.ts";
 import { runSeatCommand } from "../src/command/seat.ts";
 import { runMcpCommand } from "../src/command/mcp.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
@@ -236,6 +237,7 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
+    if (command === "telemetry") return await runTelemetryCommand(rest, { stdout, stderr });
     if (command === "metrics") {
       const result = await runMetricsCommand(rest, options);
       outputJson(stdout, result);

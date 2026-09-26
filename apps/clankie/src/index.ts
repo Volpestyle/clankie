@@ -33,6 +33,11 @@ import {
 } from "@clankie/credential-broker";
 import { createLogger } from "@clankie/observability";
 import {
+  bodyTelemetryFromEnv,
+  startResourceSampler,
+  turnTelemetry,
+} from "@clankie/observability/body-telemetry";
+import {
   applyDiscordSettingsToEnvironment,
   applyRelaySettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
@@ -68,9 +73,15 @@ import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts"
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import { readHostedBodyBootstrap, createHostedBodyClient, HostedBodyDeniedError } from "./hosted-body.ts";
-import { PublicGatewayConnector } from "./public-gateway-connector.ts";
+import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
+/** Hosted bodies only: `clankie-body` names the spool; a Mac never does. */
+const bodyTelemetry = bodyTelemetryFromEnv(process.env, "service");
+const onDoorwayChange =
+  bodyTelemetry === undefined
+    ? undefined
+    : (change: PublicGatewayDoorwayChange) => bodyTelemetry.emit({ event: "body.gateway", ...change });
 
 /**
  * Provider API-key compatibility fallbacks from the root `.env.local`.
@@ -115,6 +126,14 @@ const herdr = await startHerdrConnection({
 });
 // Keep the existing on-disk directory so browser profiles survive the process merge.
 const capabilityStateRoot = join(stateRoot, "runner");
+if (bodyTelemetry !== undefined) {
+  startResourceSampler(bodyTelemetry, {
+    statePath: stateRoot,
+    ...(startupSettings.captain.workingDirectory === undefined
+      ? {}
+      : { workspacePath: startupSettings.captain.workingDirectory }),
+  });
+}
 const eventLogPath = process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "events.jsonl");
 const port = Number(process.env.PORT ?? 4310);
 const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? 4321);
@@ -140,6 +159,7 @@ if (hostedBody !== undefined) {
     controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
     relayUrl: `http://127.0.0.1:${String(relayPort)}`,
     logger,
+    ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
   });
   hostedBody.onDenied = () => publicGatewayConnector?.close();
 }
@@ -167,6 +187,7 @@ if (
         controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
         relayUrl: `http://127.0.0.1:${String(relayPort)}`,
         logger,
+        ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
       });
     }
   } catch (error) {
@@ -205,6 +226,7 @@ if (
       controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
       relayUrl: `http://127.0.0.1:${String(relayPort)}`,
       logger,
+      ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
     });
   } catch (error) {
     if (clankieAccountSignInRequired(error)) publicGatewaySignInRequiredSince = new Date().toISOString();
@@ -421,6 +443,9 @@ const agentSessions = createAgentSessions(settingsStore, undefined, {
 });
 const captain = createCaptain(
   {
+    ...(bodyTelemetry === undefined
+      ? {}
+      : { onTurnSettled: (metrics) => bodyTelemetry.emit(turnTelemetry(metrics)) }),
     herdrAvailable: herdr.available,
     agentSessions,
     runtimes,

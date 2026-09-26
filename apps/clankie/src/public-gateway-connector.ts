@@ -54,7 +54,13 @@ export interface PublicGatewayConnectorOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly reconnectMinimumMs?: number;
   readonly reconnectMaximumMs?: number;
+  /** Each doorway transition, for the hosted body's telemetry. Metadata only. */
+  readonly onDoorwayChange?: (change: PublicGatewayDoorwayChange) => void;
 }
+
+export type PublicGatewayDoorwayChange =
+  | { readonly state: "connected" | "sign_in_required" }
+  | { readonly state: "disconnected"; readonly retryInMs: number; readonly closeCode?: number };
 
 export interface PublicGatewayPairingOffer {
   readonly offerSecret: string;
@@ -110,6 +116,8 @@ export class PublicGatewayConnector {
   private readonly tokenErrorIsTerminal: (error: unknown) => boolean;
   private readonly reconnectMinimumMs: number;
   private readonly reconnectMaximumMs: number;
+  private readonly onDoorwayChange: ((change: PublicGatewayDoorwayChange) => void) | undefined;
+  private lastCloseCode: number | undefined;
   private readonly pairingRoutes = new Map<string, PublicGatewayPairingRouteFrame>();
   private readonly inFlight = new Map<string, AbortController>();
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
@@ -148,6 +156,7 @@ export class PublicGatewayConnector {
     this.fetcher = options.fetch ?? globalThis.fetch;
     this.reconnectMinimumMs = options.reconnectMinimumMs ?? RECONNECT_MIN_MS;
     this.reconnectMaximumMs = options.reconnectMaximumMs ?? RECONNECT_MAX_MS;
+    this.onDoorwayChange = options.onDoorwayChange;
     this.reconnectDelayMs = this.reconnectMinimumMs;
     this.hostBaseUrl = new URL(`/h/${this.hostId}`, gatewayOrigin).toString().replace(/\/$/u, "");
     const connect = new URL(PUBLIC_GATEWAY_HOST_CONNECT_PATH, gatewayOrigin);
@@ -308,6 +317,7 @@ export class PublicGatewayConnector {
           { hostId: this.hostId, error: errorName(error), ...errorCode(error) },
           "public gateway needs this Mac signed in again",
         );
+        this.onDoorwayChange?.({ state: "sign_in_required" });
         return;
       }
       this.logger.warn(
@@ -346,12 +356,16 @@ export class PublicGatewayConnector {
       }
       void this.replayPairingRoutes(socket);
       this.logger.info({ hostId: this.hostId }, "public gateway connected");
+      this.onDoorwayChange?.({ state: "connected" });
     });
     socket.on("message", (data, isBinary) => this.handleMessage(socket, data, isBinary));
     socket.once("error", (error) => {
       this.logger.warn({ hostId: this.hostId, error: error.name }, "public gateway connection error");
     });
-    socket.once("close", () => this.disconnected(socket));
+    socket.once("close", (code) => {
+      if (this.socket === socket) this.lastCloseCode = code;
+      this.disconnected(socket);
+    });
   }
 
   private disconnected(socket: WebSocket): void {
@@ -376,6 +390,13 @@ export class PublicGatewayConnector {
     }, delayMs);
     this.reconnectTimer.unref();
     this.logger.warn({ hostId: this.hostId, reconnectInMs: delayMs }, "public gateway disconnected");
+    const closeCode = this.lastCloseCode;
+    this.lastCloseCode = undefined;
+    this.onDoorwayChange?.({
+      state: "disconnected",
+      retryInMs: delayMs,
+      ...(closeCode === undefined ? {} : { closeCode }),
+    });
   }
 
   private handleMessage(socket: WebSocket, data: RawData, isBinary: boolean): void {

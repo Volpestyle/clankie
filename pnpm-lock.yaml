@@ -310,6 +310,9 @@ importers:
       '@clankie/model-registry':
         specifier: workspace:*
         version: link:../../packages/model-registry
+      '@clankie/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -568,9 +571,15 @@ importers:
 
   packages/observability:
     dependencies:
+      '@smithy/signature-v4':
+        specifier: 5.7.0
+        version: 5.7.0
       pino:
         specifier: 10.3.1
         version: 10.3.1
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: 24.12.4
@@ -1929,10 +1938,6 @@ packages:
 
   '@smithy/signature-v4@5.7.0':
     resolution: {integrity: sha512-hCynhm22wMJ8wTF9crcwu8mxggtUrSLLJgDcGUvYFBqpofxycYJCGKOMYg4xtPPFtgNiDJSYmhsWLTrcU/g59Q==}
-    engines: {node: '>=18.0.0'}
-
-  '@smithy/types@4.16.1':
-    resolution: {integrity: sha512-0JFs3V2y2M9tKW5na/qxe69Zv+uxLMO7QBbhxF/FHu/Gp2NFZAAL9tWl9PU02xxo07pb3G9FTyjNc6D5uZrJIg==}
     engines: {node: '>=18.0.0'}
 
   '@smithy/types@4.17.0':
@@ -3359,7 +3364,7 @@ snapshots:
       '@smithy/core': 3.33.0
       '@smithy/fetch-http-handler': 5.7.0
       '@smithy/node-http-handler': 4.10.0
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.17.0
       tslib: 2.8.1
 
   '@aws-sdk/core@3.977.7':
@@ -4279,10 +4284,6 @@ snapshots:
     dependencies:
       '@smithy/core': 3.33.0
       '@smithy/types': 4.17.0
-      tslib: 2.8.1
-
-  '@smithy/types@4.16.1':
-    dependencies:
       tslib: 2.8.1
 
   '@smithy/types@4.17.0':

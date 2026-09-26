@@ -11,6 +11,7 @@ import type { VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import type {
   CaptainEpisodeVisibility,
   CaptainSessionLaneV2,
+  CaptainTurnSettledMetrics,
   DiscordPersonIdentity,
   DiscordPresenceAttachment,
   DiscordStreamWatchObservation,
@@ -37,6 +38,8 @@ import type { RivalsClient } from "../rivals.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  /** Called once per settled turn with its bounded metrics (hosted body telemetry). */
+  readonly onTurnSettled?: (metrics: CaptainTurnSettledMetrics) => void;
   /** Execution is optional; checked again when a terminal tool is called. */
   readonly herdrAvailable?: () => boolean;
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;

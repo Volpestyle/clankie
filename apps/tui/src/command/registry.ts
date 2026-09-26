@@ -231,6 +231,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["telemetry"],
+    lines: [
+      "  telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval S]",
+      "                           Hosted host only: ship a body's metadata telemetry to CloudWatch Logs",
+    ],
+  },
+  {
     nouns: ["seat"],
     lines: [
       "  seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
