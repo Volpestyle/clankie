@@ -1,0 +1,9 @@
+{
+  "channelsEnabled": true,
+  "allowedChannelPlugins": [
+    {
+      "marketplace": "swarm-channel-consent-probe",
+      "plugin": "swarm-probe"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+import { createRequire } from 'node:module';
+import { appendFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { createServer } from 'node:net';
+const require = createRequire(process.argv[3]);
+const {Server} = require('@modelcontextprotocol/sdk/server/index.js');
+const {StdioServerTransport} = require('@modelcontextprotocol/sdk/server/stdio.js');
+const {ListToolsRequestSchema,CallToolRequestSchema} = require('@modelcontextprotocol/sdk/types.js');
+const root = process.argv[2];
+const log = (type,data={}) => appendFileSync(root+'/events.jsonl',JSON.stringify({at:new Date().toISOString(),type,...data})+'\n');
+const seen = new Set();
+const server = new Server({name:'swarm-probe',version:'0.0.1'},{capabilities:{tools:{},experimental:{'claude/channel':{}}},instructions:'This is an isolated channel transport probe. On every channel event, call ack with its message_id and content exactly. Do not call any other tools or edit anything. After ack, answer with ACK plus message_id and stop. Duplicate message IDs should still be acknowledged; the tool records them idempotently.'});
+server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[{name:'ack',description:'Acknowledge receipt of the isolated probe event. No external actions.',inputSchema:{type:'object',properties:{message_id:{type:'string'},content:{type:'string'}},required:['message_id','content'],additionalProperties:false}}]}));
+server.setRequestHandler(CallToolRequestSchema,async request=>{const args=request.params.arguments??{};log('ack',{...args,duplicate:seen.has(args.message_id)});seen.add(args.message_id);return {content:[{type:'text',text:'Receipt recorded. End this turn.'}]};});
+server.oninitialized=()=>log('initialized');
+await server.connect(new StdioServerTransport());
+const ipc=createServer(socket=>{let buf='';socket.on('data',async chunk=>{buf+=chunk;if(!buf.includes('\n'))return;try{const event=JSON.parse(buf.trim());log('emit',event);await server.notification({method:'notifications/claude/channel',params:{content:event.content,meta:{message_id:event.message_id,kind:'probe'}}});socket.end('sent\n');}catch(e){log('error',{message:String(e)});socket.end('error\n');}});});
+ipc.listen(root+'/probe.sock',()=>{chmodSync(root+'/probe.sock',0o600);writeFileSync(root+'/ready','ready');log('listening');});
+process.stdin.on('end',()=>{ipc.close();process.exit(0);});

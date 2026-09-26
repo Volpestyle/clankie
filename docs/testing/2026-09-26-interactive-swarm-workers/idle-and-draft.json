@@ -1,0 +1,49 @@
+[
+  {
+    "at": "2026-09-26T19:13:46.263Z",
+    "type": "listening"
+  },
+  {
+    "at": "2026-09-26T19:13:46.284Z",
+    "type": "initialized"
+  },
+  {
+    "at": "2026-09-26T19:14:04.945Z",
+    "type": "emit",
+    "message_id": "idle-001",
+    "content": "TRANSPORT_PROBE_IDLE_001"
+  },
+  {
+    "at": "2026-09-26T19:14:06.627Z",
+    "type": "ack",
+    "message_id": "idle-001",
+    "content": "TRANSPORT_PROBE_IDLE_001",
+    "duplicate": false
+  },
+  {
+    "at": "2026-09-26T19:15:01.388Z",
+    "type": "emit",
+    "message_id": "draft-002",
+    "content": "TRANSPORT_PROBE_DRAFT_002"
+  },
+  {
+    "at": "2026-09-26T19:15:02.883Z",
+    "type": "ack",
+    "message_id": "draft-002",
+    "content": "TRANSPORT_PROBE_DRAFT_002",
+    "duplicate": false
+  },
+  {
+    "at": "2026-09-26T19:15:42.224Z",
+    "type": "emit",
+    "message_id": "draft-002",
+    "content": "TRANSPORT_PROBE_DRAFT_002"
+  },
+  {
+    "at": "2026-09-26T19:15:43.653Z",
+    "type": "ack",
+    "message_id": "draft-002",
+    "content": "TRANSPORT_PROBE_DRAFT_002",
+    "duplicate": true
+  }
+]

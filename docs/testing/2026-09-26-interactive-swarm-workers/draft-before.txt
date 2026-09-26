@@ -1,0 +1,22 @@
+▝▜██████▀  Claude Max
+ ▝▝   ▝▝   ~/dev/clankie
+
+▎ Channels (experimental) messages from
+▎ server:swarm_probe inject directly in this
+▎ session · restart without
+▎ --dangerously-load-development-channels to stop
+▎ server:swarm_probe · no MCP server configured
+▎ with that name
+
+← swarm_probe: TRANSPORT_PROBE_IDLE_001
+
+  Called swarm_probe (ctrl+o to expand)
+
+⏺ ACK idle-001
+
+✻ Worked for 2s · done 2:14 PM
+
+───────────────────────────── Swarm channel probe ─
+❯ UNSENT_CHANNEL_PROBE_DRAFT_002
+───────────────────────────────────────────────────
+  ⏵⏵ don't ask on (shift+tab to cycle)

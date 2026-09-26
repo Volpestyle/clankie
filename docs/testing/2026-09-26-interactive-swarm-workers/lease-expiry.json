@@ -1,0 +1,41 @@
+[
+  {
+    "at": "2026-09-26T19:20:09.108Z",
+    "type": "listening"
+  },
+  {
+    "at": "2026-09-26T19:20:09.125Z",
+    "type": "initialized"
+  },
+  {
+    "at": "2026-09-26T19:20:30.846Z",
+    "type": "emit",
+    "message_id": "lease-probe-message",
+    "attempt": 1
+  },
+  {
+    "at": "2026-09-26T19:20:37.625Z",
+    "type": "effect_committed",
+    "message_id": "lease-probe-message",
+    "attempt": 1
+  },
+  {
+    "at": "2026-09-26T19:20:37.625Z",
+    "type": "ack_withheld",
+    "message_id": "lease-probe-message",
+    "attempt": 1
+  },
+  {
+    "at": "2026-09-26T19:20:42.474Z",
+    "type": "emit",
+    "message_id": "lease-probe-message",
+    "attempt": 2
+  },
+  {
+    "at": "2026-09-26T19:20:46.350Z",
+    "type": "ack",
+    "message_id": "lease-probe-message",
+    "attempt": 2,
+    "duplicate_effect_prevented": true
+  }
+]

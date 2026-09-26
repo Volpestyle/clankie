@@ -1,0 +1,19 @@
+ ▐▛███▛█   Claude Code v2.1.283
+▝▜██████▀  Sonnet 5 with low effort · Claude Max
+ ▝▝   ▝▝   <probe-dir>
+
+▎ Channels (experimental) messages from plugin:fakechat@claude-plugins-official
+▎ inject directly in this session · restart without --channels to stop
+
+← fakechat · web: approved-001
+
+  Called plugin:fakechat:fakechat (ctrl+o to expand)
+
+⏺ Done.
+
+✻ Cogitated for 2s · done 2:32 PM
+
+───────────────────────────────────────────────────────── Approved channel probe ─
+❯ 
+──────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ don't ask on (shift+tab to cycle) · ← 5 agents                          /rc

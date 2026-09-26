@@ -1,0 +1,42 @@
+[
+  {
+    "at": "2026-09-26T19:17:24.579Z",
+    "event": "SessionStart"
+  },
+  {
+    "at": "2026-09-26T19:17:38.938Z",
+    "event": "UserPromptSubmit"
+  },
+  {
+    "at": "2026-09-26T19:17:40.417Z",
+    "event": "PreToolUse",
+    "tool": "mcp__swarm_probe__ack"
+  },
+  {
+    "at": "2026-09-26T19:17:48.522Z",
+    "event": "PostToolUse",
+    "tool": "mcp__swarm_probe__ack"
+  },
+  {
+    "at": "2026-09-26T19:17:48.595Z",
+    "event": "UserPromptSubmit"
+  },
+  {
+    "at": "2026-09-26T19:17:50.055Z",
+    "event": "PreToolUse",
+    "tool": "mcp__swarm_probe__ack"
+  },
+  {
+    "at": "2026-09-26T19:17:50.137Z",
+    "event": "PostToolUse",
+    "tool": "mcp__swarm_probe__ack"
+  },
+  {
+    "at": "2026-09-26T19:17:50.931Z",
+    "event": "Stop"
+  },
+  {
+    "at": "2026-09-26T19:19:21.165Z",
+    "event": "SessionEnd"
+  }
+]

@@ -1,0 +1,32 @@
+import { createRequire } from 'node:module';
+import { appendFileSync, writeFileSync, chmodSync, readFileSync, existsSync } from 'node:fs';
+import { createServer } from 'node:net';
+const require = createRequire('<clankie-checkout>/apps/tui/package.json');
+const {Server} = require('@modelcontextprotocol/sdk/server/index.js');
+const {StdioServerTransport} = require('@modelcontextprotocol/sdk/server/stdio.js');
+const {ListToolsRequestSchema,CallToolRequestSchema} = require('@modelcontextprotocol/sdk/types.js');
+const root = process.argv[2];
+const log = (type,data={}) => appendFileSync(root+'/events.jsonl',JSON.stringify({at:new Date().toISOString(),type,...data})+'\n');
+const swarmRequire=createRequire('<clankie-checkout>/packages/swarm/package.json');
+const runtimePath=swarmRequire.resolve('swarm-mcp/package.json').replace(/package.json$/, 'dist/coordination/runtime.js');
+const {CoordinationClient}=await import(runtimePath);
+const binding=JSON.parse(readFileSync(root+'/worker.json','utf8'));
+const worker=await CoordinationClient.connect(binding.environment.SWARM_COORDINATOR_ENDPOINT,binding.environment.SWARM_SESSION_CAPABILITY);
+const seen = new Set();
+const server = new Server({name:'swarm-probe',version:'0.0.1'},{capabilities:{tools:{},experimental:{'claude/channel':{}}},instructions:'This is an isolated channel transport probe. On every channel event, call ack with its message_id and content exactly. Do not call any other tools or edit anything. After ack, answer with ACK plus message_id and stop. Duplicate message IDs should still be acknowledged; the tool records them idempotently.'});
+server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[{name:'ack',description:'Acknowledge receipt of the isolated probe event. No external actions.',inputSchema:{type:'object',properties:{message_id:{type:'string'},content:{type:'string'}},required:['message_id','content'],additionalProperties:false}}]}));
+server.setRequestHandler(CallToolRequestSchema,async request=>{
+ const args=request.params.arguments??{};const lease=JSON.parse(args.content);
+ if(args.message_id!==lease.message.id||lease.message.recipient!==binding.actor)throw new Error('Wrong message or recipient');
+ const effectPath=root+'/effect.json';const processed=existsSync(effectPath);
+ if(!processed){writeFileSync(effectPath,JSON.stringify({messageId:lease.message.id,completed:true}),{flag:'wx',mode:0o600});log('effect_committed',{message_id:lease.message.id,attempt:lease.attempt});}
+ else if(JSON.parse(readFileSync(effectPath,'utf8')).messageId!==lease.message.id)throw new Error('Unexpected second work item');
+ if(!processed){log('ack_withheld',{message_id:lease.message.id,attempt:lease.attempt});}
+ else {await worker.request({op:'command',command:{id:'probe-ack-'+lease.attempt,type:'inbox.ack',payload:{messageId:lease.message.id,leaseToken:lease.leaseToken}}});log('ack',{message_id:lease.message.id,attempt:lease.attempt,duplicate_effect_prevented:true});}
+ return {content:[{type:'text',text:processed?'Existing completed effect reused; fresh lease acknowledged. End turn.':'Effect durably committed; acknowledgement intentionally withheld to simulate lost receipt. End turn and wait for redelivery.'}]};
+});
+server.oninitialized=()=>log('initialized');
+await server.connect(new StdioServerTransport());
+const ipc=createServer(socket=>{let buf='';socket.on('data',async chunk=>{buf+=chunk;if(!buf.includes('\n'))return;try{const event=JSON.parse(buf.trim());log('emit',{message_id:event.message_id,attempt:JSON.parse(event.content).attempt});await server.notification({method:'notifications/claude/channel',params:{content:event.content,meta:{message_id:event.message_id,kind:'probe'}}});socket.end('sent\n');}catch(e){log('error',{message:String(e)});socket.end('error\n');}});});
+ipc.listen(root+'/probe.sock',()=>{chmodSync(root+'/probe.sock',0o600);writeFileSync(root+'/ready','ready');log('listening');});
+process.stdin.on('end',()=>{ipc.close();process.exit(0);});

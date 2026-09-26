@@ -1,0 +1,14 @@
+ ▐▛███▛█   Claude Code v2.1.283
+▝▜██████▀  Sonnet 5 with low effort · Claude Max
+ ▝▝   ▝▝   <probe-dir>
+
+▎ Channels (experimental) messages from
+▎ plugin:swarm-probe@swarm-channel-consent-probe inject directly in this session ·
+▎ restart without --channels to stop
+▎ plugin:swarm-probe@swarm-channel-consent-probe · not on the approved channels
+▎ allowlist
+
+───────────────────────────────────────────────────────── Approved channel probe ─
+❯ Try "fix lint errors"
+──────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ don't ask on (shift+tab to cycle) · ← 5 agents                          /rc

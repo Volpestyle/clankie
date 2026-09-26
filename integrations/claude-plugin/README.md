@@ -59,9 +59,13 @@ with the permission allowlist for `clankie` commands and, when the plugin is
 installed, `enabledPlugins` for this session only; names the herdr pane
 `clankie` when it is one; and starts Claude Code with `--name Clankie`. With
 the plugin installed from the repo's marketplace it also passes the channel
-development flag, so wakes and escalations reach the session; a `--plugin-dir`
-seat gets his tools and skills but not his wakes, because the channel preview
-accepts only marketplace-installed plugins.
+development flag, so wakes and escalations reach the session. The launcher's
+`--plugin-dir` path currently gets tools and skills without enabling wakes.
+That is a launcher constraint, not a universal plugin-only channel requirement:
+[an isolated probe](../../docs/testing/2026-09-26-interactive-swarm-workers/README.md)
+on Claude Code 2.1.283 received events through a bare MCP server with the development
+channel flag. That probe does not change the operator-seat launch path or establish
+`--plugin-dir` channel support.
 
 `--conversation ID` resolves an existing global/workspace conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and

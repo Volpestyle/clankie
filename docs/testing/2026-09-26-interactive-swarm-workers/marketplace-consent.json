@@ -1,0 +1,45 @@
+{
+  "claudeVersion": "2.1.283",
+  "authentication": "personal Claude Max",
+  "approvedPlugin": {
+    "id": "fakechat@claude-plugins-official",
+    "scope": "local",
+    "flag": "--channels",
+    "developmentDialog": false,
+    "initialState": "idle",
+    "sentAt": "2026-09-26T19:32:32.806Z",
+    "replyAt": "2026-09-26T19:32:34.696Z",
+    "reply": "ACK approved-001",
+    "roundTripMs": 1890
+  },
+  "customPlugin": {
+    "id": "swarm-probe@swarm-channel-consent-probe",
+    "scope": "local",
+    "flag": "--channels",
+    "developmentDialog": false,
+    "mcpInitialized": true,
+    "notificationWritten": true,
+    "channelRejected": "not on the approved channels allowlist",
+    "ackCount": 0,
+    "observationSecondsAfterEmit": 16.255
+  },
+  "customPluginDevelopmentFlag": {
+    "initialState": "blocked",
+    "dialog": "Loading development channels",
+    "dialogAccepted": false
+  },
+  "strictMcpControl": {
+    "officialPluginInstalled": true,
+    "mirroredServerConnected": true,
+    "notificationWritten": true,
+    "replyWithin15Seconds": false,
+    "interpretation": "Explicit MCP config does not preserve installed-plugin channel registration; actual plugin loading required in this test"
+  },
+  "cleanup": {
+    "allOwnedPanesClosed": true,
+    "temporaryLocalPluginsUninstalled": true,
+    "temporaryMarketplaceRemoved": true,
+    "managedPolicyChanged": false,
+    "productionRestarted": false
+  }
+}

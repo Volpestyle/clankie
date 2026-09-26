@@ -1,0 +1,22 @@
+ ▝▝   ▝▝   ~/dev/clankie
+
+▎ Channels (experimental) messages from server:swarm_probe inject directly in this
+▎ session · restart without --dangerously-load-development-channels to stop
+▎ server:swarm_probe · no MCP server configured with that name
+
+← swarm_probe: TRANSPORT_PROBE_busy-003
+
+  Called swarm_probe (ctrl+o to expand)
+
+← swarm_probe: TRANSPORT_PROBE_queued-004
+
+  Called swarm_probe (ctrl+o to expand)
+
+⏺ ACK queued-004
+
+✻ Cogitated for 12s · done 2:17 PM
+
+──────────────────────────────────────────────────────────── Swarm channel probe ─
+❯
+──────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ don't ask on (shift+tab to cycle) · ← 5 agents                          /rc

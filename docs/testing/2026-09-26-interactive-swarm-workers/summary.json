@@ -1,0 +1,33 @@
+{
+  "claudeVersion": "2.1.283",
+  "model": "Sonnet 5",
+  "effort": "low",
+  "mode": "interactive",
+  "channel": "server:swarm_probe",
+  "installedPluginRequiredForThisProbe": false,
+  "initialState": "idle",
+  "draftStates": ["done", "working", "done"],
+  "draftUnchanged": true,
+  "firstAckMs": 1682,
+  "draftAckMs": 1495,
+  "duplicateAckMs": 1429,
+  "longToolDurationMs": 8002,
+  "queuedEventAfterToolStartMs": 48,
+  "queuedUserPromptSubmitAfterToolEndMs": 140,
+  "queuedAckAfterToolEndMs": 1610,
+  "operatorCredentialUsed": false,
+  "credentialEnvironmentVariables": {
+    "CLANKIE_OPERATOR_TOKEN": false,
+    "CLANKIE_CAPTAIN_TOKEN": false,
+    "SWARM_SESSION_CAPABILITY": false,
+    "CLANKIE_WORKER_TOKEN": false
+  },
+  "startupConfirmation": "Local development channel warning accepted once in each isolated probe session; no permission bypass flag used",
+  "eventDelivery": "Unix socket to MCP channel notification; no terminal text or Enter used to submit test events",
+  "limitations": [
+    "Test receipt tool, not the production worker integration",
+    "Durable exactly-once test effect is one exclusive file creation; arbitrary effects require their own idempotency/reconciliation",
+    "Disposable Swarm coordinator, not production tasks; task-heartbeat continuity and resume still need implementation tests",
+    "Startup confirmation and noisy registration banner require explicit readiness handling"
+  ]
+}

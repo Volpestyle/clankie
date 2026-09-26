@@ -1,0 +1,9 @@
+{
+  "channelsEnabled": true,
+  "allowedChannelPlugins": [
+    {
+      "marketplace": "clankie",
+      "plugin": "clankie-worker"
+    }
+  ]
+}

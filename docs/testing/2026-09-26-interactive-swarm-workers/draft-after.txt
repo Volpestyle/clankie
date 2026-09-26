@@ -1,0 +1,18 @@
+  Called swarm_probe (ctrl+o to expand)
+
+⏺ ACK idle-001
+
+✻ Worked for 2s · done 2:14 PM
+
+← swarm_probe: TRANSPORT_PROBE_DRAFT_002
+
+  Called swarm_probe (ctrl+o to expand)
+
+⏺ ACK draft-002
+
+✻ Brewed for 2s · done 2:15 PM
+
+───────────────────────────── Swarm channel probe ─
+❯ UNSENT_CHANNEL_PROBE_DRAFT_002
+───────────────────────────────────────────────────
+  ⏵⏵ don't ask on (shift+tab to cycle)

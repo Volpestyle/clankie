@@ -1,0 +1,33 @@
+$ pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+apps/clankie/.work-discover.mts (0ms)
+apps/clankie/.work-proof-serve.mts (0ms)
+docs/testing/2026-09-26-work-items/evidence/a1-discover.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/a2-create-refused.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/a3-init.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/a4-create.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/a5-close.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/b1-discover.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/b2-create.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/b3-progress.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/b4-attach.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/b5-close.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/c1-discover.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/c2-create.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/c3-review.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/c4-attach.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/c5-show.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/c6-close.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/d1-device-work-repos.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/d2-device-work-items-portfolio-a24f86e5.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/d2-device-work-items-tmp-cz4aclzezx-76aec8d4.json (0ms)
+docs/testing/2026-09-26-work-items/evidence/d2-device-work-items-workspace.json (1ms)
+docs/testing/2026-09-26-work-items/evidence/d3-unregistered.json (0ms)
+docs/testing/2026-09-26-work-items/flows/serve.mts (0ms)
+
+Format issues found in above 24 files. Run without `--check` to fix.
+Finished in 3291ms on 1134 files using 18 threads.
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.
