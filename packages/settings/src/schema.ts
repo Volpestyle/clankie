@@ -456,10 +456,41 @@ export type GameplaySettings = z.infer<typeof GameplaySettingsSchema>;
  * Preferences, never authority. This says who he should reach for, not what he
  * is permitted to do: a note here can no more widen his reach than a warmer
  * persona can.
+ *
+ * Beside the notes, two small enums state the owner's budget, because budget is
+ * one of the few things that is not conditional: the swarm size to aim for
+ * (`size`) and how a model and effort are picked per job (`models`). Both are
+ * targets the lead sizes to, never enforced caps: nothing counts seats against
+ * them, and an owner who wants a thousand agents says `max` or says so in the
+ * notes. Like the notes, they never grant reach. The defaults, `max` and
+ * `optimal`, assume no plan limit.
  */
+export const FLEET_SIZES = ["max", "large", "small", "solo"] as const;
+export type FleetSize = (typeof FLEET_SIZES)[number];
+export const FLEET_MODEL_MODES = ["optimal", "frugal"] as const;
+export type FleetModelMode = (typeof FLEET_MODEL_MODES)[number];
+
+/** The plan each size fits and the swarm it aims for: one text for the CLI, the TUI and his prompt. */
+export const FLEET_SIZE_GUIDANCE: Readonly<Record<FleetSize, string>> = {
+  max: "Several top-tier plans (for example four or five $200/month subscriptions): aim for maximum bandwidth, one worker per separable deliverable plus independent reviewers, as far as the work and the machines can use them. No ceiling.",
+  large: "One or two top-tier plans: aim for around six concurrent workers, reviewers included.",
+  small:
+    "One mid-tier plan (about $100/month): aim for one or two workers at a time beside you, and sequence the rest.",
+  solo: "Pay-per-token API use: aim for no standing workers. Do the work yourself or through short native subagents, and ask before a long or parallel run.",
+};
+
+/** How a model and effort are chosen per job under each mode. */
+export const FLEET_MODEL_GUIDANCE: Readonly<Record<FleetModelMode, string>> = {
+  optimal: "Pick the strongest model and the effort each job needs; cost is not a reason to downgrade a job.",
+  frugal:
+    "Pick the cheapest model and the lowest effort that can meet each job's acceptance; keep the top model for consequential boundaries (safety, data integrity, live surfaces, a disputed review).",
+};
+
 export const FleetSettingsSchema = z
   .object({
     notes: z.string().max(4_000).default(""),
+    size: z.enum(FLEET_SIZES).default("max"),
+    models: z.enum(FLEET_MODEL_MODES).default("optimal"),
   })
   .strict();
 export type FleetSettings = z.infer<typeof FleetSettingsSchema>;

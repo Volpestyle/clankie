@@ -9,6 +9,8 @@ import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import {
   clankieSkillRoots,
+  FLEET_MODEL_GUIDANCE,
+  FLEET_SIZE_GUIDANCE,
   personaInstructions,
   resolveDiscordSettings,
   SettingsStore,
@@ -291,16 +293,23 @@ export function assembleLanePrompt(
   // room with no shell cannot dispatch, so the section would be dead weight
   // there. Unset renders nothing rather than an empty heading. Stated as
   // preference on purpose — he is handed the context and decides, the way he
-  // does with every other thing his person tells him.
-  const fleetNotes = currentSettings.fleet.notes.trim();
+  // does with every other thing his person tells him. The budget lines ride
+  // along whenever the section renders, and alone force it only when they
+  // differ from the no-limit default, so an owner who set nothing sees no change.
+  const { notes, size, models } = currentSettings.fleet;
+  const fleetNotes = notes.trim();
+  const budgetSet = size !== "max" || models !== "optimal";
   const fleet =
-    systemTools && fleetNotes.length > 0
+    systemTools && (fleetNotes.length > 0 || budgetSet)
       ? [
           "# Your fleet",
           "",
           "How your person wants work spread across the agents you lead. Their preference, not a rule you execute — you still read the work and decide, and you say so when you go another way.",
           "",
-          fleetNotes,
+          `Swarm size: ${size}. ${FLEET_SIZE_GUIDANCE[size]}`,
+          `Models: ${models}. ${FLEET_MODEL_GUIDANCE[models]}`,
+          "This is their budget as a target, not a cap: size the fleet toward it and pick each seat's model and effort by it (the lead skills say how). Go past it when the work clearly warrants, and say so.",
+          ...(fleetNotes.length > 0 ? ["", fleetNotes] : []),
         ].join("\n")
       : "";
   // His own address is a fact he should be able to say without calling a tool

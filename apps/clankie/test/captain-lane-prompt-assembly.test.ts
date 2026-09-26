@@ -58,6 +58,30 @@ describe("lane prompt assembly", () => {
     expect(assembleLanePrompt("operator", true, settings)).not.toContain("# Your fleet");
   });
 
+  it("states the owner's budget as a target, and a non-default budget alone renders the section", () => {
+    const frugal = ClankieSettingsSchema.parse({
+      schemaVersion: 1,
+      fleet: { size: "small", models: "frugal" },
+    });
+    const operator = assembleLanePrompt("operator", true, frugal);
+    expect(operator).toContain("# Your fleet");
+    expect(operator).toContain("Swarm size: small.");
+    expect(operator).toContain("Models: frugal.");
+    // A target the lead sizes toward, never a cap he is held to.
+    expect(operator).toContain("not a cap");
+    expect(operator).not.toMatch(/\n\n\n/u);
+    expect(assembleLanePrompt("discord_presence", false, frugal)).not.toContain("# Your fleet");
+    // With notes, the default budget still rides along so he knows it is unlimited.
+    const notesOnly = ClankieSettingsSchema.parse({
+      schemaVersion: 1,
+      fleet: { notes: "codex is the workhorse." },
+    });
+    const withNotes = assembleLanePrompt("operator", true, notesOnly);
+    expect(withNotes).toContain("Swarm size: max.");
+    expect(withNotes).toContain("No ceiling");
+    expect(withNotes.indexOf("Models: optimal.")).toBeLessThan(withNotes.indexOf("codex is the workhorse."));
+  });
+
   it("renders only the named sections, so a seat can skip the identity its output style already carries", () => {
     const prompt = assembleLanePrompt("operator", true, settings, ["persona", "reach", "address", "model"], {
       model: "## The model you are running on\nstub",

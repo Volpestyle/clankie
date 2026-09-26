@@ -609,14 +609,32 @@ he opens, signed-in ones included. JSON contains `browser.recordSessions`,
 `settingsFile`, and `"appliesTo": "next_browsing_burst"` — no restart is needed.
 The TUI `/browser` command calls this same writer.
 
-### `fleet [status]` / `fleet set --notes TEXT` / `fleet clear`
+### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
-which. Up to 4,000 characters of free text.
+which (up to 4,000 characters of free text) — and the budget he sizes the fleet
+to. `set` takes any combination of the three flags; what is left out keeps its
+value. `clear` returns all three to their defaults.
 
-**The default is empty**, and empty means he picks a harness per job on his own.
-Nothing here ships with an opinion; this is where you add one.
+**The budget is two targets, never caps.** Nothing counts seats against them; the
+lead skills (`lead`, `swarm-lead`, `herdr-lead`) and his prompt use them to aim.
+An owner who wants a thousand agents picks `max` or says so in the notes.
+
+| `--size`        | Fits                                                               | Aims for                                                                                                                                     |
+| --------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `max` (default) | several top-tier plans, e.g. four or five $200/month subscriptions | maximum bandwidth: one worker per separable deliverable plus independent reviewers, as far as the work and machines can use them; no ceiling |
+| `large`         | one or two top-tier plans                                          | around six concurrent workers, reviewers included                                                                                            |
+| `small`         | one mid-tier plan, about $100/month                                | one or two workers at a time; the rest sequenced                                                                                             |
+| `solo`          | pay-per-token API use                                              | no standing workers: he works himself or through short native subagents, and asks before a long or parallel run                              |
+
+| `--models`          | Picks per job                                                                                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `optimal` (default) | the strongest model and the effort the job needs; cost is not a reason to downgrade                                                                                             |
+| `frugal`            | the cheapest model and lowest effort that meet the job's acceptance; the top model stays on consequential boundaries (safety, data integrity, live surfaces, a disputed review) |
+
+**The default notes are empty**, and empty means he picks a harness per job on his
+own. Nothing here ships with an opinion; this is where you add one.
 
 It is free text rather than a table of roles because an enum of
 `reviewer`/`implementer` only covers the situations someone enumerated, and the
@@ -627,14 +645,16 @@ The notes reach him as the `fleet` prompt section, and only on lanes that hold a
 shell — a room that cannot dispatch would carry the section for nothing. They are
 preference, not authority: the section says plainly that he still reads the work
 and decides, and a note here can no more widen his reach than a warmer persona
-can. Unset renders no section at all.
+can. The section carries the swarm size and model mode whenever it renders. With
+no notes and the default budget (`max`, `optimal`) there is no section at all.
 
-JSON contains `{ "ok": true, "fleet": { "notes": "…" }, "settingsFile": "…", "restart": "clankie restart captain" }`.
-The TUI `/fleet` command opens the same editor and `/fleet status` prints the
-same values.
+JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal" }, "settingsFile": "…", "restart": "clankie restart captain" }`.
+The TUI `/fleet` command opens the same editor (size, then models, then notes)
+and `/fleet status` prints the same values.
 
 ```bash
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
+clankie fleet set --size small --models frugal
 ```
 
 ### `connections` and `runtime`
