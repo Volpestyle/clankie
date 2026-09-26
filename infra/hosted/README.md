@@ -147,6 +147,10 @@ environment, command arguments or logs. Its exact fields are:
 }
 ```
 
+The optional `tenantTelemetryKey` is the fleet-derived 32-byte tenant telemetry
+key, encoded as 43 base64url characters. Treat it as a secret with the other
+bootstrap fields.
+
 The body validates this configuration and the signed credential's identity before
 connecting. It derives its host id from the account and installation, uses the
 host credential as its gateway bearer, and renews through

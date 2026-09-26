@@ -22,6 +22,27 @@ describe("managed hosted credential", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("accepts the fleet's optional tenant telemetry key while keeping the bootstrap strict", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hosted-bootstrap-"));
+    try {
+      const path = join(dir, "bootstrap.json");
+      const { bootstrap } = hostedFixture();
+      const withTelemetry = { ...bootstrap, tenantTelemetryKey: Buffer.alloc(32, 7).toString("base64url") };
+      writeFileSync(path, JSON.stringify(withTelemetry));
+      expect(readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toEqual(withTelemetry);
+      for (const invalid of [
+        { ...withTelemetry, tenantTelemetryKey: "not-a-256-bit-key" },
+        { ...withTelemetry, unexpectedSecret: "should-not-be-accepted" },
+      ]) {
+        writeFileSync(path, JSON.stringify(invalid));
+        expect(() => readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toThrow(
+          "Invalid hosted body bootstrap file",
+        );
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("shares a single half-life renewal across connector and fleet calls and persists it", async () => {
     const f = hostedFixture();
     let now = f.now;

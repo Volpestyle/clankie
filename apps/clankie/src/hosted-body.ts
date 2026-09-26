@@ -21,6 +21,10 @@ const BootstrapSchema = z
     installationId: PublicGatewayInstallationIdSchema,
     fleetVerifyKeysJson: z.string().min(1).max(4096),
     pairingKeyRegistrationToken: z.string().min(1).max(2048).optional(),
+    tenantTelemetryKey: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{43}$/u)
+      .optional(),
   })
   .strict();
 export type HostedBodyBootstrap = z.infer<typeof BootstrapSchema>;
