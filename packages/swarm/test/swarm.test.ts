@@ -14,23 +14,33 @@ afterEach(async () => {
   await Promise.all(hosts.splice(0).map((host) => host.close()));
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  for (const root of roots.splice(0)) {
-    // Only this test's private coordinator can listen on this freshly allocated path.
+  const completedRoots = roots.splice(0);
+  const endpoints: string[] = [];
+  for (const root of completedRoots) {
     for (const entry of await readdir(root).catch(() => [])) {
       try {
         const config = JSON.parse(await readFile(join(root, entry, "owner.json"), "utf8"));
-        const pids = execFileSync("lsof", ["-t", "--", localEndpoint(config.databasePath)], {
-          encoding: "utf8",
-        })
-          .trim()
-          .split(/\s+/u);
-        for (const pid of pids) if (/^\d+$/u.test(pid)) process.kill(Number(pid), "SIGTERM");
+        endpoints.push(localEndpoint(config.databasePath));
       } catch {
-        /* Already stopped or not a coordinator directory. */
+        /* Not a coordinator directory. */
       }
     }
-    await rm(root, { recursive: true, force: true });
   }
+  if (endpoints.length) {
+    try {
+      // Scan once: macOS process discovery can take seconds per invocation.
+      // Only this test's private coordinators can listen on these fresh paths.
+      const pids = execFileSync("lsof", ["-nP", "-a", "-U", "-t", "--", ...endpoints], {
+        encoding: "utf8",
+      })
+        .trim()
+        .split(/\s+/u);
+      for (const pid of new Set(pids)) if (/^\d+$/u.test(pid)) process.kill(Number(pid), "SIGTERM");
+    } catch {
+      /* Already stopped. */
+    }
+  }
+  await Promise.all(completedRoots.map((root) => rm(root, { recursive: true, force: true })));
 });
 
 test("real MCP delivers isolated inboxes, explicit acknowledgment and stable identity after host restart", async () => {
@@ -560,9 +570,12 @@ process.exit(1);
     state: "healthy",
     capacity: 1,
     capabilities: ["code"],
+    workspaces: [{ kind: "directory" as const, path: root }],
   }));
+  let budget: number | null = null;
   const host = new SwarmHost({
     stateDirectory: root,
+    dispatchBudget: async () => budget,
     runtimeConnections: async () => connections,
     warn: (message) => {
       throw new Error(message);
@@ -585,6 +598,19 @@ process.exit(1);
       constraints: [],
     },
   };
+  const refused = await assign.execute(
+    "test",
+    {
+      ...input,
+      commandId: "wrong-worktree",
+      contract: { ...input.contract, worktree: join(root, "outside") },
+    },
+    undefined,
+    undefined,
+    {} as never,
+  );
+  expect(JSON.stringify(refused)).toContain("allowedWorktrees");
+  expect(JSON.stringify(refused)).toContain(join(root, "outside"));
   const first = await assign.execute("test", input, undefined, undefined, {} as never);
   expect(JSON.stringify(first)).toContain("uncertain");
   const launched = (await readFile(log, "utf8"))
@@ -593,6 +619,23 @@ process.exit(1);
     .map((line) => JSON.parse(line));
   expect(launched).toHaveLength(1);
   expect(launched[0].socket).toBe(join(root, "two.sock"));
+  const policyOwner = await ownerState(join(root, createHash("sha256").update(root).digest("hex")));
+  expect(policyOwner.dispatch?.maximum).toBeNull();
+  budget = 25;
+  connections = connections.map((entry) => ({ ...entry, capacity: 25 }));
+  await host.syncRuntimeConnections();
+  const limitedOwner = await ownerState(dirname(policyOwner.configPath));
+  expect(limitedOwner.launcherSecret).toBe(policyOwner.launcherSecret);
+  expect(limitedOwner.dispatch?.maximum).toBe(25);
+  expect(limitedOwner.dispatch?.herdr).toEqual(
+    expect.arrayContaining([expect.objectContaining({ capacity: 25 })]),
+  );
+  budget = null;
+  await host.syncRuntimeConnections();
+  expect((await ownerState(dirname(policyOwner.configPath))).dispatch?.maximum).toBeNull();
+  // The old uncertain receipt is recovered, never launched again after policy updates.
+  await assign.execute("test", input, undefined, undefined, {} as never);
+  expect((await readFile(log, "utf8")).trim().split("\n")).toHaveLength(1);
   const request = CoordinationClient.prototype.request;
   const oldOwner = vi
     .spyOn(CoordinationClient.prototype, "request")
@@ -679,4 +722,76 @@ process.exit(1);
   } finally {
     peer.close();
   }
+});
+
+test("default budget admits sixteen in-flight dispatches, owner limits reconcile, and clearing admits more", async () => {
+  const root = await realpath(await mkdtemp("/tmp/clankie-dispatch-limits-"));
+  roots.push(root);
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  for (const name of ["herdr", "claude"])
+    await writeFile(join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+  let capacity: number | null = 16;
+  let budget: number | null = 16;
+  const host = new SwarmHost({
+    stateDirectory: root,
+    dispatchBudget: async () => budget,
+    runtimeConnections: async () => [
+      {
+        id: "default",
+        socketPath: join(root, "runtime.sock"),
+        enabled: true,
+        state: "healthy",
+        capacity,
+        capabilities: ["code"],
+      },
+    ],
+    warn: (message) => {
+      throw new Error(message);
+    },
+  });
+  hosts.push(host);
+  await host.start({ ready: () => true, wake: async () => undefined });
+  const tools = await host.tools({ conversationId: "lead", cwd: root });
+  const assign = tools.find((tool) => tool.name === "swarm_assign")!;
+  const run = async (id: string) =>
+    JSON.stringify(
+      await assign.execute(
+        id,
+        {
+          commandId: id,
+          title: id,
+          routing: { capabilities: ["code"], durable: true },
+          contract: {
+            objective: id,
+            worktree: root,
+            acceptanceCriteria: ["done"],
+            expectedArtifacts: [],
+            constraints: [],
+          },
+        },
+        undefined,
+        undefined,
+        {} as never,
+      ),
+    );
+  const first = await run("work-0");
+  expect(first).toContain("uncertain");
+  for (let i = 1; i < 16; i++) expect(await run(`work-${i}`)).toContain("uncertain");
+  expect(await run("default-exhausted")).toContain("concurrency_budget");
+  budget = 2;
+  capacity = 2;
+  await host.syncRuntimeConnections();
+  expect(await run("owner-exhausted")).toContain("route_capacity");
+  expect(await run("work-0")).toContain("uncertain");
+  budget = null;
+  capacity = null;
+  await host.syncRuntimeConnections();
+  expect(await run("unlimited-17")).toContain("uncertain");
+  const owner = await ownerState(join(root, createHash("sha256").update(root).digest("hex")));
+  expect(owner.dispatch?.maximum).toBeNull();
+  expect(owner.dispatch?.herdr).toEqual(
+    expect.arrayContaining([expect.objectContaining({ capacity: null })]),
+  );
 });

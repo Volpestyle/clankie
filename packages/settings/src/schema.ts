@@ -339,6 +339,18 @@ export const HerdrSettingsSchema = z
   .strict();
 export type HerdrSettings = z.infer<typeof HerdrSettingsSchema>;
 
+/** Repositories store canonical git-common-dir; directories are exact identities. */
+export const ExecutionWorkspacesSchema = z
+  .array(
+    z
+      .object({
+        kind: z.enum(["repository", "directory"]),
+        path: z.string().startsWith("/").max(4096),
+      })
+      .strict(),
+  )
+  .max(32);
+
 /** Named execution endpoints are pinned; disabling a connection keeps its identity. */
 export const ExecutionConnectionSchema = z
   .object({
@@ -362,7 +374,8 @@ export const ExecutionConnectionSchema = z
       )
       .max(32)
       .default(["code", "review", "research"]),
-    capacity: z.number().int().min(1).max(16).default(4),
+    capacity: z.number().int().min(0).nullable().optional(),
+    workspaces: ExecutionWorkspacesSchema.optional(),
     enabled: z.boolean().default(true),
   })
   .strict();
@@ -654,7 +667,12 @@ export const ClankieSettingsSchema = z
       )
       .default(() => ({ connections: [] })),
     execution: z
-      .object({ connections: z.array(ExecutionConnectionSchema).max(15).default([]) })
+      .object({
+        connections: z.array(ExecutionConnectionSchema).max(15).default([]),
+        workspaces: ExecutionWorkspacesSchema.optional(),
+        capacity: z.number().int().min(0).nullable().optional(),
+        budget: z.number().int().min(0).nullable().optional(),
+      })
       .strict()
       .refine(
         (value) => new Set(value.connections.map((entry) => entry.id)).size === value.connections.length,

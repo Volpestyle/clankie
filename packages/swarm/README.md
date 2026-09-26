@@ -51,6 +51,21 @@ a lost external connection unavailable instead of replacing its fleet. Gateway h
 The [single-owner Linux deployment](../../infra/hosted/README.md) supplies the actual
 captain, Swarm/Herdr worker environment and relay independently of an owner's desktop.
 
+## Owner-approved execution workspaces
+
+A runtime defaults to the requester's conversation directory. The operator may
+approve additional repositories (canonical Git common-directory identity and
+current registered worktrees) or exact non-Git directories through
+`clankie runtime workspaces`; [CLI contract](../../docs/cli.md#connections-and-runtime).
+These are execution selections inside the existing coordination scope, not new
+actors or implicit context sources. One runtime keeps one capacity pool.
+Rejections expose requested canonical path and each same-scope route's allowed
+directories/reasons. The provider rechecks approval and uses the selected directory
+for both launch and enrollment. Retained intents/receipts still reconcile after
+policy changes. Existing owners must advertise `executionWorkspaces` before route
+configuration is updated. [ADR 0193](../../docs/adr/0193-runtime-workspaces-are-owner-approved.md)
+records authority and recovery semantics.
+
 ## Named external coordinators
 
 `clankie swarm connect PRIVATE.json` verifies a dedicated enrolled Clankie session
@@ -343,3 +358,13 @@ an enrolled agent outside Herdr.
 Run `pnpm --filter @clankie/swarm test` for real MCP isolation, acknowledgment and
 restart coverage. Swarm's own `coordination-herdr.test.ts` covers idempotent
 provisioning, including uncertain launch reconciliation.
+
+Dispatch budget and each runtime capacity default to 16. The owner can change either:
+`clankie runtime capacity ID N` sets a runtime limit and `clankie runtime budget N`
+sets the overall budget. Replace `N` with `--clear` for unlimited; `0`
+pauses new admission. The TUI accepts the same arguments after `/runtime`.
+Both counts apply per coordinator scope, including runtime capacity: two
+coordinators sharing one Herdr runtime can together exceed its configured limit.
+Settings are reconciled into existing owners without replacing in-flight receipts.
+`runtime status` reports each effective value and its source: default, owner or unlimited.
+These controls use the operator API; no Swarm tool or captain bearer can change them.

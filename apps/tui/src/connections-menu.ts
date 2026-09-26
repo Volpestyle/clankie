@@ -29,7 +29,10 @@ interface Runtime {
   readonly socketPath?: string;
   readonly state?: string;
   readonly enabled?: boolean;
-  readonly capacity?: number;
+  readonly capacity?: number | null;
+  readonly capacitySource?: string;
+  readonly budget?: number | null;
+  readonly budgetSource?: string;
   readonly capabilities?: readonly string[];
 }
 interface AgentSession {
@@ -93,7 +96,11 @@ function runtimeHint(runtime: Runtime): string {
   const parts = [
     runtime.enabled === false ? "disabled" : (runtime.state ?? "unknown"),
     runtime.session === undefined ? undefined : `session ${runtime.session}`,
-    runtime.capacity === undefined ? undefined : `${runtime.capacity} workers`,
+    runtime.capacity === undefined
+      ? undefined
+      : runtime.capacity === null
+        ? "unlimited workers"
+        : `${runtime.capacity} workers per coordinator${runtime.capacitySource === "default" ? " (default)" : ""}`,
   ];
   return parts.filter(Boolean).join(" · ");
 }
@@ -388,7 +395,28 @@ async function runtimeDetail(
     ...(runtime.socketPath ? [{ value: "info:socket", label: "Socket", hint: runtime.socketPath }] : []),
     ...(runtime.capacity === undefined
       ? []
-      : [{ value: "info:capacity", label: "Capacity", hint: `${runtime.capacity} workers` }]),
+      : [
+          {
+            value: "info:capacity",
+            label: "Capacity per coordinator",
+            hint:
+              runtime.capacity === null
+                ? "unlimited"
+                : `${runtime.capacity} (${runtime.capacitySource ?? "owner"})`,
+          },
+        ]),
+    ...(runtime.budget === undefined
+      ? []
+      : [
+          {
+            value: "info:budget",
+            label: "Budget per coordinator",
+            hint:
+              runtime.budget === null
+                ? "unlimited"
+                : `${runtime.budget} (${runtime.budgetSource ?? "owner"})`,
+          },
+        ]),
     ...(runtime.capabilities?.length
       ? [{ value: "info:capabilities", label: "Capabilities", hint: runtime.capabilities.join(", ") }]
       : []),

@@ -467,6 +467,7 @@ const swarm = new SwarmHost({
   connections: { settings: settingsStore, credentials: operatorCredentialStore },
   socketPath: herdr.binding()?.socketPath,
   runtimeConnections: () => runtimes.list(),
+  dispatchBudget: () => runtimes.dispatchBudget(),
   workerMcp: {
     command: process.execPath,
     args: [

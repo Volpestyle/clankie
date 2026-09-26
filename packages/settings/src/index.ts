@@ -14,6 +14,7 @@ export {
   BrowserSettingsSchema,
   HerdrSettingsSchema,
   ExecutionConnectionSchema,
+  ExecutionWorkspacesSchema,
   SwarmConnectionSchema,
   SwarmSettingsSchema,
   type SwarmConnection,

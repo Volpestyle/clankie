@@ -1,4 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { mkdtemp, rm, mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
@@ -227,6 +229,118 @@ it("serves bounded connection metadata through the operator client and refuses s
     ]);
     await client.connections!({ action: "disconnect_swarm", id: "remote" });
     expect(disconnected).toBe("remote");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("only the operator can approve repositories and exact directories through runtime CLI/API", async () => {
+  const root = realpathSync(await mkdtemp("/tmp/clankie-execution-policy-"));
+  const repo = join(root, "repo"),
+    plain = join(root, "plain"),
+    alias = join(root, "alias");
+  await mkdir(repo);
+  await mkdir(plain);
+  await symlink(repo, alias);
+  execFileSync("git", ["-C", repo, "init"], { stdio: "pipe" });
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const options = {
+    settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+    run: async () => ({ stdout: JSON.stringify({ result: { snapshot: { workspaces: [] } } }) }),
+  };
+  const runtimes = new ExecutionConnections(options);
+  let reloadSupported = true;
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    runtimes,
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+    authenticateCaptain: async () => ({ captainId: "machine-grant", steerSourceLane: "discord_text" }),
+    swarm: {
+      status: async () => ({}),
+      syncRuntimeConnections: async () => {
+        if (!reloadSupported) throw new Error("Coordinator upgrade required");
+      },
+    },
+  });
+  const cli = {
+    host: "http://localhost",
+    env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+    fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
+  };
+  try {
+    expect((await runtimes.list())[0]).toMatchObject({
+      capacity: 16,
+      budget: 16,
+      capacitySource: "default",
+      budgetSource: "default",
+    });
+    for (const args of [
+      ["capacity", "default", "25"],
+      ["budget", "25"],
+    ]) {
+      await expect(
+        runRuntimeCommand(args, { ...cli, env: { CLANKIE_OPERATOR_TOKEN: "discord" } }),
+      ).rejects.toThrow();
+      await runRuntimeCommand(args, cli);
+    }
+    expect((await runtimes.list())[0]).toMatchObject({
+      capacity: 25,
+      budget: 25,
+      capacitySource: "owner",
+      budgetSource: "owner",
+    });
+    expect(await new ExecutionConnections(options).dispatchBudget()).toBe(25);
+    await runRuntimeCommand(["capacity", "default", "--clear"], cli);
+    await runRuntimeCommand(["budget", "--clear"], cli);
+    expect((await runtimes.list())[0]).toMatchObject({
+      capacity: null,
+      budget: null,
+      capacitySource: "unlimited",
+      budgetSource: "unlimited",
+    });
+    await expect(runRuntimeCommand(["capacity", "default", "-1"], cli)).rejects.toThrow();
+    const request = { action: "workspaces", id: "default", workspaces: [{ kind: "repository", path: repo }] };
+    expect(
+      (
+        await app.app.request("/v1/runtime-connections", {
+          method: "POST",
+          headers: { authorization: "Bearer discord", "content-type": "application/json" },
+          body: JSON.stringify(request),
+        })
+      ).status,
+    ).toBe(401);
+    expect((await settings.load()).execution.workspaces).toBeUndefined();
+    const result = await runRuntimeCommand(["workspaces", "default", "--repo", alias, "--dir", plain], cli);
+    const workspaces = [
+      { kind: "repository", path: join(repo, ".git") },
+      { kind: "directory", path: plain },
+    ];
+    expect(result).toEqual({ id: "default", workspaces });
+    expect((await new ExecutionConnections(options).list())[0]).toMatchObject({ workspaces });
+    await runRuntimeCommand(["connect", "named", "--socket", "/tmp/policy.sock"], cli);
+    await runRuntimeCommand(["capacity", "named", "100"], cli);
+    expect((await runtimes.list())[1]).toMatchObject({ capacity: 100 });
+    await runRuntimeCommand(["capacity", "named", "--clear"], cli);
+    expect((await runtimes.list())[1]).toMatchObject({ capacity: null });
+    await runRuntimeCommand(["workspaces", "named", "--repo", repo], cli);
+    await runRuntimeCommand(["disconnect", "named"], cli);
+    expect((await settings.load()).execution).toMatchObject({
+      workspaces,
+      connections: [{ id: "named", enabled: false, workspaces: workspaces.slice(0, 1) }],
+    });
+    await expect(runRuntimeCommand(["workspaces", "default", "--repo", plain], cli)).rejects.toThrow();
+    await writeFile(join(root, "file"), "not a directory");
+    await expect(
+      runRuntimeCommand(["workspaces", "default", "--dir", join(root, "file")], cli),
+    ).rejects.toThrow(/directory/);
+    reloadSupported = false;
+    await expect(runRuntimeCommand(["workspaces", "default", "--clear"], cli)).rejects.toThrow(/upgrade/);
+    expect((await settings.load()).execution.workspaces).toEqual(workspaces);
+    reloadSupported = true;
+    await runRuntimeCommand(["workspaces", "default", "--clear"], cli);
+    expect((await settings.load()).execution.workspaces).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

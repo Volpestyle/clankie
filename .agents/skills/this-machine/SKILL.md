@@ -43,6 +43,29 @@ Finish active turns and close side conversations first. An externally bound
 root must end its seat first; resetting service storage cannot reset that
 harness's context. Full contract: `{repoRoot}/docs/cli.md`.
 
+## Worker execution locations
+
+Use `clankie runtime list` to inspect execution policy. The operator configures
+extra locations with `clankie runtime workspaces ID --repo /checkout --dir /scratch`
+(or `--clear`); each call replaces that runtime's extras. Repository approval pins
+Git's common directory and permits its current registered worktrees; a directory
+entry is exact, never a prefix. The caller conversation directory remains the default.
+Use the actual checkout as `swarm_assign.contract.worktree`; do not falsify it to
+match a route or change conversation identity. A blocked result lists the canonical
+request and each candidate's allowed worktrees/reasons. Workspace changes require
+the operator endpoint; Swarm tools cannot grant themselves another location.
+A `restart-required` owner needs a coordinated update, not duplicate dispatch.
+
+Dispatch budget and each runtime capacity default to 16. The owner can change either:
+`clankie runtime capacity ID N` sets a runtime limit and `clankie runtime budget N`
+sets the overall budget. Replace `N` with `--clear` for unlimited; `0`
+pauses new admission. The TUI accepts the same arguments after `/runtime`.
+Both counts apply per coordinator scope, including runtime capacity: two
+coordinators sharing one Herdr runtime can together exceed its configured limit.
+Settings are reconciled into existing owners without replacing in-flight receipts.
+`runtime status` reports each effective value and its source: default, owner or unlimited.
+These controls use the operator API; no Swarm tool or captain bearer can change them.
+
 ## External agent history
 
 Herdr discovery is identity and status, not transcript enrollment. Inspect panes

@@ -8,6 +8,8 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["runtime"],
     lines: [
       "  runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID",
+      "          workspaces ID (--repo /checkout | --dir /directory)... | workspaces ID --clear",
+      "          capacity ID N|--clear | budget N|--clear (per coordinator scope; default 16; clear = unlimited)",
       "                           Manage named execution connections (JSON)",
     ],
   },

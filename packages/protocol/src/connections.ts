@@ -31,7 +31,7 @@ export const OperatorConnectionInventorySchema = z
             session: label,
             state: label,
             enabled: z.boolean(),
-            capacity: z.number().int().nonnegative(),
+            capacity: z.number().int().nonnegative().nullable(),
             capabilities: z.array(label).max(64),
           })
           .strict(),

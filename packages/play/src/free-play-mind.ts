@@ -78,6 +78,26 @@ const FreePlayWireDecisionSchema = z
   .strict();
 
 /**
+ * The answer's shape, stated in the instructions.
+ *
+ * A provider with structured output enforces the schema on its own. An
+ * OpenAI-compatible provider without it (OpenRouter, local runtimes) is sent
+ * `response_format: json_object`, which carries no schema at all, and OpenAI
+ * refuses that mode outright unless a message says "json" — every gameplay
+ * turn on an `openrouter/openai/*` model failed with a 400 (model-eval-2,
+ * 2026-09-26). Naming JSON and giving the schema in the system prompt is the
+ * request every provider accepts, and the schema outranks the prose there,
+ * which describes the action as a nested object the wire shape flattens.
+ */
+function jsonAnswerContract(schema: z.ZodType): string {
+  return [
+    "Answer with one JSON object and nothing else. Its fields are exactly those of this JSON Schema,",
+    "which takes precedence over any shape described above:",
+    JSON.stringify(z.toJSONSchema(schema)),
+  ].join("\n");
+}
+
+/**
  * Marks the system prompt as a prompt-cache breakpoint on Anthropic-routed
  * providers. The persona and the surface rules are identical on every turn of
  * a session, and a playthrough makes this call several times a minute — so
@@ -324,7 +344,12 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
   // Character first, then the rules of this surface, then transient operator
   // context. Reversing the first two would make the game prompt the primary
   // identity again, which is the drift this ordering exists to prevent.
-  const system = [options.character, FREE_PLAY_SYSTEM_PROMPT, options.systemSuffix]
+  const system = [
+    options.character,
+    FREE_PLAY_SYSTEM_PROMPT,
+    options.systemSuffix,
+    jsonAnswerContract(FreePlayWireDecisionSchema),
+  ]
     .filter((part): part is string => part !== undefined && part.trim().length > 0)
     .join("\n\n");
 
@@ -604,7 +629,12 @@ export interface ModelVoiceOptions extends ModelFreePlayMindOptions {
  * simply has nowhere to put one, which is the point.
  */
 export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
-  const system = [options.character, VOICE_SYSTEM_PROMPT, options.systemSuffix]
+  const system = [
+    options.character,
+    VOICE_SYSTEM_PROMPT,
+    options.systemSuffix,
+    jsonAnswerContract(VoiceDecisionSchema),
+  ]
     .filter((part): part is string => part !== undefined && part.trim().length > 0)
     .join("\n\n");
 

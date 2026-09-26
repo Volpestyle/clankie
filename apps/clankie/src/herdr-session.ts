@@ -1,7 +1,14 @@
+import { z } from "zod";
+import { realpath, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { isAbsolute, join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
-import { ExecutionConnectionSchema, type SettingsStore, type HerdrSettings } from "@clankie/settings";
+import {
+  ExecutionWorkspacesSchema,
+  ExecutionConnectionSchema,
+  type SettingsStore,
+  type HerdrSettings,
+} from "@clankie/settings";
 import type { HerdrBinding } from "@clankie/protocol";
 import { startHerdrRuntime, watchHerdrSocket } from "./herdr-runtime.ts";
 
@@ -177,12 +184,50 @@ export async function startHerdrConnection(
   };
 }
 
-export const ExecutionConnectSchema = ExecutionConnectionSchema.omit({ enabled: true })
+const NamedExecutionConnectSchema = ExecutionConnectionSchema.omit({ enabled: true })
   .partial({ socketPath: true, session: true })
   .refine(
     (value) => value.socketPath !== undefined || value.session !== undefined,
     "Select a session or socket",
   );
+
+export const ExecutionConnectSchema = z.union([
+  NamedExecutionConnectSchema,
+  z
+    .object({
+      action: z.literal("capacity"),
+      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+      capacity: z.number().int().min(0).nullable(),
+    })
+    .strict(),
+  z.object({ action: z.literal("budget"), budget: z.number().int().min(0).nullable() }).strict(),
+  z
+    .object({
+      action: z.literal("workspaces"),
+      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+      workspaces: ExecutionWorkspacesSchema,
+    })
+    .strict(),
+]);
+
+async function resolveExecutionWorkspaces(entries: z.infer<typeof ExecutionWorkspacesSchema>) {
+  const resolved = await Promise.all(
+    entries.map(async (entry) => {
+      let path = await realpath(entry.path);
+      if (!(await stat(path)).isDirectory()) throw new Error("Execution workspace must be a directory");
+      if (entry.kind === "repository") {
+        const result = await exec(
+          "git",
+          ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+          { timeout: 5000 },
+        );
+        path = await realpath(result.stdout.trim());
+      }
+      return { kind: entry.kind, path };
+    }),
+  );
+  return [...new Map(resolved.map((entry) => [JSON.stringify(entry), entry])).values()];
+}
 
 /** Named external runtimes are never started, stopped or replaced by connection management. */
 export class ExecutionConnections {
@@ -217,6 +262,51 @@ export class ExecutionConnections {
 
   async connect(raw: unknown) {
     const input = ExecutionConnectSchema.parse(raw);
+    if ("action" in input && input.action !== "workspaces") {
+      await this.options.settings.update((current) => {
+        if (input.action === "budget")
+          return { ...current, execution: { ...current.execution, budget: input.budget } };
+        if (input.id !== "default" && !current.execution.connections.some((entry) => entry.id === input.id))
+          throw new Error("Unknown runtime connection");
+        return {
+          ...current,
+          execution: {
+            ...current.execution,
+            ...(input.id === "default"
+              ? { capacity: input.capacity }
+              : {
+                  connections: current.execution.connections.map((entry) =>
+                    entry.id === input.id ? { ...entry, capacity: input.capacity } : entry,
+                  ),
+                }),
+          },
+        };
+      });
+      for (const listener of this.changes) listener(input.action === "budget" ? "default" : input.id);
+      return input;
+    }
+    if ("action" in input) {
+      const workspaces = await resolveExecutionWorkspaces(input.workspaces);
+      await this.options.settings.update((current) => {
+        if (input.id !== "default" && !current.execution.connections.some((entry) => entry.id === input.id))
+          throw new Error("Unknown runtime connection");
+        return {
+          ...current,
+          execution: {
+            ...current.execution,
+            ...(input.id === "default"
+              ? { workspaces }
+              : {
+                  connections: current.execution.connections.map((entry) =>
+                    entry.id === input.id ? { ...entry, workspaces } : entry,
+                  ),
+                }),
+          },
+        };
+      });
+      for (const listener of this.changes) listener(input.id);
+      return { id: input.id, workspaces };
+    }
     const env = pinHerdrEnvironment({ ...(this.options.env ?? process.env) });
     const socketPath =
       input.socketPath ??
@@ -225,6 +315,7 @@ export class ExecutionConnections {
       throw new Error("Herdr runtime did not answer");
     const connection = ExecutionConnectionSchema.parse({
       ...input,
+      ...(input.workspaces ? { workspaces: await resolveExecutionWorkspaces(input.workspaces) } : {}),
       socketPath,
       session: input.session ?? input.id,
       enabled: true,
@@ -243,6 +334,7 @@ export class ExecutionConnections {
       return {
         ...current,
         execution: {
+          ...current.execution,
           connections: [
             ...current.execution.connections.filter((entry) => entry.id !== connection.id),
             connection,
@@ -261,6 +353,7 @@ export class ExecutionConnections {
       return {
         ...current,
         execution: {
+          ...current.execution,
           connections: current.execution.connections.map((entry) =>
             entry.id === id ? { ...entry, enabled: false } : entry,
           ),
@@ -270,12 +363,24 @@ export class ExecutionConnections {
     for (const listener of this.changes) listener(id);
   }
 
+  async dispatchBudget() {
+    const budget = (await this.options.settings.load()).execution.budget;
+    return budget === undefined ? 16 : budget;
+  }
+
   async list() {
     const settings = await this.options.settings.load();
     const configured = settings.execution.connections;
     const checked = await Promise.all(
       configured.map(async (connection) => ({
         ...connection,
+        capacity: connection.capacity === undefined ? 16 : connection.capacity,
+        capacitySource:
+          connection.capacity === undefined
+            ? "default"
+            : connection.capacity === null
+              ? "unlimited"
+              : "owner",
         state: !connection.enabled
           ? "disabled"
           : (await answers(connection.socketPath, this.options.env ?? process.env, this.run))
@@ -294,7 +399,21 @@ export class ExecutionConnections {
         socketPath: primary?.socketPath,
         state: this.options.primary.status(),
         enabled: primary !== undefined,
-        capacity: 4,
+        ...(settings.execution.workspaces ? { workspaces: settings.execution.workspaces } : {}),
+        capacity: settings.execution.capacity === undefined ? 16 : settings.execution.capacity,
+        capacitySource:
+          settings.execution.capacity === undefined
+            ? "default"
+            : settings.execution.capacity === null
+              ? "unlimited"
+              : "owner",
+        budget: settings.execution.budget === undefined ? 16 : settings.execution.budget,
+        budgetSource:
+          settings.execution.budget === undefined
+            ? "default"
+            : settings.execution.budget === null
+              ? "unlimited"
+              : "owner",
         capabilities: ["code", "review", "research"],
       },
       ...checked.map((connection) =>

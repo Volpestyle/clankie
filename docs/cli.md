@@ -767,6 +767,48 @@ until deliberately upgraded/restarted; replacing a package does not upgrade a
 running owner. Configuration failures return an error: inspect inventory before
 retrying rather than assuming a disconnect completed.
 
+Approve additional execution locations for the default or a named runtime through
+the operator API (the same commands work as `/runtime` in the TUI):
+
+```sh
+clankie runtime workspaces default --repo /absolute/project --dir /absolute/scratch
+clankie runtime workspaces build --repo /absolute/project
+clankie runtime workspaces build --clear
+```
+
+Dispatch budget and each runtime capacity default to 16. The owner can change either:
+`clankie runtime capacity ID N` sets a runtime limit and `clankie runtime budget N`
+sets the overall budget. Replace `N` with `--clear` for unlimited; `0`
+pauses new admission. The TUI accepts the same arguments after `/runtime`.
+Both counts apply per coordinator scope, including runtime capacity: two
+coordinators sharing one Herdr runtime can together exceed its configured limit.
+Settings are reconciled into existing owners without replacing in-flight receipts.
+`runtime status` reports each effective value and its source: default, owner or unlimited.
+These controls use the operator API; no Swarm tool or captain bearer can change them.
+
+Each call **replaces** that runtime's extra approvals; `--clear` restores the
+conversation-directory-only default. `runtime list` shows the stored policy.
+`--repo` pins the canonical Git common directory and accepts that repository's
+currently registered checkouts, including newly created linked worktrees outside
+the original directory. Stale approvals grant nothing; rejected requests identify
+them as `stale_workspace` with `staleWorkspaces` details.
+`--dir` permits only that canonical directory, never its children. Paths must be
+absolute and exist on the service host. The runtime retains one capacity pool.
+
+The operator-only POST `/v1/runtime-connections` accepts
+`{ "action": "workspaces", "id": "default", "workspaces": [{ "kind": "repository", "path": "/absolute/project" }] }`.
+Named `connect` JSON also accepts `workspaces`. No Swarm tool changes this policy;
+captain/Discord credentials cannot call this endpoint. Existing operator-machine
+shell authority remains unchanged.
+
+Set `contract.worktree` to the actual approved checkout. Rejection includes
+`requestedWorktree` and same-scope `routes`, each with `routeId`, `worktree`,
+`allowedWorktrees` and `reasons`. The worker starts and enrolls there while keeping
+the requester's coordination scope and instruction snapshot. Removing approval
+blocks new launches; it does not redirect or duplicate existing assignments.
+Old owners report `restart-required` until deliberately upgraded; coordinate the
+restart with running work. See [ADR 0193](adr/0193-runtime-workspaces-are-owner-approved.md).
+
 ### `agents [list]` / `agents read` / `agents hosts`
 
 Clankie reads and resumes any Claude Code, Codex, Grok or Pi session from the

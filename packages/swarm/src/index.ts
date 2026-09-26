@@ -85,14 +85,16 @@ interface Options {
   /** A configured Herdr socket, never whichever session the UI happens to focus. */
   socketPath?: string | undefined;
   canDispatch?: () => boolean;
+  dispatchBudget?: () => Promise<number | null>;
   runtimeConnections?: () => Promise<
     readonly {
       id: string;
       socketPath?: string | undefined;
       enabled: boolean;
       state: string;
-      capacity: number;
+      capacity: number | null;
       capabilities: string[];
+      workspaces?: { kind: "repository" | "directory"; path: string }[] | undefined;
     }[]
   >;
   /** Trusted embedding bridge; contains no provider or operator credential. */
@@ -690,8 +692,14 @@ export class SwarmHost {
   private async requireRuntimeReload(session: Session) {
     const current = (await session.connection.request({ op: "bootstrap" })) as {
       dispatchConfigReload?: boolean;
+      executionWorkspaces?: boolean;
+      unlimitedDispatch?: boolean;
     };
-    if (current.dispatchConfigReload !== true)
+    if (
+      current.dispatchConfigReload !== true ||
+      current.executionWorkspaces !== true ||
+      current.unlimitedDispatch !== true
+    )
       throw new Error(
         "Coordinator runtime must be upgraded and deliberately restarted before managing execution connections",
       );
@@ -812,18 +820,24 @@ export class SwarmHost {
         [...this.sessions].map(async ([key, pending]) => {
           try {
             const session = await pending;
+            const runtime =
+              !session.binding.connectionId && this.options.runtimeConnections
+                ? ((await session.connection.request({ op: "bootstrap" })) as {
+                    dispatchConfigReload?: boolean;
+                    executionWorkspaces?: boolean;
+                    unlimitedDispatch?: boolean;
+                  })
+                : undefined;
             return {
               conversationId: session.binding.conversationId,
               connection: session.binding.connectionId ?? "embedded",
               actor: session.actor,
-              ...(!session.binding.connectionId && this.options.runtimeConnections
+              ...(runtime
                 ? {
                     runtimeConfiguration:
-                      (
-                        (await session.connection.request({ op: "bootstrap" })) as {
-                          dispatchConfigReload?: boolean;
-                        }
-                      ).dispatchConfigReload === true
+                      runtime.dispatchConfigReload === true &&
+                      runtime.executionWorkspaces === true &&
+                      runtime.unlimitedDispatch === true
                         ? "live"
                         : "restart-required",
                   }
@@ -950,7 +964,7 @@ async function prepareOwner(cwd: string, options: Options) {
         version: 1,
         ...owner,
         dispatch: {
-          maximum: 4,
+          maximum: options.dispatchBudget ? await options.dispatchBudget() : 16,
           observationMaxAgeMs: 60000,
           peers: [],
           herdr: {
@@ -963,7 +977,7 @@ async function prepareOwner(cwd: string, options: Options) {
             nodePath: process.execPath,
             workerPath: executable("herdr-worker-cli.js"),
             capabilities: ["code", "review", "research"],
-            capacity: 4,
+            capacity: 16,
           },
         },
       };
@@ -996,6 +1010,7 @@ async function prepareOwner(cwd: string, options: Options) {
         workerPath: executable("herdr-worker-cli.js"),
         capabilities: [...entry.capabilities, `runtime:${entry.id}`],
         capacity: entry.capacity,
+        ...(entry.workspaces ? { workspaces: entry.workspaces } : {}),
         ...(options.workerMcp ? { mcpServers: { clankie_worker: options.workerMcp } } : {}),
       }));
     // Retain old routes for their receipts; disabled routes cannot acquire new work.
@@ -1008,13 +1023,10 @@ async function prepareOwner(cwd: string, options: Options) {
     });
     merged.push(...desired.filter((entry) => !routes.some((route) => route.id === entry.id)));
     const dispatch = {
-      maximum: Math.min(
-        64,
-        runtimes.reduce((sum, entry) => sum + entry.capacity, 0),
-      ),
       observationMaxAgeMs: 60000,
       peers: [],
       ...configured.dispatch,
+      maximum: options.dispatchBudget ? await options.dispatchBudget() : 16,
       herdr: merged,
     };
     if (!isDeepStrictEqual(configured.dispatch, dispatch)) {

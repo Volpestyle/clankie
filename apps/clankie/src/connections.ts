@@ -130,8 +130,16 @@ export async function manageConnections(deps: Dependencies, command: OperatorCon
   if (command.action === "reconnect_runtime") {
     const runtime = (await deps.runtimes?.list())?.find((entry) => entry.id === command.id);
     if (!runtime || runtime.id === "default") throw new Error("Unknown named runtime");
-    const { id, kind, session, socketPath, capacity, capabilities } = runtime;
-    await changeRuntime(deps, "connect", { id, kind, session, socketPath, capacity, capabilities });
+    const { id, kind, session, socketPath, capacity, capabilities, workspaces } = runtime;
+    await changeRuntime(deps, "connect", {
+      id,
+      kind,
+      session,
+      socketPath,
+      ...(runtime.capacitySource === "default" ? {} : { capacity }),
+      capabilities,
+      workspaces,
+    });
   }
   if (command.action === "disconnect_runtime") await changeRuntime(deps, "disconnect", command.id);
   if (command.action === "disconnect_swarm") {

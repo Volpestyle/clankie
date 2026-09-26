@@ -248,8 +248,8 @@ paths:
     post:
       tags: [Operator]
       operationId: connectRuntime
-      summary: Connect a named Herdr runtime without starting or stopping its processes
-      description: Resolves an explicit session or socket and pins that endpoint to the ID. Reconnection cannot retarget an existing ID. Live coordinator configuration is synchronized before success.
+      summary: Connect a Herdr runtime or configure owner execution policy
+      description: Resolves an explicit session or socket and pins that endpoint to the ID. Reconnection cannot retarget an existing ID. Live coordinator configuration is synchronized before success. action=workspaces replaces additional repository/directory approvals for a named or default runtime; it never starts or stops workers. action=capacity sets one runtime limit; action=budget sets the overall limit per coordinator scope. Unset limits default to 16; null clears a limit to unlimited; zero pauses new admission. Runtime capacity is also counted per coordinator, not across coordinators sharing a runtime.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -258,10 +258,77 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [id]
-              anyOf: [{ required: [session] }, { required: [socketPath] }]
+              oneOf:
+                - required: [id]
+                  anyOf: [{ required: [session] }, { required: [socketPath] }]
+                  not: { anyOf: [{ required: [action] }, { required: [budget] }] }
+                - required: [id, action, workspaces]
+                  properties: { action: { const: workspaces } }
+                  not:
+                    {
+                      anyOf:
+                        [
+                          { required: [session] },
+                          { required: [socketPath] },
+                          { required: [kind] },
+                          { required: [capacity] },
+                          { required: [budget] },
+                          { required: [capabilities] },
+                        ],
+                    }
+                - required: [id, action, capacity]
+                  properties: { action: { const: capacity } }
+                  not:
+                    {
+                      anyOf:
+                        [
+                          { required: [workspaces] },
+                          { required: [budget] },
+                          { required: [session] },
+                          { required: [socketPath] },
+                          { required: [kind] },
+                          { required: [capabilities] },
+                        ],
+                    }
+                - required: [action, budget]
+                  properties: { action: { const: budget } }
+                  not:
+                    {
+                      anyOf:
+                        [
+                          { required: [id] },
+                          { required: [capacity] },
+                          { required: [workspaces] },
+                          { required: [session] },
+                          { required: [socketPath] },
+                          { required: [kind] },
+                          { required: [capabilities] },
+                        ],
+                    }
               properties:
-                id: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$", description: "default is reserved" }
+                id:
+                  {
+                    type: string,
+                    pattern: "^[a-z][a-z0-9-]{0,63}$",
+                    description: "default is reserved except for workspace and capacity configuration",
+                  }
+                action: { type: string, enum: [workspaces, capacity, budget] }
+                workspaces:
+                  type: array
+                  maxItems: 32
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [kind, path]
+                    properties:
+                      kind: { type: string, enum: [repository, directory] }
+                      path:
+                        {
+                          type: string,
+                          maxLength: 4096,
+                          pattern: "^/",
+                          description: "Existing absolute checkout or exact directory; repository identity is stored as canonical git-common-dir",
+                        }
                 kind: { type: string, enum: [herdr], default: herdr }
                 session: { type: string, maxLength: 64 }
                 socketPath:
@@ -270,7 +337,8 @@ paths:
                     maxLength: 102,
                     description: "Absolute Unix socket path, at most 102 UTF-8 bytes",
                   }
-                capacity: { type: integer, minimum: 1, maximum: 16, default: 4 }
+                capacity: { type: [integer, "null"], minimum: 0, default: 16 }
+                budget: { type: [integer, "null"], minimum: 0, default: 16 }
                 capabilities:
                   { type: array, maxItems: 32, items: { type: string }, default: [code, review, research] }
       responses:

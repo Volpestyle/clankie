@@ -1,0 +1,178 @@
+{
+  "issue": "VUH-1377",
+  "sourceRevision": "672eb6f",
+  "method": "SQLite online backup API on each live schema-13 database, migrate separate private copies with committed upstream migrate(), compare every original column of every original table as a multiset; no live owner restart or database write",
+  "databases": [
+    {
+      "database": 0,
+      "schemaBefore": 13,
+      "schemaAfter": 14,
+      "liveSchemaUnchanged": 13,
+      "integrity": "ok",
+      "foreignKeyViolations": 0,
+      "tables": {
+        "agents": {
+          "rows": 2,
+          "allOriginalColumnsPreserved": true
+        },
+        "artifacts": {
+          "rows": 6,
+          "allOriginalColumnsPreserved": true
+        },
+        "commands": {
+          "rows": 134,
+          "allOriginalColumnsPreserved": true
+        },
+        "dispatch_intents": {
+          "rows": 1,
+          "allOriginalColumnsPreserved": true
+        },
+        "events": {
+          "rows": 117,
+          "allOriginalColumnsPreserved": true
+        },
+        "finding_artifacts": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "findings": {
+          "rows": 1,
+          "allOriginalColumnsPreserved": true
+        },
+        "inbox_deliveries": {
+          "rows": 4,
+          "allOriginalColumnsPreserved": true
+        },
+        "inbox_messages": {
+          "rows": 4,
+          "allOriginalColumnsPreserved": true
+        },
+        "legacy_imports": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "legacy_records": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "reservations": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "sessions": {
+          "rows": 13,
+          "allOriginalColumnsPreserved": true
+        },
+        "shared_kv": {
+          "rows": 4,
+          "allOriginalColumnsPreserved": true
+        },
+        "shared_kv_history": {
+          "rows": 4,
+          "allOriginalColumnsPreserved": true
+        },
+        "task_attempts": {
+          "rows": 1,
+          "allOriginalColumnsPreserved": true
+        },
+        "task_dependencies": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "tasks": {
+          "rows": 1,
+          "allOriginalColumnsPreserved": true
+        }
+      },
+      "newColumnDefaultsValid": true
+    },
+    {
+      "database": 1,
+      "schemaBefore": 13,
+      "schemaAfter": 14,
+      "liveSchemaUnchanged": 13,
+      "integrity": "ok",
+      "foreignKeyViolations": 0,
+      "tables": {
+        "agents": {
+          "rows": 6,
+          "allOriginalColumnsPreserved": true
+        },
+        "artifacts": {
+          "rows": 28,
+          "allOriginalColumnsPreserved": true
+        },
+        "commands": {
+          "rows": 1112,
+          "allOriginalColumnsPreserved": true
+        },
+        "dispatch_intents": {
+          "rows": 4,
+          "allOriginalColumnsPreserved": true
+        },
+        "events": {
+          "rows": 853,
+          "allOriginalColumnsPreserved": true
+        },
+        "finding_artifacts": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "findings": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "inbox_deliveries": {
+          "rows": 10,
+          "allOriginalColumnsPreserved": true
+        },
+        "inbox_messages": {
+          "rows": 10,
+          "allOriginalColumnsPreserved": true
+        },
+        "legacy_imports": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "legacy_records": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "reservations": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "sessions": {
+          "rows": 24,
+          "allOriginalColumnsPreserved": true
+        },
+        "shared_kv": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "shared_kv_history": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "task_attempts": {
+          "rows": 4,
+          "allOriginalColumnsPreserved": true
+        },
+        "task_dependencies": {
+          "rows": 0,
+          "allOriginalColumnsPreserved": true
+        },
+        "tasks": {
+          "rows": 4,
+          "allOriginalColumnsPreserved": true
+        }
+      },
+      "newColumnDefaultsValid": true
+    }
+  ],
+  "limitations": [
+    "This proves schema/data preservation on snapshots, not survival of active leases across a running owner upgrade.",
+    "A fresh online backup is required again immediately before the coordinated upgrade.",
+    "Old binaries refuse schema 14; binary-only rollback is not supported."
+  ]
+}
