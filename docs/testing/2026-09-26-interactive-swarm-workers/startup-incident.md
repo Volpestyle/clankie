@@ -102,7 +102,6 @@ upgrade preflight/admission barrier with immutable runtime generations preferred
 These are design requirements, not shipped safeguards. The current operational
 hold and coordinated backup/restart window remain necessary.
 
-
 ## Verification of this evidence change
 
 The live compatibility queries were read-only. The actual MCP candidate failed
