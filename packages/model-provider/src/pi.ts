@@ -283,6 +283,13 @@ function piThinkingLevelMap(providerId: string, entry: ModelEntry): ThinkingLeve
   };
 }
 
+/**
+ * Providers each runtime got from this function, so a second projection (the
+ * model-keys service projects on every request) does not mistake Clankie's
+ * own earlier registration for a Pi builtin and drop the provider's `api`.
+ */
+const declaredProviders = new WeakMap<ModelRuntime, Set<string>>();
+
 /** Project Clankie's declarative custom providers into Pi's native provider registry. */
 export function registerConfiguredPiProviders(
   runtime: ModelRuntime,
@@ -292,12 +299,15 @@ export function registerConfiguredPiProviders(
   // Pi's static flow registry also keeps OAuth available in our esbuild release.
   registerBunOAuthFlows();
   const merged = mergedCatalog(config, catalog);
-  for (const [providerId, declared] of Object.entries(config.provider ?? {})) {
-    const baseUrl = typeof declared.options?.baseURL === "string" ? declared.options.baseURL : undefined;
-    const hasBuiltin = runtime.getProviders().some((provider) => provider.id === providerId);
+  const declared = declaredProviders.get(runtime) ?? new Set<string>();
+  declaredProviders.set(runtime, declared);
+  for (const [providerId, entry] of Object.entries(config.provider ?? {})) {
+    const baseUrl = typeof entry.options?.baseURL === "string" ? entry.options.baseURL : undefined;
+    const hasBuiltin =
+      !declared.has(providerId) && runtime.getProviders().some((provider) => provider.id === providerId);
     if (!hasBuiltin && baseUrl === undefined) continue;
     const models: ProviderConfig["models"] =
-      declared.models === undefined
+      entry.models === undefined
         ? undefined
         : Object.values(merged[providerId]?.models ?? {}).map((model) => ({
             id: model.id,
@@ -319,19 +329,23 @@ export function registerConfiguredPiProviders(
     // credential-less local runtime (ADR: `clankie model add-local`). Pi will
     // not start a turn for a provider it sees no auth for at all, so give it a
     // placeholder bearer the runtime ignores; a stored credential still wins.
-    const placeholderAuth = !hasBuiltin && baseUrl !== undefined && (declared.env ?? []).length === 0;
+    const placeholderAuth = !hasBuiltin && baseUrl !== undefined && (entry.env ?? []).length === 0;
     const provider: ProviderConfig = {
-      ...(declared.name === undefined ? {} : { name: declared.name }),
+      ...(entry.name === undefined ? {} : { name: entry.name }),
       ...(baseUrl === undefined ? {} : { baseUrl }),
-      ...(!hasBuiltin ? { api: piApi(providerId, declared.npm, baseUrl) } : {}),
+      ...(!hasBuiltin ? { api: piApi(providerId, entry.npm, baseUrl) } : {}),
       ...(placeholderAuth ? { apiKey: LOCAL_PLACEHOLDER_API_KEY } : {}),
       ...(models === undefined ? {} : { models }),
     };
     runtime.registerProvider(providerId, provider);
+    if (!hasBuiltin) declared.add(providerId);
   }
 }
 
 function piApi(providerId: string, npm: string | undefined, baseUrl: string | undefined): Api {
+  // Naming OpenAI's own package asks for its own protocol, Responses, as the AI
+  // SDK's openai() does; a bare endpoint stays OpenAI-compatible chat.
+  if (npm === "@ai-sdk/openai") return "openai-responses";
   const family = providerFamilyFor({ id: providerId, npm }, baseUrl);
   if (family === "anthropic") return "anthropic-messages";
   if (family === "google") return "google-generative-ai";

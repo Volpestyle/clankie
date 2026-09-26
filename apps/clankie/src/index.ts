@@ -80,11 +80,14 @@ import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
   applyHostedModelRouting,
+  configureHostedModels,
   readHostedBodyBootstrap,
   createHostedBodyClient,
+  HOSTED_DEFAULT_MODEL,
   HostedBodyDeniedError,
 } from "./hosted-body.ts";
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
+import { startHostedModelForwarder } from "./hosted-model-forwarder.ts";
 import { createWorkItemsService } from "./work-items.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
@@ -169,6 +172,15 @@ const hostedPairing =
         operatorCredentialStore,
         join(stateRoot, "hosted-pair-tickets.json"),
       );
+// Included model usage (VUH-1371): without a customer key, every model call
+// goes through this loopback forwarder to the fleet's model proxy.
+const hostedModelForwarder =
+  hostedBody === undefined ? undefined : await startHostedModelForwarder({ client: hostedBody, logger });
+if (hostedModelForwarder !== undefined) {
+  await configureHostedModels(hostedModelForwarder.baseURL, {
+    hasCredential: async (providerId) => (await operatorCredentialStore.get(providerId)) !== undefined,
+  });
+}
 const hostedHeartbeat =
   hostedBody === undefined
     ? undefined
@@ -679,6 +691,8 @@ const clankie = await createClankieApp({
     store: operatorCredentialStore,
     cwd: repoRoot,
     ...(bodyTelemetry === undefined ? {} : { telemetry: bodyTelemetry }),
+    // Removing the key behind the selected model returns a hosted body to its included model.
+    ...(hostedModelForwarder === undefined ? {} : { fallbackModel: HOSTED_DEFAULT_MODEL }),
   }),
   ...(hostedPairing === undefined
     ? {}

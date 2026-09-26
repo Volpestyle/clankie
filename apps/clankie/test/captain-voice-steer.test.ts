@@ -280,6 +280,66 @@ describe("runOneShotDiscordTurn", () => {
     ).rejects.toMatchObject({ message: errorMessage, code: "captain_usage_limit_reached" });
   });
 
+  it.each([
+    {
+      code: "allowance_exhausted",
+      status: 429,
+      type: "insufficient_quota",
+      message:
+        "Your included model usage is used up. Add your own key in the Clankie app, or it resets on 2026-10-26.",
+      expected: "captain_usage_limit_reached",
+    },
+    {
+      code: "daily_cap",
+      status: 429,
+      type: "insufficient_quota",
+      message: "Today's included model usage is used up.",
+      expected: "captain_usage_limit_reached",
+    },
+    {
+      code: "escalation_not_in_plan",
+      status: 403,
+      type: "invalid_request_error",
+      message: "Escalating to the work model is part of Pro.",
+      expected: "captain_model_failed",
+    },
+  ])(
+    "shows the customer the hosted model proxy's own sentence for $code",
+    async ({ code, status, type, message, expected }) => {
+      // What Pi makes of the proxy's answer (VUH-1371): status plus the JSON body.
+      const errorMessage = `OpenAI API error (${String(status)}): ${JSON.stringify({ message, type, code })}`;
+      await expect(
+        runOneShotDiscordTurn(
+          {
+            state: { messages: [{ role: "assistant", stopReason: "error", errorMessage }] },
+            prompt: () => Promise.resolve(),
+            abort: () => Promise.resolve(),
+            subscribe: () => () => undefined,
+          },
+          "hello",
+          [],
+        ),
+      ).rejects.toMatchObject({ message, code: expected });
+    },
+  );
+
+  it("leaves other provider errors as Pi reported them", async () => {
+    const errorMessage =
+      'OpenAI API error (400): {"message":"bad","type":"invalid_request_error","code":"other"}';
+    await expect(
+      runOneShotDiscordTurn(
+        {
+          state: { messages: [{ role: "assistant", stopReason: "error", errorMessage }] },
+          prompt: () => Promise.resolve(),
+          abort: () => Promise.resolve(),
+          subscribe: () => () => undefined,
+        },
+        "hello",
+        [],
+      ),
+    ).rejects.toMatchObject({ message: errorMessage, code: "captain_model_failed" });
+  });
+
   it("declares a turn dead only after it has gone silent inside, never for being slow", async () => {
     vi.useFakeTimers();
     try {

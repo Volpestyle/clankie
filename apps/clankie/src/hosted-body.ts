@@ -8,7 +8,7 @@ import {
   PublicGatewayHostIdSchema,
 } from "@clankie/protocol/public-gateway";
 import type { CredentialStore } from "@clankie/credential-broker";
-import { parseModelRef, updateModelRouting } from "@clankie/model-provider";
+import { loadConfig, parseModelRef, updateGlobalConfig, updateModelRouting } from "@clankie/model-provider";
 
 const ModelRefSchema = z
   .string()
@@ -63,6 +63,64 @@ export async function applyHostedModelRouting(
       escalationModel: routing.escalationModel ?? null,
     },
     options,
+  );
+}
+
+/** The included model: the fleet proxy's `default` alias, reached through the loopback forwarder. */
+const HOSTED_MODEL_PROVIDER = "clankie";
+export const HOSTED_DEFAULT_MODEL = `${HOSTED_MODEL_PROVIDER}/default`;
+
+/**
+ * The proxy's three aliases as one provider. The body never learns which
+ * model an alias is pinned to, nor prices it: the proxy does both. Limits
+ * are the proxy's clamps, with the context kept under the pinned model's
+ * long-context price tier.
+ */
+const HOSTED_ALIAS_MODEL = {
+  reasoning: true,
+  tool_call: true,
+  attachment: true,
+  temperature: false,
+  modalities: { input: ["text", "image"], output: ["text"] },
+  limit: { context: 272_000, output: 8_192 },
+  reasoning_options: [{ type: "effort", values: ["none", "low", "medium", "high", "xhigh", "max"] }],
+};
+
+/**
+ * Points the included model at the forwarder (fleet README, "What the body's
+ * forwarder must do"). The provider speaks OpenAI's Responses protocol with
+ * no key; the forwarder signs every call. A body whose selected model has no
+ * customer credential behind it (a new body, or a key just removed) runs on
+ * `clankie/default`; a customer's own key and model stay selected.
+ */
+export async function configureHostedModels(
+  baseURL: string,
+  options: { hasCredential: (providerId: string) => Promise<boolean>; env?: NodeJS.ProcessEnv },
+): Promise<void> {
+  const { config } = await loadConfig(options.env === undefined ? {} : { env: options.env });
+  const selected = config.model === undefined ? undefined : parseModelRef(config.model);
+  const fallBack =
+    selected === undefined ||
+    (selected.providerId !== HOSTED_MODEL_PROVIDER && !(await options.hasCredential(selected.providerId)));
+  await updateGlobalConfig(
+    (draft) => {
+      draft.provider = {
+        ...draft.provider,
+        [HOSTED_MODEL_PROVIDER]: {
+          name: "Clankie (included)",
+          npm: "@ai-sdk/openai",
+          options: { baseURL },
+          models: Object.fromEntries(
+            (["default", "routine", "escalation"] as const).map((alias) => [
+              alias,
+              { id: alias, name: `Clankie ${alias}`, ...HOSTED_ALIAS_MODEL },
+            ]),
+          ),
+        },
+      };
+      if (fallBack) draft.model = HOSTED_DEFAULT_MODEL;
+    },
+    options.env === undefined ? {} : { env: options.env },
   );
 }
 
@@ -142,6 +200,24 @@ const HostClaimsSchema = z
     inst: PublicGatewayInstallationIdSchema,
   })
   .strict();
+
+/** The fleet model proxy's endpoints, under `/fleet/v1/model/v1/`. */
+export const HOSTED_MODEL_ENDPOINTS = ["responses", "chat/completions", "images/generations"] as const;
+export type HostedModelEndpoint = (typeof HOSTED_MODEL_ENDPOINTS)[number];
+
+/** The OpenAI-shaped `error.code` (or the fleet's bare `error`), read from a copy. */
+async function errorCode(response: Response): Promise<string | undefined> {
+  const body: unknown = await response
+    .clone()
+    .json()
+    .catch(() => undefined);
+  const parsed = z
+    .object({ error: z.union([z.string(), z.object({ code: z.string().optional() }).loose()]) })
+    .loose()
+    .safeParse(body);
+  if (!parsed.success) return undefined;
+  return typeof parsed.data.error === "string" ? parsed.data.error : parsed.data.error.code;
+}
 
 export class HostedBodyDeniedError extends Error {
   constructor() {
@@ -237,6 +313,30 @@ export class HostedBodyClient {
     this.onDenied?.();
   }
 
+  /** Fresh timestamp and nonce, signed with the pairing key: `clankie-body-request-v1`. */
+  private signature(pathname: string, digest: string): Record<string, string> {
+    if (this.pairingKey === undefined) throw new Error("Hosted pairing key is not registered");
+    const timestamp = String(this.clock()),
+      nonce = randomBytes(16).toString("base64url");
+    const transcript = [
+      "clankie-body-request-v1",
+      "POST",
+      pathname,
+      this.bootstrap.tenantId,
+      this.bootstrap.installationId,
+      timestamp,
+      nonce,
+      digest,
+    ].join("\n");
+    return {
+      "x-clankie-body-timestamp": timestamp,
+      "x-clankie-body-nonce": nonce,
+      // The transcript's last line, ahead of the body, so the fleet can verify before reading it.
+      "x-clankie-body-digest": digest,
+      "x-clankie-body-signature": sign(null, Buffer.from(transcript), this.pairingKey).toString("base64url"),
+    };
+  }
+
   private async request(path: string, body: unknown, token: string): Promise<Response> {
     const registration = path === "pairing-key";
     const pathname = `/fleet/v1/body/${path}`;
@@ -251,28 +351,7 @@ export class HostedBodyClient {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
       };
-      if (!registration) {
-        if (this.pairingKey === undefined) throw new Error("Hosted pairing key is not registered");
-        const timestamp = String(this.clock()),
-          nonce = randomBytes(16).toString("base64url");
-        const transcript = [
-          "clankie-body-request-v1",
-          "POST",
-          pathname,
-          this.bootstrap.tenantId,
-          this.bootstrap.installationId,
-          timestamp,
-          nonce,
-          digest,
-        ].join("\n");
-        headers["x-clankie-body-timestamp"] = timestamp;
-        headers["x-clankie-body-nonce"] = nonce;
-        // The transcript's last line, ahead of the body, so the fleet can verify before reading it.
-        headers["x-clankie-body-digest"] = digest;
-        headers["x-clankie-body-signature"] = sign(null, Buffer.from(transcript), this.pairingKey).toString(
-          "base64url",
-        );
-      }
+      if (!registration) Object.assign(headers, this.signature(pathname, digest));
       let response: Response;
       try {
         response = await this.fetcher(new URL(pathname, this.bootstrap.gatewayOrigin), {
@@ -368,6 +447,66 @@ export class HostedBodyClient {
   ): Promise<Response> {
     const credential = await this.resolveHostToken();
     return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
+  }
+  /**
+   * One model call to the fleet's model proxy (VUH-1371): exactly `bytes`,
+   * signed like every body call, answered with the proxy's own response so
+   * the caller can relay its status and stream unchanged. Retries only what
+   * the forwarder contract allows: a rejected signature (three attempts, each
+   * signed afresh), a missing pairing key (re-registered once), and one
+   * network failure before any response (a new nonce, so a new reservation).
+   * Every other answer, including 429 and 409, is returned as it came.
+   */
+  async forwardModel(
+    endpoint: HostedModelEndpoint,
+    bytes: Uint8Array<ArrayBuffer>,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const pathname = `/fleet/v1/model/v1/${endpoint}`;
+    const digest = createHash("sha256").update(bytes).digest("base64url");
+    let signatureAttempts = 0,
+      registeredAgain = false,
+      networkRetried = false;
+    for (;;) {
+      await this.pairingRegistration;
+      const { token } = await this.resolveHostToken();
+      const headers = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        ...this.signature(pathname, digest),
+      };
+      let response: Response;
+      try {
+        response = await this.fetcher(new URL(pathname, this.bootstrap.gatewayOrigin), {
+          method: "POST",
+          headers,
+          body: bytes,
+          redirect: "error",
+          ...(signal === undefined ? {} : { signal }),
+        });
+      } catch (error) {
+        if (signal?.aborted === true || networkRetried) throw error;
+        networkRetried = true;
+        continue;
+      }
+      if (response.status !== 401 && response.status !== 403) return response;
+      const code = await errorCode(response);
+      if (response.status === 401 && code === "body_signature_invalid") {
+        if (++signatureAttempts < 3) {
+          await response.body?.cancel();
+          await delay(250 * 2 ** (signatureAttempts - 1));
+          continue;
+        }
+        this.onSignatureInvalid?.();
+      }
+      if (response.status === 403 && code === "pairing_key_required" && !registeredAgain && this.pairingKey) {
+        await response.body?.cancel();
+        registeredAgain = true;
+        await this.registerPairingKey(this.pairingKey);
+        continue;
+      }
+      return response;
+    }
   }
   async registerWakeKey(deviceId: string, publicKey: string): Promise<void> {
     await this.post("wake-keys", { deviceId, publicKey });

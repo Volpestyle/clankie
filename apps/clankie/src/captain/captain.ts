@@ -551,14 +551,38 @@ class PiRunError extends Error {
   readonly code: string;
 
   constructor(message: string) {
-    super(message);
+    const included = includedModelRefusal(message);
+    super(included?.message ?? message);
     // Receipts stay content-free; the provider's full reason remains in Pi's tree.
     this.code =
+      included?.capped === true ||
       /\busage limit (?:has been )?reached\b|\busage_limit_reached\b|\byou have hit your ChatGPT usage limit\b/iu.test(
         message,
       )
         ? "captain_usage_limit_reached"
         : "captain_model_failed";
+  }
+}
+
+/** The fleet model proxy's refusals whose `message` is written for the customer (VUH-1371). */
+const INCLUDED_MODEL_CAPS = new Set(["allowance_exhausted", "daily_cap", "capability_cap"]);
+const INCLUDED_MODEL_REFUSALS = new Set(["escalation_not_in_plan", "no_allowance", "not_entitled"]);
+
+/**
+ * A hosted body's included-model refusal, read from Pi's provider error
+ * ("OpenAI API error (429): {…}"). The customer sees the proxy's own sentence
+ * ("Your included model usage is used up…") instead of an HTTP status and JSON.
+ */
+function includedModelRefusal(message: string): { message: string; capped: boolean } | undefined {
+  const start = message.indexOf("{");
+  if (start === -1) return undefined;
+  try {
+    const body = JSON.parse(message.slice(start)) as { message?: unknown; code?: unknown };
+    if (typeof body.message !== "string" || typeof body.code !== "string") return undefined;
+    const capped = INCLUDED_MODEL_CAPS.has(body.code);
+    return capped || INCLUDED_MODEL_REFUSALS.has(body.code) ? { message: body.message, capped } : undefined;
+  } catch {
+    return undefined;
   }
 }
 

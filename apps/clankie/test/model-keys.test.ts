@@ -357,6 +357,32 @@ describe("owner model keys", () => {
     expect(stderr).not.toHaveBeenCalled();
   });
 
+  it("returns a hosted body to its included model when the key behind its selection is removed", async () => {
+    const { store, env, dir, runtime } = await setup({ modelId: "gpt-6-luna" });
+    const hosted = createModelKeys({
+      store,
+      env,
+      cwd: dir,
+      runtime: async () => runtime,
+      fallbackModel: "clankie/default",
+    });
+    const selfHosted = createModelKeys({ store, env, cwd: dir, runtime: async () => runtime });
+
+    await expect(hosted.set("openai", "sk-customer")).resolves.toEqual({ ok: true });
+    await expect(hosted.select("openai/gpt-6-luna")).resolves.toEqual({ ok: true });
+    // Removing a key the selection does not use leaves the customer's model alone.
+    await expect(hosted.remove("disabled")).resolves.toMatchObject({ ok: false });
+    expect((await loadConfig({ env })).config.model).toBe("openai/gpt-6-luna");
+    await expect(hosted.remove("openai")).resolves.toEqual({ ok: true });
+    expect((await loadConfig({ env })).config.model).toBe("clankie/default");
+
+    // A self-hosted body keeps its selection: there is no included model to return to.
+    await selfHosted.set("openai", "sk-owner");
+    await selfHosted.select("openai/gpt-6-luna");
+    await selfHosted.remove("openai");
+    expect((await loadConfig({ env })).config.model).toBe("openai/gpt-6-luna");
+  });
+
   it("cannot overwrite internal broker entries, disabled providers or OAuth-only providers", async () => {
     const { call, store } = await setup();
     for (const providerId of ["clankie_operator", "clankie_captain", "oauth-only", "disabled", "unknown"])

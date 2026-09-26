@@ -30,6 +30,12 @@ export function createModelKeys(options: {
   cwd?: string;
   runtime?: () => Promise<ModelRuntime>;
   telemetry?: Pick<BodyTelemetry, "emit">;
+  /**
+   * What the captain runs on once the key behind the selected model is
+   * removed. A hosted body returns to its included model (VUH-1371); unset,
+   * the selection is left as it was.
+   */
+  fallbackModel?: string;
 }): ModelKeysPort {
   const { store } = options;
   const telemetryCatalog = options.telemetry === undefined ? undefined : loadBundledCatalog();
@@ -214,6 +220,16 @@ export function createModelKeys(options: {
         if ((await store.get(providerId))?.type === "api") {
           await store.delete(providerId);
           report("key-removed", "ok", providerId);
+          const selected = (await snapshot()).config.model;
+          if (
+            options.fallbackModel !== undefined &&
+            parseModelRef(selected ?? "")?.providerId === providerId
+          ) {
+            await setCaptainModel(
+              options.fallbackModel,
+              options.env === undefined ? {} : { env: options.env },
+            );
+          }
         }
         return { ok: true };
       } catch (error) {

@@ -82,4 +82,36 @@ describe("Pi provider projection", () => {
 
     expect(registrations[0]?.config.apiKey).toBeUndefined();
   });
+
+  it("keeps a declared provider's protocol when the same runtime projects it again", () => {
+    // The model-keys service projects on every request into one runtime. The
+    // second pass used to see Clankie's own registration as a Pi builtin and
+    // re-register the provider with no api, which Pi refuses.
+    const registered = new Map<string, ProviderConfig>();
+    const runtime = {
+      getProviders: () => [...registered.keys()].map((id) => ({ id })),
+      registerProvider(id: string, config: ProviderConfig) {
+        registered.set(id, config);
+      },
+    } as unknown as ModelRuntime;
+    const config = {
+      provider: {
+        clankie: {
+          npm: "@ai-sdk/openai",
+          options: { baseURL: "http://127.0.0.1:4319/v1" },
+          models: { default: { id: "default", limit: { context: 272_000, output: 8_192 } } },
+        },
+      },
+    };
+
+    registerConfiguredPiProviders(runtime, config, CatalogSchema.parse({}));
+    registerConfiguredPiProviders(runtime, config, CatalogSchema.parse({}));
+
+    // Naming OpenAI's own package asks for its Responses protocol.
+    expect(registered.get("clankie")).toMatchObject({
+      api: "openai-responses",
+      baseUrl: "http://127.0.0.1:4319/v1",
+      apiKey: "local",
+    });
+  });
 });

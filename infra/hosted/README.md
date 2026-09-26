@@ -257,6 +257,39 @@ and timestamp. The fleet allows five minutes of clock skew and accepts each
 nonce once. A `401 body_signature_invalid` gets at most three attempts, then
 emits only that error code; check clock skew or a pairing-key mismatch.
 
+### Included model usage
+
+A managed body has no provider key of its own ([VUH-1371](https://linear.app/vuhlp/issue/VUH-1371)).
+At start it opens a loopback forwarder on an ephemeral `127.0.0.1` port and
+declares the provider `clankie` in its `clankie.json`, with the models
+`default`, `routine` and `escalation` (the fleet model proxy's aliases),
+OpenAI's Responses protocol, and the forwarder as `options.baseURL`. The
+forwarder accepts `POST /v1/responses`, `/v1/chat/completions` and
+`/v1/images/generations` and sends each body unchanged to
+`/fleet/v1/model/v1/<endpoint>` on the gateway origin, signed like the calls
+above, digest header included. Bodies over 2 MiB get `413` locally. It relays
+the proxy's status, content type and stream as they arrive.
+
+It retries only what the proxy allows:
+
+- `401 body_signature_invalid`: three attempts in all, each signed afresh.
+- `403 pairing_key_required`: one re-registration.
+- One network failure before any response, which is a new reservation.
+
+Everything else is relayed once with `x-should-retry: false`, including the
+caps (`429` `allowance_exhausted`, `daily_cap`, `capability_cap`),
+`rate_limited`, `409 replayed`, `403 not_entitled`, `no_allowance`,
+`escalation_not_in_plan` and `400 unsupported_model`. For the caps and plan
+refusals, the failed turn shows the customer the proxy's own `error.message`.
+Neither the SDK nor Pi's agent retry repeats a cap, because it carries type
+`insufficient_quota`. The forwarder logs statuses only.
+
+A new body, or one whose selected model has no stored credential, selects
+`clankie/default`. A customer's own key (`/v1/model-keys/set`, then `/select`),
+or their own subscription login, takes over: calls go straight to that
+provider. Removing the key behind the selected model returns the body to
+`clankie/default`. Image generation does not use the forwarder yet.
+
 `POST /v1/hosted/pair-offer` accepts only protocol v2:
 `{ version: 2, pairTicket, browserPublicKey, nonce }`. The body verifies the
 fleet’s Ed25519 signature, audience, tenant, host, lifetime, browser public-key

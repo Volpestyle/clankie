@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, verify, type KeyObject } from "node:crypto";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hostedFixture } from "./fixtures/hosted-body.ts";
@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig, updateModelRouting } from "@clankie/model-provider";
 import {
   applyHostedModelRouting,
+  configureHostedModels,
+  HOSTED_DEFAULT_MODEL,
   HostedBodyClient,
   HostedBodyDeniedError,
   readHostedBodyBootstrap,
@@ -345,5 +347,188 @@ describe("signed body fleet calls", () => {
     fetcher.mockRejectedValueOnce(new Error(f.bootstrap.hostCredential));
     await expect(client.post("heartbeat", {})).rejects.toThrow("Fleet request unavailable");
     expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("included model calls (VUH-1371)", () => {
+  const proxyError = (status: number, code: string, type = "invalid_request_error") =>
+    Response.json({ error: { message: `refused: ${code}`, type, code } }, { status });
+  async function registered(fetcher: typeof fetch) {
+    const f = hostedFixture(),
+      signing = generateKeyPairSync("ed25519");
+    const client = new HostedBodyClient(f.bootstrap, { clock: () => f.now, fetch: fetcher });
+    await client.registerPairingKey(signing.privateKey);
+    return { f, client, signing };
+  }
+  const modelCalls = (fetcher: ReturnType<typeof vi.fn<typeof fetch>>) =>
+    fetcher.mock.calls.filter(([url]) => String(url).includes("/fleet/v1/model/"));
+
+  it("signs the exact bytes to the model proxy, with the digest header, and relays the answer", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (url) =>
+      String(url).includes("/model/")
+        ? new Response("data: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } })
+        : Response.json({}),
+    );
+    const { f, client, signing } = await registered(fetcher);
+    const bytes = new Uint8Array(Buffer.from('{"model":"default","input":"☃","stream":true}'));
+    const answer = await client.forwardModel("responses", bytes);
+    expect(answer.headers.get("content-type")).toBe("text/event-stream");
+    expect(await answer.text()).toBe("data: {}\n\n");
+    const [[url, init]] = modelCalls(fetcher) as [[string, RequestInit]];
+    expect(new URL(url).href).toBe(`${f.bootstrap.gatewayOrigin}/fleet/v1/model/v1/responses`);
+    expect(init.body).toBe(bytes);
+    const headers = new Headers(init.headers);
+    expect(headers.get("authorization")).toBe(`Bearer ${f.bootstrap.hostCredential}`);
+    const digest = createHash("sha256").update(bytes).digest("base64url");
+    expect(headers.get("x-clankie-body-digest")).toBe(digest);
+    const transcript = [
+      "clankie-body-request-v1",
+      "POST",
+      "/fleet/v1/model/v1/responses",
+      f.bootstrap.tenantId,
+      f.bootstrap.installationId,
+      headers.get("x-clankie-body-timestamp"),
+      headers.get("x-clankie-body-nonce"),
+      digest,
+    ].join("\n");
+    expect(
+      verify(
+        null,
+        Buffer.from(transcript),
+        signing.publicKey,
+        Buffer.from(headers.get("x-clankie-body-signature")!, "base64url"),
+      ),
+    ).toBe(true);
+  });
+
+  it("re-signs a rejected signature up to three times, each with a fresh nonce", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (url) =>
+      String(url).includes("/model/") ? proxyError(401, "body_signature_invalid") : Response.json({}),
+    );
+    const { client } = await registered(fetcher);
+    client.onSignatureInvalid = vi.fn();
+    const answer = await client.forwardModel("chat/completions", new Uint8Array(Buffer.from("{}")));
+    expect(answer.status).toBe(401);
+    const nonces = modelCalls(fetcher).map(([, init]) =>
+      new Headers(init?.headers).get("x-clankie-body-nonce"),
+    );
+    expect(nonces).toHaveLength(3);
+    expect(new Set(nonces).size).toBe(3);
+    expect(client.onSignatureInvalid).toHaveBeenCalledOnce();
+  });
+
+  it("re-registers a missing pairing key once, then sends the call again", async () => {
+    let model = 0;
+    const fetcher = vi.fn<typeof fetch>(async (url) =>
+      String(url).includes("/model/")
+        ? model++ === 0
+          ? Response.json({ error: "pairing_key_required" }, { status: 403 })
+          : Response.json({ id: "resp" })
+        : Response.json({}),
+    );
+    const { client } = await registered(fetcher);
+    const answer = await client.forwardModel("responses", new Uint8Array(Buffer.from("{}")));
+    expect(answer.status).toBe(200);
+    const paths = fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname);
+    expect(paths).toEqual([
+      "/fleet/v1/body/pairing-key",
+      "/fleet/v1/model/v1/responses",
+      "/fleet/v1/body/pairing-key",
+      "/fleet/v1/model/v1/responses",
+    ]);
+  });
+
+  it.each([
+    [429, "allowance_exhausted", "insufficient_quota"],
+    [429, "daily_cap", "insufficient_quota"],
+    [429, "rate_limited", "rate_limit_error"],
+    [409, "replayed", "invalid_request_error"],
+    [403, "not_entitled", "invalid_request_error"],
+    [403, "escalation_not_in_plan", "invalid_request_error"],
+    [400, "unsupported_model", "invalid_request_error"],
+  ] as const)("never retries %i %s, and never parks the body for it", async (status, code, type) => {
+    const fetcher = vi.fn<typeof fetch>(async (url) =>
+      String(url).includes("/model/") ? proxyError(status, code, type) : Response.json({}),
+    );
+    const { client } = await registered(fetcher);
+    client.onDenied = vi.fn();
+    const answer = await client.forwardModel("responses", new Uint8Array(Buffer.from("{}")));
+    expect(answer.status).toBe(status);
+    expect(await answer.json()).toMatchObject({ error: { code } });
+    expect(modelCalls(fetcher)).toHaveLength(1);
+    expect(client.onDenied).not.toHaveBeenCalled();
+    // The next call still goes out: a refusal is not a revoked body.
+    await client.forwardModel("responses", new Uint8Array(Buffer.from("{}")));
+    expect(modelCalls(fetcher)).toHaveLength(2);
+  });
+
+  it("retries one network failure before any answer with a new nonce, and no more", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (url) => {
+      if (String(url).includes("/model/")) throw new TypeError("fetch failed");
+      return Response.json({});
+    });
+    const { client } = await registered(fetcher);
+    await expect(client.forwardModel("responses", new Uint8Array(Buffer.from("{}")))).rejects.toThrow();
+    const nonces = modelCalls(fetcher).map(([, init]) =>
+      new Headers(init?.headers).get("x-clankie-body-nonce"),
+    );
+    expect(nonces).toHaveLength(2);
+    expect(nonces[0]).not.toBe(nonces[1]);
+  });
+});
+
+describe("included model selection (VUH-1371)", () => {
+  async function withConfig(
+    initial: Record<string, unknown> | undefined,
+    run: (env: NodeJS.ProcessEnv) => Promise<void>,
+  ) {
+    const dir = mkdtempSync(join(tmpdir(), "hosted-models-"));
+    try {
+      if (initial !== undefined) {
+        mkdirSync(join(dir, "clankie"), { recursive: true });
+        writeFileSync(join(dir, "clankie", "clankie.json"), JSON.stringify(initial));
+      }
+      await run({ XDG_CONFIG_HOME: dir });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const noCredentials = async () => false;
+
+  it("points the included provider at the forwarder and selects it on a new body", async () => {
+    await withConfig(undefined, async (env) => {
+      await configureHostedModels("http://127.0.0.1:4319/v1", { env, hasCredential: noCredentials });
+      const { config } = await loadConfig({ env });
+      expect(config.model).toBe(HOSTED_DEFAULT_MODEL);
+      expect(config.provider?.clankie).toMatchObject({
+        npm: "@ai-sdk/openai",
+        options: { baseURL: "http://127.0.0.1:4319/v1" },
+      });
+      expect(Object.keys(config.provider?.clankie?.models ?? {}).sort()).toEqual([
+        "default",
+        "escalation",
+        "routine",
+      ]);
+    });
+  });
+
+  it.each([
+    ["an API key", "openai/gpt-6-luna", "openai"],
+    ["a subscription login", "openai-codex/gpt-6-astra", "openai-codex"],
+  ])("keeps a customer model backed by %s", async (_kind, model, provider) => {
+    await withConfig({ model }, async (env) => {
+      await configureHostedModels("http://127.0.0.1:4319/v1", {
+        env,
+        hasCredential: async (providerId) => providerId === provider,
+      });
+      expect((await loadConfig({ env })).config.model).toBe(model);
+    });
+  });
+
+  it("returns a customer model whose credential is gone to the included model", async () => {
+    await withConfig({ model: "openai/gpt-6-luna" }, async (env) => {
+      await configureHostedModels("http://127.0.0.1:4319/v1", { env, hasCredential: noCredentials });
+      expect((await loadConfig({ env })).config.model).toBe(HOSTED_DEFAULT_MODEL);
+    });
   });
 });
