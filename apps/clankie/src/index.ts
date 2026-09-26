@@ -79,11 +79,10 @@ import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts"
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
-  applyHostedModelRouting,
+  applyHostedModelPolicy,
   configureHostedModels,
   readHostedBodyBootstrap,
   createHostedBodyClient,
-  HOSTED_DEFAULT_MODEL,
   HostedBodyDeniedError,
 } from "./hosted-body.ts";
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
@@ -158,7 +157,6 @@ await ensureOperatorCredential({ env: process.env, store: operatorCredentialStor
 const discordBodyInLoadout =
   serviceInLoadout("discord-bridge", process.env) || serviceInLoadout("discord-user-session", process.env);
 const hostedBootstrap = readHostedBodyBootstrap(process.env);
-if (hostedBootstrap !== undefined) await applyHostedModelRouting(hostedBootstrap);
 const hostedBody =
   hostedBootstrap === undefined
     ? undefined
@@ -176,11 +174,18 @@ const hostedPairing =
 // goes through this loopback forwarder to the fleet's model proxy.
 const hostedModelForwarder =
   hostedBody === undefined ? undefined : await startHostedModelForwarder({ client: hostedBody, logger });
-if (hostedModelForwarder !== undefined) {
-  await configureHostedModels(hostedModelForwarder.baseURL, {
-    hasCredential: async (providerId) => (await operatorCredentialStore.get(providerId)) !== undefined,
-  });
-}
+// Which path model calls take (the customer's own credential, or included
+// usage with the plan's routing) is decided now and after every key or model
+// change; a self-hosted body keeps its own routing untouched.
+const hostedModelPolicy =
+  hostedBootstrap === undefined || hostedModelForwarder === undefined
+    ? undefined
+    : () =>
+        applyHostedModelPolicy(hostedBootstrap, {
+          hasCredential: async (providerId) => (await operatorCredentialStore.get(providerId)) !== undefined,
+        }).then(() => undefined);
+if (hostedModelForwarder !== undefined) await configureHostedModels(hostedModelForwarder.baseURL);
+await hostedModelPolicy?.();
 const hostedHeartbeat =
   hostedBody === undefined
     ? undefined
@@ -691,8 +696,7 @@ const clankie = await createClankieApp({
     store: operatorCredentialStore,
     cwd: repoRoot,
     ...(bodyTelemetry === undefined ? {} : { telemetry: bodyTelemetry }),
-    // Removing the key behind the selected model returns a hosted body to its included model.
-    ...(hostedModelForwarder === undefined ? {} : { fallbackModel: HOSTED_DEFAULT_MODEL }),
+    ...(hostedModelPolicy === undefined ? {} : { onModelChanged: hostedModelPolicy }),
   }),
   ...(hostedPairing === undefined
     ? {}

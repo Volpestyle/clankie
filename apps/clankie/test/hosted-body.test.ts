@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig, updateModelRouting } from "@clankie/model-provider";
 import {
   applyHostedModelRouting,
+  applyHostedModelPolicy,
   configureHostedModels,
   HOSTED_DEFAULT_MODEL,
   HostedBodyClient,
@@ -477,7 +478,10 @@ describe("included model calls (VUH-1371)", () => {
   });
 });
 
-describe("included model selection (VUH-1371)", () => {
+describe("included model and customer model paths (VUH-1371)", () => {
+  const plan = {
+    modelRouting: { routineModel: "clankie/routine", escalate: true, escalationModel: "clankie/escalation" },
+  };
   async function withConfig(
     initial: Record<string, unknown> | undefined,
     run: (env: NodeJS.ProcessEnv) => Promise<void>,
@@ -493,11 +497,17 @@ describe("included model selection (VUH-1371)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }
-  const noCredentials = async () => false;
+  const credentials =
+    (...providers: string[]) =>
+    async (providerId: string) =>
+      providers.includes(providerId);
 
-  it("points the included provider at the forwarder and selects it on a new body", async () => {
+  it("starts a new body on the included model with the plan's routing", async () => {
     await withConfig(undefined, async (env) => {
-      await configureHostedModels("http://127.0.0.1:4319/v1", { env, hasCredential: noCredentials });
+      await configureHostedModels("http://127.0.0.1:4319/v1", { env });
+      await expect(applyHostedModelPolicy(plan, { env, hasCredential: credentials() })).resolves.toBe(
+        "included",
+      );
       const { config } = await loadConfig({ env });
       expect(config.model).toBe(HOSTED_DEFAULT_MODEL);
       expect(config.provider?.clankie).toMatchObject({
@@ -509,26 +519,75 @@ describe("included model selection (VUH-1371)", () => {
         "escalation",
         "routine",
       ]);
-    });
-  });
-
-  it.each([
-    ["an API key", "openai/gpt-6-luna", "openai"],
-    ["a subscription login", "openai-codex/gpt-6-astra", "openai-codex"],
-  ])("keeps a customer model backed by %s", async (_kind, model, provider) => {
-    await withConfig({ model }, async (env) => {
-      await configureHostedModels("http://127.0.0.1:4319/v1", {
-        env,
-        hasCredential: async (providerId) => providerId === provider,
+      expect(config.routing).toMatchObject({
+        routine_model: "clankie/routine",
+        escalate: true,
+        escalation_model: "clankie/escalation",
       });
-      expect((await loadConfig({ env })).config.model).toBe(model);
     });
   });
 
-  it("returns a customer model whose credential is gone to the included model", async () => {
-    await withConfig({ model: "openai/gpt-6-luna" }, async (env) => {
-      await configureHostedModels("http://127.0.0.1:4319/v1", { env, hasCredential: noCredentials });
-      expect((await loadConfig({ env })).config.model).toBe(HOSTED_DEFAULT_MODEL);
+  const customerRouting = {
+    routine_model: "openai/gpt-5.4-nano",
+    escalate: true,
+    escalation_model: "openai/gpt-6-astra",
+    purposes: { gameplay: "routine" },
+  };
+  it.each([
+    ["an API key (BYOK)", "openai/gpt-6-luna", "openai"],
+    ["a subscription login (BYOS)", "openai-codex/gpt-6-astra", "openai-codex"],
+    ["a subscription login behind an openai/ selection (ADR 0052)", "openai/gpt-6-astra", "openai-codex"],
+  ])(
+    "gives a customer model backed by %s no plan routing, and keeps its own routing across restarts",
+    async (_kind, model, provider) => {
+      await withConfig({ model, routing: customerRouting }, async (env) => {
+        // Two boots: the plan's bootstrap routing is present both times and applied neither time.
+        for (let boot = 0; boot < 2; boot++) {
+          await configureHostedModels("http://127.0.0.1:4319/v1", { env });
+          await expect(
+            applyHostedModelPolicy(plan, { env, hasCredential: credentials(provider) }),
+          ).resolves.toBe("customer");
+        }
+        const { config } = await loadConfig({ env });
+        expect(config.model).toBe(model);
+        expect(config.routing).toEqual(customerRouting);
+      });
+    },
+  );
+
+  it("clears the routing an earlier plan wrote once the customer's own model takes over", async () => {
+    await withConfig(
+      {
+        model: "openai/gpt-6-luna",
+        routing: {
+          routine_model: "clankie/routine",
+          escalate: true,
+          escalation_model: "clankie/escalation",
+          purposes: { gameplay: "routine" },
+        },
+      },
+      async (env) => {
+        await expect(
+          applyHostedModelPolicy(plan, { env, hasCredential: credentials("openai") }),
+        ).resolves.toBe("customer");
+        // No turn can reach the included model; the customer's purpose choice stays.
+        expect((await loadConfig({ env })).config.routing).toEqual({ purposes: { gameplay: "routine" } });
+      },
+    );
+  });
+
+  it("returns a customer model whose credential is gone to the included model and the plan's routing", async () => {
+    await withConfig({ model: "openai/gpt-6-luna", routing: customerRouting }, async (env) => {
+      await expect(applyHostedModelPolicy(plan, { env, hasCredential: credentials() })).resolves.toBe(
+        "included",
+      );
+      const { config } = await loadConfig({ env });
+      expect(config.model).toBe(HOSTED_DEFAULT_MODEL);
+      expect(config.routing).toMatchObject({
+        routine_model: "clankie/routine",
+        escalate: true,
+        escalation_model: "clankie/escalation",
+      });
     });
   });
 });

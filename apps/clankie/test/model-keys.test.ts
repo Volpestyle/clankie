@@ -11,6 +11,7 @@ import { ModelKeysResponseSchema } from "@clankie/protocol/model-keys";
 import { bodyTelemetryFromEnv } from "@clankie/observability/body-telemetry";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createModelKeys } from "../src/model-keys.ts";
+import { applyHostedModelPolicy } from "../src/hosted-body.ts";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 
@@ -357,26 +358,45 @@ describe("owner model keys", () => {
     expect(stderr).not.toHaveBeenCalled();
   });
 
-  it("returns a hosted body to its included model when the key behind its selection is removed", async () => {
+  it("moves a hosted body between the included model with plan routing and the customer's own model", async () => {
     const { store, env, dir, runtime } = await setup({ modelId: "gpt-6-luna" });
+    const plan = { modelRouting: { routineModel: "clankie/routine", escalate: true } };
+    const policy = () =>
+      applyHostedModelPolicy(plan, {
+        env,
+        hasCredential: async (providerId) => (await store.get(providerId)) !== undefined,
+      }).then(() => undefined);
     const hosted = createModelKeys({
       store,
       env,
       cwd: dir,
       runtime: async () => runtime,
-      fallbackModel: "clankie/default",
+      onModelChanged: policy,
     });
-    const selfHosted = createModelKeys({ store, env, cwd: dir, runtime: async () => runtime });
+    const current = async () => (await loadConfig({ env })).config;
 
+    // (2) No customer key: included usage, plan routing.
+    await policy();
+    expect(await current()).toMatchObject({
+      model: "clankie/default",
+      routing: { routine_model: "clankie/routine", escalate: true },
+    });
+    // (1) The customer's key and model: every turn to their provider, no plan routing.
     await expect(hosted.set("openai", "sk-customer")).resolves.toEqual({ ok: true });
     await expect(hosted.select("openai/gpt-6-luna")).resolves.toEqual({ ok: true });
-    // Removing a key the selection does not use leaves the customer's model alone.
-    await expect(hosted.remove("disabled")).resolves.toMatchObject({ ok: false });
-    expect((await loadConfig({ env })).config.model).toBe("openai/gpt-6-luna");
+    expect(await current()).toMatchObject({ model: "openai/gpt-6-luna", routing: {} });
+    expect((await current()).routing?.routine_model).toBeUndefined();
+    // (3) Removing the key returns to the included path, and plan routing applies again.
     await expect(hosted.remove("openai")).resolves.toEqual({ ok: true });
-    expect((await loadConfig({ env })).config.model).toBe("clankie/default");
+    expect(await current()).toMatchObject({
+      model: "clankie/default",
+      routing: { routine_model: "clankie/routine", escalate: true },
+    });
+  });
 
-    // A self-hosted body keeps its selection: there is no included model to return to.
+  it("leaves a self-hosted owner's selection alone when a key is removed", async () => {
+    const { store, env, dir, runtime } = await setup({ modelId: "gpt-6-luna" });
+    const selfHosted = createModelKeys({ store, env, cwd: dir, runtime: async () => runtime });
     await selfHosted.set("openai", "sk-owner");
     await selfHosted.select("openai/gpt-6-luna");
     await selfHosted.remove("openai");

@@ -159,8 +159,10 @@ bootstrap fields.
 The optional `modelRouting` is the plan's task-based model routing
 ([ADR 0192](../../docs/adr/0192-model-routing-by-kind-of-task.md)):
 `{ "routineModel": "clankie/routine", "escalate": false }`, with an optional
-`escalationModel`. At every start the body writes it over its own routing
-settings (routine model, escalation and escalation model; the owner's purpose
+`escalationModel`. It applies only while the body runs on included usage (see
+"Included model usage" below). Then, at every start and whenever the body
+returns to included usage, the body writes it over its own routing settings
+(routine model, escalation and escalation model; the owner's purpose
 overrides stay), so a plan change lands on the next boot. Absent, the body's
 routing is left alone. The model proxy, not this field, enforces what a plan
 may spend.
@@ -284,11 +286,22 @@ refusals, the failed turn shows the customer the proxy's own `error.message`.
 Neither the SDK nor Pi's agent retry repeats a cap, because it carries type
 `insufficient_quota`. The forwarder logs statuses only.
 
-A new body, or one whose selected model has no stored credential, selects
-`clankie/default`. A customer's own key (`/v1/model-keys/set`, then `/select`),
-or their own subscription login, takes over: calls go straight to that
-provider. Removing the key behind the selected model returns the body to
-`clankie/default`. Image generation does not use the forwarder yet.
+Which path a body is on is decided at every start and after every model
+selection or key removal (James, 2026-09-26):
+
+- **Customer model.** The selected model runs on the customer's own
+  credential. That is an API key (`/v1/model-keys/set`, then `/select`) or a
+  subscription login on the body, including the subscription an `openai/…`
+  selection runs on. Every turn goes to their provider:
+  - the plan's `modelRouting` is not applied;
+  - routing an earlier plan wrote (refs to `clankie/…`) is cleared;
+  - the customer's own routing settings are never overwritten, across restarts too.
+- **Included usage.** Anything else: a new body, or a selected model whose
+  credential is gone. The body runs on `clankie/default` with the plan's
+  routing. Removing the customer's key lands here and applies the plan's
+  routing again.
+
+Image generation does not use the forwarder yet.
 
 `POST /v1/hosted/pair-offer` accepts only protocol v2:
 `{ version: 2, pairTicket, browserPublicKey, nonce }`. The body verifies the

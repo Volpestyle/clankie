@@ -8,7 +8,14 @@ import {
   PublicGatewayHostIdSchema,
 } from "@clankie/protocol/public-gateway";
 import type { CredentialStore } from "@clankie/credential-broker";
-import { loadConfig, parseModelRef, updateGlobalConfig, updateModelRouting } from "@clankie/model-provider";
+import {
+  loadConfig,
+  parseModelRef,
+  subscriptionRefFor,
+  updateGlobalConfig,
+  updateModelRouting,
+  type ClankieConfig,
+} from "@clankie/model-provider";
 
 const ModelRefSchema = z
   .string()
@@ -88,20 +95,13 @@ const HOSTED_ALIAS_MODEL = {
 
 /**
  * Points the included model at the forwarder (fleet README, "What the body's
- * forwarder must do"). The provider speaks OpenAI's Responses protocol with
- * no key; the forwarder signs every call. A body whose selected model has no
- * customer credential behind it (a new body, or a key just removed) runs on
- * `clankie/default`; a customer's own key and model stay selected.
+ * forwarder must do"): OpenAI's Responses protocol with no key, since the
+ * forwarder signs every call. Which model runs is {@link applyHostedModelPolicy}'s.
  */
 export async function configureHostedModels(
   baseURL: string,
-  options: { hasCredential: (providerId: string) => Promise<boolean>; env?: NodeJS.ProcessEnv },
+  options: { env?: NodeJS.ProcessEnv } = {},
 ): Promise<void> {
-  const { config } = await loadConfig(options.env === undefined ? {} : { env: options.env });
-  const selected = config.model === undefined ? undefined : parseModelRef(config.model);
-  const fallBack =
-    selected === undefined ||
-    (selected.providerId !== HOSTED_MODEL_PROVIDER && !(await options.hasCredential(selected.providerId)));
   await updateGlobalConfig(
     (draft) => {
       draft.provider = {
@@ -118,10 +118,73 @@ export async function configureHostedModels(
           ),
         },
       };
-      if (fallBack) draft.model = HOSTED_DEFAULT_MODEL;
     },
     options.env === undefined ? {} : { env: options.env },
   );
+}
+
+/**
+ * The provider of the customer's own credential behind the selected model: an
+ * API key (BYOK) or a subscription login (BYOS), including the subscription an
+ * `openai/…` selection runs on (ADR 0052). Undefined is the included model.
+ */
+async function customerModelProvider(
+  config: ClankieConfig,
+  hasCredential: (providerId: string) => Promise<boolean>,
+): Promise<string | undefined> {
+  const selected = config.model === undefined ? undefined : parseModelRef(config.model);
+  if (selected === undefined || selected.providerId === HOSTED_MODEL_PROVIDER) return undefined;
+  if (await hasCredential(selected.providerId)) return selected.providerId;
+  const subscription = subscriptionRefFor(selected, config);
+  const subscriptionProvider =
+    subscription === undefined ? undefined : parseModelRef(subscription)?.providerId;
+  return subscriptionProvider !== undefined && (await hasCredential(subscriptionProvider))
+    ? subscriptionProvider
+    : undefined;
+}
+
+const isIncludedRef = (ref: string | undefined) => ref?.startsWith(`${HOSTED_MODEL_PROVIDER}/`) === true;
+
+/**
+ * Which path a hosted body's model calls take, decided at every start and
+ * after every key or model change (James, 2026-09-26):
+ *
+ * - The customer's own credential behind the selected model: every turn goes
+ *   to their provider. The plan's routing is not applied, and routing that
+ *   names the included model (what an earlier plan wrote) is cleared so no
+ *   turn falls back to it. The customer's own routing settings are kept.
+ * - Otherwise, included usage: `clankie/default`, with the plan's routing from
+ *   the bootstrap written as before. Removing the customer's key lands here.
+ */
+export async function applyHostedModelPolicy(
+  bootstrap: Pick<HostedBodyBootstrap, "modelRouting">,
+  options: { hasCredential: (providerId: string) => Promise<boolean>; env?: NodeJS.ProcessEnv },
+): Promise<"customer" | "included"> {
+  const env = options.env === undefined ? {} : { env: options.env };
+  const { config } = await loadConfig(env);
+  if ((await customerModelProvider(config, options.hasCredential)) !== undefined) {
+    const routing = config.routing;
+    if (isIncludedRef(routing?.routine_model) || isIncludedRef(routing?.escalation_model)) {
+      await updateGlobalConfig((draft) => {
+        const next = { ...draft.routing };
+        if (isIncludedRef(next.routine_model)) {
+          // The plan's routine model and its escalation switch go together.
+          delete next.routine_model;
+          delete next.escalate;
+        }
+        if (isIncludedRef(next.escalation_model)) delete next.escalation_model;
+        draft.routing = next;
+      }, env);
+    }
+    return "customer";
+  }
+  if (config.model !== HOSTED_DEFAULT_MODEL) {
+    await updateGlobalConfig((draft) => {
+      draft.model = HOSTED_DEFAULT_MODEL;
+    }, env);
+  }
+  await applyHostedModelRouting(bootstrap, env);
+  return "included";
 }
 
 /** Unset is a self-hosted body. Invalid managed configuration fails startup closed. */

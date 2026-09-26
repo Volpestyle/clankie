@@ -31,11 +31,11 @@ export function createModelKeys(options: {
   runtime?: () => Promise<ModelRuntime>;
   telemetry?: Pick<BodyTelemetry, "emit">;
   /**
-   * What the captain runs on once the key behind the selected model is
-   * removed. A hosted body returns to its included model (VUH-1371); unset,
-   * the selection is left as it was.
+   * Runs after a model is selected or a key removed. A hosted body re-decides
+   * its model path there (VUH-1371): the customer's provider with their own
+   * routing, or the included model with the plan's. Unset, nothing else moves.
    */
-  fallbackModel?: string;
+  onModelChanged?: () => Promise<void>;
 }): ModelKeysPort {
   const { store } = options;
   const telemetryCatalog = options.telemetry === undefined ? undefined : loadBundledCatalog();
@@ -203,6 +203,7 @@ export function createModelKeys(options: {
           return { ok: false, error: "unsupported_model" };
         }
         await setCaptainModel(model, options.env === undefined ? {} : { env: options.env });
+        await options.onModelChanged?.();
         if (state.config.model !== model) report("model-selected", "ok", providerId, ref.modelId);
         return { ok: true };
       } catch (error) {
@@ -220,16 +221,7 @@ export function createModelKeys(options: {
         if ((await store.get(providerId))?.type === "api") {
           await store.delete(providerId);
           report("key-removed", "ok", providerId);
-          const selected = (await snapshot()).config.model;
-          if (
-            options.fallbackModel !== undefined &&
-            parseModelRef(selected ?? "")?.providerId === providerId
-          ) {
-            await setCaptainModel(
-              options.fallbackModel,
-              options.env === undefined ? {} : { env: options.env },
-            );
-          }
+          await options.onModelChanged?.();
         }
         return { ok: true };
       } catch (error) {
