@@ -101,6 +101,20 @@ describe("Discord ingress sealed scope", () => {
     ).toThrow();
     prepared.destroy();
   });
+  it("refuses re-encryption of known plaintext under an attacker response key", () => {
+    const publicKey = key.getPublicKey().toString("base64url");
+    const legitimate = prepareDiscordIngress(event, publicKey);
+    const attacker = prepareDiscordIngress(event, publicKey);
+    try {
+      const stolenPermit = permit(legitimate.digest);
+      expect(() => openDiscordIngress(attacker.seal(stolenPermit).envelope, options)).toThrow();
+      const opened = openDiscordIngress(legitimate.seal(stolenPermit).envelope, options);
+      opened.destroy();
+    } finally {
+      legitimate.destroy();
+      attacker.destroy();
+    }
+  });
   it("canonicalizes schema order, refuses arbitrary grants, expired queue windows and ambient triggers", () => {
     expect(discordEventDigest({ ...event, content: event.content })).toBe(discordEventDigest(event));
     for (const extra of [

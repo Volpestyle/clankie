@@ -43,6 +43,8 @@ security: []
 paths:
   /v1/discord/ingress:
     post:
+      tags: [Discord]
+      operationId: discordIngress
       summary: Admit an encrypted, fleet-permitted addressed Discord turn
       description: >-
         Remote connection API, not an operator bearer. P-256 ECDH and AES-GCM

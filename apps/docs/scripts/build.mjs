@@ -236,6 +236,13 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/discord/ingress",
+      {
+        purpose: "A trusted Discord connection delivers a sealed addressed turn",
+        access: "Fleet-signed scoped permit and P-256 encrypted request and response",
+      },
+    ],
+    [
       "POST /v1/hosted/pair-offer",
       {
         access: "Single-use fleet ticket bound to the browser key; managed bodies only",
