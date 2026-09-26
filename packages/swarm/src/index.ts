@@ -543,13 +543,17 @@ export class SwarmHost {
           throw new Error(
             "Worker provisioning unavailable; Swarm communication remains available. Reconcile existing assignments under their original intent.",
           );
-        const result = await active.client.callTool({
-          name: tool.name,
-          arguments:
-            tool.name === "swarm_assign" && this.instructions
-              ? await this.assignmentInstructions(selected, active, forwarded)
-              : forwarded,
-        });
+        const result = await active.client.callTool(
+          {
+            name: tool.name,
+            arguments:
+              tool.name === "swarm_assign" && this.instructions
+                ? await this.assignmentInstructions(selected, active, forwarded)
+                : forwarded,
+          },
+          undefined,
+          tool.name === "swarm_assign" && forwarded.routing !== undefined ? { timeout: 75000 } : undefined,
+        );
         if (result.isError) throw new Error(JSON.stringify(result.content));
         return {
           content: [{ type: "text", text: JSON.stringify(result.structuredContent ?? result.content) }],

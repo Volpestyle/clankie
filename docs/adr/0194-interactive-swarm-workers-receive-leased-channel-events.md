@@ -4,6 +4,14 @@ Status: Proposed, 2026-09-26. [VUH-1380](https://linear.app/vuhlp/issue/VUH-1380
 The native channel transport has empirical evidence; the production integration
 is not implemented by this ADR.
 
+## Current stream-worker implementation
+
+The readiness, independent MCP-health and stale-progress subset is implemented
+upstream in `dff68e3`, with [regression evidence and rollout limits](../testing/2026-09-26-interactive-swarm-workers/stream-readiness.md).
+It is pending reviewed re-vendoring and a drained restart window. This does not
+implement interactive workers, consent, model/effort selection, an install lock
+or immutable runtime generations. Existing-peer and OpenCode protocols are unchanged.
+
 ## Problem
 
 Swarm's Herdr worker wraps `claude --print` with stream-JSON pipes. That gives the

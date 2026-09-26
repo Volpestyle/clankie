@@ -23,6 +23,11 @@ was upgraded or restarted. All owned probe panes and the disposable coordinator 
 follow-up below installed two plugins at local scope in a temporary directory;
 both were uninstalled and its temporary marketplace declaration removed.
 
+## Current stream-worker readiness
+
+[Implementation and regression evidence](stream-readiness.md) covers the existing
+stream worker and its separate review/install boundary.
+
 ## Inspectable evidence
 
 - [Summary and limits](summary.json)
