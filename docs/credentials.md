@@ -51,9 +51,9 @@ flowchart LR
   Broker --> Account[clankie-account]
   Account --> Doorway[this Mac's route at api.clankie.bot]
   PlayVoice --> Active[active Discord body]
-  PlayVoice --> ClankiePlay[Clankie's local or hosted play]
+  PlayVoice --> ClankiePlay[Clankie's hosted-world play]
   Seat --> ClankieSeat[Clankie's hosted player identity]
-  Harness[external harness] --> Private[its private emulator/runtime]
+  Harness[external harness] --> Private[its own credentialed PokeAgents seat]
 ```
 
 ## Configure Discord
@@ -100,8 +100,8 @@ cancel work already running.
 1. Run `/discord` directly, store **User token**, and enable the lab body.
 2. Set non-empty guild, text-channel, and voice-channel allowlists.
 3. Record the ToS/account-risk acknowledgement in that flow.
-4. When spoken requests are required, set
-   `discord.userSessionVoiceEnabled=true` in `settings.json`; `/discord status`
+4. When spoken requests are required, run
+   `clankie discord set --user-session-voice-enabled true`; `/discord status`
    shows the effective value. Enter explicit voice-channel ids in the lab
    wizard rather than relying on a blank fallback.
 5. Select the **Lab user body** and build Vox with
@@ -134,7 +134,7 @@ Discord lane bearers are intentionally distinct, so a body or text lane cannot
 claim another transport by changing a request field.
 
 `clankie_play_voice` is shared only by Clankie's play loop and the active
-Discord body. It is not issued to GBA MCP or any external harness. The old
+Discord body. It is not issued to any external harness. The old
 `clankie_possessor_voice` provider id is not a current principal.
 
 Discord also issues short-lived voice and stream-server credentials after a
@@ -216,46 +216,59 @@ readable only for migration and local development; new users never enter it.
 
 ### Who holds which secret
 
-Remote access layers four secrets, each held by one party and checked by
-another. No user ever receives a certificate: one TLS certificate secures every
-pipe, and identity comes from tokens.
+Self-hosted remote access uses account credentials to connect the Mac and device
+credentials to authorize the phone. Device application traffic is encrypted
+between those endpoints, in addition to TLS on each network connection.
 
 ```mermaid
 flowchart LR
   subgraph Phone["iPhone / iPad"]
-    DeviceBearer["device session bearer<br/>platform Keychain"]
+    Device["device bearer + encryption secret + ticket<br/>platform secure storage"]
   end
-  subgraph Edge["api.clankie.bot on Lightsail"]
-    Cert["one TLS certificate<br/>Caddy · Let's Encrypt"]
-    Gateway["gateway<br/>verifies the Mac's JWT<br/>forwards the device bearer unread"]
+  subgraph Edge["api.clankie.bot"]
+    Gateway["TLS gateway<br/>verifies the Mac account JWT<br/>routes opaque device envelopes"]
   end
   subgraph Mac["this Mac"]
     Account["clankie-account<br/>Cognito access + refresh"]
+    WrappingKey["clankie-gateway-encryption<br/>broker wrapping key"]
+    Encryption["authenticated envelope boundary"]
     DeviceKey["device-session.key<br/>HMAC signer, mode 0600"]
-    Devices["device projection<br/>grants · revocation"]
+    Devices["device projection<br/>grants + revocation"]
   end
-  Cognito["Cognito user pool<br/>issues tokens · publishes JWKS"]
-  Phone -->|"HTTPS"| Cert
-  Account -->|"HTTPS WebSocket<br/>Bearer access token"| Cert
-  Cert --> Gateway
-  Account -. "email one-time code<br/>hourly refresh" .-> Cognito
-  Gateway -. "JWKS" .-> Cognito
-  Gateway -->|"bounded exchange over<br/>the Mac's own socket"| Devices
-  DeviceKey -->|"signs and verifies"| Devices
+  Cognito["Cognito user pool<br/>issues tokens + publishes JWKS"]
+  Device -->|"HTTPS + encrypted application request"| Gateway
+  Account -->|"outbound TLS WebSocket<br/>access token"| Gateway
+  Account -. "email code + token refresh" .-> Cognito
+  Gateway -. "JWT verification" .-> Cognito
+  Gateway -->|"opaque envelope"| Encryption
+  WrappingKey -->|"unwrap ticket"| Encryption
+  Encryption -->|"authenticated device request"| Devices
+  DeviceKey -->|"verify bearer"| Devices
 ```
 
-| Secret                                      | Lives on                                   | Issued by                              | Verified by                                                                                            | Proves                                                               |
-| ------------------------------------------- | ------------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| TLS certificate for `api.clankie.bot`       | Caddy's volume on the Lightsail instance   | Let's Encrypt, renewed by Caddy        | every phone's and Mac's TLS stack                                                                      | the client reached the real doorway; nothing about who the client is |
-| `clankie-account` access and refresh tokens | Mac Keychain via the broker                | Cognito, after the email one-time code | the gateway, offline against Cognito's JWKS on every connect                                           | which account and which installation this Mac is                     |
-| `device-session.key`                        | `~/.clankie/device-session.key`, mode 0600 | the Mac itself on first run            | the Mac itself; it never leaves the machine                                                            | nothing to anyone else; it signs the bearers below                   |
-| Device session bearer                       | the phone's Keychain                       | the Mac at pairing completion          | the Mac and relay on every request, with grants read from the projection; the gateway only forwards it | which paired device is asking, and only for the Mac that signed it   |
+| Credential                                  | Stored by                                                         | Purpose                                                                                                     |
+| ------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| TLS certificate for `api.clankie.bot`       | Gateway TLS terminator                                            | Authenticates the public origin and protects the network connection                                         |
+| `clankie-account` access and refresh tokens | Mac credential broker                                             | Cognito authenticates the account; the gateway verifies the access token and derives the installation route |
+| `device-session.key`                        | Mac private state, mode 0600                                      | Signs and verifies device bearers locally                                                                   |
+| Device session bearer                       | Phone secure storage                                              | Identifies the paired device; the Mac and relay check its live grants and revocation                        |
+| `clankie-gateway-encryption` wrapping key   | Mac credential broker                                             | Seals tickets so the gateway cannot recover their contents                                                  |
+| Device encryption secret and wrapped ticket | Phone secure storage; secret sealed inside the host-issued ticket | Authenticates and encrypts device application requests and responses                                        |
 
-Cognito therefore identifies Macs and only Macs. Phones never talk to Cognito,
-and the gateway never mints, validates, or stores a device session. Because
-public TLS terminates on the gateway instance, that process handles forwarded
-bytes in the clear while it relays them; it retains and logs none of them.
-Application-layer device-to-Mac encryption is the stated gate before unrelated
-customers share the doorway
-([ADR 0151](adr/0151-the-public-doorway-routes-home.md),
-[ADR 0153](adr/0153-an-account-signs-the-mac-in.md)).
+A secure QR or full link transfers the initial pairing secret in its fragment,
+which is never sent as an HTTP URL. Pairing completion returns a new device
+secret and ticket. Refresh rotates them with the session; revocation is checked
+against the live device projection. A ticket does not replace the device bearer.
+
+The gateway sees routing metadata, ciphertext lengths and timing, but cannot
+read device bearers, conversations or terminal bytes. Plaintext application
+routes are refused. There is no forward secrecy: a later endpoint-key compromise
+can expose recorded traffic from that key's lifetime. Push routing metadata,
+Cognito sign-in and signed Linear webhooks have separate contracts.
+
+Managed bodies use fleet-issued host credentials and additional pairing and
+restore protections described in the [hosted guide](../infra/hosted/README.md).
+[ADR 0173](adr/0173-the-gateway-cannot-read-device-traffic.md) records the device
+encryption boundary and recovery procedure. Matching gateway, host and app
+versions and deployment evidence are required before external release; source
+implementation alone does not establish production readiness.

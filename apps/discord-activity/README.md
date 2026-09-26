@@ -150,10 +150,10 @@ surface entirely; the bearer token is the second lock rather than the only one.
 **Only Clankie's active play path opens the producer connection.** The slot goes
 to the newest connection and closes the previous one, and every sink reconnects
 two seconds after being closed, so two connected producers would livelock. The
-service therefore opens the sink only for its own active local or hosted play
-session. GBA MCP has no producer dependency and returns frames only to its stdio
-caller. Process ownership, rather than a shared body lock, keeps private harness
-cores off this surface.
+service therefore opens the sink only for its own active hosted-world play
+session. Other harnesses use their own PokeAgents seats and do not hold this
+producer credential. The former local emulator and GBA MCP app were removed
+([ADR 0145](../../docs/adr/0145-the-world-is-the-only-body.md)).
 
 The activity server owns the listener, so it owns the first-run mint. The
 clankie service only ever resolves, which avoids two processes minting
@@ -171,11 +171,10 @@ port for an internet-facing surface to connect into.
 - One stereo PCM packet is capped at `RENDERED_SURFACE_AUDIO_MAX_BYTES` (64
   KiB). Audio is never retained for a late viewer, and a slow socket drops it
   rather than letting sound lag behind play.
-- The resident play host publishes at hardware rate (~60fps), deduplicates
-  unchanged PNGs, and idles the core between turns, so the surface remains live
-  rather than becoming a stale still.
-- GBA MCP never publishes here. Its private core's optional PNG is returned only
-  in the MCP observation result.
+- The play host forwards frames from Clankie's hosted-world seat and
+  deduplicates unchanged PNGs. The world owns the emulator's timing and keeps
+  running between Clankie's turns.
+- Other harnesses cannot publish through Clankie's Activity producer.
 - A viewer whose socket backlog exceeds `maxBufferedBytes` has frames dropped
   rather than queued, and the drops are counted on `droppedFrameCount`. The
   standalone entrypoint reports that counter to stdout whenever it changes, so a

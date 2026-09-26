@@ -1,6 +1,8 @@
 # ADR 0039: GBA emulator embodiment and the deterministic core boundary
 
-Status: accepted. The real-core follow-up described below shipped in
+Status: superseded by [ADR 0145](0145-the-world-is-the-only-body.md), which
+removed the local emulator. The design below is historical. The real-core
+follow-up described below shipped in
 [ADR 0040](0040-real-mgba-core-behind-the-emulator-seam.md).
 
 ## Context

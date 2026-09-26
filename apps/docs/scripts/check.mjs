@@ -16,6 +16,15 @@ async function checkPublicDocs(outputDir) {
   for await (const file of glob("**/*.html", { cwd: outputDir })) htmlFiles.push(file);
 
   const failures = [];
+  const network = await readFile(resolve(outputDir, "network/index.html"), "utf8");
+  for (const path of ["/v1/hosted/pair-offer", "/v1/discord/ingress", "/v1/gateway/push-authorize"]) {
+    if (!network.includes(`/h/{hostId}${path}`) || network.includes(`${path} (inside encrypted exchange)`)) {
+      failures.push(`network/index.html: ${path} must be documented as a host carrier route`);
+    }
+  }
+  if (!network.includes("/operator/v1/dispatch (inside encrypted exchange)")) {
+    failures.push("network/index.html: device dispatch must remain inside the encrypted exchange");
+  }
   for (const file of htmlFiles) {
     const absolute = resolve(outputDir, file);
     const source = await readFile(absolute, "utf8");

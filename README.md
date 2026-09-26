@@ -109,7 +109,7 @@ the providers or local runtimes you configure. Four more steps:
    clankie pair
    ```
 
-   Scan the QR, or type the code, in the app; review the access it offers and
+   Scan the secure QR, or paste the full secure link, in the app; review the access it offers and
    connect. Each offer is single-use. `clankie devices` lists and revokes paired
    devices.
 

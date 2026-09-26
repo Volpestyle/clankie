@@ -3,8 +3,9 @@
 This app builds the public product documentation served from
 [`docs.clankie.bot`](https://docs.clankie.bot). It leads with Clankie — who he
 is, how to install him, how to reach him from the app — and then renders the
-technical references from their canonical files at build time, so the site
-cannot drift from what ships.
+technical references from their canonical files at build time. This avoids a
+second copy of those references; their prose and API descriptions still need
+review against the implementation.
 
 | Page             | Source                                                                                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |

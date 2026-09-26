@@ -14,12 +14,16 @@ later ADRs link back to the decision they amend or replace.
   describe the running system.
 - Link ADRs by stable filename, not by number alone. Accepted ADRs are never
   renumbered.
-- Two accepted records share number 0098. Use these disambiguating aliases:
+- Numbers 0098, 0189 and 0191 each identify two records. Use these disambiguating aliases:
 
-| Alias                          | Stable record                                                                                            |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| ADR 0098 (room text)           | [The room can type to a playthrough](0098-the-room-can-type-to-a-playthrough.md)                         |
-| ADR 0098 (user-session shares) | [The lab user body watches Discord shares through ClankVox](0098-user-session-watches-discord-shares.md) |
+| Alias                          | Stable record                                                                                                  |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| ADR 0098 (room text)           | [The room can type to a playthrough](0098-the-room-can-type-to-a-playthrough.md)                               |
+| ADR 0098 (user-session shares) | [The lab user body watches Discord shares through ClankVox](0098-user-session-watches-discord-shares.md)       |
+| ADR 0189 (agent sessions)      | [Agent sessions read from their transcripts](0189-agent-sessions-read-from-their-transcripts.md)               |
+| ADR 0189 (Linear echoes)       | [His own Linear activity does not wake him](0189-his-own-linear-activity-does-not-wake-him.md)                 |
+| ADR 0191 (reply routing)       | [A reply to his post goes to whoever owns the work](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) |
+| ADR 0191 (work tracking)       | [Work is tracked where the repo tracks it](0191-work-is-tracked-where-the-repo-tracks-it.md)                   |
 
 ## Diagram sources
 

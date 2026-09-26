@@ -71,11 +71,11 @@ the viewer presses **Enable sound** at whatever level the volume slider is set
 to, and shows a present-tense work state so a
 still-visible prior thought never makes a live model decision look stuck.
 
-Only Clankie's own local or hosted play path publishes gameplay media to this
-surface. GBA MCP is a private contract sandbox: its observed PNG may return to
-its stdio caller, but it has no Activity producer or play-voice connection and
-cannot interrupt or impersonate a live Clankie playthrough
-([ADR 0129](adr/0129-each-player-owns-a-body.md)).
+Only Clankie's own hosted-world play path publishes gameplay media to this
+surface. Other harnesses use their own credentialed PokeAgents seats and have
+no Activity producer or play-voice connection. Clankie's former GBA MCP app and
+local emulator were removed
+([ADR 0145](adr/0145-the-world-is-the-only-body.md)).
 
 The local process has two listeners:
 

@@ -1,6 +1,7 @@
 # Security policy
 
-Report vulnerabilities privately to the repository maintainers. Do not put
+Report vulnerabilities privately to
+[volpestyle+bot@gmail.com](mailto:volpestyle+bot@gmail.com). Do not put
 exploit details, credentials, private message content, or user-session tokens in
 a public issue.
 

@@ -84,10 +84,11 @@ A top-level section this version has retired is dropped when the file is read,
 so an older settings file still opens. Any _other_ unknown key is still a hard
 parse failure, which is how a typo stays visible.
 
-`gameplay.pokemonEmulatorEnabled` controls solo FireRed/Emerald through the
-local GBA emulator. `gameplay.pokeagentMmoEnabled` independently controls the
-hosted PokeAgent MMO. Both may be enabled, while the shared play host permits
-one live session across them.
+`gameplay.pokeagentMmoEnabled` enables Clankie's credentialed seat in a hosted
+PokeAgents world. The local emulator and `pokemonEmulatorEnabled` were retired;
+older settings files have that key removed on read. Configure hosted play with
+`clankie games set on|off` or `/games`
+([ADR 0145](../../docs/adr/0145-the-world-is-the-only-body.md)).
 
 `/discord status` prints the effective configuration, whether `discord_bot` is
 present in the broker, and any environment overrides in effect.

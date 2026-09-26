@@ -130,11 +130,11 @@ clankie</code></pre>
 
           <h3>Give him a model</h3>
           <p>
-            In the console, <code>/auth</code> stores a provider key or OAuth login in your machine’s
-            Keychain-backed credential broker, and <code>/model</code> picks the model he thinks with. That is
-            the whole setup — talk to him. <code>/persona</code>, <code>/image-model</code>,
-            <code>/discord</code>, and <code>/connect</code> are optional and can wait. A local runtime
-            (Ollama, LM Studio, vLLM) works too: <code>/provider</code> → “add a local endpoint”.
+            The console opens <code>/setup</code> when Clankie needs a model. Choose a subscription, an API
+            key, a local runtime, or an already connected provider, then choose the model. Credentials go to
+            your machine’s Keychain-backed broker. Once he is ready, talk to him; <code>/setup</code> lists
+            optional connections and their current state. Use <code>/auth</code>, <code>/model</code>, and
+            <code>/provider</code> to revisit those choices.
           </p>
 
           <h3>Know what is configured</h3>
@@ -188,9 +188,9 @@ clankie status</code></pre>
           <li>
             <h3>Pair the phone</h3>
             <p>
-              Run <code>clankie pair</code> on your machine, then scan the QR code or type its single-use code
-              in the app. Review the access it offers and connect. <code>clankie devices</code> lists and
-              revokes paired devices.
+              Run <code>clankie pair</code> on your machine, then scan the secure QR code or paste its full
+              single-use link in the app. Review the access it offers and connect.
+              <code>clankie devices</code> lists and revokes paired devices.
             </p>
           </li>
         </ol>
@@ -278,7 +278,8 @@ clankie status</code></pre>
           <h2>Generated from the source.</h2>
           <p>
             These pages are rendered from the console’s command registry, the CLI contract, and the service’s
-            OpenAPI document at build time, so they cannot drift from what ships.
+            OpenAPI document at build time. Changes to those sources appear here without maintaining a second
+            copy; their descriptions still need review against the implementation.
           </p>
         </div>
         <div class="fact-grid">

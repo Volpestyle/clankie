@@ -1,6 +1,7 @@
 # ADR 0040: Real headless mGBA core behind the emulator seam
 
-Status: accepted.
+Status: superseded by [ADR 0145](0145-the-world-is-the-only-body.md), which
+removed the local emulator. The design below is historical.
 
 ## Context
 

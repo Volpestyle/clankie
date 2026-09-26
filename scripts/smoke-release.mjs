@@ -37,7 +37,11 @@ try {
     join(extracted, "node_modules/swarm-mcp/dist/coordination/owner-cli.js"),
     join(extracted, "node_modules/swarm-mcp/dist/coordination/herdr-worker-cli.js"),
     join(extracted, "integrations/claude-plugin/skills/swarm-lead/SKILL.md"),
-    join(extracted, "docs", "cli.md"),
+    ...["cli.md", "worker-access.md", "model-keys.md", "rivals.md", "discord-ingress.md"].map((name) =>
+      join(extracted, "docs", name),
+    ),
+    join(extracted, "packages/swarm/README.md"),
+    join(extracted, "infra/hosted/README.md"),
     join(extracted, "integrations", "herdr-plugin", "herdr-plugin.toml"),
   ]) {
     if (!existsSync(path)) throw new Error(`release is missing ${path.slice(extracted.length + 1)}`);

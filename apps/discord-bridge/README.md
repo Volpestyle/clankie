@@ -169,7 +169,7 @@ satisfy these live gates.
   [Discord media guide](../../docs/discord-media.md).
 - Gameplay commentary and hearing use the canonical
   [`@clankie/play-voice`](../../packages/play-voice/README.md) seam.
-  It accepts only Clankie's own local or hosted play client; GBA MCP and external
+  It accepts only Clankie's own hosted-world play client; external
   harnesses have no credential or room-input path. This README does not
   duplicate its wire, credential, or loss semantics.
 

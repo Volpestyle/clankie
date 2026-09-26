@@ -258,7 +258,7 @@ function buildNetworkRows() {
     [
       "POST /v1/pairing/redeem",
       {
-        access: "One-time offer secret or typed code",
+        access: "One-time offer secret inside the authenticated pairing envelope",
         purpose: "Claim an active pairing offer and receive a completion token.",
       },
     ],
@@ -382,7 +382,14 @@ function buildNetworkRows() {
     routeDetails.delete(key);
     rows.push({
       method: route.method,
-      route: ["/v1/gateway/challenge", "/v1/gateway/encrypted", "/v1/hooks/linear"].includes(route.path)
+      route: [
+        "/v1/gateway/challenge",
+        "/v1/gateway/encrypted",
+        "/v1/gateway/push-authorize",
+        "/v1/hooks/linear",
+        "/v1/hosted/pair-offer",
+        "/v1/discord/ingress",
+      ].includes(route.path)
         ? `/h/{hostId}${route.path}`
         : `${route.path} (inside encrypted exchange)`,
       ...detail,

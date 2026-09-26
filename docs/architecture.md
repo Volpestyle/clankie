@@ -67,6 +67,13 @@ trust map in [`docs/credentials.md`](credentials.md#who-holds-which-secret).
 
 ## How a message becomes a turn
 
+Each surface authenticates a request and selects a conversation. The service
+runs or steers the turn, retains its result and exposes replay or live tails.
+Discord transport, operator clients and native seats use the paths below;
+autonomous continuations re-enter the same conversation queue.
+
+### Discord ingress
+
 The older [message-to-captain JPG](diagrams/clankie-message-turn-sequence.jpg)
 is a historical snapshot; the present flow is described below.
 
@@ -107,6 +114,8 @@ lights only when his reply stream can no longer be the silence sentinel, so a
 turn he ends in silence never shows the room a reply being written. Buffered,
 dropped, duplicate, and backlog catch-up messages do not start typing.
 
+### Operator conversations and fleet views
+
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): durable agent personas, their current fleet seats,
 one coherent cursor-long-polled fleet snapshot, revision-fenced sends, cursored replay,
@@ -132,6 +141,9 @@ seat, channel, and stance changes advance the same cursor. Foreground apps
 therefore render one current seats/personas/channels moment without polling or
 persisting a second world projection
 ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)).
+
+### Native operator seats
+
 The operator seat is a place any harness can sit
 ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)). `clankie seat`
 opens Claude Code, on the owner's own plan, as Clankie: the plugin at
@@ -155,6 +167,8 @@ room turn then lands as a channel event instead of keystrokes typed into the
 pane's pty, and a Codex seat takes it through `codex queue`, so nothing the
 operator is drafting there is touched
 ([ADR 0161](adr/0161-a-fleet-seat-reads-its-mail-instead-of-its-keyboard.md)).
+
+### Conversation selection and retention
 
 A TUI process opens the existing main Clankie conversation unless `--chat`
 selects another. `/new` creates a fresh conversation explicitly. A captain conversation and its Pi session are one lifetime: bounded
@@ -199,6 +213,8 @@ surface is listed in [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)
 imports that canonical catalog into Yaak and adds a Keychain-backed `Local`
 environment for authenticated requests.
 
+### Goals and autonomous continuation
+
 The service also keeps `autonomy.json`: one owner-approved goal and one
 replaceable self-wake per operator conversation, plus a global enable switch.
 An unreadable file fails closed and surfaces `state_unreadable` to operator
@@ -220,6 +236,8 @@ Each conversation also keeps an append-only goal decision journal under
 working a goal, written through `note_goal_decision` and returned by
 `get_goal` so a continuation resumes from what was already decided
 ([ADR 0132](adr/0132-a-goal-keeps-a-decision-journal.md)).
+
+### Independent evaluation
 
 The optional independent evaluator captures settled Pi turns and native Herdr
 reply projections under `~/.clankie/captain/evaluator/`. Its durable queue dispatches

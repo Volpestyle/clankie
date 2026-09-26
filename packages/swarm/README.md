@@ -15,7 +15,8 @@ global conversation when omitted) through
 Clankie's MCP server; its launch directory and inherited worker environment do
 not select another actor. The owner's configured Herdr connections supply local
 Claude dispatch routes, each with a capacity and an owned workspace for each
-worker. The default route has capacity four. Uncertain starts retain their provisioning token and capacity
+worker. The default route has capacity 16 per coordinator scope. Uncertain starts
+retain their provisioning token and capacity
 reservation. Herdr's native `layout.apply` API replaces only the new workspace's
 initial tab with a direct argv worker process. Shell startup prompts cannot
 consume its command. The worker publishes its actual pane ID in a private startup
@@ -56,6 +57,17 @@ Existing coordinator state and workers remain intact. The running service keeps
 a lost external connection unavailable instead of replacing its fleet. Gateway hosting routes to a configured host.
 The [single-owner Linux deployment](../../infra/hosted/README.md) supplies the actual
 captain, Swarm/Herdr worker environment and relay independently of an owner's desktop.
+
+### Support at a glance
+
+| Capability         | Current support and reference                                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coordination       | Embedded coordinator and [named external coordinators](#named-external-coordinators); peer communication works without Herdr                        |
+| Managed execution  | Named Herdr routes with [owner-approved workspaces](#owner-approved-execution-workspaces); capacity and budget default to 16 per scope              |
+| Connected accounts | Explicit restricted worker grants; [account verification and delivery](../../docs/worker-access.md)                                                 |
+| Worker context     | [Owner preferences and selected skills](#working-preferences-and-portable-skills-slices-36) travel with the assignment                              |
+| Runtime readiness  | [Current startup limits](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md) and upgrade precautions apply to live workers |
+| Plans and evidence | [Implementation sequence](#implementation-sequence) records acceptance boundaries and retained proofs; it is not a separate work queue              |
 
 ## Owner-approved execution workspaces
 

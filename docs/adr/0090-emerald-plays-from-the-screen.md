@@ -1,11 +1,12 @@
 # ADR 0090: Emerald plays from the screen
 
-Status: accepted (James, 2026-08-11). Extends
+Status: accepted (James, 2026-08-11). The local-body implementation was retired
+by [ADR 0145](0145-the-world-is-the-only-body.md); its details below are historical. Extends
 [ADR 0040](0040-real-mgba-core-behind-the-emulator-seam.md) without widening
 the FireRed RAM profile in
 [ADR 0043](0043-version-pinned-firered-gameplay-profile.md).
 
-## Current status (2026-08-26)
+## Historical status on 26 August 2026
 
 Local asked-play Emerald still boots through `MgbaVisualCore` and plays from
 the screen: that body has no Emerald RAM profile. Hosted Emerald is a different

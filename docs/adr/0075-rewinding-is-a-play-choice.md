@@ -1,9 +1,10 @@
 # 0075. Rewinding is a play choice
 
 Date: 2026-08-01
-Status: accepted (owner decision)
+Status: superseded by [ADR 0145](0145-the-world-is-the-only-body.md).
+The accepted local-play decision below is historical; hosted play has no rewind.
 
-## Current status (2026-08-19)
+## Historical status on 19 August 2026
 
 Rewind remains Clankie's own local-play choice. A GBA MCP caller may save or
 load only checkpoints belonging to its private core and configured

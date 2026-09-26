@@ -83,10 +83,18 @@
 
         <h2>Security boundary</h2>
         <p>
-          Public TLS terminates at the gateway and your machine maintains a separate authenticated TLS
-          connection to it. The gateway is therefore able to read forwarded content in transit even though it
-          does not retain content bodies. Device grants are enforced by your machine on every request. Pairing
-          capabilities expire, are single-use, and are registered at the gateway only by their hashes.
+          Device application requests and responses use an authenticated encrypted envelope between the device
+          and your machine. TLS also protects both connections, but terminating TLS does not let the gateway
+          decrypt device bearers, conversations or terminal bytes. Your machine enforces device grants on
+          every request. Pairing uses a secure QR or full link whose fragment carries the encryption
+          credential directly to the device; short codes work only on direct private connections.
+        </p>
+        <p>
+          The gateway can observe routing identifiers, ciphertext sizes and timing, and can interrupt service.
+          Push delivery retains the metadata described above. Cognito sign-in, signed Linear webhooks, managed
+          web pairing and Discord ingress have separate authentication contracts; they are not ordinary device
+          requests inside this envelope. Matching gateway, host and client versions are required;
+          implementation alone does not establish deployment or release readiness.
         </p>
 
         <h2>For integrators</h2>

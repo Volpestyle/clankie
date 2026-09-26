@@ -6,15 +6,15 @@ It preserves the event-not-script boundary from historical
 no-possession decision in
 [ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md).
 
-Clankie's local or hosted play loop holds no Discord gateway or live presence
+Clankie's hosted-world play loop holds no Discord gateway or live presence
 claim. It reports what happened; the active media-enabled Discord body decides
 whether and how to speak, and pushes only room input it is already allowed to
 hear. External harnesses do not receive this package or credential.
 
-The package is neutral between Clankie's local emulator and his separately
-credentialed hosted-world seat. It connects his own play experience to his own
-active Discord body; it is not an extension point for GBA MCP, PokeAgents MCP,
-or another player's harness.
+The package connects Clankie's credentialed hosted-world seat to his own active
+Discord body. Other players use their own PokeAgents seats and cannot receive
+Clankie's room input or publish through his voice connection
+([ADR 0145](../../docs/adr/0145-the-world-is-the-only-body.md)).
 
 ## API
 

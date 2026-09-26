@@ -53,9 +53,10 @@ browser-downloaded package.
 Mutable process records, logs, and TUI history live under
 `${XDG_STATE_HOME:-~/.local/state}/clankie`, outside the release. Owner settings
 and broker-backed credentials remain in their documented user-level homes.
-The working directory of an interactive Clankie conversation is the directory
-where the operator invokes `clankie`; supervised services run from their
-installed release root.
+An interactive console resumes the existing main conversation regardless of
+its launch directory. Tools use the selected conversation's workspace; select
+a project with `/cd PATH` or a retained conversation with `--chat ID`.
+Supervised services run from their installed release root.
 
 Herdr ships as an official stable release binary, verified against the
 platform checksum in `scripts/release/herdr.json`. Its matching source archive
@@ -85,8 +86,11 @@ external executables. Clankie's own herdr plugin declaration ships under
 models and credentials are configured, and whether those optional commands
 are on PATH. The headless command contract is
 [`docs/cli.md`](cli.md) (`clankie help` prints the same index). Checkout-only
-skills under `.agents/dev-skills` stay out of the archive. The rest of
-`docs/` does not ship.
+skills under `.agents/dev-skills` stay out of the archive. The release also
+ships `docs/worker-access.md`, `docs/model-keys.md`, `docs/rivals.md`,
+`docs/discord-ingress.md`, `packages/swarm/README.md`, and
+`infra/hosted/README.md` for the installed skills' operational references.
+Other repository documentation does not ship.
 
 The public gateway is Clankie's hosted service, not part of the Mac release;
 its source, Cognito accounts, and deployment live in the private `clankie-ops`

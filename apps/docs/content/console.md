@@ -39,4 +39,4 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 
 ## Headless
 
-Everything that is not live console chrome is also a command: `clankie status`, `clankie doctor`, `clankie model set`, `clankie persona set`, `clankie pair`, and the rest print one JSON document and exit 0 or 1. The full contract, with every flag and payload, is the [CLI reference](/cli/). Secret entry stays interactive — `/auth`, `/discord`, `/connect`, `/voice` — because tokens never become flags.
+Use headless commands for scripts: `clankie status`, `clankie doctor`, `clankie model set`, and `clankie persona set` print JSON and exit 0 or 1. Pairing, device listing and operator credential rotation default to human-readable output; pass `--json`, for example `clankie pair --json`. Other output exceptions are listed in the CLI reference. The full contract, with every flag and payload, is the [CLI reference](/cli/). Secret entry stays interactive — `/auth`, `/discord`, `/connect`, `/voice` — because tokens never become flags.

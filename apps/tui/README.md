@@ -64,13 +64,12 @@ expects the service to be running already.
 
 ## Workspaces
 
-Where `clankie` is typed decides the scope of the fresh room it creates
-([ADR 0104](../../docs/adr/0104-clankie-works-where-you-launched-him.md)). A
-launch outside this repository creates a conversation for that project —
-its checkout root, or the directory itself when it is not a checkout — and the
-captain's session runs its tools there. A launch inside this repository opens
-a fresh global conversation whose session works in this repository. Use
-`--chat <conversationId>` to resume instead.
+Starting `clankie` opens the existing main Clankie conversation regardless of
+the launch directory. Use `--chat <conversationId>` to select another retained
+conversation, `/cd <path>` to select a project, or `/new [title]` to create a
+fresh conversation in the current workspace. Tools run in the selected
+conversation's workspace, not the directory of the launching terminal
+([ADR 0111](../../docs/adr/0111-a-console-process-starts-one-conversation.md)).
 
 `/cd <path>` moves to the newest retained conversation for another project,
 opening its first on first visit; `/cd` alone names the current one. The

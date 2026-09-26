@@ -3,9 +3,9 @@
 Status: accepted, and the body it governs was later removed. The runner, the
 Mineflayer client, and the Minecraft environment bindings are gone; the Paper
 verifier retains no source. Everything below is the ratified decision, not a
-description of the running system — Clankie's only game bodies today are the
-local GBA emulator and a hosted PokeAgent MMO seat
-([ADR 0103](0103-a-hosted-world-is-another-body.md)).
+description of the running system. Current Pokémon body ownership is recorded
+in [ADR 0145](0145-the-world-is-the-only-body.md); other games have their own
+domain contracts.
 
 ## Context
 

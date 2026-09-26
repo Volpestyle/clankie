@@ -1,6 +1,6 @@
 # ADR 0187: Clankie hires his own seats
 
-Status: accepted (2026-11-24). Amends the app repo's ADR 0013 ("compose is
+Status: accepted (acceptance date unverified). Amends the app repo's ADR 0013 ("compose is
 hiring"): hiring is no longer only the operator's act. Builds on
 [ADR 0185](0185-a-hire-may-name-its-model-and-effort.md) — a hire Clankie
 makes may name its model and effort the same way — and shares the authority

@@ -123,12 +123,12 @@ match would let a user-plane bearer authenticate as the bot bridge.
 
 ## Play voice bearer
 
-`clankie_play_voice` authenticates only Clankie's local or hosted play loop to
+`clankie_play_voice` authenticates only Clankie's hosted-world play loop to
 the active Discord body's loopback `@clankie/play-voice` listener. The Discord
 body owns first-run minting; play resolves the stored value. The bearer has no
 environment fallback, and `CLANKIE_PLAY_VOICE_TOKEN` is a hard error.
 
-GBA MCP and external harnesses neither receive nor depend on this credential.
+External harnesses neither receive nor depend on this credential.
 The retired `clankie_possessor_voice` id is not accepted as the current bearer;
 there is no path from owning an emulator process to hearing or speaking in
 Clankie's room ([ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md)).

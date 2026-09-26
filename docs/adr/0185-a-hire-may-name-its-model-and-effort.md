@@ -1,6 +1,7 @@
 # ADR 0185: A hire may name its model and effort
 
-Status: accepted (2026-11-24). Extends the hire contract of the app repo's
+Status: accepted (acceptance date unverified). Extends the hire contract of the
+app repo's
 ADR 0013 ("compose is hiring"): `SpawnOperatorSeat` carries an optional
 `model` and an optional `effort`, and the captain turns them into the
 harness's own launch arguments.
