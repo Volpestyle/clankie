@@ -4,6 +4,9 @@
 [ADR 0193](../../adr/0193-runtime-workspaces-are-owner-approved.md).
 Upstream commits: `672eb6f` (workspace routing), `6637756` (nullable budgets).
 The vendored source is exactly `e93dc70` plus those two commits.
+Clankie implementation is in `784959b0`: a concurrent play-lane commit picked up
+these already-staged paths along with its own two files. No shared history was
+rewritten; this evidence follow-up records the attribution.
 
 ## Verified behavior
 
@@ -46,6 +49,13 @@ Whole-checkout formatting blockers were `apps/clankie/.work-discover.mts`,
 `docs/testing/2026-09-26-work-items/{evidence/*.json,flows/serve.mts}` (24 files).
 Deadcode flags the two temporary scripts and `flows/serve.mts`. Those files were
 left with their owner.
+
+Three outside-scope assertions also reproduce in isolation:
+`apps/discord-bridge/test/text-inbox.test.ts:61` returns `settled` rather than
+`failed`; line 209 sees no pending messages rather than two. The launch lead
+confirmed these exist at HEAD. `apps/tui/test/claude-plugin.test.ts:12` reports the
+VUH-1373 hire-agent instructions missing from the generated output style; its
+owner will regenerate that hunk without absorbing the work-items lane's changes.
 
 ## Artifact and migration
 
