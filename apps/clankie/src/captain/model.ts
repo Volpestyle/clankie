@@ -6,9 +6,13 @@ import {
 import { createModelRegistry } from "@clankie/model-registry";
 import {
   CODEX_PROVIDER_ID,
+  configForRef,
   loadConfig,
   registerConfiguredPiProviders,
   resolvePiModelSelection,
+  routeFor,
+  type ModelPurpose,
+  type ModelRoute,
   type PiModelSelection,
 } from "@clankie/model-provider";
 import { type Credential, type CredentialInfo } from "@earendil-works/pi-ai";
@@ -104,10 +108,24 @@ function fromPiCredential(
   };
 }
 
+/** One purpose's model for this turn, and how it may escalate. */
+export interface RoutedSelection {
+  readonly route: ModelRoute;
+  readonly selection: PiModelSelection;
+  /**
+   * The escalation model, resolved only when a routine run escalates, so a
+   * broken escalation setting fails that escalation rather than every
+   * routine turn. Absent when the route may not escalate.
+   */
+  readonly resolveEscalation?: () => Promise<PiModelSelection>;
+}
+
 export interface CaptainModelRuntime {
   readonly runtime: ModelRuntime;
-  /** Resolves Clankie's configured policy through Pi's model catalog. */
+  /** Resolves Clankie's configured policy through Pi's model catalog: the work model. */
   resolveSelection(): Promise<PiModelSelection>;
+  /** Resolves the model a purpose runs on this turn (task-based routing). */
+  resolveRoute(purpose: ModelPurpose): Promise<RoutedSelection>;
 }
 
 export async function createCaptainModelRuntime(repoRoot: string): Promise<CaptainModelRuntime> {
@@ -120,18 +138,43 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
   const initialConfig = await loadConfig({ cwd: repoRoot });
   const catalog = await createModelRegistry().catalog();
   registerConfiguredPiProviders(runtime, initialConfig.config, catalog);
+  const select = async (
+    config: Awaited<ReturnType<typeof loadConfig>>["config"],
+    label?: string,
+  ): Promise<PiModelSelection> => {
+    try {
+      return resolvePiModelSelection(config, runtime, {
+        hasCodexSubscription: (await broker.get(CODEX_PROVIDER_ID)) !== undefined,
+        catalog,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CaptainModelError(label === undefined ? message : `${label}: ${message}`);
+    }
+  };
   return {
     runtime,
-    resolveSelection: async () => {
-      const configured = await loadConfig({ cwd: repoRoot });
-      try {
-        return resolvePiModelSelection(configured.config, runtime, {
-          hasCodexSubscription: (await broker.get(CODEX_PROVIDER_ID)) !== undefined,
-          catalog,
-        });
-      } catch (error) {
-        throw new CaptainModelError(error instanceof Error ? error.message : String(error));
-      }
+    resolveSelection: async () => await select((await loadConfig({ cwd: repoRoot })).config),
+    resolveRoute: async (purpose) => {
+      const { config } = await loadConfig({ cwd: repoRoot });
+      const route = routeFor(config, purpose);
+      // A routine route resolves its own ref and fails by name; it never
+      // falls back to the work model.
+      const selection = await select(
+        configForRef(config, route.ref),
+        route.tier === "routine" ? `Routine model ${route.ref}` : undefined,
+      );
+      const escalation = route.escalation;
+      return {
+        route,
+        selection,
+        ...(escalation === undefined
+          ? {}
+          : {
+              resolveEscalation: async () =>
+                await select(configForRef(config, escalation.ref), `Escalation model ${escalation.ref}`),
+            }),
+      };
     },
   };
 }

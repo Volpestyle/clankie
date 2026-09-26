@@ -8,6 +8,12 @@ import {
   PublicGatewayHostIdSchema,
 } from "@clankie/protocol/public-gateway";
 import type { CredentialStore } from "@clankie/credential-broker";
+import { parseModelRef, updateModelRouting } from "@clankie/model-provider";
+
+const ModelRefSchema = z
+  .string()
+  .max(512)
+  .refine((ref) => parseModelRef(ref) !== undefined, "expected providerId/modelId");
 
 const BootstrapSchema = z
   .object({
@@ -26,9 +32,39 @@ const BootstrapSchema = z
       .string()
       .regex(/^[A-Za-z0-9_-]{43}$/u)
       .optional(),
+    /**
+     * The plan's task-based model routing. Absent leaves the body's own
+     * routing untouched; present, it is written over the body's routing
+     * settings at every start, so a plan change lands on the next boot.
+     */
+    modelRouting: z
+      .object({
+        routineModel: ModelRefSchema,
+        escalate: z.boolean(),
+        escalationModel: ModelRefSchema.optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type HostedBodyBootstrap = z.infer<typeof BootstrapSchema>;
+
+/** Applies the plan's routing (see `modelRouting`) to the body's model config. */
+export async function applyHostedModelRouting(
+  bootstrap: Pick<HostedBodyBootstrap, "modelRouting">,
+  options: { env?: NodeJS.ProcessEnv } = {},
+): Promise<void> {
+  const routing = bootstrap.modelRouting;
+  if (routing === undefined) return;
+  await updateModelRouting(
+    {
+      routineModel: routing.routineModel,
+      escalate: routing.escalate,
+      escalationModel: routing.escalationModel ?? null,
+    },
+    options,
+  );
+}
 
 /** Unset is a self-hosted body. Invalid managed configuration fails startup closed. */
 export function readHostedBodyBootstrap(env: NodeJS.ProcessEnv): HostedBodyBootstrap | undefined {

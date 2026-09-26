@@ -77,7 +77,12 @@ import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
-import { readHostedBodyBootstrap, createHostedBodyClient, HostedBodyDeniedError } from "./hosted-body.ts";
+import {
+  applyHostedModelRouting,
+  readHostedBodyBootstrap,
+  createHostedBodyClient,
+  HostedBodyDeniedError,
+} from "./hosted-body.ts";
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
@@ -146,6 +151,7 @@ const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? 4321);
 const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
 const hostedBootstrap = readHostedBodyBootstrap(process.env);
+if (hostedBootstrap !== undefined) await applyHostedModelRouting(hostedBootstrap);
 const hostedBody =
   hostedBootstrap === undefined
     ? undefined

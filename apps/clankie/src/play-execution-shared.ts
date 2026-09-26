@@ -110,7 +110,11 @@ export async function resolvePlayMind(options: {
   if (options.createMind !== undefined) {
     return { mind: await options.createMind(), voiceAgent };
   }
-  const configured = await resolveConfiguredLanguageModel({ cwd: options.repoRoot, env: options.env });
+  const configured = await resolveConfiguredLanguageModel({
+    cwd: options.repoRoot,
+    env: options.env,
+    purpose: "gameplay",
+  });
   // One character across every surface (ADR 0051): the Clankie an audience
   // watches play is the one they talk to, in his `gameplay` register — not a
   // second character defined by this file's prompt.

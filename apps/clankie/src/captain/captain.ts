@@ -33,7 +33,7 @@ import {
   type OperatorConversationServiceResult,
 } from "@clankie/protocol";
 import { sanitizeForSupportBundle } from "@clankie/observability";
-import { type PiModelSelection } from "@clankie/model-provider";
+import { type ModelPurpose, type PiModelSelection } from "@clankie/model-provider";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
@@ -90,7 +90,8 @@ import {
 } from "./discord-turn.ts";
 import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { LaneLog, laneKey } from "./lane-log.ts";
-import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
+import { createCaptainModelRuntime, type CaptainModelRuntime, type RoutedSelection } from "./model.ts";
+import { captainRoutingExtension } from "./routing.ts";
 import type { CaptainPort, CaptainPromptSection, HireSeat } from "./port.ts";
 import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
@@ -352,6 +353,16 @@ function laneHoldsSystemTools(lane: CaptainSessionLaneV2): boolean {
   return lane === "operator";
 }
 
+/**
+ * Which kind of model call a session makes, for task-based routing. A Discord
+ * session's machine tools are fixed when it is built, so its purpose is too.
+ */
+export function sessionPurpose(lane: CaptainSessionLaneV2, systemTools: boolean): ModelPurpose {
+  if (lane === "operator") return "operator";
+  if (lane === "gameplay") return "gameplay";
+  return systemTools ? "discord_granted" : "discord_social";
+}
+
 /** 272000 -> "272k": a size he can say out loud, not an exact accounting. */
 function formatTokens(count: number): string {
   return count >= 1000 ? `${Math.round(count / 1000)}k` : String(count);
@@ -488,7 +499,9 @@ export interface CaptainOptions {
 interface LaneSession {
   readonly session: AgentSession;
   readonly capture: TurnContext;
-  modelRef: string;
+  readonly purpose: ModelPurpose;
+  /** This purpose's route as of the last sync; the routing extension reads it per run. */
+  readonly route: { current: RoutedSelection };
   lastAssistantText: string;
   turnCounter: number;
   /** Settlement of the in-flight run, while one is active: true if it succeeded. */
@@ -884,9 +897,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return published;
       };
     }
-    const { runtime: models, resolveSelection } = await runtime();
+    const { runtime: models, resolveRoute } = await runtime();
     const currentSettings = await settings();
-    const selection = await resolveSelection();
+    const purpose = sessionPurpose(lane, systemTools);
+    const route = { current: await resolveRoute(purpose) };
+    const selection = route.current.selection;
     const piSettings = SettingsManager.inMemory();
     const loader = new DefaultResourceLoader({
       cwd,
@@ -895,7 +910,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       noExtensions: true,
       extensionFactories: [
         captainMemoryExtension(deps.memory, lane),
-        captainModelExtension(resolveSelection),
+        captainModelExtension(async () => (await resolveRoute(purpose)).selection),
+        captainRoutingExtension({
+          current: () => route.current,
+          onEscalated: (record) => console.info("Routine turn escalated:", JSON.stringify(record)),
+        }),
         browserExtension(deps, capture),
         mcpExtension(deps, lane),
         ...(lane === "operator" && conversationId !== undefined && options.swarm !== undefined
@@ -945,7 +964,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const laneSession: LaneSession = {
       session,
       capture,
-      modelRef: selection.ref,
+      purpose,
+      route,
       lastAssistantText: "",
       turnCounter: 0,
     };
@@ -957,11 +977,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return laneSession;
   }
 
+  /**
+   * Put an idle session back on its purpose's model before a run. Compared
+   * against the session's live model rather than a remembered ref, because an
+   * escalated routine run leaves the session on the escalation model and the
+   * next run must start routine again.
+   */
   async function syncModel(lane: LaneSession): Promise<void> {
-    const selection = await (await runtime()).resolveSelection();
-    if (lane.modelRef !== selection.ref) {
+    lane.route.current = await (await runtime()).resolveRoute(lane.purpose);
+    const selection = lane.route.current.selection;
+    const current = lane.session.model;
+    if (current?.provider !== selection.model.provider || current.id !== selection.model.id) {
       await lane.session.setModel(selection.model);
-      lane.modelRef = selection.ref;
     }
     if (lane.session.thinkingLevel !== selection.thinkingLevel) {
       lane.session.setThinkingLevel(selection.thinkingLevel);

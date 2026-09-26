@@ -548,6 +548,62 @@ path's check with the provider's message, and any failed check exits 1. `--confi
 checks the selection previously written by the CLI under that configuration
 home. The owner's live selection remains unchanged.
 
+### `model routing [status]`
+
+Task-based model routing ([ADR 0192](adr/0192-model-routing-by-kind-of-task.md)).
+Everyday turns run on a cheap routine model; real work stays on the captain
+model. Off until a routine model is set; off, every turn runs on `model` as
+before. JSON:
+
+```json
+{
+  "ok": true,
+  "enabled": true,
+  "routineModel": "openai/routine-model",
+  "workModel": "openai/gpt-6-astra",
+  "escalate": true,
+  "escalationModel": "openai/gpt-6-astra",
+  "routineTurnLimit": 12,
+  "purposes": {
+    "operator": { "tier": "work", "model": "openai/gpt-6-astra" },
+    "discord_social": {
+      "tier": "routine",
+      "model": "openai/routine-model",
+      "escalatesTo": "openai/gpt-6-astra"
+    },
+    "discord_granted": { "tier": "work", "model": "openai/gpt-6-astra" },
+    "gameplay": { "tier": "work", "model": "openai/gpt-6-astra" }
+  }
+}
+```
+
+| Purpose           | Which calls                                                         | Default tier |
+| ----------------- | ------------------------------------------------------------------- | ------------ |
+| `operator`        | Operator conversations, their wakes, watches and side conversations | `work`       |
+| `discord_social`  | Discord text or voice turns without machine tools                   | `routine`    |
+| `discord_granted` | Discord turns holding machine tools, and the Herdr watches they arm | `work`       |
+| `gameplay`        | The play mind and its commentary                                    | `work`       |
+
+Every verb prints the status above after writing. Writes take effect on the
+next turn (the next play session for `gameplay`); no restart is needed.
+
+| Command                                                       | Effect                                                                                      |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `model routing set providerId/modelId`                        | Choose the routine model; turns routing on                                                  |
+| `model routing off`                                           | Remove the routine model; every purpose returns to `model`. Other routing settings are kept |
+| `model routing escalate on\|off [--model providerId/modelId]` | Let a routine turn move to the escalation model (default: `model`) once per turn            |
+| `model routing purpose PURPOSE routine\|work\|default`        | Override one purpose's tier                                                                 |
+| `model routing turn-limit N\|default`                         | Model calls a routine turn may make before it escalates as looping (default 12)             |
+
+With escalation on, a routine turn moves to the escalation model for the rest
+of that turn when he calls `escalate`, when it reaches the turn limit, or when
+the routine model fails with an error the runtime retries (the retry runs on
+the escalation model). A permanent error does not escalate. A routine model that
+cannot be served fails the turn by name; it never falls back to the work
+model. Effort is per model ref, so `clankie effort set LEVEL --model REF` sets
+the routine model's effort. Hosted bodies receive routing from the fleet at
+start. The console's `/routing` takes the same arguments.
+
 ### `effort [status]`
 
 Read the current captain model's stored effort override. JSON:

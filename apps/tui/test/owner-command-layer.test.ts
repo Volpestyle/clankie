@@ -10,6 +10,7 @@ import { effortStatus } from "../src/command/effort.ts";
 import { gamesStatus } from "../src/command/games.ts";
 import { imageModelStatus } from "../src/command/image-model.ts";
 import { modelStatus } from "../src/command/model.ts";
+import { modelRoutingStatus } from "../src/command/model-routing.ts";
 import { personaStatus } from "../src/command/persona.ts";
 import { videoModelStatus } from "../src/command/video-model.ts";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
@@ -114,6 +115,45 @@ describe("canonical owner command layer", () => {
     expect(results[0]?.text).toContain("status: ready");
     expect(results[0]?.text).toContain("clankie: healthy");
     expect(JSON.parse(results[1]?.text ?? "")).toEqual(doctor);
+  });
+
+  it("configures task-based model routing through argv", async () => {
+    const env = await isolatedEnv();
+    await run(["model", "set", "openai/work-model"], env);
+
+    const off = (await run(["model", "routing"], env)) as { enabled: boolean; purposes: unknown };
+    expect(off).toMatchObject({
+      ok: true,
+      enabled: false,
+      routineModel: null,
+      workModel: "openai/work-model",
+    });
+    expect(off.purposes).toMatchObject({ discord_social: { tier: "work", model: "openai/work-model" } });
+
+    await run(["model", "routing", "set", "openai/routine-model"], env);
+    await run(["model", "routing", "escalate", "on"], env);
+    await run(["model", "routing", "purpose", "gameplay", "routine"], env);
+    const on = await run(["model", "routing", "turn-limit", "5"], env);
+    expect(on).toEqual(await modelRoutingStatus({ env }));
+    expect(on).toMatchObject({
+      enabled: true,
+      routineModel: "openai/routine-model",
+      escalate: true,
+      escalationModel: "openai/work-model",
+      routineTurnLimit: 5,
+      purposes: {
+        operator: { tier: "work", model: "openai/work-model" },
+        discord_social: { tier: "routine", model: "openai/routine-model", escalatesTo: "openai/work-model" },
+        discord_granted: { tier: "work", model: "openai/work-model" },
+        gameplay: { tier: "routine", model: "openai/routine-model", escalatesTo: "openai/work-model" },
+      },
+    });
+
+    await run(["model", "routing", "purpose", "gameplay", "default"], env);
+    expect(await run(["model", "routing", "off"], env)).toMatchObject({
+      enabled: false,
+      purposes: { gameplay: { tier: "work", model: "openai/work-model" } },
+    });
   });
 
   it("finishes non-secret setup through argv and returns the command functions' results", async () => {

@@ -69,6 +69,24 @@ export const ProviderConfigSchema = z.looseObject({
 });
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
+/**
+ * Task-based model routing (routing.ts). Absent — or present without a
+ * `routine_model` — every purpose runs on `model`, exactly as before routing.
+ */
+export const ModelRoutingConfigSchema = z.looseObject({
+  /** The cheap model routine purposes run on, as a "providerId/modelId" ref. */
+  routine_model: z.string().optional(),
+  /** Whether a routine turn may hand the rest of its run to the escalation model. */
+  escalate: z.boolean().optional(),
+  /** Where an escalated routine turn continues. Defaults to `model`. */
+  escalation_model: z.string().optional(),
+  /** Model calls one routine run may make before it escalates as looping. */
+  routine_turn_limit: z.number().int().positive().optional(),
+  /** Per-purpose tier overrides, e.g. { "gameplay": "routine" }. */
+  purposes: z.record(z.string(), z.enum(["routine", "work"])).optional(),
+});
+export type ModelRoutingConfig = z.infer<typeof ModelRoutingConfigSchema>;
+
 export const ClankieConfigSchema = z
   .looseObject({
     /** Primary model as a "providerId/modelId" ref. */
@@ -83,6 +101,8 @@ export const ClankieConfigSchema = z
     image_model: z.string().optional(),
     /** Video generation model as a "providerId/modelId" ref, e.g. "xai/grok-imagine-video-1.5". */
     video_model: z.string().optional(),
+    /** Which model each kind of task runs on; see ModelRoutingConfigSchema. */
+    routing: ModelRoutingConfigSchema.optional(),
     /** Selected variant per model ref, e.g. { "anthropic/claude-opus-4-5": "think-16k" }. */
     variant: z.record(z.string(), z.string()).optional(),
     /** When non-empty, ONLY these providers are enabled. */

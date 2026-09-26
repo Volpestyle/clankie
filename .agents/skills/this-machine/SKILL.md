@@ -107,6 +107,7 @@ index). Configure through the headless CLI:
 | Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`             |
 | Switch captain                        | `clankie model set provider/model`                                                    |
 | Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`            |
+| Cheaper model for everyday turns      | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`  |
 | Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`    |
 | Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`              |
 | Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`      |
@@ -203,7 +204,10 @@ JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 If a newly released model is missing, run `clankie model refresh`, select it
 with `clankie model set provider/model`, then restart the captain. Astra accepts
 `low`, `medium`, `high`, `xhigh`, and `max`; unsupported efforts fail when a turn
-executes. Voice and image/video models have independent selectors.
+executes. Voice and image/video models have independent selectors. Model
+routing (`clankie model routing`) sends social Discord turns to a cheap routine
+model while operator and granted work stays on the captain model; with
+escalation on, a routine turn can call `escalate` to finish on the bigger one.
 `play stop` prints `Nothing is playing.` (not JSON) when idle. A bare
 `--base-url` origin is rewritten to `/v1`. `--set` selects the first listed
 model. If the probe fails, pass `--models id,id`. Local LLM servers (ds4,

@@ -48,6 +48,11 @@ import {
 } from "@clankie/model-provider";
 import { modelDeclareLocal, modelSet, modelStatus } from "./command/model.ts";
 import { effortSet, effortStatus } from "./command/effort.ts";
+import {
+  MODEL_ROUTING_USAGE,
+  runModelRoutingCommand,
+  type ModelRoutingStatus,
+} from "./command/model-routing.ts";
 import { imageModelSet, imageModelStatus } from "./command/image-model.ts";
 import { videoModelSet, videoModelStatus } from "./command/video-model.ts";
 import type { MenuOption, SetupFlow } from "./shell/setup-flow.ts";
@@ -286,6 +291,7 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
         selectedProvider = await runModelWizard(shell, services, selectedProvider);
       },
     },
+    routingCommand(services),
     mediaModelCommand("image-model", "image_model", services),
     mediaModelCommand("video-model", "video_model", services),
     {
@@ -308,6 +314,62 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
       },
     },
   ];
+}
+
+// --- /routing ---
+
+/**
+ * Task-based model routing: which purposes run on the cheap routine model and
+ * whether a routine turn may escalate. Positional over the `clankie model
+ * routing` functions, so the console and the headless CLI share one writer.
+ */
+function routingCommand(services: ProviderServices): FaceShellCommand {
+  return {
+    name: "routing",
+    aliases: [],
+    description: "Route everyday turns to a cheaper model",
+    argumentHint: "[status|set provider/model|off|escalate on|off|purpose NAME routine|work|default]",
+    takesArgument: true,
+    async run(argument, shell): Promise<void> {
+      const args = argument.trim().split(/\s+/u).filter(Boolean);
+      try {
+        const status = await runModelRoutingCommand(args, { env: services.env, cwd: services.cwd });
+        shell.insertCommandResult(
+          `/routing${args.length === 0 ? "" : ` ${args.join(" ")}`}`,
+          formatRoutingStatus(status),
+          status.ok ? "success" : "error",
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        shell.insertCommandResult(
+          "/routing",
+          message.startsWith("Usage:") ? message.replaceAll("clankie model routing", "/routing") : message,
+          "error",
+        );
+      }
+    },
+  };
+}
+
+function formatRoutingStatus(status: ModelRoutingStatus): string {
+  const lines = [
+    status.enabled
+      ? `routing: on — routine ${status.routineModel ?? "unset"}, work ${status.workModel ?? "unset"}`
+      : `routing: off — every turn runs on ${status.workModel ?? "the captain model (unset)"}`,
+  ];
+  if (status.enabled) {
+    lines.push(
+      status.escalate
+        ? `escalation: on — to ${status.escalationModel ?? "unset"}, after ${String(status.routineTurnLimit)} model calls or when asked`
+        : "escalation: off",
+      "",
+      ...Object.entries(status.purposes).map(
+        ([purpose, route]) => `${purpose}: ${route.tier} (${route.model ?? "unset"})`,
+      ),
+    );
+  }
+  lines.push("", MODEL_ROUTING_USAGE.replaceAll("clankie model routing", "/routing"));
+  return lines.join("\n");
 }
 
 // --- /image-model, /video-model ---

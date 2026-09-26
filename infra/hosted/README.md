@@ -156,6 +156,15 @@ The optional `tenantTelemetryKey` is the fleet-derived 32-byte tenant telemetry
 key, encoded as 43 base64url characters. Treat it as a secret with the other
 bootstrap fields.
 
+The optional `modelRouting` is the plan's task-based model routing
+([ADR 0192](../../docs/adr/0192-model-routing-by-kind-of-task.md)):
+`{ "routineModel": "clankie/routine", "escalate": false }`, with an optional
+`escalationModel`. At every start the body writes it over its own routing
+settings (routine model, escalation and escalation model; the owner's purpose
+overrides stay), so a plan change lands on the next boot. Absent, the body's
+routing is left alone. The model proxy, not this field, enforces what a plan
+may spend.
+
 The body validates this configuration and the signed credential's identity before
 connecting. It derives its host id from the account and installation, uses the
 host credential as its gateway bearer, and renews through

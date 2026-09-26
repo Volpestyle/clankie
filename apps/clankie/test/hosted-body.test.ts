@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hostedFixture } from "./fixtures/hosted-body.ts";
 import { describe, expect, it, vi } from "vitest";
-import { HostedBodyClient, HostedBodyDeniedError, readHostedBodyBootstrap } from "../src/hosted-body.ts";
+import { loadConfig, updateModelRouting } from "@clankie/model-provider";
+import {
+  applyHostedModelRouting,
+  HostedBodyClient,
+  HostedBodyDeniedError,
+  readHostedBodyBootstrap,
+} from "../src/hosted-body.ts";
 
 describe("managed hosted credential", () => {
   it("is opt-in and rejects malformed or insecure bootstrap configuration", () => {
@@ -40,6 +46,58 @@ describe("managed hosted credential", () => {
           "Invalid hosted body bootstrap file",
         );
       }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("takes the plan's model routing from the bootstrap and writes it over the body's routing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hosted-bootstrap-"));
+    try {
+      const path = join(dir, "bootstrap.json");
+      const { bootstrap } = hostedFixture();
+      const routed = {
+        ...bootstrap,
+        modelRouting: {
+          routineModel: "clankie/routine",
+          escalate: true,
+          escalationModel: "clankie/escalation",
+        },
+      };
+      writeFileSync(path, JSON.stringify(routed));
+      const read = readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path });
+      expect(read).toEqual(routed);
+      for (const invalid of [
+        { ...routed, modelRouting: { routineModel: "no-slash", escalate: false } },
+        { ...routed, modelRouting: { ...routed.modelRouting, apiKey: "sk-should-not-be-accepted" } },
+      ]) {
+        writeFileSync(path, JSON.stringify(invalid));
+        expect(() => readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toThrow(
+          "Invalid hosted body bootstrap file",
+        );
+      }
+
+      const env = { XDG_CONFIG_HOME: dir };
+      await updateModelRouting({ purposes: { gameplay: "routine" }, escalationModel: "openai/old" }, { env });
+      await applyHostedModelRouting(read!, { env });
+      expect((await loadConfig({ env, cwd: dir })).config.routing).toEqual({
+        purposes: { gameplay: "routine" },
+        routine_model: "clankie/routine",
+        escalate: true,
+        escalation_model: "clankie/escalation",
+      });
+      // A Starter plan drops escalation and its model; the body's own purpose choices stay.
+      await applyHostedModelRouting(
+        { modelRouting: { routineModel: "clankie/routine", escalate: false } },
+        { env },
+      );
+      expect((await loadConfig({ env, cwd: dir })).config.routing).toEqual({
+        purposes: { gameplay: "routine" },
+        routine_model: "clankie/routine",
+        escalate: false,
+      });
+      // No routing in the bootstrap leaves the body's config alone.
+      await applyHostedModelRouting({}, { env });
+      expect((await loadConfig({ env, cwd: dir })).config.routing?.routine_model).toBe("clankie/routine");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -30,6 +30,7 @@ import {
   type ModelRole,
   type ResolvedRole,
 } from "./resolve.ts";
+import { configForRef, routeFor, type ModelPurpose } from "./routing.ts";
 import { effortVariantsFor, thinkingLevelForVariant, variantById, type ModelVariant } from "./variants.ts";
 
 export const CAPTAIN_CODEX_PREAMBLE =
@@ -54,6 +55,8 @@ export interface ConfiguredLanguageModel {
 
 export interface ResolveConfiguredLanguageModelOptions {
   readonly role?: ModelRole;
+  /** Route the captain role by task (routing.ts); omitted reads `model` directly. */
+  readonly purpose?: ModelPurpose;
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly sessionId?: string;
@@ -149,7 +152,7 @@ export async function resolveConfiguredLanguageModel(
   const env = options.env ?? process.env;
   const store = options.store ?? createDefaultCredentialStore({ env });
   const registry = options.registry ?? createModelRegistry({ env });
-  const [{ config, issues }, sourceCatalog] = await Promise.all([
+  const [{ config: loaded, issues }, sourceCatalog] = await Promise.all([
     loadConfig({ cwd, env }),
     options.catalog === undefined ? registry.catalog() : Promise.resolve(options.catalog),
   ]);
@@ -158,6 +161,10 @@ export async function resolveConfiguredLanguageModel(
       `Captain config is invalid: ${issues.map((issue) => issue.message).join("; ")}`,
     );
   }
+  const config =
+    role === "model" && options.purpose !== undefined
+      ? configForRef(loaded, routeFor(loaded, options.purpose).ref)
+      : loaded;
   const configured = resolveRole(role, { config, catalog: sourceCatalog });
   if (configured === undefined)
     throw new ConfiguredModelError(`No ${role.replace("_", " ")} is configured; run /model`);
