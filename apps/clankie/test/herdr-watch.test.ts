@@ -7,6 +7,7 @@ import { parseHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { fleetSeatClaudeStartArgs } from "../src/captain/fleet-seat.ts";
 import {
+  createHerdrWatchRunner,
   distillHerdrSeatReply,
   herdrAgentName,
   HerdrWatchStore,
@@ -14,6 +15,7 @@ import {
   parseHerdrForegroundProcessId,
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
+  type PiSeatModel,
 } from "../src/captain/herdr-watch.ts";
 import { isHerdrWorkspaceMissing } from "../src/captain/herdr-watch.ts";
 
@@ -1544,6 +1546,105 @@ describe("hiring a seat", () => {
     await store.spawnSeat({ schemaVersion: 1, harness: "codex", title: "Other", workingDirectory: tmpdir() });
     expect(installPiIntegration).toHaveBeenCalledOnce();
     store.close();
+  });
+
+  describe("a hosted body's pi workers (VUH-1373)", () => {
+    const included = {
+      model: "clankie/default",
+      provider: {
+        id: "clankie",
+        config: { baseUrl: "http://127.0.0.1:4319/v1", api: "openai-responses", apiKey: "local" },
+      },
+    };
+    async function hire(piSeatModel: (() => Promise<PiSeatModel | undefined>) | undefined, model?: string) {
+      const startAgent = vi.fn((_options: { args?: readonly string[] }) => Promise.resolve());
+      const configurePiProvider = vi.fn(() => Promise.resolve());
+      const piHired: HerdrAgentSnapshot = {
+        ...hired,
+        agent: "pi",
+        session: { source: "herdr:pi", kind: "path", value: "/state/home/.pi/agent/sessions/one.jsonl" },
+      };
+      const runner: HerdrWatchRunner = {
+        get: vi.fn(() => Promise.resolve(piHired)),
+        resolveTerminal: vi.fn(() => Promise.resolve(piHired)),
+        wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+        createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+        startAgent,
+        installPiIntegration: vi.fn(() => Promise.resolve()),
+        configurePiProvider,
+      };
+      const store = new HerdrWatchStore(await storePath(), {
+        runner,
+        ...(piSeatModel === undefined ? {} : { piSeatModel }),
+      });
+      const result = await store.spawnSeat({
+        schemaVersion: 1,
+        harness: "pi",
+        title: "Worker",
+        workingDirectory: tmpdir(),
+        ...(model === undefined ? {} : { model }),
+      });
+      store.close();
+      expect(result).toMatchObject({ outcome: "spawned" });
+      return { args: startAgent.mock.calls[0]![0].args ?? [], configurePiProvider, startAgent };
+    }
+
+    it("runs on the included model through the body's forwarder, declared for pi first", async () => {
+      const { args, configurePiProvider, startAgent } = await hire(async () => included);
+      expect(args).toEqual(["--model", "clankie/default"]);
+      expect(configurePiProvider).toHaveBeenCalledWith("clankie", included.provider.config);
+      expect(configurePiProvider.mock.invocationCallOrder[0]).toBeLessThan(
+        startAgent.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it("keeps an asked-for included alias, and never starts a keyless provider on included usage", async () => {
+      expect((await hire(async () => included, "clankie/routine")).args).toEqual([
+        "--model",
+        "clankie/routine",
+      ]);
+      expect((await hire(async () => included, "openai/gpt-6-luna")).args).toEqual([
+        "--model",
+        "clankie/default",
+      ]);
+    });
+
+    it("defaults to the customer's own model on their credential, and declares nothing", async () => {
+      const customer = async () => ({ model: "openai/gpt-6-luna" });
+      const { args, configurePiProvider } = await hire(customer);
+      expect(args).toEqual(["--model", "openai/gpt-6-luna"]);
+      expect(configurePiProvider).not.toHaveBeenCalled();
+      expect((await hire(customer, "openai-codex/gpt-6-astra")).args).toEqual([
+        "--model",
+        "openai-codex/gpt-6-astra",
+      ]);
+    });
+
+    it("leaves pi's own configuration alone off a hosted body", async () => {
+      expect((await hire(async () => undefined)).args).toEqual([]);
+      expect((await hire(undefined)).args).toEqual([]);
+    });
+
+    it("merges the included provider into pi's models.json and keeps the owner's providers", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "pi-agent-"));
+      vi.stubEnv("PI_CODING_AGENT_DIR", dir);
+      try {
+        await writeFile(
+          join(dir, "models.json"),
+          JSON.stringify({ providers: { ollama: { baseUrl: "http://x/v1" } } }),
+        );
+        await createHerdrWatchRunner().configurePiProvider!("clankie", included.provider.config);
+        expect(JSON.parse(await readFile(join(dir, "models.json"), "utf8"))).toEqual({
+          providers: { ollama: { baseUrl: "http://x/v1" }, clankie: included.provider.config },
+        });
+        await writeFile(join(dir, "models.json"), "{not json");
+        await expect(createHerdrWatchRunner().configurePiProvider!("clankie", {})).rejects.toThrow();
+        expect(await readFile(join(dir, "models.json"), "utf8")).toBe("{not json");
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("clears the development-channels dialog and proceeds as if start succeeded", async () => {

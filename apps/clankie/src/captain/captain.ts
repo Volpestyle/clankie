@@ -768,10 +768,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.runtimes ? { connections: deps.runtimes } : {}),
     ...(deps.herdrAvailable ? { defaultAvailable: deps.herdrAvailable } : {}),
   });
-  const herdrWatches = new HerdrWatchStore(
-    join(options.stateDir, "herdr-watches.json"),
-    deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable },
-  );
+  const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    ...(deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable }),
+    ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
+  });
   const evaluator = new Evaluator(
     join(options.stateDir, "evaluator"),
     deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable },

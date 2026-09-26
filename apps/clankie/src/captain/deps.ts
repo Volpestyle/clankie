@@ -1,4 +1,5 @@
 import type { HostedWorkStarted } from "../hosted-work.ts";
+import type { PiSeatModel } from "./herdr-watch.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
 import type { ExecutionConnections } from "../herdr-session.ts";
 import type {
@@ -46,6 +47,8 @@ export interface CaptainDeps {
   readonly onTurnSettled?: (metrics: CaptainTurnSettledMetrics) => void;
   /** Execution is optional; checked again when a terminal tool is called. */
   readonly herdrAvailable?: () => boolean;
+  /** A hosted body's model for the pi workers it hires (VUH-1373); absent, pi keeps its own. */
+  readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
   readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */

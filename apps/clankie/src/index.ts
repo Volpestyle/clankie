@@ -88,6 +88,7 @@ import {
 } from "./hosted-body.ts";
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { startHostedModelForwarder } from "./hosted-model-forwarder.ts";
+import { hostedPiSeatModel } from "./hosted-seat-model.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
 
@@ -522,6 +523,8 @@ const workItems = createWorkItemsService({
 const captain = createCaptain(
   {
     workItems,
+    // Hosted pi workers follow the captain's model path (VUH-1373).
+    ...(hostedModelForwarder === undefined ? {} : { piSeatModel: () => hostedPiSeatModel() }),
     ...(hostedHeartbeat === undefined ? {} : { onWorkStarted: (reason) => hostedHeartbeat.begin(reason) }),
     ...(bodyTelemetry === undefined
       ? {}

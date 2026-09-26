@@ -135,6 +135,11 @@ export interface HerdrWatchRunner {
    */
   installPiIntegration?(): Promise<void>;
   /**
+   * Declares one provider in pi's `models.json` (its agent directory), keeping
+   * every other provider there. An unreadable file is left alone and fails the hire.
+   */
+  configurePiProvider?(id: string, config: Readonly<Record<string, unknown>>): Promise<void>;
+  /**
    * `herdr agent send-keys`, falling back to `herdr pane send-keys` when the
    * pane is not classified as an agent yet.
    */
@@ -433,6 +438,23 @@ export function createHerdrWatchRunner(available?: () => boolean): HerdrWatchRun
       mkdirSync(join(agentDir, "extensions"), { recursive: true });
       await runHerdr(["integration", "install", "pi"]);
     },
+    configurePiProvider: async (id, config) => {
+      const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
+      const path = join(agentDir, "models.json");
+      const current: unknown = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+      if (typeof current !== "object" || current === null || Array.isArray(current)) {
+        throw new Error("pi models.json is not an object");
+      }
+      const providers = (current as { providers?: unknown }).providers ?? {};
+      if (typeof providers !== "object" || providers === null || Array.isArray(providers)) {
+        throw new Error("pi models.json providers is not an object");
+      }
+      mkdirSync(agentDir, { recursive: true });
+      const next = { ...current, providers: { ...providers, [id]: config } };
+      const tmp = `${path}.${randomUUID()}.tmp`;
+      writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+      renameSync(tmp, path);
+    },
     addClaudeMcp: async (name) => {
       const result = await runClaude(["mcp", "add", "-s", "user", name, "--", "clankie", "mcp", "--seat"]);
       if (!fleetSeatMcpAddSucceeded(result)) {
@@ -527,7 +549,19 @@ export type HerdrSeatSpawnResult =
   | { readonly outcome: "spawned"; readonly seat: ObservedFleetSeat };
 
 /** Persisted, event-driven one-shot watches that wake an operator conversation when an agent settles. */
+/**
+ * How a hosted body's pi workers reach a model (VUH-1373). On included usage
+ * the model is the body's own `clankie/default`, reached through its loopback
+ * forwarder, so `provider` is declared in pi's `models.json` first. On the
+ * customer's own credential it is their selected model, and no provider.
+ */
+export interface PiSeatModel {
+  readonly model: string;
+  readonly provider?: { readonly id: string; readonly config: Readonly<Record<string, unknown>> };
+}
+
 export class HerdrWatchStore implements HerdrWatchPort {
+  private readonly piSeatModel: (() => Promise<PiSeatModel | undefined>) | undefined;
   private readonly path: string;
   private readonly runner: HerdrWatchRunner;
   private readonly controllers = new Map<string, AbortController>();
@@ -555,9 +589,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly summariesPath?: string;
       readonly summaryWatchIntervalMs?: number;
       readonly seatTranscriptTailMs?: number;
+      /** A hosted body's model for pi seats (VUH-1373); absent, pi uses its own configuration. */
+      readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
     } = {},
   ) {
     this.path = path;
+    this.piSeatModel = options.piSeatModel;
     this.runner = options.runner ?? createHerdrWatchRunner(options.available);
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
@@ -744,6 +781,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * persona binding hangs on — a move passes the old one so the character
    * comes with it instead of a stranger arriving in the new district.
    */
+  /**
+   * The model a pi seat starts on. A hosted body on included usage runs every
+   * pi worker on its own included model, whatever was asked, since no other
+   * provider has a key there; a `clankie/…` alias that was asked for stays. On
+   * the customer's own credential the worker defaults to their model.
+   * Elsewhere pi keeps its own configuration.
+   */
+  private async hostedPiModel(requested: string | undefined): Promise<string | undefined> {
+    const hosted = await this.piSeatModel?.();
+    if (hosted === undefined) return requested;
+    if (hosted.provider === undefined) return requested ?? hosted.model;
+    await this.runner.configurePiProvider?.(hosted.provider.id, hosted.provider.config);
+    return requested?.startsWith(`${hosted.provider.id}/`) === true ? requested : hosted.model;
+  }
+
   public async spawnSeat(input: SpawnOperatorSeat, subjectOverride?: string): Promise<HerdrSeatSpawnResult> {
     const { createTab, startAgent } = this.runner;
     if (this.closed || createTab === undefined || startAgent === undefined) {
@@ -767,10 +819,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // reports; make sure the extension is there before starting one.
       if (input.harness === "pi") await this.runner.installPiIntegration?.();
       const subject = subjectOverride ?? herdrAgentName(input.title);
+      const model = input.harness === "pi" ? await this.hostedPiModel(input.model) : input.model;
       // A model or effort the harness cannot take fails the hire typed, before
       // herdr is asked to start anything — the alternative is a hire that
       // silently launches the default the operator did not pick (ADR 0185).
-      const modelArgs = input.model === undefined ? [] : fleetSeatModelArgs(input.harness, input.model);
+      const modelArgs = model === undefined ? [] : fleetSeatModelArgs(input.harness, model);
       if (modelArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired model flag`);
       const effortArgs = input.effort === undefined ? [] : fleetSeatEffortArgs(input.harness, input.effort);
       if (effortArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired effort flag`);
