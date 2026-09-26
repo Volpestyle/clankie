@@ -60,7 +60,7 @@ import {
   type HerdrSessionCensus,
   type ObservedHeadSeat,
 } from "./herdr-census.ts";
-import { deliverFleetSeatMessage, fleetSeatMailbox } from "./fleet-seat.ts";
+import { deliverFleetSeatMessage, fleetSeatMailbox, type FleetSeatMessageContext } from "./fleet-seat.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { createStanceStore } from "./stances.ts";
@@ -92,7 +92,7 @@ import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime, type RoutedSelection } from "./model.ts";
 import { captainRoutingExtension } from "./routing.ts";
-import type { CaptainPort, CaptainPromptSection, HireSeat } from "./port.ts";
+import type { CaptainPort, CaptainPromptSection, HireSeat, MessageSeat } from "./port.ts";
 import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
@@ -948,6 +948,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         autonomy,
         herdrWatches,
         hireSeat,
+        messageSeat,
       ),
       resourceLoader: loader,
       sessionManager,
@@ -1283,27 +1284,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       sessions.delete(key);
       void pending?.then((lane) => lane.session.dispose()).catch(() => undefined);
     },
-    async (seatId, message, context) => {
-      const deliver = () =>
-        deliverFleetSeatMessage(
-          fleetMailboxes,
-          (id, text) => herdrWatches.sendToSeat(id, text),
-          seatId,
-          message,
-          context,
-        );
-      const sent =
-        context.source === "room"
-          ? await herdrWatches.sendAndWatchReply(seatId, message, deliver)
-          : await deliver();
-      // What a seat has been asked to do today is a fact about the seat, so the
-      // roster's cursor moves for it the way it moves for a stance (ADR 0150).
-      if (sent) {
-        seatLedger.promptSent(seatId);
-        fleetChanges.touch();
-      }
-      return sent;
-    },
+    (seatId, message, context) => sendToSeat(seatId, message, context),
     undefined,
     async ({ parentConversationId, conversationId, workspace }) => {
       const cwd = workspace ?? workingDirectory;
@@ -1391,6 +1372,54 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
     fleetChanges.touch();
     return { outcome: "spawned", seat };
+  };
+
+  /**
+   * The one lane into a seat — an operator DM, a room turn, and the captain's
+   * own brief all take it: the seat's mailbox when a bridge is polling, else
+   * the pane.
+   */
+  async function sendToSeat(
+    seatId: string,
+    message: string,
+    context: FleetSeatMessageContext,
+  ): Promise<boolean> {
+    const deliver = () =>
+      deliverFleetSeatMessage(
+        fleetMailboxes,
+        (id, text) => herdrWatches.sendToSeat(id, text),
+        seatId,
+        message,
+        context,
+      );
+    const sent =
+      context.source === "room"
+        ? await herdrWatches.sendAndWatchReply(seatId, message, deliver)
+        : await deliver();
+    // What a seat has been asked to do today is a fact about the seat, so the
+    // roster's cursor moves for it the way it moves for a stance (ADR 0150).
+    if (sent) {
+      seatLedger.promptSent(seatId);
+      fleetChanges.touch();
+    }
+    return sent;
+  }
+
+  // A hired seat is not a Swarm actor, so the captain briefs it the way the
+  // operator would, by whichever id the hire handed back (VUH-1373).
+  const messageSeat: MessageSeat = async (target, message) => {
+    const seat = liveSeats.find(
+      (current) =>
+        current.seatId === target || current.personaId === target || current.conversationId === target,
+    );
+    const seatId = seat?.seatId ?? seatByPersona.get(target);
+    if (seatId === undefined) return { outcome: "unknown_seat", seat: target };
+    const sent = await sendToSeat(seatId, message, {
+      conversationId: seat?.conversationId ?? seatId,
+      source: "captain",
+    });
+    if (!sent) return { outcome: "seat_offline", seatId };
+    return { outcome: "delivered", seatId, status: await herdrWatches.awaitPickup(seatId) };
   };
 
   const roomConversations = new RoomConversations(conversations);
@@ -2497,6 +2526,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         autonomy,
         herdrWatches,
         hireSeat,
+        messageSeat,
         lane === "operator" && options.swarm !== undefined
           ? await options.swarm.tools({
               ...seatContext(conversationId)!,

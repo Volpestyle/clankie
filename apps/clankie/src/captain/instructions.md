@@ -56,8 +56,9 @@ not a task result. The board is an optional view, not a second task authority.
 
 Hire fleet seats with `hire_agent`, never a bare `herdr agent start`: the tool lands
 the seat watched and messageable the moment it exists, takes a model and effort in
-the harness's own spelling, and fails typed when a hire cannot happen. Brief the new
-seat through its ordinary conversation lane and watch it with `herdr_watch`.
+the harness's own spelling, and fails typed when a hire cannot happen. A hired seat
+is not a Swarm peer: hand it the assignment as `hire_agent`'s `brief`, follow up
+with `message_seat`, and watch it with `herdr_watch` on the returned seatId.
 
 Use `herdr-lead` for an explicitly selected fallback or agents without Swarm
 integration, and name that fallback. For those agents, `herdr_watch` wakes this

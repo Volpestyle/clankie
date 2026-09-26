@@ -28,7 +28,7 @@ import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
 import type { DiscordWatchOrigin, HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
-import type { HireSeat } from "./port.ts";
+import type { HireSeat, MessageSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { rivalsTools } from "./rivals-tools.ts";
@@ -108,6 +108,7 @@ export function captainTools(
   autonomy?: AutonomyStore,
   herdrWatches?: HerdrWatchPort,
   hireSeat?: HireSeat,
+  messageSeat?: MessageSeat,
 ): ToolDefinition[] {
   const playPorts = {
     submitEmbodimentIntent: deps.embodiment.submitIntent,
@@ -138,7 +139,11 @@ export function captainTools(
     // holding the machine-access grant (ADR 0187).
     ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
     hireSeat !== undefined
-      ? [hireAgentTool(hireSeat, turn, deps.herdrAvailable)]
+      ? [hireAgentTool(hireSeat, turn, deps.herdrAvailable, messageSeat)]
+      : []),
+    ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
+    messageSeat !== undefined
+      ? [messageSeatTool(messageSeat)]
       : []),
     ...(turn.publishFile !== undefined
       ? [
@@ -558,7 +563,12 @@ export function captainTools(
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
 }
 
-function hireAgentTool(hire: HireSeat, turn: TurnContext, available?: () => boolean): ToolDefinition {
+function hireAgentTool(
+  hire: HireSeat,
+  turn: TurnContext,
+  available?: () => boolean,
+  message?: MessageSeat,
+): ToolDefinition {
   return defineTool({
     name: "hire_agent",
     label: "Hire an agent",
@@ -569,8 +579,9 @@ function hireAgentTool(hire: HireSeat, turn: TurnContext, available?: () => bool
       "(pi, claude and codex take --model; effort is pi's --thinking, claude's --effort, codex's " +
       "model_reasoning_effort); omit both for the harness default. Outcomes are typed: unknown_directory, " +
       "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
-      "spelling or never came up), herdr_unreachable. Once spawned, brief the seat through the ordinary " +
-      "conversation lane and watch it with herdr_watch.",
+      "spelling or never came up), herdr_unreachable. A hired seat is not a Swarm peer: pass brief to hand it " +
+      "its first prompt through its conversation lane (the result says whether it was delivered), follow up " +
+      "with message_seat, and watch it with herdr_watch on the returned seatId.",
     parameters: Type.Object({
       harness: StringEnum(OPERATOR_SEAT_HARNESSES),
       title: Type.String({ minLength: 1, maxLength: 80, description: "What the roster calls it." }),
@@ -581,16 +592,49 @@ function hireAgentTool(hire: HireSeat, turn: TurnContext, available?: () => bool
       }),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
       effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+      ...(message === undefined
+        ? {}
+        : {
+            brief: Type.Optional(
+              Type.String({
+                minLength: 1,
+                maxLength: SEAT_MESSAGE_MAX,
+                description: "The assignment, delivered as the seat's first prompt once it is up.",
+              }),
+            ),
+          }),
     }),
     executionMode: "sequential",
     execute: async (_id, params) => {
       if (turn.autonomous === true) throw new Error("Autonomous turns may propose a hire, not execute one");
-      return json(
-        available?.() === false
-          ? { outcome: "failed", reason: "herdr_unreachable" }
-          : await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...params })),
-      );
+      if (available?.() === false) return json({ outcome: "failed", reason: "herdr_unreachable" });
+      const { brief, ...seat } = params as typeof params & { brief?: string };
+      const result = await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }));
+      if (result.outcome !== "spawned" || brief === undefined || message === undefined) return json(result);
+      return json({ ...result, brief: await message(result.seat.seatId, brief) });
     },
+  });
+}
+
+const SEAT_MESSAGE_MAX = 32_768;
+
+function messageSeatTool(message: MessageSeat): ToolDefinition {
+  return defineTool({
+    name: "message_seat",
+    label: "Message a hired seat",
+    description:
+      "Send a Herdr seat you hired a message down its conversation lane, the way the operator's DM reaches " +
+      "it: a follow-up, a correction, an answer to its question. seat is the seatId, personaId or " +
+      "conversationId hire_agent returned. Outcomes: delivered (with the seat's status once it picked the " +
+      "message up), seat_offline, unknown_seat. Swarm peers are messaged with swarm_send instead.",
+    parameters: Type.Object({
+      seat: Type.String({ minLength: 1, maxLength: 200 }),
+      message: Type.String({ minLength: 1, maxLength: SEAT_MESSAGE_MAX }),
+    }),
+    executionMode: "sequential",
+    // A watch wake is an internal turn, and answering the seat it woke for is
+    // the point of it, so unlike hiring this is not held back from one.
+    execute: async (_id, params) => json(await message(params.seat, params.message)),
   });
 }
 

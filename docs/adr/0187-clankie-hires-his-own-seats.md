@@ -54,3 +54,22 @@ appears in the same roster as an operator's hire; cleanup follows the
 standing rule that only the creator closes a temporary worker. Giving rooms
 _without_ the machine-access grant a way to request hires (a proposal the
 operator approves) is a possible follow-up; it is not this decision.
+
+## Amendment: he briefs what he hires
+
+Accepted 2026-09-26 with [VUH-1373](https://linear.app/vuhlp/issue/VUH-1373).
+A hired Herdr seat is not a Swarm actor, so a `swarm_send` to anything a hire
+returns (persona, conversation) fails `stale_recipient`, and `herdr agent get`
+does not know the terminal id the hire returns as its seatId. In model evals
+every pi hire came up idle and stayed idle: the only lane into it, the seat's
+conversation, was reachable from the operator's surfaces and not from his tools.
+
+- `hire_agent` takes an optional `brief`, delivered as the seat's first prompt
+  down that lane (the seat mailbox when a bridge is polling, else the pane),
+  and reports whether it landed and whether the seat picked it up.
+- `message_seat` sends a follow-up the same way, by seatId, personaId or
+  conversationId — the third named exception above, for the same reason: a raw
+  pane send skips the mailbox and the seat ledger, and nothing points him at it.
+- `herdr_watch` accepts the seatId a hire returns.
+
+Swarm stays the path for enrolled peers; these reach only seats he can see.

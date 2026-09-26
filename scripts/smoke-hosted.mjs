@@ -1,13 +1,12 @@
 // Run after building clankie-hosted:local. All accounts and model responses are synthetic.
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { promisify } from "node:util";
 
 const mode = process.argv[2];
 const run = (command, args) => execFileSync(command, args, { encoding: "utf8", timeout: 240_000 });
@@ -34,6 +33,8 @@ async function inside() {
   let writesConfirmed = 0;
   let hireResult;
   let piTurns = 0;
+  // The captain's brief is the only thing that may start the pi worker's turn.
+  const brief = `PI_WORKER_BRIEF ${randomUUID()}: reply PI_WORKER_DONE`;
   // A real Claude binary executes one real Write tool. The canned model response
   // proves Linux process/tool transport, never model judgment or provider login.
   const model = createServer(async (req, res) => {
@@ -47,7 +48,7 @@ async function inside() {
       );
       if (hireOutcome) hireResult ??= JSON.stringify(hireOutcome.content);
       const piWorker = body.model === "pi-worker";
-      if (piWorker) piTurns++;
+      if (piWorker && raw.includes(brief)) piTurns++;
       const hire = !piWorker && !hireOutcome && raw.includes("HIRE_PI_WORKER");
       res.writeHead(200, { "content-type": "text/event-stream" });
       const chunk = (delta, finish_reason) =>
@@ -61,7 +62,12 @@ async function inside() {
           })}\n\n`,
         );
       if (hire) {
-        const args = JSON.stringify({ harness: "pi", title: "pi proof", workingDirectory: "/workspace" });
+        const args = JSON.stringify({
+          harness: "pi",
+          title: "pi proof",
+          workingDirectory: "/workspace",
+          brief,
+        });
         chunk(
           {
             role: "assistant",
@@ -244,7 +250,8 @@ async function inside() {
   }
 
   // hire_agent(pi) needs the pi CLI and Herdr's pi integration, whose session
-  // report is the seat's durable identity; then the worker completes a turn.
+  // report is the seat's durable identity; then the captain's brief, and nothing
+  // else, starts the worker's turn (VUH-1373).
   async function provePiHire() {
     const agentDir = join(process.env.HOME, ".pi", "agent");
     await mkdir(agentDir, { recursive: true });
@@ -273,22 +280,10 @@ async function inside() {
       (agent) => agent.agent === "pi",
     );
     assert.ok(worker?.agent_session?.source, JSON.stringify(worker));
-    // Async, so this process's model server can answer the worker meanwhile.
-    await promisify(execFile)(
-      "clankie",
-      [
-        "herdr",
-        "agent",
-        "prompt",
-        worker.pane_id,
-        "PI_WORKER_PING: reply PI_WORKER_DONE",
-        "--wait",
-        "--timeout",
-        "90000",
-      ],
-      { timeout: 120_000 },
-    );
-    assert.ok(piTurns > 0, "the hired pi worker completes a turn");
+    assert.match(hireResult, /\\?"brief\\?":\s*\{(?:\\n|\s)*\\?"outcome\\?":\s*\\?"delivered/, hireResult);
+    const turnDeadline = Date.now() + 90_000;
+    while (Date.now() < turnDeadline && piTurns === 0) await sleep(250);
+    assert.ok(piTurns > 0, "the captain's brief starts a pi worker turn");
     run("clankie", ["herdr", "pane", "close", worker.pane_id]);
     return { version: run("pi", ["--version"]).trim(), session: worker.agent_session.source, piTurns };
   }
@@ -369,7 +364,7 @@ async function outside() {
     assert.deepEqual(state(id), before, "credentials, settings and work survive container replacement");
     assert.equal(before.workdir, "/workspace/project");
     console.log(
-      "Hosted smoke passed: non-root captain turn + relay, real Claude/Herdr worker with synthetic model, Swarm assignment, captain-hired pi worker, owner isolation, persistent credentials/settings/workspace.",
+      "Hosted smoke passed: non-root captain turn + relay, real Claude/Herdr worker with synthetic model, Swarm assignment, captain-hired pi worker whose turn the captain's brief started, owner isolation, persistent credentials/settings/workspace.",
     );
   } catch (error) {
     for (const project of projects) process.stderr.write(compose(project, ["logs", "--tail", "30"]));

@@ -185,6 +185,9 @@ const SEAT_REPLY_READ_LINES = 240;
 const SEAT_TRANSCRIPT_TAIL_MS = 1_000;
 const SPAWN_SESSION_WAIT_MS = 10_000;
 const SPAWN_SESSION_POLL_MS = 250;
+const TERMINAL_ID = /^term_[0-9a-f]+$/u;
+/** How long a delivered message may take to turn an idle seat into a working one. */
+const SEAT_PICKUP_WAIT_MS = 10_000;
 const SPAWN_CHANNEL_DIALOG_WAIT_MS = 30_000;
 const CLAUDE_MCP_TIMEOUT_MS = 10_000;
 const CHANNEL_DIALOG_MARKER = "Loading development channels";
@@ -675,6 +678,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /**
+   * The seat's status once a message has had a moment to start a turn: an idle
+   * seat right after delivery would read as already settled to `herdr_watch`.
+   * Returns the last status seen when the wait runs out.
+   */
+  public async awaitPickup(seatId: string, timeoutMs = SEAT_PICKUP_WAIT_MS): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    let status = "unknown";
+    while (!this.closed) {
+      status = (await this.runner.resolveTerminal(seatId).catch(() => undefined))?.status ?? "offline";
+      if (status !== "idle" || Date.now() >= deadline) return status;
+      await delay(SPAWN_SESSION_POLL_MS);
+    }
+    return status;
+  }
+
+  /**
    * ponytail: lsof of the open Codex rollout file is the session id; herdr
    * `report-agent-session` for Codex would replace it.
    */
@@ -937,7 +956,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<HerdrWatchArmResult> {
     if (this.closed || this.wake === undefined) throw new Error("Herdr watcher is not running");
     if (this.stateUnreadable) throw new Error("Herdr watcher state is unreadable");
-    const agent = await this.runner.get(target);
+    // `herdr agent get` takes a pane or agent name, not the terminal id a hire
+    // returns as its seatId, so a seatId is resolved from the pane list.
+    const agent = TERMINAL_ID.test(target)
+      ? await this.runner.resolveTerminal(target).then((found) => {
+          if (found === undefined) throw new Error(`Herdr seat ${target} not found`);
+          return found;
+        })
+      : await this.runner.get(target);
     if (SETTLED_STATUSES.has(agent.status)) {
       return {
         outcome: "already_settled",
