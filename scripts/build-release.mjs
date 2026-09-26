@@ -235,6 +235,15 @@ async function installNodeRuntime(targetRoot, scratchRoot) {
 async function copyDynamicRuntimePackages(targetRoot, metafilePath) {
   await mkdir(join(targetRoot, "node_modules"), { recursive: true });
   for (const component of await npmComponents(metafilePath)) {
+    if (component.name === "@earendil-works/pi-coding-agent") {
+      // The bundled TUI reads pi's built-in themes from the directory pi
+      // resolves beside the bundle (no package.json above it): bin/dist/...
+      const themes = join(component.root, "dist", "modes", "interactive", "theme");
+      const target = join(targetRoot, "apps", "tui", "bin", "dist", "modes", "interactive", "theme");
+      await mkdir(target, { recursive: true });
+      for (const theme of ["dark.json", "light.json"])
+        await copyFile(join(themes, theme), join(target, theme));
+    }
     if (!dynamicRuntimePackages.has(component.name)) continue;
     await cp(component.root, join(targetRoot, "node_modules", component.name), {
       recursive: true,
