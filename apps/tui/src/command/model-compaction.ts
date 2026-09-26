@@ -27,9 +27,7 @@ export interface ModelCompactionStatus {
   readonly issues?: readonly { path: string; message: string }[];
 }
 
-async function modelCompactionStatus(
-  options: ModelCompactionOptions = {},
-): Promise<ModelCompactionStatus> {
+async function modelCompactionStatus(options: ModelCompactionOptions = {}): Promise<ModelCompactionStatus> {
   const { config, issues } = await loadConfig(options);
   return {
     ok: issues.length === 0,
