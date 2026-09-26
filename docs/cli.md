@@ -55,6 +55,7 @@ the token is never an argument, settings value, or printed result.
 | `send --conversation ID …`                                                                                   | JSON accepted-run receipt or refusal                                                         |
 | `file publish --conversation ID PATH …`                                                                      | JSON delivered-file metadata                                                                 |
 | `memory …`, `metrics …`                                                                                      | JSON                                                                                         |
+| `telemetry ship …`                                                                                           | One JSON line per shipping pass                                                              |
 | `play stop`                                                                                                  | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
 | `prompt …`, `memory-card …`                                                                                  | Plain text: the prompt or card itself, verbatim                                              |
 | `seat`                                                                                                       | Interactive (TTY); `seat --dry-run` is JSON                                                  |
@@ -1052,6 +1053,22 @@ the same recent past his own sessions do.
 Filtered by lane exactly as the session's own injection is: operator-private
 episodes reach only the operator lane. Empty output means the lane has recalled
 nothing yet, which is not an error.
+
+### `telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval SECONDS]`
+
+Hosted infrastructure only. Ships a body's metadata telemetry spool (what
+`CLANKIE_BODY_TELEMETRY_DIR` collects) to a CloudWatch Logs group, stream
+`<tenantId>/<instanceId>`, each event at its own time. It must run on the EC2
+host with instance metadata reachable, not inside the body: the tenant and
+instance ids and the credentials come from the instance, never from the
+spool. Every line is parsed against the event schema again before it leaves;
+anything else is counted as `dropped`. The cursor file records how far each
+spool file has shipped and advances only after CloudWatch accepts.
+
+`--interval` is 10–3600 seconds (default 60). Without `--once` it runs until
+`SIGTERM`, printing `{"ok":true,"shipped":N,"dropped":N,"files":N}` per pass
+and `{"ok":false,"error":…}` on stderr when a pass fails; a failed pass is
+retried from the same cursor. See [hosted bodies](../infra/hosted/README.md#body-telemetry).
 
 ### `seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
 

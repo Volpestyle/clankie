@@ -71,7 +71,16 @@ export async function runTelemetryCommand(
     return 2;
   }
   const metadata = createInstanceMetadata(options.fetchImpl);
-  const identity = await metadata.identity();
+  let identity: Awaited<ReturnType<typeof metadata.identity>>;
+  try {
+    identity = await metadata.identity();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "unreachable";
+    options.stderr.write(
+      `telemetry ship: instance metadata failed (${reason}); run it on the EC2 host with host networking\n`,
+    );
+    return 1;
+  }
   let cached: AwsCredentials | undefined;
   const credentials = async () => {
     if (cached === undefined || (cached.expiresAtMs ?? 0) - Date.now() < CREDENTIAL_REFRESH_MS) {
