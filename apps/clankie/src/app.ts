@@ -172,7 +172,12 @@ import {
   mintDeviceSessionClaims,
 } from "./device-session.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
-import { LinearWorkOwnerSchema, type LinearWriteReceipts, classifyLinearDelivery } from "./linear-webhook.ts";
+import {
+  LinearWorkOwnerSchema,
+  type LinearWriteReceipts,
+  classifyLinearDelivery,
+  linearReplyTo,
+} from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { LocalVoiceChatSession } from "./local-voice-chat.ts";
@@ -2552,8 +2557,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       own !== undefined &&
       outcome.activity.actorId === own.userId &&
       outcome.activity.organizationId === own.workspaceId;
+    // A reply to his own post is someone asking about his work; the wake routes it (ADR 0191).
+    const replyTo = linearReplyTo(outcome.activity, own, hook.writes, clock());
     const ingested = dependencies.captain.receiveLinearActivity(
-      outcome.activity,
+      replyTo ? { ...outcome.activity, replyTo } : outcome.activity,
       (await settingsSource.load()).linearWebhook.following && !selfAuthored,
     );
     return context.json({ schemaVersion: 1 as const, ingested: ingested !== false });

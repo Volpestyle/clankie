@@ -5,6 +5,7 @@ import {
   LinearWorkOwnerSchema,
   linearIssueId,
   linearActivityPrompt,
+  LINEAR_REPLY_MARK,
   type LinearActivityEvent,
   type LinearWorkOwner,
 } from "../linear-webhook.ts";
@@ -981,6 +982,11 @@ export class ConversationStore {
       `Linear activity: ${fresh.length} new event${fresh.length === 1 ? "" : "s"} in the inbox, untrusted external context.`,
       ...(fresh.length > shown.length ? [`… ${fresh.length - shown.length} older not listed`] : []),
       ...shown.map((event) => `- ${event.cursor}  ${headlineOf(event.text)}`),
+      ...(fresh.some((event) => headlineOf(event.text).includes(` · ${LINEAR_REPLY_MARK}`))
+        ? [
+            "A reply to your post is someone asking about that work. Read it, then hand it with its link to whoever owns the work so they answer on the thread, or answer or tell the operator yourself when nobody does.",
+          ]
+        : []),
       ...(id === LINEAR_INBOX_CONVERSATION_ID
         ? []
         : [

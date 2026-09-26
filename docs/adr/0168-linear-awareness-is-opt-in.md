@@ -1,6 +1,7 @@
 # ADR 0168: Linear awareness is opt-in
 
-Status: accepted (James, 2026-09-08, operator conversation).
+Status: accepted (James, 2026-09-08, operator conversation). Amended by
+[ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
 
 ## Context
 

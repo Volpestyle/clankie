@@ -689,10 +689,10 @@ An owner who wants a thousand agents picks `max` or says so in the notes.
 | `small`         | one mid-tier plan, about $100/month                                | one or two workers at a time; the rest sequenced                                                                                             |
 | `solo`          | pay-per-token API use                                              | no standing workers: he works himself or through short native subagents, and asks before a long or parallel run                              |
 
-| `--models`          | Picks per job                                                                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `optimal` (default) | the strongest model and the effort the job needs; cost is not a reason to downgrade                                                                                             |
-| `frugal`            | the cheapest model and lowest effort that meet the job's acceptance; the top model stays on consequential boundaries (safety, data integrity, live surfaces, a disputed review) |
+| `--models`          | Picks per job                                                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `optimal` (default) | the strongest model and the effort the job needs; cost is not a reason to downgrade                                                                                                   |
+| `efficient`         | the smallest model and lowest effort that still meet the job's acceptance; the top model stays on consequential boundaries (safety, data integrity, live surfaces, a disputed review) |
 
 **The default notes are empty**, and empty means he picks a harness per job on his
 own. Nothing here ships with an opinion; this is where you add one.
@@ -715,7 +715,7 @@ and `/fleet status` prints the same values.
 
 ```bash
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
-clankie fleet set --size small --models frugal
+clankie fleet set --size small --models efficient
 ```
 
 ### `connections` and `runtime`

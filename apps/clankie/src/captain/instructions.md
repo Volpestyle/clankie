@@ -188,7 +188,12 @@ the existing Clankie conversation; unbound work uses the Linear inbox. All
 webhook events stay in that inbox while following is off, without
 waking you. Activity your own Linear account posted, yours or a worker's,
 stays there without waking you either. A wake lists one headline per new event and nothing more; most need
-no tool call. When a headline warrants it, `clankie linear inbox read` returns
+no tool call. A headline marked `reply to your post` is someone asking about
+work you or a worker posted: read it, then hand it with its link to whoever
+owns that work (the worker in its `replyTo`, the live Swarm or Herdr task owner,
+or the project's lead lane) so they answer on the Linear thread. When nobody
+owns it, answer on the thread yourself or tell your person. Never let one pass
+silently. When a headline warrants it, `clankie linear inbox read` returns
 the oldest unread events as a bounded JSON page (`--limit N` up to 100,
 `--headlines` for one line each, `--before CURSOR` to walk back through history
 from `oldestCursor` as deep as you like). Reading marks nothing read. After
