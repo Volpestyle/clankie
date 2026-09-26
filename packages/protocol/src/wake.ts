@@ -32,7 +32,15 @@ export const WakeRequestSchema = z
   .strict();
 export type WakeRequest = z.infer<typeof WakeRequestSchema>;
 export const WakeResponseSchema = z
-  .object({ state: z.enum(["waking", "running"]), retryAfterMs: z.number().int().positive() })
+  .object({
+    state: z.enum(["waking", "running"]),
+    retryAfterMs: z.number().int().positive(),
+    /** The fleet's id for this wake (a repeat joins the one under way); the app reports it in its telemetry. */
+    wakeId: z
+      .string()
+      .regex(/^wk_[A-Za-z0-9_-]{22}$/u)
+      .optional(),
+  })
   .strict();
 export type WakeResponse = z.infer<typeof WakeResponseSchema>;
 /**

@@ -75,6 +75,11 @@ describe("wake contract", () => {
       retryAfterMs: 5000,
     });
     expect(WakeResponseSchema.safeParse({ state: "asleep", retryAfterMs: 5000 }).success).toBe(false);
+    const wakeId = `wk_${"A".repeat(22)}`;
+    expect(WakeResponseSchema.parse({ state: "waking", retryAfterMs: 5000, wakeId }).wakeId).toBe(wakeId);
+    expect(
+      WakeResponseSchema.safeParse({ state: "waking", retryAfterMs: 5000, wakeId: "wk_short" }).success,
+    ).toBe(false);
     expect(WakeResponseSchema.safeParse({ state: "running", retryAfterMs: 0 }).success).toBe(false);
     expect(WakeErrorCodeSchema.options).toContain("budget_egress_allowance");
     expect(WakeErrorCodeSchema.safeParse("host_unavailable").success).toBe(false);
