@@ -41,6 +41,153 @@ tags:
 security: []
 
 paths:
+  /v1/model-keys:
+    get:
+      tags: [Operator]
+      operationId: listModelKeys
+      summary: List supported providers, models, stored-key status and captain selection
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. Shares the CLI model catalog
+        and config. Returns no credentials or endpoint headers. Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Secret-free model catalog and selection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeysResponse" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
+  /v1/model-keys/set:
+    post:
+      tags: [Operator]
+      operationId: setModelKey
+      summary: Store or replace a write-only provider API key
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. No key, provider error text,
+        or generated text is returned or logged. Cache-Control no-store.
+        Validation uses a fixed prompt, 16 output tokens, no retries and a 15-second
+        deadline; the provider may bill this request. Set does not validate implicitly.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelKeySetRequest" }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "400":
+          description: Malformed input, unsupported provider/model, missing key, failed or timed-out validation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "413": { description: malformed — body exceeds 16 KiB }
+        "503": { description: unavailable }
+  /v1/model-keys/validate:
+    post:
+      tags: [Operator]
+      operationId: validateModelKey
+      summary: Validate the stored key with a bounded provider call
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. No key, provider error text,
+        or generated text is returned or logged. Cache-Control no-store.
+        Validation uses a fixed prompt, 16 output tokens, no retries and a 15-second
+        deadline; the provider may bill this request. Set does not validate implicitly.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelKeyValidateRequest" }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "400":
+          description: Malformed input, unsupported provider/model, missing key, failed or timed-out validation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "413": { description: malformed — body exceeds 16 KiB }
+        "503": { description: unavailable }
+  /v1/model-keys/select:
+    post:
+      tags: [Operator]
+      operationId: selectModelKey
+      summary: Select the captain model for the next turn
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. No key, provider error text,
+        or generated text is returned or logged. Cache-Control no-store.
+        Validation uses a fixed prompt, 16 output tokens, no retries and a 15-second
+        deadline; the provider may bill this request. Set does not validate implicitly.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelSelectRequest" }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "400":
+          description: Malformed input, unsupported provider/model, missing key, failed or timed-out validation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "413": { description: malformed — body exceeds 16 KiB }
+        "503": { description: unavailable }
+  /v1/model-keys/remove:
+    post:
+      tags: [Operator]
+      operationId: removeModelKey
+      summary: Remove a stored API key without removing OAuth or environment fallback
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. No key, provider error text,
+        or generated text is returned or logged. Cache-Control no-store.
+        Validation uses a fixed prompt, 16 output tokens, no retries and a 15-second
+        deadline; the provider may bill this request. Set does not validate implicitly.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelKeyRemoveRequest" }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "400":
+          description: Malformed input, unsupported provider/model, missing key, failed or timed-out validation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "413": { description: malformed — body exceeds 16 KiB }
+        "503": { description: unavailable }
   /v1/connections:
     get:
       tags: [Operator]
@@ -1999,6 +2146,102 @@ paths:
 
 components:
   schemas:
+    ModelKeySetRequest:
+      type: object
+      additionalProperties: false
+      required: [providerId, apiKey]
+      properties:
+        providerId: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }
+        apiKey:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 8192,
+            writeOnly: true,
+            description: "Trimmed, nonempty, no control characters",
+          }
+    ModelKeyValidateRequest:
+      type: object
+      additionalProperties: false
+      required: [providerId, modelId]
+      properties:
+        providerId: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }
+        modelId: { type: string, minLength: 1, maxLength: 512 }
+    ModelSelectRequest:
+      type: object
+      additionalProperties: false
+      required: [model]
+      properties:
+        model:
+          {
+            type: string,
+            minLength: 3,
+            maxLength: 512,
+            description: "provider/model reference; split on the first slash",
+          }
+    ModelKeyRemoveRequest:
+      type: object
+      additionalProperties: false
+      required: [providerId]
+      properties:
+        providerId: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }
+    ModelKeysResponse:
+      type: object
+      additionalProperties: false
+      required: [model, effectiveModel, providers]
+      properties:
+        model: { type: [string, "null"] }
+        effectiveModel: { type: [string, "null"], description: Includes existing subscription precedence }
+        providers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, acceptsApiKey, keyConfigured, models]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              acceptsApiKey: { type: boolean }
+              keyConfigured:
+                {
+                  type: boolean,
+                  description: Only an API key stored in the broker; not OAuth or environment fallback,
+                }
+              models:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [id, name]
+                  properties:
+                    id: { type: string }
+                    name: { type: string }
+    ModelKeyResult:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [ok]
+          properties:
+            ok: { const: true }
+        - type: object
+          additionalProperties: false
+          required: [ok, error]
+          properties:
+            ok: { const: false }
+            error:
+              type: string
+              enum:
+                [
+                  authentication_required,
+                  forbidden,
+                  malformed,
+                  unsupported_provider,
+                  unsupported_model,
+                  key_missing,
+                  validation_failed,
+                  validation_timeout,
+                  unavailable,
+                ]
     LinearWorkOwnerRequest:
       type: object
       additionalProperties: false

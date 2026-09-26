@@ -78,6 +78,17 @@ container ends live workers, so reconcile persisted intents before reassigning.
 The gateway is only a portal. An absent model login, provider account, personal
 SSH setup or media binary requires configuration; it is not supplied by hosting.
 
+For a hosted body without a terminal, the paired app uses the owner model-key
+API (`docs/model-keys.md` under the service root): GET `/v1/model-keys` lists the
+same providers/models as `/model`; POST `/set`, `/validate`, `/select`, `/remove`
+under that path manage broker API keys and the captain selection. The device
+must accept **Take Control** (`terminalControl`) at pairing. Supervise cannot
+manage keys; the local operator bearer can. Public gateway calls must use the
+encrypted envelope. Keys are write-only: never ask for one in chat or put one in
+shell arguments, logs or telemetry. The stored key is validated with a bounded
+provider call that may incur a small charge; selection applies on the next
+captain turn without a restart. The same API works on a self-hosted Mac.
+
 ## Launcher control
 
 This skill is the installed agent companion to the canonical launcher command

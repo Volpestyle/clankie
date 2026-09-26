@@ -149,6 +149,42 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
 function buildNetworkRows() {
   const routeDetails = new Map([
     [
+      "GET /v1/model-keys",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read the supported model catalog, captain selection and stored-key status, never keys.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/set",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Store or replace a provider API key in the body credential broker.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/validate",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Check a stored provider key with a bounded provider request; return only a success or error code.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/select",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Choose the captain model for its next turn using the shared CLI config.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/remove",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Remove a stored provider API key without exposing it.",
+      },
+    ],
+    [
       "POST /operator/v1/artifacts/download",
       {
         access: "Encrypted device bearer plus chat grant",

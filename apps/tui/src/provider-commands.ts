@@ -1,3 +1,4 @@
+import { FEATURED_MODEL_PROVIDERS as FEATURED_PROVIDERS } from "@clankie/protocol/model-keys";
 /**
  * Provider/model configuration wizards: /auth, /provider, /model, /effort (VUH-760).
  * Guided SetupFlow modals over the registry (@clankie/model-registry), the
@@ -179,9 +180,6 @@ function piModelEntry(model: Model<any>): ModelEntry {
     modalities: { input: model.input, output: ["text"] },
   };
 }
-
-/** Providers surfaced first in /auth — everything else reachable via "other". */
-const FEATURED_PROVIDERS = ["anthropic", "openai", "xai", "google", "openrouter", "groq", "mistral"];
 
 /**
  * Non-LLM credentials that are still first-class /auth citizens. These serve

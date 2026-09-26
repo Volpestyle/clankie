@@ -446,6 +446,9 @@ See [Rivals setup and verification](rivals.md).
 
 ### `model [status]`
 
+Paired apps, including hosted bodies without a terminal, use the same catalog,
+credential broker and captain selection through the [owner model-key API](model-keys.md).
+
 Captain model and every config-declared provider. JSON:
 
 ```json

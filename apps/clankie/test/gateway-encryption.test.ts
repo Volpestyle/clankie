@@ -1,6 +1,7 @@
+import type { ModelKeysPort } from "../src/model-keys.ts";
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SUPERVISE_GRANTS } from "@clankie/protocol";
+import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@clankie/protocol";
 import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 import {
   GATEWAY_ENCRYPTED_PATH,
@@ -37,6 +38,8 @@ async function account(
         "x-content-type-options": "nosniff",
       },
     }),
+  modelKeys?: ModelKeysPort,
+  grants: DeviceGrantSet = SUPERVISE_GRANTS,
 ) {
   const hostId = derivePublicGatewayHostId(accountId, "i".repeat(22));
   const master = randomBytes(32);
@@ -46,6 +49,7 @@ async function account(
   const base = `http://127.0.0.1/h/${hostId}`;
   const app = await createClankieApp({
     captain: createStubCaptain(),
+    ...(modelKeys === undefined ? {} : { modelKeys }),
     deviceSessionKey: randomBytes(32),
     publicGatewayHostBaseUrl: base,
     authenticateOperator: async (request) =>
@@ -86,7 +90,7 @@ async function account(
   const complete = await client(`${base}/v1/pairing/complete`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ completionToken: pending.completionToken, acceptedGrants: SUPERVISE_GRANTS }),
+    body: JSON.stringify({ completionToken: pending.completionToken, acceptedGrants: grants }),
   });
   expect(complete.status).toBe(200);
   credential!.ticket = complete.headers.get("x-clankie-encryption-ticket")!;
@@ -331,4 +335,36 @@ it("counts only authorized work after decrypting, excluding polling and revoked 
   });
   expect(denied.status).toBe(401);
   expect(own.onCustomerWork).toHaveBeenCalledTimes(3);
+});
+
+it("carries model keys only in the encrypted envelope and still checks machine authority", async () => {
+  const set = vi.fn(async () => ({ ok: true as const }));
+  const models: ModelKeysPort = {
+    list: async () => ({ model: null, effectiveModel: null, providers: [] }),
+    set,
+    validate: async () => ({ ok: true }),
+    select: async () => ({ ok: true }),
+    remove: async () => ({ ok: true }),
+  };
+  const marker = "MARKER_KEY_encrypted_only_3831";
+  for (const grants of [SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS]) {
+    const own = await account("model-keys-account", undefined, models, grants);
+    const response = await own.client(`${own.base}/v1/model-keys/set`, {
+      method: "POST",
+      headers: own.headers,
+      body: JSON.stringify({ providerId: "openai", apiKey: marker }),
+    });
+    expect(response.status).toBe(grants.terminalControl ? 200 : 403);
+    expect(JSON.stringify(own.outerRequests)).not.toContain(marker);
+    expect(
+      (
+        await own.raw(`${own.base}/v1/model-keys/set`, {
+          method: "POST",
+          headers: own.headers,
+          body: JSON.stringify({ providerId: "openai", apiKey: marker }),
+        })
+      ).status,
+    ).toBe(426);
+  }
+  expect(set).toHaveBeenCalledExactlyOnceWith("openai", marker);
 });

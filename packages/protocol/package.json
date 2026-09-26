@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./public-gateway": "./src/public-gateway.ts",
     "./gateway-encryption": "./src/gateway-encryption.ts",
+    "./model-keys": "./src/model-keys.ts",
     "./wake": "./src/wake.ts",
     "./app-telemetry": "./src/app-telemetry.ts"
   },

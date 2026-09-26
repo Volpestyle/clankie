@@ -1,3 +1,4 @@
+import { TAKE_CONTROL_GRANTS } from "@clankie/protocol";
 import {
   createDecipheriv,
   createECDH,
@@ -71,9 +72,17 @@ describe("hosted pairing v2", () => {
       relayUrl: "http://127.0.0.1:4321",
     });
     const onHostedPairing = vi.fn();
+    const setModelKey = vi.fn(async () => ({ ok: true as const }));
     const app = await createClankieApp({
       captain: createStubCaptain(),
       hostedPairing: pairing,
+      modelKeys: {
+        list: async () => ({ model: null, effectiveModel: null, providers: [] }),
+        set: setModelKey,
+        validate: async () => ({ ok: true }),
+        select: async () => ({ ok: true }),
+        remove: async () => ({ ok: true }),
+      },
       onHostedPairing,
       clock: () => new Date(f.now),
       deviceSessionKey: randomBytes(32),
@@ -130,6 +139,22 @@ describe("hosted pairing v2", () => {
       }),
     });
     expect(redeemed.status).toBe(200);
+    const pending = await redeemed.json();
+    expect(pending.offeredGrants).toEqual(TAKE_CONTROL_GRANTS);
+    const completed = await app.app.request("/v1/pairing/complete", {
+      method: "POST",
+      body: JSON.stringify({ completionToken: pending.completionToken, acceptedGrants: TAKE_CONTROL_GRANTS }),
+    });
+    const device = await completed.json();
+    expect(completed.status).toBe(200);
+    expect(device.grants.terminalControl).toBe(true);
+    const setKey = await app.app.request("/v1/model-keys/set", {
+      method: "POST",
+      headers: { authorization: `Bearer ${device.deviceToken}` },
+      body: JSON.stringify({ providerId: "openai", apiKey: "hosted-owner-key" }),
+    });
+    expect(setKey.status).toBe(200);
+    expect(setModelKey).toHaveBeenCalledExactlyOnceWith("openai", "hosted-owner-key");
     // An active gateway cannot substitute any signed response field or another request/host.
     for (const field of ["ephemeralPublicKey", "iv", "ciphertext"] as const)
       expect(

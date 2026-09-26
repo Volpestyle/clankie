@@ -1,3 +1,5 @@
+import { createModelKeyRoutes } from "./model-key-routes.ts";
+import type { ModelKeysPort } from "./model-keys.ts";
 import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
 import type { HostedPairing } from "./hosted-pairing.ts";
 import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
@@ -351,6 +353,7 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
+  modelKeys?: ModelKeysPort;
   hostedPairing?: HostedPairing;
   onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
@@ -636,6 +639,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (denial.denied === "expired") return context.json({ error: "expired" }, 401);
     return context.json({ error: "device_authentication_required" }, 401);
   };
+
+  app.route(
+    "/",
+    createModelKeyRoutes(dependencies.modelKeys, async (request) => {
+      const operator = await authenticateOperator(request, dependencies);
+      if (operator && operator !== "unavailable") return true;
+      const device = await authenticateDevice(request);
+      if (device === "unavailable" || "denied" in device) return "authentication_required";
+      return device.grants.terminalControl ? true : "forbidden";
+    }),
+  );
 
   /** Captain or authenticated operator, for reads the owner should never have to authorize. */
   const authenticateCaptainOrOperator = async (

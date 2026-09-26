@@ -1,3 +1,4 @@
+import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { watchHostedHerdrWork } from "./hosted-work.ts";
@@ -636,6 +637,7 @@ const captain = createCaptain(
 );
 
 const clankie = await createClankieApp({
+  modelKeys: createModelKeys({ store: operatorCredentialStore, cwd: repoRoot }),
   ...(hostedPairing === undefined
     ? {}
     : { hostedPairing, onHostedPairing: () => hostedHeartbeat?.interactive() }),

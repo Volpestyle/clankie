@@ -1,3 +1,10 @@
+import {
+  MODEL_KEYS_PATH,
+  MODEL_KEY_SET_PATH,
+  MODEL_KEY_VALIDATE_PATH,
+  MODEL_SELECT_PATH,
+  MODEL_KEY_REMOVE_PATH,
+} from "./model-keys.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./index.ts";
@@ -27,6 +34,11 @@ export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
 export const HOSTED_PAIR_OFFER_PATH = "/v1/hosted/pair-offer";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  { method: "GET", path: MODEL_KEYS_PATH, target: "control" },
+  { method: "POST", path: MODEL_KEY_SET_PATH, target: "control" },
+  { method: "POST", path: MODEL_KEY_VALIDATE_PATH, target: "control" },
+  { method: "POST", path: MODEL_SELECT_PATH, target: "control" },
+  { method: "POST", path: MODEL_KEY_REMOVE_PATH, target: "control" },
   { method: "GET", path: "/v1/gateway/challenge", target: "control" },
   { method: "POST", path: "/v1/gateway/encrypted", target: "control" },
   { method: "POST", path: "/v1/gateway/push-authorize", target: "control" },
