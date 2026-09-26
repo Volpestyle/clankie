@@ -49,11 +49,55 @@ grant shell permissions, install a plugin, or select interactive Swarm mode.
 For the future worker package, the proposed exact identity is
 `clankie-worker@clankie`, separate from the operator-seat `clankie@clankie`.
 [managed-settings.worker-proposed.json](managed-settings.worker-proposed.json)
-contains that pair. **That worker plugin is not implemented or installed yet.**
+contains that pair plus `clankie@clankie` to preserve the operator seat explicitly. **That worker plugin is not implemented or installed yet.**
 Do not use the production snippet as evidence that this probe is allowed; the
 identities intentionally differ. Repeat the readiness probe against the shipped
 worker's actual code and identity before changing the runtime default.
 The allowlist identifies a plugin and marketplace, not a pinned code version.
+
+## Preserve the operator seat and other channels
+
+The [official channel policy](https://code.claude.com/docs/en/channels#restrict-which-channel-plugins-can-run)
+says the development flag can bypass even an empty plugin allowlist when channels
+are enabled. That predicts the existing seat will keep receiving events with
+`--dangerously-load-development-channels plugin:clankie@clankie`, but **we have
+not measured that under managed policy**. The seat coexistence test below is
+required before retaining the policy or enabling unattended workers.
+
+If the seat stops receiving events, the owner must restore the previous policy
+first, then explicitly add this entry for the next coordinated trial:
+
+```json
+{ "marketplace": "clankie", "plugin": "clankie" }
+```
+
+[managed-settings.probe-with-seat.json](managed-settings.probe-with-seat.json)
+contains the complete probe-plus-seat policy. Retain any other owner-approved
+entries when merging it. Adding the seat is required if omission breaks delivery,
+but is not itself proof of recovery: repeat the event checks and restore the
+prior policy if they still fail. Keep the seat's existing development launch flag
+for this compatibility test; do not switch its transport or copy its bearer into
+the worker fixture. The proposed production policy includes the seat explicitly
+regardless of the bypass result.
+
+The read-only `claude plugin list --json` inventory on 2026-09-26 found none of
+these official channel plugins installed. The fakechat state directory remains
+from the earlier test, but its plugin was uninstalled; a directory is not an
+active channel. No credentials were read. Recheck the inventory with James before
+applying policy, including channel use from other projects or sessions.
+
+| Preserve if James uses it        | Exact additional allowlist entry                                     |
+| -------------------------------- | -------------------------------------------------------------------- |
+| Telegram                         | `{ "marketplace": "claude-plugins-official", "plugin": "telegram" }` |
+| Discord                          | `{ "marketplace": "claude-plugins-official", "plugin": "discord" }`  |
+| iMessage                         | `{ "marketplace": "claude-plugins-official", "plugin": "imessage" }` |
+| Local fakechat demo, if retained | `{ "marketplace": "claude-plugins-official", "plugin": "fakechat" }` |
+
+These are the official channels documented at the time of the check, not an
+exhaustive frozen default allowlist. Preserve any other channel James identifies.
+The installed Expo, Figma and Swift LSP plugins are not these chat channels; they
+do not need entries merely to retain their ordinary tools. Clankie's own Discord
+body is also separate from the official Claude Code Discord channel plugin.
 
 ## Owner-run steps
 
@@ -65,7 +109,18 @@ python3 docs/testing/2026-09-26-interactive-swarm-workers/managed-channel-probe.
   --dir /tmp/clankie-managed-channel-probe
 ```
 
-James reviews the snippet and fixture, then applies/merges the policy himself.
+Before applying policy, the seat lead records a baseline from the actual
+`clankie@clankie` development-channel seat: one harmless Clankie wake, one
+`herdr_watch` settlement from an owned probe, and one Swarm envelope. Give each
+an identifiable nonce, retain its source event/message ID and emission/receipt
+timestamps, and observe the seat consume it through the channel. Arrange these
+through the existing service/Swarm producers, not pasted terminal prompts. A
+Herdr prompt response alone does not establish channel delivery. The lead owns
+this check and keeps a terminal available independently of the seat channel for
+recovery. Do not restart the live seat or service just to prepare this experiment.
+
+James reviews the snippet, preserve list and fixture, then applies/merges the
+policy himself.
 **Only if the policy file is still absent**, these are the exact owner commands;
 they are supplied for review and have not been run:
 
@@ -79,6 +134,25 @@ sudo install -m 0644 \
 If policy already exists, back it up and merge the exact entry instead. Keep its
 original contents for restoration. Coordinate this machine-wide change with the
 fleet lead; file policy can reload in existing sessions.
+
+After application, the seat lead verifies the effective managed source under
+`/status` and repeats all three baseline events while the seat is idle. Record
+the active policy's exact allowlist, the unchanged development launch flag, and
+actual channel receipts. Check again after the two worker-probe launches below.
+Policy observation/reload must be established first; success in a session that
+has not loaded the new policy is not a pass. Include a fresh seat launch and
+repeat the same events at a restart window the lead coordinates; a hot-reload
+result alone does not establish future startup compatibility. Human confirmation
+of the seat's existing development dialog is allowed; it does not satisfy the
+worker's unattended-consent criterion.
+
+If any seat event fails or policy adoption is uncertain, stop the trial and have
+James restore the prior policy; do not leave a disconnected lead to recover via
+the same channel. Test the explicit probe-plus-seat policy only in a coordinated
+second window, then repeat both seat and worker checks. Do not declare success
+until the final policy passes all checks. Save the baseline and policy-enabled
+seat receipts alongside the worker evidence; this coexistence evidence is still
+pending, not implied by the official docs.
 
 In an owned interactive terminal, start the fixture:
 
@@ -125,7 +199,7 @@ lead. Do not delete the policy directory or any unrelated policy entries.
 
 ## Decision after the probe
 
-If both runs pass, owner-managed approval of the exact installed worker plugin is
+If both worker runs and the seat coexistence checks pass, owner-managed approval of the exact installed worker plugin is
 the **preferred unattended interactive path**. The owner must then opt in through
 Clankie's runtime mode setting once the actual worker integration passes its
 readiness, capability, heartbeat and recovery tests. Until then, `stream` remains

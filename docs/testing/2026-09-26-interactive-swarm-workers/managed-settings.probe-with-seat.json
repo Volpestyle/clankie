@@ -2,8 +2,8 @@
   "channelsEnabled": true,
   "allowedChannelPlugins": [
     {
-      "marketplace": "clankie",
-      "plugin": "clankie-worker"
+      "marketplace": "swarm-channel-consent-probe",
+      "plugin": "swarm-probe"
     },
     {
       "marketplace": "clankie",

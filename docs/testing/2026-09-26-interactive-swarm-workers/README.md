@@ -141,7 +141,10 @@ until the owner opts in and the actual worker passes readiness, isolation and
 lifecycle tests. See [the managed-consent plan](managed-consent.md), exact
 [probe policy](managed-settings.probe.json), proposed
 [worker policy](managed-settings.worker-proposed.json), and
-[owner-run probe script](managed-channel-probe.py). No managed policy was applied.
+[owner-run probe script](managed-channel-probe.py). No managed policy was applied. The plan also requires real wake/watch/Swarm
+receipts from the development-channel operator seat after policy adoption and
+at a coordinated fresh launch. It includes an explicit seat-preserving fallback
+and the optional official-channel entries; these coexistence checks remain pending.
 The script's syntax, local plugin install/cleanup, and refusal to launch without
 policy were checked; the positive managed-policy round-trip remains pending James's
 action. The [official deployment guide](https://code.claude.com/docs/en/managed-settings)

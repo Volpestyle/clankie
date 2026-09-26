@@ -80,7 +80,11 @@ unattended interactive path if the prepared probe passes**. The proposed worker
 identity is `clankie-worker@clankie`, separate from the operator-seat plugin; it
 is not implemented yet. First prove persistent consent with two fresh sessions
 of the isolated custom-plugin fixture, then repeat readiness against the actual
-worker package. Stream remains the default until the owner explicitly opts in
+worker package. The policy must also preserve the operator seat: verify actual
+wake, watch and Swarm channel receipts after policy adoption and a coordinated
+fresh seat launch. If the development flag does not preserve delivery by itself,
+the owner must explicitly allow `clankie@clankie` and repeat the checks. Preserve
+any official channels the owner uses; the managed list replaces the default list. Stream remains the default until the owner explicitly opts in
 and the production worker passes capability/lifecycle tests. Do not install or
 edit managed policy as an implicit side effect of dispatch or runtime settings.
 Normal workspace trust or tool permissions can still block either interactive
