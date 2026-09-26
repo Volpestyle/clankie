@@ -242,7 +242,9 @@ Signed requests retain the bearer credential and add `x-clankie-body-timestamp`
 `x-clankie-body-signature` (Ed25519, base64url). The signature covers eight UTF-8
 lines with no trailing newline: `clankie-body-request-v1`, `POST`, path only,
 tenant id, installation id, timestamp header, nonce header, and the base64url
-SHA-256 digest of the exact request body bytes. Every retry gets a fresh nonce
+SHA-256 digest of the exact request body bytes. That digest is also sent as
+`x-clankie-body-digest`, so a verifier can check the signature before reading
+the body; the fleet's model proxy requires it. Every retry gets a fresh nonce
 and timestamp. The fleet allows five minutes of clock skew and accepts each
 nonce once. A `401 body_signature_invalid` gets at most three attempts, then
 emits only that error code; check clock skew or a pairing-key mismatch.

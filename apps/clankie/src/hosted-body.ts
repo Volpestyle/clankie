@@ -242,6 +242,7 @@ export class HostedBodyClient {
     const pathname = `/fleet/v1/body/${path}`;
     // Serialize once: the digest must cover exactly the bytes fetch sends, including on retry.
     const bytes = JSON.stringify(body);
+    const digest = createHash("sha256").update(bytes).digest("base64url");
     let registeredAgain = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (!registration) await this.pairingRegistration;
@@ -262,10 +263,12 @@ export class HostedBodyClient {
           this.bootstrap.installationId,
           timestamp,
           nonce,
-          createHash("sha256").update(bytes).digest("base64url"),
+          digest,
         ].join("\n");
         headers["x-clankie-body-timestamp"] = timestamp;
         headers["x-clankie-body-nonce"] = nonce;
+        // The transcript's last line, ahead of the body, so the fleet can verify before reading it.
+        headers["x-clankie-body-digest"] = digest;
         headers["x-clankie-body-signature"] = sign(null, Buffer.from(transcript), this.pairingKey).toString(
           "base64url",
         );

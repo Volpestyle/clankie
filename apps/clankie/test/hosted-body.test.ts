@@ -180,6 +180,9 @@ function verifyCall(url: string | URL | Request, init: RequestInit | undefined, 
   expect(signature).toMatch(/^[A-Za-z0-9_-]{86}$/u);
   expect(init?.method).toBe("POST");
   expect(typeof init?.body).toBe("string");
+  // The transcript's last line, sent ahead of the body so the fleet can verify before reading it.
+  const digest = createHash("sha256").update(String(init?.body)).digest("base64url");
+  expect(headers.get("x-clankie-body-digest")).toBe(digest);
   const transcript = Buffer.from(
     [
       "clankie-body-request-v1",
@@ -189,7 +192,7 @@ function verifyCall(url: string | URL | Request, init: RequestInit | undefined, 
       f.bootstrap.installationId,
       timestamp,
       nonce,
-      createHash("sha256").update(String(init?.body)).digest("base64url"),
+      digest,
     ].join("\n"),
   );
   expect(verify(null, transcript, key, Buffer.from(signature!, "base64url"))).toBe(true);
