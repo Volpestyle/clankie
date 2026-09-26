@@ -105,6 +105,32 @@ describe("loadBundledCatalog", () => {
       { type: "effort", values: ["none", "low", "medium", "high", "xhigh", "max"] },
     ]);
   });
+
+  // The other models hosted plans and routing name, because model-key telemetry
+  // prices calls from these bundled costs. Standard tier per 1M tokens, from
+  // https://developers.openai.com/api/docs/pricing, checked 2026-09-26; the long
+  // tier is the page's long-context column (above 272K input tokens).
+  // gpt-6-astra is the frontier model routing may escalate to; gpt-5.6-luna is
+  // the model proxy's second default; gpt-5.4-nano prices Discord ambient
+  // presence in the plan design.
+  it.each([
+    {
+      id: "gpt-6-astra",
+      cost: { input: 10, cache_read: 1, cache_write: 12.5, output: 50 },
+      long: { input: 20, cache_read: 2, cache_write: 25, output: 75 },
+    },
+    {
+      id: "gpt-5.6-luna",
+      cost: { input: 0.2, cache_read: 0.02, cache_write: 0.25, output: 1.2 },
+      long: { input: 0.4, cache_read: 0.04, cache_write: 0.5, output: 1.8 },
+    },
+    { id: "gpt-5.4-nano", cost: { input: 0.2, cache_read: 0.02, output: 1.25 }, long: undefined },
+  ])("ships $id at OpenAI's published prices", ({ id, cost, long }) => {
+    const model = must(loadBundledCatalog()["openai"]?.models[id], id);
+    expect(model.cost).toMatchObject(cost);
+    if (long === undefined) expect(model.cost?.tiers ?? []).toEqual([]);
+    else expect(model.cost?.tiers).toEqual([{ ...long, tier: { type: "context", size: 272_000 } }]);
+  });
 });
 
 describe("createModelRegistry", () => {

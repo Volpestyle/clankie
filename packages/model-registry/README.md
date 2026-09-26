@@ -31,11 +31,12 @@ The default cache dir is `${XDG_CACHE_HOME ?? ~/.cache}/clankie`.
 curl https://models.dev/api.json > packages/model-registry/data/models-dev-snapshot.json
 ```
 
-Run that command from the repository root.
+Run that command from the repository root. Last vendored 2026-09-26.
 
-The vendored snapshot predates some current models. `openai/gpt-6-luna`, the
-hosted default, was added by hand on 2026-09-26 from models.dev's entry, with
-prices checked against [OpenAI's pricing page](https://developers.openai.com/api/docs/pricing):
-$0.10 input, $0.01 cached input, $0.125 cache write and $0.50 output per 1M
-tokens, with 2x input/cache and 1.5x output above 272K input tokens. A full
-re-vendor supersedes it.
+The bundled costs are what model-key telemetry prices calls with, so the models
+hosted plans and routing name are pinned to the provider's published prices in
+`test/model-registry.test.ts`: `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-luna` and
+`gpt-5.4-nano`, checked against [OpenAI's pricing page](https://developers.openai.com/api/docs/pricing).
+A re-vendor that moves one of them fails the test. Check the page: update the
+pin if the provider changed its price, or keep the old snapshot if models.dev
+is wrong. The previous snapshot listed `gpt-5.6-luna` at 5x its price.
