@@ -111,7 +111,7 @@ describe("routing on a real Pi session", () => {
         purpose: "discord_social",
         tier: "routine",
         ref: "faux/routine-model",
-        escalation: { ref: "faux/work-model", turnLimit: 10 },
+        escalation: { ref: "faux/work-model", turnLimit: 10, onProviderError: true },
       },
       selection: selection(models.routine),
       resolveEscalation: () => Promise.resolve(selection(models.work)),
@@ -128,6 +128,28 @@ describe("routing on a real Pi session", () => {
     ]);
     // One user message: escalation continued the run rather than replaying it.
     expect(pi.session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+  });
+
+  it("moves a work turn to the stronger model when he asks, and not before", async () => {
+    const pi = await piSession((models) => ({
+      route: {
+        purpose: "operator",
+        tier: "work",
+        ref: "faux/routine-model",
+        escalation: { ref: "faux/work-model", onProviderError: false },
+      },
+      selection: selection(models.routine),
+      resolveEscalation: () => Promise.resolve(selection(models.work)),
+    }));
+    pi.core.setResponses([
+      fauxAssistantMessage("thinking about the approach"),
+      fauxAssistantMessage(fauxToolCall(ESCALATE_TOOL_NAME, { reason: "careful design" })),
+      fauxAssistantMessage("designed on the stronger model"),
+    ]);
+    await pi.session.prompt("first, a quick question");
+    await pi.session.prompt("now design the parametric gear generator");
+    expect(pi.calls).toEqual(["routine-model", "routine-model", "work-model"]);
+    expect(pi.escalations.map((record) => record.trigger)).toEqual(["asked"]);
   });
 
   it("keeps a non-escalating routine run on the routine model for every call", async () => {
@@ -150,7 +172,7 @@ describe("routing on a real Pi session", () => {
         purpose: "discord_social",
         tier: "routine",
         ref: "faux/routine-model",
-        escalation: { ref: "faux/work-model", turnLimit: 10 },
+        escalation: { ref: "faux/work-model", turnLimit: 10, onProviderError: true },
       },
       selection: selection(models.routine),
       resolveEscalation: () => Promise.resolve(selection(models.work)),

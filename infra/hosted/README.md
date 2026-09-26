@@ -158,8 +158,12 @@ bootstrap fields.
 
 The optional `modelRouting` is the plan's task-based model routing
 ([ADR 0192](../../docs/adr/0192-model-routing-by-kind-of-task.md)):
-`{ "routineModel": "clankie/routine", "escalate": false }`, with an optional
-`escalationModel`. It applies only while the body runs on included usage (see
+`{ "routineModel": "clankie/default", "escalate": false }`, with an optional
+`escalationModel`. The fleet writes it per plan (VUH-1391): Starter as shown, Pro
+with `"escalate": true, "escalationModel": "clankie/escalation"`. Routine
+purposes run on `clankie/default` because luna is already the cheapest good
+model measured; the proxy's `routine` alias is unused on purpose. A Pro turn
+reaches the escalation model only when Clankie calls `escalate`. It applies only while the body runs on included usage (see
 "Included model usage" below). Then, at every start and whenever the body
 returns to included usage, the body writes it over its own routing settings
 (routine model, escalation and escalation model; the owner's purpose

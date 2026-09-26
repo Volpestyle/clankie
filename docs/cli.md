@@ -678,7 +678,7 @@ next turn (the next play session for `gameplay`); no restart is needed.
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `model routing set providerId/modelId`                        | Choose the routine model; turns routing on                                                  |
 | `model routing off`                                           | Remove the routine model; every purpose returns to `model`. Other routing settings are kept |
-| `model routing escalate on\|off [--model providerId/modelId]` | Let a routine turn move to the escalation model (default: `model`) once per turn            |
+| `model routing escalate on\|off [--model providerId/modelId]` | Let a turn move to the escalation model once per turn (routine turns default to `model`)    |
 | `model routing purpose PURPOSE routine\|work\|default`        | Override one purpose's tier                                                                 |
 | `model routing turn-limit N\|default`                         | Model calls a routine turn may make before it escalates as looping (default 12)             |
 
@@ -687,9 +687,13 @@ of that turn when he calls `escalate`, when it reaches the turn limit, or when
 the routine model fails with an error the runtime retries (the retry runs on
 the escalation model). A permanent error does not escalate. A routine model that
 cannot be served fails the turn by name; it never falls back to the work
-model. Effort is per model ref, so `clankie effort set LEVEL --model REF` sets
-the routine model's effort. Hosted bodies receive routing from the fleet at
-start. The console's `/routing` takes the same arguments.
+model. A work turn (operator, granted Discord, gameplay) escalates too when
+escalation is on and `--model` names a model other than the captain model, but
+only when he calls `escalate`: never on the turn limit or a provider error, since
+long work is normal there. This works without a routine model. Effort is per
+model ref, so `clankie effort set LEVEL --model REF` sets the routine model's
+effort. Hosted bodies receive routing from the fleet at start. The console's
+`/routing` takes the same arguments.
 
 ### `model compaction [status]` / `model compaction set TOKENS` / `model compaction default`
 

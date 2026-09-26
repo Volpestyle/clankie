@@ -1,4 +1,4 @@
-import type { ModelPurpose } from "@clankie/model-provider";
+import type { ModelEscalation, ModelPurpose } from "@clankie/model-provider";
 import { isRetryableAssistantError, type AssistantMessage } from "@earendil-works/pi-ai/compat";
 import { defineTool, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -29,34 +29,42 @@ export const ESCALATE_TOOL_NAME = "escalate";
  * are testable without a model.
  */
 export class RoutineRunBudget {
+  private allowed = false;
   private limit: number | undefined;
+  private onProviderError = false;
   private calls = 0;
   private escalated = false;
 
-  /** Starts a run. An undefined limit is a run that may not escalate at all. */
-  public start(limit: number | undefined): void {
-    this.limit = limit;
+  /**
+   * Starts a run. Absent, the run may not escalate at all. A routine run gets
+   * a call limit and escalates on a retryable provider error; a work run has
+   * neither and escalates only when he asks.
+   */
+  public start(escalation: Pick<ModelEscalation, "turnLimit" | "onProviderError"> | undefined): void {
+    this.allowed = escalation !== undefined;
+    this.limit = escalation?.turnLimit;
+    this.onProviderError = escalation?.onProviderError ?? false;
     this.calls = 0;
     this.escalated = false;
   }
 
   public get canEscalate(): boolean {
-    return this.limit !== undefined && !this.escalated;
+    return this.allowed && !this.escalated;
   }
 
   public get hasEscalated(): boolean {
     return this.escalated;
   }
 
-  /** Counts one finished model call; `looping` once the limit is reached. */
+  /** Counts one finished model call; `looping` once a routine run reaches its limit. */
   public modelCallEnded(): EscalationTrigger | undefined {
     this.calls += 1;
-    return this.canEscalate && this.calls >= (this.limit ?? Infinity) ? "looping" : undefined;
+    return this.canEscalate && this.limit !== undefined && this.calls >= this.limit ? "looping" : undefined;
   }
 
   /** Only an error Pi will retry escalates: the retry is what runs on the bigger model. */
   public modelCallFailed(retryable: boolean): EscalationTrigger | undefined {
-    return this.canEscalate && retryable ? "provider_error" : undefined;
+    return this.canEscalate && this.onProviderError && retryable ? "provider_error" : undefined;
   }
 
   /** Takes the run's one escalation; false when it is spent or never existed. */
@@ -67,7 +75,7 @@ export class RoutineRunBudget {
   }
 }
 
-/** What he is told when a turn runs on the routine model and may escalate. */
+/** What he is told when a turn runs on the routine model, and whether it may escalate. */
 function routineCard(routed: RoutedSelection): string {
   return [
     "## This turn's model",
@@ -79,10 +87,24 @@ function routineCard(routed: RoutedSelection): string {
 }
 
 /**
+ * What he is told when a work turn may escalate (VUH-1391). The judgement is
+ * his: nothing here decides for him, and nothing escalates a work turn but
+ * his own call.
+ */
+function workEscalationCard(routed: RoutedSelection): string {
+  return [
+    "## A stronger model, when you need it",
+    `This turn runs on \`${routed.selection.ref}\`. If the task needs more than it can give — hard reasoning, a subtle bug, careful design, anything where a better answer is worth the cost — call \`${ESCALATE_TOOL_NAME}\` and the rest of this turn runs on \`${routed.route.escalation?.ref ?? "your stronger model"}\`.`,
+    "It costs more, so use it when the work warrants it, not by habit. Once per turn; the next turn starts back here.",
+  ].join("\n");
+}
+
+/**
  * Task-based routing inside a Pi session. The session starts each run on the
  * model its purpose routes to (`syncModel` in captain.ts); this extension is
- * the only thing that ever moves a routine run off it, and only onto the
- * escalation model, once. Pi reads the session model before every model call,
+ * the only thing that ever moves a run off it, and only onto the escalation
+ * model, once: a routine run when he asks, loops or hits a retryable error; a
+ * work run only when he asks. Pi reads the session model before every model call,
  * so a swap here takes effect on the next call of the same run without
  * replaying the turn, and Pi's own retry of a failed call runs on it too.
  * The swap is recorded in the session file and reported to `onEscalated`.
@@ -145,8 +167,9 @@ export function captainRoutingExtension(input: {
           name: ESCALATE_TOOL_NAME,
           label: "Escalate this turn",
           description:
-            "Hand the rest of this turn to your bigger model when it turns out to be real work: code, a multi-step " +
-            "investigation, leading agents, or a question your routine model cannot answer well. Once per turn.",
+            "Hand the rest of this turn to your stronger model when the task needs more than the current one can " +
+            "give: real work on a routine turn, or on a work turn hard reasoning, a subtle bug, careful design. " +
+            "Once per turn; it costs more.",
           parameters: Type.Object({
             reason: Type.Optional(Type.String({ maxLength: 500 })),
           }),
@@ -166,10 +189,14 @@ export function captainRoutingExtension(input: {
       pi.on("before_agent_start", async (event) => {
         routed = input.current();
         const escalation = routed?.resolveEscalation === undefined ? undefined : routed.route.escalation;
-        budget.start(escalation?.turnLimit);
+        budget.start(escalation);
         setToolActive(escalation !== undefined);
-        if (routed === undefined || routed.route.tier !== "routine") return undefined;
-        return { systemPrompt: `${event.systemPrompt}\n\n${routineCard(routed)}` };
+        if (routed === undefined) return undefined;
+        if (routed.route.tier === "routine") {
+          return { systemPrompt: `${event.systemPrompt}\n\n${routineCard(routed)}` };
+        }
+        if (escalation === undefined) return undefined;
+        return { systemPrompt: `${event.systemPrompt}\n\n${workEscalationCard(routed)}` };
       });
 
       pi.on("turn_end", async () => {
