@@ -1275,6 +1275,41 @@ describe("hiring a seat", () => {
     store.close();
   });
 
+  it("installs herdr's pi integration before a pi hire, and only for pi", async () => {
+    const installPiIntegration = vi.fn(() => Promise.resolve());
+    const startAgent = vi.fn(() => Promise.resolve());
+    const piHired: HerdrAgentSnapshot = {
+      ...hired,
+      agent: "pi",
+      session: { source: "herdr:pi", kind: "path", value: "/state/home/.pi/agent/sessions/one.jsonl" },
+    };
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(piHired)),
+      resolveTerminal: vi.fn(() => Promise.resolve(piHired)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      startAgent,
+      installPiIntegration,
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "Worker",
+      workingDirectory: tmpdir(),
+    });
+
+    expect(result).toMatchObject({ outcome: "spawned" });
+    expect(installPiIntegration).toHaveBeenCalledOnce();
+    expect(installPiIntegration.mock.invocationCallOrder[0]).toBeLessThan(
+      startAgent.mock.invocationCallOrder[0]!,
+    );
+    await store.spawnSeat({ schemaVersion: 1, harness: "codex", title: "Other", workingDirectory: tmpdir() });
+    expect(installPiIntegration).toHaveBeenCalledOnce();
+    store.close();
+  });
+
   it("clears the development-channels dialog and proceeds as if start succeeded", async () => {
     const claudeHired: HerdrAgentSnapshot = {
       ...hired,

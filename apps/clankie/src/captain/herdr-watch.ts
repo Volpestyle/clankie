@@ -9,7 +9,8 @@ import {
   watchFile,
   writeFileSync,
 } from "node:fs";
-import { dirname } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
 import {
@@ -127,6 +128,12 @@ export interface HerdrWatchRunner {
   }): Promise<void>;
   /** `claude mcp add -s user <name> -- clankie mcp --seat`. Already-exists is success. */
   addClaudeMcp?(name: string): Promise<void>;
+  /**
+   * `herdr integration install pi`: the pi extension that reports each pi
+   * session to herdr. Without it herdr never learns a pi pane's session, so a pi
+   * hire has no durable identity. Idempotent.
+   */
+  installPiIntegration?(): Promise<void>;
   /**
    * `herdr agent send-keys`, falling back to `herdr pane send-keys` when the
    * pane is not classified as an agent yet.
@@ -404,6 +411,13 @@ export function createHerdrWatchRunner(available?: () => boolean): HerdrWatchRun
       }
     },
     closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
+    installPiIntegration: async () => {
+      // herdr refuses a missing default extensions directory ("install pi
+      // first"), which is exactly a fresh home such as a hosted body's.
+      const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
+      mkdirSync(join(agentDir, "extensions"), { recursive: true });
+      await runHerdr(["integration", "install", "pi"]);
+    },
     addClaudeMcp: async (name) => {
       const result = await runClaude(["mcp", "add", "-s", "user", name, "--", "clankie", "mcp", "--seat"]);
       if (!fleetSeatMcpAddSucceeded(result)) {
@@ -711,6 +725,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     try {
       if (input.harness === "claude") await this.ensureClaudeSeatMcp();
+      // A pi seat's durable identity is the session its herdr extension
+      // reports; make sure the extension is there before starting one.
+      if (input.harness === "pi") await this.runner.installPiIntegration?.();
       const subject = subjectOverride ?? herdrAgentName(input.title);
       // A model or effort the harness cannot take fails the hire typed, before
       // herdr is asked to start anything — the alternative is a hire that

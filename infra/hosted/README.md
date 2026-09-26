@@ -28,8 +28,8 @@ flowchart LR
 
 Run these commands from the repository on a Docker host with Compose v2.
 The build supports Linux arm64 and x64; the retained smoke proof names the tested
-architecture. It installs pinned Node, Claude Code and the verified official Herdr
-binary. The existing release bundler produces compiled entrypoints, shipped skills,
+architecture. It installs pinned Node, Claude Code, pi and the verified official
+Herdr binary. The existing release bundler produces compiled entrypoints, shipped skills,
 plugins and dependency license inventory. No local credential/configuration files
 or `node_modules` enter the allowlisted build context.
 
@@ -43,6 +43,9 @@ The last command opens the TUI as a portal to the already-running service. Use
 `/auth` to connect model credentials, `/model` to choose the captain's model and
 `/connect` for connected services. Claude workers use Claude Code's own supported
 login: run `exec captain claude` through the same Compose command to authenticate.
+Pi workers use pi's own provider configuration under `/state/home/.pi/agent`
+(`exec captain pi`, then `/login`). Clankie installs Herdr's pi integration there
+before each pi hire; the session it reports is the seat's durable identity.
 Model billing and connected-service delegation are separate: connecting Linear
 does not authenticate a worker's model, and a worker login grants no Linear tools.
 The pinned npm installation follows the [Claude setup documentation](https://code.claude.com/docs/en/setup#install-with-npm).
@@ -118,7 +121,9 @@ node scripts/smoke-hosted.mjs
 The smoke creates and removes two isolated Compose deployments. A real Claude
 process in Herdr executes a file tool under canned, local model responses after
 an assignment through Clankie's MCP/Swarm path. The captain also completes a
-conversation through its compiled model client. It checks non-root execution,
+conversation through its compiled model client, then hires a real pi worker with
+`hire_agent`; the seat must carry Herdr's pi session and the worker completes a
+turn. It checks non-root execution,
 private broker files, distinct owner credentials/workspaces, and preservation of
 settings, credentials and work after container replacement. It never authenticates
 to a real model/provider or reads the operator's accounts.
