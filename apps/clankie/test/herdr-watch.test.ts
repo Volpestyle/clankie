@@ -168,6 +168,40 @@ describe("HerdrWatchStore", () => {
     second.close();
   });
 
+  it("retains a watch when shutdown kills its wait before the store closes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-interrupted-"));
+    roots.push(root);
+    const path = join(root, "herdr-watches.json");
+    const wake = vi.fn(async () => undefined);
+    const wait = vi.fn(async () => {
+      throw new Error("Command failed: herdr agent wait");
+    });
+    const first = new HerdrWatchStore(path, {
+      runner: {
+        get: async () => working,
+        resolveTerminal: async () => working,
+        wait,
+      },
+    });
+    first.start(wake);
+    await first.watch("global-default", "w18:p1", "Keep observing through restart");
+    await vi.waitFor(() => expect(wait).toHaveBeenCalledOnce());
+    expect(wake).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(path, "utf8")).watches).toHaveLength(1);
+    first.close();
+    const second = new HerdrWatchStore(path, {
+      runner: {
+        get: async () => done,
+        resolveTerminal: async () => done,
+        wait: async () => done,
+      },
+    });
+    second.start(wake);
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
+    expect(wake).toHaveBeenCalledWith("global-default", expect.stringContaining("agent status done"));
+    second.close();
+  });
+
   it("returns an already-settled pane instead of arming a redundant watcher", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-done-"));
     roots.push(root);

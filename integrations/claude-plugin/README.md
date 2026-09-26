@@ -140,3 +140,16 @@ and redacts on the Claude host, while the service deduplicates retries and pins
 the native session to one conversation. Ordinary plugin use without the launcher
 session binding does not publish. See [CLI sync contract](../../docs/cli.md#native-seat-transcript-sync)
 and [Claude hook input](https://code.claude.com/docs/en/hooks#common-input-fields).
+
+### Service restarts
+
+The operator bridge renews its MCP session after an explicit `unknown_session`
+rejection and retries that rejected request once. Concurrent requests share the
+new session. Network failures and lost tool results are not replayed because the
+tool may already have run. Persisted Herdr watches retain their stable terminal
+identity when a wait process fails, retry observation, and resume on service start.
+A failed wait is not treated as agent completion.
+
+An already-running bridge must be reloaded once to pick up this implementation:
+reconnect the plugin's **operator** MCP server (`clankie mcp --lane operator`),
+not only the separate fleet mailbox (`clankie mcp --seat`).

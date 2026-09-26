@@ -314,7 +314,7 @@ export async function pumpSeatEvents(
 }
 
 /** Opens the service's `/v1/mcp` as a client and its seat outbox; the bearer rides every request. */
-async function connectLaneUpstream(input: {
+export async function connectLaneUpstream(input: {
   readonly host: string;
   readonly bearer: string;
   readonly conversationId?: string;
@@ -327,31 +327,89 @@ async function connectLaneUpstream(input: {
     if (input.conversationId !== undefined) url.searchParams.set("conversationId", input.conversationId);
     return url;
   };
-  const client = new Client(SEAT_CLIENT, { capabilities: {} });
-  const transport = new StreamableHTTPClientTransport(urlFor("/v1/mcp"), {
-    requestInit: { headers },
-  });
-  // Same boundary cast as the service's own MCP host: the SDK's transports do
-  // not satisfy its `Transport` interface under exactOptionalPropertyTypes.
-  await client.connect(transport as unknown as Transport, { timeout: REQUEST_TIMEOUT_MS });
+  class ExpiredSeatSession extends Error {}
+  let closed = false;
+  const connect = async () => {
+    const next = new Client(SEAT_CLIENT, { capabilities: {} });
+    const transport = new StreamableHTTPClientTransport(urlFor("/v1/mcp"), {
+      requestInit: { headers },
+      fetch: async (url, init) => {
+        const response = await fetchImpl(url, init);
+        // This explicit rejection happens before tool admission. Network errors,
+        // generic 404s and lost results must never replay a potentially run tool.
+        if (init?.method === "POST" && response.status === 404) {
+          const body: unknown = await response
+            .clone()
+            .json()
+            .catch(() => undefined);
+          if (
+            typeof body === "object" &&
+            body !== null &&
+            "error" in body &&
+            body.error === "unknown_session"
+          ) {
+            throw new ExpiredSeatSession("The service restarted its MCP session");
+          }
+        }
+        return response;
+      },
+    });
+    try {
+      await next.connect(transport as unknown as Transport, { timeout: REQUEST_TIMEOUT_MS });
+      return next;
+    } catch (error) {
+      await next.close().catch(() => undefined);
+      throw error;
+    }
+  };
+  let client = await connect();
+  let reconnecting: Promise<void> | undefined;
+  const request = async <T>(operation: (active: Client) => Promise<T>): Promise<T> => {
+    if (closed) throw new Error("Seat bridge is closed");
+    const previous = client;
+    try {
+      return await operation(previous);
+    } catch (error) {
+      if (!(error instanceof ExpiredSeatSession) || closed) throw error;
+      if (client === previous) {
+        reconnecting ??= (async () => {
+          const next = await connect();
+          if (closed) {
+            await next.close();
+            throw new Error("Seat bridge is closed");
+          }
+          client = next;
+          await previous.close().catch(() => undefined);
+        })().finally(() => {
+          reconnecting = undefined;
+        });
+        await reconnecting;
+      }
+      return await operation(client);
+    }
+  };
   return {
     instructions: client.getInstructions(),
     async listTools() {
       const collected: Tool[] = [];
       let cursor: string | undefined;
       do {
-        const page = await client.listTools(cursor === undefined ? {} : { cursor }, {
-          timeout: REQUEST_TIMEOUT_MS,
-        });
+        const page = await request((active) =>
+          active.listTools(cursor === undefined ? {} : { cursor }, {
+            timeout: REQUEST_TIMEOUT_MS,
+          }),
+        );
         collected.push(...page.tools);
         cursor = page.nextCursor;
       } while (cursor !== undefined);
       return collected;
     },
     async callTool(name, args) {
-      const result = await client.callTool({ name, arguments: args }, undefined, {
-        timeout: REQUEST_TIMEOUT_MS,
-      });
+      const result = await request((active) =>
+        active.callTool({ name, arguments: args }, undefined, {
+          timeout: REQUEST_TIMEOUT_MS,
+        }),
+      );
       return {
         content: Array.isArray(result.content) ? (result.content as CallToolResult["content"]) : [],
         ...(result.isError === true ? { isError: true } : {}),
@@ -381,7 +439,11 @@ async function connectLaneUpstream(input: {
       if (!response.ok) throw new Error(`seat reply answered ${String(response.status)}`);
       return true;
     },
-    close: () => client.close(),
+    close: async () => {
+      closed = true;
+      await reconnecting?.catch(() => undefined);
+      await client.close();
+    },
   };
 }
 

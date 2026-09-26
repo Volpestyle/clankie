@@ -1250,13 +1250,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
           : await this.runner.wait(current.paneId, signal);
         prompt = watchPrompt(record, settled);
       }
-    } catch (caught) {
-      if (signal.aborted) return;
-      prompt = watchPrompt(
-        record,
-        undefined,
-        `The watcher failed before it observed completion: ${caught instanceof Error ? caught.message : String(caught)}`,
-      );
+    } catch {
+      if (signal.aborted || this.closed) return;
+      // A failed wait is not a settled pane. In particular, launcher shutdown
+      // can terminate the child before captain.close aborts this store. Keep
+      // the durable watch so a retry or the next service restores observation.
+      this.retry(record);
+      return;
     }
     if (signal.aborted) return;
     try {
@@ -1265,14 +1265,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
         : this.wake?.(record.conversationId, prompt, record.discord));
       this.remove(record.id);
     } catch {
-      if (this.closed) return;
-      const timer = setTimeout(() => {
-        this.retryTimers.delete(timer);
-        this.launch(record);
-      }, RETRY_ADMISSION_MS);
-      timer.unref?.();
-      this.retryTimers.add(timer);
+      this.retry(record);
     }
+  }
+
+  private retry(record: HerdrWatchRecord): void {
+    if (this.closed) return;
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(timer);
+      if (this.state.watches.some((watch) => watch.id === record.id)) this.launch(record);
+    }, RETRY_ADMISSION_MS);
+    timer.unref?.();
+    this.retryTimers.add(timer);
   }
 
   private remove(id: string): void {

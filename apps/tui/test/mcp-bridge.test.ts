@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   CHANNEL_NOTIFICATION_METHOD,
+  connectLaneUpstream,
   createFleetSeatBridge,
   createSeatBridge,
   parentArgvLoadsFleetChannel,
@@ -402,4 +403,61 @@ it.each(["--print", "-p"])("keeps operator mail with the service in Claude %s mo
   expect(polls).toBe(0);
   await client.close();
   await expect(running).resolves.toBe(0);
+});
+
+describe("operator bridge restart recovery", () => {
+  it("reinitializes an expired session once for concurrent tools without replaying uncertain failures", async () => {
+    let generation = 1;
+    let initializes = 0;
+    let effects = 0;
+    let failure: "none" | "network" | "not_found" = "none";
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      if (init?.method !== "POST") return new Response(null, { status: 405 });
+      const message = JSON.parse(String(init.body));
+      if (message.method === "notifications/initialized") return new Response(null, { status: 202 });
+      if (message.method === "initialize") {
+        initializes++;
+        return Response.json(
+          {
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              protocolVersion: message.params.protocolVersion,
+              capabilities: { tools: {} },
+              serverInfo: { name: "restart-fixture", version: "1" },
+            },
+          },
+          { headers: { "mcp-session-id": String(generation) } },
+        );
+      }
+      if (new Headers(init.headers).get("mcp-session-id") !== String(generation)) {
+        return Response.json({ error: "unknown_session" }, { status: 404 });
+      }
+      effects++;
+      if (failure === "network") throw new Error("lost response after effect");
+      if (failure === "not_found") return Response.json({ error: "not_found" }, { status: 404 });
+      return Response.json({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { content: [{ type: "text", text: "ok" }] },
+      });
+    };
+    const upstream = await connectLaneUpstream({ host: "http://localhost", bearer: "fixture", fetchImpl });
+    try {
+      generation++;
+      const results = await Promise.all([upstream.callTool("first", {}), upstream.callTool("second", {})]);
+      expect(results).toHaveLength(2);
+      expect(initializes).toBe(2);
+      expect(effects).toBe(2);
+      failure = "network";
+      await expect(upstream.callTool("unsafe", {})).rejects.toThrow("lost response");
+      expect(effects).toBe(3);
+      failure = "not_found";
+      await expect(upstream.callTool("missing", {})).rejects.toThrow("not_found");
+      expect(effects).toBe(4);
+      expect(initializes).toBe(2);
+    } finally {
+      await upstream.close();
+    }
+  });
 });
