@@ -843,6 +843,208 @@ describe("harness-native seat transcripts", () => {
     ]);
   });
 
+  it("keeps Claude prompts queued mid-turn at their own time and place in the active chain", () => {
+    const queued = (
+      uuid: string,
+      parentUuid: string,
+      timestamp: string,
+      attachment: Record<string, unknown>,
+    ) => ({
+      type: "attachment",
+      uuid,
+      parentUuid,
+      timestamp,
+      isSidechain: false,
+      attachment: {
+        type: "queued_command",
+        commandMode: "prompt",
+        timestamp,
+        ...attachment,
+      },
+    });
+    const records = [
+      {
+        type: "user",
+        uuid: "u1",
+        parentUuid: null,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message: { role: "user", content: "Check the pane" },
+      },
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: "u1",
+        timestamp: "2026-01-01T00:00:05.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call-1", name: "Bash", input: {} }],
+        },
+      },
+      {
+        type: "user",
+        uuid: "r1",
+        parentUuid: "a1",
+        timestamp: "2026-01-01T00:00:10.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "call-1", content: "ok" }],
+        },
+      },
+      // Claude records the attachment once the turn reaches it, stamped with when it was typed.
+      queued("q1", "r1", "2026-01-01T00:00:07.000Z", {
+        prompt: "That is autocomplete, not a draft",
+        source_uuid: "s1",
+        origin: { kind: "human" },
+        humanTurn: true,
+      }),
+      queued("q2", "q1", "2026-01-01T00:00:08.000Z", {
+        prompt: [
+          { type: "text", text: "Look at this" },
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/png", data: "AAAA" },
+          },
+        ],
+        source_uuid: "s2",
+        origin: { kind: "human" },
+      }),
+      queued("q3", "q2", "2026-01-01T00:00:09.000Z", {
+        prompt: '<channel source="plugin:clankie:clankie" kind="message">Room question</channel>',
+        source_uuid: "s3",
+        origin: { kind: "channel", server: "plugin:clankie:clankie" },
+        isMeta: true,
+      }),
+      queued("q4", "q3", "2026-01-01T00:00:09.100Z", {
+        prompt: "peer ping",
+        source_uuid: "s4",
+        origin: { kind: "peer" },
+        isMeta: true,
+      }),
+      queued("q5", "q4", "2026-01-01T00:00:09.200Z", {
+        prompt: "<task-notification>worker finished</task-notification>",
+        commandMode: "task-notification",
+      }),
+      queued("q6", "q5", "2026-01-01T00:00:09.300Z", {
+        prompt: "Also written as a user record",
+        source_uuid: "s6",
+        origin: { kind: "human" },
+      }),
+      {
+        type: "attachment",
+        uuid: "hook",
+        parentUuid: "q6",
+        timestamp: "2026-01-01T00:00:11.000Z",
+        attachment: {
+          type: "hook_success",
+          hookName: "UserPromptSubmit",
+          content: "memory card",
+        },
+      },
+      {
+        type: "user",
+        uuid: "s6",
+        parentUuid: "hook",
+        timestamp: "2026-01-01T00:00:11.500Z",
+        message: { role: "user", content: "Also written as a user record" },
+      },
+      {
+        type: "assistant",
+        uuid: "a2",
+        parentUuid: "s6",
+        timestamp: "2026-01-01T00:00:12.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Understood." }],
+        },
+      },
+      // A queued prompt on an abandoned branch never reaches the transcript.
+      queued("stale", "u1", "2026-01-01T00:00:13.000Z", {
+        prompt: "Abandoned branch prompt",
+        source_uuid: "s7",
+        origin: { kind: "human" },
+      }),
+      {
+        type: "assistant",
+        uuid: "a3",
+        parentUuid: "a2",
+        timestamp: "2026-01-01T00:00:14.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done." }],
+        },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n");
+
+    const messages = (includeChannelPrompts: boolean) =>
+      parseHerdrSeatTranscript("claude", records, includeChannelPrompts).flatMap((entry) =>
+        entry.type === "message"
+          ? [
+              {
+                id: entry.id,
+                role: entry.role,
+                text: entry.text,
+                at: entry.occurredAt,
+                internal: entry.internal,
+              },
+            ]
+          : [],
+      );
+    const human = [
+      {
+        id: "claude:u1",
+        role: "operator",
+        text: "Check the pane",
+        at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "claude:q1",
+        role: "operator",
+        text: "That is autocomplete, not a draft",
+        at: "2026-01-01T00:00:07.000Z",
+      },
+      {
+        id: "claude:q2",
+        role: "operator",
+        text: "Look at this",
+        at: "2026-01-01T00:00:08.000Z",
+      },
+    ];
+    const tail = [
+      {
+        id: "claude:s6",
+        role: "operator",
+        text: "Also written as a user record",
+        at: "2026-01-01T00:00:11.500Z",
+      },
+      {
+        id: "claude:a2",
+        role: "agent",
+        text: "Understood.",
+        at: "2026-01-01T00:00:12.000Z",
+      },
+      {
+        id: "claude:a3",
+        role: "agent",
+        text: "Done.",
+        at: "2026-01-01T00:00:14.000Z",
+      },
+    ];
+    expect(messages(false)).toEqual([...human, ...tail]);
+    expect(messages(true)).toEqual([
+      ...human,
+      {
+        id: "claude:q3",
+        role: "operator",
+        text: '<channel source="plugin:clankie:clankie" kind="message">Room question</channel>',
+        at: "2026-01-01T00:00:09.000Z",
+        internal: true,
+      },
+      ...tail,
+    ]);
+  });
+
   it("keeps Grok prompts and assistant text, not injected context or synthetic reminders", () => {
     const entries = parseHerdrSeatTranscript(
       "grok",

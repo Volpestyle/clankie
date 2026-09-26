@@ -388,9 +388,13 @@ function claudeEntries(
     entries,
     "uuid",
     "parentUuid",
-    (entry) => (entry.type === "user" || entry.type === "assistant") && entry.isSidechain !== true,
+    (entry) =>
+      (entry.type === "user" || entry.type === "assistant" || queuedCommand(entry) !== undefined) &&
+      entry.isSidechain !== true,
   );
   const active = new Set(chain);
+  // A queued prompt Claude also wrote as its own user record renders once.
+  const prompts = new Set(chain.flatMap((entry) => (entry.type === "user" ? [entry.uuid] : [])));
   const parents = new Set(chain.map((entry) => entry.uuid));
   const calls = new Set(
     chain.flatMap((entry) =>
@@ -416,9 +420,28 @@ function claudeEntries(
   return dedupeTools(
     records.flatMap<HerdrTranscriptEntry>((entry, entryIndex) => {
       if (entry.isMeta === true || entry.promptSource === "system") return [];
+      const nativeId = string(entry.uuid) ?? String(entryIndex);
+      // Mid-turn input rides the active chain as an attachment, stamped when it was sent.
+      const queued = queuedCommand(entry);
+      if (queued !== undefined) {
+        if (prompts.has(queued.source_uuid)) return [];
+        const text = messageText(queued.prompt);
+        const origin = record(queued.origin)?.kind;
+        const admitted =
+          origin === "channel"
+            ? CLAUDE_CHANNEL_PROMPT.test(text.trimStart())
+            : origin === "human" && queued.isMeta !== true;
+        return admitted
+          ? claudePrompt(
+              `claude:${nativeId}`,
+              text,
+              timestamp(entry, queued.timestamp),
+              includeChannelPrompts,
+            )
+          : [];
+      }
       const message = record(entry.message);
       if (message === undefined) return [];
-      const nativeId = string(entry.uuid) ?? String(entryIndex);
       const at = timestamp(entry);
       const content = array(message.content).filter(isRecord);
       if (entry.type === "assistant") {
@@ -477,17 +500,31 @@ function claudeEntries(
           ),
         ];
       }
-      const text = messageText(message.content);
-      if (includeChannelPrompts && /^<channel[ >]/u.test(text.trimStart()))
-        return transcriptMessage(`claude:${nativeId}`, "operator", text, at).map((item) => ({
-          ...item,
-          internal: true as const,
-        }));
-      if (/^<(?:local-command-|command-name>|system-reminder>|channel[ >])/u.test(text.trimStart()))
-        return [];
-      return transcriptMessage(`claude:${nativeId}`, "operator", text, at);
+      return claudePrompt(`claude:${nativeId}`, messageText(message.content), at, includeChannelPrompts);
     }),
   );
+}
+
+const CLAUDE_CHANNEL_PROMPT = /^<channel[ >]/u;
+
+function queuedCommand(entry: Record<string, unknown>): Record<string, unknown> | undefined {
+  const attachment = entry.type === "attachment" ? record(entry.attachment) : undefined;
+  return attachment?.type === "queued_command" ? attachment : undefined;
+}
+
+function claudePrompt(
+  id: string,
+  text: string,
+  at: { readonly occurredAt?: string },
+  includeChannelPrompts: boolean,
+): HerdrTranscriptMessage[] {
+  if (includeChannelPrompts && CLAUDE_CHANNEL_PROMPT.test(text.trimStart()))
+    return transcriptMessage(id, "operator", text, at).map((item) => ({
+      ...item,
+      internal: true as const,
+    }));
+  if (/^<(?:local-command-|command-name>|system-reminder>|channel[ >])/u.test(text.trimStart())) return [];
+  return transcriptMessage(id, "operator", text, at);
 }
 
 function piEntries(entries: readonly Record<string, unknown>[]): HerdrTranscriptEntry[] {
