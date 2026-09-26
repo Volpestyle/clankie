@@ -303,6 +303,19 @@ selection or key removal (James, 2026-09-26):
 
 Image generation does not use the forwarder yet.
 
+Hired pi workers follow the same path ([ADR 0197](../../docs/adr/0197-hosted-workers-reach-the-owners-model-through-the-body.md)):
+
+- **Included usage:** pi's `models.json` declares `clankie`, the forwarder with no
+  key, and the worker starts on `clankie/default`.
+- **The customer's own credential:** pi's `models.json` declares
+  `clankie-customer`, pointing at `/customer` on the same loopback, with a
+  placeholder key. For each call the loopback reads the credential from the
+  broker, puts it in the provider's auth header, and forwards to the selected
+  provider's base URL only.
+  - It refuses any other path, anything but POST, browser requests and calls
+    with no customer model selected.
+  - Pi never holds the credential, and OAuth refresh stays in the broker.
+
 `POST /v1/hosted/pair-offer` accepts only protocol v2:
 `{ version: 2, pairTicket, browserPublicKey, nonce }`. The body verifies the
 fleet’s Ed25519 signature, audience, tenant, host, lifetime, browser public-key

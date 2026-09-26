@@ -26,15 +26,26 @@ class CaptainModelError extends Error {}
  * OAuth tokens against the same store the rest of the system uses. The shapes
  * are near-identical; only the api-key tag differs.
  */
+/**
+ * One chain per broker and provider, shared by every store over that broker:
+ * the captain, the model-keys service and a hosted body's customer-model
+ * loopback each build their own Pi runtime, and all of them must refresh a
+ * provider's OAuth token one at a time.
+ */
+const brokerLocks = new WeakMap<ClankieCredentialStore, Map<string, Promise<unknown>>>();
+
 export class BrokerCredentialStore {
   private readonly broker: ClankieCredentialStore;
   // pi runs OAuth refresh inside modify() and relies on writes being
   // serialized; two lanes refreshing one provider concurrently would rotate
   // the token twice and strand the second. In-process chain per provider.
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly locks: Map<string, Promise<unknown>>;
 
   public constructor(broker: ClankieCredentialStore) {
     this.broker = broker;
+    const shared = brokerLocks.get(broker) ?? new Map<string, Promise<unknown>>();
+    brokerLocks.set(broker, shared);
+    this.locks = shared;
   }
 
   public async read(providerId: string): Promise<Credential | undefined> {

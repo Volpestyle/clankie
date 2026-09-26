@@ -89,6 +89,7 @@ import {
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { startHostedModelForwarder } from "./hosted-model-forwarder.ts";
 import { hostedPiSeatModel } from "./hosted-seat-model.ts";
+import { createHostedCustomerModels, customerSeatModel } from "./hosted-customer-model.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
 
@@ -173,10 +174,20 @@ const hostedPairing =
         operatorCredentialStore,
         join(stateRoot, "hosted-pair-tickets.json"),
       );
+// The customer's own model for hired pi workers (VUH-1373): one resolver over
+// the operator broker, so the loopback and each hire read the same selection.
+const hostedCustomerModels =
+  hostedBody === undefined ? undefined : createHostedCustomerModels({ store: operatorCredentialStore });
 // Included model usage (VUH-1371): without a customer key, every model call
 // goes through this loopback forwarder to the fleet's model proxy.
 const hostedModelForwarder =
-  hostedBody === undefined ? undefined : await startHostedModelForwarder({ client: hostedBody, logger });
+  hostedBody === undefined
+    ? undefined
+    : await startHostedModelForwarder({
+        client: hostedBody,
+        ...(hostedCustomerModels === undefined ? {} : { customer: hostedCustomerModels }),
+        logger,
+      });
 // Which path model calls take (the customer's own credential, or included
 // usage with the plan's routing) is decided now and after every key or model
 // change; a self-hosted body keeps its own routing untouched.
@@ -524,7 +535,17 @@ const captain = createCaptain(
   {
     workItems,
     // Hosted pi workers follow the captain's model path (VUH-1373).
-    ...(hostedModelForwarder === undefined ? {} : { piSeatModel: () => hostedPiSeatModel() }),
+    ...(hostedModelForwarder === undefined
+      ? {}
+      : {
+          piSeatModel: () =>
+            hostedPiSeatModel({
+              customer: async (loopback) => {
+                const target = await hostedCustomerModels?.resolve();
+                return target === undefined ? undefined : customerSeatModel(target, loopback);
+              },
+            }),
+        }),
     ...(hostedHeartbeat === undefined ? {} : { onWorkStarted: (reason) => hostedHeartbeat.begin(reason) }),
     ...(bodyTelemetry === undefined
       ? {}

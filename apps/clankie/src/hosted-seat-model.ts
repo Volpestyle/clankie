@@ -1,6 +1,7 @@
 import { loadConfig } from "@clankie/model-provider";
 import type { PiSeatModel } from "./captain/herdr-watch.ts";
 import { HOSTED_DEFAULT_MODEL } from "./hosted-body.ts";
+import { CUSTOMER_LOOPBACK_PREFIX } from "./hosted-model-forwarder.ts";
 
 const INCLUDED_PROVIDER = "clankie";
 
@@ -14,14 +15,23 @@ const INCLUDED_PROVIDER = "clankie";
  * model. A body with no included provider declared is not hosted: undefined.
  */
 export async function hostedPiSeatModel(
-  options: { env?: NodeJS.ProcessEnv } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    /**
+     * The customer's own model behind the body's loopback (VUH-1373, option c),
+     * given the loopback's base URL. Absent or undefined, the worker is just
+     * pointed at the customer's model and needs its own credential.
+     */
+    customer?: (loopbackBaseUrl: string) => Promise<PiSeatModel | undefined>;
+  } = {},
 ): Promise<PiSeatModel | undefined> {
   const { config } = await loadConfig(options.env === undefined ? {} : { env: options.env });
   const included = config.provider?.[INCLUDED_PROVIDER];
   const baseUrl = included?.options?.baseURL;
   if (typeof baseUrl !== "string") return undefined;
   if (config.model !== undefined && !config.model.startsWith(`${INCLUDED_PROVIDER}/`)) {
-    return { model: config.model };
+    const loopback = `${new URL(baseUrl).origin}${CUSTOMER_LOOPBACK_PREFIX}`;
+    return (await options.customer?.(loopback)) ?? { model: config.model };
   }
   const model = (id: string) => {
     const declared = included?.models?.[id] as { limit?: { context?: number; output?: number } } | undefined;

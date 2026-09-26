@@ -1,3 +1,4 @@
+import { request as httpRequest } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import type { HostedModelEndpoint } from "../src/hosted-body.ts";
 import { startHostedModelForwarder } from "../src/hosted-model-forwarder.ts";
@@ -106,6 +107,142 @@ describe("hosted model forwarder (VUH-1371)", () => {
         const response = await fetch(`${baseURL}/responses`, { method: "POST", body: "{}" });
         expect(response.status).toBe(502);
         expect(await response.json()).toMatchObject({ error: { code: "model_proxy_unreachable" } });
+      },
+    );
+  });
+});
+
+describe("customer model loopback for hired pi workers (VUH-1373)", () => {
+  type Target = Awaited<
+    ReturnType<NonNullable<Parameters<typeof startHostedModelForwarder>[0]["customer"]>["resolve"]>
+  >;
+  const target = (api: string, apiKey: string, baseUrl = "https://api.provider.example/v1"): Target =>
+    ({
+      model: { id: "m", api, provider: "p", baseUrl },
+      baseUrl,
+      apiKey,
+      headers: {},
+    }) as unknown as Target;
+  async function withLoopback(
+    resolve: () => Promise<Target>,
+    run: (base: string, upstream: ReturnType<typeof vi.fn<typeof fetch>>) => Promise<void>,
+  ) {
+    const upstream = vi.fn<typeof fetch>(
+      async () =>
+        new Response("data: ok\n\n", { status: 200, headers: { "content-type": "text/event-stream" } }),
+    );
+    const forwarder = await startHostedModelForwarder({
+      client: { forwardModel: vi.fn(async () => Response.json({})) },
+      customer: { resolve: vi.fn(resolve) },
+      fetch: upstream,
+    });
+    try {
+      await run(forwarder.baseURL.replace(/\/v1$/u, "/customer"), upstream);
+    } finally {
+      await forwarder.close();
+    }
+  }
+
+  it("forwards the worker's exact request to the selected provider with the real key in place of the placeholder", async () => {
+    await withLoopback(
+      async () => target("openai-responses", "sk-real-customer"),
+      async (base, upstream) => {
+        const body = '{"model":"m","input":"hi","stream":true}';
+        const response = await fetch(`${base}/responses`, {
+          method: "POST",
+          headers: {
+            authorization: "Bearer local",
+            "content-type": "application/json",
+            "x-client-request-id": "r1",
+          },
+          body,
+        });
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("data: ok\n\n");
+        const [url, init] = upstream.mock.calls[0]!;
+        expect(String(url)).toBe("https://api.provider.example/v1/responses");
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBe("Bearer sk-real-customer");
+        expect(headers.get("x-client-request-id")).toBe("r1");
+        expect(headers.get("host")).toBeNull();
+        expect(Buffer.from(init?.body as Uint8Array).toString("utf8")).toBe(body);
+      },
+    );
+  });
+
+  it("sends a subscription the way its API expects", async () => {
+    await withLoopback(
+      async () => target("anthropic-messages", "sk-ant-oat01-real", "https://api.anthropic.com"),
+      async (base, upstream) => {
+        await fetch(`${base}/v1/messages`, {
+          method: "POST",
+          headers: { "x-api-key": "local", authorization: "Bearer sk-ant-oat-clankie-loopback" },
+          body: "{}",
+        });
+        const headers = new Headers(upstream.mock.calls[0]![1]?.headers);
+        expect(String(upstream.mock.calls[0]![0])).toBe("https://api.anthropic.com/v1/messages");
+        expect(headers.get("authorization")).toBe("Bearer sk-ant-oat01-real");
+        expect(headers.get("x-api-key")).toBeNull();
+      },
+    );
+  });
+
+  it("uses a credential replaced mid-run on the next call, without restarting the worker", async () => {
+    let key = "sk-first";
+    await withLoopback(
+      async () => target("openai-completions", key),
+      async (base, upstream) => {
+        await fetch(`${base}/chat/completions`, { method: "POST", body: "{}" });
+        key = "sk-rotated";
+        await fetch(`${base}/chat/completions`, { method: "POST", body: "{}" });
+        expect(
+          upstream.mock.calls.map(([, init]) => new Headers(init?.headers).get("authorization")),
+        ).toEqual(["Bearer sk-first", "Bearer sk-rotated"]);
+      },
+    );
+  });
+
+  it("is not an open proxy: no other destination, no browser, POST only, and nothing without a customer model", async () => {
+    await withLoopback(
+      async () => target("openai-responses", "sk-real"),
+      async (base, upstream) => {
+        // Raw request lines: fetch would normalize these before they left the client.
+        const raw = (path: string) =>
+          new Promise<number>((resolve, reject) => {
+            const url = new URL(base);
+            const request = httpRequest(
+              { host: url.hostname, port: url.port, method: "POST", path: `${url.pathname}${path}` },
+              (answer) => {
+                answer.resume();
+                resolve(answer.statusCode ?? 0);
+              },
+            );
+            request.on("error", reject);
+            request.end("{}");
+          });
+        expect(await raw("/../v1/responses")).toBe(404);
+        expect(await raw("/%2e%2e/admin")).toBe(404);
+        expect(await raw("//evil.example/x")).toBe(404);
+        expect((await fetch(`${base}/responses`)).status).toBe(404);
+        expect(
+          (
+            await fetch(`${base}/responses`, {
+              method: "POST",
+              headers: { origin: "https://evil.example" },
+              body: "{}",
+            })
+          ).status,
+        ).toBe(403);
+        expect(upstream).not.toHaveBeenCalled();
+      },
+    );
+    await withLoopback(
+      async () => undefined,
+      async (base, upstream) => {
+        const response = await fetch(`${base}/responses`, { method: "POST", body: "{}" });
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "no_customer_model" } });
+        expect(upstream).not.toHaveBeenCalled();
       },
     );
   });

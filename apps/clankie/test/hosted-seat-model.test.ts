@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { hostedPiSeatModel } from "../src/hosted-seat-model.ts";
 
 async function withConfig(config: Record<string, unknown>, run: (env: NodeJS.ProcessEnv) => Promise<void>) {
@@ -42,6 +42,19 @@ describe("a hosted body's pi worker model (VUH-1373)", () => {
   it("is the customer's own model on their credential", async () => {
     await withConfig({ model: "openai/gpt-6-luna", provider: { clankie: included } }, async (env) => {
       expect(await hostedPiSeatModel({ env })).toEqual({ model: "openai/gpt-6-luna" });
+    });
+  });
+
+  it("reaches the customer's model through the body's loopback when one is offered", async () => {
+    await withConfig({ model: "openai/gpt-6-luna", provider: { clankie: included } }, async (env) => {
+      const seat = { model: "clankie-customer/gpt-6-luna" };
+      const customer = vi.fn(async () => seat);
+      expect(await hostedPiSeatModel({ env, customer })).toBe(seat);
+      expect(customer).toHaveBeenCalledWith("http://127.0.0.1:4319/customer");
+      // No loopback seat (say, a subscription token without an account id): the plain model.
+      expect(await hostedPiSeatModel({ env, customer: async () => undefined })).toEqual({
+        model: "openai/gpt-6-luna",
+      });
     });
   });
 

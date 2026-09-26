@@ -436,6 +436,12 @@ renewal and signs each request. `pairing_key_required` triggers one
 re-registration attempt. Persistent `body_signature_invalid` after three
 attempts indicates clock skew beyond five minutes or a pairing-key mismatch;
 inspect those conditions without exposing tokens, signatures or private keys.
+A hired pi worker runs on the body's own model path (ADR 0197): on included
+usage, `clankie/default` through the loopback forwarder; on the owner's key or
+subscription, `clankie-customer/<model>` through the same loopback's
+`/customer` route, which attaches the credential from the broker. Pi holds no
+key there. Do not log pi into a provider or put a key in its `models.json`; if
+a worker cannot reach the model, check the owner's selection and credential.
 
 ## Managed Discord connection
 
