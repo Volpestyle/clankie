@@ -1,0 +1,236 @@
+import { createHash, createPublicKey, verify, type KeyObject } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { z } from "zod";
+import {
+  derivePublicGatewayHostId,
+  PublicGatewayInstallationIdSchema,
+  PublicGatewayHostIdSchema,
+} from "@clankie/protocol/public-gateway";
+import type { CredentialStore } from "@clankie/credential-broker";
+
+const BootstrapSchema = z
+  .object({
+    hostCredential: z.string().min(1).max(8192),
+    credentialExpiresAtMs: z.number().int().positive(),
+    gatewayOrigin: z.url().refine((value) => {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.origin === value && !url.username && !url.password;
+    }),
+    tenantId: z.string().regex(/^tn_[a-z2-7]{20}$/u),
+    accountId: z.string().min(1).max(128),
+    installationId: PublicGatewayInstallationIdSchema,
+    fleetVerifyKeysJson: z.string().min(1).max(4096),
+  })
+  .strict();
+export type HostedBodyBootstrap = z.infer<typeof BootstrapSchema>;
+
+/** Unset is a self-hosted body. Invalid managed configuration fails startup closed. */
+export function readHostedBodyBootstrap(env: NodeJS.ProcessEnv): HostedBodyBootstrap | undefined {
+  const path = env.CLANKIE_HOSTED_BOOTSTRAP_FILE?.trim();
+  if (!path) return undefined;
+  try {
+    return BootstrapSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  } catch {
+    throw new Error("Invalid hosted body bootstrap file");
+  }
+}
+
+export function hostedVerifyKeys(json: string): ReadonlyMap<string, KeyObject> {
+  const parsed = z
+    .object({
+      keys: z
+        .array(z.object({ publicKeyPem: z.string().min(1).max(1000) }).strict())
+        .min(1)
+        .max(2),
+    })
+    .strict()
+    .parse(JSON.parse(json));
+  return new Map(
+    parsed.keys.map(({ publicKeyPem }) => {
+      const key = createPublicKey(publicKeyPem);
+      if (key.asymmetricKeyType !== "ed25519") throw new Error("Fleet verify keys must be Ed25519");
+      const id = createHash("sha256")
+        .update(key.export({ format: "der", type: "spki" }))
+        .digest("base64url")
+        .slice(0, 16);
+      return [id, key];
+    }),
+  );
+}
+
+function signedClaims(
+  token: string,
+  typ: "clankie-host" | "clankie-pair",
+  keys: ReadonlyMap<string, KeyObject>,
+): unknown {
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/u.test(part)))
+    throw new Error("Invalid fleet credential");
+  const [header, claims, signature] = parts as [string, string, string];
+  const parsed = z
+    .object({ alg: z.literal("EdDSA"), typ: z.literal(typ), kid: z.string().regex(/^[A-Za-z0-9_-]{16}$/u) })
+    .strict()
+    .parse(JSON.parse(Buffer.from(header, "base64url").toString()));
+  const key = keys.get(parsed.kid);
+  if (!key || !verify(null, Buffer.from(`${header}.${claims}`), key, Buffer.from(signature, "base64url")))
+    throw new Error("Invalid fleet signature");
+  return JSON.parse(Buffer.from(claims, "base64url").toString());
+}
+const ClaimsBase = {
+  iss: z.literal("clankie-fleet"),
+  tid: BootstrapSchema.shape.tenantId,
+  hid: PublicGatewayHostIdSchema,
+  iat: z.number().int().positive(),
+  exp: z.number().int().positive(),
+};
+const PairClaimsSchema = z
+  .object({ ...ClaimsBase, aud: z.literal("clankie-body"), jti: z.string().regex(/^[A-Za-z0-9_-]{22}$/u) })
+  .strict();
+const HostClaimsSchema = z
+  .object({
+    ...ClaimsBase,
+    aud: z.literal("clankie-gateway"),
+    sub: BootstrapSchema.shape.accountId,
+    inst: PublicGatewayInstallationIdSchema,
+  })
+  .strict();
+
+export class HostedBodyDeniedError extends Error {
+  constructor() {
+    super("Hosted body credential rejected");
+    this.name = "HostedBodyDeniedError";
+  }
+}
+
+/** One renewable credential for the connector and every fleet call. Secrets stay in the broker. */
+export class HostedBodyClient {
+  readonly bootstrap: HostedBodyBootstrap;
+  readonly hostId: string;
+  readonly keys: ReadonlyMap<string, KeyObject>;
+  private credential: { token: string; expiresAt: number; refreshAt: number };
+  private renewal: Promise<void> | undefined;
+  private denied = false;
+  private readonly fetcher: typeof fetch;
+  private readonly clock: () => number;
+  private readonly persist: ((token: string, expiresAt: number) => Promise<void>) | undefined;
+  onDenied: (() => void) | undefined;
+
+  constructor(
+    bootstrap: HostedBodyBootstrap,
+    options: {
+      fetch?: typeof fetch;
+      clock?: () => number;
+      persist?: (token: string, expiresAt: number) => Promise<void>;
+    } = {},
+  ) {
+    this.bootstrap = bootstrap;
+    this.hostId = derivePublicGatewayHostId(bootstrap.accountId, bootstrap.installationId);
+    this.keys = hostedVerifyKeys(bootstrap.fleetVerifyKeysJson);
+    this.fetcher = options.fetch ?? fetch;
+    this.clock = options.clock ?? Date.now;
+    this.persist = options.persist;
+    this.credential = this.validateCredential(bootstrap.hostCredential, bootstrap.credentialExpiresAtMs);
+  }
+
+  private validateCredential(token: string, expiresAt: number) {
+    const claims = HostClaimsSchema.parse(signedClaims(token, "clankie-host", this.keys));
+    if (
+      claims.tid !== this.bootstrap.tenantId ||
+      claims.hid !== this.hostId ||
+      claims.sub !== this.bootstrap.accountId ||
+      claims.inst !== this.bootstrap.installationId ||
+      claims.exp * 1000 !== expiresAt ||
+      claims.exp <= claims.iat ||
+      claims.exp - claims.iat > 12 * 3600 ||
+      claims.iat * 1000 > this.clock() + 60_000
+    )
+      throw new Error("Invalid hosted credential binding or lifetime");
+    return { token, expiresAt, refreshAt: (claims.iat + (claims.exp - claims.iat) / 2) * 1000 - 1000 };
+  }
+
+  verifyPairTicket(ticket: string) {
+    const claims = PairClaimsSchema.parse(signedClaims(ticket, "clankie-pair", this.keys));
+    const now = Math.floor(this.clock() / 1000);
+    if (
+      claims.tid !== this.bootstrap.tenantId ||
+      claims.hid !== this.hostId ||
+      claims.exp <= now ||
+      claims.iat > now + 60 ||
+      claims.exp <= claims.iat ||
+      claims.exp - claims.iat > 120
+    )
+      throw new Error("Invalid pair ticket binding or lifetime");
+    return claims;
+  }
+
+  async resolveHostToken(): Promise<{ token: string; expiresAt: number; refreshAt: number }> {
+    if (this.denied) throw new HostedBodyDeniedError();
+    if (this.clock() >= this.credential.refreshAt) {
+      this.renewal ??= this.renew().finally(() => {
+        this.renewal = undefined;
+      });
+      await this.renewal;
+    }
+    return this.credential;
+  }
+
+  private async request(path: string, body: unknown, token: string): Promise<Response> {
+    if (this.denied) throw new HostedBodyDeniedError();
+    const response = await this.fetcher(new URL(`/fleet/v1/body/${path}`, this.bootstrap.gatewayOrigin), {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+      redirect: "error",
+    });
+    if (response.status === 403) {
+      this.denied = true;
+      this.onDenied?.();
+      throw new HostedBodyDeniedError();
+    }
+    if (!response.ok) throw new Error(`Fleet request failed (${response.status})`);
+    return response;
+  }
+  private async renew(): Promise<void> {
+    const response = await this.request("host-credential", {}, this.credential.token);
+    const next = z
+      .object({ credential: z.string(), expiresAtMs: z.number().int().positive() })
+      .strict()
+      .parse(await response.json());
+    const credential = this.validateCredential(next.credential, next.expiresAtMs);
+    if (credential.refreshAt <= this.clock()) throw new Error("Fleet returned an expired renewal");
+    await this.persist?.(credential.token, credential.expiresAt);
+    this.credential = credential;
+  }
+  async post(
+    path: "wake-keys" | "wake-keys/revoke" | "heartbeat",
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Response> {
+    const credential = await this.resolveHostToken();
+    return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
+  }
+  async registerWakeKey(deviceId: string, publicKey: string): Promise<void> {
+    await this.post("wake-keys", { deviceId, publicKey });
+  }
+  async revokeWakeKey(deviceId: string): Promise<void> {
+    await this.post("wake-keys/revoke", { deviceId });
+  }
+}
+
+export async function createHostedBodyClient(
+  bootstrap: HostedBodyBootstrap,
+  store: CredentialStore,
+): Promise<HostedBodyClient> {
+  const provider = `clankie-hosted-${derivePublicGatewayHostId(bootstrap.accountId, bootstrap.installationId)}`;
+  const cached = await store.get(provider);
+  let current = bootstrap;
+  if (cached?.type === "api") {
+    const saved = z.object({ token: z.string(), expiresAt: z.number() }).parse(JSON.parse(cached.key));
+    if (saved.expiresAt > bootstrap.credentialExpiresAtMs)
+      current = { ...bootstrap, hostCredential: saved.token, credentialExpiresAtMs: saved.expiresAt };
+  }
+  return new HostedBodyClient(current, {
+    persist: async (token, expiresAt) =>
+      store.set(provider, { type: "api", key: JSON.stringify({ token, expiresAt }) }),
+  });
+}

@@ -122,3 +122,32 @@ conversation through its compiled model client. It checks non-root execution,
 private broker files, distinct owner credentials/workspaces, and preservation of
 settings, credentials and work after container replacement. It never authenticates
 to a real model/provider or reads the operator's accounts.
+
+## Managed body bootstrap
+
+The managed tenant image sets `CLANKIE_HOSTED_BOOTSTRAP_FILE` to a private JSON
+file readable by the service user (mode 0600). Unset means self-hosted, including
+ordinary Compose installations: their gateway sign-in and lifecycle are unchanged.
+The provisioner delivers this file to its own instance; never put it in image
+layers, user data, command arguments or logs. Its exact fields are:
+
+```json
+{
+  "hostCredential": "<fleet-signed Ed25519 host credential>",
+  "credentialExpiresAtMs": 1790021600000,
+  "gatewayOrigin": "https://api.clankie.bot",
+  "tenantId": "tn_<20 lowercase base32 characters>",
+  "accountId": "<account subject>",
+  "installationId": "<22 base64url characters>",
+  "fleetVerifyKeysJson": "{\"keys\":[{\"publicKeyPem\":\"<Ed25519 public PEM>\"}]}"
+}
+```
+
+The body validates this configuration and the signed credential's identity before
+connecting. It derives its host id from the account and installation, uses the
+host credential as its gateway bearer, and renews through
+`POST /fleet/v1/body/host-credential` before half-life. The same credential
+serves fleet calls. Renewals live in the credential broker so a restart does not
+revert to an old bootstrap token; the bootstrap file itself is not rewritten.
+A fleet `403` stops the connector and further fleet requests. Invalid bootstrap
+configuration fails startup instead of falling back to a different account.

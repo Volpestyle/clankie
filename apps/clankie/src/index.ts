@@ -67,6 +67,7 @@ import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
+import { readHostedBodyBootstrap, createHostedBodyClient, HostedBodyDeniedError } from "./hosted-body.ts";
 import { PublicGatewayConnector } from "./public-gateway-connector.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
@@ -120,10 +121,33 @@ const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? 4321);
 
 const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
+const hostedBootstrap = readHostedBodyBootstrap(process.env);
+const hostedBody =
+  hostedBootstrap === undefined
+    ? undefined
+    : await createHostedBodyClient(hostedBootstrap, operatorCredentialStore);
 let publicGatewayConnector: PublicGatewayConnector | undefined;
 /** Set when the account credential is rejected before a connector can even exist. */
 let publicGatewaySignInRequiredSince: string | undefined;
-if (startupSettings.publicGateway.url !== undefined && startupSettings.publicGateway.hostId !== undefined) {
+if (hostedBody !== undefined) {
+  publicGatewayConnector = new PublicGatewayConnector({
+    encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
+    gatewayUrl: hostedBody.bootstrap.gatewayOrigin,
+    hostId: hostedBody.hostId,
+    installationId: hostedBody.bootstrap.installationId,
+    resolveHostToken: () => hostedBody.resolveHostToken(),
+    tokenErrorIsTerminal: (error) => error instanceof HostedBodyDeniedError,
+    controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
+    relayUrl: `http://127.0.0.1:${String(relayPort)}`,
+    logger,
+  });
+  hostedBody.onDenied = () => publicGatewayConnector?.close();
+}
+if (
+  hostedBody === undefined &&
+  startupSettings.publicGateway.url !== undefined &&
+  startupSettings.publicGateway.hostId !== undefined
+) {
   try {
     const hostToken = await resolvePublicGatewayCredential({
       env: process.env,
@@ -156,6 +180,7 @@ if (startupSettings.publicGateway.url !== undefined && startupSettings.publicGat
   }
 }
 if (
+  hostedBody === undefined &&
   publicGatewayConnector === undefined &&
   startupSettings.publicGateway.url !== undefined &&
   startupSettings.publicGateway.installationId !== undefined

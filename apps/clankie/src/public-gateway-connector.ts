@@ -41,7 +41,11 @@ export interface PublicGatewayConnectorOptions {
   readonly hostToken?: string;
   readonly encryptionKey?: Uint8Array;
   readonly installationId?: string;
-  readonly resolveHostToken?: () => Promise<{ readonly token: string; readonly expiresAt: number }>;
+  readonly resolveHostToken?: () => Promise<{
+    readonly token: string;
+    readonly expiresAt: number;
+    readonly refreshAt?: number;
+  }>;
   /** Names the token failures no reconnect can clear; the doorway parks instead of looping. */
   readonly tokenErrorIsTerminal?: (error: unknown) => boolean;
   readonly controlPlaneUrl: string;
@@ -97,7 +101,7 @@ export class PublicGatewayConnector {
   private readonly hostId: string;
   private readonly hostToken: string | undefined;
   private readonly resolveHostToken:
-    | (() => Promise<{ readonly token: string; readonly expiresAt: number }>)
+    | (() => Promise<{ readonly token: string; readonly expiresAt: number; readonly refreshAt?: number }>)
     | undefined;
   private readonly controlPlaneUrl: string;
   private readonly relayUrl: string;
@@ -291,7 +295,7 @@ export class PublicGatewayConnector {
   }
 
   private async openSocket(): Promise<void> {
-    let credential: { readonly token: string; readonly expiresAt?: number };
+    let credential: { readonly token: string; readonly expiresAt?: number; readonly refreshAt?: number };
     try {
       credential =
         this.resolveHostToken === undefined ? { token: this.hostToken ?? "" } : await this.resolveHostToken();
@@ -330,7 +334,10 @@ export class PublicGatewayConnector {
       }
       this.connectionWaiters.clear();
       if (credential.expiresAt !== undefined) {
-        const refreshInMs = Math.max(0, credential.expiresAt - Date.now() - TOKEN_REFRESH_WINDOW_MS);
+        const refreshInMs = Math.max(
+          0,
+          (credential.refreshAt ?? credential.expiresAt - TOKEN_REFRESH_WINDOW_MS) - Date.now(),
+        );
         this.tokenRefreshTimer = setTimeout(() => {
           this.tokenRefreshTimer = undefined;
           if (this.socket === socket) socket.close(4000, "refreshing host credential");
@@ -438,7 +445,7 @@ export class PublicGatewayConnector {
     const body = frame.bodyBase64 === undefined ? undefined : Buffer.from(frame.bodyBase64, "base64");
     try {
       const response =
-        frame.path === "/v1/hooks/linear"
+        frame.path === "/v1/hooks/linear" || frame.path === "/v1/hosted/pair-offer"
           ? await this.fetcher(new URL(frame.path, baseUrl), {
               method: frame.method,
               headers,
