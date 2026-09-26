@@ -20,7 +20,7 @@ export function createModelKeyRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
 ): Hono {
   const app = new Hono();
-  // Intentionally no request, error, event-log, or telemetry logging in this surface.
+  // No request, raw error or event-log logging. The model port emits catalog-only outcome telemetry.
   for (const path of [
     MODEL_KEYS_PATH,
     MODEL_KEY_SET_PATH,

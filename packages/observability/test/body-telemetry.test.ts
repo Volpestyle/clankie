@@ -89,6 +89,47 @@ describe("body telemetry redaction boundary", () => {
     ]);
   });
 
+  it("accepts model outcomes but refuses smuggled keys and invalid action/result pairs", () => {
+    const { telemetry, lines } = spool();
+    const valid = {
+      event: "body.model",
+      action: "key-validated",
+      result: "ok",
+      providerId: "openai",
+    } as const;
+    for (const event of [
+      { ...valid, apiKey: FAKE_KEY },
+      { ...valid, providerId: FAKE_KEY },
+      { ...valid, result: FAKE_KEY },
+      { ...valid, action: "model-selected", modelId: FAKE_KEY },
+      { ...valid, modelId: "gpt-4.1-mini" }, // modelId only belongs to selection
+      { ...valid, result: "unavailable" }, // validation uses its own closed outcomes
+      { ...valid, action: "key-set", result: "validation_failed" },
+    ])
+      telemetry.emit(event as unknown as BodyTelemetryInput);
+    telemetry.emit(valid);
+    telemetry.emit({
+      event: "body.model",
+      action: "model-selected",
+      result: "ok",
+      providerId: "openrouter",
+      modelId: "anthropic/claude-sonnet-4",
+    });
+    expect(lines().map((line) => parseBodyTelemetryLine(line))).toEqual([
+      { ...valid, v: 1, atMs: NOW },
+      {
+        v: 1,
+        atMs: NOW,
+        event: "body.model",
+        action: "model-selected",
+        result: "ok",
+        providerId: "openrouter",
+        modelId: "anthropic/claude-sonnet-4",
+      },
+    ]);
+    expect(lines().join("\n")).not.toContain(FAKE_KEY);
+  });
+
   it("parses only lines that match an event schema exactly", () => {
     expect(
       parseBodyTelemetryLine(JSON.stringify({ v: 1, atMs: NOW, event: "body.shutdown", reason: "sigterm" })),

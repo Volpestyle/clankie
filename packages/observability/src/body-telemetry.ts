@@ -42,9 +42,45 @@ const OpaqueId = z
   .regex(/^[A-Za-z0-9_-]{8,64}$/u)
   .refine((value) => !KEY_SHAPED.test(value), "an id must not look like a credential");
 
+// Public catalog identifiers may include slashes/colons (for example OpenRouter).
+// Emitters must project these from the bundled catalog, never owner-defined names.
+const ModelCatalogId = z
+  .string()
+  .regex(/^[A-Za-z0-9._:/-]{1,128}$/u)
+  .refine((value) => !KEY_SHAPED.test(value), "a catalog id must not look like a credential");
+
 const envelope = { v: z.literal(1), atMs: z.number().int().positive() };
 
+/** Mutation/validation outcomes only; no model request or credential fields. */
+const BodyModelTelemetrySchema = z
+  .object({
+    ...envelope,
+    event: z.literal("body.model"),
+    providerId: ModelCatalogId.optional(),
+    modelId: ModelCatalogId.optional(),
+    action: z.enum(["key-set", "key-replaced", "key-removed", "model-selected", "key-validated"]),
+    result: z.enum([
+      "ok",
+      "unsupported_provider",
+      "unsupported_model",
+      "unavailable",
+      "validation_failed",
+      "validation_timeout",
+    ]),
+  })
+  .strict()
+  .refine(
+    (event) =>
+      (event.modelId === undefined ||
+        (event.action === "model-selected" && event.providerId !== undefined)) &&
+      (event.action === "key-validated"
+        ? ["ok", "validation_failed", "validation_timeout"].includes(event.result)
+        : !["validation_failed", "validation_timeout"].includes(event.result)),
+  );
+export type BodyModelTelemetryInput = Omit<z.infer<typeof BodyModelTelemetrySchema>, "v" | "atMs">;
+
 export const BodyTelemetryEventSchema = z.discriminatedUnion("event", [
+  BodyModelTelemetrySchema,
   z
     .object({
       ...envelope,

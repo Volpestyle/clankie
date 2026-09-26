@@ -79,3 +79,16 @@ authenticate that provider after removal.
 Keys are write-only. Never put them in URLs, conversation messages, command-line
 arguments, logs, event records, telemetry, support bundles or analytics. The app
 should clear its input after submitting and must not persist the plaintext key.
+
+When body telemetry is enabled, these operations emit `body.model` metadata:
+`action` is `key-set`, `key-replaced`, `key-removed`, `model-selected`, or
+`key-validated`; `result` is a closed outcome code. A successful provider probe
+emits `key-validated` / `ok`; merely storing a key does not imply it works.
+Validation refusals before a provider request do not emit a validation event.
+Unchanged selection and removal of an absent key do not emit change events.
+Only IDs in the bundled public catalog may appear as `providerId` and, for
+selection only, `modelId`. Custom names, unrecognized input, keys and provider
+error text are omitted. Catalog identifiers allow letters, digits, `.`, `_`,
+`:`, `/` and `-`, up to 128 characters; credential-shaped values are refused.
+The existing emitter adds `v` and `atMs`, and the host shipper adds tenant and
+instance identity. Telemetry failure never changes a write's result.

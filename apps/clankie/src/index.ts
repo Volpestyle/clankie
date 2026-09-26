@@ -637,7 +637,11 @@ const captain = createCaptain(
 );
 
 const clankie = await createClankieApp({
-  modelKeys: createModelKeys({ store: operatorCredentialStore, cwd: repoRoot }),
+  modelKeys: createModelKeys({
+    store: operatorCredentialStore,
+    cwd: repoRoot,
+    ...(bodyTelemetry === undefined ? {} : { telemetry: bodyTelemetry }),
+  }),
   ...(hostedPairing === undefined
     ? {}
     : { hostedPairing, onHostedPairing: () => hostedHeartbeat?.interactive() }),

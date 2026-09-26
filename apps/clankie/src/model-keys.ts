@@ -1,5 +1,6 @@
+import type { BodyTelemetry, BodyModelTelemetryInput } from "@clankie/observability/body-telemetry";
 import type { CredentialStore } from "@clankie/credential-broker";
-import { createModelRegistry } from "@clankie/model-registry";
+import { createModelRegistry, loadBundledCatalog } from "@clankie/model-registry";
 import {
   CODEX_PROVIDER_ID,
   loadConfig,
@@ -28,8 +29,32 @@ export function createModelKeys(options: {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   runtime?: () => Promise<ModelRuntime>;
+  telemetry?: Pick<BodyTelemetry, "emit">;
 }): ModelKeysPort {
   const { store } = options;
+  const telemetryCatalog = options.telemetry === undefined ? undefined : loadBundledCatalog();
+  const report = (
+    action: BodyModelTelemetryInput["action"],
+    result: BodyModelTelemetryInput["result"],
+    providerId: string,
+    modelId?: string,
+  ) => {
+    const provider = telemetryCatalog?.[providerId];
+    const knownProvider = provider?.id === providerId;
+    const knownModel = knownProvider && modelId !== undefined && provider.models[modelId]?.id === modelId;
+    try {
+      options.telemetry?.emit({
+        event: "body.model",
+        action,
+        result,
+        ...(knownProvider ? { providerId: provider.id } : {}),
+        ...(knownModel ? { modelId: provider.models[modelId]!.id } : {}),
+      });
+    } catch {
+      /* Telemetry can never change a credential/config write outcome. */
+    }
+  };
+
   const registry = createModelRegistry({ env: options.env ?? process.env });
   let initialized: Promise<ModelRuntime> | undefined;
   const runtime = () =>
@@ -91,9 +116,26 @@ export function createModelKeys(options: {
       };
     },
     async set(providerId, apiKey) {
-      if ((await apiProvider(providerId)) === undefined) return { ok: false, error: "unsupported_provider" };
-      await store.set(providerId, { type: "api", key: apiKey });
-      return { ok: true };
+      let action: "key-set" | "key-replaced" = "key-set";
+      try {
+        if ((await apiProvider(providerId)) === undefined) {
+          report(action, "unsupported_provider", providerId);
+          return { ok: false, error: "unsupported_provider" };
+        }
+        if (options.telemetry !== undefined) {
+          try {
+            if ((await store.list())[providerId]?.type === "api") action = "key-replaced";
+          } catch {
+            /* Optional replacement classification cannot prevent the write. */
+          }
+        }
+        await store.set(providerId, { type: "api", key: apiKey });
+        report(action, "ok", providerId);
+        return { ok: true };
+      } catch (error) {
+        report(action, "unavailable", providerId);
+        throw error;
+      }
     },
     async validate(providerId, modelId) {
       const state = await apiProvider(providerId);
@@ -121,34 +163,63 @@ export function createModelKeys(options: {
             cacheRetention: "none",
           },
         );
-        return response.stopReason === "error" || response.stopReason === "aborted"
-          ? { ok: false, error: signal.aborted ? "validation_timeout" : "validation_failed" }
-          : { ok: true };
+        const result =
+          response.stopReason === "error" || response.stopReason === "aborted"
+            ? signal.aborted
+              ? "validation_timeout"
+              : "validation_failed"
+            : "ok";
+        report("key-validated", result, providerId);
+        return result === "ok" ? { ok: true } : { ok: false, error: result };
       } catch {
-        return { ok: false, error: signal.aborted ? "validation_timeout" : "validation_failed" };
+        const result = signal.aborted ? "validation_timeout" : "validation_failed";
+        report("key-validated", result, providerId);
+        return { ok: false, error: result };
       }
     },
     async select(model) {
-      const state = await snapshot();
       const ref = parseModelRef(model);
-      if (ref === undefined || !state.providers.some((provider) => provider.id === ref.providerId))
-        return { ok: false, error: "unsupported_provider" };
+      // Unknown input is never an identifier in telemetry: report() checks the bundled catalog.
+      const providerId = ref?.providerId ?? "";
       try {
-        resolvePiModelSelection({ ...state.config, model }, state.models, {
-          catalog: state.catalog,
-          hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
-        });
-      } catch {
-        return { ok: false, error: "unsupported_model" };
+        const state = await snapshot();
+        if (ref === undefined || !state.providers.some((provider) => provider.id === ref.providerId)) {
+          report("model-selected", "unsupported_provider", providerId);
+          return { ok: false, error: "unsupported_provider" };
+        }
+        try {
+          resolvePiModelSelection({ ...state.config, model }, state.models, {
+            catalog: state.catalog,
+            hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+          });
+        } catch {
+          report("model-selected", "unsupported_model", providerId, ref.modelId);
+          return { ok: false, error: "unsupported_model" };
+        }
+        await setCaptainModel(model, options.env === undefined ? {} : { env: options.env });
+        if (state.config.model !== model) report("model-selected", "ok", providerId, ref.modelId);
+        return { ok: true };
+      } catch (error) {
+        report("model-selected", "unavailable", providerId, ref?.modelId);
+        throw error;
       }
-      await setCaptainModel(model, options.env === undefined ? {} : { env: options.env });
-      return { ok: true };
     },
     async remove(providerId) {
-      if ((await apiProvider(providerId)) === undefined) return { ok: false, error: "unsupported_provider" };
-      // This API manages API keys, never OAuth or internal service credentials.
-      if ((await store.get(providerId))?.type === "api") await store.delete(providerId);
-      return { ok: true };
+      try {
+        if ((await apiProvider(providerId)) === undefined) {
+          report("key-removed", "unsupported_provider", providerId);
+          return { ok: false, error: "unsupported_provider" };
+        }
+        // This API manages API keys, never OAuth or internal service credentials.
+        if ((await store.get(providerId))?.type === "api") {
+          await store.delete(providerId);
+          report("key-removed", "ok", providerId);
+        }
+        return { ok: true };
+      } catch (error) {
+        report("key-removed", "unavailable", providerId);
+        throw error;
+      }
     },
   };
 }

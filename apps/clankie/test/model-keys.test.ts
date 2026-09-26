@@ -42,7 +42,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-async function setup() {
+async function setup(options: { modelId?: string } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "model-keys-"));
   dirs.push(dir);
   const env = {
@@ -53,7 +53,7 @@ async function setup() {
   await writeFile(env.CLANKIE_MODELS_PATH, "{}");
   const store = new FileCredentialStore(join(dir, "credentials.json"));
   const model = {
-    id: "test/model",
+    id: options.modelId ?? "test/model",
     name: "Test",
     provider: "openai",
     api: "openai-responses",
@@ -74,11 +74,11 @@ async function setup() {
   } as unknown as ModelRuntime;
   await mkdir(join(dir, "clankie"));
   await writeFile(join(dir, "clankie/clankie.json"), JSON.stringify({ disabled_providers: ["disabled"] }));
-  const models = createModelKeys({ store, env, cwd: dir, runtime: async () => runtime });
   const telemetryDir = join(dir, "telemetry");
   vi.stubEnv("CLANKIE_BODY_TELEMETRY_DIR", telemetryDir);
   const telemetry = bodyTelemetryFromEnv({ CLANKIE_BODY_TELEMETRY_DIR: telemetryDir }, "service")!;
   telemetry.emit({ event: "body.boot", phase: "clankie-healthy" });
+  const models = createModelKeys({ store, env, cwd: dir, runtime: async () => runtime, telemetry });
   const app = await createClankieApp({
     captain: createStubCaptain(),
     modelKeys: models,
@@ -111,10 +111,93 @@ async function setup() {
     expect(response.status).toBe(200);
     return response.json();
   };
-  return { dir, env, store, models, complete, runtime, app, call, pair, telemetryDir };
+  return { dir, env, store, models, complete, runtime, app, call, pair, telemetryDir, telemetry };
 }
 
 describe("owner model keys", () => {
+  it("emits only model-setting metadata through the real telemetry spool, including working-key validation", async () => {
+    const { call, telemetryDir, complete, store, telemetry } = await setup({ modelId: "gpt-4.1-mini" });
+    const marker = "sk-marker-never-in-model-telemetry";
+    const emit = vi.spyOn(telemetry, "emit");
+    await call("/v1/model-keys/set", { providerId: "openai", apiKey: marker });
+    await call("/v1/model-keys/set", { providerId: "openai", apiKey: `${marker}-replacement` });
+    await call("/v1/model-keys/validate", { providerId: "openai", modelId: "gpt-4.1-mini" });
+    complete.mockRejectedValueOnce(new Error(marker));
+    await call("/v1/model-keys/validate", { providerId: "openai", modelId: "gpt-4.1-mini" });
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort());
+    complete.mockRejectedValueOnce(new Error(marker));
+    await call("/v1/model-keys/validate", { providerId: "openai", modelId: "gpt-4.1-mini" });
+    timeout.mockRestore();
+    await call("/v1/model-keys/select", { model: "openai/gpt-4.1-mini" });
+    await call("/v1/model-keys/select", { model: "openai/gpt-4.1-mini" }); // no change
+    await call("/v1/model-keys/remove", { providerId: "openai" });
+    await call("/v1/model-keys/remove", { providerId: "openai" }); // no key to remove
+    vi.spyOn(store, "set").mockRejectedValueOnce(new Error(marker));
+    await call("/v1/model-keys/set", { providerId: "openai", apiKey: marker });
+    const events = [
+      { action: "key-set", result: "ok" },
+      { action: "key-replaced", result: "ok" },
+      { action: "key-validated", result: "ok" },
+      { action: "key-validated", result: "validation_failed" },
+      { action: "key-validated", result: "validation_timeout" },
+      { action: "model-selected", result: "ok", modelId: "gpt-4.1-mini" },
+      { action: "key-removed", result: "ok" },
+      { action: "key-set", result: "unavailable" },
+    ].map((event) => ({ event: "body.model", providerId: "openai", ...event }));
+    expect(emit.mock.calls.map(([event]) => event)).toEqual(events);
+    const written = (
+      await Promise.all(
+        (await readdir(telemetryDir)).map((file) => readFile(join(telemetryDir, file), "utf8")),
+      )
+    ).join("");
+    expect(written).not.toContain(marker);
+    expect(
+      written
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((event) => event.event === "body.model"),
+    ).toEqual(events.map((event) => ({ ...event, v: 1, atMs: expect.any(Number) })));
+  });
+
+  it("omits custom or unrecognized ids, even from an owner-supplied catalog", async () => {
+    const marker = "private-marker-pretending-to-be-a-model";
+    const { call, telemetry, runtime, env } = await setup({ modelId: marker });
+    const emit = vi.spyOn(telemetry, "emit");
+    await call("/v1/model-keys/select", { model: `openai/${marker}` });
+    await call("/v1/model-keys/select", { model: `openai/${marker}-missing` });
+    vi.spyOn(runtime, "getProviders").mockReturnValue([
+      ...runtime.getProviders(),
+      { id: marker, name: marker, auth: { apiKey: {} } },
+    ] as never);
+    await writeFile(
+      env.CLANKIE_MODELS_PATH,
+      JSON.stringify({
+        [marker]: { id: marker, name: marker, env: [], models: {} },
+      }),
+    );
+    await call("/v1/model-keys/set", { providerId: marker, apiKey: "sk-secret-value" });
+    await call("/v1/model-keys/set", { providerId: `${marker}-unknown`, apiKey: "sk-secret-value" });
+    expect(emit.mock.calls.map(([event]) => event)).toEqual([
+      { event: "body.model", action: "model-selected", result: "ok", providerId: "openai" },
+      { event: "body.model", action: "model-selected", result: "unsupported_model", providerId: "openai" },
+      { event: "body.model", action: "key-set", result: "ok" },
+      { event: "body.model", action: "key-set", result: "unsupported_provider" },
+    ]);
+    expect(diagnosticText(emit.mock.calls)).not.toContain(marker);
+    expect(diagnosticText(emit.mock.calls)).not.toContain("sk-secret-value");
+  });
+
+  it("telemetry failure cannot break a successful key write", async () => {
+    const { call, store, telemetry } = await setup();
+    vi.spyOn(store, "list").mockRejectedValue(new Error("classification unavailable"));
+    vi.spyOn(telemetry, "emit").mockImplementation(() => {
+      throw new Error("spool unavailable");
+    });
+    expect((await call("/v1/model-keys/set", { providerId: "openai", apiKey: "test-key" })).status).toBe(200);
+    expect(await store.get("openai")).toEqual({ type: "api", key: "test-key" });
+  });
+
   it("uses the actual provider adapter with explicit stored auth and discards echoed provider errors", async () => {
     const { store, env, dir } = await setup();
     const marker = "MARKER_KEY_real_adapter_8492";
