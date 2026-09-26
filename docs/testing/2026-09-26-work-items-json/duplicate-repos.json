@@ -1,0 +1,11 @@
+{
+  "repos": [
+    { "id": "workspace", "name": "clankie", "needsDecision": true },
+    { "id": "clankie-3cac94e5", "name": "clankie", "backend": "linear", "needsDecision": false }
+  ],
+  "source": "clankie work repos, real running local body",
+  "workspace": "~/dev/clankie/apps/clankie",
+  "registeredRepo": "~/dev/clankie",
+  "workspaceTrackingFileExists": false,
+  "registeredTrackingFileExists": true
+}

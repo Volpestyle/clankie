@@ -44,6 +44,8 @@ import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
+/** Data consumers need intact text, with a separate byte ceiling instead of truncation. */
+const MAX_DATA_RESULT_BYTES = 8 * 1024 * 1024;
 const MAX_DESCRIPTION_CHARACTERS = 4_000;
 const CONNECT_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -74,7 +76,7 @@ interface McpToolDescriptor {
   readonly initial: boolean;
 }
 
-type McpRefusalReason = "unknown_server" | "lane_denied" | "server_unavailable";
+type McpRefusalReason = "unknown_server" | "lane_denied" | "server_unavailable" | "result_too_large";
 
 type McpCallResult =
   | { readonly outcome: "ok"; readonly content: string; readonly isError: boolean }
@@ -95,6 +97,8 @@ export interface McpHost {
     readonly server: string;
     readonly tool: string;
     readonly arguments: Record<string, unknown>;
+    /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
+    readonly resultMode?: "model" | "data";
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
   }): Promise<McpCallResult>;
   close(): Promise<void>;
@@ -487,9 +491,20 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             "MCP call settled but its receipt could not be recorded",
           );
         }
+        if (
+          input.resultMode === "data" &&
+          Buffer.byteLength(result.content, "utf8") > MAX_DATA_RESULT_BYTES
+        ) {
+          return {
+            outcome: "refused",
+            reason: "result_too_large",
+            detail: `MCP ${server.id}/${input.tool} result exceeds ${MAX_DATA_RESULT_BYTES} bytes; request a smaller page or fewer fields`,
+          };
+        }
         return {
           outcome: "ok",
-          content: result.content.slice(0, MAX_RESULT_CHARACTERS),
+          content:
+            input.resultMode === "data" ? result.content : result.content.slice(0, MAX_RESULT_CHARACTERS),
           isError: result.isError,
         };
       } catch (error) {

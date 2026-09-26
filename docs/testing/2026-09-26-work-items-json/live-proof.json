@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-09-26T20:56:10.216Z",
+  "outcome": "passed",
+  "repo": {
+    "id": "workspace",
+    "name": "clankie",
+    "backend": "linear",
+    "needsDecision": false
+  },
+  "itemCount": 165,
+  "pages": [
+    {
+      "tool": "list_issues",
+      "limit": 50,
+      "bytes": 39908,
+      "characters": 39786,
+      "issues": 50,
+      "hasNextPage": true,
+      "nextCursor": "0f8d8ae6-916a-43b1-a839-163a310d1de4"
+    },
+    {
+      "tool": "list_issues",
+      "limit": 50,
+      "cursor": "0f8d8ae6-916a-43b1-a839-163a310d1de4",
+      "bytes": 39489,
+      "characters": 39342,
+      "issues": 50,
+      "hasNextPage": true,
+      "nextCursor": "0673ce6a-3097-4761-9474-4621d494df83"
+    },
+    {
+      "tool": "list_issues",
+      "limit": 50,
+      "cursor": "0673ce6a-3097-4761-9474-4621d494df83",
+      "bytes": 39342,
+      "characters": 39189,
+      "issues": 50,
+      "hasNextPage": true,
+      "nextCursor": "a108be0b-2f97-40d3-b387-78ebe38e2221"
+    },
+    {
+      "tool": "list_issues",
+      "limit": 50,
+      "cursor": "a108be0b-2f97-40d3-b387-78ebe38e2221",
+      "bytes": 11914,
+      "characters": 11862,
+      "issues": 15,
+      "hasNextPage": false
+    }
+  ],
+  "wallMs": 1700
+}

@@ -1,0 +1,133 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+ ❯ apps/clankie/test/work-items-linear-results.test.ts (2 tests | 2 failed) 14ms
+   × parses a Linear page larger than 50k through the real MCP host while retaining the model cap 7ms
+   × refuses oversized UTF-8 data with a typed result and service error, never truncated JSON 6ms
+ ❯ packages/work-items/test/linear-pagination.test.ts (4 tests | 4 failed) 7ms
+   × pages in bounded chunks and honors the overall limit 5ms
+   × continues across filtered-out pages and stops when the server is exhausted 0ms
+   × rejects a missing or repeated continuation cursor (undefined) 1ms
+   × rejects a missing or repeated continuation cursor (same) 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/work-items-linear-results.test.ts > parses a Linear page larger than 50k through the real MCP host while retaining the model cap
+SyntaxError: Unterminated string in JSON at position 50000 (line 1 column 50001)
+ ❯ Object.linear [as call] apps/clankie/src/work-items.ts:201:73
+    199|           if (result.outcome !== "ok") throw new Error(`Linear ${tool}…
+    200|           if (result.isError) throw new Error(`Linear ${tool}: ${resul…
+    201|           return result.content.trim().length === 0 ? undefined : (JSO…
+       |                                                                         ^
+    202|         };
+    203|
+ ❯ Object.list packages/work-items/src/backends/linear.ts:153:23
+ ❯ Object.handle apps/clankie/src/work-items.ts:349:20
+ ❯ apps/clankie/test/work-items-linear-results.test.ts:43:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  apps/clankie/test/work-items-linear-results.test.ts > refuses oversized UTF-8 data with a typed result and service error, never truncated JSON
+AssertionError: expected { outcome: 'ok', …(2) } to match object { outcome: 'refused', …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "detail": StringContaining "8388608 bytes",
+-   "outcome": "refused",
+-   "reason": "result_too_large",
++   "outcome": "ok",
+  }
+
+ ❯ apps/clankie/test/work-items-linear-results.test.ts:53:18
+     51|   const { service, host } = await fixture(content);
+     52|   const result = await host.call({ lane: "operator", server: "linear",…
+     53|   expect(result).toMatchObject({ outcome: "refused", reason: "result_t…
+       |                  ^
+     54|   expect(result).not.toHaveProperty("content");
+     55|   await expect(service.handle({ action: "list", repo: "workspace" }, f…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  packages/work-items/test/linear-pagination.test.ts > pages in bounded chunks and honors the overall limit
+AssertionError: expected [ { limit: 120, cursor: undefined } ] to deeply equal [ …(3) ]
+
+- Expected
++ Received
+
+  [
+    {
+      "cursor": undefined,
+-     "limit": 50,
+-   },
+-   {
+-     "cursor": "50",
+-     "limit": 50,
+-   },
+-   {
+-     "cursor": "100",
+-     "limit": 20,
++     "limit": 120,
+    },
+  ]
+
+ ❯ packages/work-items/test/linear-pagination.test.ts:14:91
+     12|   expect(items).toHaveLength(120);
+     13|   expect(items.at(-1)?.id).toBe("VUH-119");
+     14|   expect(call.mock.calls.map(([, args]) => ({ limit: args.limit, curso…
+       |                                                                                           ^
+     15|   for (const [tool, args] of call.mock.calls) expect({ tool, team: arg…
+     16| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  packages/work-items/test/linear-pagination.test.ts > continues across filtered-out pages and stops when the server is exhausted
+AssertionError: expected [] to deeply equal [ 'VUH-2' ]
+
+- Expected
++ Received
+
+- [
+-   "VUH-2",
+- ]
++ []
+
+ ❯ packages/work-items/test/linear-pagination.test.ts:23:40
+     21|     : { issues: [issue(2)], hasNextPage: false });
+     22|   const items = await createLinearBackend({ team: "VUH", call }).list(…
+     23|   expect(items.map((item) => item.id)).toEqual(["VUH-2"]);
+       |                                        ^
+     24|   expect(call).toHaveBeenCalledTimes(2);
+     25| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  packages/work-items/test/linear-pagination.test.ts > rejects a missing or repeated continuation cursor (undefined)
+ FAIL  packages/work-items/test/linear-pagination.test.ts > rejects a missing or repeated continuation cursor (same)
+AssertionError: promise resolved "[]" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+[]
+
+ ❯ packages/work-items/test/linear-pagination.test.ts:29:66
+     27| it.each([undefined, "same"])("rejects a missing or repeated continuati…
+     28|   const call = vi.fn(async () => ({ issues: [], hasNextPage: true, cur…
+     29|   await expect(createLinearBackend({ team: "VUH", call }).list()).reje…
+       |                                                                  ^
+     30|   expect(call.mock.calls.length).toBeLessThanOrEqual(2);
+     31| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  6 failed (6)
+   Start at  15:52:09
+   Duration  438ms (transform 134ms, setup 0ms, import 279ms, tests 21ms, environment 0ms)

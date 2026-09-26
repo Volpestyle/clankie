@@ -1,0 +1,14 @@
+$ tsc --noEmit -p tsconfig.json
+src/hosted-body.ts(281,15): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+src/hosted-device-security.ts(19,5): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+src/hosted-device-security.ts(20,5): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+test/restore-authority.test.ts(36,19): error TS2322: Type '{ prepare(_key: Uint8Array<ArrayBufferLike> | undefined, local: readonly string[]): Promise<{ key: Uint8Array<ArrayBuffer>; revocations: { ...; }[]; }>; revokeDevice(id: string): Promise<...>; }' is not assignable to type 'Pick<HostedDeviceSecurity, "revokeDevice" | "prepare">'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type 'Promise<{ key: Uint8Array<ArrayBuffer>; revocations: { dev: string; at: number; }[]; }>' is not assignable to type 'Promise<{ key: Uint8Array<ArrayBuffer>; revocations: { dev: string; at: number; gen: number; }[]; }>'.
+      Type '{ key: Uint8Array<ArrayBuffer>; revocations: { dev: string; at: number; }[]; }' is not assignable to type '{ key: Uint8Array<ArrayBuffer>; revocations: { dev: string; at: number; gen: number; }[]; }'.
+        Types of property 'revocations' are incompatible.
+          Type '{ dev: string; at: number; }[]' is not assignable to type '{ dev: string; at: number; gen: number; }[]'.
+            Property 'gen' is missing in type '{ dev: string; at: number; }' but required in type '{ dev: string; at: number; gen: number; }'.
+/Users/james/dev/clankie/apps/clankie:
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @clankie/clankie@0.2.0 typecheck: `tsc --noEmit -p tsconfig.json`
+Exit status 2

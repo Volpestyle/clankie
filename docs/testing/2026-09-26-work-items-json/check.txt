@@ -1,0 +1,13 @@
+$ pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+apps/clankie/src/app.ts (6ms)
+apps/clankie/src/hosted-body.ts (1ms)
+apps/clankie/src/hosted-device-security.ts (0ms)
+apps/clankie/test/restore-authority.test.ts (0ms)
+
+Format issues found in above 4 files. Run without `--check` to fix.
+Finished in 858ms on 1178 files using 18 threads.
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.

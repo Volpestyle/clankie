@@ -22,3 +22,13 @@ Work items in the repo's own tracking convention ([ADR 0191](../../docs/adr/0191
 The service (`apps/clankie/src/work-items.ts`) owns which repos a paired device
 may read; `clankie work` and the captain's `work_items` tools are its callers.
 The wire shapes live in `@clankie/protocol/work-items`.
+
+Linear lists use cursor pages of at most 50 issues, stopping at the requested
+number of matching items (default 100, maximum 250) or the final page. Missing
+or repeated continuation cursors fail with `invalid_pagination` instead of
+looping or silently returning an incomplete list.
+
+The service requests MCP `resultMode: "data"`: complete text up to 8 MiB in
+UTF-8, with typed `result_too_large` failure above that ceiling. The default
+model-facing 50,000-character cap is unchanged. The data limit is checked on
+the decoded tool result; it is not a network transport streaming limit.

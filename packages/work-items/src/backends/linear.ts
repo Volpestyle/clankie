@@ -35,6 +35,15 @@ interface LinearStatus {
 }
 
 const FIELDS = ["title", "description", "status", "statusType", "url", "updatedAt"];
+const PAGE_SIZE = 50;
+
+class LinearPaginationError extends Error {
+  readonly code = "invalid_pagination";
+  constructor() {
+    super("Linear returned another page without a new cursor");
+    this.name = "LinearPaginationError";
+  }
+}
 
 function statusName(issue: LinearIssue): string {
   return typeof issue.status === "string" ? issue.status : (issue.status?.name ?? "");
@@ -150,14 +159,31 @@ export function createLinearBackend(options: {
   return {
     kind: "linear",
     async list(filter) {
-      const result = (await options.call("list_issues", {
-        team: options.team,
-        ...(options.project === undefined ? {} : { project: options.project }),
-        limit: Math.min(filter?.limit ?? 100, 250),
-        fields: FIELDS,
-      })) as { issues?: LinearIssue[] } | LinearIssue[];
-      const issues = Array.isArray(result) ? result : (result.issues ?? []);
-      return issues.map(toItem).filter((item) => matchesFilter(item, filter));
+      const limit = Math.min(filter?.limit ?? 100, 250);
+      const items: WorkItem[] = [];
+      const cursors = new Set<string>();
+      let cursor: string | undefined;
+      while (items.length < limit) {
+        const result = (await options.call("list_issues", {
+          team: options.team,
+          ...(options.project === undefined ? {} : { project: options.project }),
+          limit: Math.min(PAGE_SIZE, limit - items.length),
+          ...(cursor === undefined ? {} : { cursor }),
+          fields: FIELDS,
+        })) as { issues?: LinearIssue[]; hasNextPage?: boolean; cursor?: string } | LinearIssue[];
+        const issues = Array.isArray(result) ? result : (result.issues ?? []);
+        for (const issue of issues) {
+          const item = toItem(issue);
+          if (matchesFilter(item, filter)) items.push(item);
+          if (items.length === limit) return items;
+        }
+        if (Array.isArray(result) || result.hasNextPage !== true) break;
+        if (typeof result.cursor !== "string" || result.cursor.length === 0 || cursors.has(result.cursor))
+          throw new LinearPaginationError();
+        cursor = result.cursor;
+        cursors.add(cursor);
+      }
+      return items;
     },
     async get(id) {
       try {
