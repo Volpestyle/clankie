@@ -12,7 +12,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import type { CredentialStore } from "@clankie/credential-broker";
-import type { HostedBodyClient } from "./hosted-body.ts";
+import { HostedBodyResourceError, type HostedBodyClient } from "./hosted-body.ts";
 
 const PAIR_DOMAIN = "clankie-hosted-pair-v2";
 const RequestSchema = z
@@ -47,7 +47,16 @@ export async function createHostedPairing(
     key = createPrivateKey(credential.key);
   }
   if (key.asymmetricKeyType !== "ed25519") throw new Error("Invalid hosted pairing key type");
-  await client.registerPairingKey(key);
+  try {
+    await client.registerPairingKey(key);
+  } catch (error) {
+    if (!(error instanceof HostedBodyResourceError) || error.code !== "key_retired") throw error;
+    // Persist the replacement before registration: a lost successful response
+    // retries this same key instead of needing a second single-use boot token.
+    key = generateKeyPairSync("ed25519").privateKey;
+    await store.set(provider, { type: "api", key: key.export({ type: "pkcs8", format: "pem" }).toString() });
+    await client.registerPairingKey(key);
+  }
   return new HostedPairing(client, key, { replayPath });
 }
 

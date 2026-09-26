@@ -578,15 +578,24 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (dependencies.hostedDeviceSecurity === undefined) throw new Error("Hosted security unavailable");
       const restored = await dependencies.hostedDeviceSecurity.prepare(
         dependencies.deviceSessionKey,
-        [...devices.values()].filter(record => record.status === "revoked").map(record => record.deviceId),
+        [...devices.values()]
+          .filter((record) => record.status === "revoked")
+          .map((record) => record.deviceId),
       );
       if (securityClosed) return;
       for (const tombstone of restored.revocations) {
         const record = devices.get(tombstone.dev);
         if (record === undefined || record.status === "revoked") continue;
-        const event = recordEvent("device.revoked", `device:${tombstone.dev}`, new Date(tombstone.at).toISOString(), {
-          schemaVersion: 1, deviceId: tombstone.dev, revokedBy: "hosted-fleet",
-        });
+        const event = recordEvent(
+          "device.revoked",
+          `device:${tombstone.dev}`,
+          new Date(tombstone.at).toISOString(),
+          {
+            schemaVersion: 1,
+            deviceId: tombstone.dev,
+            revokedBy: "hosted-fleet",
+          },
+        );
         applyDeviceEvent(devices, event);
       }
       // Publish the signer last. Pairing, refresh and relay self-authorize
@@ -597,10 +606,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   };
   let securityRetry: Promise<void> | undefined;
-  const retryHostedSecurity = () => securityRetry ??= reconcileHostedSecurity().finally(() => { securityRetry = undefined; });
+  const retryHostedSecurity = () =>
+    (securityRetry ??= reconcileHostedSecurity().finally(() => {
+      securityRetry = undefined;
+    }));
   if (dependencies.hostedBody !== undefined) await retryHostedSecurity();
-  const securityRetryTimer = dependencies.hostedBody === undefined ? undefined
-    : setInterval(() => { void retryHostedSecurity(); }, 30_000);
+  const securityRetryTimer =
+    dependencies.hostedBody === undefined
+      ? undefined
+      : setInterval(() => {
+          void retryHostedSecurity();
+        }, 30_000);
   securityRetryTimer?.unref();
   const discordPresenceResults = new Map<
     string,
@@ -1098,6 +1114,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   // Optional execution and doorway failures do not make the captain unhealthy.
   app.get("/health", (context) => {
+    if (dependencies.hostedBody !== undefined && deviceSessionSigner === undefined)
+      return context.json({ error: "hosted_security_unavailable" }, 503);
     const herdr = dependencies.herdrRuntime?.();
     const doorway = dependencies.publicGatewayDoorway?.();
     return context.json({
@@ -2660,6 +2678,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   };
 
   app.post(HOSTED_PAIR_OFFER_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
+    if (dependencies.hostedBody !== undefined && deviceSessionSigner === undefined)
+      return context.json({ error: "device_authentication_unavailable" }, 503);
     if (dependencies.hostedPairing === undefined) return context.json({ error: "not_found" }, 404);
     return dependencies.hostedPairing.offer(await readJson(context.req.raw), async () => {
       const publisher = dependencies.pairingOfferPublisher;

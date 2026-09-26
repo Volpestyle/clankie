@@ -51,5 +51,19 @@ export function hostedFixture() {
       keys: [{ publicKeyPem: publicKey.export({ type: "spki", format: "pem" }) }],
     }),
   };
-  return { now, bootstrap, host, pair, hostId, browserPublicKey, nonce };
+  const security = (requestNonce: string, claims: Record<string, unknown> = {}) =>
+    token("clankie-security", {
+      hid: undefined,
+      typ: "clankie-security",
+      aud: "clankie-body",
+      inst: installationId,
+      non: requestNonce,
+      exp: now / 1000 + 60,
+      gen: 0,
+      rev: [],
+      ak: null,
+      pk: null,
+      ...claims,
+    });
+  return { now, bootstrap, host, pair, hostId, browserPublicKey, nonce, security };
 }

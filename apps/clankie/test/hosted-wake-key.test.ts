@@ -17,7 +17,18 @@ describe("hosted wake key", () => {
       deviceSessionKey: randomBytes(32),
       authenticateOperator: async (req) =>
         req.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
-      ...(hosted ? { hostedBody: { registerWakeKey, revokeWakeKey } } : {}),
+      ...(hosted
+        ? {
+            hostedBody: { registerWakeKey, revokeWakeKey },
+            hostedDeviceSecurity: {
+              prepare: async (key: Uint8Array | undefined) => ({
+                key: Uint8Array.from(key!),
+                revocations: [],
+              }),
+              revokeDevice: async () => {},
+            },
+          }
+        : {}),
     });
     apps.push(clankie);
     const post = (path: string, body: unknown = {}, token = "owner") =>

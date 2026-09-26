@@ -223,7 +223,7 @@ function hostedVerifyKeys(json: string): ReadonlyMap<string, KeyObject> {
 
 function signedClaims(
   token: string,
-  typ: "clankie-host" | "clankie-pair",
+  typ: "clankie-host" | "clankie-pair" | "clankie-security",
   keys: ReadonlyMap<string, KeyObject>,
 ): unknown {
   const parts = token.split(".");
@@ -263,6 +263,54 @@ const HostClaimsSchema = z
     inst: PublicGatewayInstallationIdSchema,
   })
   .strict();
+
+/** Fleet-signed rollback-independent state; the request nonce fences old answers. */
+const SecurityStateClaimsSchema = z
+  .object({
+    typ: z.literal("clankie-security"),
+    iss: z.literal("clankie-fleet"),
+    aud: z.literal("clankie-body"),
+    tid: z.string().min(1).max(64),
+    inst: z.string().min(1).max(64),
+    non: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
+    iat: z.number().int().nonnegative(),
+    exp: z.number().int().positive(),
+    gen: z.number().int().nonnegative(),
+    rev: z
+      .array(
+        z
+          .object({
+            dev: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/u),
+            at: z.number().int().nonnegative(),
+            gen: z.number().int().positive(),
+          })
+          .strict(),
+      )
+      .max(1024),
+    ak: z
+      .object({ kid: z.string().regex(/^[A-Za-z0-9_-]{22,64}$/u), gen: z.number().int().positive() })
+      .strict()
+      .nullable(),
+    pk: z
+      .object({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/u), gen: z.number().int().nonnegative() })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type HostedSecurityState = Pick<
+  z.infer<typeof SecurityStateClaimsSchema>,
+  "gen" | "rev" | "ak" | "pk"
+>;
+
+/** Resource/key refusal is not revocation of this body's entitlement. */
+export class HostedBodyResourceError extends Error {
+  readonly code: "key_retired" | "stale_auth_key" | "device_revoked" | "too_many_revocations";
+  constructor(code: HostedBodyResourceError["code"]) {
+    super(`Fleet request refused (${code})`);
+    this.name = "HostedBodyResourceError";
+    this.code = code;
+  }
+}
 
 /** The fleet model proxy's endpoints, under `/fleet/v1/model/v1/`. */
 export const HOSTED_MODEL_ENDPOINTS = ["responses", "chat/completions", "images/generations"] as const;
@@ -400,7 +448,12 @@ export class HostedBodyClient {
     };
   }
 
-  private async request(path: string, body: unknown, token: string): Promise<Response> {
+  private async request(
+    path: string,
+    body: unknown,
+    token: string,
+    accept?: (response: Response, nonce: string) => Promise<void>,
+  ): Promise<Response> {
     const registration = path === "pairing-key";
     const pathname = `/fleet/v1/body/${path}`;
     // Serialize once: the digest must cover exactly the bytes fetch sends, including on retry.
@@ -429,6 +482,18 @@ export class HostedBodyClient {
         await delay(250 * 2 ** attempt);
         continue;
       }
+      if (response.status === 403 || response.status === 409) {
+        const code = await errorCode(response);
+        if (
+          (path === "pairing-key" && code === "key_retired") ||
+          (path === "wake-keys" && code === "device_revoked") ||
+          (path === "auth-key" && (code === "stale_auth_key" || code === "key_retired")) ||
+          (path === "devices/revoke" && code === "too_many_revocations")
+        ) {
+          await response.body?.cancel();
+          throw new HostedBodyResourceError(code);
+        }
+      }
       if (response.status === 403) {
         const error: unknown = await response
           .clone()
@@ -447,7 +512,11 @@ export class HostedBodyClient {
         this.reject();
         throw new HostedBodyDeniedError();
       }
-      if (response.ok) return response;
+      if (response.ok) {
+        // Validate against this attempt's locally generated nonce, including retries.
+        await accept?.(response, headers["x-clankie-body-nonce"]!);
+        return response;
+      }
       let retry = registration && response.status >= 500;
       if (!registration && response.status === 401) {
         const error: unknown = await response
@@ -505,11 +574,61 @@ export class HostedBodyClient {
     this.credential = credential;
   }
   async post(
-    path: "wake-keys" | "wake-keys/revoke" | "heartbeat" | "discord-key",
+    path: "wake-keys" | "wake-keys/revoke" | "heartbeat" | "discord-key" | "devices/revoke" | "auth-key",
     body: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     const credential = await this.resolveHostToken();
     return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
+  }
+  async readSecurityState(): Promise<HostedSecurityState> {
+    let state: HostedSecurityState | undefined;
+    const credential = await this.resolveHostToken();
+    await this.request(
+      "security-state",
+      { installationId: this.bootstrap.installationId },
+      credential.token,
+      async (response, nonce) => {
+        const wire = z
+          .object({ state: z.string().max(256_000) })
+          .strict()
+          .parse(await response.json());
+        const claims = SecurityStateClaimsSchema.parse(
+          signedClaims(wire.state, "clankie-security", this.keys),
+        );
+        const now = Math.floor(this.clock() / 1000);
+        if (
+          claims.tid !== this.bootstrap.tenantId ||
+          claims.inst !== this.bootstrap.installationId ||
+          claims.non !== nonce ||
+          claims.exp <= now ||
+          claims.iat > now + 60 ||
+          claims.exp <= claims.iat ||
+          claims.exp - claims.iat > 60 ||
+          claims.rev.some((entry) => entry.gen > claims.gen) ||
+          (claims.ak !== null && claims.ak.gen > claims.gen) ||
+          (claims.pk !== null && claims.pk.gen > claims.gen)
+        )
+          throw new Error("Invalid hosted security state");
+        state = { gen: claims.gen, rev: claims.rev, ak: claims.ak, pk: claims.pk };
+      },
+    );
+    if (state === undefined) throw new Error("Hosted security state unavailable");
+    return state;
+  }
+  async revokeDevice(deviceId: string): Promise<void> {
+    const response = await this.post("devices/revoke", { deviceId });
+    z.object({ generation: z.number().int().nonnegative() })
+      .strict()
+      .parse(await response.json());
+  }
+  async declareAuthKey(keyId: string, previousKeyId?: string): Promise<void> {
+    const response = await this.post("auth-key", {
+      keyId,
+      ...(previousKeyId === undefined ? {} : { previousKeyId }),
+    });
+    z.object({ generation: z.number().int().nonnegative() })
+      .strict()
+      .parse(await response.json());
   }
   /**
    * One model call to the fleet's model proxy (VUH-1371): exactly `bytes`,

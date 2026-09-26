@@ -320,3 +320,41 @@ signing key directly from the fleet and verifies the signature before decrypting
 This prevents an active gateway relay from substituting either party’s key.
 It does not protect against compromise of the fleet or the origin serving the
 account page. No ticket, link or private key is logged.
+
+### Security state on boot and disk restore
+
+Before admitting a device, a managed body reads the fleet's signed security
+state with a fresh request nonce. It checks the fleet signature, tenant,
+installation, nonce, lifetime and generation, and persists the fleet's device
+revocation tombstones into its local projection. A restored event log cannot
+reactivate a device revoked after that snapshot.
+
+Pairing-key registration must run first because the security-state request
+itself needs that signature. A retired pairing key is replaced with a fresh
+broker key using the bootstrap registration token; the replacement is saved
+before registration so a lost response can retry the same key. No device is
+admitted during this bootstrap sequence.
+
+The device-session key and its random fleet identity are saved atomically in
+`<deviceSessionKeyPath>.hosted.json` (mode `0600`). On first enrollment only, an
+existing local signing key is retained. After enrollment, a missing or stale
+identity gets new key bytes and a new identity, declared against the fleet's
+current key. Old bearers then require pairing again. Never restore or rotate
+the key file independently of this bundle; hosted admission uses the bundle.
+Self-hosted bodies keep the ordinary local-key behavior.
+
+If state cannot be read or verified, device authentication, hosted pairing
+and health remain unavailable. The body retries boot reconciliation every
+30 seconds; it never admits devices from cached authority while waiting.
+A successful boot does not poll the fleet on every device request: ordinary
+bearer verification and the live local grant projection still apply. Device
+revocation is recorded locally immediately, acknowledged only after the fleet
+has persisted its tombstone and removed the wake key, and retried after a
+failure or restart.
+
+This fences body-volume rollback, not a rollback of the fleet's own security
+records. Customer provider keys are outside this contract: the fleet never
+holds them or an authoritative revision for them. Tests cover disk restore,
+valid-device admission, unavailable authority, signed-response binding and
+retired-key replacement in `apps/clankie/test/restore-authority.test.ts`,
+`hosted-device-security.test.ts` and `hosted-security-wire.test.ts`.
