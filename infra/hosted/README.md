@@ -125,11 +125,14 @@ to a real model/provider or reads the operator's accounts.
 
 ## Managed body bootstrap
 
-The managed tenant image sets `CLANKIE_HOSTED_BOOTSTRAP_FILE` to a private JSON
+The managed tenant host sets `CLANKIE_HOSTED_BOOTSTRAP_FILE` to a private JSON
 file readable by the service user (mode 0600). Unset means self-hosted, including
 ordinary Compose installations: their gateway sign-in and lifecycle are unchanged.
-The provisioner delivers this file to its own instance; never put it in image
-layers, user data, command arguments or logs. Its exact fields are:
+The provisioner delivers it to that instance only: a managed host receives it as
+the instance's raw JSON user-data before every create and start, and writes it on
+each boot to a tmpfs file mounted read-only into the body, so the body itself
+never reaches instance metadata. Never put it in image layers, the container
+environment, command arguments or logs. Its exact fields are:
 
 ```json
 {
