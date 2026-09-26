@@ -100,10 +100,12 @@ stays quiet. In channels where the owner enables `/clankie tools mode:on`, the
 host also edits one quiet tool-activity card with public-safe work categories,
 counts, elapsed time, and a terminal state; tool names, arguments, and results
 stay in the local Pi trail ([ADR 0134](adr/0134-discord-tool-work-is-a-status-card.md)).
-Discord shows him typing from his first words to the end of the turn: the
-captain signals the body when his reply stream can no longer be the silence
-sentinel, so a turn he ends in silence never shows the room a reply being
-written.
+Discord shows him typing as soon as ingress accepts a live message asked of
+him (a DM, a mention, or one of his names), before calling the captain, and it
+stays visible through thinking and tool work. Room chatter he is merely shown
+lights only when his reply stream can no longer be the silence sentinel, so a
+turn he ends in silence never shows the room a reply being written. Buffered,
+dropped, duplicate, and backlog catch-up messages do not start typing.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): durable agent personas, their current fleet seats,

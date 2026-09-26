@@ -110,15 +110,16 @@ without ending the turn or spending his reply. Its description tells him when:
 when someone is actually waiting on slow work and a meaningful delay would
 otherwise leave them hanging. Unsolicited links he elects to inspect get no
 progress announcement. What he says is his; nothing here writes it for him. The
-typing indicator runs for the whole turn rather than stopping after a minute, so
-"he is working" stays visible the entire time — but it starts when he starts
-writing, not when the message arrived. The captain watches his own reply stream
-and signals the body (a `typing` captain action, host-stamped, carrying no
-content) the moment the words can no longer become `[[stay-silent]]`; the body
-lights the delivery it is already holding, so DMs work like channels and no new
-authority is involved. A turn he ends in silence never lights the room, and a
-turn spent entirely in tools shows the tool-activity card and `send_text_update`
-rather than an indicator promising words he has not written.
+typing indicator runs for the whole turn rather than stopping after a minute.
+Amended 2026-09-26: a live message asked of him (a DM, a mention, or one of
+his names) starts the indicator when ingress accepts it, before the captain is
+called, so thinking and tool latency are visible to the person waiting. That
+acknowledges the ask and does not commit him to an answer. Room chatter he is
+merely shown still waits for the captain's reply-stream signal, so a turn he
+ends in silence never shows the room a reply being written. A silent, failed,
+or absorbed turn stops its refresh loop; without a reply, Discord expires the
+last indicator naturally. Dropped, buffered, duplicate, and backlog catch-up
+messages never start an indicator.
 
 **One derived attachment root, shared by writer and reader.**
 `discordAttachmentRoot(env)` in `@clankie/settings` defaults to
@@ -161,13 +162,13 @@ A turn that has to go and find something out, meanwhile, is allowed to:
 sequenceDiagram
     participant R as Room
     participant L as Durable lane
-    R->>L: "what was the biggest upset?"
+    R->>L: "clankie, what was the biggest upset?"
+    Note over R: asked by name, so typing starts when ingress accepts it
     L->>R: send_text_update — "hang on, pulling the bracket up"
-    Note over R: nothing is typing yet — he has written no reply
     loop as long as it keeps working
         L->>L: browse, read, click — each event resets the stall clock
     end
-    L->>R: first words of the reply — typing lights, and stays lit
+    Note over R: typing refreshes throughout thinking and tool work
     L->>R: the answer, however long it took
 ```
 

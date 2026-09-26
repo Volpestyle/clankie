@@ -540,7 +540,12 @@ export class DiscordTextIngress {
     });
     event("accepted");
     const typing = this.armTyping(message, identity);
-    if (typing !== undefined) this.typing.set(message.id, typing.begin);
+    if (typing !== undefined) {
+      this.typing.set(message.id, typing.begin);
+      // Only a message asked of him lights the room before he writes. Chatter
+      // he may let pass waits for `beginTyping`, so silence never shows typing.
+      if (message.guildId === undefined || !this.unprompted(message)) typing.begin();
+    }
     let result: CaptainChannelTurnResult;
     try {
       result = await this.port.submitDiscordCaptainChannelTurn(request);
@@ -616,19 +621,13 @@ export class DiscordTextIngress {
   }
 
   /**
-   * The room sees him typing once he is actually writing a reply, and not
-   * before — the mid-turn signal ADR 0118 wanted and did not have.
-   *
-   * Arriving is not answering. The turn that lights the indicator is the same
-   * turn that decides whether to speak at all, so an indicator lit on delivery
-   * showed him "typing" through every turn he ended in silence. The captain now
-   * calls `beginTyping` the moment his reply stream stops being a possible
-   * `[[stay-silent]]`, which is the earliest anything can honestly know.
-   *
-   * Everything after that is unchanged: the indicator's lifetime is the turn's,
-   * the refresh keeps it lit for as long as the work takes, and the reply — or
-   * the `finally` below it — takes it down. A turn that never writes a word
-   * never lights the channel, which is the point.
+   * A live message asked of him (a DM, a mention, or one of his names) starts
+   * typing before the captain is called, so thinking and tool work are visible
+   * without waiting for reply text. That acknowledges the ask, not a promise to
+   * speak. Room chatter he is merely shown stays dark until the captain calls
+   * `beginTyping` with a real reply, so a turn he ends in silence never shows him
+   * typing. Refreshing stops when the turn settles or fails; Discord expires the
+   * last indicator naturally when there is no reply to clear it.
    *
    * A catch-up turn is armed for nothing at all. Reading a backlog minutes later
    * is him checking in, not answering a room that is waiting on him, and a
@@ -676,7 +675,7 @@ export class DiscordTextIngress {
   }
 
   /**
-   * He has started writing his reply to this delivery, so the channel shows it.
+   * Ensure typing is active for an in-flight delivery; repeated signals are idempotent.
    * False when nothing is in flight under that id — a settled turn, a catch-up,
    * or a delivery this process never held.
    */
