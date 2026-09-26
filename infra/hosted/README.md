@@ -151,3 +151,18 @@ serves fleet calls. Renewals live in the credential broker so a restart does not
 revert to an old bootstrap token; the bootstrap file itself is not rewritten.
 A fleet `403` stops the connector and further fleet requests. Invalid bootstrap
 configuration fails startup instead of falling back to a different account.
+
+Managed bodies also register paired-device P-256 wake keys with the fleet via
+`POST /v1/devices/wake-key`, inside the existing encrypted device channel. The
+live session chooses the device id; device revocation immediately denies local
+access and retries fleet key removal on failure and after restart. Self-hosted
+bodies answer 404, including through the encrypted gateway.
+
+Idle accounting reports actual work to `/fleet/v1/body/heartbeat`: human and
+owner-configured external-event captain turns, running owner-goal continuations,
+and working Herdr/headless seats. Self-wakes, presence and polling earn no busy
+credit. Successful pairing and operator writes update customer activity; tails,
+fleet reads and token refresh do not. Reports go out on changes, each minute
+while busy, and every five minutes while idle. The fleet remains responsible for
+sleep and budget enforcement; the service records its returned desired state and
+uses the ordinary graceful shutdown when the instance stops.

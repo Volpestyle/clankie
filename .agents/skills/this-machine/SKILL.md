@@ -373,3 +373,13 @@ the enrolled session again for renewable, still-active work. The owned Claude st
 turns; external hosts must renew their own attempts. Verification identifies the
 connected user; it does not switch to the intended automation account. Read `docs/worker-access.md`
 under `repoRoot` for the contract.
+
+## Managed hosted bodies
+
+`CLANKIE_HOSTED_BOOTSTRAP_FILE` selects a managed tenant body. Its private
+bootstrap supplies the fleet identity; the service renews its host credential
+through the fleet and stores renewals in the broker. Do not repair this by
+running `/gateway` sign-in or editing the bootstrap. A fleet rejection needs the
+managed tenant's entitlement/provisioning fixed. Unset means a self-hosted body.
+Managed wake-key registration and busy reporting are automatic; see
+`infra/hosted/README.md` under the doctor-reported service root for the contract.

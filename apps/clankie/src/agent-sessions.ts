@@ -135,6 +135,8 @@ export function createAgentSessions(
     clock?: () => number;
     /** Where runs survive a restart; a run in flight then comes back `unknown`. */
     runsPath?: string;
+    /** Active headless turns, for managed-body idle accounting. */
+    onWorkingChanged?: (working: boolean) => void;
   } = {},
 ): AgentSessions {
   const clock = options.clock ?? Date.now;
@@ -163,6 +165,7 @@ export function createAgentSessions(
   const set = (run: AgentSessionRun) => {
     runs.set(run.runId, run);
     save();
+    options.onWorkingChanged?.([...runs.values()].some((item) => item.state === "running"));
     return run;
   };
   /**

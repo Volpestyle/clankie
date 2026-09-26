@@ -1,3 +1,4 @@
+import type { HostedWorkStarted } from "../hosted-work.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
 import type { ExecutionConnections } from "../herdr-session.ts";
 import type {
@@ -38,6 +39,8 @@ import type { RivalsClient } from "../rivals.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  /** Actual work lifetime, separate from presence and model telemetry. */
+  readonly onWorkStarted?: HostedWorkStarted;
   /** Called once per settled turn with its bounded metrics (hosted body telemetry). */
   readonly onTurnSettled?: (metrics: CaptainTurnSettledMetrics) => void;
   /** Execution is optional; checked again when a terminal tool is called. */

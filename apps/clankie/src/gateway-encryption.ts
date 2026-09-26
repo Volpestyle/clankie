@@ -1,3 +1,4 @@
+import { isHostedCustomerWork } from "./hosted-heartbeat.ts";
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from "node:crypto";
 import { z } from "zod";
 import { PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID, type CredentialStore } from "@clankie/credential-broker";
@@ -63,7 +64,9 @@ export class GatewayEncryptionHost {
   private readonly challenges = new Map<string, number>();
   private readonly hostId: string;
   private readonly wrappingKey: Uint8Array;
-  public constructor(hostId: string, wrappingKey: Uint8Array) {
+  private readonly onCustomerWork: (() => void) | undefined;
+  public constructor(hostId: string, wrappingKey: Uint8Array, onCustomerWork?: () => void) {
+    this.onCustomerWork = onCustomerWork;
     this.hostId = hostId;
     this.wrappingKey = wrappingKey;
   }
@@ -181,6 +184,11 @@ export class GatewayEncryptionHost {
           ...(requestBody === undefined ? {} : { body: requestBody }),
         }),
       );
+      if (
+        response.ok &&
+        isHostedCustomerWork(request.method, request.path, requestBody?.toString("utf8") ?? "")
+      )
+        this.onCustomerWork?.();
       if (
         response.ok &&
         ["/v1/pairing/redeem", "/v1/pairing/complete", "/v1/devices/self/session/refresh"].includes(

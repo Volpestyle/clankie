@@ -192,6 +192,21 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/devices/wake-key",
+      {
+        access: "Encrypted live device bearer; managed bodies only",
+        purpose:
+          "Register this device’s public key for waking its hosted body. Self-hosted bodies return 404.",
+      },
+    ],
+    [
+      "POST /v1/hosted/pair-offer",
+      {
+        access: "Single-use fleet ticket bound to the browser key; managed bodies only",
+        purpose: "Return a signed, encrypted pairing offer to the account page’s browser.",
+      },
+    ],
+    [
       "GET /v1/devices/self",
       {
         access: "Device bearer",

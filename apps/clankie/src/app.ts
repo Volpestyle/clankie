@@ -1,3 +1,5 @@
+import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
+import type { HostedBodyClient } from "./hosted-body.ts";
 import { changeRuntime, manageConnections } from "./connections.ts";
 import { SwarmConnectSchema, type SwarmHost } from "@clankie/swarm";
 import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
@@ -347,6 +349,7 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
+  hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
   workerMcp?: WorkerMcp;
@@ -2544,6 +2547,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return raw === undefined || raw.length === 0 ? {} : { relayUrl: raw };
   };
 
+  app.post(DEVICE_WAKE_KEY_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
+    if (dependencies.hostedBody === undefined) return context.json({ error: "not_found" }, 404);
+    const identity = await authenticateDevice(context.req.raw);
+    if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+    if ("denied" in identity) return deviceDenialResponse(context, identity);
+    const parsed = DeviceWakeKeyRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    return withSerializedLock(deviceLocks, identity.deviceId, async () => {
+      const record = devices.get(identity.deviceId);
+      if (record?.status !== "active") return context.json({ error: "revoked" }, 401);
+      try {
+        await dependencies.hostedBody!.registerWakeKey(record.deviceId, parsed.data.publicKey);
+      } catch {
+        return context.json({ error: "wake_unavailable" }, 503);
+      }
+      return context.json({ deviceId: record.deviceId });
+    });
+  });
+
   app.post("/v1/pairing/offer", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
@@ -2825,6 +2847,30 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } satisfies DeviceSelfResponse);
   });
 
+  const pendingWakeRevocations = new Set(
+    [...devices.values()].filter((device) => device.status === "revoked").map((device) => device.deviceId),
+  );
+  const revokeWakeKey = async (deviceId: string): Promise<boolean> => {
+    try {
+      await dependencies.hostedBody?.revokeWakeKey(deviceId);
+      pendingWakeRevocations.delete(deviceId);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const retryWakeRevocations = async (): Promise<void> => {
+    for (const deviceId of pendingWakeRevocations) await revokeWakeKey(deviceId);
+  };
+  const wakeRevocationTimer =
+    dependencies.hostedBody === undefined
+      ? undefined
+      : setInterval(() => {
+          void retryWakeRevocations();
+        }, 60_000);
+  wakeRevocationTimer?.unref();
+  if (dependencies.hostedBody !== undefined) void retryWakeRevocations();
+
   // Operator device management: list and revoke.
   app.get("/v1/devices", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
@@ -2850,14 +2896,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       const record = devices.get(deviceId);
       if (record === undefined || isDevicePendingExpired(record, now))
         return context.json({ error: "device_not_found" }, 404);
-      if (record.status === "revoked") return context.json(deviceListItem(record));
-      const event = recordEvent("device.revoked", `device:${deviceId}`, now.toISOString(), {
-        schemaVersion: 1,
-        deviceId,
-        revokedBy: operator.operatorId,
-      });
-      applyDeviceEvent(devices, event);
-      logger.info({ deviceId, operatorId: operator.operatorId }, "device revoked");
+      if (record.status !== "revoked") {
+        const event = recordEvent("device.revoked", `device:${deviceId}`, now.toISOString(), {
+          schemaVersion: 1,
+          deviceId,
+          revokedBy: operator.operatorId,
+        });
+        applyDeviceEvent(devices, event);
+        logger.info({ deviceId, operatorId: operator.operatorId }, "device revoked");
+      }
+      if (dependencies.hostedBody !== undefined) {
+        pendingWakeRevocations.add(deviceId);
+        if (!(await revokeWakeKey(deviceId))) return context.json({ error: "wake_unavailable" }, 503);
+      }
       const updated = devices.get(deviceId);
       return context.json(deviceListItem(updated ?? record));
     });
@@ -3126,6 +3177,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     },
     close: () => {
+      if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);
       stopObservingMessages?.();
       pushDispatcher?.close();
       captainPresence.close();

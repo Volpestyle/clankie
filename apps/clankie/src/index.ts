@@ -1,3 +1,5 @@
+import { HostedHeartbeat } from "./hosted-heartbeat.ts";
+import { watchHostedHerdrWork } from "./hosted-work.ts";
 import { SwarmHost } from "@clankie/swarm";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
@@ -145,6 +147,19 @@ const hostedBody =
   hostedBootstrap === undefined
     ? undefined
     : await createHostedBodyClient(hostedBootstrap, operatorCredentialStore);
+const hostedHeartbeat =
+  hostedBody === undefined
+    ? undefined
+    : new HostedHeartbeat(hostedBody, {
+        onReport: ({ busy, reasons, desired }) =>
+          bodyTelemetry?.emit({ event: "body.heartbeat", busy, reasons, desired }),
+        onError: () =>
+          logger.warn({ event: "hosted.heartbeat.unavailable" }, "hosted fleet heartbeat failed"),
+      });
+let herdrWorking = false,
+  headlessWorking = false;
+const updateHostedWorkers = () =>
+  hostedHeartbeat?.setExternal("herdr-agent", herdrWorking || headlessWorking);
 let publicGatewayConnector: PublicGatewayConnector | undefined;
 /** Set when the account credential is rejected before a connector can even exist. */
 let publicGatewaySignInRequiredSince: string | undefined;
@@ -153,6 +168,7 @@ if (hostedBody !== undefined) {
     encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
     gatewayUrl: hostedBody.bootstrap.gatewayOrigin,
     hostId: hostedBody.hostId,
+    onCustomerWork: () => hostedHeartbeat?.interactive(),
     installationId: hostedBody.bootstrap.installationId,
     resolveHostToken: () => hostedBody.resolveHostToken(),
     tokenErrorIsTerminal: (error) => error instanceof HostedBodyDeniedError,
@@ -161,7 +177,10 @@ if (hostedBody !== undefined) {
     logger,
     ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
   });
-  hostedBody.onDenied = () => publicGatewayConnector?.close();
+  hostedBody.onDenied = () => {
+    publicGatewayConnector?.close();
+    hostedHeartbeat?.close();
+  };
 }
 if (
   hostedBody === undefined &&
@@ -440,9 +459,14 @@ const swarm = new SwarmHost({
 });
 const agentSessions = createAgentSessions(settingsStore, undefined, {
   runsPath: join(stateRoot, "agent-session-runs.json"),
+  onWorkingChanged: (working) => {
+    headlessWorking = working;
+    updateHostedWorkers();
+  },
 });
 const captain = createCaptain(
   {
+    ...(hostedHeartbeat === undefined ? {} : { onWorkStarted: (reason) => hostedHeartbeat.begin(reason) }),
     ...(bodyTelemetry === undefined
       ? {}
       : { onTurnSettled: (metrics) => bodyTelemetry.emit(turnTelemetry(metrics)) }),
@@ -599,6 +623,11 @@ const captain = createCaptain(
 );
 
 const clankie = await createClankieApp({
+  ...(hostedBody === undefined
+    ? {}
+    : {
+        hostedBody,
+      }),
   agentSessions,
   workerMcp: new WorkerMcp({
     directory: join(stateRoot, "worker-grants"),
@@ -670,6 +699,17 @@ const clankie = await createClankieApp({
   },
 });
 clankieRef = clankie;
+const stopHostedWork =
+  hostedHeartbeat === undefined
+    ? undefined
+    : watchHostedHerdrWork(
+        (working) => {
+          herdrWorking = working;
+          updateHostedWorkers();
+        },
+        { available: herdr.available },
+      );
+hostedHeartbeat?.start();
 if (startupSettings.linearWebhook.following) captain.resumeLinearActivity();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
@@ -734,6 +774,8 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
+  hostedHeartbeat?.close();
+  stopHostedWork?.();
   publicGatewayConnector?.close();
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();

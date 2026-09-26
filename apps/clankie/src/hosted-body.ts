@@ -35,7 +35,7 @@ export function readHostedBodyBootstrap(env: NodeJS.ProcessEnv): HostedBodyBoots
   }
 }
 
-export function hostedVerifyKeys(json: string): ReadonlyMap<string, KeyObject> {
+function hostedVerifyKeys(json: string): ReadonlyMap<string, KeyObject> {
   const parsed = z
     .object({
       keys: z

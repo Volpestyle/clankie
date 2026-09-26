@@ -40,6 +40,8 @@ export interface PublicGatewayConnectorOptions {
   readonly hostId: string;
   readonly hostToken?: string;
   readonly encryptionKey?: Uint8Array;
+  /** Authenticated customer work observed after decrypting and dispatching. */
+  readonly onCustomerWork?: () => void;
   readonly installationId?: string;
   readonly resolveHostToken?: () => Promise<{
     readonly token: string;
@@ -137,7 +139,7 @@ export class PublicGatewayConnector {
     this.encryption =
       options.encryptionKey === undefined
         ? undefined
-        : new GatewayEncryptionHost(this.hostId, options.encryptionKey);
+        : new GatewayEncryptionHost(this.hostId, options.encryptionKey, options.onCustomerWork);
     if ((options.hostToken === undefined) === (options.resolveHostToken === undefined)) {
       throw new Error("Configure one static or renewable gateway host token source");
     }

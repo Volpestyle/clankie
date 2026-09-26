@@ -1,3 +1,4 @@
+import { trackHostedConversationRunner } from "../hosted-work.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
@@ -1008,7 +1009,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const conversations = new ConversationStore(
     join(options.stateDir, "conversations"),
-    async (conversationId, incoming, publish, context) => {
+    trackHostedConversationRunner(async (conversationId, incoming, publish, context) => {
       // Turning follow off also drops activity still queued behind a live turn.
       if (context.origin === "hook" && !(await settings()).linearWebhook.following) return;
       // A hook wake is worded when it starts, from whatever arrived until now.
@@ -1242,7 +1243,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
         unsubscribe();
       }
-    },
+    }, deps.onWorkStarted),
     (conversationId, scope) => {
       seatOutboxes.get(conversationId)?.close();
       seatOutboxes.delete(conversationId);
@@ -2026,7 +2027,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         transportKind: request.identity.transportKind,
       };
       const lane = await discordLane(normalized, plan.systemTools);
-      return runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled, origin);
+      const finish = request.trigger.unprompted === true ? undefined : deps.onWorkStarted?.("captain-turn");
+      try {
+        return await runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled, origin);
+      } finally {
+        finish?.();
+      }
     },
 
     async serveOperatorConversation(

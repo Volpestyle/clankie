@@ -40,7 +40,8 @@ async function account(
 ) {
   const hostId = derivePublicGatewayHostId(accountId, "i".repeat(22));
   const master = randomBytes(32);
-  let host = new GatewayEncryptionHost(hostId, master);
+  const onCustomerWork = vi.fn();
+  let host = new GatewayEncryptionHost(hostId, master, onCustomerWork);
   let credential: GatewayEncryptionCredential;
   const base = `http://127.0.0.1/h/${hostId}`;
   const app = await createClankieApp({
@@ -94,6 +95,7 @@ async function account(
   const headers = { authorization: `Bearer ${device.deviceToken}`, "content-type": "application/json" };
   return {
     app,
+    onCustomerWork,
     base,
     headers,
     device,
@@ -287,4 +289,46 @@ describe("device-to-host encryption security boundary", () => {
     vi.spyOn(Date, "now").mockReturnValue(now + 8 * 86400_000);
     await expect(actor.client(`${actor.base}/v1/devices/self`, { headers: actor.headers })).rejects.toThrow();
   });
+});
+
+it("returns a self-hosted 404 through the encrypted wake-key route", async () => {
+  const own = await account("wake-account");
+  const response = await own.client(`${own.base}/v1/devices/wake-key`, {
+    method: "POST",
+    headers: own.headers,
+    body: JSON.stringify({ publicKey: "A".repeat(87) }),
+  });
+  expect(response.status).toBe(404);
+});
+
+it("counts only authorized work after decrypting, excluding polling and revoked sends", async () => {
+  const own = await account("work-account");
+  expect(own.onCustomerWork).toHaveBeenCalledTimes(2); // successful pairing
+  await own.client(`${own.base}/v1/devices/self`, { headers: own.headers });
+  expect(own.onCustomerWork).toHaveBeenCalledTimes(2);
+  const body = JSON.stringify({
+    op: "send",
+    schemaVersion: 1,
+    turn: {
+      schemaVersion: 1,
+      kind: "message",
+      conversationId: "conversation-1",
+      surfaceClientId: "phone",
+      expectedRevision: 0,
+      message: "work",
+    },
+  });
+  await own.client(`${own.base}/operator/v1/dispatch`, { method: "POST", headers: own.headers, body });
+  expect(own.onCustomerWork).toHaveBeenCalledTimes(3);
+  await own.app.app.request(`/v1/devices/${own.device.deviceId}/revoke`, {
+    method: "POST",
+    headers: { authorization: "Bearer owner" },
+  });
+  const denied = await own.client(`${own.base}/operator/v1/dispatch`, {
+    method: "POST",
+    headers: own.headers,
+    body,
+  });
+  expect(denied.status).toBe(401);
+  expect(own.onCustomerWork).toHaveBeenCalledTimes(3);
 });

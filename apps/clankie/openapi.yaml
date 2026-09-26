@@ -1877,6 +1877,43 @@ paths:
         "200":
           description: Self row
 
+  /v1/devices/wake-key:
+    post:
+      tags: [Devices]
+      operationId: registerDeviceWakeKey
+      summary: Register a paired device wake public key on a managed body
+      description: |
+        Managed bodies only; self-hosted installations answer 404. The gateway
+        carries this route inside the encrypted device envelope. The live device
+        session selects deviceId; callers cannot select a different device.
+        Registration and device revocation are serialized. Revocation disables
+        local access immediately, then removes the fleet key, retrying failures.
+      security: [{ deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicKey]
+              properties:
+                publicKey:
+                  type: string
+                  description: Uncompressed P-256 public point encoded as base64url
+                  pattern: "^[A-Za-z0-9_-]{87}$"
+      responses:
+        "200":
+          description: Registered; returns deviceId
+        "400":
+          description: Malformed public key request
+        "401":
+          description: Device session is unknown, expired, or revoked
+        "404":
+          description: Self-hosted body
+        "503":
+          description: Fleet registration unavailable; retry later
+
   /v1/devices/self/push:
     post:
       tags: [Devices]
