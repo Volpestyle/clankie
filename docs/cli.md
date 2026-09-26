@@ -414,6 +414,43 @@ on startup when following is enabled; passive backlog stays passive. A recovered
 lead reconciles existing work before repeating external side effects. Current
 storage and recovery limits live in [ADR 0168](adr/0168-linear-awareness-is-opt-in.md).
 
+### `work [status]` / `work init` / `work list|show|create|update|close|attach`
+
+Tracks work where the repo already does ([ADR 0191](adr/0191-work-is-tracked-where-the-repo-tracks-it.md)):
+its Linear team (through the Linear account connected to Clankie), its GitHub
+issues (through the owner's `gh` login), its own one-file-per-item Markdown
+directory, or `.clankie/work/` when it has none. Every command runs against the
+git repo containing the current directory, or `--repo PATH`, and prints JSON.
+It is the same contract as Clankie's `work_items` and `work_item_write` tools,
+and every assignment brief tells a hire to use it.
+
+- `clankie work` (or `work status`, `work discover`) reports the repo's signals,
+  its recorded convention if any, and a `question` when discovery found more
+  than one tracker or only a single `TODO.md`. Answer it once with `work init`.
+- `clankie work init` records what discovery found; `work init --backend
+default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
+[--linear-team KEY] [--linear-project NAME] [--note TEXT]` records the owner's
+  choice. The answer is written to `.clankie/tracking.json` in the repo; nothing
+  else is added to a repo that tracks work elsewhere.
+- `clankie work repos` lists the repos registered on this machine. A repo is
+  registered the first time a local command names it; only registered repos are
+  readable from a paired device.
+- `clankie work list [--status todo,in_progress] [--owner NAME]`,
+  `work show ID`.
+- `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
+[--status S]`.
+- `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]
+[--check N]... [--uncheck N]... [--add-criterion C]...`; criterion numbers are
+  1-based and may be comma-separated.
+- `clankie work close ID [--canceled]` sets `done` (or `canceled`).
+- `clankie work attach ID --url URL --caption TEXT [--kind image|video|log|link]`
+  appends evidence; the kind is inferred from the URL when omitted.
+
+Statuses are `todo`, `in_progress`, `in_review`, `done` and `canceled`,
+projected onto each backend's own states. A recorded backend that cannot be
+reached answers `backend_unavailable` and never falls back to files. The HTTP
+form is `POST /v1/work` with the operator bearer and `{ "action": ... }`.
+
 ### `operator-credential rotate [--json]`
 
 Mint a new local operator bearer. Existing operator sessions are invalid

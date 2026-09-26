@@ -1,0 +1,27 @@
+{
+  "op": "work_items",
+  "schemaVersion": 1,
+  "result": {
+    "outcome": "ready",
+    "repo": {
+      "id": "tmp-cz4aclzezx-76aec8d4",
+      "name": "tmp.cz4AclzeZx",
+      "backend": "default",
+      "needsDecision": false
+    },
+    "items": [
+      {
+        "id": "W-6hypgf",
+        "title": "Scratch default item",
+        "status": "done",
+        "owner": "proof",
+        "dependsOn": [],
+        "summary": "",
+        "criteria": [{ "text": "One file per item", "done": false }],
+        "evidence": [],
+        "location": ".clankie/work/W-6hypgf-scratch-default-item.md",
+        "updatedAt": "2026-09-26T18:24:20.915Z"
+      }
+    ]
+  }
+}

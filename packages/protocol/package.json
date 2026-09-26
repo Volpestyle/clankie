@@ -8,6 +8,7 @@
     "./gateway-encryption": "./src/gateway-encryption.ts",
     "./model-keys": "./src/model-keys.ts",
     "./wake": "./src/wake.ts",
+    "./work-items": "./src/work-items.ts",
     "./app-telemetry": "./src/app-telemetry.ts",
     "./discord-ingress": "./src/discord-ingress.ts",
     "./discord-ingress-crypto": "./src/discord-ingress-crypto.ts"

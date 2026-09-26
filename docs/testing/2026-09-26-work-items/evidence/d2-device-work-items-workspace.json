@@ -1,0 +1,2272 @@
+{
+  "op": "work_items",
+  "schemaVersion": 1,
+  "result": {
+    "outcome": "ready",
+    "repo": { "id": "workspace", "name": "clankie", "backend": "linear", "needsDecision": false },
+    "items": [
+      {
+        "id": "VUH-1376",
+        "title": "[proof] Work-items Linear backend (ADR 0191), safe to ignore",
+        "status": "canceled",
+        "owner": "proof",
+        "dependsOn": [],
+        "summary": "Created by the clankie work proof; canceled at the end of the run.",
+        "criteria": [
+          { "text": "Created in the Clankie Linear project", "done": true },
+          { "text": "No .clankie/work files added", "done": true }
+        ],
+        "evidence": [
+          {
+            "kind": "link",
+            "url": "<https://github.com/Volpestyle/clankie/blob/main/docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md>",
+            "caption": "ADR 0191, the decision this proof exercises"
+          }
+        ],
+        "location": "https://linear.app/vuhlp/issue/VUH-1376/proof-work-items-linear-backend-adr-0191-safe-to-ignore",
+        "updatedAt": "2026-09-26T18:25:14.704Z"
+      },
+      {
+        "id": "VUH-1066",
+        "title": "Authorize wake before starting tenant compute",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "A request to a sleeping tenant must not become a free compute-start primitive. Add a fleet-verifiable, narrowly scoped wake capability; the ordinary tenant bearer remains tenant-owned and is revalidated by the tenant control plane after boot.",
+        "criteria": [
+          {
+            "text": "A random request, guessed hostname, expired token, replay, or valid token for another tenant cannot start compute",
+            "done": true
+          },
+          {
+            "text": "A fleet-verifiable wake ticket/capability binds tenant,… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1066/authorize-wake-before-starting-tenant-compute",
+        "updatedAt": "2026-09-26T18:19:19.782Z"
+      },
+      {
+        "id": "VUH-1068",
+        "title": "Prove hosted tenant isolation, recovery, and paid lifecycle",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Treat hosted Clankie as hostile multi-customer infrastructure even though each body is isolated. Prove the boundaries and the data lifecycle before accepting general paid traffic.",
+        "criteria": [
+          {
+            "text": "A written threat model covers web account, Stripe webhook, fleet plane, router, wake path, AWS control path, tenant body, backups, and pairing",
+            "done": false
+          },
+          {
+            "text": "Automated negative tests cover cross-tenant routing, wake, storage, secrets, device ident… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1068/prove-hosted-tenant-isolation-recovery-and-paid-lifecycle",
+        "updatedAt": "2026-09-26T18:19:04.063Z"
+      },
+      {
+        "id": "VUH-1371",
+        "title": "Include capped model usage in hosted plans (no key needed), BYOK as upgrade",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "A hosted customer should sign up, pair, and have Clankie just work, with no API key. Each plan includes a capped allowance on a cheap, capable default model, paid for by Clankie. At the cap, model calls pause until the next period unless the customer adds their own key (existing [VUH-1369](<https://linear.app/vuhlp/issue/VUH-1369>) flow) or buys more. Clankie never loses money on a customer.\n\n## Background\n\n* **Decision (James, 2026-09-26):** in… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1371/include-capped-model-usage-in-hosted-plans-no-key-needed-byok-as",
+        "updatedAt": "2026-09-26T18:18:49.258Z"
+      },
+      {
+        "id": "VUH-1373",
+        "title": "Hosted: pi workers fail to start under the bundled Herdr (\"no durable session identity\")",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "On a hosted-style body, every `hire_agent` with harness `pi` fails with \"Herdr started an agent without a durable session identity\". Hosted Clankie therefore cannot lead coding agents, which is a core promised capability.\n\n## Background\n\nFound by the <issue id=\"3620627e-1c3e-48f9-8648-44b77ada8990\" href=\"https://linear.app/vuhlp/issue/VUH-1371/include-capped-model-usage-in-hosted-plans-no-key-needed-byok-as\">VUH-1371</issue> default-model evalua… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1373/hosted-pi-workers-fail-to-start-under-the-bundled-herdr-no-durable",
+        "updatedAt": "2026-09-26T18:16:34.673Z"
+      },
+      {
+        "id": "VUH-1375",
+        "title": "Route model calls by kind of task: routine model, work model, Pro escalation",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Clankie routes each model call to a model by kind of task, with fixed rules rather than a learned router: everyday conversation runs on a cheap routine model, real work on the owner's chosen model, and on Pro a routine turn that turns out to be hard escalates once to the bigger model. All of it draws on the same included-usage allowance at real cost. Self-hosted owners get the same routing as an opt-in setting; the default stays one model.\n\n## B… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1375/route-model-calls-by-kind-of-task-routine-model-work-model-pro",
+        "updatedAt": "2026-09-26T18:16:24.619Z"
+      },
+      {
+        "id": "VUH-1372",
+        "title": "Full Discord (text and voice) for every paying hosted customer",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "A paying hosted customer must get full Discord: Clankie in their servers and DMs, text and voice. It must set up in one click, with no bot tokens or developer portal, and without keeping their body awake or draining their allowance while nobody is talking to him.\n\n## Background\n\n* **Decision (James, 2026-09-26):** full Discord is part of the paid product, and the promo will show it.\n* **Why the hosted loadout disables it today** (`CLANKIE_SERVIC… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1372/full-discord-text-and-voice-for-every-paying-hosted-customer",
+        "updatedAt": "2026-09-26T18:16:15.434Z"
+      },
+      {
+        "id": "VUH-1369",
+        "title": "Let a hosted customer add their own model key from the app",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Hosted plans are bring-your-own-key, but a hosted body has no way to receive the customer's model key. On a Mac the owner configures models with `clankie model` in a local terminal. A hosted body has no terminal the customer can reach, and no device route sets provider credentials. Without this, a paying customer gets a Clankie that cannot run a model. This blocks paid launch.\n\n## Background\n\n* Found by the synthetic customer ([VUH-1364](<https:… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1369/let-a-hosted-customer-add-their-own-model-key-from-the-app",
+        "updatedAt": "2026-09-26T18:15:38.070Z"
+      },
+      {
+        "id": "VUH-1069",
+        "title": "Provision and pair a hosted Clankie from the web",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Deliver the shortest safe customer path: authenticate on the web, pay through Stripe, wait for a healthy tenant body, and open the existing signed Clankie pairing offer in the companion app.",
+        "criteria": [
+          {
+            "text": "A customer can create or access a web account and see plan, entitlement, usage, runtime status, and billing-management actions",
+            "done": true
+          },
+          {
+            "text": "Successful verified payment schedules idempotent provisioning and reports progress without mak… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1069/provision-and-pair-a-hosted-clankie-from-the-web",
+        "updatedAt": "2026-09-26T18:02:43.188Z"
+      },
+      {
+        "id": "VUH-1374",
+        "title": "Clankie tracks work in the repo's own convention, with a standard default and an app view",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Clankie and the agents he hires should track work, and the evidence behind it, wherever the repo already does. When a repo has no convention, they use a standard in-repo format. The app then shows that work as a board with an evidence gallery, whatever the backend. Post-launch.\n\n## Background\n\nToday agents either pair with the owner's tracker (Linear, GitHub Issues) or keep ad-hoc tracking docs in the repo, each in its own shape. James wants ins… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1374/clankie-tracks-work-in-the-repos-own-convention-with-a-standard",
+        "updatedAt": "2026-09-26T17:56:20.891Z"
+      },
+      {
+        "id": "VUH-1098",
+        "title": "Get SES production access so external testers receive sign-in codes",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Cognito's default sender caps at 50 emails a day per pool and the SES sandbox delivers only to verified recipients, so a tester whose address is not pre-verified cannot receive their Mac sign-in code. The [clankie.bot](<http://clankie.bot>) domain sender is already in the accounts stack; production access and the domain verification are AWS-side steps that still have to be confirmed before anyone outside the team is invited.\n\n## Acceptance Crite… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1098/get-ses-production-access-so-external-testers-receive-sign-in-codes",
+        "updatedAt": "2026-09-26T17:50:11.998Z"
+      },
+      {
+        "id": "VUH-1062",
+        "title": "Hosted Clankie subscriptions: $29 Starter + $99 Pro",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Ship a profitable, secure hosted Clankie offer with two web-billed plans. Each subscriber gets an isolated, persistent Clankie body that sleeps when idle; the shared fleet plane owns billing state, routing, provisioning, wake authorization, and metering but no tenant content.\n\n## Launch shape\n\n* Starter: $29/month with $6 of included model usage (default gpt-6-luna), BYOK as the upgrade; 2 vCPU / 8 GiB, 40 GiB persistent storage, 30 active body-… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1062/hosted-clankie-subscriptions-dollar29-starter-dollar99-pro",
+        "updatedAt": "2026-09-26T17:50:11.787Z"
+      },
+      {
+        "id": "VUH-1114",
+        "title": "Make public install links and product claims match what ships",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "The public site must point to available installation or signup paths and describe the actual licenses, supported platforms, prerequisites, and hosted availability. Customers should be able to follow the stated journey without dead store badges or unsupported promises.",
+        "criteria": [
+          {
+            "text": "Every install/store/signup call to action resolves to an available destination; unreleased platforms use truthful availability wording.",
+            "done": false
+          },
+          { "text": "Source-… (truncated, use `get_issue` for full description)", "done": false }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1114/make-public-install-links-and-product-claims-match-what-ships",
+        "updatedAt": "2026-09-26T17:49:54.604Z"
+      },
+      {
+        "id": "VUH-1067",
+        "title": "Meter active compute and enforce Starter and Pro budgets",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Keep an authoritative Clankie usage ledger, then export billable overage to Stripe. Subscription price alone never implies unbounded compute.",
+        "criteria": [
+          {
+            "text": "Usage records active seconds, instance shape, persistent storage, wake/start count, and tenant/plan attribution",
+            "done": true
+          },
+          {
+            "text": "Duplicate lifecycle events cannot double-count usage; ledger entries are immutable or auditable",
+            "done": true
+          },
+          {
+            "text": "Starter and Pro included-hour counters stop or require e… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1067/meter-active-compute-and-enforce-starter-and-pro-budgets",
+        "updatedAt": "2026-09-26T17:49:50.702Z"
+      },
+      {
+        "id": "VUH-1064",
+        "title": "Add Stripe Checkout, subscription webhooks, and Customer Portal",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Use Stripe's hosted billing surfaces on the web. Stripe reports commercial state; Clankie materializes the entitlement it needs and never treats a client redirect as proof of payment.",
+        "criteria": [
+          {
+            "text": "The server creates Checkout Sessions for the $20 Starter and $99 Pro prices",
+            "done": true
+          },
+          {
+            "text": "Customer Portal supports payment-method changes, invoices, plan changes, and cancellation",
+            "done": true
+          },
+          {
+            "text": "The webhook endpoint verifies the raw signed body, recor… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1064/add-stripe-checkout-subscription-webhooks-and-customer-portal",
+        "updatedAt": "2026-09-26T17:49:49.465Z"
+      },
+      {
+        "id": "VUH-1063",
+        "title": "Prove the paid tenant body on EC2 and EBS",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Turn the <issue id=\"d69b3478-258f-4748-b766-2c8c77772025\" href=\"https://linear.app/vuhlp/issue/VUH-1053/spike-clankie-boots-in-a-linux-container\">VUH-1053</issue> Linux findings into the smallest production-shaped tenant body: one isolated EC2 instance and one encrypted persistent EBS volume per subscriber. The body sleeps by stopping the instance; tenant identity and files survive.",
+        "criteria": [
+          {
+            "text": "An immutable arm64 image boots C… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1063/prove-the-paid-tenant-body-on-ec2-and-ebs",
+        "updatedAt": "2026-09-26T17:49:48.713Z"
+      },
+      {
+        "id": "VUH-1370",
+        "title": "Operator business dashboard: sign-ups, revenue, usage and margin",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "James needs one private view of the hosted business, to steer ads and pricing toward at least $500/month profit. <issue id=\"cf33f36c-3fa2-42b2-af4c-e70712237103\" href=\"https://linear.app/vuhlp/issue/VUH-1364/diagnose-any-hosted-customers-issue-from-metadata-only-telemetry\">VUH-1364</issue> answers what happened to one customer; this answers how the business is doing: sign-ups, conversion, revenue, usage, margin and health, read from data we alre… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1370/operator-business-dashboard-sign-ups-revenue-usage-and-margin",
+        "updatedAt": "2026-09-26T17:47:42.523Z"
+      },
+      {
+        "id": "VUH-1088",
+        "title": "Decide the fate of the Anthropic subscription OAuth flow",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "The service carries a Claude Pro/Max OAuth flow for captain model requests, the paste-code flow opencode removed, and ADR 0052 still describes Anthropic subscription auth as working. Verify whether it still works under Anthropic's current policy, then either keep it as documented or remove it and correct ADR 0052, so `/auth` never offers a dead path.",
+        "criteria": [
+          {
+            "text": "Outcome recorded: working and kept, or removed with ADR 0052 corr… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1088/decide-the-fate-of-the-anthropic-subscription-oauth-flow",
+        "updatedAt": "2026-09-26T15:28:50.692Z"
+      },
+      {
+        "id": "VUH-1365",
+        "title": "Route questions on Clankie's Linear posts to whoever owns the work",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "When someone comments on something Clankie posted in Linear (a project update, a document, an issue comment), Clankie should get that question to the agent who owns the work, or answer it himself when nobody does. Right now it gets dropped: James asked two questions on a Rivals Agent project update and nobody replied.\n\n## Background\n\nJames's comment [e899310b](<https://linear.app/vuhlp/project/rivals-agent-762337b8bf64/activity#project-update-50… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1365/route-questions-on-clankies-linear-posts-to-whoever-owns-the-work",
+        "updatedAt": "2026-09-26T14:50:31.521Z"
+      },
+      {
+        "id": "VUH-1364",
+        "title": "Diagnose any hosted customer's issue from metadata-only telemetry",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Before paid launch, an agent given a customer's email, tenant id or a support message must be able to reconstruct what happened to that customer across the web, Stripe, fleet, gateway, body and app, and name the failing layer, without a human reproducing it and without reading customer content.\n\n## Background\n\nThe hosted design and the public privacy policy promise that conversations, repositories, terminal bytes, prompts and model keys never re… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1364/diagnose-any-hosted-customers-issue-from-metadata-only-telemetry",
+        "updatedAt": "2026-09-26T14:42:15.615Z"
+      },
+      {
+        "id": "VUH-1366",
+        "title": "App: expo-notifications PushTokenModule segfault on first dev-client load",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "The iOS dev client crashes with `EXC_BAD_ACCESS` / `SIGSEGV` on the first bundle load after install or relaunch. The next load succeeds. It looks like an unsynchronized append to `NotificationCenterManager`'s delegate array while Expo modules post events at startup. Whether Release builds are affected is unknown and needs checking before App Store submission.\n\n## Background\n\nIt was seen twice on 2026-09-26 (01:13 and 01:15 CDT) while verifying <… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1366/app-expo-notifications-pushtokenmodule-segfault-on-first-dev-client",
+        "updatedAt": "2026-09-26T09:26:07.460Z"
+      },
+      {
+        "id": "VUH-1368",
+        "title": "Swarm tests time out when lsof cleanup is slow on a loaded host",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "`packages/swarm/test/swarm.test.ts` fails with 30 s test and `afterEach` timeouts when the host is heavily loaded. No assertion fails; the time goes to an `lsof` cleanup child that ran for about 22 s at about 67% CPU. Decide whether cleanup should avoid `lsof` or bound it, so `pnpm check` is not host-dependent.\n\n## Background\n\nThis was observed on 2026-09-26 while validating the unrelated public commit `888d6b7b`. The host's load average was abo… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1368/swarm-tests-time-out-when-lsof-cleanup-is-slow-on-a-loaded-host",
+        "updatedAt": "2026-09-26T08:12:09.704Z"
+      },
+      {
+        "id": "VUH-1096",
+        "title": "Publish a privacy policy and set the App Privacy labels",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "App Store Connect will not accept a submission without a privacy policy URL, and neither repo has one. Publish a short policy on [clankie.bot](<http://clankie.bot>) that matches what the app actually does, then answer App Privacy to match.",
+        "criteria": [
+          {
+            "text": "A public privacy policy URL on [clankie.bot](<http://clankie.bot>) covering: the device session stored in the phone Keychain, the device name sent to the user's own Mac, camera u… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1096/publish-a-privacy-policy-and-set-the-app-privacy-labels",
+        "updatedAt": "2026-09-26T06:51:58.172Z"
+      },
+      {
+        "id": "VUH-1367",
+        "title": "Reach a customer's hosted body only through a grant they issue",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Before paid launch, nobody at Clankie may read a hosted customer's conversations, files or terminal unless that customer issued a time-boxed grant for it, and every access under a grant is visible to them and audited.\n\n## Background\n\nDiagnosis runs on metadata only (<issue id=\"cf33f36c-3fa2-42b2-af4c-e70712237103\" href=\"https://linear.app/vuhlp/issue/VUH-1364/diagnose-any-hosted-customers-issue-from-metadata-only-telemetry\">VUH-1364</issue>); so… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1367/reach-a-customers-hosted-body-only-through-a-grant-they-issue",
+        "updatedAt": "2026-09-26T06:49:04.369Z"
+      },
+      {
+        "id": "VUH-1093",
+        "title": "App Store review readiness for the Clankie iOS app",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Get the iOS app through TestFlight Beta App Review and then App Store Review on the self-hosted Mac journey. Sub-issues are dependency-ordered; the review pairing code, the upload path, and the privacy policy are the real blockers, the rest is App Store Connect setup and review-day operations.",
+        "criteria": [
+          {
+            "text": "An external TestFlight tester can install the app, sign their Mac in, pair, and use chat, fleet, and terminal without opera… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1093/app-store-review-readiness-for-the-clankie-ios-app",
+        "updatedAt": "2026-09-26T06:05:43.720Z"
+      },
+      {
+        "id": "VUH-1106",
+        "title": "App: open, preview, and share Clankie's delivered files",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "A completed deliverable should be usable directly from its conversation. Render the host's published files as attachments that open or share through the platform's supported viewers.",
+        "criteria": [
+          {
+            "text": "Conversation attachments show the filename, type, size, and download state, including several files in one result.",
+            "done": false
+          },
+          {
+            "text": "Reports, spreadsheets, presentations, and bundles can be opened or saved/shared; supported types use native previe… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1106/app-open-preview-and-share-clankies-delivered-files",
+        "updatedAt": "2026-09-26T06:04:47.501Z"
+      },
+      {
+        "id": "VUH-1084",
+        "title": "Optional Claude Code operator seat: finish remaining validation",
+        "status": "in_review",
+        "dependsOn": [],
+        "summary": "Clankie's primary lead remains the local pi service reached through the TUI and companion app. Interactive Claude Code, on the owner's own Max plan, is an optional operator seat: one command lands the owner in Claude Code as Clankie, with his persona, his tools over MCP, his memory card per turn, and his skills. The service keeps running his body and the Discord and voice lanes on pi. The tool bank over MCP is what makes the seat harness-agnosti… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1084/optional-claude-code-operator-seat-finish-remaining-validation",
+        "updatedAt": "2026-09-26T06:04:17.703Z"
+      },
+      {
+        "id": "VUH-1362",
+        "title": "Linear inbox wakes resend ~115k tokens of stale history to triage one headline",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The `linear-inbox` captain conversation is one session that has kept growing since 2026-09-08. Each Follow-Linear wake now carries a single headline of about 200 tokens, but it runs on top of about 112–116k tokens of history. Most of that history is full webhook payloads and herdr censuses from 2026-09-08 to 2026-09-11, before wakes changed to headline-only. When wakes are more than a few minutes apart, the provider cache has expired and every o… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1362/linear-inbox-wakes-resend-115k-tokens-of-stale-history-to-triage-one",
+        "updatedAt": "2026-09-26T05:59:58.302Z"
+      },
+      {
+        "id": "VUH-1002",
+        "title": "Add agent-owned connector identities and event ingestion",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Extend /connect and the service-owned MCP host for Clankie's own accounts.\n\n* Distinguish agent-owned identities from owner-private connections.\n* Add OAuth onboarding, late credential resolution, revocation, and lane policy.\n* Normalize push, webhook, and polling changes into idempotent initiative events.\n* Mark self-originated changes and fence provider content as untrusted.\n* Require explicit side-effect classification for tools used by self-directed turns.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1002/add-agent-owned-connector-identities-and-event-ingestion",
+        "updatedAt": "2026-09-26T05:59:58.251Z"
+      },
+      {
+        "id": "VUH-1065",
+        "title": "Build hosted fleet state and the runtime reconciler",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Create the small shared management plane that knows accounts, tenants, entitlements, routing metadata, usage state, and desired/actual runtime state. It does not store conversations, repositories, browser sessions, or tenant secrets.",
+        "criteria": [
+          {
+            "text": "The data model separates subscription entitlement (active/grace/inactive), desired runtime (running/sleeping/suspended), and actual runtime (provisioning/healthy/stopped/failed)",
+            "done": true
+          },
+          { "text": "… (truncated, use `get_issue` for full description)", "done": true }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1065/build-hosted-fleet-state-and-the-runtime-reconciler",
+        "updatedAt": "2026-09-26T04:55:59.129Z"
+      },
+      {
+        "id": "VUH-1363",
+        "title": "App: say why Clankie can't answer when his Mac isn't set up",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The console now opens `/setup` whenever Clankie can't take a turn (`b2e0c9e4`, [ADR 0190](<https://github.com/Volpestyle/clankie/blob/main/docs/adr/0190-setup-asks-one-question-then-clankie-takes-over.md>)). The app has no equivalent. A phone paired to a Mac with no model or no sign-in shows the normal \"Lead with Clankie\" welcome, and the first message fails with the service's error.\n\n## Background\n\nThe rule already exists as `captainReadiness` … (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1363/app-say-why-clankie-cant-answer-when-his-mac-isnt-set-up",
+        "updatedAt": "2026-09-25T20:46:44.444Z"
+      },
+      {
+        "id": "VUH-1358",
+        "title": "Full vitest run aborts intermittently when Node 26 tears down a worker thread",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`pnpm check` and `pnpm test` in clankie intermittently die with SIGABRT (exit 134) before reporting any failing test. Agents lose 1–3 minutes per rerun and cannot get a green gate.\n\n**Evidence (redacted)**\n\n* Seat `term_65c1fd42070531a` (run `herdr:claude:id:94633059-…:claude:34b32816-…`), 2026-09-23: full runs aborted at 06:42, 16:36 and 16:38 UTC; passed once at 06:43. The agent reported \"crash during the long full-suite run … I haven't found … (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1358/full-vitest-run-aborts-intermittently-when-node-26-tears-down-a-worker",
+        "updatedAt": "2026-09-24T09:33:41.857Z"
+      },
+      {
+        "id": "VUH-996",
+        "title": "Give Clankie a self-directed life",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Implement the foreground-first agency architecture in the linked design: a private self lane, spontaneous and reactive attention, agent-owned online identities, opt-in local activity, and Robinhood-brokered purchases. Direct requests remain higher priority than every self-directed action.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-996/give-clankie-a-self-directed-life",
+        "updatedAt": "2026-09-23T23:02:21.573Z"
+      },
+      {
+        "id": "VUH-1357",
+        "title": "Browser read returns gzip bytes as successful page text",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "`agent_browser_read` reports `outcome: ok` while its content is still gzip-compressed bytes whenever a site sends `Content-Encoding: gzip` without being asked. Amazon does this. The captain gets unreadable text, and the tool calls it success.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1357/browser-read-returns-gzip-bytes-as-successful-page-text",
+        "updatedAt": "2026-09-23T16:39:38.179Z"
+      },
+      {
+        "id": "VUH-1350",
+        "title": "Run an independent evaluator in Herdr with durable evidence and improvement follow-through",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Enable a Codex or Claude Code evaluator from Clankie's CLI/TUI. The service captures task evidence and schedules independent assessments; the evaluator can turn substantiated findings into deduplicated Linear issues and a separate worker's draft MR, with review before merge.",
+        "criteria": [
+          { "text": "CLI, API and TUI expose enable, disable, status, open and retry.", "done": true },
+          {
+            "text": "Evidence and queued assessments survive restart; evaluator failures do … (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1350/run-an-independent-evaluator-in-herdr-with-durable-evidence-and",
+        "updatedAt": "2026-09-22T20:35:38.675Z"
+      },
+      {
+        "id": "VUH-1345",
+        "title": "Add and evaluate household house-hunting skill through Clankie",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Build a reusable house-hunting skill with a private criteria/shortlist ledger, optional structured listing access, and efficient browser research through the existing Clankie agent. Validate preference updates, duplicate handling, unknown facts, source failures, and browser efficiency with actual Clankie turns. Connect the owner's designated private Discord channel and retain evidence here. Personal household criteria remain local.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1345/add-and-evaluate-household-house-hunting-skill-through-clankie",
+        "updatedAt": "2026-09-22T15:42:18.050Z"
+      },
+      {
+        "id": "VUH-1327",
+        "title": "Show images viewed by Codex agents in native chat",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Codex shows Viewed Image entries in the terminal, but the corresponding agent chat in Clankie omits the images. Show those explicitly viewed local images through the existing authenticated conversation-file delivery.",
+        "criteria": [
+          {
+            "text": "Images from Codex Viewed Image events appear inline in the corresponding native chat, including existing retained history.",
+            "done": true
+          },
+          {
+            "text": "Repeated transcript polling and restart do not duplicate image cards; su… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1327/show-images-viewed-by-codex-agents-in-native-chat",
+        "updatedAt": "2026-09-21T03:45:22.538Z"
+      },
+      {
+        "id": "VUH-1316",
+        "title": "Let Clankie play, observe, and share Spider-Man through Rivals Agent",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Clankie uses Rivals Agent as his gameplay skill: the Rivals policy owns tactics and controller execution, while Clankie chooses objectives and talks with the room.\n\nImplemented in both repos. Independent review accepts the bridge sources with input path `a7f3445`; the Rivals bridge is committed on `main` as `757b92d`. The bridge stays disabled under [VUH-1325](<https://linear.app/vuhlp/issue/VUH-1325>) until the lead schedules deployment and ver… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1316/let-clankie-play-observe-and-share-spider-man-through-rivals-agent",
+        "updatedAt": "2026-09-21T03:33:59.187Z"
+      },
+      {
+        "id": "VUH-1105",
+        "title": "Publish finished files from a Clankie conversation",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Clankie can create files, but useful reports, spreadsheets, decks, websites, and file bundles need a dependable delivery path. Let him attach deliberate deliverables to a conversation and retrieve them through the existing service boundary.",
+        "criteria": [
+          {
+            "text": "A captain tool and API/CLI path publish an existing authorized file or bundle with its name, type, size, and stable reference.",
+            "done": false
+          },
+          {
+            "text": "Multiple deliverables survive turn completio… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1105/publish-finished-files-from-a-clankie-conversation",
+        "updatedAt": "2026-09-21T02:27:33.785Z"
+      },
+      {
+        "id": "VUH-1317",
+        "title": "Keep Commons agents spatially stable across fleet refreshes",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "James reports the Commons appears to refresh roughly every 30 seconds, with agents suddenly scurrying around. Trace whether unchanged fleet reads reset movement/layout or whether intentional idle walks are visually misleading. Fix the demonstrated cause rather than freezing legitimate status/relationship changes.\n\nAcceptance:\n\n- [X] Reproduce or capture the periodic movement and identify its actual trigger.\n- [X] Unchanged fleet identity/layout … (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1317/keep-commons-agents-spatially-stable-across-fleet-refreshes",
+        "updatedAt": "2026-09-21T01:10:58.766Z"
+      },
+      {
+        "id": "VUH-1318",
+        "title": "Label workspace and tab groupings clearly in Commons",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "James wants the garden/Commons to make agent relationships easier to understand by clearly labeling Herdr workspaces and tab groupings.\n\nAcceptance:\n\n- [X] Workspace/tab membership is legible from real host metadata; missing metadata has an honest fallback.\n- [X] Group labels and visual hierarchy distinguish workspace, tab and individual agents without mislabeling existing working-directory districts.\n- [X] Existing prompt/spawn relationship ren… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1318/label-workspace-and-tab-groupings-clearly-in-commons",
+        "updatedAt": "2026-09-21T01:10:58.766Z"
+      },
+      {
+        "id": "VUH-1100",
+        "title": "Open TestFlight external testing (Beta App Review)",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Internal testers on the App Store Connect team can install the moment a build uploads. Anyone else needs an external TestFlight group, which goes through Apple's lighter Beta App Review first. This is the first review milestone and exercises the same code, privacy policy, and review notes as the store submission.",
+        "criteria": [
+          {
+            "text": "An external TestFlight group exists with test information, the privacy policy URL, and beta review note… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1100/open-testflight-external-testing-beta-app-review",
+        "updatedAt": "2026-09-21T01:10:16.469Z"
+      },
+      {
+        "id": "VUH-1228",
+        "title": "Commons: district root rows overlap captions at iPad scale",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Roots in one district are seated on a fixed row pitch that is shorter than a figure's label box at iPad scale, so three or more roots in a district can stand with one figure's crown over another's caption.\n\n## Background\n\nFound while fixing the parent arc in <issue id=\"56fcdcf8-acdc-4416-b698-a954ea590a90\" href=\"https://linear.app/vuhlp/issue/VUH-1218/commons-hierarchy-by-posture\">VUH-1218</issue> (`03af9199`): the arc now steps by the measured … (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1228/commons-district-root-rows-overlap-captions-at-ipad-scale",
+        "updatedAt": "2026-09-21T00:57:41.100Z"
+      },
+      {
+        "id": "VUH-1312",
+        "title": "Preserve UTF-8 in encrypted mobile responses so the agent roster loads",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The paired production iPhone shows only Clankie despite a populated host fleet. React Native's byte-backed Response decodes UTF-8 as Latin-1: the captured valid 94,481-byte fleet response fails client schema validation at snapshot.personas\\[60\\].name (too_big). The client then discards the roster.\n\nThe shared encrypted client must decode text/JSON correctly while retaining authenticated bytes, clone semantics, status and headers. Hono's Response… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1312/preserve-utf-8-in-encrypted-mobile-responses-so-the-agent-roster-loads",
+        "updatedAt": "2026-09-21T00:21:02.805Z"
+      },
+      {
+        "id": "VUH-1052",
+        "title": "APNs delivery for messages that land while the app is closed",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Long-poll and WebSocket both die when iOS backgrounds the app, so a message that lands while the app is closed waits for the next foreground. No transport choice fixes this — background delivery on iOS is APNs-only.\n\n## Context\n\n* hosted-scale backlog — the real real-time gap for a hosted mobile product, ahead of any transport rework",
+        "criteria": [
+          { "text": "Message arriving while the app is backgrounded/closed produces a push", "done": true },
+          { "text": "Tapping the push opens the thread", "done": true }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1052/apns-delivery-for-messages-that-land-while-the-app-is-closed",
+        "updatedAt": "2026-09-21T00:21:02.805Z"
+      },
+      {
+        "id": "VUH-1313",
+        "title": "Keep the fleet list visible when returning from an agent DM",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "James reports that returning from an agent DM briefly shows a blank Messages list before agents reappear. The live roster should remain visible through navigation and refresh.\n\nAcceptance:\n\n- [X] Identify and fix the shared lifecycle cause rather than adding a screen-specific delay.\n- [X] Returning from a DM retains the last valid roster while a refresh is pending.\n- [X] Actual disconnection, seat removal and host changes still update the roster… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1313/keep-the-fleet-list-visible-when-returning-from-an-agent-dm",
+        "updatedAt": "2026-09-21T00:15:45.925Z"
+      },
+      {
+        "id": "VUH-1208",
+        "title": "The commons v2: the fleet as a game",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "Turn the commons from a presence room into a game surface: agents visibly talk to each other, hierarchy reads from where figures stand, the room takes commands, and the fleet earns things. Sub-issues carry the pieces in dependency order.\n\n## Background\n\nThe v1 room ([VUH-1048](<https://linear.app/vuhlp/issue/VUH-1048>)) proves presence honestly but is quiet: figures on a lawn with labels doing the talking. ADR 0015 cut the garden's economy and A… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1208/the-commons-v2-the-fleet-as-a-game",
+        "updatedAt": "2026-09-21T00:12:47.488Z"
+      },
+      {
+        "id": "VUH-1024",
+        "title": "App: reconcile protocol drift, then build the messages home (ADR 0013)",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Two sequential phases in clankie-app (its pnpm workspace consumes `@clankie/protocol` live from `../clankie-v2`):\n\n**Phase 1 — reconcile.** The repo is red against protocol HEAD: mission/artifact-era imports (`MissionFeedEvent`, `Evidence`, `FailedCheck`, `ActionDecision`, …) no longer exist, and `OperatorConversationServiceClient` grew `close`/`autonomy` plus turn-result/stream-event variants the composer predates. Delete dead mission-era lanes… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1024/app-reconcile-protocol-drift-then-build-the-messages-home-adr-0013",
+        "updatedAt": "2026-09-20T23:33:34.100Z"
+      },
+      {
+        "id": "VUH-1113",
+        "title": "App: close privacy-link and attachment gaps before external testing",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The assessed app exposes image selection that the live transport rejects, and its published privacy/support pages are not reachable inside the app. Make the shipped controls and help paths match the actual release.",
+        "criteria": [
+          {
+            "text": "Privacy and support links are reachable from pairing/onboarding and Settings.",
+            "done": true
+          },
+          {
+            "text": "Image selection is shown only when the connected host can accept it; otherwise the unsupported action is absent or clea… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1113/app-close-privacy-link-and-attachment-gaps-before-external-testing",
+        "updatedAt": "2026-09-20T23:21:30.518Z"
+      },
+      {
+        "id": "VUH-1097",
+        "title": "Create the App Store Connect record and store listing",
+        "status": "in_progress",
+        "dependsOn": [],
+        "summary": "One-time App Store Connect setup for `io.clankie.v2`.",
+        "criteria": [
+          {
+            "text": "App record created for `io.clankie.v2` with name, subtitle, category, and the age rating questionnaire completed",
+            "done": false
+          },
+          { "text": "Support URL and privacy policy URL set", "done": false },
+          {
+            "text": "Screenshots for the currently required iPhone and iPad sizes, taken with a live fleet so Messages, fleet, and terminal show real content",
+            "done": false
+          },
+          {
+            "text": "The listing describes Clankie as the native client for th… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1097/create-the-app-store-connect-record-and-store-listing",
+        "updatedAt": "2026-09-20T23:21:29.960Z"
+      },
+      {
+        "id": "VUH-1112",
+        "title": "Encrypt device-to-host traffic across the shared gateway",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Before unrelated customers use the shared gateway, device-to-host application traffic must satisfy the encryption boundary already required by the architecture. The gateway should route customer traffic without being able to read protected content.",
+        "criteria": [
+          {
+            "text": "Pairing authenticates the intended device and host and establishes keys without making the shared gateway a decryption endpoint.",
+            "done": true
+          },
+          {
+            "text": "Conversation, control, file/artifa… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1112/encrypt-device-to-host-traffic-across-the-shared-gateway",
+        "updatedAt": "2026-09-20T23:19:31.399Z"
+      },
+      {
+        "id": "VUH-1111",
+        "title": "Publish and prove the first downloadable Clankie Mac release",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The public installer needs a real, tested release behind its download link. Prove the packaged product on a clean machine rather than relying on the source checkout.",
+        "criteria": [
+          {
+            "text": "A versioned Apple silicon release and checksums are published through the existing release workflow; the public installer resolves a real downloadable artifact.",
+            "done": true
+          },
+          {
+            "text": "A clean install starts Clankie and the relay with the bundled runtime required for ad… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1111/publish-and-prove-the-first-downloadable-clankie-mac-release",
+        "updatedAt": "2026-09-20T22:48:16.526Z"
+      },
+      {
+        "id": "VUH-1095",
+        "title": "Ship Release builds to App Store Connect",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The only Release path today installs over USB. Add an archive-and-upload path so a build reaches TestFlight and the store, with distribution signing for `io.clankie.v2`.",
+        "criteria": [
+          {
+            "text": "One command archives the standalone Release variant and uploads it to App Store Connect (EAS Build and Submit, or `xcodebuild archive` plus Transporter, in the style of the existing device scripts)",
+            "done": false
+          },
+          {
+            "text": "A distribution certificate and provisioning … (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1095/ship-release-builds-to-app-store-connect",
+        "updatedAt": "2026-09-20T22:46:01.924Z"
+      },
+      {
+        "id": "VUH-1099",
+        "title": "Write the review notes and run the review-day journey on the uploaded build",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "App Review gets one shot at the app with the text and the code we give them. Write the notes from the README's phone steps, keep the review Mac live for the window, and prove the exact uploaded build on physical devices first.",
+        "criteria": [
+          {
+            "text": "Review notes state that the app is the native client for the user's own Mac-hosted agent, that the host is a personal computer the user owns, and that the terminal is an ancillary observation… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1099/write-the-review-notes-and-run-the-review-day-journey-on-the-uploaded",
+        "updatedAt": "2026-09-20T21:44:48.323Z"
+      },
+      {
+        "id": "VUH-1109",
+        "title": "Bundle and supervise Herdr as Clankie's internal runtime",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Clankie owns a pinned Herdr executable as an internal agent runtime, so customers do not need their own Herdr installation or an attached terminal. Preserve the existing CLI/socket boundary and consume the official upstream release with its checksum and licensing.",
+        "criteria": [
+          {
+            "text": "Install and release artifacts include an identified, pinned Herdr executable with provenance and licensing preserved.",
+            "done": true
+          },
+          {
+            "text": "Clankie's launcher starts, he… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1109/bundle-and-supervise-herdr-as-clankies-internal-runtime",
+        "updatedAt": "2026-09-20T21:15:07.891Z"
+      },
+      {
+        "id": "VUH-1048",
+        "title": "The commons v1: live presence room",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "One authored room over the live roster/conversation feed: Clankie center posed by availability, seats as harness-tinted sprites animated by status, offline seats absent. The commons shows, Messages does (ADR 0015).",
+        "criteria": [
+          {
+            "text": "`commons` destination takes the garden's `DestinationId` slot (rail · icon · macOS defaults · approvals routing)",
+            "done": true
+          },
+          {
+            "text": "Binds `liveMessagesHost` roster + projection — no mock-only path; empty fleet render… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1048/the-commons-v1-live-presence-room",
+        "updatedAt": "2026-09-20T20:50:42.542Z"
+      },
+      {
+        "id": "VUH-1047",
+        "title": "Nuke garden + canvas lens (ADR 0015)",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Delete the garden and canvas graph lens as one unit — both render the mission feed the platform deleted 2026-08-12 (ADR 0011); release builds show an empty world.",
+        "criteria": [
+          {
+            "text": "Deleted: `garden/` (minus extracted sprite runtime) · `packages/garden-model` · `graph/` · `mockMissionHost` · store `world`/`harvest`/`gardenExpandedChatWorkerRunId` · `docs/garden-v2-design.md`",
+            "done": true
+          },
+          {
+            "text": "Retained: `assets/garden/` source art + bake tooling … (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1047/nuke-garden-canvas-lens-adr-0015",
+        "updatedAt": "2026-09-20T20:50:38.749Z"
+      },
+      {
+        "id": "VUH-1046",
+        "title": "Extract sprite runtime from garden/ into neutral sprite/ module",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Messages contact portraits and the Settings skin picker import the garden's sprite runtime; the garden nuke (ADR 0015) can't land until it moves.",
+        "criteria": [
+          {
+            "text": "`atlasRuntime.ts` · `skinRenderEpoch.ts` · sprite types · `variantForHarness` · `ClankieAtlasSprite` live in a neutral `sprite/` module (\\~490 LOC)",
+            "done": true
+          },
+          {
+            "text": "`messages/ContactPresence.tsx` · `messages/MessagesDestination.tsx` · `settings/SkinSettings.tsx` import from `sprite/… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1046/extract-sprite-runtime-from-garden-into-neutral-sprite-module",
+        "updatedAt": "2026-09-20T20:50:35.151Z"
+      },
+      {
+        "id": "VUH-1115",
+        "title": "Record execution identity and reported usage in captain turn metrics",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The Astra/Terra comparison had to reconstruct model and effort from external snapshots. The durable settled-turn log records neither execution identity nor total reported usage; context occupancy cannot substitute for either.",
+        "criteria": [
+          {
+            "text": "Each new settled captain metric records the model/provider/effort actually used, including failed and interrupted turns; a model switch is attributed to the next executing turn rather than a s… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1115/record-execution-identity-and-reported-usage-in-captain-turn-metrics",
+        "updatedAt": "2026-09-20T20:49:02.251Z"
+      },
+      {
+        "id": "VUH-1029",
+        "title": "First light: boot the real app and walk the messages home",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The Messages home is verified on iPhone and iPad simulators, with real offer-only onboarding against an isolated host. The merged first-light archive and screenshots are linked in the completion comment.",
+        "criteria": [
+          { "text": "Dev client builds and launches on iPhone and iPad simulators.", "done": true },
+          {
+            "text": "Mock-profile Messages walk covers pinned Clankie, seat contacts, seat DM, delivery states, terminal deep link and offline-seat failure, with retai… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1029/first-light-boot-the-real-app-and-walk-the-messages-home",
+        "updatedAt": "2026-09-20T20:47:23.229Z"
+      },
+      {
+        "id": "VUH-1025",
+        "title": "App: bind the live seat lane and prove messages end-to-end",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Follow-up to <issue id=\"d87813bd-d3e5-4157-9791-91fa1a49cc84\" href=\"https://linear.app/vuhlp/issue/VUH-1024/app-reconcile-protocol-drift-then-build-the-messages-home-adr-0013\">VUH-1024</issue>. The upstream gap it recorded is closed: `roster()` is on `OperatorConversationServiceClient` and seat threads/`seat_offline` are live in the platform repo (<issue id=\"12fdabed-0926-4c04-b112-201d2e9d8024\" href=\"https://linear.app/vuhlp/issue/VUH-1023/seat… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1025/app-bind-the-live-seat-lane-and-prove-messages-end-to-end",
+        "updatedAt": "2026-09-20T20:47:23.170Z"
+      },
+      {
+        "id": "VUH-1087",
+        "title": "ADR: a harness takes the operator seat",
+        "status": "in_review",
+        "dependsOn": [],
+        "summary": "Record the decision and update the docs it changes. The ADR states that the primary operator seat is the TUI over the persistent pi lead, with an optional harness seat starting with Claude Code on the owner's plan; that the tool bank over MCP is the seam; and that pi keeps the body and the social lanes. It says why this is not possession (ADR 0129 stands) and not one session with subagents (ADR 0124), and amends ADR 0101 so pi owns the model run… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1087/adr-a-harness-takes-the-operator-seat",
+        "updatedAt": "2026-09-20T20:46:24.000Z"
+      },
+      {
+        "id": "VUH-993",
+        "title": "Evaluation-grade PokeAgent traces and complete play accounting",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Make production play traces sufficient to evaluate an agent’s actual experience: movement sanity, action appropriateness, plan continuity, execution effectiveness, recovery, and room-report delivery. Every historical run must also have truthful terminal accounting even when service shutdown interrupts it.",
+        "criteria": [
+          {
+            "text": "Each turn durably binds the exact decision observation, immediate pre-action state, structured action result, p… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-993/evaluation-grade-pokeagent-traces-and-complete-play-accounting",
+        "updatedAt": "2026-09-20T20:46:22.950Z"
+      },
+      {
+        "id": "VUH-1023",
+        "title": "Seat conversations: direct send + projection + relay exposure (ADR 0135 phase 1)",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Implement ADR 0135 phase 1 in the backend repo, on top of the committed seam (bf56c77: seat scope kind, `agent` message role, live `roster` op, seat-aware sameScope, typed seat-create rejection).\n\nScope:\n\n* Seat-scoped conversations in the registry (idempotent create per seat, no captain session behind them)\n* `send` to a seat thread pipes text to the seat's current pane via the service's herdr seat; typed failure when no live pane\n* Projection:… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1023/seat-conversations-direct-send-projection-relay-exposure-adr-0135",
+        "updatedAt": "2026-09-20T20:44:59.539Z"
+      },
+      {
+        "id": "VUH-1061",
+        "title": "Channels: several agents share one conversation, projected into Clankie's swarm server",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "A room several herdr agents share, rendered natively in the app and as a real channel or forum post in the one Discord server Clankie controls. Every agent posts under its own name and face from one per-channel webhook — no bot application and no user account per agent.",
+        "criteria": [
+          {
+            "text": "A channel is a conversation with several seats; members are offered a turn in order and `PASS` is free",
+            "done": true
+          },
+          {
+            "text": "Reactions are first-class on conversat… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1061/channels-several-agents-share-one-conversation-projected-into-clankies",
+        "updatedAt": "2026-09-20T20:43:21.732Z"
+      },
+      {
+        "id": "VUH-1227",
+        "title": "Host: move a seat's working directory",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "A host command that moves a live seat to another working directory, so the room's drag-to-district gesture (<issue id=\"af1ee3ae-c9b4-488c-b19a-fbaf3a324e1f\" href=\"https://linear.app/vuhlp/issue/VUH-1214/commons-commands-from-the-room\">VUH-1214</issue>) can do what it offers.\n\n## Background\n\n<issue id=\"af1ee3ae-c9b4-488c-b19a-fbaf3a324e1f\" href=\"https://linear.app/vuhlp/issue/VUH-1214/commons-commands-from-the-room\">VUH-1214</issue> wired the ges… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1227/host-move-a-seats-working-directory",
+        "updatedAt": "2026-09-07T14:03:29.381Z"
+      },
+      {
+        "id": "VUH-1234",
+        "title": "Commons: the exchange, two figures talking face to face",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "When one agent prompts another, the room plays a conversation, not just a walk and a line: the two figures turn to face each other, the sender talks with the first line of its prompt in a bubble, the listener works on it under a \"…\" glyph, then talks back with the first line of its reply under a \"!\", and the sender goes home. Everything on screen is a fact from the transcript.\n\n## Background\n\nThe visit (<issue id=\"698e5d2c-e130-46f7-8d3e-187f834… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1234/commons-the-exchange-two-figures-talking-face-to-face",
+        "updatedAt": "2026-09-07T13:25:20.954Z"
+      },
+      {
+        "id": "VUH-1219",
+        "title": "Commons: blooms, compost, celebrations, and a plaque",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The room shows what the fleet earned: a bloom beside a figure whose last run passed, a compost mound beside one that failed, a dance when an agent says it shipped, and a plaque with today's tallies.\n\n## Background\n\nThe art already exists: `prop-harvest-bloom` and `prop-harvest-compost` were drawn for the garden's verified-artifact and failure states and never wired. Every fact here comes from the host ledger; the app renders and never tallies. A… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1219/commons-blooms-compost-celebrations-and-a-plaque",
+        "updatedAt": "2026-09-07T09:10:03.451Z"
+      },
+      {
+        "id": "VUH-1218",
+        "title": "Commons: hierarchy by posture",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Who reports to whom reads from where figures stand: a lead at its station, the seats it spawned gathered in an arc facing it, a worker's workers one ring out. Role hats reinforce it.\n\n## Background\n\nSpawn edges form a tree, and the persona role accessory (lead, planner, implementer, verifier, reviewer, debugger, evaluator) already exists. Today placement is a flat lattice keyed by activity station. This changes the layout model so a seat's ancho… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1218/commons-hierarchy-by-posture",
+        "updatedAt": "2026-09-07T09:10:01.073Z"
+      },
+      {
+        "id": "VUH-1217",
+        "title": "Commons: wires overlay and worn paths",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "A toggleable overlay draws who is talking to whom: lines between figures weighted by recent traffic, channel membership as a shared ring, and a worn path in the ground between pairs that talk a lot.\n\n## Background\n\nADR 0015 said a structure lens could return over the live feed. This is it. Lines derive from the edge window in the snapshot and channel membership from ADR 0146; a wire fades as its edges age out of the window and vanishes when eith… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1217/commons-wires-overlay-and-worn-paths",
+        "updatedAt": "2026-09-07T09:09:58.103Z"
+      },
+      {
+        "id": "VUH-1216",
+        "title": "Commons: visits, a prompt walks a note across the room",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "When one agent prompts another, its figure walks over, hands off a note using the existing carry cycle, and walks back. A message becomes something you watch happen.\n\n## Background\n\nThis is the first thing the edge feed buys. The `carry` animation already exists in every variant and direction. The visit is presentation over a host fact: the walk plays when a new prompt edge arrives and never asserts anything the edge did not say. Figures that ar… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1216/commons-visits-a-prompt-walks-a-note-across-the-room",
+        "updatedAt": "2026-09-07T09:09:56.007Z"
+      },
+      {
+        "id": "VUH-1215",
+        "title": "Commons: cosmetics and a room you decorate",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The operator owns the look of the room: placeable props, per-persona cosmetics, and a persisted layout. This is app-owned truth and persists locally.\n\n## Background\n\nThe game-surface ADR splits room state into host facts and app-owned truth. Decoration and cosmetics are the second kind: the app is the authority, so it may persist them without any drift risk. Skin packs are already the container for art, and persona appearance already carries a v… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1215/commons-cosmetics-and-a-room-you-decorate",
+        "updatedAt": "2026-09-07T09:09:53.789Z"
+      },
+      {
+        "id": "VUH-1214",
+        "title": "Commons: commands from the room",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The room becomes somewhere you act, not only watch: drag a figure to a district to move it, tap a station to hire a seat there, and reach the existing seat controls from the figure.\n\n## Background\n\n\"The commons shows, messages does\" was a v1 scope choice; the game-surface ADR retires it. Commands still route through host contracts that exist today: hiring already offers working directories as places a new agent can join, and seat conversations a… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1214/commons-commands-from-the-room",
+        "updatedAt": "2026-09-07T09:09:51.732Z"
+      },
+      {
+        "id": "VUH-1233",
+        "title": "Host: edges carry the message, replies, and the mailbox path",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The fleet snapshot's edges gain what an animated exchange needs: which message a prompt was, whether and when the recipient replied, and edges for messages delivered through the seat mailbox, not only `herdr agent prompt`.\n\n## Background\n\n<issue id=\"f8751020-3d2f-406d-b928-64e1dd37aec8\" href=\"https://linear.app/vuhlp/issue/VUH-1212/fleet-snapshot-carries-agent-to-agent-edges\">VUH-1212</issue> put prompt and spawn edges on the snapshot from Herdr… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1233/host-edges-carry-the-message-replies-and-the-mailbox-path",
+        "updatedAt": "2026-09-07T09:09:46.937Z"
+      },
+      {
+        "id": "VUH-1232",
+        "title": "Art: talk and listen cycles for a face-to-face exchange",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Two side-facing animation tags on every clankie variant so two figures can be seen talking: `talk` (arm extended toward the listener, crown bobbing with the words, four frames) and `listen` (a one-pixel head tilt and the eyes glancing toward the speaker, two frames). Authored facing right, mirrored at runtime for the figure on the right, like the existing side walk.\n\n## Background\n\nA prompt between agents currently plays as a walk plus a wire. T… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1232/art-talk-and-listen-cycles-for-a-face-to-face-exchange",
+        "updatedAt": "2026-09-07T09:09:44.459Z"
+      },
+      {
+        "id": "VUH-1235",
+        "title": "Chat: open a thread scrolled to a given entry",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The shared chat screen accepts an entry id and opens scrolled to that entry, so a tap on a figure or bubble mid-exchange lands on the message it represents rather than at the bottom of the thread.\n\n## Background\n\nThe exchange (<issue id=\"7f552191-14db-46d3-a98b-56510e15619d\" href=\"https://linear.app/vuhlp/issue/VUH-1234/commons-the-exchange-two-figures-talking-face-to-face\">VUH-1234</issue>) routes a mid-exchange tap to the right thread but cann… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1235/chat-open-a-thread-scrolled-to-a-given-entry",
+        "updatedAt": "2026-09-07T07:33:34.265Z"
+      },
+      {
+        "id": "VUH-1212",
+        "title": "Fleet snapshot carries agent-to-agent edges",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The fleet snapshot every surface already subscribes to gains an edge list: who prompted whom recently, and who spawned whom.\n\n## Background\n\nADR 0150 makes the fleet a live cursor that advances on Herdr's native events, so once Herdr emits prompt and spawn edges no new transport is needed. The snapshot stays derived: the captain keeps a bounded recent window of prompt edges and reads spawn edges off the pane's parent, and an empty session yields… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1212/fleet-snapshot-carries-agent-to-agent-edges",
+        "updatedAt": "2026-09-07T04:29:57.598Z"
+      },
+      {
+        "id": "VUH-1211",
+        "title": "Host: seat outcomes, daily tallies, and a celebrate stance",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The host becomes the authority for what a seat has earned: its last run outcome, its counts for the day, and a way for an agent to say it just landed something.\n\n## Background\n\nRewards in the room are only honest if the ledger lives on the host. The app renders them and never keeps its own tally. This is the commons-facing slice of the cross-project ledger effort; it should reuse whatever usage ledger and rollup the stats lane already has rather… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1211/host-seat-outcomes-daily-tallies-and-a-celebrate-stance",
+        "updatedAt": "2026-09-07T02:40:57.011Z"
+      },
+      {
+        "id": "VUH-1209",
+        "title": "ADR: the commons is a game surface",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "One app ADR that reopens the commons for gameplay, commands, and app-owned state, and names exactly which prior clauses it retires.\n\n## Background\n\nADR 0015 (the commons shows, messages does), ADR 0019 (placement doctrine), and ADR 0022 (derived, never projected) each forbid something this effort needs: commands from the room, a spatial model with memory, and any economy. They were written against the garden's projected-world failure. The one ru… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1209/adr-the-commons-is-a-game-surface",
+        "updatedAt": "2026-09-07T00:50:54.766Z"
+      },
+      {
+        "id": "VUH-1213",
+        "title": "Commons: stance bubbles and station ambients",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The room starts feeling inhabited using only data and art it already has: an agent's stated note pops as a speech bubble, and stations animate while someone is working at them.\n\n## Background\n\nSix station sprites ship an `ambient` animation tag and GIF that nothing plays. The stance op already carries a note in the agent's own words that only the Messages row prints. Both are pure presentation over the live roster and need no host change, so thi… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1213/commons-stance-bubbles-and-station-ambients",
+        "updatedAt": "2026-09-07T00:46:03.760Z"
+      },
+      {
+        "id": "VUH-1210",
+        "title": "Herdr: emit prompt and spawn edges between panes",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Herdr records who prompted whom and who started whom, and publishes both on the session event socket.\n\n## Background\n\nAgent-to-agent traffic is invisible today. `herdr agent prompt` carries a target and no sender, `herdr agent start` records no parent, and neither produces an event. A CLI call made from inside a pane already has that pane's id in its environment, so the sender is available without new plumbing. This lands in Herdr itself, not as… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1210/herdr-emit-prompt-and-spawn-edges-between-panes",
+        "updatedAt": "2026-09-07T00:11:25.279Z"
+      },
+      {
+        "id": "VUH-1031",
+        "title": "Event-driven herdr fleet awareness (events.subscribe + snapshot bootstrap)",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Move the TUI roster and captain census from polling (`herdr pane list` / `herdr agent list`) to upstream herdr's socket API: one long-lived `events.subscribe` stream (`pane.agent_status_changed`, `pane.created/updated/closed/exited`, workspace/tab events) bootstrapped with `herdr api snapshot` per the documented no-gap pattern (subscribe first, buffer, snapshot, replay).\n\nRequirements:\n\n* Small unix-socket newline-JSON client (`HERDR_SOCKET_PATH… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1031/event-driven-herdr-fleet-awareness-eventssubscribe-snapshot-bootstrap",
+        "updatedAt": "2026-09-06T23:06:27.983Z"
+      },
+      {
+        "id": "VUH-1050",
+        "title": "Push fleet roster changes over the operator stream",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The app polls `roster()` every 15s (`liveMessagesHost`, commit `09ca244` on `volpestyle/commons-adr-0015`) because nothing pushes fleet changes. The census is live per call — `herdr agent list` server-side — so this is a latency/battery ceiling, not a correctness gap.",
+        "criteria": [
+          {
+            "text": "Fleet membership/status changes (pane spawn · death · status transition) arrive as typed events on the operator stream lane",
+            "done": false
+          },
+          { "text": "`liveMessagesHost` … (truncated, use `get_issue` for full description)", "done": false }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1050/push-fleet-roster-changes-over-the-operator-stream",
+        "updatedAt": "2026-09-06T23:06:27.966Z"
+      },
+      {
+        "id": "VUH-1049",
+        "title": "Expose captain presence card over the relay",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The commons poses Clankie from his real activity; the present-tense presence card exists service-side but has no relay contract. App ADR 0015 names this the one new host contract.",
+        "criteria": [
+          {
+            "text": "Relay op exposing the captain presence card (current activity: voice · play · coding · idle) to paired devices",
+            "done": false
+          },
+          { "text": "Typed in `packages/protocol` · redaction at the relay documented", "done": false },
+          {
+            "text": "App-side presence poses are a P2 follow-up, not th… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1049/expose-captain-presence-card-over-the-relay",
+        "updatedAt": "2026-09-06T23:05:48.130Z"
+      },
+      {
+        "id": "VUH-1107",
+        "title": "Compare Astra and Terra on four complete Clankie jobs",
+        "status": "canceled",
+        "dependsOn": [],
+        "summary": "Measure whether Astra finishes useful work more reliably than the prior Terra setup. Use a small, repeatable set of real jobs and existing traces instead of inferring gains from fluent explanations.",
+        "criteria": [
+          {
+            "text": "Run a difficult bug from report to verified fix under both models, with an explicit correctness check.",
+            "done": true
+          },
+          {
+            "text": "Run a multi-agent feature through dispatch, review, and integration; record missed requirements, conflicting e… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1107/compare-astra-and-terra-on-four-complete-clankie-jobs",
+        "updatedAt": "2026-09-06T02:34:49.610Z"
+      },
+      {
+        "id": "VUH-1108",
+        "title": "Turn failed Clankie jobs into verified, reusable lessons",
+        "status": "canceled",
+        "dependsOn": [],
+        "summary": "Let Clankie revisit failed work, identify the mistaken assumption or missing information, and test a correction. Keep lessons only when evidence shows they improve a future attempt.",
+        "criteria": [
+          {
+            "text": "A failed or operator-rescued job can be selected from existing traces and journals without duplicating those stores.",
+            "done": false
+          },
+          {
+            "text": "The review identifies the failure, supporting evidence, proposed correction, and a checkable outcome.",
+            "done": false
+          },
+          { "text": "A com… (truncated, use `get_issue` for full description)", "done": false }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1108/turn-failed-clankie-jobs-into-verified-reusable-lessons",
+        "updatedAt": "2026-09-06T02:34:48.298Z"
+      },
+      {
+        "id": "VUH-1102",
+        "title": "Make Astra's gains measurable and useful in Clankie",
+        "status": "canceled",
+        "dependsOn": [],
+        "summary": "Use GPT-6 Astra to carry larger jobs through with fewer operator interventions. Extend recall and finished-file delivery where the current product limits the model, and prove gains on real Clankie tasks.",
+        "criteria": [
+          {
+            "text": "Captain and gameplay model paths are verified independently with their actual provider and effort recorded.",
+            "done": false
+          },
+          {
+            "text": "Durable recall, delivered artifacts, and evidence-backed learning have linked implementation tasks.",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1102/make-astras-gains-measurable-and-useful-in-clankie",
+        "updatedAt": "2026-09-06T02:34:47.076Z"
+      },
+      {
+        "id": "VUH-1127",
+        "title": "Preserve model failures when the captain runtime resolves an empty turn",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "A provider failure can resolve the captain's turn with an empty assistant response instead of rejecting it. The conversation must record the failure and its reason rather than reporting successful completion.",
+        "criteria": [
+          {
+            "text": "A model failure ends the owning conversation run as failed with its reported reason.",
+            "done": true
+          },
+          {
+            "text": "A message absorbed into a failing run does not receive a successful result.",
+            "done": true
+          },
+          {
+            "text": "Deliberate interruption and valid te… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1127/preserve-model-failures-when-the-captain-runtime-resolves-an-empty",
+        "updatedAt": "2026-09-05T16:32:37.538Z"
+      },
+      {
+        "id": "VUH-1030",
+        "title": "Launcher occupancy check false-positives on test instances",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`clankie restart` refused to start with \"Clankie is occupied by a process the clankie launcher does not own and is not healthy\" while port 4310 had NO listener. The occupying \"process\" was a lane's brief-compliant scratch service on loopback test port 4390 — `startService`'s unowned+unhealthy branch calls `findServiceProcessPids`, which matches on command shape alone (`--filter @clankie/clankie start`), never checking whether the match holds the… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1030/launcher-occupancy-check-false-positives-on-test-instances",
+        "updatedAt": "2026-09-05T16:31:25.009Z"
+      },
+      {
+        "id": "VUH-1053",
+        "title": "Spike: Clankie boots in a Linux container",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The forcing function for hosted sandboxes: everything that breaks in this spike is the real porting list, everything else is speculation.",
+        "criteria": [
+          {
+            "text": "`clankie` + `relay` come up under the launcher registry in a Linux container (`clankie status` healthy for both) · discord/voice/activity/GBA may stay `enabled()`-off",
+            "done": true
+          },
+          {
+            "text": "Credential broker runs on a non-Keychain backend (file/KMS seam behind `createDefaultCredentialStore`)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1053/spike-clankie-boots-in-a-linux-container",
+        "updatedAt": "2026-09-05T16:30:18.376Z"
+      },
+      {
+        "id": "VUH-1116",
+        "title": "Protocol package pulls the full zod runtime into every consumer bundle",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Mobile bundles `@clankie/protocol` and with it zod 4 classic: \\~7% of the app's JS after the icon fix (0.55 MB of source across 78 modules, measured with `scripts/bundle-attribution.mjs` in clankie-app), and \\~1,300 schemas constructed at module init. `zod/mini` would cut most of that but drops the method surface (`Schema.parse` → `z.parse(Schema, …)`), so it is a protocol-wide change rather than an app one.",
+        "criteria": [{ "text": "Decide… (truncated, use `get_issue` for full description)", "done": true }],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1116/protocol-package-pulls-the-full-zod-runtime-into-every-consumer-bundle",
+        "updatedAt": "2026-09-05T15:47:40.514Z"
+      },
+      {
+        "id": "VUH-1126",
+        "title": "Compile the app with the React Compiler",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`babel-preset-expo` now runs the React Compiler over the mobile shell and every shared component it bundles: the shared UI carries 142 components behind only 7 hand-written `memo`s, and rows like `MessagesDestination.renderItem` and `ContactRow` rebuilt their closures every render while each hosts a Skia canvas. Landed as `e08c687`.\n\n**The measured result was no change**, and that is the honest outcome rather than a win:\n\n|  | `first_render_ms` … (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1126/compile-the-app-with-the-react-compiler",
+        "updatedAt": "2026-09-05T15:37:45.293Z"
+      },
+      {
+        "id": "VUH-1118",
+        "title": "Mobile performance wave: cut bundle size and per-frame React work",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Filed retroactively. A four-lane wave against the mobile app's two standing costs: what ships in the JS bundle, and how much React work a single streamed frame provokes. Landed as `e988bd9`, `e6732e5`, `33e0ba9`, `01551b3`, `2b190a7`, `842efd9`, `3c5ef53`, `e08c687` on `main`.\n\nHeadline results:\n\n* Hermes bytecode `5,541,580` → `4,288,148` (**-22.6%**), bundle modules `3,523` → `1,853`, from the lucide icon fix alone\n* Android release APK `165,1… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1118/mobile-performance-wave-cut-bundle-size-and-per-frame-react-work",
+        "updatedAt": "2026-09-05T15:37:45.293Z"
+      },
+      {
+        "id": "VUH-1125",
+        "title": "Minify and shrink resources in Android release builds",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`apps/mobile/android/` is generated and gitignored, so `android.enableMinifyInReleaseBuilds` and `android.enableShrinkResourcesInReleaseBuilds` could not be set in `gradle.properties` and defaulted to false — **every Android release shipped unminified with all resources**. The Expo-owned way to reach a generated `gradle.properties` is the `expo-build-properties` config plugin, so that is where the two flags now live. Landed as `3c5ef53`.\n\nReleas… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1125/minify-and-shrink-resources-in-android-release-builds",
+        "updatedAt": "2026-09-05T15:37:37.603Z"
+      },
+      {
+        "id": "VUH-1124",
+        "title": "Cap picked photos at the model's useful resolution",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`launchImageLibraryAsync` ran with `base64: true` and no downscale, so a 12MP pick became a multi-megabyte base64 string that crossed the bridge, sat in JS memory, and went through the relay — for detail the model throws away, since it downsamples anything past \\~1568px on the long edge. Landed as `842efd9`.\n\nThe picker no longer returns base64. Each asset resizes when the long edge exceeds 1568 (one edge given, so aspect ratio is preserved), th… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1124/cap-picked-photos-at-the-models-useful-resolution",
+        "updatedAt": "2026-09-05T15:37:29.190Z"
+      },
+      {
+        "id": "VUH-1123",
+        "title": "Drive AgentSpinner on the UI thread",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`AgentSpinner` ran `setInterval` + `setState` every 80ms, so a visible spinner cost 12.5 React renders and Fabric commits per second — in the chat working row, the terminal overlays, and the terminal session list. ADR 0018 records commits landing mid-spring breaking layout animations, so the cost was not only battery. Landed as `2b190a7`.\n\nReanimated's `useFrameCallback` now derives the tick from `timeSinceFirstFrame` on the UI thread, and `useA… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1123/drive-agentspinner-on-the-ui-thread",
+        "updatedAt": "2026-09-05T15:37:22.510Z"
+      },
+      {
+        "id": "VUH-1122",
+        "title": "Fold chat reaction tallies once per transcript render",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`renderItem` folded `reactionTallies` per row, handing every rendered turn a fresh array, so `ChatTurnView`'s memo never hit: one streamed delta re-rendered every visible turn — markdown re-parse included — rather than only the open one. Landed as `e6732e5`.\n\nThe whole reaction set now folds into one entry-keyed map per `reactions` identity, and each row gets that entry's tallies or one shared empty array.",
+        "criteria": [{ "text": "A stream… (truncated, use `get_issue` for full description)", "done": true }],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1122/fold-chat-reaction-tallies-once-per-transcript-render",
+        "updatedAt": "2026-09-05T15:37:04.763Z"
+      },
+      {
+        "id": "VUH-1121",
+        "title": "Stop committing React on every terminal output frame",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`lastSequence` lived on the attach state the pane subscribes to, so every output frame allocated a new snapshot and woke `useSyncExternalStore` — a React and Fabric commit per frame, on top of the native draw that frame already did. Landed as `33e0ba9`.\n\nThe pane reads only phase, capabilities and control owner. The replay cursor is now an instance field behind a getter, and listeners are notified only when a field of the snapshot actually moved… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1121/stop-committing-react-on-every-terminal-output-frame",
+        "updatedAt": "2026-09-05T15:37:01.747Z"
+      },
+      {
+        "id": "VUH-1120",
+        "title": "Bundle only the lucide glyphs the app draws",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`shell/Icon.tsx` resolved glyphs off a namespace import (`import * as Lucide`) by string key, so Metro could not prove which icons were reachable and bundled all 1,753 lucide modules — 1.40MB of source, 15.6% of the bundle — for the 78 glyphs the app actually draws. Landed as `01551b3`.\n\n`shell/lucideGlyphs.ts` now imports each glyph from lucide's per-icon entry points and exposes them as a registry. `IconToken.lucide` is typed as that registry'… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1120/bundle-only-the-lucide-glyphs-the-app-draws",
+        "updatedAt": "2026-09-05T15:36:59.238Z"
+      },
+      {
+        "id": "VUH-1119",
+        "title": "Attribute bundle bytes to packages from an export source map",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Ranks what the mobile JS bundle is made of by npm, workspace, or sibling package, so a whole-library import shows up as a number instead of a guess. Landed as `e988bd9`.\n\nThis came first deliberately — every later claim in the wave is attributable to a package because this existed.",
+        "criteria": [
+          {
+            "text": "`scripts/bundle-attribution.mjs` ranks bundle contents by package from an `expo export --source-maps` map",
+            "done": true
+          },
+          {
+            "text": "Baseline recorded: 3,51… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1119/attribute-bundle-bytes-to-packages-from-an-export-source-map",
+        "updatedAt": "2026-09-05T15:36:49.891Z"
+      },
+      {
+        "id": "VUH-1117",
+        "title": "Protocol package pulls the full zod runtime into every consumer bundle",
+        "status": "canceled",
+        "dependsOn": [],
+        "summary": "Mobile bundles `@clankie/protocol`, and with it `zod` 4 classic: \\~7% of the app's JS after the icon fix, and \\~1,300 schemas constructed at module init. `zod/mini` would cut most of that but drops the method surface, so this is a protocol-wide decision rather than a mobile-side change.",
+        "criteria": [
+          {
+            "text": "A decision is recorded between `zod/mini`, splitting the protocol index into per-domain entry points, or accepting the cost — with… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1117/protocol-package-pulls-the-full-zod-runtime-into-every-consumer-bundle",
+        "updatedAt": "2026-09-05T15:25:16.453Z"
+      },
+      {
+        "id": "VUH-1022",
+        "title": "Emit a durable captain.turn.settled metrics line per settled turn",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The <issue id=\"8f197d1e-65c1-43a5-8561-14a2a049ba1d\" href=\"https://linear.app/vuhlp/issue/VUH-991/evaluate-a-design-checkpoint-for-long-running-coding-turns\">VUH-991</issue> evaluation could not measure survey→implementation imbalance because ADR 0111 prunes non-default conversation trees — the only store of per-turn tool telemetry. Lanes keep heard/said; cognition shape is lost.\n\nAppend one JSONL line per settled operator/Discord captain turn t… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1022/emit-a-durable-captainturnsettled-metrics-line-per-settled-turn",
+        "updatedAt": "2026-09-05T01:43:01.953Z"
+      },
+      {
+        "id": "VUH-1009",
+        "title": "Unify the PokeAgents player runtime across MCP, CLI, and Clankie",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "## Outcome\n\nClaude Code, Clankie, and any other agent connect to PokeAgents through one production player-client runtime. MCP is a thin protocol adapter over that runtime, so external agents receive the same connection, session, capability, frame, retry, refusal, and reconnect behavior as Clankie.\n\n```mermaid\nflowchart TD\n  Client[\"@pokeagents/world-protocol client runtime\"]\n  MCP[\"world-mcp\"]\n  CLI[\"world-cli\"]\n  Clankie[\"Clankie WorldBody\"]\n  … (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1009/unify-the-pokeagents-player-runtime-across-mcp-cli-and-clankie",
+        "updatedAt": "2026-09-05T00:56:20.271Z"
+      },
+      {
+        "id": "VUH-1011",
+        "title": "Route PokeAgents MCP and CLI through the shared WorldClient",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "## Outcome\n\nThe PokeAgents MCP server and CLI are thin adapters over the shared `WorldClient`. Claude Code and any standards-compliant MCP host therefore receive the same world semantics as a direct client.\n\n## Scope\n\n* Replace direct host calls and local token/session bookkeeping in `apps/world-mcp`.\n* Route the world CLI through the same client lifecycle.\n* Generate or validate MCP tool coverage against `WORLD_OPERATIONS` so the surfaces canno… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1011/route-pokeagents-mcp-and-cli-through-the-shared-worldclient",
+        "updatedAt": "2026-09-05T00:56:18.895Z"
+      },
+      {
+        "id": "VUH-1035",
+        "title": "Pairing restore never times out — eternal spinner on unreachable host",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Hit live during the first phone dogfood: a saved pairing whose origin is unreachable leaves `SetupShell` spinning at \"Restoring this device\" indefinitely. The Recovery screen (with its re-pair reset) only renders when restore fails into a recovery state; a hanging network call never gets there.",
+        "criteria": [
+          {
+            "text": "Restore phase carries a bounded timeout → typed recovery with the existing re-pair action",
+            "done": true
+          },
+          {
+            "text": "A user can always reach \"p… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1035/pairing-restore-never-times-out-eternal-spinner-on-unreachable-host",
+        "updatedAt": "2026-09-05T00:49:36.258Z"
+      },
+      {
+        "id": "VUH-1103",
+        "title": "Verify Astra across captain, gameplay, and play commentary",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "A working Astra captain turn does not prove the gameplay and commentary paths use it successfully. Verify each supported transport and make model selection and failures truthful across the product.",
+        "criteria": [
+          {
+            "text": "Select Astra through the supported configuration surface and record the effective model, provider, supported effort, and transport limits for each path.",
+            "done": true
+          },
+          {
+            "text": "A captain turn successfully uses a tool and consumes an image… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1103/verify-astra-across-captain-gameplay-and-play-commentary",
+        "updatedAt": "2026-09-05T00:42:43.705Z"
+      },
+      {
+        "id": "VUH-1094",
+        "title": "Mint a review pairing offer that outlives the five-minute window",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "App Review and TestFlight testers pick up a pairing code hours or days after it is issued, but an offer expires after five minutes and the gateway rejects any pairing route more than fifteen minutes out. Add an operator-minted review offer with a long lifetime that the gateway will route, so the code in the review notes works whenever the reviewer tries it.",
+        "criteria": [
+          {
+            "text": "`clankie pair` can mint an offer with an operator-chosen l… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1094/mint-a-review-pairing-offer-that-outlives-the-five-minute-window",
+        "updatedAt": "2026-09-05T00:33:35.910Z"
+      },
+      {
+        "id": "VUH-1086",
+        "title": "Publish the operator prompt and memory card headlessly",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The captain builds the operator lane's system prompt (identity, persona, reach, address) and injects the newest memory card per run. Both need to be readable outside a pi session: a route plus `clankie prompt` for the prompt, and a route plus a CLI read for the memory card, so a seat launcher and a per-turn hook can fetch them.",
+        "criteria": [
+          {
+            "text": "`clankie prompt --lane operator` prints the same system prompt the pi operator lane rece… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1086/publish-the-operator-prompt-and-memory-card-headlessly",
+        "updatedAt": "2026-09-05T00:33:34.406Z"
+      },
+      {
+        "id": "VUH-1085",
+        "title": "Serve each lane's tool bank over MCP",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Expose Clankie's authored tools as a streamable-HTTP MCP endpoint on the service API, scoped by lane: the tool list a connection sees is that lane's authority plan, and a lane-scoped bearer selects it. This is the seam any harness takes the seat through.",
+        "criteria": [
+          {
+            "text": "Claude Code pointed at the endpoint with an operator bearer lists exactly the operator lane's authored tools, plus the connected MCP tools that lane allows",
+            "done": true
+          },
+          { "text": "A… (truncated, use `get_issue` for full description)", "done": true }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1085/serve-each-lanes-tool-bank-over-mcp",
+        "updatedAt": "2026-09-05T00:33:33.401Z"
+      },
+      {
+        "id": "VUH-1104",
+        "title": "Recall durable experiences and decisions beyond the recent episode ring",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Clankie's recent-memory card contains eight visible episodes from a global 128-entry store. Give experiences and decisions he chooses to retain a searchable lifetime beyond that recent window, so meaningful continuity survives busy rooms and long gaps.",
+        "criteria": [
+          {
+            "text": "A retained episode remains discoverable after more than 128 newer episodes and a service restart.",
+            "done": true
+          },
+          {
+            "text": "Clankie can search and recall relevant episodes on demand whi… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1104/recall-durable-experiences-and-decisions-beyond-the-recent-episode",
+        "updatedAt": "2026-09-05T00:33:31.069Z"
+      },
+      {
+        "id": "VUH-1037",
+        "title": "The launcher owns the relay",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The relay is the only device-facing service and the only one the launcher does not manage — `clankie restart` stops/starts tunnel, activity, bridge, and Clankie, while the relay is hand-run with hand-carried env (`CLANKIE_RELAY_HOST`, `PORT`, `CLANKIE_CAPTAIN_TOKEN`). During the first phone dogfood nothing was serving devices at all and nobody had noticed.",
+        "criteria": [
+          {
+            "text": "Relay is a managed service in the launcher's `all` set: sta… (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1037/the-launcher-owns-the-relay",
+        "updatedAt": "2026-09-05T00:33:25.729Z"
+      },
+      {
+        "id": "VUH-1032",
+        "title": "Audit and remove only unused Herdr fork patches",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Audit the fork against the runtime Clankie ships and remove only patches with no remaining consumers. Preserve the bundled executable and the performance, ownership, and lifecycle fixes required by the product.",
+        "criteria": [
+          {
+            "text": "Recheck each candidate against Clankie, the clients, the Herdr lead tools, and release/runtime workflows; record current consumers and the reason to keep or remove it.",
+            "done": false
+          },
+          {
+            "text": "Remove only patches proven unnece… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1032/audit-and-remove-only-unused-herdr-fork-patches",
+        "updatedAt": "2026-09-04T23:49:57.943Z"
+      },
+      {
+        "id": "VUH-1033",
+        "title": "Vanilla herdr trial → retire the perf quartet and delete the fork",
+        "status": "canceled",
+        "dependsOn": [],
+        "summary": "After <issue id=\"d0872e39-4a79-460d-ad95-f28cf76e646d\" href=\"https://linear.app/vuhlp/issue/VUH-1031/event-driven-herdr-fleet-awareness-eventssubscribe-snapshot-bootstrap\">VUH-1031</issue> (event-driven awareness) and <issue id=\"ecf91c3d-e38e-4192-8f4b-728bd4a76ef8\" href=\"https://linear.app/vuhlp/issue/VUH-1032/retire-unused-herdr-fork-patches-30828084-byte-attach-output-streaming\">VUH-1032</issue> (integration patches dropped), run the `upstrea… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1033/vanilla-herdr-trial-retire-the-perf-quartet-and-delete-the-fork",
+        "updatedAt": "2026-09-04T23:49:56.678Z"
+      },
+      {
+        "id": "VUH-1070",
+        "title": "Run paid alpha and lock Starter and Pro allowances",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Use paid-alpha evidence to turn the pricing targets into promises. Do not market unlimited compute or freeze included usage before this gate passes.",
+        "criteria": [
+          {
+            "text": "Representative chat, terminal, repository, browser, and swarm workloads run on both proposed instance shapes",
+            "done": false
+          },
+          {
+            "text": "One complete subscribe → provision → pair → use → sleep/wake → exhaust allowance → cancel → suspend → reactivate path passes",
+            "done": false
+          },
+          {
+            "text": "Measured monthly COGS i… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1070/run-paid-alpha-and-lock-starter-and-pro-allowances",
+        "updatedAt": "2026-09-04T22:52:09.886Z"
+      },
+      {
+        "id": "VUH-997",
+        "title": "Define self-directed authority and /agency settings",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Add the host-authenticated self principal and owner-facing agency policy.\n\n* Version the captain lane contract for a private self lane.\n* Add settings for active hours, home surfaces, pulse/rate budgets, side-effect policy, local roots, and Robinhood purchase mode.\n* Add /agency status/edit/pause controls.\n* Keep credentials broker-owned and prevent external input from widening the self principal.\n* Record the authority decision in an ADR and update the architecture docs.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-997/define-self-directed-authority-and-agency-settings",
+        "updatedAt": "2026-09-04T22:50:54.286Z"
+      },
+      {
+        "id": "VUH-999",
+        "title": "Add the durable self lane, agenda, and initiative journal",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Give Clankie private, restart-safe continuity for his own activity.\n\n* Persist the self Pi session separately from operator and ambient rooms.\n* Store deduplicated provider events, one-time commitments, resumable checkpoints, and a small current agenda.\n* Rebuild due wakes after restart without repeating acknowledged events.\n* Keep raw provider content out of trusted event metadata and episodic memory.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-999/add-the-durable-self-lane-agenda-and-initiative-journal",
+        "updatedAt": "2026-09-04T22:50:53.406Z"
+      },
+      {
+        "id": "VUH-1000",
+        "title": "Wake Clankie with pulses, events, and commitments",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Run low-priority attention turns through the private self lane.\n\n* Offer jittered active-hour pulses, due commitments, and normalized external events.\n* Supply presence, recent episodes, agenda, commitments, and unread-event digests.\n* Let Clankie ignore, investigate, act, communicate, or schedule a return.\n* Back off after silence, coalesce bursts, suppress self-origin loops, and enforce model/outbound budgets.\n* Deliver deliberate output to co… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1000/wake-clankie-with-pulses-events-and-commitments",
+        "updatedAt": "2026-09-04T22:50:52.595Z"
+      },
+      {
+        "id": "VUH-1001",
+        "title": "Sandbox self-directed local machine activity",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Give the self principal opt-in local tools without inheriting the foreground shell.\n\n* Restrict reads/writes to owner-selected roots.\n* Exclude credential-broker secrets and reject path escapes.\n* Bound commands and network access, prefer recoverable deletion, and record changed paths/outcomes.\n* Let foreground work preempt queued local activity.\n* Verify public web/social content cannot widen local authority.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1001/sandbox-self-directed-local-machine-activity",
+        "updatedAt": "2026-09-04T22:50:51.709Z"
+      },
+      {
+        "id": "VUH-1003",
+        "title": "Connect Clankie's Gmail and YouTube identity",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Connect one separate Google identity for Clankie's mailbox and channel.\n\n* Add least-privilege Gmail and YouTube OAuth grants in the broker.\n* Feed Gmail watch/history changes into initiative events and renew the watch before expiry.\n* Add mailbox read/send/reply tools for the private self lane without loosening James's operator-only inbox.\n* Add YouTube upload, metadata, comment, reply, and moderation tools.\n* Use push for channel uploads/metad… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1003/connect-clankies-gmail-and-youtube-identity",
+        "updatedAt": "2026-09-04T22:50:49.079Z"
+      },
+      {
+        "id": "VUH-1004",
+        "title": "Connect and label Clankie's X account",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Give Clankie a transparent automated X presence.\n\n* Connect the account to James's human-run account and enable the automated label.\n* Add user-context OAuth and tools for reading, posting, replying, quoting, media, and deleting Clankie's own posts.\n* Feed mentions and relevant account events into the initiative journal.\n* Enforce X automation rules: no automated likes, bulk following, unsolicited DMs, trend manipulation, duplicates, or deceptiv… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1004/connect-and-label-clankies-x-account",
+        "updatedAt": "2026-09-04T22:50:47.811Z"
+      },
+      {
+        "id": "VUH-1005",
+        "title": "Connect Clankie's Facebook Page",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Use a James-administered Facebook Page as Clankie's identity.\n\n* Add Page OAuth/onboarding and brokered credentials.\n* Add Page read, publish, reply, moderation, and activity tools within granted Meta permissions.\n* Feed Page events into the initiative journal with self-origin suppression.\n* Keep this distinct from a personal profile and do not use browser automation to evade API or review limits.\n* Report unavailable permissions and review requirements explicitly.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1005/connect-clankies-facebook-page",
+        "updatedAt": "2026-09-04T22:50:46.789Z"
+      },
+      {
+        "id": "VUH-1006",
+        "title": "Connect Robinhood Banking MCP and an agentic card",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Add the official Robinhood Banking MCP at [https://banking-agent.robinhood.com/mcp/banking](<https://banking-agent.robinhood.com/mcp/banking>).\n\n* Implement curated /connect onboarding and OAuth through the service-owned MCP host.\n* Provision or select only the Robinhood agentic virtual card authorized for Clankie.\n* Read card policy and transaction history without exposing unrelated Robinhood accounts.\n* Classify card-detail tools as secret-bea… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1006/connect-robinhood-banking-mcp-and-an-agentic-card",
+        "updatedAt": "2026-09-04T22:50:45.806Z"
+      },
+      {
+        "id": "VUH-1007",
+        "title": "Broker browser purchases through Robinhood's agentic card",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Add a host-owned checkout boundary; do not expose Robinhood card tools directly to the model.\n\n* Let Clankie prepare a cart, then host-read the merchant, line items, final amount, currency, and checkout state.\n* Create a deduplicated purchase intent and apply agency policy.\n* Fetch card details late through Robinhood Banking MCP and inject them through a non-model-visible browser secret sink.\n* Let Robinhood enforce per-purchase approval or the … (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1007/broker-browser-purchases-through-robinhoods-agentic-card",
+        "updatedAt": "2026-09-04T22:50:44.560Z"
+      },
+      {
+        "id": "VUH-1008",
+        "title": "Verify and operate Clankie's self-directed life",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Finish the operator surface and end-to-end evidence for the full system.\n\n* Show current self activity, reason for wake, budgets, commitments, connector health, and recent receipts.\n* Support pause, stop, revoke, and resume without disabling foreground assistance.\n* Test foreground preemption, restart recovery, event deduplication, self-origin loops, prompt injection, and ambiguous side effects.\n* Verify social writes, local mutations, and Robin… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1008/verify-and-operate-clankies-self-directed-life",
+        "updatedAt": "2026-09-04T22:50:43.476Z"
+      },
+      {
+        "id": "VUH-1026",
+        "title": "Terminal transport contract: pane truth over the relay",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The app's terminal gateway died with the retired `terminal-protocol` package (removed in clankie-app <issue id=\"d87813bd-d3e5-4157-9791-91fa1a49cc84\" href=\"https://linear.app/vuhlp/issue/VUH-1024/app-reconcile-protocol-drift-then-build-the-messages-home-adr-0013\">VUH-1024</issue> phase 1 — renderer, keyboard choreography, and mock host survive). PRODUCT_DIRECTION keeps terminal fidelity as the credibility surface and P0 requires terminal end-to-… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1026/terminal-transport-contract-pane-truth-over-the-relay",
+        "updatedAt": "2026-09-04T22:50:42.275Z"
+      },
+      {
+        "id": "VUH-1051",
+        "title": "The relay holds one upstream tail per conversation",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The relay dispatches upstream once per parked device tail, so N devices watching one conversation hold N upstream tails. Fine for a single operator; the ceiling for hosted sandboxes.\n\n## Context\n\n* decision: the client transport stays long-poll — RN fetch can't stream · delivery alre… (truncated, use `get_issue` for full description)",
+        "criteria": [
+          {
+            "text": "Upstream tail count scales with active conversations, not connected devices",
+            "done": false
+          },
+          { "text": "Device-facing long-poll dispatch contract unchanged", "done": false }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1051/the-relay-holds-one-upstream-tail-per-conversation",
+        "updatedAt": "2026-09-04T22:50:11.575Z"
+      },
+      {
+        "id": "VUH-1073",
+        "title": "App: file references in a thread become tappable",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Tapping a file link in a thread today hands the path to the OS, which does nothing. Route file references through the chat's link handler to the file viewer instead, resolved against the thread agent's working directory.",
+        "criteria": [
+          {
+            "text": "A markdown link whose target is a file (`file://`, an absolute path, or a path relative to the agent's working directory), with or without a `:line` suffix, opens the file viewer at that file and l… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1073/app-file-references-in-a-thread-become-tappable",
+        "updatedAt": "2026-09-04T22:49:46.273Z"
+      },
+      {
+        "id": "VUH-1074",
+        "title": "App: file viewer page on the mock workspace host",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "A read-only page that shows one file from the agent's worktree, pushed over the thread the reference came from.",
+        "criteria": [
+          {
+            "text": "Pushed page per ADR 0021 on compact; on regular (iPad, macOS) it pushes inside the Messages detail column; the back gesture and the header control both pop it",
+            "done": false
+          },
+          {
+            "text": "Monospace text with line numbers and horizontal scroll for long lines; opens scrolled to a requested line with that line marked",
+            "done": false
+          },
+          { "text": "Header … (truncated, use `get_issue` for full description)", "done": false }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1074/app-file-viewer-page-on-the-mock-workspace-host",
+        "updatedAt": "2026-09-04T22:49:45.210Z"
+      },
+      {
+        "id": "VUH-1075",
+        "title": "App: worktree diff viewer for the thread's working directory",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The overall current diff of the worktree an agent is working in — what `git diff` shows right now, staged and unstaged together — reachable from that agent's thread.",
+        "criteria": [
+          {
+            "text": "The thread header gains a worktree control beside the terminal one, present when the agent has a working directory; it pushes the worktree page (ADR 0021), which opens on its Changes view ([VUH-1077](<https://linear.app/vuhlp/issue/VUH-1077>) adds Brow… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1075/app-worktree-diff-viewer-for-the-threads-working-directory",
+        "updatedAt": "2026-09-04T22:49:44.324Z"
+      },
+      {
+        "id": "VUH-1072",
+        "title": "Expose bounded workspace listing, file, and diff reads over the operator relay",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The app needs to list a directory, read one file, and read the current diff from a worktree an agent is working in — and it never invents an endpoint. Add the reads to the operator conversation service so they ride the existing dispatch envelope and relay like every other op.",
+        "criteria": [
+          {
+            "text": "Four ops on the operator service contract: a worktree status read (branch, head, changed files with change kind and added/removed line counts… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1072/expose-bounded-workspace-listing-file-and-diff-reads-over-the-operator",
+        "updatedAt": "2026-09-04T22:49:43.431Z"
+      },
+      {
+        "id": "VUH-1078",
+        "title": "Expose bounded worktree search over the operator relay",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The symbol finder and quick-open need to search a worktree an agent is working in — by file content and by file name — and the app never invents an endpoint. Two more reads on the operator conversation service, under the same confinement and grant as the file reads.",
+        "criteria": [
+          {
+            "text": "A content search op: literal or regex, optional whole-word and case flags, optional path scope; ignore-aware; returns matches grouped by file with line… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1078/expose-bounded-worktree-search-over-the-operator-relay",
+        "updatedAt": "2026-09-04T22:49:40.112Z"
+      },
+      {
+        "id": "VUH-1076",
+        "title": "App: bind the live workspace lane and prove it on iPhone, iPad, and macOS",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Bind the workspace host adapter to the relay ops and prove the whole path against a real agent's worktree.",
+        "criteria": [
+          {
+            "text": "The live profile resolves listing, file, diff, and search reads through the operator relay under the paired device's grant; refusal and truncation surface as their typed states",
+            "done": false
+          },
+          {
+            "text": "From a real seat thread: tap a link the agent wrote → the file at the right line; open changes → the diff matches `git diff` run… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1076/app-bind-the-live-workspace-lane-and-prove-it-on-iphone-ipad-and-macos",
+        "updatedAt": "2026-09-04T22:49:39.158Z"
+      },
+      {
+        "id": "VUH-1071",
+        "title": "Open the worktree from a thread: files, diff, browse, search",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Agents already put file links in chat; tapping one hands the path to the OS, which does nothing. Make a file reference in a thread open a file viewer, and give each agent thread a view of the worktree it is working in: its overall current diff, any file in it, where a symbol is used, and the navigation tools to move around.\n\n## Shape\n\n* A thread's agent has a working directory (its seat). File references resolve against it; the diff is that work… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1071/open-the-worktree-from-a-thread-files-diff-browse-search",
+        "updatedAt": "2026-09-04T22:49:38.314Z"
+      },
+      {
+        "id": "VUH-1079",
+        "title": "App: find references to a symbol across the worktree",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "From the file viewer, find where a name is used across the agent's worktree and jump there.",
+        "criteria": [
+          {
+            "text": "Long-pressing or selecting a word in the file viewer offers Find references; the results page lists whole-word matches grouped by file with the matched line and one context line each side, definition-looking lines (a declaration keyword before the name) ranked first",
+            "done": false
+          },
+          {
+            "text": "Tapping a result opens the file viewer at that line; … (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1079/app-find-references-to-a-symbol-across-the-worktree",
+        "updatedAt": "2026-09-04T22:49:37.196Z"
+      },
+      {
+        "id": "VUH-1080",
+        "title": "App: worktree navigation tools",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The small tools that make one-directory-at-a-time browsing livable: know where you are, jump up, jump to a path, find a file by name, reveal a file's folder.",
+        "criteria": [
+          {
+            "text": "A path bar on the Browse view and in the file viewer header shows the path from the working directory root; tapping a segment opens that directory",
+            "done": false
+          },
+          {
+            "text": "The worktree page's search field defaults to quick-open: typing finds files by name across the tree and a t… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1080/app-worktree-navigation-tools",
+        "updatedAt": "2026-09-04T22:49:35.861Z"
+      },
+      {
+        "id": "VUH-1077",
+        "title": "App: browse the worktree from the thread",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Open any file in the worktree an agent is working in, not only the ones it referenced. A Browse view on the thread's worktree page, descending one directory at a time.",
+        "criteria": [
+          {
+            "text": "The worktree page gains a Browse view beside Changes; it opens at the working directory root",
+            "done": false
+          },
+          {
+            "text": "One directory per screen: folders first, then files, each row carrying the git change glyph when dirty; tapping a folder pushes the next level (ADR 002… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1077/app-browse-the-worktree-from-the-thread",
+        "updatedAt": "2026-09-04T22:49:34.444Z"
+      },
+      {
+        "id": "VUH-1028",
+        "title": "App: wire the native terminal to the terminal-tail feed",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Backend half landed with ADR 0138 (accepted): `terminal_tail` op + `/operator/v1/terminal-tail` NDJSON relay route serving full-baseline + monotonic base64 diffs per stable terminal id, gated by the `terminalObserve` grant.",
+        "criteria": [
+          {
+            "text": "Native terminal client consumes the relay NDJSON feed directly — bytes never enter React state (renderer + keyboard choreography already exist)",
+            "done": false
+          },
+          {
+            "text": "Seat-thread header deep link attaches the te… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1028/app-wire-the-native-terminal-to-the-terminal-tail-feed",
+        "updatedAt": "2026-09-04T22:49:28.140Z"
+      },
+      {
+        "id": "VUH-1034",
+        "title": "One-shot update-depth loop on fresh-install first thread-open",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Found during <issue id=\"960df7d2-ecaa-4ba7-be87-6b4b936a71e7\" href=\"https://linear.app/vuhlp/issue/VUH-1029/first-light-boot-the-real-app-and-walk-the-messages-home\">VUH-1029</issue> first light: on a fresh install's very first thread-open, React fires one `Maximum update depth exceeded` (LogBox stack pins the loop to `CompactChromeOverrideProvider.setOverride` in `shell/bottomChrome.tsx` re-entering through `ClankieChatScreen`'s shell-composer … (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1034/one-shot-update-depth-loop-on-fresh-install-first-thread-open",
+        "updatedAt": "2026-09-04T22:49:12.893Z"
+      },
+      {
+        "id": "VUH-1045",
+        "title": "iOS 26 scene-lifecycle trap kills debug cold starts despite scene manifest",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Every cold home-screen launch of the debug dev build on a physical iPhone (iOS 26.x) dies with `EXC_BREAKPOINT` in `__UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke` — before any JS runs. Launches that foreground an existing process survive, which masked the pattern for hours during the first phone dogfood.\n\nMitigations attempted, in the working tree (uncommitted): `UIApplicationSceneManifest` in `apps/mobile/ios/Clank… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1045/ios-26-scene-lifecycle-trap-kills-debug-cold-starts-despite-scene",
+        "updatedAt": "2026-09-04T22:49:09.709Z"
+      },
+      {
+        "id": "VUH-1027",
+        "title": "Seat replies become bubbles: project the pane's actual turn text",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Found by the <issue id=\"8ab0aa5d-57a0-40aa-9b8d-99e55752214e\" href=\"https://linear.app/vuhlp/issue/VUH-1025/app-bind-the-live-seat-lane-and-prove-messages-end-to-end\">VUH-1025</issue> live proof: a seat DM currently shows typing/delivery states and stale herd-lead summaries, but never the agent's actual reply — the pane answered, `summaries.json` hadn't moved, so no new `agent` bubble was emitted. The thread reads as silence after \"typing\".\n\nADR… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1027/seat-replies-become-bubbles-project-the-panes-actual-turn-text",
+        "updatedAt": "2026-09-04T22:49:04.465Z"
+      },
+      {
+        "id": "VUH-1101",
+        "title": "Submit the app for App Store Review",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "Submit once TestFlight external testing has run and the listing is complete. On approval, the README's \"install the app from your TestFlight invitation\" step becomes an App Store link.",
+        "criteria": [
+          {
+            "text": "Submission made with the review notes, review pairing code, and privacy answers from the sibling issues",
+            "done": false
+          },
+          {
+            "text": "Any App Review rejection is answered from the prepared framing or the LAN-only terminal contingency, not improvised",
+            "done": false
+          },
+          { "text": "O… (truncated, use `get_issue` for full description)", "done": false }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1101/submit-the-app-for-app-store-review",
+        "updatedAt": "2026-09-04T22:48:55.683Z"
+      },
+      {
+        "id": "VUH-1092",
+        "title": "Self-service remote access: account sign-in, derived host route, launch at login (ADR 0153)",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "A Mac now earns its gateway route by signing in with an email one-time code instead of an operator copying a bearer into the AWS host, and a user LaunchAgent brings Clankie and the relay back after login. Recorded so the App Store work has something to point at; ADR 0153 is the decision.\n\n## Delivered (2026-09-01)\n\n* `/gateway` and `clankie gateway`: Cognito passwordless sign-in, `clankie-account` Keychain credential, installation-derived host i… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1092/self-service-remote-access-account-sign-in-derived-host-route-launch",
+        "updatedAt": "2026-09-04T22:47:53.150Z"
+      },
+      {
+        "id": "VUH-1110",
+        "title": "Connect the Mac TUI to a hosted Clankie",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "The Mac TUI should reach the same hosted Clankie as the phone and Mac apps. Closing a client must leave the hosted agent and its work running.",
+        "criteria": [
+          {
+            "text": "A documented authenticated remote mode connects the TUI to an existing hosted instance without starting a second local body.",
+            "done": false
+          },
+          {
+            "text": "Identity, conversations, memory-backed replies, and continuing work agree between the TUI and paired apps.",
+            "done": false
+          },
+          {
+            "text": "Disconnect/reconnect resumes th… (truncated, use `get_issue` for full description)",
+            "done": false
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1110/connect-the-mac-tui-to-a-hosted-clankie",
+        "updatedAt": "2026-09-04T22:47:49.188Z"
+      },
+      {
+        "id": "VUH-991",
+        "title": "Evaluate a design checkpoint for long-running coding turns",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Clankie's operator-console voice-join fix spent \\~32m researching before the first edit, then implemented and verified the change in <5m. Consider a non-blocking self-check for long coding turns, but do not adopt it until more traces show the same pattern.\n\n## Candidate\n\nAfter \\~10m or \\~30 tool calls without an edit, inject one checkpoint:\n\n* root cause\n* minimal design\n* unresolved risks\n* next implementation step\n\nIf those are answerable, sto… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-991/evaluate-a-design-checkpoint-for-long-running-coding-turns",
+        "updatedAt": "2026-09-04T22:46:31.175Z"
+      },
+      {
+        "id": "VUH-1038",
+        "title": "Publish relayUrl at pair time (close the ADR 0012 upstream ask)",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The app repo's ADR 0012 records the design: `DeviceSessionCredential` carries an optional `relayUrl`, published on `pairing/complete` and session refresh, so a device learns the relay origin from the host it paired with. The service side never landed — no `relayUrl` exists in the platform repo — so dev builds bake the origin via `EXPO_PUBLIC_CLANKIE_CAPTAIN_RELAY_URL` at bundle time. During the phone dogfood that meant restarting Metro just to p… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1038/publish-relayurl-at-pair-time-close-the-adr-0012-upstream-ask",
+        "updatedAt": "2026-09-02T20:08:45.108Z"
+      },
+      {
+        "id": "VUH-1036",
+        "title": "Relay and activity surface both default to port 4320",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`apps/relay/src/index.ts` defaults `PORT=4320`; `apps/discord-activity/src/index.ts` defaults `CLANKIE_ACTIVITY_PORT=4320`. In the running stack the activity surface holds 4320 and a default-config relay cannot start — found while diagnosing why no phone could reach the relay.",
+        "criteria": [
+          { "text": "Distinct default ports, documented in both READMEs", "done": false },
+          { "text": "`docs/architecture.md` port map updated if one exists", "done": false }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1036/relay-and-activity-surface-both-default-to-port-4320",
+        "updatedAt": "2026-09-02T20:08:16.290Z"
+      },
+      {
+        "id": "VUH-1089",
+        "title": "Ship the seat as a Claude Code plugin",
+        "status": "in_review",
+        "dependsOn": [],
+        "summary": "Clankie's seat ships as a Claude Code plugin at `integrations/claude-plugin`, beside the herdr plugin and under the same rule: it carries only what a plugin can uniquely declare. The repo hosts a local marketplace manifest so the plugin installs by name. `clankie seat` shrinks to a thin launcher: check the plugin is enabled, pass the permission allowlist for `clankie` commands and the channel development flag, and exec Claude Code.\n\nThe plugin c… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1089/ship-the-seat-as-a-claude-code-plugin",
+        "updatedAt": "2026-09-02T02:45:39.537Z"
+      },
+      {
+        "id": "VUH-1091",
+        "title": "Deliver wakes and escalations through a channel",
+        "status": "in_review",
+        "dependsOn": [],
+        "summary": "Goals, self-wakes, herdr completion watches, and rooms handing work to the head all queue turns into the operator pi lane today. When the head is a seated Claude Code pane, those turns reach it through a Claude Code channel: the plugin's `clankie mcp` process declares the channel capability, subscribes to the service's operator queue, and pushes each item as a channel event. Claude Code queues events while he is busy and delivers them on his nex… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1091/deliver-wakes-and-escalations-through-a-channel",
+        "updatedAt": "2026-09-02T02:45:06.605Z"
+      },
+      {
+        "id": "VUH-1090",
+        "title": "Bind the seated Claude Code pane as Clankie's head",
+        "status": "in_review",
+        "dependsOn": [],
+        "summary": "When the owner sits in Claude Code as Clankie inside a herdr pane, the service treats that seat as his head rather than a fleet contact: the managed agent named clankie binds to Clankie's own persona, and the app pins its conversation as the Clankie thread, reading the Claude Code session transcript through the existing seat projection.",
+        "criteria": [
+          {
+            "text": "A herdr agent named clankie running the seat binds to Clankie's persona, never … (truncated, use `get_issue` for full description)",
+            "done": true
+          }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1090/bind-the-seated-claude-code-pane-as-clankies-head",
+        "updatedAt": "2026-09-02T02:44:50.818Z"
+      },
+      {
+        "id": "VUH-1044",
+        "title": "Messages: animated Signal Face avatars and throbber statuses",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Replace the Messages contact initials and generic status pills with the selected flat Signal Face identity system, backed by the active SkinPack.",
+        "criteria": [
+          {
+            "text": "Clankie and every fleet seat render a small head-and-sprout crop from the active SkinPack inside one neutral flat avatar ring",
+            "done": true
+          },
+          {
+            "text": "Avatar motion uses existing SkinPack state animations (`idle` / `work` / `blocked` / `sleep`) and stops under Reduce Motion",
+            "done": true
+          },
+          { "text": "Status pil… (truncated, use `get_issue` for full description)", "done": true }
+        ],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1044/messages-animated-signal-face-avatars-and-throbber-statuses",
+        "updatedAt": "2026-08-29T18:19:42.766Z"
+      },
+      {
+        "id": "VUH-1013",
+        "title": "Prove player-harness parity and publish canonical agent onboarding",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "## Outcome\n\nA runnable parity suite and one canonical onboarding path prove that direct clients, Claude Code over MCP, another generic MCP host, and Clankie use the same player semantics.\n\n## Scope\n\nTreat parity as an executable contract, not a manually maintained feature table.\n\n* Exercise the same host fixture and credentials through the direct client and MCP adapter.\n* Exercise Clankie's hosted body at its adapter boundary without testing per… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1013/prove-player-harness-parity-and-publish-canonical-agent-onboarding",
+        "updatedAt": "2026-08-26T21:46:47.940Z"
+      },
+      {
+        "id": "VUH-1012",
+        "title": "Migrate Clankie's hosted-world body and expose multiplayer capabilities",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "## Outcome\n\nClankie's hosted PokeAgents body composes the shared `WorldClient`, honors the canonical world address, and exposes every granted multiplayer capability to Clankie's gameplay mind.\n\n## Scope\n\nRetain only Clankie-owned behavior in the adapter:\n\n* world observations mapped into the existing GBA driver input\n* Activity/media publishing\n* Clankie's decision cadence, narration, memory, and evaluation journal integration\n\nMove transport, a… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1012/migrate-clankies-hosted-world-body-and-expose-multiplayer-capabilities",
+        "updatedAt": "2026-08-26T21:46:47.889Z"
+      },
+      {
+        "id": "VUH-1010",
+        "title": "Implement the shared session-bound PokeAgents WorldClient",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "## Outcome\n\n`@pokeagents/world-protocol` provides the one production `WorldClient` implementation used by every player-facing adapter.\n\n## Scope\n\nBuild on the existing `WorldClient` contract in `packages/world-protocol/src/operations.ts`; do not introduce a parallel client abstraction.\n\nThe implementation owns:\n\n* parsing and connecting to Unix, TCP, and TLS world addresses\n* credential exchange, retained session token, and capability state\n* ty… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-1010/implement-the-shared-session-bound-pokeagents-worldclient",
+        "updatedAt": "2026-08-26T21:46:47.840Z"
+      },
+      {
+        "id": "VUH-998",
+        "title": "Prioritize requested turns over self-directed work",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "Add a foreground-first attention arbiter.\n\n* Human-requested turns are admitted immediately.\n* Self-directed runs hold revocable background leases and yield at tool/model boundaries.\n* Shared browser, MCP, and local-runner queues prefer foreground callers.\n* Yielded work checkpoints and resumes without duplicating side effects.\n* Cover cross-lane interruption, long tool calls, and restart behavior.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-998/prioritize-requested-turns-over-self-directed-work",
+        "updatedAt": "2026-08-26T21:46:47.681Z"
+      },
+      {
+        "id": "VUH-994",
+        "title": "Frame and overlay share one sequence counter → phantom \"1 lost\" every turn",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`onTurn` bumps `sequence` for the overlay, then `publishFrame` bumps the same counter for the frame (`apps/clankie/src/play-execution.ts:596` · `apps/clankie/src/play-execution-world.ts:302`). The client counts upstream loss from frame-sequence gaps (`client.html`: `stats.lostUpstream += frame.sequence - lastFrameSequence - 1`), so every settled turn injects a phantom `· 1 lost` into the viewer status line — the readout built to keep loss honest… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-994/frame-and-overlay-share-one-sequence-counter-phantom-1-lost-every-turn",
+        "updatedAt": "2026-08-26T21:46:47.603Z"
+      },
+      {
+        "id": "VUH-983",
+        "title": "Prune dormant product surfaces: Minecraft embodiment and the protocol it carried",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The pi rewrite left surfaces with no consumer standing. Deleted rather than kept as scaffolding.\n\nLanded on `main`: `29fc761` prune · `c5f7aba` reconcile the docs behind it. No PR — pushed direct.\n\n## What went\n\n`integrations/minecraft-mineflayer` · `scenarios/minecraft/**` (the `collect-craft-place` v1 binding, scenario, and pinned `server.properties`) · `packages/interactive-environment` dormant paths · the protocol and observability surface t… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-983/prune-dormant-product-surfaces-minecraft-embodiment-and-the-protocol",
+        "updatedAt": "2026-08-16T11:39:06.947Z"
+      },
+      {
+        "id": "VUH-982",
+        "title": "Pi owns the captain model runtime; the TUI picker stops offering models Pi cannot run",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "The TUI picked the primary model from the [models.dev](<http://models.dev>) catalog while the captain executed it through Pi's independent catalog, so the same `clankie.json` could offer a model Pi did not know · `/effort` wrote provider-specific variants the Pi session never read.\n\nLanded on `main`: `7d026ed`. No PR — pushed direct.\n\n## What landed\n\nOwnership split, per [ADR 0101](<https://github.com/Volpestyle/clankie/blob/main/docs/adr/0101-p… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-982/pi-owns-the-captain-model-runtime-the-tui-picker-stops-offering-models",
+        "updatedAt": "2026-08-16T11:38:17.568Z"
+      },
+      {
+        "id": "VUH-981",
+        "title": "Vox is an owned native media plane behind an Apache process boundary",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "`apps/vox` becomes Clankie's native Discord voice, screen-watch, and Go Live media plane, carried as owned source under AGPL-3.0-or-later while the rest of the repo stays Apache-2.0. `packages/vox-client` is the seam that keeps the split honest — Apache TypeScript speaking typed IPC to the AGPL executable, never linking it.\n\nLanded on `main`: `cae681a` own the plane · `f4e9444` route Discord stream media through it. No PR — pushed direct.\n\n## Wh… (truncated, use `get_issue` for full description)",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://linear.app/vuhlp/issue/VUH-981/vox-is-an-owned-native-media-plane-behind-an-apache-process-boundary",
+        "updatedAt": "2026-08-16T11:37:53.046Z"
+      }
+    ]
+  }
+}

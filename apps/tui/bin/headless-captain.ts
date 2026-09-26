@@ -15,6 +15,7 @@ import { runPersonaCommand } from "../src/command/persona.ts";
 import { runBrowserCommand } from "../src/command/browser.ts";
 import { runGamesCommand } from "../src/command/games.ts";
 import { runLinearCommand } from "../src/command/linear.ts";
+import { runWorkCommand } from "../src/command/work.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
 import { forwardsToFleetHerdr, runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
@@ -163,6 +164,11 @@ export async function runHeadlessCaptainCommand(
     if (command === "linear") {
       outputJson(stdout, await runLinearCommand(rest, options));
       return 0;
+    }
+    if (command === "work") {
+      const result = await runWorkCommand(rest, options);
+      outputJson(stdout, result.body);
+      return result.ok ? 0 : 1;
     }
     if (command === "connections") {
       outputJson(stdout, await runRuntimeCommand(["inventory"], options));

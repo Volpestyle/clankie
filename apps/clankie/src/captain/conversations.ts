@@ -64,6 +64,8 @@ import type {
 type ConversationServiceRequest = Exclude<
   OperatorConversationServiceRequest,
   | { op: "connections" }
+  | { op: "work_repos" }
+  | { op: "work_items" }
   | { op: "autonomy" }
   | { op: "roster" }
   | { op: "fleet" }
@@ -82,6 +84,8 @@ type ConversationServiceRequest = Exclude<
 type ConversationServiceResult = Exclude<
   OperatorConversationServiceResult,
   | { op: "connections" }
+  | { op: "work_repos" }
+  | { op: "work_items" }
   | { op: "autonomy" }
   | { op: "roster" }
   | { op: "fleet" }

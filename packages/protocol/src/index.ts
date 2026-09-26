@@ -6,6 +6,14 @@ import {
 } from "./connections.ts";
 export * from "./connections.ts";
 import { DevicePushRequestSchema } from "./device-push.ts";
+import {
+  WorkItemsResultSchema,
+  WorkRepoSchema,
+  WorkReposResultSchema,
+  WorkSignalSchema,
+  type WorkItemsResult,
+  type WorkRepo,
+} from "./work-items.ts";
 export * from "./device-push.ts";
 export * from "./evaluator.ts";
 
@@ -2103,6 +2111,23 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
     })
     .strict(),
+  /**
+   * The repos this machine registered for work tracking, and one repo's items
+   * in its own convention (ADR 0191). Read-only: devices never write items.
+   */
+  z
+    .object({
+      op: z.literal("work_repos"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_items"),
+      schemaVersion: z.literal(1),
+      repoId: WorkRepoSchema.shape.id,
+    })
+    .strict(),
   // `react` is the operator's own reaction only. An agent reacts through the
   // captain, which is the boundary that can vouch for which seat it is.
   z
@@ -2227,6 +2252,17 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
 ]);
 export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
 
+/** A repo's work items as a device sees them (ADR 0191). */
+export type OperatorWorkItemsOutcome =
+  | (WorkItemsResult & { readonly outcome: "ready" })
+  | {
+      readonly outcome: "needs_decision";
+      readonly repo: WorkRepo;
+      readonly question: string;
+      readonly signals: readonly z.infer<typeof WorkSignalSchema>[];
+    }
+  | { readonly outcome: "unavailable"; readonly message: string };
+
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
   z
     .object({
@@ -2344,6 +2380,31 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("discord_rooms"),
       schemaVersion: z.literal(1),
       rooms: z.array(DiscordGuildRoomSchema).max(DISCORD_GUILD_ROOM_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_repos"),
+      schemaVersion: z.literal(1),
+      repos: WorkReposResultSchema.shape.repos,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_items"),
+      schemaVersion: z.literal(1),
+      result: z.discriminatedUnion("outcome", [
+        WorkItemsResultSchema.extend({ outcome: z.literal("ready") }).strict(),
+        z
+          .object({
+            outcome: z.literal("needs_decision"),
+            repo: WorkRepoSchema,
+            question: z.string().max(2000),
+            signals: z.array(WorkSignalSchema).max(20),
+          })
+          .strict(),
+        z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
+      ]),
     })
     .strict(),
   z
@@ -2544,6 +2605,10 @@ export interface OperatorConversationServiceClient {
   channels?(): Promise<readonly OperatorChannel[]>;
   /** The swarm home's rooms, to pick which one a channel is projected onto. */
   discordRooms?(): Promise<readonly DiscordGuildRoom[]>;
+  /** Repos registered for work tracking on this machine (ADR 0191). */
+  workRepos?(): Promise<readonly WorkRepo[]>;
+  /** One repo's work items, or why they cannot be read yet. */
+  workItems?(repoId: string): Promise<OperatorWorkItemsOutcome>;
   /**
    * Put the operator's reaction on one transcript entry, or take it back off.
    * False when the entry is not in the conversation's retained log.
@@ -2710,6 +2775,16 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "channels", schemaVersion: 1 });
       if (result.op !== "channels") throw new Error(`Unexpected ${result.op} result for channels`);
       return result.channels;
+    },
+    async workRepos() {
+      const result = await dispatch({ op: "work_repos", schemaVersion: 1 });
+      if (result.op !== "work_repos") throw new Error(`Unexpected ${result.op} result for work_repos`);
+      return result.repos;
+    },
+    async workItems(repoId) {
+      const result = await dispatch({ op: "work_items", schemaVersion: 1, repoId });
+      if (result.op !== "work_items") throw new Error(`Unexpected ${result.op} result for work_items`);
+      return result.result;
     },
     async discordRooms() {
       const result = await dispatch({ op: "discord_rooms", schemaVersion: 1 });

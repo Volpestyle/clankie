@@ -1,0 +1,22 @@
+{
+  "name": "@clankie/work-items",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clankie/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -108,6 +108,15 @@ import {
   type TurnSettledOutcome,
 } from "./turn-metrics.ts";
 
+/**
+ * Every assignment carries the one work-tracking contract (ADR 0191), so a
+ * hire tracks work in the repo's own convention the same way he does.
+ */
+const WORK_TRACKING_BRIEF = [
+  "# Work tracking",
+  "Track work where this repo already does. Run `clankie work` in the repo to see its convention (Linear, GitHub issues, its own Markdown directory, or .clankie/work/ when it has none); if it answers with a question, ask the lead once instead of choosing. Use `clankie work list | show | create | update | close | attach` (JSON) for items, criteria and status. Every result you report carries evidence attached with `clankie work attach ID --url URL --caption TEXT`: a screenshot or video for anything visible, test output, numbers and commit links otherwise, each captioned with what it proves and what is sample data. Load the work-items skill for details.",
+].join("\n");
+
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
   operator: "operator",
   discord_voice: "social",
@@ -1581,6 +1590,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           `# Owner preferences: persona.characterNotes\n${current.persona.characterNotes}`,
           `# Owner preferences: fleet.notes\n${current.fleet.notes}`,
           ...files.map((file) => `# Instructions: ${file.path}\n${file.content}`),
+          WORK_TRACKING_BRIEF,
           await assignmentSkills({ cwd: selected.cwd, repoRoot: options.repoRoot, names: skills }),
         ]
           .filter(Boolean)
@@ -2343,6 +2353,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       if (request.op === "connections")
         throw new Error("Connections are served by the authenticated app boundary");
+      if (request.op === "work_repos" || request.op === "work_items")
+        throw new Error("Work items are served by the authenticated app boundary");
       if (request.op === "replay" || request.op === "tail" || request.op === "react") {
         const input =
           request.op === "replay"

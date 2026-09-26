@@ -1,0 +1,14 @@
+{
+  "op": "work_repos",
+  "schemaVersion": 1,
+  "repos": [
+    { "id": "workspace", "name": "clankie", "backend": "linear", "needsDecision": false },
+    {
+      "id": "tmp-cz4aclzezx-76aec8d4",
+      "name": "tmp.cz4AclzeZx",
+      "backend": "default",
+      "needsDecision": false
+    },
+    { "id": "portfolio-a24f86e5", "name": "portfolio", "backend": "github", "needsDecision": false }
+  ]
+}

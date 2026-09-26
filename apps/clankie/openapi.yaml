@@ -367,6 +367,29 @@ paths:
         "409":
           { description: Unknown connection or synchronization unconfirmed; inspect state before retrying }
         "503": { description: Execution management or authentication unavailable }
+  /v1/work:
+    post:
+      tags: [Operator]
+      operationId: workItems
+      summary: Read and write work items in the repo's own tracking convention
+      description: >-
+        One contract over Linear, GitHub issues, the repo's own Markdown directory, or
+        .clankie/work/ (ADR 0191). `action` is repos, discover, init, list, show, create,
+        update or attach. A path names and registers a local repo; registered repos are
+        readable from paired devices through the work_repos and work_items operator ops.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [action], properties: { action: { type: string } } }
+      responses:
+        "200": { description: The repos, discovery, recorded convention, items, or one item }
+        "400": { description: Invalid request, or a write a device may not make }
+        "401": { description: Operator authentication required }
+        "404": { description: Unknown repo or work item }
+        "409": { description: The repo needs its convention decided, or its recorded backend is unavailable }
+        "502": { description: The backend refused or failed the request }
   /v1/linear/work:
     get:
       tags: [Operator]

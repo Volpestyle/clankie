@@ -179,6 +179,7 @@ import { LocalVoiceChatSession } from "./local-voice-chat.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 import type { DeliveredFileStore } from "./delivered-files.ts";
+import { WorkRequestError, WorkRequestSchema, type WorkItemsService } from "./work-items.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 
@@ -361,6 +362,8 @@ export interface ClankieAppDependencies {
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
+  /** Work items in each repo's own tracking convention (ADR 0191). */
+  workItems?: WorkItemsService;
   workerMcp?: WorkerMcp;
   /** Swarm communication is independent of execution runtime availability. */
   runtimes?: ExecutionConnections;
@@ -2447,6 +2450,48 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
 
+  // Work items in the repo's own convention (ADR 0191). The operator bearer is
+  // a local caller: the CLI, the captain, or a hire on this machine. It may name
+  // a repo path, which registers it for the app to read later.
+  app.post("/v1/work", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (dependencies.workItems === undefined) return context.json({ error: "work_items_unavailable" }, 503);
+    const input = WorkRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!input.success)
+      return context.json({ error: "invalid_work_request", detail: input.error.issues[0]?.message }, 400);
+    try {
+      return context.json(await dependencies.workItems.handle(input.data, true));
+    } catch (error) {
+      if (error instanceof WorkRequestError) {
+        const status =
+          error.code === "not_found" || error.code === "unknown_repo"
+            ? 404
+            : error.code === "invalid"
+              ? 400
+              : 409;
+        return context.json(
+          {
+            error: error.code,
+            detail: error.message,
+            ...(error.question === undefined ? {} : { question: error.question }),
+            ...(error.signals === undefined ? {} : { signals: error.signals }),
+          },
+          status,
+        );
+      }
+      return context.json(
+        {
+          error: "work_request_failed",
+          detail: error instanceof Error ? error.message.slice(0, 500) : "failed",
+        },
+        502,
+      );
+    }
+  });
+
   app.on(["GET", "PUT", "DELETE"], "/v1/linear/work", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
@@ -3005,6 +3050,61 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
             outcome: "refused",
             message:
               "Connection change or inventory unavailable. Refresh to inspect current state; check the host's connection diagnostics before retrying.",
+          },
+        });
+      }
+    }
+    // Work items are read here, beside the registry that decides which repos a
+    // device may name (ADR 0191). A device never writes one.
+    if (parsed.data.op === "work_repos") {
+      const result =
+        dependencies.workItems === undefined
+          ? { repos: [] }
+          : await dependencies.workItems.handle({ action: "repos" }, false);
+      return context.json({
+        op: "work_repos",
+        schemaVersion: 1,
+        repos: "repos" in result ? result.repos : [],
+      });
+    }
+    if (parsed.data.op === "work_items") {
+      const repoId = parsed.data.repoId;
+      if (dependencies.workItems === undefined)
+        return context.json({
+          op: "work_items",
+          schemaVersion: 1,
+          result: { outcome: "unavailable", message: "Work tracking is not running on this host" },
+        });
+      try {
+        const result = await dependencies.workItems.handle({ action: "list", repo: repoId }, false);
+        if (!("items" in result)) throw new Error("unexpected work result");
+        return context.json({
+          op: "work_items",
+          schemaVersion: 1,
+          result: { outcome: "ready", repo: result.repo, items: result.items },
+        });
+      } catch (error) {
+        if (error instanceof WorkRequestError && error.code === "needs_decision") {
+          const repos = await dependencies.workItems.handle({ action: "repos" }, false);
+          const repo = "repos" in repos ? repos.repos.find((entry) => entry.id === repoId) : undefined;
+          if (repo !== undefined)
+            return context.json({
+              op: "work_items",
+              schemaVersion: 1,
+              result: {
+                outcome: "needs_decision",
+                repo,
+                question: error.question ?? error.message,
+                signals: (error.signals ?? []).slice(0, 20),
+              },
+            });
+        }
+        return context.json({
+          op: "work_items",
+          schemaVersion: 1,
+          result: {
+            outcome: "unavailable",
+            message: (error instanceof Error ? error.message : "Unavailable").slice(0, 1000),
           },
         });
       }

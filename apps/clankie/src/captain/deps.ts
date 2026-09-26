@@ -33,6 +33,7 @@ import type { McpHost } from "../mcp-host.ts";
 import type { FinishedRender } from "../media-generation.ts";
 import type { TldrawHost } from "../tldraw-host.ts";
 import type { RivalsClient } from "../rivals.ts";
+import type { WorkItemsService } from "../work-items.ts";
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
@@ -49,6 +50,8 @@ export interface CaptainDeps {
   readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */
   readonly agentSessions?: Pick<AgentSessions, "list" | "read" | "send" | "run" | "cancel" | "release">;
+  /** Work items in each repo's own tracking convention (ADR 0191). */
+  readonly workItems?: Pick<WorkItemsService, "handle">;
   /** Tools on his connected MCP servers. The lane is passed on every call. */
   readonly mcp: Pick<McpHost, "catalog" | "call">;
   readonly email: EmailPort;

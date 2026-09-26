@@ -1,0 +1,15 @@
+{
+  "repo": {
+    "id": "tmp-cz4aclzezx-76aec8d4",
+    "name": "tmp.cz4AclzeZx",
+    "backend": "default",
+    "needsDecision": false
+  },
+  "convention": {
+    "schemaVersion": 1,
+    "backend": "default",
+    "decidedBy": "owner",
+    "decidedAt": "2026-09-26T18:24:18.066Z",
+    "note": "owner: keep TODO.md by hand; agent work in .clankie/work"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "repo": { "id": "workspace", "name": "clankie", "needsDecision": true },
+  "signals": [
+    {
+      "kind": "linear",
+      "detail": "CLAUDE.md links a Linear project; docs link 18 Linear issues; 100 distinct VUH-* issues cited in docs, commits or branches",
+      "suggests": { "backend": "linear", "linear": { "team": "VUH", "project": "clankie-7f2de0de4a75" } }
+    },
+    { "kind": "adr", "detail": "docs/adr/ records decisions", "suggests": { "decisions": "docs/adr" } }
+  ]
+}

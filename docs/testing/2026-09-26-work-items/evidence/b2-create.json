@@ -1,0 +1,18 @@
+{
+  "repo": { "id": "portfolio-a24f86e5", "name": "portfolio", "backend": "github", "needsDecision": false },
+  "item": {
+    "id": "#47",
+    "title": "Clankie work-tracking proof (ADR 0191), safe to ignore",
+    "status": "todo",
+    "owner": "proof",
+    "dependsOn": [],
+    "summary": "Created by the clankie work proof; closed as not planned at the end of the run.",
+    "criteria": [
+      { "text": "Created through the repo's own convention", "done": false },
+      { "text": "No .clankie/work files added", "done": false }
+    ],
+    "evidence": [],
+    "location": "https://github.com/Volpestyle/portfolio/issues/47",
+    "updatedAt": "2026-09-26T18:24:29Z"
+  }
+}

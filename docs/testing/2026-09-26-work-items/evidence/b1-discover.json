@@ -1,0 +1,10 @@
+{
+  "repo": { "id": "portfolio-a24f86e5", "name": "portfolio", "needsDecision": true },
+  "signals": [
+    {
+      "kind": "github",
+      "detail": "Volpestyle/portfolio has 8 GitHub issues",
+      "suggests": { "backend": "github", "github": { "repo": "Volpestyle/portfolio" } }
+    }
+  ]
+}

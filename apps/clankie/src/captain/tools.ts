@@ -32,6 +32,7 @@ import type { HireSeat, MessageSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { rivalsTools } from "./rivals-tools.ts";
+import { WorkRequestSchema } from "../work-items.ts";
 
 /**
  * What the running turn is, as its tools need to see it: the last attachable
@@ -129,6 +130,12 @@ export function captainTools(
     ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
     deps.agentSessions !== undefined
       ? agentSessionTools(deps.agentSessions)
+      : []),
+    // Tracking writes land in the owner's tracker or repo, so they ride the
+    // same authority as touching the repo by shell (ADR 0191).
+    ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
+    deps.workItems !== undefined
+      ? workItemTools(deps.workItems)
       : []),
     ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
     herdrWatches !== undefined
@@ -636,6 +643,146 @@ function messageSeatTool(message: MessageSeat): ToolDefinition {
     // the point of it, so unlike hiring this is not held back from one.
     execute: async (_id, params) => json(await message(params.seat, params.message)),
   });
+}
+
+const WORK_STATUS = StringEnum(["todo", "in_progress", "in_review", "done", "canceled"]);
+
+/**
+ * Work items in the repo's own convention (ADR 0191). The same contract every
+ * hire reaches through `clankie work`, so his tracking and theirs agree.
+ */
+function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinition[] {
+  const repo = Type.Optional(
+    Type.String({
+      minLength: 1,
+      maxLength: 4096,
+      description: "Absolute repo path, or a registered repo id. Omit for his working directory (workspace).",
+    }),
+  );
+  // Tool params are validated again against the service contract, which also
+  // narrows TypeBox's string enums to the protocol's literals.
+  const call = async (request: unknown) => {
+    try {
+      return json(await work.handle(WorkRequestSchema.parse(request), true));
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      return json({
+        error: code ?? "work_request_failed",
+        detail: error instanceof Error ? error.message : String(error),
+        ...((error as { question?: string }).question === undefined
+          ? {}
+          : { question: (error as { question?: string }).question }),
+      });
+    }
+  };
+  return [
+    defineTool({
+      name: "work_items",
+      label: "Work items",
+      description:
+        "Read work items in a repo, wherever that repo tracks work: its Linear team, its GitHub issues, its own " +
+        "Markdown directory, or .clankie/work/ when it has nothing. action=list (optionally by status or owner), " +
+        "show one by id, or discover how the repo tracks work. If discovery finds more than one tracker it returns " +
+        "a question: ask the owner once, then record the answer with work_item_write action=init.",
+      parameters: Type.Object({
+        action: StringEnum(["list", "show", "discover", "repos"]),
+        repo,
+        id: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+        status: Type.Optional(Type.Array(WORK_STATUS, { maxItems: 5 })),
+        owner: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+      }),
+      execute: async (_id, params) => {
+        const target = params.repo ?? "workspace";
+        if (params.action === "repos") return call({ action: "repos" });
+        if (params.action === "discover") return call({ action: "discover", repo: target });
+        if (params.action === "show") {
+          if (params.id === undefined) return json({ error: "show needs an id" });
+          return call({ action: "show", repo: target, id: params.id });
+        }
+        return call({
+          action: "list",
+          repo: target,
+          ...(params.status === undefined ? {} : { status: params.status }),
+          ...(params.owner === undefined ? {} : { owner: params.owner }),
+        });
+      },
+    }),
+    defineTool({
+      name: "work_item_write",
+      label: "Write work item",
+      description:
+        "Create, update or attach evidence to a work item in the repo's own tracker (same backends as work_items). " +
+        "Every finished result gets inspectable evidence: a screenshot or video for anything visible; test output, " +
+        "numbers and commit links otherwise, each captioned with what it proves and what is sample data. " +
+        "action=init records the repo's convention once (backend, plus directory, githubRepo or linearTeam/" +
+        "linearProject); omit backend to record what discovery found. Criteria numbers for check/uncheck are 1-based.",
+      parameters: Type.Object({
+        action: StringEnum(["create", "update", "attach", "init"]),
+        repo,
+        id: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+        title: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+        summary: Type.Optional(Type.String({ maxLength: 20_000 })),
+        owner: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+        criteria: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 500 }), { maxItems: 50 })),
+        status: Type.Optional(WORK_STATUS),
+        check: Type.Optional(Type.Array(Type.Integer({ minimum: 1, maximum: 50 }), { maxItems: 50 })),
+        uncheck: Type.Optional(Type.Array(Type.Integer({ minimum: 1, maximum: 50 }), { maxItems: 50 })),
+        evidence: Type.Optional(
+          Type.Object({
+            kind: StringEnum(["image", "video", "log", "link"]),
+            url: Type.String({ minLength: 1, maxLength: 2048 }),
+            caption: Type.String({ minLength: 1, maxLength: 500 }),
+          }),
+        ),
+        backend: Type.Optional(StringEnum(["default", "markdown", "github", "linear"])),
+        directory: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+        githubRepo: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+        linearTeam: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+        linearProject: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+      }),
+      execute: async (_id, params) => {
+        const target = params.repo ?? "workspace";
+        if (params.action === "init")
+          return call({
+            action: "init",
+            repo: target,
+            ...(params.backend === undefined ? {} : { backend: params.backend }),
+            ...(params.directory === undefined ? {} : { directory: params.directory }),
+            ...(params.githubRepo === undefined ? {} : { githubRepo: params.githubRepo }),
+            ...(params.linearTeam === undefined ? {} : { linearTeam: params.linearTeam }),
+            ...(params.linearProject === undefined ? {} : { linearProject: params.linearProject }),
+          });
+        if (params.action === "create") {
+          if (params.title === undefined) return json({ error: "create needs a title" });
+          return call({
+            action: "create",
+            repo: target,
+            title: params.title,
+            ...(params.summary === undefined ? {} : { summary: params.summary }),
+            ...(params.owner === undefined ? {} : { owner: params.owner }),
+            ...(params.criteria === undefined ? {} : { criteria: params.criteria }),
+            ...(params.status === undefined ? {} : { status: params.status }),
+          });
+        }
+        if (params.id === undefined) return json({ error: `${params.action} needs an id` });
+        if (params.action === "attach") {
+          if (params.evidence === undefined) return json({ error: "attach needs evidence" });
+          return call({ action: "attach", repo: target, id: params.id, evidence: params.evidence });
+        }
+        return call({
+          action: "update",
+          repo: target,
+          id: params.id,
+          ...(params.status === undefined ? {} : { status: params.status }),
+          ...(params.owner === undefined ? {} : { owner: params.owner }),
+          ...(params.title === undefined ? {} : { title: params.title }),
+          ...(params.check === undefined ? {} : { check: params.check }),
+          ...(params.uncheck === undefined ? {} : { uncheck: params.uncheck }),
+          ...(params.criteria === undefined ? {} : { addCriteria: params.criteria }),
+        });
+      },
+    }),
+  ];
 }
 
 function agentSessionTools(sessions: NonNullable<CaptainDeps["agentSessions"]>): ToolDefinition[] {

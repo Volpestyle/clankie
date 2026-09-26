@@ -51,7 +51,7 @@ describe("clankie claude plugin", () => {
   });
 
   it("links the product skills from the repo rather than copying them", async () => {
-    for (const skill of ["this-machine", "trace-clankie"]) {
+    for (const skill of ["this-machine", "trace-clankie", "work-items"]) {
       expect(await readlink(join(pluginRoot, "skills", skill))).toBe(`../../../.agents/skills/${skill}`);
       expect(await readFile(join(pluginRoot, "skills", skill, "SKILL.md"), "utf8")).toContain(
         `name: ${skill}`,

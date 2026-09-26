@@ -26,6 +26,9 @@ connection support; do not infer support from the architecture alone.
 | Are my processes up?              | `clankie status` |
 | What am I doing right now?        | `get_self_state` |
 
+Tracked work and its evidence go where each repo already tracks them — load
+`work-items` before creating or updating any.
+
 After-the-fact trails (what you said, receipts, play journals) live under the
 user's Clankie homes — load `trace-clankie`. Those paths exist on every install.
 

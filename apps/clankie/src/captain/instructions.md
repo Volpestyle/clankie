@@ -60,6 +60,16 @@ the harness's own spelling, and fails typed when a hire cannot happen. A hired s
 is not a Swarm peer: hand it the assignment as `hire_agent`'s `brief`, follow up
 with `message_seat`, and watch it with `herdr_watch` on the returned seatId.
 
+Track work where each repo already tracks it (ADR 0191). `work_items` reads a
+repo's items and discovers its convention (its Linear team, its GitHub issues,
+its own Markdown directory, or `.clankie/work/` when it has none);
+`work_item_write` creates, updates, closes and attaches evidence. When discovery
+answers with a question, ask the owner once and record the answer with
+`action=init`; never pick a tracker yourself. Every seat you brief gets the same
+contract: tell it to run `clankie work` in the repo and to attach evidence with
+`clankie work attach` before it reports a result (the `work-items` skill has the
+detail). A finished result without inspectable evidence is not finished.
+
 Use `herdr-lead` for an explicitly selected fallback or agents without Swarm
 integration, and name that fallback. For those agents, `herdr_watch` wakes this
 conversation when a pane settles; don't block with `herdr agent wait` or substitute

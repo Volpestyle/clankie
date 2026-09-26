@@ -156,6 +156,15 @@ const HEADLESS_COMMAND_HELP = [
       "  linear work list | bind ORG ISSUE CONVERSATION [--from ID] | unbind ORG ISSUE CONVERSATION",
     ],
   },
+  {
+    nouns: ["work"],
+    lines: [
+      "  work [status] | repos | init [--backend B ...] | list [--status S] [--owner O] | show ID",
+      "  work create TITLE [--criterion C]... | update ID [--status S] [--check N]... | close ID",
+      "  work attach ID --url URL --caption TEXT [--kind K]   [--repo PATH on any command]",
+      "                           Track work in the repo's own convention, with evidence (JSON)",
+    ],
+  },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
     nouns: ["browser"],

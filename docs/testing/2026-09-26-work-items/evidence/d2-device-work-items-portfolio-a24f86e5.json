@@ -1,0 +1,119 @@
+{
+  "op": "work_items",
+  "schemaVersion": 1,
+  "result": {
+    "outcome": "ready",
+    "repo": { "id": "portfolio-a24f86e5", "name": "portfolio", "backend": "github", "needsDecision": false },
+    "items": [
+      {
+        "id": "#47",
+        "title": "Clankie work-tracking proof (ADR 0191), safe to ignore",
+        "status": "canceled",
+        "owner": "proof",
+        "dependsOn": [],
+        "summary": "Created by the clankie work proof; closed as not planned at the end of the run.",
+        "criteria": [
+          { "text": "Created through the repo's own convention", "done": true },
+          { "text": "No .clankie/work files added", "done": false }
+        ],
+        "evidence": [
+          {
+            "kind": "link",
+            "url": "https://github.com/Volpestyle/clankie/blob/main/docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md",
+            "caption": "ADR 0191, the decision this proof exercises"
+          }
+        ],
+        "location": "https://github.com/Volpestyle/portfolio/issues/47",
+        "updatedAt": "2026-09-26T18:24:44Z"
+      },
+      {
+        "id": "#24",
+        "title": "little 3D blob/cube that spins around and moves while LLM is responding",
+        "status": "todo",
+        "dependsOn": [],
+        "summary": "this would be sick, its like me like im the cube. different animations for thinking, talking, and idle.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://github.com/Volpestyle/portfolio/issues/24",
+        "updatedAt": "2026-01-10T06:11:34Z"
+      },
+      {
+        "id": "#18",
+        "title": "improve styling on github document reader pages/components",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "for all locations (/projects and chat ui)\n\nneed to make sure the document markdown viewer width is close to the full screen width on mobile. we want to give text as much room as possible.\n\ntoo much space above breadcrumbs\n\neven out the breadcrumb element spacing (spacing between [project name] > [document name])",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://github.com/Volpestyle/portfolio/issues/18",
+        "updatedAt": "2025-12-08T19:25:15Z"
+      },
+      {
+        "id": "#17",
+        "title": "improve page transitions for project details",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "no fade in/fade out or spinner anim for these pages yet (only from /projects, in chat UI we are good)\ncard -> readme -> document",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://github.com/Volpestyle/portfolio/issues/17",
+        "updatedAt": "2025-12-08T21:45:56Z"
+      },
+      {
+        "id": "#16",
+        "title": "migrate from portfolio gist to our configurable from admin page",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "instead of passing portfolio gist id, we can manage our own admin page to edit and save this config in our AWS infra. we could create a ui to pull ALL github repos, then we simply select the ones we want. we'd also need a way to customize the desired icon string for a project.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://github.com/Volpestyle/portfolio/issues/16",
+        "updatedAt": "2025-12-08T20:28:32Z"
+      },
+      {
+        "id": "#15",
+        "title": "add a button to go to admin page when logged in as admin",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "shouldn't go in nav bar\nshould go on blog page, fixed at bottom of viewport",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://github.com/Volpestyle/portfolio/issues/15",
+        "updatedAt": "2025-12-08T19:36:17Z"
+      },
+      {
+        "id": "#14",
+        "title": "the dev trace reasoning panel disappears when queries are blank",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "for general searches where text is empty, the dev trace reasoning panel disappears at some point after answer",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://github.com/Volpestyle/portfolio/issues/14",
+        "updatedAt": "2025-12-08T17:46:12Z"
+      },
+      {
+        "id": "#13",
+        "title": "dev trace panel for nonretrieval responses not visible from prod admin",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "need to repro local\nworks when there IS a user reasoning panel, but if theres not user reasoning panel theres no dev trace one either when we switch modes",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://github.com/Volpestyle/portfolio/issues/13",
+        "updatedAt": "2025-12-08T17:22:44Z"
+      },
+      {
+        "id": "#12",
+        "title": "tags overflow project cards",
+        "status": "done",
+        "dependsOn": [],
+        "summary": "the tags should wrap so they cant overflow the project cards.",
+        "criteria": [],
+        "evidence": [],
+        "location": "https://github.com/Volpestyle/portfolio/issues/12",
+        "updatedAt": "2025-12-08T17:20:45Z"
+      }
+    ]
+  }
+}

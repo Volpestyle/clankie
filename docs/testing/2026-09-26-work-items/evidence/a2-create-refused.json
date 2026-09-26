@@ -1,0 +1,6 @@
+{
+  "error": "needs_decision",
+  "detail": "TODO.md is a single task list, which cannot hold per-item criteria and evidence. Keep using it by hand and track agent work in .clankie/work/, or somewhere else?",
+  "question": "TODO.md is a single task list, which cannot hold per-item criteria and evidence. Keep using it by hand and track agent work in .clankie/work/, or somewhere else?",
+  "signals": [{ "kind": "todo_file", "detail": "TODO.md is a single task list" }]
+}

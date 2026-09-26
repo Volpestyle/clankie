@@ -84,6 +84,7 @@ import {
   HostedBodyDeniedError,
 } from "./hosted-body.ts";
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
+import { createWorkItemsService } from "./work-items.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 /** Hosted bodies only: `clankie-body` names the spool; a Mac never does. */
@@ -486,8 +487,16 @@ const agentSessions = createAgentSessions(settingsStore, undefined, {
     updateHostedWorkers();
   },
 });
+// Work items in each repo's own convention (ADR 0191): Linear rides his
+// connected account, GitHub the owner's gh login, files the repo itself.
+const workItems = createWorkItemsService({
+  stateDirectory: stateRoot,
+  workspace: () => startupSettings.captain.workingDirectory ?? process.cwd(),
+  mcpHost,
+});
 const captain = createCaptain(
   {
+    workItems,
     ...(hostedHeartbeat === undefined ? {} : { onWorkStarted: (reason) => hostedHeartbeat.begin(reason) }),
     ...(bodyTelemetry === undefined
       ? {}
@@ -670,6 +679,7 @@ const clankie = await createClankieApp({
         hostedBody,
       }),
   agentSessions,
+  workItems,
   workerMcp: new WorkerMcp({
     directory: join(stateRoot, "worker-grants"),
     credentials: operatorCredentialStore,

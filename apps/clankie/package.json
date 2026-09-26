@@ -31,6 +31,7 @@
     "@clankie/rendered-surface-client": "workspace:*",
     "@clankie/settings": "workspace:*",
     "@clankie/swarm": "workspace:*",
+    "@clankie/work-items": "workspace:*",
     "@earendil-works/pi-ai": "0.84.2",
     "@earendil-works/pi-coding-agent": "0.84.2",
     "@hono/node-server": "2.0.8",

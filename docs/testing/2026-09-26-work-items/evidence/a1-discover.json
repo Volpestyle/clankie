@@ -1,0 +1,5 @@
+{
+  "repo": { "id": "tmp-cz4aclzezx-76aec8d4", "name": "tmp.cz4AclzeZx", "needsDecision": true },
+  "signals": [{ "kind": "todo_file", "detail": "TODO.md is a single task list" }],
+  "question": "TODO.md is a single task list, which cannot hold per-item criteria and evidence. Keep using it by hand and track agent work in .clankie/work/, or somewhere else?"
+}

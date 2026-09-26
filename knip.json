@@ -1,6 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": ["docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs"],
+  "ignore": [
+    "docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs",
+    "docs/testing/2026-09-26-work-items/flows/serve.mts"
+  ],
   "workspaces": {
     ".": {
       "entry": [
