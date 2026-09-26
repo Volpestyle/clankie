@@ -1,7 +1,8 @@
 # ADR 0167: Replies about Linear work belong on the ticket
 
 Status: accepted. Activity awareness follows
-[ADR 0168](0168-linear-awareness-is-opt-in.md).
+[ADR 0168](0168-linear-awareness-is-opt-in.md). Replies to his own posts are routed
+to the work's owner by [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md).
 
 ## Context
 
