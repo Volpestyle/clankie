@@ -5,7 +5,13 @@ import { CatalogSchema } from "@clankie/model-registry";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { ClankieConfigSchema, type ClankieConfig } from "../src/config.ts";
-import { resolvePiModelSelection } from "../src/pi.ts";
+import {
+  boundedContextModel,
+  compactAtTokens,
+  INCLUDED_USAGE_COMPACT_AT_TOKENS,
+  PI_COMPACTION_RESERVE_TOKENS,
+  resolvePiModelSelection,
+} from "../src/pi.ts";
 import {
   configForRef,
   DEFAULT_ROUTINE_TURN_LIMIT,
@@ -180,5 +186,34 @@ describe("updateModelRouting", () => {
     await expect(updateModelRouting({ routineTurnLimit: 0 }, { env: environment })).rejects.toThrow(
       /turn limit/u,
     );
+  });
+});
+
+describe("compaction threshold", () => {
+  const clankie = { provider: "clankie", contextWindow: 1_050_000 };
+  const openai = { provider: "openai", contextWindow: 1_050_000 };
+
+  it("bounds included usage at 250k by default, so Pi compacts long before the proxy's 2 MiB", () => {
+    expect(compactAtTokens({}, "clankie")).toBe(INCLUDED_USAGE_COMPACT_AT_TOKENS);
+    expect(INCLUDED_USAGE_COMPACT_AT_TOKENS).toBe(250_000);
+    // Pi compacts at the window minus its reserve, which lands exactly on the threshold.
+    expect(boundedContextModel(clankie, {}).contextWindow - PI_COMPACTION_RESERVE_TOKENS).toBe(250_000);
+  });
+
+  it("leaves other providers on their own window unless the owner sets a threshold", () => {
+    expect(boundedContextModel(openai, {})).toBe(openai);
+    expect(compactAtTokens({}, "openai")).toBeUndefined();
+    expect(boundedContextModel(openai, { compact_at_tokens: 64_000 }).contextWindow).toBe(64_000 + 16_384);
+    expect(boundedContextModel(clankie, { compact_at_tokens: 120_000 }).contextWindow).toBe(120_000 + 16_384);
+  });
+
+  it("never widens a model past its own window", () => {
+    const small = { provider: "clankie", contextWindow: 128_000 };
+    expect(boundedContextModel(small, {})).toBe(small);
+  });
+
+  it("refuses a threshold below Pi's reserve in config", () => {
+    expect(ClankieConfigSchema.safeParse({ compact_at_tokens: 1_000 }).success).toBe(false);
+    expect(ClankieConfigSchema.safeParse({ compact_at_tokens: 250_000 }).success).toBe(true);
   });
 });

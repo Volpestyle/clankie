@@ -92,6 +92,7 @@ import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime, type RoutedSelection } from "./model.ts";
 import { captainRoutingExtension } from "./routing.ts";
+import { captainRequestExtension, promptCacheSalt } from "./request-budget.ts";
 import type { CaptainPort, CaptainPromptSection, HireSeat, MessageSeat } from "./port.ts";
 import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
@@ -362,6 +363,9 @@ function laneHoldsSystemTools(lane: CaptainSessionLaneV2): boolean {
   return lane === "operator";
 }
 
+/** Pi's answers to a compaction request that leave nothing to do. */
+const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to compact (session too small)"]);
+
 /**
  * Which kind of model call a session makes, for task-based routing. A Discord
  * session's machine tools are fixed when it is built, so its purpose is too.
@@ -511,6 +515,8 @@ interface LaneSession {
   readonly purpose: ModelPurpose;
   /** This purpose's route as of the last sync; the routing extension reads it per run. */
   readonly route: { current: RoutedSelection };
+  /** Set when a request had to be trimmed to fit; the next sync compacts first. */
+  readonly budget: { compactBeforeNextRun: boolean };
   lastAssistantText: string;
   turnCounter: number;
   /** Settlement of the in-flight run, while one is active: true if it succeeded. */
@@ -851,6 +857,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let headSeat: ObservedHeadSeat | undefined;
 
   const settings = (): Promise<ClankieSettings> => settingsStore.load();
+  const cacheSalt = promptCacheSalt(join(options.stateDir, "prompt-cache-salt"));
   const runtime = (): Promise<CaptainModelRuntime> =>
     (modelRuntime ??= createCaptainModelRuntime(options.repoRoot));
 
@@ -910,6 +917,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const currentSettings = await settings();
     const purpose = sessionPurpose(lane, systemTools);
     const route = { current: await resolveRoute(purpose) };
+    const budget = { compactBeforeNextRun: false };
     const selection = route.current.selection;
     const piSettings = SettingsManager.inMemory();
     const loader = new DefaultResourceLoader({
@@ -920,6 +928,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       extensionFactories: [
         captainMemoryExtension(deps.memory, lane),
         captainModelExtension(async () => (await resolveRoute(purpose)).selection),
+        captainRequestExtension({
+          lane,
+          cacheSalt,
+          onTrimmed: () => {
+            budget.compactBeforeNextRun = true;
+          },
+        }),
         captainRoutingExtension({
           current: () => route.current,
           onEscalated: (record) => console.info("Routine turn escalated:", JSON.stringify(record)),
@@ -976,6 +991,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       capture,
       purpose,
       route,
+      budget,
       lastAssistantText: "",
       turnCounter: 0,
     };
@@ -994,10 +1010,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * next run must start routine again.
    */
   async function syncModel(lane: LaneSession): Promise<void> {
+    if (lane.budget.compactBeforeNextRun) {
+      lane.budget.compactBeforeNextRun = false;
+      // A request had to be trimmed to fit the included-usage limit: compact now,
+      // while idle, so this run's requests fit whole.
+      await lane.session.compact().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        // Pi's own threshold may already have compacted, or the bytes were
+        // images that compaction cannot shrink; the request budget still holds.
+        if (BENIGN_COMPACTION_REFUSALS.has(message)) return;
+        console.warn("Compaction before the next run failed:", message);
+      });
+    }
     lane.route.current = await (await runtime()).resolveRoute(lane.purpose);
     const selection = lane.route.current.selection;
     const current = lane.session.model;
-    if (current?.provider !== selection.model.provider || current.id !== selection.model.id) {
+    if (
+      current?.provider !== selection.model.provider ||
+      current.id !== selection.model.id ||
+      // A changed compaction threshold arrives as a narrower or wider window.
+      current.contextWindow !== selection.model.contextWindow
+    ) {
       await lane.session.setModel(selection.model);
     }
     if (lane.session.thinkingLevel !== selection.thinkingLevel) {

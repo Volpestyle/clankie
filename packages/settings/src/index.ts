@@ -50,6 +50,7 @@ export {
 export { discordAttachmentRoot } from "./attachments.ts";
 export { characterNames, personaInstructions, type PersonaRegister } from "./persona.ts";
 export { clankieSkillRoots } from "./skill-roots.ts";
+export { SERVICE_LOADOUT_ENV, serviceInLoadout } from "./loadout.ts";
 export { SettingsStore, defaultSettingsPath } from "./store.ts";
 export {
   applyDiscordSettingsToEnvironment,

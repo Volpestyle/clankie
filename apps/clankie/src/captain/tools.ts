@@ -116,6 +116,7 @@ export function captainTools(
     getEmbodimentSession: deps.embodiment.getSession,
     getLiveEmbodimentSession: deps.embodiment.getLiveSession,
   };
+  const streamWatch = deps.streamWatch;
   const enabled = new Set(
     gameplay.pokeagentMmoEnabled
       ? ["pokeagent_join_mmo", "pokeagent_world", "pokeagent_stop", "pokeagent_observe", "pokeagent_recall"]
@@ -325,69 +326,77 @@ export function captainTools(
       execute: async () =>
         json(await stopPlay(playPorts, { originLane: lane, requestedBy: turnActor(turn, lane) })),
     }),
-    defineTool({
-      name: "observe_share",
-      label: "Look at a screen share",
-      description:
-        "Look at a Discord screen share in a voice channel you can see. Returns up to four chronological " +
-        "stills, oldest to newest, when " +
-        "the lab user body is watching it. If someone is sharing but you have no still, say that — do not invent " +
-        "what is on their screen. Use it when someone asks what is on the share, what they are looking at, or " +
-        "what is on screen in the call.",
-      parameters: Type.Object({}),
-      executionMode: "sequential",
-      execute: async () => {
-        const observation = await deps.streamWatch.current();
-        if (observation.streams.length === 0) {
-          return json({
-            outcome: "none",
-            detail: "nobody is sharing a screen in a channel you can see",
-          });
-        }
-        const frame = observation.frame;
-        if (frame === undefined) {
-          return json({
-            outcome: "listed",
-            streams: observation.streams,
-            decoder: observation.decoder,
-            ...(observation.decoderDetail === undefined ? {} : { decoderDetail: observation.decoderDetail }),
-            detail:
-              observation.decoder === "missing"
-                ? "someone is sharing but Vox is not built, so you cannot see the picture"
-                : "someone is sharing but you do not have a still yet",
-          });
-        }
-        if (frame.artifactRef !== undefined && isAttachableTurnMediaRef(frame.artifactRef)) {
-          turn.media = { artifactRef: frame.artifactRef, filename: `share-${frame.userId}.jpg` };
-        }
-        const frames = observation.frames?.length ? observation.frames : [frame];
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                outcome: "frame",
-                streams: observation.streams,
-                sequence: "oldest_to_newest",
-                frameCount: frames.length,
-                capturedAt: frames.map((sample) => sample.capturedAt),
-                userId: frame.userId,
-                detail:
-                  frames.length > 1
-                    ? "Compare these chronological samples to infer coarse motion or change."
-                    : "Only one sample is available, so do not infer motion.",
-              }),
+    // A screen share is watched by a live Discord body; an install without one
+    // (a hosted body) has nothing this could ever return.
+    ...(streamWatch === undefined
+      ? []
+      : [
+          defineTool({
+            name: "observe_share",
+            label: "Look at a screen share",
+            description:
+              "Look at a Discord screen share in a voice channel you can see. Returns up to four chronological " +
+              "stills, oldest to newest, when " +
+              "the lab user body is watching it. If someone is sharing but you have no still, say that — do not invent " +
+              "what is on their screen. Use it when someone asks what is on the share, what they are looking at, or " +
+              "what is on screen in the call.",
+            parameters: Type.Object({}),
+            executionMode: "sequential",
+            execute: async () => {
+              const observation = await streamWatch.current();
+              if (observation.streams.length === 0) {
+                return json({
+                  outcome: "none",
+                  detail: "nobody is sharing a screen in a channel you can see",
+                });
+              }
+              const frame = observation.frame;
+              if (frame === undefined) {
+                return json({
+                  outcome: "listed",
+                  streams: observation.streams,
+                  decoder: observation.decoder,
+                  ...(observation.decoderDetail === undefined
+                    ? {}
+                    : { decoderDetail: observation.decoderDetail }),
+                  detail:
+                    observation.decoder === "missing"
+                      ? "someone is sharing but Vox is not built, so you cannot see the picture"
+                      : "someone is sharing but you do not have a still yet",
+                });
+              }
+              if (frame.artifactRef !== undefined && isAttachableTurnMediaRef(frame.artifactRef)) {
+                turn.media = { artifactRef: frame.artifactRef, filename: `share-${frame.userId}.jpg` };
+              }
+              const frames = observation.frames?.length ? observation.frames : [frame];
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      outcome: "frame",
+                      streams: observation.streams,
+                      sequence: "oldest_to_newest",
+                      frameCount: frames.length,
+                      capturedAt: frames.map((sample) => sample.capturedAt),
+                      userId: frame.userId,
+                      detail:
+                        frames.length > 1
+                          ? "Compare these chronological samples to infer coarse motion or change."
+                          : "Only one sample is available, so do not infer motion.",
+                    }),
+                  },
+                  ...frames.map((sample) => ({
+                    type: "image" as const,
+                    data: sample.jpegBase64,
+                    mimeType: "image/jpeg" as const,
+                  })),
+                ],
+                details: { outcome: "frame", streams: observation.streams, frameCount: frames.length },
+              };
             },
-            ...frames.map((sample) => ({
-              type: "image" as const,
-              data: sample.jpegBase64,
-              mimeType: "image/jpeg" as const,
-            })),
-          ],
-          details: { outcome: "frame", streams: observation.streams, frameCount: frames.length },
-        };
-      },
-    }),
+          }),
+        ]),
     defineTool({
       name: "pokeagent_observe",
       label: "PokeAgent: look at screen",
@@ -498,7 +507,7 @@ export function captainTools(
           // Only this room's renders: what he was asked to make elsewhere is
           // not this room's business, same rule as `observe_room`.
           turn.room === undefined ? [] : deps.media.finishedRenders(turn.room),
-          deps.streamWatch.current(),
+          deps.streamWatch?.current(),
           deps.rivals?.call({ action: "status" }),
         ]);
         return json({
@@ -508,8 +517,7 @@ export function captainTools(
           voiceHistory,
           recentVoiceSpeech: voiceSpeech,
           finishedRenders: renders,
-          activeStreams: shares.streams,
-          shareDecoder: shares.decoder,
+          ...(shares === undefined ? {} : { activeStreams: shares.streams, shareDecoder: shares.decoder }),
         });
       },
     }),
@@ -1050,6 +1058,8 @@ function discordVoicePresenceTools(
 ): ToolDefinition[] {
   if (!lane.startsWith("discord_") && lane !== "operator") return [];
   const voice = deps.discordVoicePresence;
+  // No Discord body in this install (a hosted body's loadout): nothing to join.
+  if (voice === undefined) return [];
   const call = async (action: "join" | "leave") => {
     if (voice === undefined) {
       return json({ action: action === "join" ? "join_refused" : "leave_refused", reason: "failed" });
@@ -1233,6 +1243,8 @@ function discordMusicTools(
   lane: CaptainSessionLaneV2,
 ): ToolDefinition[] {
   const music = deps.discordMusic;
+  // No Discord body in this install (a hosted body's loadout): no music desk.
+  if (music === undefined) return [];
   const author = (): string => turnActor(turn, lane);
   const unavailable = () =>
     json({

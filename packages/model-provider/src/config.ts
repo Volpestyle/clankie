@@ -101,6 +101,11 @@ export const ClankieConfigSchema = z
     image_model: z.string().optional(),
     /** Video generation model as a "providerId/modelId" ref, e.g. "xai/grok-imagine-video-1.5". */
     video_model: z.string().optional(),
+    /**
+     * Context size, in tokens, at which a captain session compacts. Unset: the
+     * included-usage default (250k), and the model's own window elsewhere.
+     */
+    compact_at_tokens: z.number().int().min(16_384).optional(),
     /** Which model each kind of task runs on; see ModelRoutingConfigSchema. */
     routing: ModelRoutingConfigSchema.optional(),
     /** Selected variant per model ref, e.g. { "anthropic/claude-opus-4-5": "think-16k" }. */

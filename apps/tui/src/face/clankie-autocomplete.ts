@@ -280,7 +280,11 @@ function commandSearchText(command: ClankieAutocompleteCommand): string {
 }
 
 function commandCategory(commandName: string): string {
-  if (["model", "provider", "auth", "effort", "routing", "image-model", "video-model"].includes(commandName))
+  if (
+    ["model", "provider", "auth", "effort", "routing", "compaction", "image-model", "video-model"].includes(
+      commandName,
+    )
+  )
     return "model/auth";
   if (["trace", "layout", "status", "board", "clear", "exit"].includes(commandName)) return "runtime";
   if (commandName === "connect") return "tools";

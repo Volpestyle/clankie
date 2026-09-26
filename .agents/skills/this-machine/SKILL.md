@@ -134,6 +134,7 @@ index). Configure through the headless CLI:
 | Switch captain                        | `clankie model set provider/model`                                                    |
 | Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`            |
 | Cheaper model for everyday turns      | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`  |
+| When long sessions compact            | `clankie model compaction`, `clankie model compaction set 250000`, `… default`        |
 | Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`    |
 | Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`              |
 | Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`      |

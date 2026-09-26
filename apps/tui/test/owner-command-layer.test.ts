@@ -117,6 +117,21 @@ describe("canonical owner command layer", () => {
     expect(JSON.parse(results[1]?.text ?? "")).toEqual(doctor);
   });
 
+  it("sets when long sessions compact through argv", async () => {
+    const env = await isolatedEnv();
+    expect(await run(["model", "compaction"], env)).toEqual({
+      ok: true,
+      compactAtTokens: null,
+      includedUsageDefault: 250_000,
+      appliesTo: "included usage",
+    });
+    expect(await run(["model", "compaction", "set", "120_000"], env)).toMatchObject({
+      compactAtTokens: 120_000,
+      appliesTo: "every model",
+    });
+    expect(await run(["model", "compaction", "default"], env)).toMatchObject({ compactAtTokens: null });
+  });
+
   it("configures task-based model routing through argv", async () => {
     const env = await isolatedEnv();
     await run(["model", "set", "openai/work-model"], env);

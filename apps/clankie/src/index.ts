@@ -48,6 +48,7 @@ import {
   applyVoiceSettingsToEnvironment,
   discordAttachmentRoot,
   parsePositiveInt,
+  serviceInLoadout,
   SettingsStore,
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
@@ -151,6 +152,8 @@ const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? 4321);
 
 const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
+const discordBodyInLoadout =
+  serviceInLoadout("discord-bridge", process.env) || serviceInLoadout("discord-user-session", process.env);
 const hostedBootstrap = readHostedBodyBootstrap(process.env);
 if (hostedBootstrap !== undefined) await applyHostedModelRouting(hostedBootstrap);
 const hostedBody =
@@ -560,11 +563,18 @@ const captain = createCaptain(
       inspect: () => hostedWorld.inspect(),
       invoke: (name, input) => hostedWorld.invoke(name, input),
     },
-    streamWatch: {
-      current: () => Promise.resolve(boundApp().streamWatch()),
-    },
-    discordMusic: createDiscordMusicClient(),
-    discordVoicePresence: createDiscordVoicePresenceClient(),
+    // Voice, music and screen shares need a live Discord body. A loadout
+    // without one (a hosted body runs `clankie,relay`) leaves their tools out
+    // rather than offering calls that can only ever refuse.
+    ...(discordBodyInLoadout
+      ? {
+          streamWatch: {
+            current: () => Promise.resolve(boundApp().streamWatch()),
+          },
+          discordMusic: createDiscordMusicClient(),
+          discordVoicePresence: createDiscordVoicePresenceClient(),
+        }
+      : {}),
     discordActions: createDiscordCaptainActionClient(),
     presence: {
       listSessions: () => Promise.resolve(boundApp().presenceSessions()),

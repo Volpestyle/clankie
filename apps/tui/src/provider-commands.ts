@@ -53,6 +53,7 @@ import {
   runModelRoutingCommand,
   type ModelRoutingStatus,
 } from "./command/model-routing.ts";
+import { MODEL_COMPACTION_USAGE, runModelCompactionCommand } from "./command/model-compaction.ts";
 import { imageModelSet, imageModelStatus } from "./command/image-model.ts";
 import { videoModelSet, videoModelStatus } from "./command/video-model.ts";
 import type { MenuOption, SetupFlow } from "./shell/setup-flow.ts";
@@ -292,6 +293,7 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
       },
     },
     routingCommand(services),
+    compactionCommand(services),
     mediaModelCommand("image-model", "image_model", services),
     mediaModelCommand("video-model", "video_model", services),
     {
@@ -314,6 +316,45 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
       },
     },
   ];
+}
+
+// --- /compaction ---
+
+/** When a long session compacts; positional over `clankie model compaction`, one writer. */
+function compactionCommand(services: ProviderServices): FaceShellCommand {
+  return {
+    name: "compaction",
+    aliases: [],
+    description: "Set how large a conversation grows before it compacts",
+    argumentHint: "[status|set TOKENS|default]",
+    takesArgument: true,
+    async run(argument, shell): Promise<void> {
+      const args = argument.trim().split(/\s+/u).filter(Boolean);
+      try {
+        const status = await runModelCompactionCommand(args, { env: services.env, cwd: services.cwd });
+        shell.insertCommandResult(
+          `/compaction${args.length === 0 ? "" : ` ${args.join(" ")}`}`,
+          [
+            status.compactAtTokens === null
+              ? `compaction: default — included usage compacts at ${status.includedUsageDefault.toLocaleString("en-US")} tokens; other models at their own window`
+              : `compaction: every model compacts at ${status.compactAtTokens.toLocaleString("en-US")} tokens`,
+            "",
+            MODEL_COMPACTION_USAGE.replaceAll("clankie model compaction", "/compaction"),
+          ].join("\n"),
+          status.ok ? "success" : "error",
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        shell.insertCommandResult(
+          "/compaction",
+          message.startsWith("Usage:")
+            ? message.replaceAll("clankie model compaction", "/compaction")
+            : message,
+          "error",
+        );
+      }
+    },
+  };
 }
 
 // --- /routing ---

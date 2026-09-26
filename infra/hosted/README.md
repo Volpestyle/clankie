@@ -165,6 +165,14 @@ overrides stay), so a plan change lands on the next boot. Absent, the body's
 routing is left alone. The model proxy, not this field, enforces what a plan
 may spend.
 
+Included-usage requests are shaped to fit the proxy
+([ADR 0195](../../docs/adr/0195-hosted-requests-fit-the-model-proxy.md)): sessions
+compact at 250k tokens unless `clankie model compaction` says otherwise, a
+request over about 1.8 MiB drops older images and trims older outsized tool
+output before it is sent, and each lane shares one prompt cache key per install.
+The loadout (`CLANKIE_SERVICES=clankie,relay`) runs no Discord body, so the
+voice, music and screen-share tools are not offered.
+
 The body validates this configuration and the signed credential's identity before
 connecting. It derives its host id from the account and installation, uses the
 host credential as its gateway bearer, and renews through

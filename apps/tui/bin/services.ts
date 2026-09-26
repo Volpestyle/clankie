@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parsePositiveInt, resolveDiscordActiveBody } from "@clankie/settings";
+import { parsePositiveInt, resolveDiscordActiveBody, serviceInLoadout } from "@clankie/settings";
 import {
   ensureCaptainCredential,
   resolveOperatorCredential,
@@ -472,12 +472,8 @@ const TUNNEL: ManagedService = {
  * a leftover is running, and reports itself off rather than unreachable. Image
  * policy, not a preference: settings cannot widen it.
  */
-const SERVICE_LOADOUT_ENV = "CLANKIE_SERVICES";
-
 function inLoadout(id: ServiceId, env: NodeJS.ProcessEnv): boolean {
-  const raw = env[SERVICE_LOADOUT_ENV]?.trim();
-  if (raw === undefined || raw.length === 0) return true;
-  return raw.split(",").some((entry) => entry.trim() === id);
+  return serviceInLoadout(id, env);
 }
 
 function withLoadout(service: ManagedService): ManagedService {

@@ -99,7 +99,8 @@ export interface CaptainDeps {
         };
     invoke(name: string, input?: Record<string, unknown>): Promise<unknown>;
   };
-  readonly streamWatch: {
+  /** Screen shares a live Discord body is watching. Absent when no Discord body is in the loadout. */
+  readonly streamWatch?: {
     current(): Promise<DiscordStreamWatchObservation>;
   };
   /**

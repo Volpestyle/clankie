@@ -15,6 +15,57 @@ import { LOCAL_PLACEHOLDER_API_KEY } from "./local-endpoint.ts";
 import { mergedCatalog, subscriptionRefFor } from "./resolve.ts";
 import { effortVariantsFor, thinkingLevelForVariant } from "./variants.ts";
 
+/**
+ * The provider id a hosted body's included usage appears under (`clankie/default`,
+ * `clankie/routine`, `clankie/escalation`): the loopback forwarder to the fleet's
+ * model proxy.
+ */
+export const INCLUDED_USAGE_PROVIDER_ID = "clankie";
+
+/**
+ * The fleet model proxy refuses a request body over 2 MiB (clankie-ops
+ * `model-proxy/proxy.ts`, `maxBodyBytes`).
+ */
+export const INCLUDED_USAGE_MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Where an included-usage session compacts unless the owner sets
+ * `compact_at_tokens` (James, 2026-09-26: rare compaction over the cheaper
+ * 64k the cost study found).
+ *
+ * Pi compacts at the model's window minus its reserve, and the window comes
+ * from the provider declaration (the pinned luna model is 1.05M; the hosted
+ * forwarder declares less). Nothing tied that to the proxy's 2 MiB body limit,
+ * past which a long hosted session fails on every call. 250k tokens of text is
+ * about 1 MiB. Images and outsized tool output are bytes that tokens do not
+ * bound; the captain's request budget trims those before a request could
+ * reach the proxy's limit.
+ */
+export const INCLUDED_USAGE_COMPACT_AT_TOKENS = 250_000;
+
+/** Pi's own reserve (`compaction.reserveTokens`); it compacts at the window minus this. */
+export const PI_COMPACTION_RESERVE_TOKENS = 16_384;
+
+/** The context size a session compacts at: the owner's setting, else the included-usage default. */
+export function compactAtTokens(config: ClankieConfig, providerId: string): number | undefined {
+  if (config.compact_at_tokens !== undefined) return config.compact_at_tokens;
+  return providerId === INCLUDED_USAGE_PROVIDER_ID ? INCLUDED_USAGE_COMPACT_AT_TOKENS : undefined;
+}
+
+/**
+ * The model a session should run, with its window narrowed so Pi compacts at
+ * {@link compactAtTokens}. The model's own window stays the ceiling.
+ */
+export function boundedContextModel<T extends Pick<Model<Api>, "provider" | "contextWindow">>(
+  model: T,
+  config: ClankieConfig,
+): T {
+  const at = compactAtTokens(config, model.provider);
+  if (at === undefined) return model;
+  const window = at + PI_COMPACTION_RESERVE_TOKENS;
+  return window < model.contextWindow ? { ...model, contextWindow: window } : model;
+}
+
 export interface PiModelSelection {
   readonly model: Model<Api>;
   readonly thinkingLevel: ModelThinkingLevel;
@@ -58,7 +109,11 @@ export function resolvePiModelSelection(
   }
   const ref = `${effective.providerId}/${effective.modelId}`;
   const variant = config.variant?.[ref] ?? config.variant?.[configuredRef];
-  return { model, ref, thinkingLevel: resolveThinkingLevel(model, ref, variant) };
+  return {
+    model: boundedContextModel(model, config),
+    ref,
+    thinkingLevel: resolveThinkingLevel(model, ref, variant),
+  };
 }
 
 /**

@@ -641,6 +641,25 @@ model. Effort is per model ref, so `clankie effort set LEVEL --model REF` sets
 the routine model's effort. Hosted bodies receive routing from the fleet at
 start. The console's `/routing` takes the same arguments.
 
+### `model compaction [status]` / `model compaction set TOKENS` / `model compaction default`
+
+When a long captain session compacts ([ADR 0195](adr/0195-hosted-requests-fit-the-model-proxy.md)).
+Unset, included usage (the hosted `clankie/*` models) compacts at 250,000 tokens
+and every other model at its own context window. Set, the threshold applies to
+every model (at least 16,384 tokens, Pi's reserve). A live session picks the
+change up on its next turn. JSON:
+
+```json
+{
+  "ok": true,
+  "compactAtTokens": null,
+  "includedUsageDefault": 250000,
+  "appliesTo": "included usage"
+}
+```
+
+The console's `/compaction` takes the same arguments.
+
 ### `effort [status]`
 
 Read the current captain model's stored effort override. JSON:

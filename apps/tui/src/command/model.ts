@@ -9,6 +9,7 @@ import {
   type ClankieConfig,
   type ProbedLocalModel,
 } from "@clankie/model-provider";
+import { runModelCompactionCommand, type ModelCompactionStatus } from "./model-compaction.ts";
 import { runModelRoutingCommand, type ModelRoutingStatus } from "./model-routing.ts";
 
 const MODEL_USAGE = [
@@ -17,6 +18,7 @@ const MODEL_USAGE = [
   "       clankie model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]",
   "       clankie model set providerId/modelId",
   "       clankie model routing [status|set|off|escalate|purpose|turn-limit] …",
+  "       clankie model compaction [status|set TOKENS|default]",
 ].join("\n");
 
 export interface ModelCommandOptions {
@@ -35,6 +37,7 @@ export interface ModelAddLocalInput {
 
 export type ModelCommandResult =
   | ModelRoutingStatus
+  | ModelCompactionStatus
   | {
       readonly ok: boolean;
       readonly model: string | null;
@@ -269,6 +272,7 @@ export async function runModelCommand(
     return await modelRefresh(options);
   }
   if (subcommand === "routing") return await runModelRoutingCommand(args.slice(1), options);
+  if (subcommand === "compaction") return await runModelCompactionCommand(args.slice(1), options);
   if (subcommand === "add-local") return await modelAddLocal(parseAddLocalArgs(args.slice(1)), options);
   if (subcommand === "set") {
     const ref = args[1];
