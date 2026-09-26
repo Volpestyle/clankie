@@ -337,6 +337,7 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
       // downstream consumes partial decisions.
       const deadline = modelRequestAbortSignal(options.requestTimeoutMs);
       const requestSignal = signal === undefined ? deadline : AbortSignal.any([deadline, signal]);
+      const failure = streamFailure();
       const stream = streamObject({
         model: options.model,
         schema: FreePlayWireDecisionSchema,
@@ -366,9 +367,10 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
         maxRetries: options.maxRetries ?? 1,
         abortSignal: requestSignal,
         providerOptions: options.providerOptions ?? {},
+        onError: failure.report,
       });
 
-      const settled = stream.object;
+      const settled = Promise.race([stream.object, failure.promise]);
       // Claim the rejection now. Without a handler attached before the drain
       // throws, a failed call surfaces as an unsettled top-level await instead
       // of an error the loop can record.
@@ -610,6 +612,7 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
     async decide(view: VoiceView): Promise<unknown> {
       const showFrame = options.showFrame ?? true;
       const deadline = modelRequestAbortSignal(options.requestTimeoutMs);
+      const failure = streamFailure();
       const stream = streamObject({
         model: options.model,
         schema: VoiceDecisionSchema,
@@ -629,9 +632,10 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
         maxRetries: options.maxRetries ?? 1,
         abortSignal: deadline,
         providerOptions: options.providerOptions ?? {},
+        onError: failure.report,
       });
 
-      const settled = stream.object;
+      const settled = Promise.race([stream.object, failure.promise]);
       settled.catch(() => undefined);
       try {
         for await (const _partial of stream.partialObjectStream) {
@@ -643,6 +647,25 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
       return await settleWithinDeadline(settled, deadline);
     },
   };
+}
+
+/**
+ * The provider's own error, as soon as the SDK reports it. A failed call (a 400,
+ * a refused effort, a bad key) arrives as a stream error part, and `object` then
+ * never settles, so without this the turn waited out the whole deadline before
+ * failing with none of the provider's reason. The deadline's timer does not
+ * hold the process open either, so a one-shot caller such as `verify-model`
+ * exited 13 with an unsettled await instead of reporting the failure.
+ */
+function streamFailure(): { promise: Promise<never>; report: (event: { error: unknown }) => void } {
+  let report: (event: { error: unknown }) => void = () => undefined;
+  const promise = new Promise<never>((_resolve, reject) => {
+    report = ({ error }) => {
+      reject(error);
+    };
+  });
+  promise.catch(() => undefined);
+  return { promise, report };
 }
 
 function modelRequestAbortSignal(timeoutMs: number | undefined): AbortSignal {

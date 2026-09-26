@@ -62,6 +62,24 @@ describe("model minds issue a prompt the SDK accepts", () => {
   });
 });
 
+describe("model minds report a provider error", () => {
+  // A long deadline, so only the provider's own error can end these promptly.
+  const failing = () =>
+    new MockLanguageModelV4({
+      doStream: () => Promise.reject(new Error("synthetic provider error")),
+    });
+
+  it("fails the player turn with the provider's reason", async () => {
+    const mind = createModelFreePlayMind({ model: failing(), requestTimeoutMs: 60_000, maxRetries: 0 });
+    await expect(mind.decide(emptyView())).rejects.toThrow("synthetic provider error");
+  });
+
+  it("fails the voice turn with the provider's reason", async () => {
+    const voice = createModelVoice({ model: failing(), requestTimeoutMs: 60_000, maxRetries: 0 });
+    await expect(voice.decide(emptyVoiceView())).rejects.toThrow("synthetic provider error");
+  });
+});
+
 /** A model that answers with one whole JSON object and records what it was sent. */
 function capturingModel(json: string): MockLanguageModelV4 {
   type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;

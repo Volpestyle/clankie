@@ -543,7 +543,8 @@ An `openai` selection uses the subscription when available; disable the
 In a checkout, `pnpm --filter @clankie/clankie verify-model provider/model@effort`
 checks a captain tool-and-image turn, a gameplay action, and commentary using
 isolated settings. It makes live provider requests. Add `--metered` for the API
-transport or `--json` for a machine-readable receipt. `--config-home PATH`
+transport or `--json` for a machine-readable receipt. A provider error fails that
+path's check with the provider's message, and any failed check exits 1. `--config-home PATH`
 checks the selection previously written by the CLI under that configuration
 home. The owner's live selection remains unchanged.
 
