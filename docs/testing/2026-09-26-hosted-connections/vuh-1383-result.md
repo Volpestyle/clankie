@@ -4,7 +4,7 @@
 
 A hosted body can now link its owner's GitHub and Linear accounts. The token lives only in the body's credential broker, and the ADR 0191 work tracker uses it.
 
-- **Decision record:** [ADR 0196](docs/adr/0196-account-connections-keep-tokens-on-the-body.md) (proposed) covers:
+- **Decision record:** [ADR 0196](../../adr/0196-account-connections-keep-tokens-on-the-body.md) (proposed) covers:
   - each provider's flow (a GitHub device flow; Linear OAuth with PKCE and a sealed hand-off)
   - where tokens live (broker only), scopes (GitHub `repo`, Linear `read write`), revocation, and what the fleet may see (nothing)
 - **API:** `/v1/accounts` list, `github/start`, `github/poll`, `linear/start`, `linear/complete`, `disconnect`.
