@@ -467,7 +467,7 @@ export type GameplaySettings = z.infer<typeof GameplaySettingsSchema>;
  */
 export const FLEET_SIZES = ["max", "large", "small", "solo"] as const;
 export type FleetSize = (typeof FLEET_SIZES)[number];
-export const FLEET_MODEL_MODES = ["optimal", "frugal"] as const;
+export const FLEET_MODEL_MODES = ["optimal", "efficient"] as const;
 export type FleetModelMode = (typeof FLEET_MODEL_MODES)[number];
 
 /** The plan each size fits and the swarm it aims for: one text for the CLI, the TUI and his prompt. */
@@ -482,8 +482,8 @@ export const FLEET_SIZE_GUIDANCE: Readonly<Record<FleetSize, string>> = {
 /** How a model and effort are chosen per job under each mode. */
 export const FLEET_MODEL_GUIDANCE: Readonly<Record<FleetModelMode, string>> = {
   optimal: "Pick the strongest model and the effort each job needs; cost is not a reason to downgrade a job.",
-  frugal:
-    "Pick the cheapest model and the lowest effort that can meet each job's acceptance; keep the top model for consequential boundaries (safety, data integrity, live surfaces, a disputed review).",
+  efficient:
+    "Pick the smallest model and the lowest effort that still meet each job's acceptance; keep the top model for consequential boundaries (safety, data integrity, live surfaces, a disputed review).",
 };
 
 export const FleetSettingsSchema = z

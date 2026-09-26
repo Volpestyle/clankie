@@ -59,18 +59,18 @@ describe("lane prompt assembly", () => {
   });
 
   it("states the owner's budget as a target, and a non-default budget alone renders the section", () => {
-    const frugal = ClankieSettingsSchema.parse({
+    const efficient = ClankieSettingsSchema.parse({
       schemaVersion: 1,
-      fleet: { size: "small", models: "frugal" },
+      fleet: { size: "small", models: "efficient" },
     });
-    const operator = assembleLanePrompt("operator", true, frugal);
+    const operator = assembleLanePrompt("operator", true, efficient);
     expect(operator).toContain("# Your fleet");
     expect(operator).toContain("Swarm size: small.");
-    expect(operator).toContain("Models: frugal.");
+    expect(operator).toContain("Models: efficient.");
     // A target the lead sizes toward, never a cap he is held to.
     expect(operator).toContain("not a cap");
     expect(operator).not.toMatch(/\n\n\n/u);
-    expect(assembleLanePrompt("discord_presence", false, frugal)).not.toContain("# Your fleet");
+    expect(assembleLanePrompt("discord_presence", false, efficient)).not.toContain("# Your fleet");
     // With notes, the default budget still rides along so he knows it is unlimited.
     const notesOnly = ClankieSettingsSchema.parse({
       schemaVersion: 1,
