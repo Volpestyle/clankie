@@ -157,7 +157,9 @@ host credential as its gateway bearer, and renews through
 `POST /fleet/v1/body/host-credential` before half-life. The same credential
 serves fleet calls. Renewals live in the credential broker so a restart does not
 revert to an old bootstrap token; the bootstrap file itself is not rewritten.
-A fleet `403` stops the connector and further fleet requests. Invalid bootstrap
+A fleet `403` stops the connector and further fleet requests, except
+`pairing_key_required`: the body re-registers its persisted key and retries the
+call once. Invalid bootstrap
 configuration fails startup instead of falling back to a different account.
 
 ## Body telemetry
@@ -213,6 +215,23 @@ confirmation of the same persisted key requires only the current host credential
 A provisioned boot delivers a fresh registration token; it is optional on a
 service restart that retains the same key. It never enters the gateway socket,
 logs, or an offer response.
+
+Registration completes before heartbeat, wake-key writes or credential renewal.
+A lost registration response or `5xx` retries with the same token and public
+key (three attempts). Once registered, that same Ed25519 private key signs
+every POST to `/fleet/v1/body/heartbeat`, `/fleet/v1/body/wake-keys`,
+`/fleet/v1/body/wake-keys/revoke` and `/fleet/v1/body/host-credential`.
+Renewal sends `{}`. Registration itself is unsigned.
+
+Signed requests retain the bearer credential and add `x-clankie-body-timestamp`
+(epoch milliseconds), `x-clankie-body-nonce` (16 random bytes, base64url), and
+`x-clankie-body-signature` (Ed25519, base64url). The signature covers eight UTF-8
+lines with no trailing newline: `clankie-body-request-v1`, `POST`, path only,
+tenant id, installation id, timestamp header, nonce header, and the base64url
+SHA-256 digest of the exact request body bytes. Every retry gets a fresh nonce
+and timestamp. The fleet allows five minutes of clock skew and accepts each
+nonce once. A `401 body_signature_invalid` gets at most three attempts, then
+emits only that error code; check clock skew or a pairing-key mismatch.
 
 `POST /v1/hosted/pair-offer` accepts only protocol v2:
 `{ version: 2, pairTicket, browserPublicKey, nonce }`. The body verifies the

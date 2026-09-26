@@ -2,7 +2,6 @@ import {
   createCipheriv,
   createECDH,
   createPrivateKey,
-  createPublicKey,
   generateKeyPairSync,
   hkdfSync,
   randomBytes,
@@ -48,14 +47,7 @@ export async function createHostedPairing(
     key = createPrivateKey(credential.key);
   }
   if (key.asymmetricKeyType !== "ed25519") throw new Error("Invalid hosted pairing key type");
-  const publicKey = createPublicKey(key).export({ format: "jwk" }).x;
-  if (publicKey === undefined) throw new Error("Invalid hosted pairing public key");
-  await client.post("pairing-key", {
-    publicKey,
-    ...(client.bootstrap.pairingKeyRegistrationToken === undefined
-      ? {}
-      : { registrationToken: client.bootstrap.pairingKeyRegistrationToken }),
-  });
+  await client.registerPairingKey(key);
   return new HostedPairing(client, key, { replayPath });
 }
 

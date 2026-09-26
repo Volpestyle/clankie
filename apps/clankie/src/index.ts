@@ -148,6 +148,15 @@ const hostedBody =
   hostedBootstrap === undefined
     ? undefined
     : await createHostedBodyClient(hostedBootstrap, operatorCredentialStore);
+// Register before any signed fleet request or connector-triggered renewal.
+const hostedPairing =
+  hostedBody === undefined
+    ? undefined
+    : await createHostedPairing(
+        hostedBody,
+        operatorCredentialStore,
+        join(stateRoot, "hosted-pair-tickets.json"),
+      );
 const hostedHeartbeat =
   hostedBody === undefined
     ? undefined
@@ -183,6 +192,8 @@ if (hostedBody !== undefined) {
     publicGatewayConnector?.close();
     hostedHeartbeat?.close();
   };
+  hostedBody.onSignatureInvalid = () =>
+    logger.warn({ event: "body_signature_invalid" }, "hosted fleet signature rejected");
 }
 if (
   hostedBody === undefined &&
@@ -624,14 +635,6 @@ const captain = createCaptain(
   },
 );
 
-const hostedPairing =
-  hostedBody === undefined
-    ? undefined
-    : await createHostedPairing(
-        hostedBody,
-        operatorCredentialStore,
-        join(stateRoot, "hosted-pair-tickets.json"),
-      );
 const clankie = await createClankieApp({
   ...(hostedPairing === undefined
     ? {}

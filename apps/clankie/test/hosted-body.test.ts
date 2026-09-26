@@ -1,3 +1,4 @@
+import { createHash, generateKeyPairSync, verify, type KeyObject } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,12 +50,18 @@ describe("managed hosted credential", () => {
     const persist = vi.fn(async () => {});
     const fetcher = vi.fn<typeof fetch>(async (url) =>
       String(url).endsWith("host-credential")
-        ? Response.json({ credential: f.host(now / 1000), expiresAtMs: now + 21600000 })
+        ? Response.json({
+            credential: f.host(now / 1000),
+            expiresAtMs: now + 21600000,
+            tenantTelemetryKey: Buffer.alloc(32, 7).toString("base64url"),
+          })
         : Response.json({}),
     );
     const client = new HostedBodyClient(f.bootstrap, { fetch: fetcher, clock: () => now, persist });
     expect((await client.resolveHostToken()).token).toBe(f.bootstrap.hostCredential);
     expect(fetcher).not.toHaveBeenCalled();
+    await client.registerPairingKey(generateKeyPairSync("ed25519").privateKey);
+    fetcher.mockClear();
     now += 10800000;
     const [next] = await Promise.all([
       client.resolveHostToken(),
@@ -76,7 +83,10 @@ describe("managed hosted credential", () => {
   it("parks on 403 and never sends another request", async () => {
     const f = hostedFixture();
     const fetcher = vi.fn<typeof fetch>(async () => new Response(null, { status: 403 }));
+    fetcher.mockResolvedValueOnce(Response.json({}));
     const client = new HostedBodyClient(f.bootstrap, { fetch: fetcher, clock: () => f.now + 10800000 });
+    await client.registerPairingKey(generateKeyPairSync("ed25519").privateKey);
+    fetcher.mockClear();
     client.onDenied = vi.fn();
     await expect(client.resolveHostToken()).rejects.toBeInstanceOf(HostedBodyDeniedError);
     await expect(client.registerWakeKey("device-one", "key")).rejects.toBeInstanceOf(HostedBodyDeniedError);
@@ -97,5 +107,182 @@ describe("managed hosted credential", () => {
     ])
       expect(() => client.verifyPairTicket(f.pair(claims), f.browserPublicKey, f.nonce)).toThrow();
     expect(() => client.verifyPairTicket(hostedFixture().pair(), f.browserPublicKey, f.nonce)).toThrow();
+  });
+});
+
+/** Independently reconstruct the fleet's eight-line wire contract from captured request bytes. */
+function verifyCall(url: string | URL | Request, init: RequestInit | undefined, key: KeyObject) {
+  const f = hostedFixture();
+  const headers = new Headers(init?.headers);
+  const timestamp = headers.get("x-clankie-body-timestamp");
+  const nonce = headers.get("x-clankie-body-nonce");
+  const signature = headers.get("x-clankie-body-signature");
+  expect(timestamp).toMatch(/^[0-9]+$/u);
+  expect(nonce).toMatch(/^[A-Za-z0-9_-]{22}$/u);
+  expect(signature).toMatch(/^[A-Za-z0-9_-]{86}$/u);
+  expect(init?.method).toBe("POST");
+  expect(typeof init?.body).toBe("string");
+  const transcript = Buffer.from(
+    [
+      "clankie-body-request-v1",
+      "POST",
+      new URL(String(url)).pathname,
+      f.bootstrap.tenantId,
+      f.bootstrap.installationId,
+      timestamp,
+      nonce,
+      createHash("sha256").update(String(init?.body)).digest("base64url"),
+    ].join("\n"),
+  );
+  expect(verify(null, transcript, key, Buffer.from(signature!, "base64url"))).toBe(true);
+  expect(
+    verify(null, Buffer.concat([transcript, Buffer.from("\n")]), key, Buffer.from(signature!, "base64url")),
+  ).toBe(false);
+}
+
+describe("signed body fleet calls", () => {
+  it("registers before half-life renewal, then signs all four routes over exact UTF-8 bytes", async () => {
+    const f = hostedFixture(),
+      signing = generateKeyPairSync("ed25519");
+    const now = f.now + 10_800_000;
+    const fetcher = vi.fn<typeof fetch>(async (url) =>
+      String(url).endsWith("host-credential")
+        ? Response.json({ credential: f.host(now / 1000), expiresAtMs: now + 21_600_000 })
+        : Response.json({}),
+    );
+    const client = new HostedBodyClient(f.bootstrap, { clock: () => now, fetch: fetcher });
+    await expect(client.post("heartbeat", {})).rejects.toThrow("not registered");
+    expect(fetcher).not.toHaveBeenCalled();
+    await client.registerPairingKey(signing.privateKey);
+    expect(new URL(String(fetcher.mock.calls[0]![0])).pathname).toBe("/fleet/v1/body/pairing-key");
+    expect(new Headers(fetcher.mock.calls[0]![1]?.headers).get("x-clankie-body-signature")).toBeNull();
+    expect(fetcher.mock.calls[0]![1]?.headers).toMatchObject({
+      authorization: `Bearer ${f.bootstrap.hostCredential}`,
+    });
+    await client.post("heartbeat", { busy: true, reasons: ["captain-turn"], note: '☃\nquoted"' });
+    await client.registerWakeKey("device", "public-key");
+    await client.revokeWakeKey("device");
+    expect(fetcher.mock.calls.slice(1).map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/fleet/v1/body/host-credential",
+      "/fleet/v1/body/heartbeat",
+      "/fleet/v1/body/wake-keys",
+      "/fleet/v1/body/wake-keys/revoke",
+    ]);
+    expect(fetcher.mock.calls[1]![1]?.body).toBe("{}");
+    for (const [url, init] of fetcher.mock.calls.slice(1)) verifyCall(url, init, signing.publicKey);
+  });
+
+  it("retries signature rejection with fresh timestamp/nonce, then reports a code and stops", async () => {
+    const f = hostedFixture(),
+      signing = generateKeyPairSync("ed25519");
+    let now = f.now;
+    const fetcher = vi.fn<typeof fetch>(async (url) => {
+      now++;
+      return String(url).endsWith("pairing-key")
+        ? Response.json({})
+        : Response.json({ error: "body_signature_invalid" }, { status: 401 });
+    });
+    const client = new HostedBodyClient(f.bootstrap, { clock: () => now, fetch: fetcher });
+    client.onDenied = vi.fn();
+    client.onSignatureInvalid = vi.fn();
+    await client.registerPairingKey(signing.privateKey);
+    await expect(client.post("heartbeat", {})).rejects.toThrow("401");
+    const calls = fetcher.mock.calls.slice(1);
+    expect(calls).toHaveLength(3);
+    for (const [url, init] of calls) verifyCall(url, init, signing.publicKey);
+    expect(
+      new Set(calls.map(([, init]) => new Headers(init?.headers).get("x-clankie-body-nonce"))).size,
+    ).toBe(3);
+    expect(
+      new Set(calls.map(([, init]) => new Headers(init?.headers).get("x-clankie-body-timestamp"))).size,
+    ).toBe(3);
+    expect(new Set(calls.map(([, init]) => init?.body)).size).toBe(1);
+    expect(client.onSignatureInvalid).toHaveBeenCalledExactlyOnceWith();
+    expect(client.onDenied).not.toHaveBeenCalled();
+  });
+
+  it("retries a lost registration response and 5xx using exactly the same token and public key", async () => {
+    const f = hostedFixture(),
+      signing = generateKeyPairSync("ed25519");
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({}));
+    fetcher
+      .mockRejectedValueOnce(new Error("lost response with secret context"))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    const client = new HostedBodyClient(f.bootstrap, { clock: () => f.now, fetch: fetcher });
+    await client.registerPairingKey(signing.privateKey);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(new Set(fetcher.mock.calls.map(([, init]) => init?.body)).size).toBe(1);
+    for (const [, init] of fetcher.mock.calls) {
+      expect(JSON.parse(String(init?.body)).registrationToken).toBe(f.bootstrap.pairingKeyRegistrationToken);
+      expect(new Headers(init?.headers).get("x-clankie-body-signature")).toBeNull();
+    }
+    await client.post("heartbeat", {});
+    verifyCall(...fetcher.mock.calls[3]!, signing.publicKey);
+  });
+
+  it("re-registers a missing fleet key once, retries signed call, and does not park", async () => {
+    const f = hostedFixture(),
+      signing = generateKeyPairSync("ed25519");
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({}));
+    const client = new HostedBodyClient(f.bootstrap, { clock: () => f.now, fetch: fetcher });
+    client.onDenied = vi.fn();
+    await client.registerPairingKey(signing.privateKey);
+    fetcher.mockResolvedValueOnce(Response.json({ error: "pairing_key_required" }, { status: 403 }));
+    await client.post("heartbeat", {});
+    expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/fleet/v1/body/pairing-key",
+      "/fleet/v1/body/heartbeat",
+      "/fleet/v1/body/pairing-key",
+      "/fleet/v1/body/heartbeat",
+    ]);
+    expect(fetcher.mock.calls[0]![1]?.body).toBe(fetcher.mock.calls[2]![1]?.body);
+    expect(new Headers(fetcher.mock.calls[1]![1]?.headers).get("x-clankie-body-nonce")).not.toBe(
+      new Headers(fetcher.mock.calls[3]![1]?.headers).get("x-clankie-body-nonce"),
+    );
+    expect(client.onDenied).not.toHaveBeenCalled();
+  });
+
+  it("does not loop or park when re-registration cannot fix pairing_key_required", async () => {
+    const f = hostedFixture(),
+      signing = generateKeyPairSync("ed25519");
+    const fetcher = vi.fn<typeof fetch>(async (url) =>
+      String(url).endsWith("pairing-key")
+        ? Response.json({})
+        : Response.json({ error: "pairing_key_required" }, { status: 403 }),
+    );
+    const client = new HostedBodyClient(f.bootstrap, { clock: () => f.now, fetch: fetcher });
+    client.onDenied = vi.fn();
+    await client.registerPairingKey(signing.privateKey);
+    await expect(client.post("heartbeat", {})).rejects.toThrow("pairing_key_required");
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(client.onDenied).not.toHaveBeenCalled();
+  });
+
+  it("signs with a replacement key only after its registration succeeds", async () => {
+    const f = hostedFixture(),
+      first = generateKeyPairSync("ed25519"),
+      next = generateKeyPairSync("ed25519");
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({}));
+    const client = new HostedBodyClient(f.bootstrap, { clock: () => f.now, fetch: fetcher });
+    await client.registerPairingKey(first.privateKey);
+    await client.post("heartbeat", {});
+    verifyCall(...fetcher.mock.calls[1]!, first.publicKey);
+    await client.registerPairingKey(next.privateKey);
+    await client.post("heartbeat", {});
+    verifyCall(...fetcher.mock.calls[3]!, next.publicKey);
+  });
+
+  it("does not retry ordinary authentication failures or expose transport error secrets", async () => {
+    const f = hostedFixture(),
+      signing = generateKeyPairSync("ed25519");
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({}));
+    const client = new HostedBodyClient(f.bootstrap, { clock: () => f.now, fetch: fetcher });
+    await client.registerPairingKey(signing.privateKey);
+    fetcher.mockResolvedValueOnce(Response.json({ error: "unauthorized" }, { status: 401 }));
+    await expect(client.post("heartbeat", {})).rejects.toThrow("Fleet request failed (401)");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fetcher.mockRejectedValueOnce(new Error(f.bootstrap.hostCredential));
+    await expect(client.post("heartbeat", {})).rejects.toThrow("Fleet request unavailable");
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 });

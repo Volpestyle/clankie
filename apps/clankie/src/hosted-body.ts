@@ -1,5 +1,6 @@
-import { createHash, createPublicKey, verify, type KeyObject } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
   derivePublicGatewayHostId,
@@ -120,11 +121,14 @@ export class HostedBodyClient {
   readonly keys: ReadonlyMap<string, KeyObject>;
   private credential: { token: string; expiresAt: number; refreshAt: number };
   private renewal: Promise<void> | undefined;
+  private pairingKey: KeyObject | undefined;
+  private pairingRegistration: Promise<void> | undefined;
   private denied = false;
   private readonly fetcher: typeof fetch;
   private readonly clock: () => number;
   private readonly persist: ((token: string, expiresAt: number) => Promise<void>) | undefined;
   onDenied: (() => void) | undefined;
+  onSignatureInvalid: (() => void) | undefined;
 
   constructor(
     bootstrap: HostedBodyBootstrap,
@@ -198,25 +202,120 @@ export class HostedBodyClient {
   }
 
   private async request(path: string, body: unknown, token: string): Promise<Response> {
-    if (this.denied) throw new HostedBodyDeniedError();
-    const response = await this.fetcher(new URL(`/fleet/v1/body/${path}`, this.bootstrap.gatewayOrigin), {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
-      redirect: "error",
-    });
-    if (response.status === 403) {
-      this.reject();
-      throw new HostedBodyDeniedError();
+    const registration = path === "pairing-key";
+    const pathname = `/fleet/v1/body/${path}`;
+    // Serialize once: the digest must cover exactly the bytes fetch sends, including on retry.
+    const bytes = JSON.stringify(body);
+    let registeredAgain = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!registration) await this.pairingRegistration;
+      if (this.denied) throw new HostedBodyDeniedError();
+      const headers: Record<string, string> = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+      if (!registration) {
+        if (this.pairingKey === undefined) throw new Error("Hosted pairing key is not registered");
+        const timestamp = String(this.clock()),
+          nonce = randomBytes(16).toString("base64url");
+        const transcript = [
+          "clankie-body-request-v1",
+          "POST",
+          pathname,
+          this.bootstrap.tenantId,
+          this.bootstrap.installationId,
+          timestamp,
+          nonce,
+          createHash("sha256").update(bytes).digest("base64url"),
+        ].join("\n");
+        headers["x-clankie-body-timestamp"] = timestamp;
+        headers["x-clankie-body-nonce"] = nonce;
+        headers["x-clankie-body-signature"] = sign(null, Buffer.from(transcript), this.pairingKey).toString(
+          "base64url",
+        );
+      }
+      let response: Response;
+      try {
+        response = await this.fetcher(new URL(pathname, this.bootstrap.gatewayOrigin), {
+          method: "POST",
+          headers,
+          body: bytes,
+          signal: AbortSignal.timeout(10_000),
+          redirect: "error",
+        });
+      } catch {
+        if (!registration || attempt === 2) throw new Error("Fleet request unavailable");
+        await delay(250 * 2 ** attempt);
+        continue;
+      }
+      if (response.status === 403) {
+        const error: unknown = await response
+          .clone()
+          .json()
+          .catch(() => undefined);
+        const missingKey = z.object({ error: z.literal("pairing_key_required") }).safeParse(error).success;
+        if (missingKey && !registration) {
+          await response.body?.cancel();
+          if (registeredAgain || this.pairingKey === undefined)
+            throw new Error("Fleet request failed (pairing_key_required)");
+          registeredAgain = true;
+          await this.registerPairingKey(this.pairingKey);
+          attempt--;
+          continue;
+        }
+        this.reject();
+        throw new HostedBodyDeniedError();
+      }
+      if (response.ok) return response;
+      let retry = registration && response.status >= 500;
+      if (!registration && response.status === 401) {
+        const error: unknown = await response
+          .clone()
+          .json()
+          .catch(() => undefined);
+        retry = z.object({ error: z.literal("body_signature_invalid") }).safeParse(error).success;
+      }
+      await response.body?.cancel();
+      if (!registration && retry && attempt === 2) this.onSignatureInvalid?.();
+      if (!retry || attempt === 2) throw new Error(`Fleet request failed (${response.status})`);
+      await delay(250 * 2 ** attempt);
     }
-    if (!response.ok) throw new Error(`Fleet request failed (${response.status})`);
-    return response;
+    throw new Error("Fleet request unavailable");
+  }
+  /** Registration precedes renewal, even when the cached credential is past half-life. */
+  async registerPairingKey(key: KeyObject): Promise<void> {
+    if (key.type !== "private" || key.asymmetricKeyType !== "ed25519")
+      throw new Error("Invalid hosted pairing key type");
+    if (this.pairingRegistration !== undefined) return this.pairingRegistration;
+    const publicKey = createPublicKey(key).export({ format: "jwk" }).x;
+    if (publicKey === undefined) throw new Error("Invalid hosted pairing public key");
+    this.pairingRegistration = this.request(
+      "pairing-key",
+      {
+        installationId: this.bootstrap.installationId,
+        publicKey,
+        ...(this.bootstrap.pairingKeyRegistrationToken === undefined
+          ? {}
+          : { registrationToken: this.bootstrap.pairingKeyRegistrationToken }),
+      },
+      this.credential.token,
+    )
+      .then(() => {
+        this.pairingKey = key;
+      })
+      .finally(() => {
+        this.pairingRegistration = undefined;
+      });
+    return this.pairingRegistration;
   }
   private async renew(): Promise<void> {
     const response = await this.request("host-credential", {}, this.credential.token);
     const next = z
-      .object({ credential: z.string(), expiresAtMs: z.number().int().positive() })
+      .object({
+        credential: z.string(),
+        expiresAtMs: z.number().int().positive(),
+        tenantTelemetryKey: BootstrapSchema.shape.tenantTelemetryKey,
+      })
       .strict()
       .parse(await response.json());
     const credential = this.validateCredential(next.credential, next.expiresAtMs);
@@ -225,7 +324,7 @@ export class HostedBodyClient {
     this.credential = credential;
   }
   async post(
-    path: "wake-keys" | "wake-keys/revoke" | "heartbeat" | "pairing-key",
+    path: "wake-keys" | "wake-keys/revoke" | "heartbeat",
     body: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     const credential = await this.resolveHostToken();

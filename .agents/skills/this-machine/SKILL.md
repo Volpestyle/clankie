@@ -383,3 +383,8 @@ running `/gateway` sign-in or editing the bootstrap. A fleet rejection needs the
 managed tenant's entitlement/provisioning fixed. Unset means a self-hosted body.
 Managed wake-key registration and busy reporting are automatic; see
 `infra/hosted/README.md` under the doctor-reported service root for the contract.
+The volume-backed pairing key registers before those calls or credential
+renewal and signs each request. `pairing_key_required` triggers one
+re-registration attempt. Persistent `body_signature_invalid` after three
+attempts indicates clock skew beyond five minutes or a pairing-key mismatch;
+inspect those conditions without exposing tokens, signatures or private keys.
