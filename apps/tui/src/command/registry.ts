@@ -183,7 +183,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["fleet"],
     lines: [
-      "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|frugal]|clear",
+      "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",
       "                           Read or set how he routes work and how big a swarm he aims for",
     ],
   },

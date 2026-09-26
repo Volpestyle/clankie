@@ -1,6 +1,7 @@
 # ADR 0189: His own Linear activity does not wake him
 
 Status: accepted (James, 2026-09-25, VUH-1362). Amends [ADR 0168](0168-linear-awareness-is-opt-in.md).
+Amended by [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md).
 
 ## Context
 

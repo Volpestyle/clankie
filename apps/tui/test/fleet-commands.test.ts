@@ -65,7 +65,7 @@ describe("clankie fleet", () => {
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
     const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
-    const picks = ["small", "frugal"];
+    const picks = ["small", "efficient"];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
@@ -84,7 +84,11 @@ describe("clankie fleet", () => {
 
     expect(selects).toMatchObject([{ currentValue: "large" }, { currentValue: "optimal" }]);
     expect(prompts).toMatchObject([{ defaultValue: "codex is the workhorse.", multiline: true }]);
-    expect(read().fleet).toEqual({ notes: "claude when it needs skills.", size: "small", models: "frugal" });
+    expect(read().fleet).toEqual({
+      notes: "claude when it needs skills.",
+      size: "small",
+      models: "efficient",
+    });
   });
 });
 
@@ -107,8 +111,8 @@ describe("clankie fleet budget", () => {
   it("sets size and models independently of the notes, and clear restores every default", async () => {
     const { settings, read } = stubStore();
     await runFleetCommand(["set", "--notes", "codex is the workhorse."], { settings });
-    const set = await runFleetCommand(["set", "--size", "solo", "--models", "frugal"], { settings });
-    expect(set.fleet).toEqual({ notes: "codex is the workhorse.", size: "solo", models: "frugal" });
+    const set = await runFleetCommand(["set", "--size", "solo", "--models", "efficient"], { settings });
+    expect(set.fleet).toEqual({ notes: "codex is the workhorse.", size: "solo", models: "efficient" });
     await runFleetCommand(["set", "--models", "optimal"], { settings });
     expect(read().fleet).toEqual({ notes: "codex is the workhorse.", size: "solo", models: "optimal" });
     expect((await runFleetCommand(["clear"], { settings })).fleet).toEqual({
