@@ -40,7 +40,7 @@ it("delivers a saved answer after a restart without running its tools again", as
     turnId: "turn",
     response: "Two houses",
   }));
-  const send = vi
+  const sendReply = vi
     .fn<DiscordTextIngressPort["executeDiscordPresenceAction"]>()
     .mockRejectedValueOnce(new Error("bridge disconnected"))
     .mockImplementation(async (write) => ({
@@ -53,7 +53,11 @@ it("delivers a saved answer after a restart without running its tools again", as
   const delegate: DiscordTextIngressPort = {
     getHealth: async () => ({ profileHash: "profile" }),
     submitDiscordCaptainChannelTurn: submit,
-    executeDiscordPresenceAction: send,
+    // Typing is cosmetic; simulate a disconnect on the reply itself.
+    executeDiscordPresenceAction: async (write) =>
+      write.payload.kind === "typing_start"
+        ? { id: write.idempotencyKey, action: write.action, transportKind: "bot" }
+        : sendReply(write),
   };
   let inbox = new DiscordTextInbox(path, "0");
   try {
@@ -67,12 +71,12 @@ it("delivers a saved answer after a restart without running its tools again", as
     ingress = new DiscordTextIngress(inbox.port(delegate), config);
     expect((await ingress.handle(message)).state).toBe("settled");
     expect(submit).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledTimes(2);
+    expect(sendReply).toHaveBeenCalledTimes(2);
     expect(inbox.pending()).toEqual([]);
     // A repeated gateway delivery must reuse the stored Discord acknowledgement.
     ingress = new DiscordTextIngress(inbox.port(delegate), config);
     expect((await ingress.handle(message)).state).toBe("settled");
-    expect(send).toHaveBeenCalledTimes(2);
+    expect(sendReply).toHaveBeenCalledTimes(2);
   } finally {
     inbox.close();
     rmSync(directory, { recursive: true, force: true });
@@ -188,7 +192,7 @@ it.each([true, false])(
       if (!savedAnswer && request.deliveryId === "100") return { state: "failed", code: "interrupted" };
       return { state: "settled", captainSessionId: "session", turnId: "turn", response: "answer" };
     });
-    const send = vi
+    const sendReply = vi
       .fn<DiscordTextIngressPort["executeDiscordPresenceAction"]>()
       .mockRejectedValueOnce(new Error("offline"))
       .mockImplementation(async (write) => ({
@@ -200,7 +204,11 @@ it.each([true, false])(
     const delegate: DiscordTextIngressPort = {
       getHealth: async () => ({ profileHash: "profile" }),
       submitDiscordCaptainChannelTurn: submit,
-      executeDiscordPresenceAction: send,
+      // Typing is cosmetic; simulate a disconnect on the reply itself.
+      executeDiscordPresenceAction: async (write) =>
+        write.payload.kind === "typing_start"
+          ? { id: write.idempotencyKey, action: write.action, transportKind: "bot" }
+          : sendReply(write),
     };
     try {
       let ingress = new DiscordTextIngress(inbox.port(delegate), config);
