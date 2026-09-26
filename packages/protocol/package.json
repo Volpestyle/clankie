@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./public-gateway": "./src/public-gateway.ts",
-    "./gateway-encryption": "./src/gateway-encryption.ts"
+    "./gateway-encryption": "./src/gateway-encryption.ts",
+    "./wake": "./src/wake.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
