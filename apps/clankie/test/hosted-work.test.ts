@@ -45,4 +45,35 @@ describe("hosted work lifetimes", () => {
     await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(true));
     stop();
   });
+  it("sees a worker stop soon after it stops, not at the next slow sample", async () => {
+    let status = "working";
+    const changed = vi.fn();
+    const stop = watchHostedHerdrWork(changed, {
+      available: () => true,
+      socketPath: "/tmp/clankie-hosted-test-no-socket",
+      read: async () =>
+        JSON.stringify({ result: { agents: [{ pane_id: "p1", agent: "pi", agent_status: status }] } }),
+      activeSampleMs: 20,
+      idleSampleMs: 60_000,
+    });
+    await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(true));
+    status = "idle";
+    // An agent still exists, so the next sample is the short one.
+    await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(false), { timeout: 500 });
+    stop();
+  });
+  it("samples slowly when no agent exists", async () => {
+    const read = vi.fn(async () => JSON.stringify({ result: { agents: [] } }));
+    const stop = watchHostedHerdrWork(vi.fn(), {
+      available: () => true,
+      socketPath: "/tmp/clankie-hosted-test-no-socket",
+      read,
+      activeSampleMs: 5,
+      idleSampleMs: 60_000,
+    });
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(read).toHaveBeenCalledOnce();
+    stop();
+  });
 });
