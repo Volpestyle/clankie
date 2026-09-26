@@ -352,6 +352,130 @@ describe("linear activity ingress", () => {
     }
   });
 
+  describe("a reply to his own post (VUH-1365, inbox event 000000002807)", () => {
+    // Shaped like the delivered event: James asking on a Rivals Agent update the clankie account posted.
+    const ORG = "75f1d1f0-542b-4095-9967-fd7b27093472";
+    const JAMES = "634ad2c8-4992-48b5-b14d-af650cd30030";
+    const CLANKIE = "47376ffa-abe2-4a44-81d0-70cfbf23bd76";
+    const UPDATE = "5087a961-ae50-4504-b06a-8ea9111cf1c5";
+    const own = async () => ({ userId: CLANKIE, workspaceId: ORG });
+    const projectUpdate = {
+      id: UPDATE,
+      body: "**The corpus is close to its target…** Record one test take.",
+      userId: CLANKIE,
+      project: {
+        id: "bff1b565-3f05-4c53-bdba-6b3d10e486a6",
+        name: "Rivals Agent",
+        url: "https://linear.app/vuhlp/project/rivals-agent-762337b8bf64",
+      },
+    };
+    const question = (
+      actor = { id: JAMES, name: "James Volpe", email: OWNER },
+      id = "e899310b-8c4f-406a-a8d4-07e8cb226840",
+    ) =>
+      JSON.stringify({
+        action: "create",
+        type: "Comment",
+        webhookTimestamp: NOW.getTime(),
+        createdAt: NOW.toISOString(),
+        url: "https://linear.app/vuhlp/project/rivals-agent-762337b8bf64/activity#project-update-5087a961&comment-e899310b",
+        organizationId: ORG,
+        actor,
+        data: {
+          id,
+          createdAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+          body: "whats the test take for?\n\nwhats the significance of the chart?",
+          projectUpdateId: UPDATE,
+          userId: actor.id,
+          botActor: null,
+          user: actor,
+          projectUpdate,
+        },
+      });
+    const statusEdit = (actor: { id: string; name: string }) =>
+      JSON.stringify({
+        action: "update",
+        type: "ProjectUpdate",
+        webhookTimestamp: NOW.getTime(),
+        organizationId: ORG,
+        actor,
+        url: "https://linear.app/vuhlp/project/rivals-agent-762337b8bf64/updates#project-update-5087a961",
+        data: { ...projectUpdate, health: "atRisk", projectId: projectUpdate.project.id, user: actor },
+        updatedFrom: { health: "onTrack" },
+      });
+
+    it("names the update, marks the reply and wakes him to route it", async () => {
+      const { post, wakes, inbox, store } = await hookApp(true, undefined, undefined, own);
+      await post(question());
+
+      expect(inbox).toHaveLength(1);
+      expect(inbox[0]!.replyTo).toEqual({ type: "ProjectUpdate", id: UPDATE });
+      expect(wakes).toHaveLength(1);
+      expect(linearActivityHeadline(inbox[0]!)).toBe(
+        "Linear Comment create · Rivals Agent update 5087a961 · reply to your post · James Volpe",
+      );
+      const prompt = linearActivityPrompt(inbox[0]!);
+      expect(prompt).toContain("whoever owns the work");
+      expect(prompt).not.toContain("Routine updates can pass silently");
+      expect(prompt).not.toContain("no obligation");
+      const wake = store.linearWakePrompt()!;
+      expect(wake).toContain("Rivals Agent update 5087a961 · reply to your post");
+      expect(wake).toContain("hand it with its link to whoever owns the work");
+    });
+
+    it("names the worker whose write receipt posted the update", async () => {
+      const writes = new LinearWriteReceipts();
+      const worker = { grantId: "grant", principalId: "rivals-worker", workId: "VUH-1346" };
+      writes.record(
+        {
+          server: "linear",
+          tool: "save_project_update",
+          content: JSON.stringify({ id: UPDATE, updatedAt: NOW.toISOString(), body: projectUpdate.body }),
+          isError: false,
+          account: {
+            provider: "linear",
+            connectionId: "account-1",
+            userId: CLANKIE,
+            workspaceId: ORG,
+            name: "clankie",
+            email: "clankie@example.test",
+            workspaceName: "Vuhlp",
+            verifiedAt: NOW.toISOString(),
+          },
+          worker,
+        },
+        NOW,
+      );
+      // The receipt proves authorship even while his identity is unverified.
+      const { post, inbox } = await hookApp(true, writes, undefined, async () => undefined);
+      await post(question());
+      expect(inbox[0]!.replyTo).toEqual({ type: "ProjectUpdate", id: UPDATE, worker });
+    });
+
+    it("leaves his own comments, status edits and unknown authorship unmarked", async () => {
+      const clankie = { id: CLANKIE, name: "clankie", email: "clankie@example.test" };
+      const { post, wakes, inbox, store } = await hookApp(true, undefined, undefined, own);
+      await post(question(clankie, "11111111-1111-4111-8111-111111111111"));
+      await post(statusEdit(clankie));
+      expect(inbox.map((event) => event.replyTo)).toEqual([undefined, undefined]);
+      expect(wakes).toHaveLength(0);
+      expect(store.linearWakePrompt()).toBeUndefined();
+      expect(linearActivityHeadline(inbox[1]!)).toBe(
+        "Linear ProjectUpdate update · Rivals Agent update 5087a961 · clankie",
+      );
+
+      await post(statusEdit({ id: JAMES, name: "James Volpe" }));
+      expect(inbox[2]!.replyTo).toBeUndefined();
+      expect(store.linearWakePrompt()).not.toContain("reply to your post");
+
+      const unknown = await hookApp(true, undefined, undefined, async () => undefined);
+      await unknown.post(question());
+      expect(unknown.inbox[0]!.replyTo).toBeUndefined();
+      expect(unknown.wakes).toHaveLength(1);
+    });
+  });
+
   it("wakes him once when Linear retries the same delivery", async () => {
     const { post, wakes } = await hookApp();
     const body = commentBody();
@@ -490,6 +614,22 @@ describe("the prompt an activity becomes", () => {
         data: { body: "x", issue: { identifier: "VUH-9", title: "t".repeat(300) } },
       }),
     ).toMatch(/^Linear Comment create · VUH-9 t+…$/u);
+    expect(
+      linearActivityHeadline({
+        ...activity,
+        type: "Comment",
+        action: "create",
+        data: { body: "x", documentContent: { document: { title: "Backlog priorities" } } },
+      }),
+    ).toBe("Linear Comment create · Backlog priorities · James");
+    expect(
+      linearActivityHeadline({
+        ...activity,
+        type: "Document",
+        action: "update",
+        data: { title: "Backlog priorities" },
+      }),
+    ).toBe("Linear Document update · Backlog priorities · James");
   });
 
   it("bounds large activity payloads", () => {
