@@ -931,7 +931,14 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("failed"),
-      reason: z.enum(["unknown_directory", "harness_unavailable", "not_ready", "herdr_unreachable"]),
+      /** `at_capacity`: a hosted body already runs as many hired agents as its plan allows (VUH-1388). */
+      reason: z.enum([
+        "unknown_directory",
+        "harness_unavailable",
+        "not_ready",
+        "herdr_unreachable",
+        "at_capacity",
+      ]),
       detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
     })
     .strict(),

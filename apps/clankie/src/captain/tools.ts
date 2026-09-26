@@ -594,7 +594,8 @@ function hireAgentTool(
       "(pi, claude and codex take --model; effort is pi's --thinking, claude's --effort, codex's " +
       "model_reasoning_effort); omit both for the harness default. Outcomes are typed: unknown_directory, " +
       "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
-      "spelling or never came up), herdr_unreachable. A hired seat is not a Swarm peer: pass brief to hand it " +
+      "spelling or never came up), herdr_unreachable, at_capacity (this body already runs as many hired agents " +
+      "as its plan allows; close or reuse one). A hired seat is not a Swarm peer: pass brief to hand it " +
       "its first prompt through its conversation lane (the result says whether it was delivered), follow up " +
       "with message_seat, and watch it with herdr_watch on the returned seatId.",
     parameters: Type.Object({

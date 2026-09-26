@@ -27,6 +27,34 @@ export function trackHostedConversationRunner(
 }
 
 /**
+ * A hosted body's hire limit (VUH-1388): how many Herdr agents run now against
+ * the plan's limit. Measured on the real image, an idle hired pi worker costs
+ * about 95 MiB, so memory holds dozens; what a plan can actually run at once is
+ * bound by the builds and tests those workers start, so the default is two per
+ * vCPU (Starter 4, Pro 8). A sample Herdr cannot answer means no limit, rather
+ * than a hire refused for a reason nobody can see.
+ */
+export function hostedHireCapacity(options: {
+  readonly limit: number;
+  readonly available: () => boolean;
+  readonly read?: () => Promise<string>;
+}): () => Promise<{ readonly live: number; readonly limit: number } | undefined> {
+  const read =
+    options.read ??
+    (async () =>
+      (await promisify(execFile)("herdr", ["agent", "list"], { timeout: 5000, maxBuffer: 8 * 1024 * 1024 }))
+        .stdout);
+  return async () => {
+    if (!options.available()) return undefined;
+    try {
+      return { live: parseHerdrAgentList(await read()).length, limit: options.limit };
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+/**
  * Watch native agent state even when no app is polling the fleet view.
  *
  * Herdr's change stream fires when panes come and go, not when an agent

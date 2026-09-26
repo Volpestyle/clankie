@@ -152,6 +152,9 @@ environment, command arguments or logs. Its exact fields are:
 }
 ```
 
+The optional `maxHiredWorkers` is the plan's limit on hired agents running at
+once (see "Included model usage"). Absent, the body allows two per vCPU.
+
 The optional `tenantTelemetryKey` is the fleet-derived 32-byte tenant telemetry
 key, encoded as 43 base64url characters. Treat it as a secret with the other
 bootstrap fields.
@@ -319,6 +322,18 @@ Hired pi workers follow the same path ([ADR 0197](../../docs/adr/0197-hosted-wor
   - It refuses any other path, anything but POST, browser requests and calls
     with no customer model selected.
   - Pi never holds the credential, and OAuth refresh stays in the broker.
+
+A hosted body runs at most `maxHiredWorkers` hired agents at once, an optional
+bootstrap field of 1 to 64 that defaults to two per vCPU (Starter 4, Pro 8).
+A hire past it (`hire_agent` or the app's `spawn_seat`) fails as `at_capacity`
+before anything starts, and a move never counts as a new hire.
+
+The limit comes from measurement on the real image
+([VUH-1388](https://linear.app/vuhlp/issue/VUH-1388)). An idle hired pi worker
+costs about 95 MiB, so memory would hold about 60 on Starter and 140 on Pro.
+The real bound is the builds and tests working agents start, which take far
+more memory and CPU than pi itself, and the model proxy's four in-flight calls
+per tenant.
 
 `POST /v1/hosted/pair-offer` accepts only protocol v2:
 `{ version: 2, pairTicket, browserPublicKey, nonce }`. The body verifies the

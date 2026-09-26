@@ -548,6 +548,14 @@ export type HerdrSeatSpawnResult =
   | Exclude<OperatorSeatSpawnResult, { readonly outcome: "spawned" }>
   | { readonly outcome: "spawned"; readonly seat: ObservedFleetSeat };
 
+type HerdrSeatSpawnFailure = Extract<HerdrSeatSpawnResult, { readonly outcome: "failed" }>;
+/** A move re-hires an existing seat, so it is never refused for capacity. */
+export type HerdrSeatMoveResult =
+  | Extract<HerdrSeatSpawnResult, { readonly outcome: "spawned" }>
+  | (Omit<HerdrSeatSpawnFailure, "reason"> & {
+      readonly reason: Exclude<HerdrSeatSpawnFailure["reason"], "at_capacity">;
+    });
+
 /** Persisted, event-driven one-shot watches that wake an operator conversation when an agent settles. */
 /**
  * How a hosted body's pi workers reach a model (VUH-1373). On included usage
@@ -562,6 +570,9 @@ export interface PiSeatModel {
 
 export class HerdrWatchStore implements HerdrWatchPort {
   private readonly piSeatModel: (() => Promise<PiSeatModel | undefined>) | undefined;
+  private readonly hireCapacity:
+    | (() => Promise<{ readonly live: number; readonly limit: number } | undefined>)
+    | undefined;
   private readonly path: string;
   private readonly runner: HerdrWatchRunner;
   private readonly controllers = new Map<string, AbortController>();
@@ -591,10 +602,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly seatTranscriptTailMs?: number;
       /** A hosted body's model for pi seats (VUH-1373); absent, pi uses its own configuration. */
       readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
+      /**
+       * How many hired agents run now and how many this body allows (VUH-1388).
+       * Absent, or undefined when asked, there is no limit.
+       */
+      readonly hireCapacity?: () => Promise<{ readonly live: number; readonly limit: number } | undefined>;
     } = {},
   ) {
     this.path = path;
     this.piSeatModel = options.piSeatModel;
+    this.hireCapacity = options.hireCapacity;
     this.runner = options.runner ?? createHerdrWatchRunner(options.available);
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
@@ -801,6 +818,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.closed || createTab === undefined || startAgent === undefined) {
       return { outcome: "failed", reason: "herdr_unreachable" };
     }
+    // A fresh hire past the body's limit is refused before anything starts. A
+    // move re-hires a seat it has just closed under the same name, so it is
+    // not a new agent and is never refused for capacity.
+    if (subjectOverride === undefined) {
+      const capacity = await this.hireCapacity?.().catch(() => undefined);
+      if (capacity !== undefined && capacity.live >= capacity.limit) {
+        return {
+          outcome: "failed",
+          reason: "at_capacity",
+          detail: `${String(capacity.live)} of ${String(capacity.limit)} hired agents are running on this Clankie; close one before hiring another.`,
+        };
+      }
+    }
     // The captain runs on the machine herdr does, so this is the real check —
     // and a missing path is the one failure worth naming precisely, because it
     // is the one the operator can fix from the compose page.
@@ -974,7 +1004,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     readonly harness: SpawnOperatorSeat["harness"];
     readonly title: SpawnOperatorSeat["title"];
     readonly workingDirectory: string;
-  }): Promise<HerdrSeatSpawnResult> {
+  }): Promise<HerdrSeatMoveResult> {
     if (this.closed) return { outcome: "failed", reason: "herdr_unreachable" };
     if (!existsSync(input.workingDirectory)) {
       return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
@@ -983,7 +1013,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return { outcome: "failed", reason: "herdr_unreachable", detail: input.seatId };
     }
     this.untrackSeat(input.seatId);
-    return this.spawnSeat(
+    const result = await this.spawnSeat(
       {
         schemaVersion: 1,
         harness: input.harness,
@@ -992,6 +1022,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
       },
       input.subject,
     );
+    // A move re-hires under the seat's own name, which is never counted against
+    // capacity; the guard only keeps the result within the move contract.
+    if (result.outcome === "spawned") return result;
+    const { reason, ...rest } = result;
+    return { ...rest, reason: reason === "at_capacity" ? "herdr_unreachable" : reason };
   }
 
   public trackSeat(seatId: string, mode: "status" | "head" = "status"): void {

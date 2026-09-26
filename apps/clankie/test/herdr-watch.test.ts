@@ -1548,6 +1548,77 @@ describe("hiring a seat", () => {
     store.close();
   });
 
+  describe("a hosted body's hire limit (VUH-1388)", () => {
+    function capacityStore(capacity: () => Promise<{ live: number; limit: number } | undefined>) {
+      const createTab = vi.fn(() => Promise.resolve("w1C:p9"));
+      const startAgent = vi.fn(() => Promise.resolve());
+      const piHired: HerdrAgentSnapshot = {
+        ...hired,
+        agent: "pi",
+        session: { source: "herdr:pi", kind: "path", value: "/state/home/.pi/agent/sessions/one.jsonl" },
+      };
+      const runner: HerdrWatchRunner = {
+        get: vi.fn(() => Promise.resolve(piHired)),
+        resolveTerminal: vi.fn(() => Promise.resolve(piHired)),
+        wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+        createTab,
+        startAgent,
+        closePane: vi.fn(() => Promise.resolve()),
+        installPiIntegration: vi.fn(() => Promise.resolve()),
+      };
+      return { createTab, startAgent, runner, hireCapacity: vi.fn(capacity) };
+    }
+    const hire = {
+      schemaVersion: 1 as const,
+      harness: "pi" as const,
+      title: "Worker",
+      workingDirectory: tmpdir(),
+    };
+
+    it("refuses a hire past the limit, typed, before anything starts", async () => {
+      const { createTab, runner, hireCapacity } = capacityStore(async () => ({ live: 4, limit: 4 }));
+      const store = new HerdrWatchStore(await storePath(), { runner, hireCapacity });
+      const result = await store.spawnSeat(hire);
+      store.close();
+      expect(result).toEqual({
+        outcome: "failed",
+        reason: "at_capacity",
+        detail: "4 of 4 hired agents are running on this Clankie; close one before hiring another.",
+      });
+      expect(createTab).not.toHaveBeenCalled();
+    });
+
+    it("hires below the limit, and when the count is unknown or fails", async () => {
+      for (const capacity of [
+        async () => ({ live: 3, limit: 4 }),
+        async () => undefined,
+        async () => {
+          throw new Error("herdr down");
+        },
+      ]) {
+        const { runner, hireCapacity } = capacityStore(capacity);
+        const store = new HerdrWatchStore(await storePath(), { runner, hireCapacity });
+        expect(await store.spawnSeat(hire)).toMatchObject({ outcome: "spawned" });
+        store.close();
+      }
+    });
+
+    it("never refuses a move for capacity: it re-hires a seat it just closed", async () => {
+      const { runner, hireCapacity } = capacityStore(async () => ({ live: 4, limit: 4 }));
+      const store = new HerdrWatchStore(await storePath(), { runner, hireCapacity });
+      const moved = await store.moveSeat({
+        seatId: "term_1",
+        subject: "worker-1a2b",
+        harness: "pi",
+        title: "Worker",
+        workingDirectory: tmpdir(),
+      });
+      store.close();
+      expect(moved).toMatchObject({ outcome: "spawned" });
+      expect(hireCapacity).not.toHaveBeenCalled();
+    });
+  });
+
   describe("a hosted body's pi workers (VUH-1373)", () => {
     const included = {
       model: "clankie/default",

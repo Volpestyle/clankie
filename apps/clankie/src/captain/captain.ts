@@ -771,6 +771,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     ...(deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable }),
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
+    ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
   });
   const evaluator = new Evaluator(
     join(options.stateDir, "evaluator"),

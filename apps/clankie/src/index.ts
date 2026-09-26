@@ -3,7 +3,7 @@ import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
-import { watchHostedHerdrWork } from "./hosted-work.ts";
+import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
 import { SwarmHost } from "@clankie/swarm";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
@@ -82,6 +82,7 @@ import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
   applyHostedModelPolicy,
   configureHostedModels,
+  hostedWorkerLimit,
   readHostedBodyBootstrap,
   createHostedBodyClient,
   HostedBodyDeniedError,
@@ -545,6 +546,15 @@ const captain = createCaptain(
                 return target === undefined ? undefined : customerSeatModel(target, loopback);
               },
             }),
+        }),
+    // A hosted body runs at most its plan's number of hired agents (VUH-1388).
+    ...(hostedBootstrap === undefined
+      ? {}
+      : {
+          hireCapacity: hostedHireCapacity({
+            limit: hostedWorkerLimit(hostedBootstrap),
+            available: herdr.available,
+          }),
         }),
     ...(hostedHeartbeat === undefined ? {} : { onWorkStarted: (reason) => hostedHeartbeat.begin(reason) }),
     ...(bodyTelemetry === undefined

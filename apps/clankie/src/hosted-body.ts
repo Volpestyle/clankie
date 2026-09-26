@@ -1,5 +1,6 @@
 import { createHash, createPublicKey, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
@@ -39,6 +40,8 @@ const BootstrapSchema = z
       .string()
       .regex(/^[A-Za-z0-9_-]{43}$/u)
       .optional(),
+    /** The plan's limit on hired agents running at once (VUH-1388); absent, two per vCPU. */
+    maxHiredWorkers: z.number().int().min(1).max(64).optional(),
     /**
      * The plan's task-based model routing. Absent leaves the body's own
      * routing untouched; present, it is written over the body's routing
@@ -185,6 +188,17 @@ export async function applyHostedModelPolicy(
   }
   await applyHostedModelRouting(bootstrap, env);
   return "included";
+}
+
+/**
+ * How many hired agents a hosted body runs at once (VUH-1388): the plan's
+ * limit from the bootstrap, else two per vCPU (Starter 4, Pro 8).
+ */
+export function hostedWorkerLimit(
+  bootstrap: Pick<HostedBodyBootstrap, "maxHiredWorkers">,
+  cpus: number = availableParallelism(),
+): number {
+  return bootstrap.maxHiredWorkers ?? Math.max(1, 2 * cpus);
 }
 
 /** Unset is a self-hosted body. Invalid managed configuration fails startup closed. */

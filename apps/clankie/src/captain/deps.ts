@@ -49,6 +49,8 @@ export interface CaptainDeps {
   readonly herdrAvailable?: () => boolean;
   /** A hosted body's model for the pi workers it hires (VUH-1373); absent, pi keeps its own. */
   readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
+  /** A hosted body's hire limit (VUH-1388); absent, hires are not counted. */
+  readonly hireCapacity?: () => Promise<{ readonly live: number; readonly limit: number } | undefined>;
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
   readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */

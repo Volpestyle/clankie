@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { trackHostedConversationRunner, watchHostedHerdrWork } from "../src/hosted-work.ts";
+import {
+  hostedHireCapacity,
+  trackHostedConversationRunner,
+  watchHostedHerdrWork,
+} from "../src/hosted-work.ts";
 import type { ConversationTurnContext } from "../src/captain/conversations.ts";
 describe("hosted work lifetimes", () => {
   it.each([
@@ -75,5 +79,35 @@ describe("hosted work lifetimes", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(read).toHaveBeenCalledOnce();
     stop();
+  });
+  it("counts every live Herdr agent against the plan's limit, and claims nothing it cannot see", async () => {
+    const agents = (n: number) =>
+      JSON.stringify({
+        result: {
+          agents: Array.from({ length: n }, (_, i) => ({
+            pane_id: `p${String(i)}`,
+            agent: "pi",
+            agent_status: "idle",
+          })),
+        },
+      });
+    expect(
+      await hostedHireCapacity({ limit: 4, available: () => true, read: async () => agents(3) })(),
+    ).toEqual({
+      live: 3,
+      limit: 4,
+    });
+    expect(
+      await hostedHireCapacity({ limit: 4, available: () => false, read: async () => agents(9) })(),
+    ).toBeUndefined();
+    expect(
+      await hostedHireCapacity({
+        limit: 4,
+        available: () => true,
+        read: async () => {
+          throw new Error("no socket");
+        },
+      })(),
+    ).toBeUndefined();
   });
 });
