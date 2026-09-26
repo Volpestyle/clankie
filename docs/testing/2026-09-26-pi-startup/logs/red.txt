@@ -1,0 +1,39 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+ ❯ apps/clankie/test/herdr-startup.test.ts (3 tests | 1 failed) 5440ms
+   × lets Herdr report a pi session after the short command deadline, without restarting the agent 5263ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/herdr-startup.test.ts > lets Herdr report a pi session after the short command deadline, without restarting the agent
+AssertionError: expected { outcome: 'failed', …(2) } to match object { outcome: 'spawned', seat: { …(2) } }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "outcome": "spawned",
+-   "seat": {
+-     "harness": "pi",
+-     "seatId": "term_pi",
+-   },
++   "outcome": "failed",
+  }
+
+ ❯ apps/clankie/test/herdr-startup.test.ts:41:20
+     39|   try {
+     40|     const result = await fake.store.spawnSeat({ schemaVersion: 1, harn…
+     41|     expect(result).toMatchObject({ outcome: "spawned", seat: { harness…
+       |                    ^
+     42|     const calls = await fake.calls();
+     43|     const starts = calls.filter((args) => args[0] === "agent" && args[…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  14:58:46
+   Duration  5.72s (transform 114ms, setup 0ms, import 194ms, tests 5.44s, environment 0ms)

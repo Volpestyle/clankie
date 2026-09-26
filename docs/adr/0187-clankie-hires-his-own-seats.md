@@ -73,3 +73,18 @@ conversation, was reachable from the operator's surfaces and not from his tools.
 - `herdr_watch` accepts the seatId a hire returns.
 
 Swarm stays the path for enrolled peers; these reach only seats he can see.
+
+## Startup readiness (VUH-1373)
+
+A hire gives `herdr agent start` its explicit 30-second readiness deadline and
+allows 35 seconds for the CLI process to return. Ordinary Herdr queries retain
+their 5-second deadline. Applying that shorter query timeout to startup killed
+the CLI while pi was still loading under CPU contention, then closed a healthy
+worker's pane before its session report arrived.
+
+After Herdr reports readiness, the existing bounded 10-second poll still requires
+a durable session report before publishing the seat. This is the integration's
+reported identity, not the existence of a transcript file: pi writes the file
+when its first turn starts. A startup timeout or missing session remains the
+protocol's typed `failed` / `not_ready` outcome with diagnostic detail, and closes
+only the pane created by that hire. There is no second launch or blind retry.

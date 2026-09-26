@@ -1,0 +1,6 @@
+$ node scripts/check-doc-links.mjs && pnpm docs:public:check
+Checked 382 markdown files; local links resolve.
+$ pnpm --filter @clankie/docs check
+$ node scripts/check.mjs
+Built public docs: 6 pages, 26 network routes, 99 API operations, 47 slash commands.
+Checked 6 public docs pages; links and anchors resolve.

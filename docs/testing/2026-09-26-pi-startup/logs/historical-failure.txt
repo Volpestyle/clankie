@@ -1,0 +1,2 @@
+Excerpt from /tmp/vuh1373-smoke.log (original hosted smoke failure):
+AssertionError [ERR_ASSERTION]: "{\n  \"outcome\": \"failed\",\n  \"reason\": \"not_ready\",\n  \"detail\": \"Command failed: herdr agent start pi-proof-d0d6 --kind pi --pane w1:p3\\n\"\n}"

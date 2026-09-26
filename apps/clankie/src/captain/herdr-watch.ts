@@ -183,6 +183,8 @@ const RETRY_ADMISSION_MS = 5_000;
 const HERDR_COMMAND_TIMEOUT_MS = 5_000;
 const SEAT_REPLY_READ_LINES = 240;
 const SEAT_TRANSCRIPT_TAIL_MS = 1_000;
+// Harness startup includes loading extensions; it is not a short Herdr query.
+const SPAWN_READY_WAIT_MS = 30_000;
 const SPAWN_SESSION_WAIT_MS = 10_000;
 const SPAWN_SESSION_POLL_MS = 250;
 const TERMINAL_ID = /^term_[0-9a-f]+$/u;
@@ -281,14 +283,18 @@ function runClaude(args: readonly string[]): Promise<ClaudeMcpResult> {
   });
 }
 
-function execHerdr(args: readonly string[], signal?: AbortSignal): Promise<string> {
+function execHerdr(
+  args: readonly string[],
+  signal?: AbortSignal,
+  timeoutMs = HERDR_COMMAND_TIMEOUT_MS,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       "herdr",
       [...args],
       {
         maxBuffer: 1024 * 1024,
-        ...(signal === undefined ? { timeout: HERDR_COMMAND_TIMEOUT_MS } : { signal }),
+        ...(signal === undefined ? { timeout: timeoutMs } : { signal }),
       },
       (error, stdout, stderr) => {
         if (error !== null) {
@@ -296,7 +302,13 @@ function execHerdr(args: readonly string[], signal?: AbortSignal): Promise<strin
             reject(error);
             return;
           }
-          reject(new Error(String(stderr).trim() || error.message));
+          reject(
+            new Error(
+              error.killed
+                ? `Herdr ${args.slice(0, 2).join(" ")} timed out after ${timeoutMs} ms`
+                : String(stderr).trim() || error.message,
+            ),
+          );
           return;
         }
         resolve(String(stdout));
@@ -330,10 +342,10 @@ function runExecFile(
 }
 
 export function createHerdrWatchRunner(available?: () => boolean): HerdrWatchRunner {
-  const runHerdr = (args: readonly string[], signal?: AbortSignal): Promise<string> =>
+  const runHerdr = (args: readonly string[], signal?: AbortSignal, timeoutMs?: number): Promise<string> =>
     available?.() === false
       ? Promise.reject(new Error("Herdr execution is unavailable"))
-      : execHerdr(args, signal);
+      : execHerdr(args, signal, timeoutMs);
   return {
     get: async (target) => parseHerdrAgentResult(await runHerdr(["agent", "get", target])),
     resolveTerminal: async (terminalId) =>
@@ -444,16 +456,23 @@ export function createHerdrWatchRunner(available?: () => boolean): HerdrWatchRun
     startAgent: ({ name, kind, paneId, args }) =>
       // Returns only once herdr has detected the harness and considers it ready
       // for input, so a resolved call means the seat can actually be messaged.
-      runHerdr([
-        "agent",
-        "start",
-        name,
-        "--kind",
-        kind,
-        "--pane",
-        paneId,
-        ...(args === undefined || args.length === 0 ? [] : ["--", ...args]),
-      ]).then(() => undefined),
+      runHerdr(
+        [
+          "agent",
+          "start",
+          name,
+          "--kind",
+          kind,
+          "--pane",
+          paneId,
+          "--timeout",
+          String(SPAWN_READY_WAIT_MS),
+          ...(args === undefined || args.length === 0 ? [] : ["--", ...args]),
+        ],
+        undefined,
+        // Let Herdr return its typed startup failure before the process watchdog fires.
+        SPAWN_READY_WAIT_MS + HERDR_COMMAND_TIMEOUT_MS,
+      ).then(() => undefined),
   };
 }
 

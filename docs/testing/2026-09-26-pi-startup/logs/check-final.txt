@@ -1,0 +1,12 @@
+$ pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+apps/tui/src/face/clankie-autocomplete.ts (0ms)
+docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md (84ms)
+packages/model-provider/src/pi.ts (0ms)
+
+Format issues found in above 3 files. Run without `--check` to fix.
+Finished in 1105ms on 1143 files using 18 threads.
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.
