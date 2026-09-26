@@ -6,10 +6,10 @@
   "skillsBase": "2ee8c52135ff9f7817aa3b4013f0c367fb7332ef",
   "artifacts": {
     "volpestyle-lead-skills-0.1.0.tgz": "c9262c5f4e14d7b179bfe96855bacef8aea38356bccd6f6092e7875a3cd00edf",
-    "swarm-mcp-2.0.0-rc.1.tgz": "bb22a38ea6ba3a944f043eadef7ab879a96bcf0e060c40b810a049078c0f8d9a"
+    "swarm-mcp-2.0.0-rc.1.tgz": "b276e0346038a7912718b3aab9f89ffcc99dd60b207138ee26dad65eef55f8b6"
   },
-  "patchSha256": "8e298b59e401c1fa40b672a2cbc9740e2d898dba8c8bd6c36a9b933780d6397b",
-  "swarmRevision": "66377564a5f2f923322c2b94ed8e4c4d586e0d5c",
+  "patchSha256": "918c0689661378bb0101572a251a955008cad8cfd8b085a9f461b41d08e46d87",
+  "swarmRevision": "dff68e3a8e42e8b1cb479b9c10722a1b0f2cacfe",
   "swarmIncludes": [
     "bf910a1: retire legacy Swarm; coordinator is sole API",
     "e93dc70: remove legacy migration/cutover tooling; add offline maintenance"

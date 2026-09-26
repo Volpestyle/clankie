@@ -8,7 +8,7 @@ is not implemented by this ADR.
 
 The readiness, independent MCP-health and stale-progress subset is implemented
 upstream in `dff68e3`, with [regression evidence and rollout limits](../testing/2026-09-26-interactive-swarm-workers/stream-readiness.md).
-It is pending reviewed re-vendoring and a drained restart window. This does not
+It was re-vendored and verified in a drained runtime upgrade on 2026-09-26. This does not
 implement interactive workers, consent, model/effort selection, an install lock
 or immutable runtime generations. Existing-peer and OpenCode protocols are unchanged.
 
