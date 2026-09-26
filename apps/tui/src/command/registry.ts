@@ -171,7 +171,10 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["fleet"],
-    lines: ["  fleet status|set --notes TEXT|clear  Read or set how he routes work across his agents"],
+    lines: [
+      "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|frugal]|clear",
+      "                           Read or set how he routes work and how big a swarm he aims for",
+    ],
   },
   {
     nouns: ["herdr"],

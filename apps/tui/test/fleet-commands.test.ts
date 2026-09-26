@@ -61,12 +61,18 @@ describe("clankie fleet", () => {
   it("opens the editor on what is already configured and saves what comes back", async () => {
     const { settings, read } = stubStore({
       ...emptySettings(),
-      fleet: { notes: "codex is the workhorse." },
+      fleet: { notes: "codex is the workhorse.", size: "large", models: "optimal" },
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
+    const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
+    const picks = ["small", "frugal"];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
+      readSelect: async (options: Parameters<SetupFlow["readSelect"]>[0]) => {
+        selects.push(options);
+        return picks.shift();
+      },
       readText: async (options: Parameters<SetupFlow["readText"]>[0]) => {
         prompts.push(options);
         return "  claude when it needs skills.  ";
@@ -76,7 +82,55 @@ describe("clankie fleet", () => {
 
     await buildFleetCommands({ settings })[0]!.run("", { setupFlow: flow } as unknown as ClankieFaceShell);
 
+    expect(selects).toMatchObject([{ currentValue: "large" }, { currentValue: "optimal" }]);
     expect(prompts).toMatchObject([{ defaultValue: "codex is the workhorse.", multiline: true }]);
-    expect(read().fleet.notes).toBe("claude when it needs skills.");
+    expect(read().fleet).toEqual({ notes: "claude when it needs skills.", size: "small", models: "frugal" });
+  });
+});
+
+/**
+ * The budget is two targets the lead sizes toward, never a cap: the contract is
+ * that each flag round-trips alone, leaves the others as they were, refuses a
+ * value it cannot store, and that `clear` puts the no-limit default back.
+ */
+describe("clankie fleet budget", () => {
+  it("defaults to maximum bandwidth with the strongest models", async () => {
+    const { settings } = stubStore();
+    const status = await runFleetCommand(["status"], { settings });
+    expect(status.fleet).toMatchObject({ size: "max", models: "optimal" });
+    const lines = formatFleetLines(status.fleet).join("\n");
+    expect(lines).toContain("swarm size: max");
+    expect(lines).toContain("No ceiling");
+    expect(lines).toContain("models: optimal");
+  });
+
+  it("sets size and models independently of the notes, and clear restores every default", async () => {
+    const { settings, read } = stubStore();
+    await runFleetCommand(["set", "--notes", "codex is the workhorse."], { settings });
+    const set = await runFleetCommand(["set", "--size", "solo", "--models", "frugal"], { settings });
+    expect(set.fleet).toEqual({ notes: "codex is the workhorse.", size: "solo", models: "frugal" });
+    await runFleetCommand(["set", "--models", "optimal"], { settings });
+    expect(read().fleet).toEqual({ notes: "codex is the workhorse.", size: "solo", models: "optimal" });
+    expect((await runFleetCommand(["clear"], { settings })).fleet).toEqual({
+      notes: "",
+      size: "max",
+      models: "optimal",
+    });
+  });
+
+  it("refuses unknown values, repeated flags and a flag without a value", async () => {
+    const { settings, read } = stubStore();
+    await expect(runFleetCommand(["set", "--size", "huge"], { settings })).rejects.toThrow(
+      /--size must be one of/u,
+    );
+    await expect(runFleetCommand(["set", "--models", "cheap"], { settings })).rejects.toThrow(
+      /--models must be one of/u,
+    );
+    await expect(runFleetCommand(["set", "--size", "max", "--size", "solo"], { settings })).rejects.toThrow(
+      /Usage/u,
+    );
+    await expect(runFleetCommand(["set", "--size"], { settings })).rejects.toThrow(/Usage/u);
+    await expect(runFleetCommand(["set"], { settings })).rejects.toThrow(/Usage/u);
+    expect(read().fleet).toEqual({ notes: "", size: "max", models: "optimal" });
   });
 });
