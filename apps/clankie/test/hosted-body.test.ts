@@ -515,6 +515,11 @@ describe("included model and customer model paths (VUH-1371)", () => {
         npm: "@ai-sdk/openai",
         options: { baseURL: "http://127.0.0.1:4319/v1" },
       });
+      // The proxy bounds output per plan at 32,768 (VUH-1391); the body must not ask for less,
+      // or long code answers are cut off mid-file at the old 8,192.
+      for (const model of Object.values(config.provider?.clankie?.models ?? {})) {
+        expect(model).toMatchObject({ limit: { output: 32_768 } });
+      }
       expect(Object.keys(config.provider?.clankie?.models ?? {}).sort()).toEqual([
         "default",
         "escalation",

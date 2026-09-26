@@ -88,6 +88,8 @@ async function harness(current: () => RoutedSelection | undefined) {
     startRun: async () =>
       (await emit("before_agent_start", { systemPrompt: "base" })) as { systemPrompt: string } | undefined,
     modelCall: async () => await emit("turn_end"),
+    stoppedAt: async (stopReason: string) =>
+      await emit("message_end", { message: { role: "assistant", stopReason } }),
     failedCall: async (errorMessage: string) =>
       await emit("message_end", { message: { role: "assistant", stopReason: "error", errorMessage } }),
     askToEscalate: async () => {
@@ -147,6 +149,15 @@ describe("captainRoutingExtension", () => {
     expect(pi.active()).not.toContain(ESCALATE_TOOL_NAME);
     for (let call = 0; call < 20; call += 1) await pi.modelCall();
     expect(pi.setModel).not.toHaveBeenCalled();
+  });
+
+  it("never escalates because an answer ran out of output room (VUH-1391)", async () => {
+    for (const route of [routineRoute({ escalate: true }), ESCALATING_WORK_ROUTE]) {
+      const pi = await harness(() => route);
+      await pi.startRun();
+      await pi.stoppedAt("length");
+      expect(pi.setModel).not.toHaveBeenCalled();
+    }
   });
 
   it("lets a work turn escalate only when he asks, never on a long run or a provider error", async () => {

@@ -92,7 +92,9 @@ const HOSTED_ALIAS_MODEL = {
   attachment: true,
   temperature: false,
   modalities: { input: ["text", "image"], output: ["text"] },
-  limit: { context: 272_000, output: 8_192 },
+  // The proxy bounds output per plan at 32,768 (VUH-1391); Pi sends this as the
+  // request's output cap, so it must match or long answers stop at the old 8,192.
+  limit: { context: 272_000, output: 32_768 },
   reasoning_options: [{ type: "effort", values: ["none", "low", "medium", "high", "xhigh", "max"] }],
 };
 

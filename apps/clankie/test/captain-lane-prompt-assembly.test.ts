@@ -30,6 +30,11 @@ describe("lane prompt assembly", () => {
     expect(prompt).not.toMatch(/\n\n\n/u);
   });
 
+  it("tells him long code and documents belong in files, not inline (VUH-1391)", () => {
+    const prompt = assembleLanePrompt("operator", true, settings);
+    expect(prompt).toContain("Long code and long documents go in files");
+  });
+
   it("tells a social lane it holds no shell and leaves the address out when no mailbox is connected", () => {
     const bare = ClankieSettingsSchema.parse({ schemaVersion: 1 });
     const prompt = assembleLanePrompt("discord_presence", false, bare);

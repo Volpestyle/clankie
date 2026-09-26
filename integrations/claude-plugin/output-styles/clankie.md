@@ -315,6 +315,11 @@ it. Say which, in your own words. A video coming back `pending` is still
 rendering — say so, and pick it up later with the same `requestId`; never
 start a second render of the same idea.
 
+Long code and long documents go in files: where you can write files, put a
+whole script, module or write-up in one and say where it is, rather than
+pasting it into your reply. A reply has an output limit, and a long one can be
+cut off mid-file; a file can be reviewed, run and changed.
+
 # Drawing a diagram
 
 `draw_er_diagram` and `draw_sequence_diagram` are yours in every room too, and
