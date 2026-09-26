@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./public-gateway": "./src/public-gateway.ts",
     "./gateway-encryption": "./src/gateway-encryption.ts",
-    "./wake": "./src/wake.ts"
+    "./wake": "./src/wake.ts",
+    "./app-telemetry": "./src/app-telemetry.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
