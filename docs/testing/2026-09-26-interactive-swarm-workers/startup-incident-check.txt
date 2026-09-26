@@ -1,0 +1,10 @@
+$ pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+docs/testing/2026-09-26-pi-startup/flows/prove.mjs (0ms)
+
+Format issues found in above 1 files. Run without `--check` to fix.
+Finished in 716ms on 1140 files using 18 threads.
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.

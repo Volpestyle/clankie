@@ -153,6 +153,97 @@ path before declaring unattended interactive dispatch supported. If readiness is
 uncertain, retain the receipt and reconcile the same worker rather than launch
 another one. Organization policy failures are explicit unsupported states.
 
+### Dispatch success requires worker readiness and ownership
+
+The [startup incident evidence](../testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
+shows four new workers with no Swarm tool calls, despite reported binding. The
+current provider accepts a persisted `started` flag plus `available`/`busy` session
+observation; `DispatchTransaction.bind` then claims the task on the worker's
+behalf. That sequence proves neither MCP usability nor worker acceptance.
+
+For both stream and interactive dispatch, **do not return `bound` or successful
+`started` until the worker's own authenticated readiness round-trip succeeds and
+its task claim is verified**. Require the actual harness-to-MCP path, compatibility
+with the selected owner build, and a receipt fenced to intent, provisioning token,
+actor, native session, enrollment generation, task, attempt and fence. Interactive
+mode additionally requires its channel round-trip. The wrapper's independent
+coordinator client must not manufacture this proof from its own connectivity.
+
+Represent physical launch separately as `starting`/`awaiting_worker_ready`;
+retain the existing launch receipt as physical evidence, never success evidence.
+Use a bounded startup challenge/control exchange before admitting ordinary task
+mail. Refactor the current coordinator-side bind/claim sequence into a fenced
+worker-readiness/claim commit, so waiting for readiness does not depend on an
+assignment delivered only after `bound`. Commit claim and ready binding atomically
+or reconcile their persisted intermediate state; do not claim a second attempt
+on a lost response. Returning success requires reading back that same claim.
+
+Return typed startup failures such as `worker_mcp_disconnected`,
+`coordinator_version_mismatch`, `worker_readiness_timeout`, or
+`worker_claim_failed`, with retry/reconciliation guidance and retained intent,
+launch and task identifiers. A timeout does not prove the process stopped. Keep
+uncertain launch/capacity reservations until positively reconciled; do not auto
+redispatch, report cancellation success, or release ownership from a pane close.
+Extend the MCP output schema, CLI and TUI together so the typed failure reaches
+the lead without being reduced to a successful pane launch.
+
+### Independent worker health and lead progress alarms
+
+The supervisor needs an authenticated health channel from the worker MCP process,
+separate from model-written text: initial registration, disconnect/exit reason,
+and bounded liveness probes. Claude owns the MCP child today, so the wrapper
+cannot simply assume it receives that child's process-exit event. Add an explicit
+local bridge/supervision seam and retain sanitized child stderr/exit metadata.
+For interactive workers, a long model/tool turn must not prevent this health
+reporting. Successful wrapper IPC is not successful MCP health.
+
+On confirmed MCP loss, the wrapper reports **`blocked:mcp_disconnected` through
+its own still-working coordinator client**, fenced to the current launch/session
+and task attempt. Stop new inbox admission/redelivery into the broken harness;
+leave messages unacknowledged. Do not mark a Claude `result` as available while
+MCP health is failed or unknown. Preserve task fencing and bounded recovery;
+health failure is not task completion or permission for another worker to act.
+If wrapper IPC also fails, retain a private local diagnostic and let coordinator
+liveness expiry expose lost supervision; never fake a delivered blocker.
+
+Persist and deliver a deduplicated blocker/health event to the requester and lead
+status surfaces independently of the worker's MCP. Add a coordinator-side stale
+progress alarm using the existing task attempt's `progress_at` and
+`progress_timeout_ms` deadline, not an undifferentiated session `updatedAt`.
+Heartbeat renewal, token streaming and assignment redelivery must not reset
+meaningful progress. Alarm thresholds should be owner-visible/configurable and
+available via API, CLI and TUI. Distinguish slow work from proven disconnect,
+include last progress/health/renewal times and attempt identity, and resolve the
+alarm only on real progress, recovery or terminal outcome. Coordinator status
+must retain the alarm even when the lead's own channel is unavailable. Existing
+progress/lease expiry remains authoritative; the alarm is not automatic reassignment.
+
+### Runtime upgrades must preserve running generations
+
+Before replacing a runtime artifact or its installed dependency graph, discover
+all affected coordinator scopes, live dispatches and uncertain reservations.
+Refuse an in-place install while those workers may still execute; report their
+IDs, runtime paths and build digests with the coordinated drain/restart action.
+Unavailable inventory is not evidence of an empty fleet. Apply this preflight to
+checkout `pnpm install`/re-vendor and release installation, not only service restart.
+Coordinate an admission pause/upgrade lock with dispatch so new workers cannot
+race between the check and replacement. Any owner override must be explicit and
+retain the unresolved work list; it cannot claim a safe upgrade.
+
+Prefer immutable, content-addressed runtime generations, including dependencies,
+skill and hook executables, pinned in each launch receipt. Keep generations while
+referenced by a live owner, worker or uncertain receipt. Pin the MCP executable
+and fresh hook subprocesses as well as the already-running wrapper. Installing a
+new generation must not mutate those paths. New dispatch must verify the owner
+and worker candidate's API/schema/skill/build compatibility **before** provisioning;
+do not point new workers at a new build while their owner remains on the old one.
+An immutable worker directory alone does not solve mixed-version dispatch.
+
+These safeguards are proposed, not implemented. Until they ship, the vendor
+procedure requires a coordinated dispatch hold, reconciliation/drain, fresh
+online database backups and an explicit owner/service restart window before
+installing a changed runtime into the service checkout.
+
 An interrupted transport does not acknowledge a message. Existing retry backoff
 and lease expiry recover it. Reconnect authenticates the same fenced enrollment;
 revoked credentials never trigger reenrollment. Native session resume, wrapper
@@ -183,3 +274,17 @@ processing key: the new token would allow the same effect again.
   readiness and human-confirmed development startup are tested separately.
 - Version/policy/startup failures are actionable without duplicate dispatch or
   silent transport fallback. The broader MCP-profile UI remains a later lane.
+
+Additional incident acceptance:
+
+- A worker MCP that exits before readiness produces a typed failed/pending startup,
+  never `bound`; an authenticated MCP path plus verified task claim is required.
+- Kill only an owned test MCP after binding: the surviving wrapper reports
+  `blocked:mcp_disconnected`, stops repeated admission, and the lead sees the alarm.
+- Keep renewing a stalled test attempt: it still raises the progress alarm without
+  extending progress deadlines; no false completion or duplicate reassignment.
+- Re-vendor/install with a live or uncertain test worker is refused before files
+  change; an admission race is fenced. A pinned old generation continues to run
+  while a new generation is staged, and mismatched new dispatch fails before launch.
+- Lost readiness/claim replies and uncertain cancellation preserve receipts and
+  fences; recovery reconciles the same attempt rather than launching another one.

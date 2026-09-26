@@ -1,0 +1,78 @@
+{
+  "source": "Claude native transcript attachment.failedMcpServers and tool_use entries, matched to persisted worker launch receipt; payloads and credentials omitted",
+  "workers": [
+    {
+      "pane": "w2T:p2",
+      "firstTranscriptAt": "2026-09-26T18:17:56.980Z",
+      "swarmToolUseCount": 15,
+      "connectionErrors": [],
+      "privateTranscriptSha256": "57fda921b276e2f1ae4ca628e088e2ce81453acf4c3337b8f3017e6d44595658"
+    },
+    {
+      "pane": "w2V:p2",
+      "firstTranscriptAt": "2026-09-26T18:23:08.916Z",
+      "swarmToolUseCount": 10,
+      "connectionErrors": [],
+      "privateTranscriptSha256": "3587c13eb874c3db28b45d9bea89f8efac72d748e31a80cc40434e188909e8e9"
+    },
+    {
+      "pane": "w2W:p2",
+      "firstTranscriptAt": "2026-09-26T18:23:27.307Z",
+      "swarmToolUseCount": 10,
+      "connectionErrors": [],
+      "privateTranscriptSha256": "3025c6a6254a1b178e7a6685ee01404e6461a72d014ed0bf2e50859364b26290"
+    },
+    {
+      "pane": "w2Y:p2",
+      "firstTranscriptAt": "2026-09-26T18:45:27.255Z",
+      "swarmToolUseCount": 0,
+      "connectionErrors": [
+        {
+          "at": "2026-09-26T18:45:36.355Z",
+          "code": "CONNECTION_CLOSED",
+          "message": "Connection closed"
+        }
+      ],
+      "privateTranscriptSha256": "fb08a50ee35bac5cee462a9adba7eceaa1157c80c0e21dc6e6b3d352ed005219"
+    },
+    {
+      "pane": "w2Z:p2",
+      "firstTranscriptAt": "2026-09-26T18:50:56.449Z",
+      "swarmToolUseCount": 0,
+      "connectionErrors": [
+        {
+          "at": "2026-09-26T18:51:07.894Z",
+          "code": "CONNECTION_CLOSED",
+          "message": "Connection closed"
+        }
+      ],
+      "privateTranscriptSha256": "4cd7a824e86926e18077e8f436893f186b72adaab09bfb3546bb9b8687149972"
+    },
+    {
+      "pane": "w20:p2",
+      "firstTranscriptAt": "2026-09-26T18:50:57.614Z",
+      "swarmToolUseCount": 0,
+      "connectionErrors": [
+        {
+          "at": "2026-09-26T18:51:08.631Z",
+          "code": "CONNECTION_CLOSED",
+          "message": "Connection closed"
+        }
+      ],
+      "privateTranscriptSha256": "70fadb9c5c85776b2e12e8cf3005b40a83997d568f6394e356272d48c822b7a5"
+    },
+    {
+      "pane": "w31:p2",
+      "firstTranscriptAt": "2026-09-26T19:04:19.668Z",
+      "swarmToolUseCount": 0,
+      "connectionErrors": [
+        {
+          "at": "2026-09-26T19:04:25.831Z",
+          "code": "CONNECTION_CLOSED",
+          "message": "Connection closed"
+        }
+      ],
+      "privateTranscriptSha256": "1c9ff08f442fcad4261d296ea8c7c6b5bb9a0136f0fd5fa1e135a5c25a618aa4"
+    }
+  ]
+}

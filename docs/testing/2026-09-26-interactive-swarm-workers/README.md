@@ -157,3 +157,14 @@ README's universal marketplace-only claim; production launch code is unchanged.
 Owned-file formatting and documentation-link checks pass. The full `pnpm check`
 attempt stopped on 24 unrelated work-items formatting paths; [the captured output](full-check-blockers.txt) names every affected path. Those shared files were not edited
 or reformatted for this change. No live service restart occurred.
+
+## Mixed-build startup incident
+
+[Investigation and corrected timeline](startup-incident.md): both live owners
+remained schema 13 while the installed MCP required 14. The actual installed MCP
+exited 1 against an isolated replay of that descriptor. Four closed-worker
+transcripts show connection failures within 6–11 seconds of startup and zero
+Swarm calls. The original exit reason was not retained; this does not prove
+healthy MCP processes were killed by package replacement. ADR 0194 records the
+readiness/claim gate, independent health reporting, progress alarms and upgrade
+preflight. Dispatch remains held pending the coordinated restart.

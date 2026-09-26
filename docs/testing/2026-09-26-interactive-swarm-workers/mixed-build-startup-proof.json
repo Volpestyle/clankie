@@ -1,0 +1,9 @@
+{
+  "fixture": "isolated IPC bootstrap replay of live schema-13 descriptor",
+  "candidateRevision": "6637756",
+  "operations": ["bootstrap"],
+  "exitCode": 1,
+  "stderr": "swarm coordinator MCP: Owner API/schema/skill contract differs; use one candidate build and explicitly restart its owner before reconnecting",
+  "stdoutBytes": 0,
+  "liveStateMutated": false
+}

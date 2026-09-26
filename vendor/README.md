@@ -16,8 +16,16 @@ Edit the source repositories, then rebuild the artifacts. For Swarm, run
 `npm pack --ignore-scripts --pack-destination /path/to/clankie/vendor`.
 For skills, stage `agent/package.json`, the three skill directories and root
 `LICENSE` in a temporary directory; run the same `npm pack` command there.
-Update source provenance and run `pnpm install` in Clankie after replacing an
-artifact. The skill archive itself includes its complete Markdown sources.
+Update source provenance, then install the artifact only in a coordinated runtime
+upgrade window. **Do not run `pnpm install` against a changed Swarm artifact in
+the service checkout while dispatched workers may still be live.** Hold new
+dispatch, inventory every affected coordinator scope and uncertain launch, and
+have the lead reconcile/drain the workers before replacement. Take fresh online
+database backups and coordinate the owner/service restart so new workers and
+owners use one compatible build. A package install is not a running-owner
+upgrade. The current tooling does not enforce this preflight automatically;
+[incident evidence and planned safeguards](../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
+explain the mixed-build startup failure. The skill archive itself includes its complete Markdown sources.
 
 Clankie's product skill links resolve into its installed packages. Global personal
 skill links continue to resolve to the original source repositories. Release

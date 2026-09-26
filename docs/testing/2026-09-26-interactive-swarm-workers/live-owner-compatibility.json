@@ -1,0 +1,36 @@
+{
+  "checkedAt": "2026-09-26T19:58:54.422278+00:00",
+  "method": "authenticated compatibility operation only; no ensureCoordinator, enrollment, dispatch, or mutation",
+  "owners": [
+    {
+      "owner": "live-owner-1",
+      "apiVersion": 1,
+      "skillContract": "swarm-coordination/1",
+      "schemaVersion": 13,
+      "serverVersion": "2.0.0-rc.1",
+      "modernProtocol": "2026-07-28",
+      "build": {
+        "revision": "a7deb06611eb61aed071f02e5ca772d84358c836",
+        "sourceDigest": "98f9b321b29792d930f6f674d295e7f89c4146f7b2639bf3c517ed1600e4f6bd",
+        "packageVersion": "2.0.0-rc.1",
+        "sdkVersion": "2.0.0"
+      }
+    },
+    {
+      "owner": "live-owner-2",
+      "apiVersion": 1,
+      "skillContract": "swarm-coordination/1",
+      "schemaVersion": 13,
+      "serverVersion": "2.0.0-rc.1",
+      "modernProtocol": "2026-07-28",
+      "build": {
+        "revision": "a7deb06611eb61aed071f02e5ca772d84358c836",
+        "sourceDigest": "98f9b321b29792d930f6f674d295e7f89c4146f7b2639bf3c517ed1600e4f6bd",
+        "packageVersion": "2.0.0-rc.1",
+        "sdkVersion": "2.0.0"
+      }
+    }
+  ],
+  "installedSchemaVersion": 14,
+  "installedRevision": "6637756"
+}

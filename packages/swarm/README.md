@@ -28,7 +28,13 @@ communication still works and provisioning reports unavailable. A native Claude
 seat with the plugin channel enabled receives Swarm envelopes through the service's
 existing seat outbox. Opening the channel rechecks pending inbox messages, including
 before the first Pi turn. Owned stream workers also wake when idle. Owners and workers require a deliberate restart to load a
-new runtime package; replacing files does not upgrade running processes.
+new runtime package; replacing files does not upgrade running processes. Do not
+replace the installed Swarm artifact while its dispatched workers may still run:
+fresh MCP/hook subprocesses can load a different build from the owner in memory.
+Hold dispatch through the coordinated upgrade and verify worker MCP readiness
+afterward. The current wrapper can report available even when its MCP failed;
+[the incident and proposed readiness gate](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
+document this gap.
 
 The bundled skills are `lead`, `swarm-lead`, `herdr-lead`, and `swarm-mcp`.
 Their sources live in the skills and Swarm repositories; distribution artifacts
