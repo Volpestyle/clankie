@@ -37,3 +37,7 @@
 **/.git
 **/dist
 **/target
+!docs/model-keys.md
+!docs/rivals.md
+!docs/discord-ingress.md
+!infra/hosted/README.md
