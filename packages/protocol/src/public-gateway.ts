@@ -6,6 +6,7 @@ import {
   PublicGatewayPushWakeFrameSchema,
   PublicGatewayPushWakeResultFrameSchema,
 } from "./device-push.ts";
+import { DEVICE_WAKE_KEY_PATH } from "./wake.ts";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
 export const PUBLIC_GATEWAY_SCHEMA_VERSION = 1 as const;
@@ -22,6 +23,9 @@ export { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./index.ts";
 /** Linear's signed activity webhook (ADR 0165); the owner pastes this path into Linear. */
 export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
 
+/** A hosted body seals a fresh pairing link for its owner's signed-in web page. */
+export const HOSTED_PAIR_OFFER_PATH = "/v1/hosted/pair-offer";
+
 export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: "/v1/gateway/challenge", target: "control" },
   { method: "POST", path: "/v1/gateway/encrypted", target: "control" },
@@ -32,6 +36,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: DEVICE_PUSH_PATH, target: "control" },
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
   { method: "POST", path: LINEAR_WEBHOOK_PATH, target: "control" },
+  { method: "POST", path: DEVICE_WAKE_KEY_PATH, target: "control" },
+  { method: "POST", path: HOSTED_PAIR_OFFER_PATH, target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
   { method: "POST", path: "/operator/v1/terminal-tail", target: "relay" },
