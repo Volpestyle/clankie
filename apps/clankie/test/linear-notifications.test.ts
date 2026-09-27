@@ -7,7 +7,9 @@ import type { McpHost } from "../src/mcp-host.ts";
 import type { LinearActivityEvent } from "../src/linear-webhook.ts";
 
 const roots: string[] = [];
+const pollers: LinearNotifications[] = [];
 afterEach(async () => {
+  for (const poller of pollers.splice(0)) await poller.close();
   if (vi.isFakeTimers()) {
     vi.clearAllTimers();
     vi.useRealTimers();
@@ -69,9 +71,11 @@ async function fixture() {
       content: JSON.stringify({ notifications, hasNextPage, cursor }),
     });
   };
+  const poller = new LinearNotifications(options);
+  pollers.push(poller);
   return {
     options,
-    poller: new LinearNotifications(options),
+    poller,
     page,
     call,
     account,
@@ -300,20 +304,22 @@ it("waits for an active poll and coalesces deliveries during the subsequent refr
   await f.poller.close();
 });
 
-it("keeps the 30-second fallback and cancels debounce and retry timers on close", async () => {
+it("reads once at startup without a periodic timer and cancels delayed work on close", async () => {
   vi.useFakeTimers();
+  const interval = vi.spyOn(globalThis, "setInterval");
   const f = await fixture();
   f.page([]);
   f.poller.start();
-  await vi.advanceTimersByTimeAsync(29_999);
+  f.poller.start();
+  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
   expect(f.call).toHaveBeenCalledTimes(1);
-  f.page([]);
-  await vi.advanceTimersByTimeAsync(1);
-  expect(f.call).toHaveBeenCalledTimes(2);
+  expect(interval).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+  interval.mockRestore();
   f.poller.requestPoll();
   await f.poller.close();
   await vi.advanceTimersByTimeAsync(60_000);
-  expect(f.call).toHaveBeenCalledTimes(2);
+  expect(f.call).toHaveBeenCalledTimes(1);
 
   const retry = await fixture();
   retry.page([]);
@@ -323,6 +329,52 @@ it("keeps the 30-second fallback and cancels debounce and retry timers on close"
   retry.poller.requestPoll();
   await vi.advanceTimersByTimeAsync(10_000);
   expect(retry.call).toHaveBeenCalledTimes(1);
+});
+
+it("makes one catch-up attempt after a failed startup read, without a recurring failure loop", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  f.call.mockRejectedValueOnce(new Error("offline"));
+  f.page([notification("recovered")]);
+  f.poller.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.call).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1_500);
+  expect(f.received).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+  expect(f.call).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
+
+  const offline = await fixture();
+  offline.call.mockRejectedValue(new Error("still offline"));
+  offline.poller.start();
+  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+  expect(offline.call).toHaveBeenCalledTimes(2);
+  expect(offline.onError).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
+  offline.page([notification("next-webhook")]);
+  offline.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(1_500);
+  expect(offline.received).toHaveLength(1);
+});
+
+it("catches up from a persisted checkpoint on startup without replaying seen notifications", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  f.page([notification("seen")]);
+  await f.poller.poll();
+  await f.poller.close();
+  const restarted = new LinearNotifications(f.options);
+  pollers.push(restarted);
+  f.page([
+    notification("during-downtime", "issueNewComment", "2026-09-27T12:01:00.000Z"),
+    notification("seen"),
+  ]);
+  restarted.start();
+  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+  expect(f.received.map((item) => item.activity.data.id)).toEqual(["seen", "during-downtime"]);
+  expect(f.call).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 it("does not start a queued refresh after closing during an active read", async () => {

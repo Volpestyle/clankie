@@ -805,7 +805,7 @@ const linearNotifications = new LinearNotifications({
   host: mcpHost,
   following: async () => (await settingsStore.load()).linearWebhook.following,
   receive: (activity, following) => captain.receiveLinearActivity(activity, following),
-  onError: () => logger.warn("Linear notification inbox unavailable; will retry"),
+  onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
 });
 const clankie = await createClankieApp({
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),

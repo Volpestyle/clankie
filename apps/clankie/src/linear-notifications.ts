@@ -39,7 +39,7 @@ interface LinearNotificationOptions {
 export class LinearNotifications {
   private checkpoint: z.infer<typeof CheckpointSchema> | undefined;
   private pending: Promise<boolean> | undefined;
-  private timer: ReturnType<typeof setInterval> | undefined;
+  private started = false;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing = false;
   private refreshRequested = false;
@@ -56,15 +56,13 @@ export class LinearNotifications {
   }
 
   start(): void {
-    if (this.timer || this.closed) return;
+    if (this.started || this.closed) return;
+    this.started = true;
     void this.poll();
-    this.timer = setInterval(() => void this.poll(), 30_000);
-    this.timer.unref();
   }
 
   async close(): Promise<void> {
     this.closed = true;
-    if (this.timer) clearInterval(this.timer);
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     await this.pending;
   }
@@ -94,7 +92,7 @@ export class LinearNotifications {
       await this.pending;
       if (this.closed) return;
       this.refreshRequested = false;
-      const found = await this.poll();
+      const found = await this.poll(false);
       if (this.refreshRequested) this.scheduleRefresh(true);
       // Linear may publish the recipient notification after its workspace hook.
       else if (!found && retry) this.scheduleRefresh(false);
@@ -104,11 +102,14 @@ export class LinearNotifications {
   }
 
   /** True when at least one previously unseen notification was persisted. */
-  poll(): Promise<boolean> {
+  poll(retryOnFailure = true): Promise<boolean> {
     if (this.closed) return Promise.resolve(false);
     return (this.pending ??= this.read()
       .catch(() => {
         this.options.onError();
+        // One catch-up attempt after a failed startup/manual read. Webhook
+        // refreshes own their retry budget; a failed retry never schedules more.
+        if (retryOnFailure && !this.refreshing && !this.refreshTimer) this.scheduleRefresh(false);
         return false;
       })
       .finally(() => {

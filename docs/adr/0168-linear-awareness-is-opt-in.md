@@ -14,13 +14,20 @@ ADR 0191's binding route. Existing bindings remain stored and inspectable but
 are inert for wakes; no automatic deletion or rebinding occurs.
 
 Signed workspace webhooks remain passive, durable external history. The service
-reads `get_notifications` through its own verified Linear MCP connection every
-30 seconds, even while following is off. Newly persisted signed webhook events
-also request a refresh after a 1.5-second debounce. A refresh waits for any active
+reads `get_notifications` through its own verified Linear MCP connection once at
+startup and after newly persisted signed webhook events, even while following
+is off. Webhooks request a refresh after a 1.5-second debounce. A refresh waits for any active
 poll; deliveries during it coalesce into a subsequent refresh. An empty or
 duplicate-only result gets at most one delayed retry after another 1.5 seconds
-to allow notification creation to catch up. Shutdown cancels these timers. The
-periodic poll stays active for missing webhooks and later notifications. Invalid,
+to allow notification creation to catch up. A failed startup read also gets one
+delayed catch-up attempt. Retries do not recursively retry: after another failure,
+the checkpoint stays intact until the next webhook or restart. Shutdown cancels
+pending debounce and retry work. There is no interval or periodic safety poll.
+A configured signed workspace webhook is required for ongoing automatic
+notification collection; without it only startup catch-up and explicit inbox
+reads are available. This supersedes the earlier 30-second fallback: accepted
+webhooks drive live awareness, with short one-shot delays only for coalescing and
+notification creation. No slow safety net is selected. Invalid,
 ignored, duplicate or failed webhook ingests do not request a refresh.
 Only new notification IDs may wake
 `global-default` or its attached seat. The same inbox stores both sources;
