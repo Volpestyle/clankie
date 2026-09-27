@@ -169,7 +169,8 @@ try {
   await stop(directService);
   directService = undefined;
 
-  // Auto adopts the launch session without persisting that incidental binding.
+  // Auto selects the bundled default, even inside a different live Herdr session
+  // (ADR 0181). The launch terminal must not silently select an execution fleet.
   const runtimeModule = await import(
     pathToFileURL(join(extracted, "apps/clankie/src/herdr-runtime.js")).href
   );
@@ -191,8 +192,8 @@ try {
   directService = start(node, [join(extracted, "apps/clankie/src/index.js")], adoptedEnv, workspace);
   await waitFor(`${env.CLANKIE_CONTROL_PLANE_URL}/health`, directService);
   const adopted = herdrStatus();
-  assert.equal(adopted.active.runtime, "external");
-  assert.equal(adopted.active.socketPath, externalEnv.HERDR_SOCKET_PATH);
+  assert.deepEqual(adopted.active, chosen.active);
+  assert.notEqual(adopted.active.socketPath, externalEnv.HERDR_SOCKET_PATH);
   assert.equal(adopted.herdr.runtime, "auto");
   assert.equal(adopted.herdr.socketPath, undefined);
   await stop(directService);

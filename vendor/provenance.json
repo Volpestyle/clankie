@@ -1,18 +1,18 @@
 {
   "swarmSource": "https://github.com/Volpestyle/swarm-mcp",
-  "swarmBase": "e93dc700b0e0ff1c3a78960a4128d1a8cce68a02",
+  "swarmBase": "0981253fc4b81fb4794ceaa706aeec363d900a32",
   "swarmPatch": "swarm-mcp.patch",
   "skillsSource": "https://github.com/Volpestyle/skills",
   "skillsBase": "2fdccc919f9c9c3b2b0e0857a95e16a60084b6b2",
   "artifacts": {
     "volpestyle-lead-skills-0.1.1.tgz": "b4d9bc5267b4569d0228c8f85608c15f11781936eea9f252434797fac7c52508",
-    "swarm-mcp-2.0.0-rc.1.tgz": "0efa3a87e361f98d5254dcd5e180f29b45529b35f1a09218c5e4983684fb8103"
+    "swarm-mcp-2.0.0-rc.1.tgz": "07f6e4a8798b0b0b8155cc2b25bafa80245e9811d66f9a1c82896ddb32501caa"
   },
-  "patchSha256": "a5c628182a510b25936dadded503729408c8f77d1c1cf45759a54fabfa484954",
-  "swarmRevision": "e60891b130e98f56c18857b898cd63e5657a83fe",
+  "patchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "swarmRevision": "0981253fc4b81fb4794ceaa706aeec363d900a32",
   "swarmIncludes": [
-    "bf910a1: retire legacy Swarm; coordinator is sole API",
-    "e93dc70: remove legacy migration/cutover tooling; add offline maintenance",
-    "e60891b: a bound dispatched worker may reclaim its task after its lease lapses"
+    "a6ca8df: worker stop proof, control expiry, progress deadlines, idle owner retirement and diagnostics",
+    "de071a1: long-transcript and subagent hook delivery fixes",
+    "0981253: supported Claude and Codex launcher CLIs"
   ]
 }

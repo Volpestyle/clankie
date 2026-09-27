@@ -33,9 +33,11 @@ new runtime package; replacing files does not upgrade running processes. Do not
 replace the installed Swarm artifact while its dispatched workers may still run:
 fresh MCP/hook subprocesses can load a different build from the owner in memory.
 Hold dispatch through the coordinated upgrade and verify worker MCP readiness
-afterward. The current wrapper can report available even when its MCP failed;
-[the incident and proposed readiness gate](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
-document this gap.
+afterward. The bundled stream wrapper requires an authenticated harness MCP call and fenced
+claim before binding. It reports MCP loss independently, and its POSIX stop latch
+can terminate owned work even when MCP is unavailable. Legacy launches retain
+uncertain capacity until stop proof exists. [The original incident](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
+records the failure that led to these safeguards.
 
 The bundled skills are `lead`, `swarm-lead`, `herdr-lead`, and `swarm-mcp`.
 Their sources live in the skills and Swarm repositories; distribution artifacts

@@ -364,8 +364,16 @@ inspection uses `clankie herdr --connection ID agent list`; opening a seat does
 not select its runtime. On embedded routed assignments, set `runtime: "ID"` to
 select execution; `connection` selects the separate Swarm coordinator. Never
 change either on a retry. Disconnect leaves workers alive. Managed Herdr launch
-routes share Clankie's filesystem; remote workers attach through their own Swarm
-coordinator. `restart-required` means the live owner needs a deliberate upgrade.
+routes share Clankie's filesystem. A registered ssh fleet joins the same embedded
+coordinator through `clankie swarm fleet-peer FLEET NAME --conversation ID --out
+PRIVATE.json`. Transfer that private environment to the peer over the owner's ssh
+and launch its matching Swarm MCP runtime with it; do not start a second coordinator
+or expose the capability in a prompt. Reusing the fleet/name resumes the actor with
+a new generation. `runtime list` reports `relayState`; use
+`clankie herdr --connection FLEET ...` for its remote terminals. Read the CLI's
+fleet-peer contract for setup and permissions. `restart-required` means the live
+owner needs a deliberate upgrade. After a coordinated owner upgrade, reconnect
+existing native MCP clients and verify `swarm_sync` before dispatching again.
 The paired companion app exposes this inventory and named connection controls in
 Settings → Connection with Supervise access. Terminal lists each connected Herdr
 session and routes observation/input to its pinned runtime. Messages also lists
