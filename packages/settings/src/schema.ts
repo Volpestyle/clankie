@@ -368,6 +368,9 @@ export type HerdrSshTransport = z.infer<typeof HerdrSshTransportSchema>;
  * How Swarm runs a dispatched worker in a runtime (ADR 0194). Unset is stream,
  * the unattended default; only an owner's explicit interactive choice is stored.
  */
+export const ExecutionWorkerHarnessSchema = z.enum(["claude", "codex", "pi"]);
+export type ExecutionWorkerHarness = z.infer<typeof ExecutionWorkerHarnessSchema>;
+
 export const ExecutionWorkerModeSchema = z.enum(["stream", "interactive"]);
 export type ExecutionWorkerMode = z.infer<typeof ExecutionWorkerModeSchema>;
 
@@ -413,6 +416,7 @@ export const ExecutionConnectionSchema = z
     capacity: z.number().int().min(0).nullable().optional(),
     workspaces: ExecutionWorkspacesSchema.optional(),
     workerMode: ExecutionWorkerModeSchema.optional(),
+    workerHarness: ExecutionWorkerHarnessSchema.optional(),
     enabled: z.boolean().default(true),
   })
   .strict();
@@ -748,6 +752,7 @@ export const ClankieSettingsSchema = z
         workspaces: ExecutionWorkspacesSchema.optional(),
         capacity: z.number().int().min(0).nullable().optional(),
         workerMode: ExecutionWorkerModeSchema.optional(),
+        workerHarness: ExecutionWorkerHarnessSchema.optional(),
         budget: z.number().int().min(0).nullable().optional(),
       })
       .strict()

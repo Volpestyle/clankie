@@ -1,3 +1,4 @@
+import { WorkerHarnessError } from "./herdr-session.ts";
 import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
 import { createModelKeyRoutes } from "./model-key-routes.ts";
 import { createHostedCreditsRoutes } from "./hosted-credits-routes.ts";
@@ -815,7 +816,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } catch (error) {
       return context.json(
         {
-          error: "runtime_connection_refused",
+          error: error instanceof WorkerHarnessError ? error.code : "runtime_connection_refused",
           detail: error instanceof Error ? error.message : "Connection refused",
         },
         409,

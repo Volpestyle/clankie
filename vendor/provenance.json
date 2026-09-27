@@ -6,13 +6,14 @@
   "skillsBase": "2fdccc919f9c9c3b2b0e0857a95e16a60084b6b2",
   "artifacts": {
     "volpestyle-lead-skills-0.1.1.tgz": "b4d9bc5267b4569d0228c8f85608c15f11781936eea9f252434797fac7c52508",
-    "swarm-mcp-2.0.0-rc.1.tgz": "07f6e4a8798b0b0b8155cc2b25bafa80245e9811d66f9a1c82896ddb32501caa"
+    "swarm-mcp-2.0.0-rc.1.tgz": "4e576996a51753876bb83fa8ae5d7d63866189eb359fa29b7eb9591de2d4205e"
   },
-  "patchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "swarmRevision": "0981253fc4b81fb4794ceaa706aeec363d900a32",
+  "patchSha256": "92a2d57062f72d7a3ab7697dd1547165e706e161dd6d984a885111275dde815b",
+  "swarmRevision": "b62a68f087e9eb8685398db37b9963618d4046d4",
   "swarmIncludes": [
     "a6ca8df: worker stop proof, control expiry, progress deadlines, idle owner retirement and diagnostics",
     "de071a1: long-transcript and subagent hook delivery fixes",
-    "0981253: supported Claude and Codex launcher CLIs"
+    "0981253: supported Claude and Codex launcher CLIs",
+    "b62a68f: managed Codex app-server and pi RPC workers, immutable harness selection and per-session MCP"
   ]
 }

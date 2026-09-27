@@ -86,6 +86,13 @@ export function interactiveWorkersSupported(): Promise<boolean> {
   })();
   return interactiveWorkers;
 }
+/** Feature discovery uses the installed runtime, without enrolling or changing a live owner. */
+export async function managedWorkersSupported(): Promise<boolean> {
+  const runtime = await import("swarm-mcp/runtime");
+  const supported = (runtime as unknown as { managedWorkerHarnesses?: unknown }).managedWorkerHarnesses;
+  return Array.isArray(supported) && supported.includes("codex") && supported.includes("pi");
+}
+
 interface Binding {
   conversationId: string;
   cwd: string;
@@ -150,6 +157,7 @@ interface Options {
       workspaces?: { kind: "repository" | "directory"; path: string }[] | undefined;
       /** Omitted or stream keeps the route unattended; interactive needs {@link interactiveWorkersSupported}. */
       workerMode?: "stream" | "interactive" | undefined;
+      workerHarness?: "claude" | "codex" | "pi" | undefined;
     }[]
   >;
   /** Trusted embedding bridge; contains no provider or operator credential. */
@@ -519,6 +527,12 @@ export class SwarmHost {
           },
           ...(tool.name === "swarm_assign"
             ? {
+                harness: {
+                  type: "string",
+                  enum: ["claude", "codex", "pi"],
+                  description:
+                    "Require this managed worker harness; no fallback. Runtime harness settings must agree.",
+                },
                 runtime: {
                   type: "string",
                   pattern: "^[a-z][a-z0-9-]{0,63}$",
@@ -542,7 +556,21 @@ export class SwarmHost {
       } as TSchema,
       executionMode: "sequential",
       execute: async (_id, args) => {
-        const { connection, runtime, ...forwarded } = args as Record<string, unknown>;
+        const { connection, runtime, harness, ...forwarded } = args as Record<string, unknown>;
+        if (harness !== undefined) {
+          if (
+            tool.name !== "swarm_assign" ||
+            !["claude", "codex", "pi"].includes(String(harness)) ||
+            !forwarded.routing ||
+            typeof forwarded.routing !== "object"
+          )
+            throw new Error("Harness selection requires routed work");
+          const routing = forwarded.routing as Record<string, unknown>;
+          const host = harness === "claude" ? "claude-code" : harness;
+          if (routing.host !== undefined && routing.host !== host)
+            throw new Error("Conflicting harness and routing.host");
+          forwarded.routing = { ...routing, host };
+        }
         if (runtime !== undefined) {
           if (
             tool.name !== "swarm_assign" ||
@@ -581,13 +609,30 @@ export class SwarmHost {
         ) {
           await this.requireRuntimeReload(active);
           const prepared = await this.prepareOwner(selected.cwd);
+          const selectedRuntime = prepared.runtimes?.find((entry) => entry.id === (runtime ?? "default"));
+          const routing = forwarded.routing as Record<string, unknown>;
+          if (routing.host === undefined && selectedRuntime?.workerHarness)
+            forwarded.routing = {
+              ...routing,
+              host:
+                selectedRuntime.workerHarness === "claude" ? "claude-code" : selectedRuntime.workerHarness,
+            };
           if (
-            runtime !== undefined &&
-            !prepared.runtimes?.some(
-              (entry) => entry.enabled && entry.state === "healthy" && runtime === entry.id,
-            )
-          )
-            throw new Error("Selected worker runtime unavailable; no dispatch intent created");
+            (runtime !== undefined && !selectedRuntime?.enabled) ||
+            (runtime !== undefined && selectedRuntime?.state !== "healthy")
+          ) {
+            if (!selectedRuntime?.state.startsWith("harness_"))
+              throw new Error("Selected worker runtime unavailable; no dispatch intent created");
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ data: { status: "blocked", reasons: [selectedRuntime.state] } }),
+                },
+              ],
+              details: {},
+            };
+          }
         }
         if (
           tool.name === "swarm_assign" &&
@@ -1101,8 +1146,24 @@ async function prepareOwner(cwd: string, options: Options) {
     const prior = configured.dispatch?.herdr;
     const routes = prior === undefined ? [] : Array.isArray(prior) ? prior : [prior];
     const which = async (name: string) => (await exec("/usr/bin/which", [name])).stdout.trim();
-    const paths = await Promise.all([which("herdr"), which("claude")]).catch(() => undefined);
-    if (!paths) runtimes = runtimes.map((entry) => ({ ...entry, state: "unavailable" }));
+    const [herdrPath, claudePath, codexPath, piPath] = await Promise.all(
+      ["herdr", "claude", "codex", "pi"].map((name) => which(name).catch(() => undefined)),
+    );
+    const supported = await managedWorkersSupported();
+    const harnessPath = (harness: "claude" | "codex" | "pi") =>
+      ({ claude: claudePath, codex: codexPath, pi: piPath })[harness];
+    runtimes = runtimes.map((entry) => {
+      const harness = entry.workerHarness ?? "claude";
+      const state =
+        !herdrPath || !harnessPath(harness)
+          ? "harness_unavailable"
+          : harness !== "claude" && !supported
+            ? "harness_unsupported"
+            : harness !== "claude" && entry.workerMode === "interactive"
+              ? "harness_mode_unsupported"
+              : entry.state;
+      return { ...entry, state };
+    });
     // An interactive route the installed owner cannot parse would void every
     // route; that runtime stays unavailable instead of silently running stream.
     if (
@@ -1117,13 +1178,19 @@ async function prepareOwner(cwd: string, options: Options) {
     const desired = runtimes
       .filter((entry) => entry.socketPath)
       .map((entry) => ({
-        id: `clankie-runtime-${entry.id}-${hash(entry.socketPath!).slice(0, 12)}`,
-        enabled: !!paths && entry.enabled && entry.state === "healthy",
+        id: `clankie-runtime-${entry.id}-${hash(entry.socketPath!).slice(0, 12)}${entry.workerHarness && entry.workerHarness !== "claude" ? `-${entry.workerHarness}` : ""}`,
+        enabled: entry.enabled && entry.state === "healthy",
         stateDirectory,
         profile: "clankie",
         socketPath: entry.socketPath!,
-        herdrPath: paths?.[0] ?? process.execPath,
-        claudePath: paths?.[1] ?? process.execPath,
+        herdrPath: herdrPath ?? process.execPath,
+        ...(entry.workerHarness && entry.workerHarness !== "claude" && supported
+          ? {
+              harness: entry.workerHarness,
+              harnessPath: harnessPath(entry.workerHarness) ?? process.execPath,
+              ...(entry.workerHarness === "codex" ? { model: "gpt-6-astra" } : {}),
+            }
+          : { claudePath: claudePath ?? process.execPath }),
         nodePath: process.execPath,
         workerPath: executable("herdr-worker-cli.js"),
         capabilities: [...entry.capabilities, `runtime:${entry.id}`],
@@ -1131,7 +1198,7 @@ async function prepareOwner(cwd: string, options: Options) {
         ...(entry.workspaces ? { workspaces: entry.workspaces } : {}),
         ...(options.workerMcp ? { mcpServers: { clankie_worker: options.workerMcp } } : {}),
         // Stream writes neither field, the route an older owner already accepts.
-        ...(entry.workerMode === "interactive"
+        ...(entry.workerMode === "interactive" && (entry.workerHarness ?? "claude") === "claude"
           ? { workerMode: "interactive" as const, channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
           : {}),
       }));

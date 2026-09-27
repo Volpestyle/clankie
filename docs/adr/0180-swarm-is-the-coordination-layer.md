@@ -67,3 +67,21 @@ legacy release. `vendor/README.md` records source provenance and regeneration;
 release packaging includes the dependency graph and bundled skills. The skill
 source remains in the skills repository, and checkout links resolve through the
 installed package. No live global MCP configuration is rewritten.
+
+## Managed harness amendment — VUH-1407 (2026-09-27)
+
+Local runtime settings now select Claude, Codex or pi independently of worker
+mode. Codex defaults to `gpt-6-astra` and uses its app-server protocol. Pi uses
+RPC with a worker-specific extension that projects its enrolled MCP tools; the
+operator extension remains conversation-bound. Both reuse the existing managed
+claim, leased inbox, explicit ack, progress/lease, cancellation and stop protocol.
+Only an actual worker Swarm tool call establishes readiness. Launch arguments
+and environment carry configuration and capabilities; global harness settings
+are untouched. Runtime selection is exposed through the operator API, CLI and
+TUI, with typed refusals for unsupported harness/mode pairs and no fallback.
+
+The resolved harness is persisted in the intent and launch receipt. Retargeting
+a route cannot adopt an existing launch. Codex/pi initially support stream;
+interactive support remains the independent ADR 0194 axis. Remote PC peers keep
+the shared coordinator and relay. Protocol tests are separate from live canary
+proof: each installed harness must finish a managed task and release its intent.

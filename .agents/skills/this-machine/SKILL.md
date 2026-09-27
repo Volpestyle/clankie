@@ -363,7 +363,13 @@ and `runtime disconnect ID` for named execution connections. Native local
 inspection uses `clankie herdr --connection ID agent list`; opening a seat does
 not select its runtime. On embedded routed assignments, set `runtime: "ID"` to
 select execution; `connection` selects the separate Swarm coordinator. Never
-change either on a retry. Disconnect leaves workers alive. Managed Herdr launch
+change either on a retry. For local managed workers, `clankie runtime harness ID
+claude|codex|pi` selects the harness through the operator API and TUI Connections
+menu. Codex uses `gpt-6-astra`; pi uses its native model preference. Codex/pi need
+the managed-adapter Swarm build and stream mode. `swarm_assign harness` explicitly
+constrains the runtime choice; unsupported or unavailable routes refuse without
+falling back to Claude. Retain the original harness and payload on uncertain
+retries. Every managed worker has its own launch-local Swarm enrollment. Disconnect leaves workers alive. Managed Herdr launch
 routes share Clankie's filesystem. A registered ssh fleet joins the same embedded
 coordinator through `clankie swarm fleet-peer FLEET NAME --conversation ID --out
 PRIVATE.json`. Transfer that private environment to the peer over the owner's ssh

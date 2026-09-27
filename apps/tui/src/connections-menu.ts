@@ -32,6 +32,7 @@ interface Runtime {
   readonly capacity?: number | null;
   readonly capacitySource?: string;
   /** How Swarm runs the workers it dispatches here (ADR 0194); absent for an ssh fleet. */
+  readonly workerHarness?: "claude" | "codex" | "pi";
   readonly workerMode?: "stream" | "interactive";
   readonly budget?: number | null;
   readonly budgetSource?: string;
@@ -103,6 +104,7 @@ function runtimeHint(runtime: Runtime): string {
       : runtime.capacity === null
         ? "unlimited workers"
         : `${runtime.capacity} workers per coordinator${runtime.capacitySource === "default" ? " (default)" : ""}`,
+    runtime.workerHarness === undefined ? undefined : `${runtime.workerHarness} harness`,
     runtime.workerMode === undefined ? undefined : `${runtime.workerMode} workers`,
   ];
   return parts.filter(Boolean).join(" · ");
@@ -423,6 +425,9 @@ async function runtimeDetail(
     ...(runtime.capabilities?.length
       ? [{ value: "info:capabilities", label: "Capabilities", hint: runtime.capabilities.join(", ") }]
       : []),
+    ...(runtime.workerHarness === undefined
+      ? []
+      : [{ value: "harness", label: "Worker harness…", hint: runtime.workerHarness }]),
     ...(runtime.workerMode === undefined
       ? []
       : [{ value: "mode", label: "Worker mode…", hint: runtime.workerMode }]),
@@ -440,6 +445,27 @@ async function runtimeDetail(
       allowBack: true,
     });
     if (action === undefined) return;
+    if (action === "harness") {
+      const harness = await flow.readSelect({
+        message: `Worker harness in ${runtime.id}`,
+        options: [
+          { value: "codex", label: "Codex", hint: "gpt-6-astra; stream workers" },
+          { value: "pi", label: "pi", hint: "native model preference; stream workers" },
+          { value: "claude", label: "Claude", hint: "stream or supported interactive workers" },
+        ],
+        allowBack: true,
+      });
+      if (harness === undefined || harness === runtime.workerHarness) continue;
+      if (
+        await attempt(
+          flow,
+          () => services.runtime(["harness", runtime.id, harness]),
+          `${runtime.id} uses ${harness} workers.`,
+        )
+      )
+        return;
+      continue;
+    }
     if (action === "mode") {
       const mode = await flow.readSelect({
         message: `How Swarm runs workers in ${runtime.id}`,

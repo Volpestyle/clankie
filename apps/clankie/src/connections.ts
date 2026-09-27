@@ -71,16 +71,19 @@ async function connectionInventory(deps: Dependencies): Promise<OperatorConnecti
   }
   return OperatorConnectionInventorySchema.parse({
     observedAt: new Date().toISOString(),
-    runtimes: runtimes.map(({ id, kind, session, state, enabled, capacity, workerMode, capabilities }) => ({
-      id,
-      kind,
-      session,
-      state,
-      enabled,
-      capacity,
-      ...(workerMode ? { workerMode } : {}),
-      capabilities,
-    })),
+    runtimes: runtimes.map(
+      ({ id, kind, session, state, enabled, capacity, workerMode, workerHarness, capabilities }) => ({
+        id,
+        kind,
+        session,
+        state,
+        enabled,
+        capacity,
+        ...(workerMode ? { workerMode } : {}),
+        ...(workerHarness ? { workerHarness } : {}),
+        capabilities,
+      }),
+    ),
     swarms: rows.slice(0, 64).map((row) => {
       const live = swarm.conversations.find(
         (entry) => entry.connection === row.id && entry.conversationId === row.conversationId,
@@ -131,7 +134,8 @@ export async function manageConnections(deps: Dependencies, command: OperatorCon
   if (command.action === "reconnect_runtime") {
     const runtime = (await deps.runtimes?.list())?.find((entry) => entry.id === command.id);
     if (!runtime || runtime.id === "default") throw new Error("Unknown named runtime");
-    const { id, kind, session, socketPath, capacity, capabilities, workspaces, workerMode } = runtime;
+    const { id, kind, session, socketPath, capacity, capabilities, workspaces, workerMode, workerHarness } =
+      runtime;
     await changeRuntime(deps, "connect", {
       id,
       kind,
@@ -141,6 +145,7 @@ export async function manageConnections(deps: Dependencies, command: OperatorCon
       capabilities,
       workspaces,
       ...(workerMode === "interactive" ? { workerMode } : {}),
+      ...(workerHarness ? { workerHarness } : {}),
     });
   }
   if (command.action === "disconnect_runtime") await changeRuntime(deps, "disconnect", command.id);

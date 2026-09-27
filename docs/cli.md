@@ -922,6 +922,19 @@ Settings are reconciled into existing owners without replacing in-flight receipt
 `runtime status` reports each effective value and its source: default, owner or unlimited.
 These controls use the operator API; no Swarm tool or captain bearer can change them.
 
+`clankie runtime harness ID claude|codex|pi` selects the managed worker harness
+for the default or a named local runtime. The operator API accepts
+`POST /v1/runtime-connections` with `{ "action": "harness", "id": "default", "harness": "codex" }`;
+`runtime list` reports `workerHarness`. The TUI Connections → Runtimes → Worker
+harness menu uses the same command. Codex defaults to `gpt-6-astra`; pi uses its
+native model preference. Codex/pi require the managed-adapter Swarm build and
+stream mode. Unsupported selections return `harness_unsupported` or
+`harness_mode_unsupported`; unavailable executables block dispatch without a
+Claude fallback. New routed assignments inherit the selected runtime's harness;
+`swarm_assign harness: "claude" | "codex" | "pi"` explicitly constrains it.
+The intent and launch receipt retain the selected harness. Keep the original
+payload when reconciling an uncertain dispatch.
+
 `clankie runtime mode ID stream|interactive` sets how Swarm runs the workers it
 dispatches into the default or a named local runtime; `runtime list` reports it as
 `workerMode`. Stream, the default, runs each worker unattended. Interactive runs

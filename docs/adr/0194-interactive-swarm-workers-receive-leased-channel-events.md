@@ -33,6 +33,17 @@ still apply when the policy is adopted.
 - Not implemented here: model/effort selection (step 6), task-title labels
   (step 7), install locks and immutable runtime generations.
 
+## Harness axis amendment — VUH-1407 (2026-09-27)
+
+Managed harness selection (`claude`, `codex`, `pi`) is independent of this mode
+choice. Codex app-server and pi RPC implement the shared unattended lifecycle;
+they reject interactive mode explicitly. Claude's interactive plugin and consent
+requirements are unchanged. Integrating the upstream branches requires combining
+the stream/interactive wrapper split with the extracted stream harness driver.
+Both branches independently added schema 15: this branch stores mode; VUH-1407
+stores harness. Sequence both migrations under distinct versions before combining
+builds; never treat those schema-15 databases as interchangeable.
+
 ## Current stream-worker implementation
 
 The readiness, independent MCP-health and stale-progress subset is implemented

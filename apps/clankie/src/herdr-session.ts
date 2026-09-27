@@ -8,6 +8,8 @@ import {
   ExecutionWorkspacesSchema,
   ExecutionConnectionSchema,
   ExecutionWorkerModeSchema,
+  ExecutionWorkerHarnessSchema,
+  type ExecutionWorkerHarness,
   type ExecutionWorkerMode,
   type SettingsStore,
   type HerdrSettings,
@@ -208,6 +210,13 @@ export const ExecutionConnectSchema = z.union([
       capacity: z.number().int().min(0).nullable(),
     })
     .strict(),
+  z
+    .object({
+      action: z.literal("harness"),
+      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+      harness: ExecutionWorkerHarnessSchema,
+    })
+    .strict(),
   z.object({ action: z.literal("budget"), budget: z.number().int().min(0).nullable() }).strict(),
   z
     .object({
@@ -304,6 +313,7 @@ export class ExecutionConnections {
      * and with it the whole dispatch configuration.
      */
     interactiveWorkers?: () => Promise<boolean>;
+    managedWorkers?: () => Promise<boolean>;
   };
   private readonly fleetRuns = new Map<string, { key: string; run: HerdrFleetRun }>();
   /** Each ssh fleet's coordinator relay, reported beside its reachability (VUH-1381). */
@@ -399,9 +409,57 @@ export class ExecutionConnections {
       );
   }
 
+  private async setWorkerHarness(id: string, harness: ExecutionWorkerHarness) {
+    const settings = await this.options.settings.load();
+    const target =
+      id === "default" ? settings.execution : settings.execution.connections.find((entry) => entry.id === id);
+    if (!target) throw new Error("Unknown runtime connection");
+    if ("ssh" in target && target.ssh)
+      throw new WorkerHarnessError(
+        "harness_unsupported",
+        "Remote peers enroll through the shared coordinator relay; managed spawning is local only",
+      );
+    await this.requireWorkerHarness(harness, target.workerMode);
+    await this.options.settings.update((current) => ({
+      ...current,
+      execution: {
+        ...current.execution,
+        ...(id === "default"
+          ? { workerHarness: harness }
+          : {
+              connections: current.execution.connections.map((entry) =>
+                entry.id === id ? { ...entry, workerHarness: harness } : entry,
+              ),
+            }),
+      },
+    }));
+    for (const listener of this.changes) listener(id);
+    return { id, workerHarness: harness };
+  }
+
+  private async requireWorkerHarness(harness: ExecutionWorkerHarness, mode?: ExecutionWorkerMode) {
+    if (harness === "claude") return;
+    if (mode === "interactive")
+      throw new WorkerHarnessError(
+        "harness_mode_unsupported",
+        "Codex and pi managed workers require stream mode",
+      );
+    if (!(await this.options.managedWorkers?.()))
+      throw new WorkerHarnessError(
+        "harness_unsupported",
+        "Codex and pi workers require an upgraded Swarm runtime",
+      );
+  }
+
   /** How Swarm runs workers it dispatches into this runtime (ADR 0194). */
   private async setWorkerMode(id: string, mode: ExecutionWorkerMode) {
     if (mode === "interactive") {
+      const settings = await this.options.settings.load();
+      const selected =
+        id === "default"
+          ? settings.execution
+          : settings.execution.connections.find((entry) => entry.id === id);
+      await this.requireWorkerHarness(selected?.workerHarness ?? "claude", mode);
       const target = (await this.options.settings.load()).execution.connections.find(
         (entry) => entry.id === id,
       );
@@ -431,6 +489,16 @@ export class ExecutionConnections {
 
   async connect(raw: unknown) {
     const parsed = ExecutionConnectSchema.parse(raw);
+    if ("action" in parsed && parsed.action === "harness")
+      return this.setWorkerHarness(parsed.id, parsed.harness);
+    if (!("action" in parsed) && parsed.workerHarness) {
+      if (parsed.ssh)
+        throw new WorkerHarnessError(
+          "harness_unsupported",
+          "Remote peers enroll through the shared coordinator relay",
+        );
+      await this.requireWorkerHarness(parsed.workerHarness, parsed.workerMode);
+    }
     if ("action" in parsed && parsed.action === "mode") return this.setWorkerMode(parsed.id, parsed.mode);
     if (!("action" in parsed) && parsed.workerMode === "interactive") {
       if (parsed.ssh !== undefined)
@@ -639,7 +707,10 @@ export class ExecutionConnections {
               ? "unlimited"
               : "owner",
         ...(connection.ssh === undefined
-          ? { workerMode: connection.workerMode ?? ("stream" as const) }
+          ? {
+              workerMode: connection.workerMode ?? ("stream" as const),
+              workerHarness: connection.workerHarness ?? ("claude" as const),
+            }
           : { transport: "ssh" as const }),
         state: !connection.enabled
           ? "disabled"
@@ -683,6 +754,7 @@ export class ExecutionConnections {
               ? "unlimited"
               : "owner",
         workerMode: settings.execution.workerMode ?? ("stream" as const),
+        workerHarness: settings.execution.workerHarness ?? ("claude" as const),
         budget: settings.execution.budget === undefined ? 16 : settings.execution.budget,
         budgetSource:
           settings.execution.budget === undefined
@@ -732,5 +804,13 @@ export class ExecutionConnections {
     return isDeepStrictEqual(connection, current)
       ? { runtime: "external", session: connection.session, socketPath: connection.socketPath }
       : undefined;
+  }
+}
+
+export class WorkerHarnessError extends Error {
+  readonly code: "harness_unsupported" | "harness_mode_unsupported";
+  constructor(code: "harness_unsupported" | "harness_mode_unsupported", message: string) {
+    super(message);
+    this.code = code;
   }
 }

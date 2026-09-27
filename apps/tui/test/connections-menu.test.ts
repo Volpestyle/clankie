@@ -241,3 +241,22 @@ it("shows each runtime's worker mode and changes it through the runtime command"
   expect(calls).toContainEqual(["mode", "named", "interactive"]);
   expect(lines).toContain("named runs interactive workers.");
 });
+
+it("selects a managed harness through the runtime CLI", async () => {
+  const { shell, readSelect, lines } = fakeShell(["runtime:default", "harness", "codex", undefined]);
+  const calls: string[][] = [];
+  const { services: deps } = services({
+    runtime: async (args: readonly string[]) => {
+      calls.push([...args]);
+      return args[0] === "list"
+        ? {
+            connections: [{ id: "default", state: "healthy", workerHarness: "claude", workerMode: "stream" }],
+          }
+        : { id: "default", workerHarness: "codex" };
+    },
+  });
+  await runConnectionsSection("runtimes", shell, deps);
+  expect(values(readSelect.mock.calls[2]!)).toEqual(["codex", "pi", "claude"]);
+  expect(calls).toContainEqual(["harness", "default", "codex"]);
+  expect(lines).toContain("default uses codex workers.");
+});

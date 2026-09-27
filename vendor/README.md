@@ -32,16 +32,17 @@ skill links continue to resolve to the original source repositories. Release
 assembly dereferences product links and copies Swarm's dependency graph; an
 installed release needs no sibling checkout or globally installed npm package.
 
-The current artifact is built directly from upstream `0981253`, with no local
-source patch. It includes authenticated worker MCP readiness, fenced task reclaim,
-long-transcript/subagent delivery fixes, launch-bound POSIX cancellation proof,
-obsolete control-message expiry, configurable assignment progress deadlines,
-idle owner retirement, backlog diagnostics, and the Claude/Codex launcher CLIs.
-`swarm-mcp.patch` is intentionally empty; provenance pins the complete source.
+The candidate artifact is built from Swarm `b62a68f`, based on pushed upstream
+`0981253`. `swarm-mcp.patch` reproduces the complete committed source delta;
+`provenance.json` pins both revisions and checksums. This candidate adds managed
+Codex (`gpt-6-astra`) and pi worker adapters, per-launch MCP configuration, and
+persisted harness selection. It has not yet passed the required live managed
+canaries; install and owner/service restart remain lead-controlled.
 
-This update retains schema 14. Back up each live DB with SQLite's backup API
-before a coordinated owner/service upgrade; never copy a live WAL database.
-Older schema-13 installations still need the documented migration backup.
-Windows and legacy workers without termination receipts retain the cooperative
-stop-proof boundary; an absent pane or expired lease does not release capacity.
-The interactive-worker schema-15 branch is not part of this artifact.
+This candidate advances schema 14 to schema 15 with `dispatch_intents.harness`.
+Back up each live DB with SQLite's backup API before the coordinated upgrade;
+never copy a live WAL database. The separate, unmerged interactive-worker branch
+also labels its mode-column migration schema 15. These schema-15 builds are NOT
+interchangeable: integration must sequence both migrations under distinct versions.
+The interactive-worker branch is not part of this artifact. Remote peers continue
+to enroll through the shared coordinator relay; this adds no private PC owner.

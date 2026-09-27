@@ -415,3 +415,54 @@ it("selects each runtime's worker mode through CLI/API, keeps stream unwritten, 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("selects managed harnesses through API/CLI and rejects unsupported harness-mode pairs without changing settings", async () => {
+  const root = await mkdtemp("/tmp/clankie-worker-harness-");
+  const settings = new SettingsStore(join(root, "settings.json"));
+  let supported = false;
+  const runtimes = new ExecutionConnections({
+    settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+    managedWorkers: async () => supported,
+    interactiveWorkers: async () => true,
+  });
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    runtimes,
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+  });
+  const cli = {
+    host: "http://localhost",
+    env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+    fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
+  };
+  try {
+    const refused = await app.app.request("/v1/runtime-connections", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "harness", id: "default", harness: "codex" }),
+    });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: "harness_unsupported" });
+    expect((await settings.load()).execution.workerHarness).toBeUndefined();
+    supported = true;
+    for (const harness of ["codex", "pi", "claude"]) {
+      expect(await runRuntimeCommand(["harness", "default", harness], cli)).toEqual({
+        id: "default",
+        workerHarness: harness,
+      });
+      expect((await settings.load()).execution.workerHarness).toBe(harness);
+    }
+    await runRuntimeCommand(["harness", "default", "codex"], cli);
+    await expect(runRuntimeCommand(["mode", "default", "interactive"], cli)).rejects.toThrow(
+      /require stream/u,
+    );
+    expect((await settings.load()).execution).toMatchObject({ workerHarness: "codex" });
+    await expect(runRuntimeCommand(["harness", "default", "unknown"], cli)).rejects.toThrow(/harness ID/u);
+    expect((await runRuntimeCommand(["list"], cli)).connections).toMatchObject([
+      { id: "default", workerHarness: "codex", workerMode: "stream" },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

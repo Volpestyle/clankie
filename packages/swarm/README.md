@@ -14,7 +14,7 @@ native Claude seat uses its explicitly selected service conversation (the defaul
 global conversation when omitted) through
 Clankie's MCP server; its launch directory and inherited worker environment do
 not select another actor. The owner's configured Herdr connections supply local
-Claude dispatch routes, each with a capacity and an owned workspace for each
+harness-selectable dispatch routes, each with a capacity and an owned workspace for each
 worker. The default route has capacity 16 per coordinator scope. Uncertain starts
 retain their provisioning token and capacity
 reservation. Herdr's native `layout.apply` API replaces only the new workspace's
@@ -24,7 +24,7 @@ receipt; binding also requires an authenticated runtime observation. A lost API
 response is reconciled through that receipt and the same provisioning token.
 
 `clankie swarm status`, `/swarm`, and operator-authenticated `GET /v1/swarm` expose
-the coordinator's diagnostics. If no Herdr/Claude executable is available,
+the coordinator's diagnostics. If Herdr or the selected harness executable is unavailable,
 communication still works and provisioning reports unavailable. A native Claude
 seat with the plugin channel enabled receives Swarm envelopes through the service's
 existing seat outbox. Opening the channel rechecks pending inbox messages, including
@@ -44,12 +44,39 @@ Their sources live in the skills and Swarm repositories; distribution artifacts
 and provenance are in [vendor](../../vendor/README.md). Architecture:
 [ADR 0180](../../docs/adr/0180-swarm-is-the-coordination-layer.md).
 
+## Managed worker harnesses
+
+`clankie runtime harness ID claude|codex|pi` selects the worker for a local runtime;
+the operator API and TUI Connections menu expose the same setting. Omitted settings
+retain Claude. Codex launches `gpt-6-astra` through app-server; pi uses RPC and a
+separate worker extension. These adapters have their own per-session enrollment,
+not the operator conversation's actor or global host configuration. The installed
+runtime advertises its support; older packages reject Codex/pi selection.
+
+`swarm_assign` accepts `harness` as an explicit constraint, translated to
+`routing.host` (`claude` maps to `claude-code`). Default/named runtime settings
+supply the host when the call does not. The resolved harness is stored in the
+immutable intent and physical launch receipt. Each non-Claude runtime route has
+a distinct ID, so changing a setting retains disabled prior routes for recovery.
+Missing executables return `harness_unavailable`; unsupported combinations return
+`harness_mode_unsupported`. No selection silently substitutes Claude.
+
+Assignments retain the existing instruction snapshots. The shared wrapper owns
+leased inbox delivery and explicit ack, progress monitoring, renewal, cancellation
+and release. An actual model call
+to Swarm commits the fenced claim; process startup or tool enumeration cannot do
+so. Codex's MCP configuration and pi's extension are supplied only at launch.
+Codex/pi currently support stream mode. Interactive Claude remains the separate
+[ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)
+workstream. Remote PC peers continue to enroll through the shared-coordinator
+relay; this does not add remote managed spawning.
+
 ## Connection contract status
 
 [ADR 0181](../../docs/adr/0181-clankie-is-independent-of-his-connections.md)
 defines the accepted product architecture. The current implementation includes
 the embedded coordinator, per-conversation actors, bundled leadership skills,
-named Herdr/Claude dispatch routes, explicit startup selection independent of the
+named Herdr managed dispatch routes, explicit startup selection independent of the
 launch terminal, and combined runtime/Swarm/account inventory in API, CLI and TUI.
 The service runs without Herdr when disabled or when runtime startup fails.
 Communication and task records remain available; unavailable Herdr routes cannot

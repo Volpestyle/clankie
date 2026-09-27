@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { CoordinationClient, enrollRuntime, localEndpoint, ownerState } from "swarm-mcp/runtime";
-import { interactiveWorkersSupported, SwarmHost } from "../src/index.ts";
+import { interactiveWorkersSupported, managedWorkersSupported, SwarmHost } from "../src/index.ts";
 import { Value } from "typebox/value";
 
 const roots: string[] = [];
@@ -854,4 +854,78 @@ test("stream routes stay free of worker-mode fields and interactive needs the in
   }
   // Whatever was written, the installed owner still reads every route.
   expect((await ownerState(dirname(configPath))).dispatch?.herdr).toHaveLength(3);
+});
+
+test("managed harness routes retain separate identities and never silently substitute Claude", async () => {
+  const supported = await managedWorkersSupported();
+  const root = await realpath(await mkdtemp("/tmp/clankie-worker-harness-"));
+  roots.push(root);
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  for (const name of ["herdr", "claude", "codex", "pi"])
+    await writeFile(join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+  let harness: "claude" | "codex" | "pi" = "claude";
+  const host = new SwarmHost({
+    stateDirectory: root,
+    warn: (message) => {
+      throw new Error(message);
+    },
+    runtimeConnections: async () => [
+      {
+        id: "default",
+        socketPath: join(root, "runtime.sock"),
+        enabled: true,
+        state: "healthy",
+        capacity: 1,
+        capabilities: ["code"],
+        workerHarness: harness,
+      },
+    ],
+  });
+  hosts.push(host);
+  await host.start({ ready: () => true, wake: async () => undefined });
+  const tools = await host.tools({ conversationId: "lead", cwd: root });
+  const configPath = join(root, createHash("sha256").update(root).digest("hex"), "owner.json");
+  for (const selected of ["codex", "pi"] as const) {
+    harness = selected;
+    await host.syncRuntimeConnections();
+    const routes = JSON.parse(await readFile(configPath, "utf8")).dispatch.herdr as Record<string, unknown>[];
+    const route = routes.find((entry) => String(entry.id).endsWith(`-${selected}`))!;
+    expect(routes.filter((entry) => entry.enabled)).toHaveLength(supported ? 1 : 0);
+    if (supported) {
+      expect(route).toMatchObject({ harness: selected, harnessPath: join(bin, selected) });
+      expect(route).not.toHaveProperty("claudePath");
+      if (selected === "codex") expect(route.model).toBe("gpt-6-astra");
+    } else expect(route.enabled).toBe(false);
+  }
+  // Selecting Claude explicitly cannot execute pi or revive the disabled old route.
+  const result = await tools
+    .find((tool) => tool.name === "swarm_assign")!
+    .execute(
+      "wrong-harness",
+      {
+        commandId: "wrong-harness",
+        title: "Must refuse",
+        runtime: "default",
+        harness: "claude",
+        routing: { intentId: "wrong-harness", capabilities: ["code"], durable: true },
+        contract: {
+          objective: "Must refuse",
+          worktree: root,
+          acceptanceCriteria: ["No launch"],
+          expectedArtifacts: [],
+          constraints: [],
+        },
+      },
+      undefined,
+      undefined,
+      {} as never,
+    );
+  const content = result.content[0]!;
+  if (content.type !== "text") throw new Error("Expected structured dispatch response");
+  expect(JSON.parse(content.text)).toMatchObject({ data: { status: "blocked" } });
+  expect((await readdir(dirname(configPath))).filter((name) => /^herdr-.*[.]json$/u.test(name))).toHaveLength(
+    0,
+  );
 });
