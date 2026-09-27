@@ -108,6 +108,10 @@ shipping publishes one without asking (James, 2026-09-25): bump the root
 operator would notice waits. Otherwise, publish only when asked. Replacing an
 installed version or an existing release always needs explicit authorization.
 
+Before the release commit, run the drift audit in
+[`maintain-docs`](../maintain-docs/SKILL.md) over the changes since the last
+tag, so the docs site and README describe what the release ships.
+
 Every release requires a clean, committed release change and a tag exactly
 matching `v` plus the root `package.json` version. Push the new tag once. Watch
 the Release workflow through completion, verify both uploaded assets and their

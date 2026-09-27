@@ -31,7 +31,7 @@ The service owns Clankie's durable conversations, goals, memory, tools, and devi
 
 `clankie` with no arguments starts the service if it is not running and opens the console. The launcher supervises the long-lived local processes and starts them in dependency order: the service, the relay for the app, the one Discord body you selected (which owns a native media child for voice), and the optional watch-me-play surface. `clankie restart [service]` and `clankie down [service]` name them; `clankie autostart enable` makes the same start happen at login. The service stays up when a console exits, so several consoles, the app, and Discord can be open at once.
 
-The captain runs on pi: models, sessions, tools, skills, and compaction are pi's. Clankie adds who he is, the rooms he lives in, the bodies he can put on, and the authority each caller carries.
+Clankie runs on pi: models, sessions, tools, skills, and compaction are pi's. What Clankie adds is who he is, the rooms he lives in, the bodies he can put on, and the authority each caller carries.
 
 ## Three views of the same work
 
