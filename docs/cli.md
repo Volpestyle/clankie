@@ -1900,3 +1900,47 @@ Revert with `clankie model set <provider>/<model>` and another
 - [Architecture canonical homes](architecture.md#canonical-homes)
 
 Managed pi workers use OpenRouter `moonshotai/kimi-k3`; the runtime harness selector chooses that explicit model instead of inheriting pi’s personal default.
+
+## Local and hosted connection modes
+
+A fresh `clankie` launch asks whether to run Clankie on this Mac or connect to an
+existing hosted Clankie. Existing installations remain local. The console shows
+`local` or `hosted · <gateway>` in its status line. Hosted startup never starts a
+local service.
+
+```sh
+clankie connect hosted
+clankie connect hosted --email you@example.com --code-stdin
+clankie status
+clankie conversations list
+clankie --chat global-default
+clankie disconnect
+```
+
+Sign-in sends an email code and then pairs this Mac as an operator device. For
+headless sign-in, provide the emailed code on stdin after the prompt; secrets
+are never command flags. `--url https://gateway.example` selects another
+compatible deployment (loopback HTTP is allowed for development). Credentials
+stay in the broker. The account's device list can revoke the Mac.
+
+`/settings` → Connection (local `/setup` → Local or hosted Clankie) and
+`/connection` select the mode. Reopen the console after changing it. In hosted
+mode `/conversation [ID]` selects a retained conversation, `/reconnect` retries
+the same selection, `/persona` edits the hosted character, `/model set
+provider/model` selects its model, and `/connect github|linear` connects accounts
+on the hosted body. Headless `model`, `persona`, `accounts`, `conversations`,
+`send` and `reset` target the hosted instance; unsupported commands refuse.
+The selected conversation and history cursors are separate for each host.
+
+Closing the client leaves accepted work running. `disconnect` forgets the
+client's device credential and chooses local mode for the next launch; use
+account device revocation to invalidate a lost Mac. Expired or revoked access
+requires `connect hosted` again. An unavailable or sleeping body is reported;
+wake it from the account page before retrying. There is no local fallback.
+
+Hosted `restart`, `down`, autostart, Herdr socket commands, Discord token setup,
+`seat`, `mcp` and shell escapes refuse with a managed-service explanation.
+Hosted terminals remain available in the paired app. `/gateway` detects an
+existing hosted tenant and offers connection instead of configuring another
+Clankie. This client requires a matching fleet ticket issuer and body version;
+source checks do not establish that those versions are deployed.

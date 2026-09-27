@@ -88,17 +88,21 @@ export class HostedPairing {
       }
     }
   }
-  async offer(input: unknown, mint: () => Promise<{ link: string; expiresAtMs: number }>): Promise<Response> {
+  async offer(
+    input: unknown,
+    mint: (purpose?: "operator") => Promise<{ link: string; expiresAtMs: number }>,
+  ): Promise<Response> {
     const parsed = RequestSchema.safeParse(input);
     if (!parsed.success) return Response.json({ error: "unauthorized" }, { status: 401 });
     const request = parsed.data,
       now = this.clock();
+    let purpose: "operator" | undefined;
     let jti: string, exp: number, secret: Buffer, ephemeralPublicKey: string;
     try {
       for (const text of [request.browserPublicKey, request.nonce])
         if (Buffer.from(text, "base64url").toString("base64url") !== text)
           throw new Error("Noncanonical encoding");
-      ({ jti, exp } = this.client.verifyPairTicket(
+      ({ jti, exp, purpose } = this.client.verifyPairTicket(
         request.pairTicket,
         request.browserPublicKey,
         request.nonce,
@@ -128,7 +132,7 @@ export class HostedPairing {
       }
     }
     try {
-      const offer = await mint();
+      const offer = await mint(purpose);
       const info = `${PAIR_DOMAIN}\n${this.client.hostId}`;
       const key = hkdfSync("sha256", secret, Buffer.from(request.nonce, "base64url"), info, 32);
       const ivBytes = randomBytes(12),

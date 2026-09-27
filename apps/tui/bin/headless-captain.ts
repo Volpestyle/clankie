@@ -1,3 +1,11 @@
+import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
+import {
+  connectHostedCli,
+  disconnectHostedCli,
+  hostedCommand,
+  hostedTransportFor,
+  HOSTED_LOCAL_ONLY,
+} from "../src/command/hosted.ts";
 import { runRuntimeCommand } from "../src/command/runtime.ts";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 import { runSwarmCommand } from "../src/command/swarm.ts";
@@ -85,6 +93,35 @@ export async function runHeadlessCaptainCommand(
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   try {
+    const env = options.env ?? process.env;
+    if (command === "connect") {
+      await connectHostedCli(rest, env, stdout);
+      return 0;
+    }
+    if (command === "disconnect") {
+      outputJson(stdout, await disconnectHostedCli(env));
+      return 0;
+    }
+    if (
+      !options.host &&
+      !options.fetchImpl &&
+      (await new SettingsStore(defaultSettingsPath(env)).load()).client?.mode === "hosted" &&
+      !["help", "--help", "-h"].includes(command ?? "")
+    ) {
+      if (HOSTED_LOCAL_ONLY.has(command ?? ""))
+        throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
+      const transport = await hostedTransportFor(env);
+      // These existing commands are HTTP-only. The transport replaces their local
+      // bearer inside the envelope; no Mac credential is read or transmitted.
+      if (["conversations", "conversation", "send", "reset"].includes(command ?? ""))
+        return runHeadlessCaptainCommand(args, {
+          ...options,
+          ...transport,
+          env: { ...env, CLANKIE_CAPTAIN_TOKEN: "hosted-device-transport" },
+        });
+      outputJson(stdout, await hostedCommand(args, transport));
+      return 0;
+    }
     if (command === "health" || command === "status") {
       const result = await statusCommand(options);
       outputJson(stdout, result);

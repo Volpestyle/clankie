@@ -746,6 +746,18 @@ export type AgentHostConnection = z.infer<typeof AgentHostConnectionSchema>;
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
+    client: z
+      .discriminatedUnion("mode", [
+        z.object({ mode: z.literal("local") }).strict(),
+        z
+          .object({
+            mode: z.literal("hosted"),
+            gatewayUrl: z.string().url(),
+            hostId: z.string().regex(/^[A-Za-z0-9_-]{16,128}$/u),
+          })
+          .strict(),
+      ])
+      .optional(),
     // Defaulted lazily: the parsed output carries every field's own default,
     // which a bare `{}` literal does not satisfy.
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),

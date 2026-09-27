@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh 
 clankie
 ```
 
-The launcher starts the service and opens the console, the primary place to
+In local mode the launcher starts the service and opens the console, the primary place to
 work with Clankie as your lead. The first time, the console opens `/setup`,
 which asks two things: how Clankie should think (a Claude, ChatGPT or SuperGrok
 subscription, an API key, or a local model) and which model. Sign-ins go to the
@@ -205,3 +205,9 @@ before pointing a coding agent at this repo.
 Apache-2.0 except `apps/vox`, which is AGPL-3.0-or-later under its own
 [`LICENSE`](apps/vox/LICENSE). Third-party dependencies retain their own
 licenses; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+The Mac console can also connect to an existing hosted Clankie with
+`clankie connect hosted`, pairing as a revocable operator device without starting
+a local service. Fresh installations choose their mode before startup. See
+[connection modes](docs/cli.md#local-and-hosted-connection-modes) for commands and
+matching deployment requirements.

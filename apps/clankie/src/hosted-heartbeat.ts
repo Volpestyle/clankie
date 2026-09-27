@@ -26,6 +26,17 @@ const WORK_OPS = new Set([
 /** Called only after successful authorization/dispatch inside the encrypted boundary. */
 export function isHostedCustomerWork(method: string, path: string, body: string): boolean {
   if (method !== "POST") return false;
+  if (path === "/v1/hosted/operator") {
+    try {
+      const inner = z
+        .object({ method: z.enum(["GET", "POST"]), path: z.string(), body: z.string().optional() })
+        .parse(JSON.parse(body));
+      // Never recurse into another bridge, and never count polling as activity.
+      return inner.path !== path && isHostedCustomerWork(inner.method, inner.path, inner.body ?? "");
+    } catch {
+      return false;
+    }
+  }
   if (path === "/v1/pairing/redeem" || path === "/v1/pairing/complete") return true;
   if (path !== "/operator/v1/dispatch") return false;
   try {

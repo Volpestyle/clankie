@@ -1,3 +1,4 @@
+import { buildHostedConnectionCommands } from "./hosted-console.ts";
 import { gatewayStatus } from "./command/gateway.ts";
 import { readHerdrBinding, herdrConnection } from "./session/herdr-connection.ts";
 import {
@@ -389,6 +390,7 @@ const setupServices: SetupCommandServices = {
 };
 
 const commands = [
+  ...buildHostedConnectionCommands(settingsStore, true),
   ...buildSetupCommands(setupServices),
   ...buildConsoleCommands({
     settings: settingsStore,
@@ -456,7 +458,7 @@ const shell = new ClankieFaceShell({
     model: currentModelDisplay,
     title: currentConversationTitle,
   }),
-  statusExtras: () => sideConversationStatus(),
+  statusExtras: () => ["local", ...sideConversationStatus()],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal, delivery) => {
     let ready!: () => void;

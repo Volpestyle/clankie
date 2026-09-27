@@ -6,7 +6,7 @@ import { createAccountRoutes } from "./account-routes.ts";
 import type { AccountsPort } from "./accounts.ts";
 import type { ComputerUseHarness } from "./computer-use-harnesses.ts";
 import type { ModelKeysPort } from "./model-keys.ts";
-import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
+import { HOSTED_OPERATOR_PATH, HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
 import type { HostedPairing } from "./hosted-pairing.ts";
 import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
 import type { HostedDeviceSecurity } from "./hosted-device-security.ts";
@@ -129,6 +129,7 @@ import {
 import { LINEAR_WEBHOOK_PATH, type PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway";
 import {
   AgentHostConnectionSchema,
+  PersonaSettingsSchema,
   personaInstructions,
   SettingsStore,
   type ClankieSettings,
@@ -705,6 +706,102 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       sessionExpiresAt: new Date(claims.expiresAt * 1000).toISOString(),
     };
   };
+
+  // Only requests created inside the authenticated device bridge acquire operator
+  // authority. No header, client platform, or ordinary pairing link can assert it.
+  const hostedRequests = new WeakMap<Request, string>();
+  const localOperator = dependencies.authenticateOperator;
+  const localCaptain = dependencies.authenticateCaptain;
+  if (dependencies.hostedPairing !== undefined)
+    dependencies = {
+      ...dependencies,
+      authenticateOperator: async (request) => {
+        const candidate = hostedRequests.get(request);
+        const deviceId =
+          candidate !== undefined && devices.get(candidate)?.status === "active" ? candidate : undefined;
+        return deviceId === undefined
+          ? localOperator?.(request)
+          : { operatorId: deviceId, steerSourceLane: "tui" };
+      },
+      authenticateCaptain: async (request) => {
+        const candidate = hostedRequests.get(request);
+        const deviceId =
+          candidate !== undefined && devices.get(candidate)?.status === "active" ? candidate : undefined;
+        return deviceId === undefined
+          ? localCaptain?.(request)
+          : { captainId: deviceId, steerSourceLane: "api" };
+      },
+    };
+  app.post(HOSTED_OPERATOR_PATH, bodyLimit({ maxSize: 2 * 1024 * 1024 }), async (context) => {
+    const identity = await authenticateDevice(context.req.raw);
+    if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+    if ("denied" in identity) return deviceDenialResponse(context, identity);
+    const record = devices.get(identity.deviceId);
+    if (
+      dependencies.hostedPairing === undefined ||
+      record?.mintedBy !== "hosted-account-operator" ||
+      !identity.grants.terminalControl
+    )
+      return context.json({ error: "operator_device_required" }, 403);
+    const parsed = z
+      .object({
+        method: z.enum(["GET", "POST"]),
+        path: z.string().regex(/^(?:\/health|\/operator\/v1\/dispatch|\/v1\/[A-Za-z0-9_/-]+)$/u),
+        body: z
+          .string()
+          .max(1024 * 1024)
+          .optional(),
+      })
+      .strict()
+      .safeParse(await readJson(context.req.raw));
+    if (
+      !parsed.success ||
+      parsed.data.path.startsWith("/v1/hosted/") ||
+      parsed.data.path.startsWith("/v1/gateway/") ||
+      parsed.data.path.startsWith("/v1/hooks/")
+    )
+      return context.json({ error: "invalid_operator_route" }, 400);
+    const inner = new Request(`http://control${parsed.data.path}`, {
+      method: parsed.data.method,
+      headers: { "content-type": "application/json" },
+      signal: context.req.raw.signal,
+      ...(parsed.data.method === "POST" && parsed.data.body !== undefined ? { body: parsed.data.body } : {}),
+    });
+    hostedRequests.set(inner, identity.deviceId);
+    try {
+      const response = await app.fetch(inner);
+      // A parked tail can outlive revocation or expiry. Recheck before releasing
+      // its page; admission of an earlier write is not undone by this denial.
+      const current = await authenticateDevice(context.req.raw);
+      if (current === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+      if ("denied" in current) return deviceDenialResponse(context, current);
+      return response;
+    } finally {
+      hostedRequests.delete(inner);
+    }
+  });
+
+  app.get("/v1/operator/persona", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, dependencies);
+    if (!identity || identity === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    return context.json({ persona: (await settingsSource.load()).persona });
+  });
+  app.post("/v1/operator/persona", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, dependencies);
+    if (!identity || identity === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
+    const patch = PersonaSettingsSchema.partial()
+      .strict()
+      .safeParse(await readJson(context.req.raw));
+    if (!patch.success) return context.json({ error: "malformed" }, 400);
+    const updated = await settingsSource.update((value) => ({
+      ...value,
+      persona: PersonaSettingsSchema.parse({ ...value.persona, ...patch.data }),
+    }));
+    return context.json({ persona: updated.persona });
+  });
 
   const deviceDenialResponse = (context: Context, denial: DeviceAuthDenial) => {
     if (denial.denied === "revoked") return context.json({ error: "revoked" }, 401);
@@ -2740,12 +2837,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (dependencies.hostedBody !== undefined && deviceSessionSigner === undefined)
       return context.json({ error: "device_authentication_unavailable" }, 503);
     if (dependencies.hostedPairing === undefined) return context.json({ error: "not_found" }, 404);
-    return dependencies.hostedPairing.offer(await readJson(context.req.raw), async () => {
+    return dependencies.hostedPairing.offer(await readJson(context.req.raw), async (purpose) => {
       const publisher = dependencies.pairingOfferPublisher;
       if (publisher?.protectPairingOffer === undefined) throw new Error("Encrypted pairing unavailable");
       const now = clock();
       pairingOffers.prune(now);
-      const offer = mintPairingOffer({ now, mintedBy: "hosted-account", idFactory });
+      const offer = mintPairingOffer({
+        now,
+        mintedBy: purpose === "operator" ? "hosted-account-operator" : "hosted-account",
+        idFactory,
+      });
       await publisher.publishPairingOffer(offer);
       const protectedOffer = publisher.protectPairingOffer(offer);
       pairingOffers.add(pairingOfferRecord(offer));

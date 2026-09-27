@@ -481,3 +481,12 @@ release so he can describe and set up this machine without a git tree
 | Credential identities/setup       | [`docs/credentials.md`](credentials.md)                                                           |
 | Credential implementation         | [`packages/credential-broker/README.md`](../packages/credential-broker/README.md)                 |
 | Models                            | [`packages/model-provider/README.md`](../packages/model-provider/README.md)                       |
+
+## Hosted Mac console
+
+The launcher resolves local/hosted mode before starting services. Hosted mode
+pairs a revocable operator device through account sign-in and carries requests
+inside the existing encrypted device envelope. No local body or operator bearer
+is started or exported. See the [ADR 0173 amendment](adr/0173-the-gateway-cannot-read-device-traffic.md#amendment-the-mac-can-be-a-hosted-operator-device-2026-09-27-vuh-1110)
+for authority and the [CLI contract](cli.md#local-and-hosted-connection-modes)
+for supported commands and recovery. Fleet ticket issuance stays private.

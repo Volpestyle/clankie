@@ -137,3 +137,65 @@ and perform fresh review pairing before reopening external testing.
 - [VUH-1112](https://linear.app/vuhlp/issue/VUH-1112/encrypt-device-to-host-traffic-across-the-shared-gateway)
 - [NIST SP 800-38D](https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=51288)
 - [Apple AES.GCM.SealedBox](https://developer.apple.com/documentation/cryptokit/aes/gcm/sealedbox)
+
+## Amendment: the Mac can be a hosted operator device (2026-09-27, VUH-1110)
+
+The launcher chooses local or hosted before starting any body. Existing installs
+retain local behavior; a fresh install offers both. Hosted mode opens only a
+client. The same service owns conversations, memory and accepted work after that
+client exits. Selected conversation and cursors are stored per host on the Mac.
+
+Account sign-in obtains a one-use fleet-signed pairing ticket bound to the
+client's ephemeral key and nonce. An explicit `purpose: operator` claim permits
+an operator offer; ordinary tickets retain device-only authority. The body's
+signed, encrypted answer carries the existing secure pairing link. The client
+verifies it before redeeming, then stores its device bearer and encryption
+credential in the broker. Account tokens never traverse the gateway host route and are not retained by
+the hosted client after pairing, so device revocation does not leave a stored
+account refresh token that could silently re-enroll it.
+
+The lead-authorized default is full operator authority for an account-paired
+Mac, revocable per device. James may revise that decision. The policy seam is
+the hosted operator bridge's check for the durable `hosted-account-operator`
+issuer marker plus an active device with Take Control. A caller's platform,
+headers or ordinary pairing link cannot create that marker. Revocation and
+expiry are checked before each encrypted exchange. No reusable operator or
+captain bearer is exported to the Mac.
+
+`POST /v1/hosted/operator` carries a bounded inner GET/POST request through the
+existing authenticated envelope. After the device check, an in-process request
+receives operator authority; only the server's request identity carries it.
+Nested bridge, gateway and webhook routes are refused. The inner route retains
+its existing validation and trusted-caller checks. Persona has a typed operator
+API; model and account connections reuse their existing owner APIs. Interactive
+work inside the bridge counts as hosted activity; polling does not.
+
+```mermaid
+sequenceDiagram
+  participant T as Mac TUI
+  participant F as Account service
+  participant G as Opaque gateway
+  participant H as Hosted Clankie
+  T->>F: Account sign-in, key-bound operator ticket
+  F-->>T: Ticket and trusted body public key
+  T->>G: Ticket, ephemeral key, nonce
+  G->>H: Pair-offer request
+  H-->>T: Signed encrypted offer
+  T->>H: Encrypted redeem and complete through gateway
+  H-->>T: Revocable device session
+  T->>H: Encrypted operator request through gateway
+  H->>H: Check live device, issuer and grants; dispatch
+```
+
+Local process, Herdr socket, autostart and body-token controls explicitly refuse
+in hosted mode. Disconnect forgets the client credential and returns the next
+launch to local mode; it does not stop hosted work. Account device revocation is
+the way to invalidate a lost Mac. `/gateway` checks the account's tenant before
+configuring another local doorway and offers connection to the existing host.
+A failed account lookup refuses configuration rather than assuming no tenant.
+
+The fleet ticket issuer remains in private `clankie-ops` under ADR 0183. The Mac
+client, encrypted transport and reusable body authorization remain public.
+Local tests cover signing, tampering, encryption, ordinary-device denial,
+revocation, continuing conversation work and forbidden local process commands.
+A real hosted Mac/phone rehearsal and deployment remain separate gates.

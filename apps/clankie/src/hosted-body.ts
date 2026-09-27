@@ -267,6 +267,7 @@ const PairClaimsSchema = z
   .object({
     ...ClaimsBase,
     aud: z.literal("clankie-body"),
+    purpose: z.literal("operator").optional(),
     jti: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
     bkh: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
     non: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),

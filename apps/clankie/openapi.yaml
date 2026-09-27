@@ -960,6 +960,56 @@ paths:
       responses:
         "200": { description: Session closed }
         "403": { description: Worker grant unavailable }
+  /v1/hosted/operator:
+    post:
+      tags: [Operator]
+      operationId: hostedOperatorRequest
+      summary: Dispatch as an account-paired hosted operator device
+      description: Encrypted gateway carrier required remotely. Checks active device session, server-recorded operator pairing purpose and Take Control grant. No operator bearer is exported. Nested bridge, gateway and webhook paths are refused; the inner route keeps its own validation. Revocation is rechecked before returning a parked page.
+      security: [{ deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [method, path]
+              properties:
+                method: { type: string, enum: [GET, POST] }
+                path: { type: string, description: Inner health, operator dispatch or v1 route }
+                body: { type: string, maxLength: 1048576, description: JSON request body for POST }
+      responses:
+        "200": { description: Inner operator route response }
+        "400": { description: Invalid inner request or forbidden route }
+        "401": { description: Missing, expired or revoked device session }
+        "403": { description: Not an account-paired operator device }
+  /v1/operator/persona:
+    get:
+      tags: [Operator]
+      operationId: getOperatorPersona
+      summary: Read the hosted or local owner-authored persona
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Persona settings }
+        "401": { description: Operator authentication required }
+    post:
+      tags: [Operator]
+      operationId: updateOperatorPersona
+      summary: Apply a validated partial persona update
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Partial PersonaSettings; unknown fields are refused
+      responses:
+        "200": { description: Updated persona settings }
+        "400": { description: Invalid persona patch }
+        "401": { description: Operator authentication required }
+        "503": { description: Settings persistence unavailable }
   /health:
     get:
       tags: [Health]

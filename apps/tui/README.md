@@ -275,3 +275,17 @@ node apps/tui/bench/transcript-render.ts 1000     # a specific scrollback size
 
 The launcher runs TypeScript through Node's native type stripping; the repo's
 `erasableSyntaxOnly` setting enforces the supported syntax.
+
+## Hosted mode
+
+A fresh launcher offers local or hosted before starting any service. Use
+`clankie connect hosted` or `/connection` to sign in and pair the Mac as a
+revocable operator device; `/settings` exposes the mode and hosted settings.
+The hosted console uses encrypted device traffic and the same retained
+conversation service as companion clients. Its selected conversation and
+cursors are keyed by host. Closing it leaves work running.
+
+`clankie disconnect` forgets the client credential and makes the next launch
+local. Hosted mode refuses local process/socket/body-token commands and `!`
+shell escapes. See [connection modes](../../docs/cli.md#local-and-hosted-connection-modes)
+for supported commands, recovery and deployment requirements.

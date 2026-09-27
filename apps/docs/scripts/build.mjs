@@ -293,6 +293,14 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/hosted/operator",
+      {
+        access: "Encrypted live device bearer with account-paired operator authority",
+        purpose:
+          "Run a bounded operator request on the hosted body; device revocation and inner route validation remain authoritative.",
+      },
+    ],
+    [
       "POST /v1/hosted/pair-offer",
       {
         access: "Single-use fleet ticket bound to the browser key; managed bodies only",
@@ -459,6 +467,19 @@ async function slashCommands() {
   let registered = 0;
   for await (const file of glob("**/*.ts", { cwd: tuiSrc })) {
     const source = await readFile(resolve(tuiSrc, file), "utf8");
+    // Hosted mode has a deliberately smaller command set, documented in the CLI
+    // connection contract. Its duplicate /model, /persona, etc. are not local
+    // console registrations. The shared connection picker is its sole addition.
+    if (file === "hosted-console.ts") {
+      registered += 1;
+      commands.push({
+        name: "connection",
+        aliases: ["settings"],
+        description: "Choose local or hosted Clankie",
+        argument: "",
+      });
+      continue;
+    }
     registered += (source.match(/^\s*takesArgument: (?:true|false),/gm) ?? []).length;
     for (const match of source.matchAll(literal)) {
       commands.push({

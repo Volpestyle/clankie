@@ -29,7 +29,7 @@ The service owns Clankie's durable conversations, goals, memory, tools, and devi
 
 ## One service, launcher-owned
 
-`clankie` with no arguments starts the service if it is not running and opens the console. The launcher supervises the long-lived local processes and starts them in dependency order: the service, the relay for the app, the one Discord body you selected (which owns a native media child for voice), and the optional watch-me-play surface. `clankie restart [service]` and `clankie down [service]` name them; `clankie autostart enable` makes the same start happen at login. The service stays up when a console exits, so several consoles, the app, and Discord can be open at once.
+In local mode, `clankie` with no arguments starts the service if it is not running and opens the console. The launcher supervises the long-lived local processes and starts them in dependency order: the service, the relay for the app, the one Discord body you selected (which owns a native media child for voice), and the optional watch-me-play surface. `clankie restart [service]` and `clankie down [service]` name them; `clankie autostart enable` makes the same start happen at login. The service stays up when a console exits, so several consoles, the app, and Discord can be open at once.
 
 Clankie runs on pi: models, sessions, tools, skills, and compaction are pi's. What Clankie adds is who he is, the rooms he lives in, the bodies he can put on, and the authority each caller carries.
 
@@ -96,3 +96,10 @@ When push is configured, the gateway keeps a separate delivery database with APN
 - [Credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md) — who holds which secret
 - [Memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md) — what each store holds and who may read it
 - [Distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md) — the installed layout and releases
+
+The Mac console can instead connect to an existing hosted Clankie. Fresh installs
+choose local or hosted before startup; `clankie connect hosted` signs in and
+pairs this Mac as a revocable device. Hosted mode starts no local service, and
+closing the client leaves work running. The status line shows the mode; local
+process controls refuse in hosted mode. See the [CLI reference](/cli/#local-and-hosted-connection-modes)
+for supported commands and compatible deployment requirements.

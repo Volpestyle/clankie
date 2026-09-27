@@ -1,3 +1,4 @@
+import { accountHasHostedClankie, pairHostedAccount } from "./hosted-session.ts";
 import {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
@@ -139,6 +140,26 @@ async function runWizard(
     if (code === undefined) return;
     flow.setStatus("signing this Mac in…");
     const credential = await completeClankieAccountLogin({ challenge, code });
+
+    if (await accountHasHostedClankie(gatewayUrl, credential)) {
+      const action = await flow.readSelect({
+        message: "Your account already has a hosted Clankie",
+        options: [
+          { value: "hosted", label: "Connect to it" },
+          { value: "cancel", label: "Cancel" },
+        ],
+      });
+      if (action === "hosted") {
+        await pairHostedAccount({
+          gatewayUrl,
+          credential,
+          store: services.credentials,
+          settings: services.settings,
+        });
+        flow.renderLine("Hosted connection saved. Exit this console and run clankie again.", "success");
+      }
+      return;
+    }
 
     const installationId = current.publicGateway.installationId ?? generatePublicGatewayInstallationId();
     const publicGateway = PublicGatewaySettingsSchema.parse({ url: gatewayUrl, installationId });

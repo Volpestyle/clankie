@@ -188,6 +188,7 @@ export function checklistEntries(
   const discordOn = discord.textIngressEnabled || discord.voiceEnabled || discord.userSessionEnabled;
   const workers = ["codex", "claude"].filter((name) => report.commands[name]?.present === true);
   return [
+    { value: "connection", label: "Local or hosted Clankie", hint: "local", command: "connection" },
     {
       value: "think",
       label: "How he thinks",

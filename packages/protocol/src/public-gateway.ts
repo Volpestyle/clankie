@@ -43,7 +43,10 @@ export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
 /** A hosted body seals a fresh pairing link for its owner's signed-in web page. */
 export const HOSTED_PAIR_OFFER_PATH = "/v1/hosted/pair-offer";
 
+export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
+
 export const PUBLIC_GATEWAY_ROUTES = [
+  { method: "POST", path: HOSTED_OPERATOR_PATH, target: "control" },
   { method: "POST", path: DISCORD_INGRESS_PATH, target: "control" },
   { method: "GET", path: MODEL_KEYS_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_SET_PATH, target: "control" },

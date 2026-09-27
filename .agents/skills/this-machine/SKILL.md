@@ -491,3 +491,26 @@ can wake a sleeping body; other channel chatter is not replayed later. Without
 Message Content access, unmentioned follow-ups and ping-disabled replies may
 need a mention or DM. A failed delivery marked interrupted was admitted before
 a restart: inspect effects before explicitly retrying it.
+
+## A Mac connected to hosted Clankie
+
+`clankie connect hosted` signs in by email code and pairs this Mac as a revocable
+operator device; headless use takes `--email EMAIL --code-stdin`, with the code
+on stdin. `/connection` and `/settings` expose the choice. Hosted mode never
+starts a local body; the status line says `hosted · <gateway>`. Existing installs
+stay local, and fresh installs choose before a service starts.
+
+Use `conversations`, `send`, `reset`, `model`, `persona` and `accounts` against
+the selected host. The hosted console resumes its saved conversation per host;
+`--chat ID` overrides it and `/reconnect` retries it. Model/account secrets stay
+in the hosted broker; the Mac keeps only its device credential after hosted sign-in.
+Local lifecycle, autostart, Herdr sockets, body tokens, `seat` and `mcp` refuse in
+hosted mode. Manage hosted lifecycle/Discord from the account page and terminals
+from the paired app. Never repair an unavailable host by starting a local copy.
+
+`disconnect` forgets this device credential and returns the next launch to local
+mode, leaving hosted work running. Account device revocation invalidates a lost
+Mac. Expired/revoked access needs a new sign-in; an unavailable/sleeping body needs
+its account lifecycle checked. `/gateway` checks for an existing hosted tenant
+before configuring a second doorway. The compatible fleet/body deployment and a
+real Mac/phone rehearsal are separate from local source verification.

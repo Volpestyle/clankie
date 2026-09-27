@@ -1,6 +1,13 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["connect", "disconnect"],
+    lines: [
+      "  connect hosted [--email EMAIL] [--url ORIGIN] [--code-stdin]",
+      "  disconnect               Forget this hosted client; hosted work continues",
+    ],
+  },
+  {
     nouns: ["connections"],
     lines: ["  connections              Inspect runtime, Swarm and connected-account inventory (JSON)"],
   },
