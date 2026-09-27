@@ -999,7 +999,7 @@ paths:
       tags: [Operator]
       operationId: hostedOperatorRequest
       summary: Dispatch as an account-paired hosted operator device
-      description: Encrypted gateway carrier required remotely. Checks active device session, server-recorded operator pairing purpose and Take Control grant. No operator bearer is exported. Nested bridge, gateway and webhook paths are refused; the inner route keeps its own validation. Revocation is rechecked before returning a parked page.
+      description: Encrypted gateway carrier required remotely. Checks active device session, server-recorded operator pairing purpose and Take Control grant. No operator bearer is exported. The shared hosted-device allowlist permits chat, fleet, terminal, model, keys, persona and connections. Restart, reset and deprovision require account authority, including through the legacy device relay. The inner route keeps its own validation. Revocation is rechecked before returning a parked page.
       security: [{ deviceBearer: [] }]
       requestBody:
         required: true

@@ -1,3 +1,4 @@
+import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
 import { runAccountsCommand } from "./accounts.ts";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
@@ -27,6 +28,7 @@ export async function connectHostedCli(
     options: {
       email: { type: "string" },
       url: { type: "string", default: "https://api.clankie.bot" },
+      machine: { type: "string" },
       "code-stdin": { type: "boolean" },
     },
   });
@@ -53,12 +55,36 @@ export async function connectHostedCli(
     const credential = await completeClankieAccountLogin({ challenge, code });
     const store = createDefaultCredentialStore({ env }),
       settings = new SettingsStore(defaultSettingsPath(env));
-    const session = await pairHostedAccount({ gatewayUrl, credential, store, settings });
+    const session = await pairHostedAccount({
+      gatewayUrl,
+      credential,
+      store,
+      settings,
+      onStatus: (status) => {
+        process.stderr.write(`${status}\n`);
+      },
+      selectMachine: async (machines) => {
+        if (values.machine) {
+          const chosen = machines.find((item) => item.id === values.machine);
+          if (!chosen) throw new Error("No such machine on this account");
+          return chosen;
+        }
+        if (machines.length === 1) return machines[0]!;
+        if (!process.stdin.isTTY) throw new Error("Multiple machines; use --machine ID");
+        machines.forEach((item, index) =>
+          process.stderr.write(`${index + 1}. ${item.name} (${item.state})\n`),
+        );
+        const chosen = machines[Number(await input.question("Machine: ")) - 1];
+        if (!chosen) throw new Error("No machine selected");
+        return chosen;
+      },
+    });
     outputJson(stdout, {
       ok: true,
       mode: "hosted",
       hostId: session.encryption.hostId,
       deviceId: session.deviceId,
+      machine: session.machine,
     });
   } finally {
     input.close();
@@ -75,6 +101,9 @@ export async function disconnectHostedCli(env: NodeJS.ProcessEnv = process.env) 
 }
 export const HOSTED_LOCAL_ONLY = new Set([
   "restart",
+  "reset",
+  "deprovision",
+  "remote-access",
   "down",
   "autostart",
   "herdr",
@@ -97,8 +126,43 @@ export async function hostedCommand(
   transport: ReturnType<typeof createHostedTransport>,
 ): Promise<unknown> {
   const [command, action, value] = args;
-  if (command === "status" || command === "health")
-    return { mode: "hosted", health: await transport.request("/health") };
+  if (command === "status" || command === "health") {
+    const health = await transport.request("/health");
+    return { mode: "hosted", label: transport.label, status: transport.status(), health };
+  }
+  if (command === "fleet" || command === "terminal") {
+    if (!action || action === "list" || action === "status")
+      return transport.request("/operator/v1/dispatch", {
+        schemaVersion: 1,
+        op: command === "fleet" ? "fleet" : "terminal_catalog",
+      });
+    const ops: Record<string, string> =
+      command === "fleet"
+        ? { spawn: "spawn_seat", move: "move_seat", close: "close_seat" }
+        : { tail: "terminal_tail", control: "terminal_control", input: "terminal_input" };
+    if (!ops[action] || !args.includes("--json-stdin"))
+      throw new Error(
+        `Use ${command} ${Object.keys(ops).join("|")} --json-stdin with its protocol request body`,
+      );
+    const fields = JSON.parse(await readHostedStdin());
+    const request = OperatorConversationServiceRequestSchema.parse({
+      ...fields,
+      op: ops[action],
+      schemaVersion: 1,
+    });
+    return transport.request("/operator/v1/dispatch", request);
+  }
+  if (command === "keys") {
+    if (!action || action === "status" || action === "list") return transport.request("/v1/model-keys");
+    if (action === "set" && value && args.includes("--key-stdin"))
+      return transport.request("/v1/model-keys/set", {
+        providerId: value,
+        apiKey: (await readHostedStdin()).trim(),
+      });
+    if ((action === "remove" || action === "validate") && value)
+      return transport.request(`/v1/model-keys/${action}`, { providerId: value });
+    throw new Error("Use keys set PROVIDER --key-stdin, keys remove PROVIDER or keys validate PROVIDER");
+  }
   if (command === "model") {
     if (action === undefined || action === "status") return transport.request("/v1/model-keys");
     if (action === "set" && value) return transport.request("/v1/model-keys/select", { model: value });
@@ -143,4 +207,39 @@ export async function hostedTransportFor(env: NodeJS.ProcessEnv) {
   )
     throw new Error("Hosted connection identity mismatch; clankie connect hosted");
   return createHostedTransport(session, store);
+}
+
+export async function hostedWhoami(env: NodeJS.ProcessEnv) {
+  const client = (await new SettingsStore(defaultSettingsPath(env)).load()).client;
+  if (client?.mode !== "hosted") return { mode: "local", label: "This Mac" };
+  try {
+    const store = createDefaultCredentialStore({ env }),
+      session = await loadHostedSession(store);
+    const transport = await hostedTransportFor(env);
+    await transport.request("/health").catch(() => undefined);
+    return {
+      mode: "hosted",
+      label: `Hosted · ${session.machine?.name ?? client.hostId}`,
+      machine: session.machine ?? { id: client.hostId },
+      deviceId: session.deviceId,
+      status: transport.status(),
+    };
+  } catch (error) {
+    return {
+      mode: "hosted",
+      label: `Hosted · ${client.hostId}`,
+      status: error instanceof Error ? error.message : "Sign-in required",
+    };
+  }
+}
+
+async function readHostedStdin(): Promise<string> {
+  if (process.stdin.isTTY) throw new Error("Provide the request on stdin");
+  let text = "";
+  process.stdin.setEncoding("utf8");
+  for await (const chunk of process.stdin) {
+    text += String(chunk);
+    if (Buffer.byteLength(text) > 64 * 1024) throw new Error("Hosted input too large");
+  }
+  return text;
 }

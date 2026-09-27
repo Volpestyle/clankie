@@ -1,12 +1,19 @@
 import {
+  createHostedAccountClient,
+  hostedOrigin,
+  type HostedMachine,
+} from "@clankie/protocol/hosted-pairing";
+import { DEVICE_WAKE_KEY_PATH, requestDeviceWake } from "@clankie/protocol/wake";
+import {
   createCipheriv,
   createDecipheriv,
   createECDH,
-  createHash,
   createPublicKey,
   hkdfSync,
   randomBytes,
   verify,
+  generateKeyPairSync,
+  sign,
 } from "node:crypto";
 import { hostname } from "node:os";
 import { z } from "zod";
@@ -25,6 +32,8 @@ import type { SettingsStore } from "@clankie/settings";
 const HOSTED_DEVICE_PROVIDER = "clankie-hosted-device";
 const SessionSchema = z.object({
   gatewayUrl: z.string().url(),
+  machine: z.object({ id: z.string(), name: z.string() }).optional(),
+  wakePrivateKey: z.string().optional(),
   deviceId: z.string(),
   deviceToken: z.string(),
   sessionExpiresAt: z.string().datetime(),
@@ -52,24 +61,13 @@ const nodeGatewayCrypto: GatewayCrypto = {
     return Buffer.concat([cipher.update(bytes.subarray(12, -16)), cipher.final()]).toString("utf8");
   },
 };
-export function hostedOrigin(value: string): string {
-  const url = new URL(value);
-  if (
-    (url.protocol !== "https:" &&
-      !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  )
-    throw new Error("Hosted URL must be an HTTPS origin (HTTP is loopback-only)");
-  return url.origin;
-}
+export { hostedOrigin };
 async function json(response: Response): Promise<unknown> {
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new Error(`Hosted Clankie: ${body.error ?? `unavailable (${response.status})`}`);
+    throw new Error(
+      `Hosted Clankie: ${body.error === "revoked" ? "Access revoked; clankie login" : body.error === "expired" ? "Sign-in expired; clankie login" : (body.error ?? `unavailable (${response.status})`)}`,
+    );
   }
   return response.json();
 }
@@ -96,94 +94,67 @@ export async function pairHostedAccount(input: {
   store: CredentialStore;
   settings: SettingsStore;
   fetchImpl?: typeof fetch;
+  selectMachine?: (machines: HostedMachine[]) => Promise<HostedMachine>;
+  onStatus?: (status: string) => void;
 }): Promise<HostedSession> {
   const gatewayUrl = hostedOrigin(input.gatewayUrl),
     fetchImpl = input.fetchImpl ?? fetch;
-  const accountToken = input.credential.access;
-  const ecdh = createECDH("prime256v1"),
-    browserPublicKey = ecdh.generateKeys().toString("base64url"),
-    nonce = randomBytes(16).toString("base64url");
-  const ticket = z
-    .object({ ticket: z.string(), ticketId: z.string(), hostId: z.string(), bodyPairingKey: z.string() })
-    .parse(
-      await json(
-        await fetchImpl(`${gatewayUrl}/fleet/v1/pairing/ticket`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${accountToken}`, "content-type": "application/json" },
-          redirect: "error",
-          signal: AbortSignal.timeout(15_000),
-          body: JSON.stringify({
-            browserPublicKeyHash: createHash("sha256")
-              .update(Buffer.from(browserPublicKey, "base64url"))
-              .digest("base64url"),
-            nonce,
-            purpose: "operator",
-          }),
-        }),
-      ),
-    );
-  const base = `${gatewayUrl}/h/${ticket.hostId}`;
-  const answer = z
-    .object({
-      version: z.literal(2),
-      ephemeralPublicKey: z.string(),
-      iv: z.string(),
-      ciphertext: z.string(),
-      signature: z.string(),
-    })
-    .parse(
-      await json(
-        await fetchImpl(`${base}/v1/hosted/pair-offer`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          redirect: "error",
-          signal: AbortSignal.timeout(15_000),
-          body: JSON.stringify({ version: 2, pairTicket: ticket.ticket, browserPublicKey, nonce }),
-        }),
-      ),
-    );
-  const domain = "clankie-hosted-pair-v2";
-  const transcript = [
-    domain,
-    ticket.hostId,
-    ticket.ticketId,
-    browserPublicKey,
-    nonce,
-    answer.ephemeralPublicKey,
-    answer.iv,
-    answer.ciphertext,
-  ].join("\n");
-  const publicKey = createPublicKey({
-    key: { kty: "OKP", crv: "Ed25519", x: ticket.bodyPairingKey },
-    format: "jwk",
+  const account = createHostedAccountClient({
+    origin: gatewayUrl,
+    accessToken: input.credential.access,
+    fetchImpl,
   });
-  if (!verify(null, Buffer.from(transcript), publicKey, Buffer.from(answer.signature, "base64url")))
-    throw new Error("Hosted pairing answer is unauthenticated");
-  const context = `${domain}\n${ticket.hostId}`;
-  const key = hkdfSync(
-    "sha256",
-    ecdh.computeSecret(Buffer.from(answer.ephemeralPublicKey, "base64url")),
-    Buffer.from(nonce, "base64url"),
-    context,
-    32,
-  );
-  const encrypted = Buffer.from(answer.ciphertext, "base64url"),
-    cipher = createDecipheriv("aes-256-gcm", Buffer.from(key), Buffer.from(answer.iv, "base64url"));
-  cipher.setAAD(Buffer.from(context));
-  cipher.setAuthTag(encrypted.subarray(-16));
-  const offer = z
-    .object({ link: z.string(), expiresAtMs: z.number() })
-    .parse(
-      JSON.parse(Buffer.concat([cipher.update(encrypted.subarray(0, -16)), cipher.final()]).toString("utf8")),
-    );
-  if (offer.expiresAtMs <= Date.now()) throw new Error("Hosted pairing offer expired");
-  const link = new URL(offer.link);
-  if (link.protocol !== "clankie:" || link.hostname !== "connect")
-    throw new Error("Invalid hosted pairing link");
-  let encryption = GatewayEncryptionCredentialSchema.parse(
-    Object.fromEntries(new URLSearchParams(link.hash.slice(1))),
-  );
-  if (encryption.hostId !== ticket.hostId) throw new Error("Hosted pairing host mismatch");
+  const machines = await account.machines();
+  if (machines.length === 0) throw new Error("No hosted machine on this account");
+  let machine = input.selectMachine
+    ? await input.selectMachine(machines)
+    : machines.length === 1
+      ? machines[0]!
+      : undefined;
+  if (!machine) throw new Error("Select a hosted machine to sign in");
+  const selectedId = machine.id;
+  if (!machines.some((item) => item.id === selectedId)) throw new Error("Invalid machine selection");
+  if (machine.state === "asleep" || machine.state === "waking") {
+    input.onStatus?.(`Waking ${machine.name}…`);
+    await account.wake(machine);
+    const id = machine.id,
+      deadline = Date.now() + 180_000;
+    while (machine.state !== "running" && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      const next = (await account.machines()).find((item) => item.id === id);
+      if (!next) throw new Error("Machine is no longer available to this account");
+      machine = next;
+    }
+  }
+  if (machine.state !== "running")
+    throw new Error(`${machine.name} is ${machine.state}; try again from the account page`);
+  const ecdh = createECDH("prime256v1"),
+    publicKey = ecdh.generateKeys().toString("base64url"),
+    nonce = randomBytes(16).toString("base64url");
+  const paired = await account.pair(machine, {
+    publicKey,
+    nonce,
+    async open({ answer, bodyPairingKey, transcript, context }) {
+      const key = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: bodyPairingKey }, format: "jwk" });
+      if (!verify(null, Buffer.from(transcript), key, Buffer.from(answer.signature, "base64url")))
+        throw new Error("Hosted pairing answer is unauthenticated");
+      const secret = hkdfSync(
+        "sha256",
+        ecdh.computeSecret(Buffer.from(answer.ephemeralPublicKey, "base64url")),
+        Buffer.from(nonce, "base64url"),
+        context,
+        32,
+      );
+      const bytes = Buffer.from(answer.ciphertext, "base64url"),
+        cipher = createDecipheriv("aes-256-gcm", Buffer.from(secret), Buffer.from(answer.iv, "base64url"));
+      cipher.setAAD(Buffer.from(context));
+      cipher.setAuthTag(bytes.subarray(-16));
+      return Buffer.concat([cipher.update(bytes.subarray(0, -16)), cipher.final()]).toString("utf8");
+    },
+  });
+  const link = new URL(paired.link),
+    base = `${gatewayUrl}/h/${machine.hostId}`;
+  let encryption = paired.encryption;
   const secureFetch = createGatewayEncryptedFetch({
     crypto: nodeGatewayCrypto,
     fetchImpl,
@@ -210,11 +181,29 @@ export async function pairHostedAccount(input: {
   encryption = rotatedEncryption(encryption, completeResponse);
   const session = SessionSchema.parse({
     gatewayUrl,
+    machine: { id: machine.id, name: machine.name },
     deviceId: complete.deviceId,
     deviceToken: complete.deviceToken,
     sessionExpiresAt: complete.sessionExpiresAt,
     encryption,
   });
+  const wakeKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const jwk = wakeKey.publicKey.export({ format: "jwk" });
+  const wakeResponse = await secureFetch(`${base}${DEVICE_WAKE_KEY_PATH}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${session.deviceToken}` },
+    body: JSON.stringify({
+      publicKey: Buffer.concat([
+        Buffer.from([4]),
+        Buffer.from(jwk.x!, "base64url"),
+        Buffer.from(jwk.y!, "base64url"),
+      ]).toString("base64url"),
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (wakeResponse.ok)
+    session.wakePrivateKey = wakeKey.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  // A legacy body can pair without wake support. The status reports that limit when asleep.
   await input.store.set(HOSTED_DEVICE_PROVIDER, { type: "api", key: JSON.stringify(session) });
   await input.settings.update((settings) => ({
     ...settings,
@@ -224,7 +213,7 @@ export async function pairHostedAccount(input: {
 }
 export async function loadHostedSession(store: CredentialStore): Promise<HostedSession> {
   const credential = await store.get(HOSTED_DEVICE_PROVIDER);
-  if (credential?.type !== "api") throw new Error("Hosted sign-in required: clankie connect hosted");
+  if (credential?.type !== "api") throw new Error("Hosted sign-in required: clankie login");
   return SessionSchema.parse(JSON.parse(credential.key));
 }
 export async function disconnectHosted(settings: SettingsStore, store: CredentialStore): Promise<void> {
@@ -240,18 +229,99 @@ export function createHostedTransport(
   let session = initial,
     refreshing: Promise<void> | undefined;
   const base = `${hostedOrigin(session.gatewayUrl)}/h/${session.encryption.hostId}`;
+  let status = "Connected",
+    waking: Promise<void> | undefined;
+  const listeners = new Set<() => void>();
+  const setStatus = (value: string) => {
+    status = value;
+    for (const listener of listeners) listener();
+  };
+  async function wake(signal?: AbortSignal | null) {
+    setStatus("Asleep");
+    if (!session.wakePrivateKey)
+      throw new Error("Asleep; wake from the account page, then log in again to enable device wake");
+    const result = await requestDeviceWake({
+      baseUrl: base,
+      hostId: session.encryption.hostId,
+      deviceId: session.deviceId,
+      fetchImpl,
+      sign: async (message) =>
+        sign("sha256", Buffer.from(message), {
+          key: session.wakePrivateKey!,
+          dsaEncoding: "ieee-p1363",
+        }).toString("base64url"),
+      ...(signal ? { signal } : {}),
+    });
+    setStatus("Waking");
+    const until = Date.now() + 180_000;
+    while (Date.now() < until) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(done, Math.min(result.retryAfterMs, 5_000));
+        function done() {
+          signal?.removeEventListener("abort", abort);
+          resolve();
+        }
+        function abort() {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", abort);
+          reject(new Error("Wake cancelled"));
+        }
+        if (signal?.aborted) abort();
+        else signal?.addEventListener("abort", abort, { once: true });
+      });
+      const probe = await fetchImpl(`${base}/v1/gateway/challenge`, {
+        signal: signal ?? AbortSignal.timeout(10_000),
+        redirect: "error",
+      });
+      if (probe.ok) return;
+      if (probe.status !== 503) throw new Error("Host unavailable after wake");
+    }
+    throw new Error("Asleep: wake timed out; try again");
+  }
+  class WokeBeforeDelivery extends Error {}
+  const carrier: typeof fetch = async (input, init) => {
+    let response = await fetchImpl(input, init);
+    if (response.status === 503) {
+      const body = (await response
+        .clone()
+        .json()
+        .catch(() => ({}))) as { error?: string };
+      if (body.error === "host_unavailable" || body.error === "waking") {
+        waking ??= wake(init?.signal).finally(() => {
+          waking = undefined;
+        });
+        try {
+          await waking;
+        } catch (error) {
+          setStatus(`Asleep · ${error instanceof Error ? error.message : String(error)}`);
+          throw error;
+        }
+        const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (new URL(target).pathname.endsWith("/v1/gateway/encrypted")) throw new WokeBeforeDelivery();
+        response = await fetchImpl(input, init);
+      }
+    }
+    return response;
+  };
   const secureFetch = createGatewayEncryptedFetch({
     crypto: nodeGatewayCrypto,
-    fetchImpl,
+    fetchImpl: carrier,
     credential: () => session.encryption,
   });
+  const exchange: typeof fetch = async (input, init) => {
+    try {
+      return await secureFetch(input, init);
+    } catch (error) {
+      if (!(error instanceof WokeBeforeDelivery)) throw error;
+      return secureFetch(input, init);
+    }
+  };
   async function refresh() {
-    if (Date.parse(session.sessionExpiresAt) <= Date.now())
-      throw new Error("Hosted access expired: clankie connect hosted");
-    const response = await secureFetch(`${base}/v1/devices/self/session/refresh`, {
+    if (Date.parse(session.sessionExpiresAt) <= Date.now()) throw new Error("Sign-in expired: clankie login");
+    const response = await exchange(`${base}/v1/devices/self/session/refresh`, {
       method: "POST",
       headers: { authorization: `Bearer ${session.deviceToken}` },
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(220_000),
     });
     const raw = await json(response);
     const renewed = DeviceSessionRefreshResponseSchema.parse(raw);
@@ -261,9 +331,11 @@ export function createHostedTransport(
       sessionExpiresAt: renewed.sessionExpiresAt,
       encryption: rotatedEncryption(session.encryption, response),
     };
+    const current = await loadHostedSession(store);
+    if (current.deviceId !== session.deviceId) throw new Error("Hosted connection changed; log in again");
     await store.set(HOSTED_DEVICE_PROVIDER, { type: "api", key: JSON.stringify(session) });
   }
-  const routed: typeof fetch = async (input, init) => {
+  const route: typeof fetch = async (input, init) => {
     const stored = await loadHostedSession(store);
     if (stored.deviceId !== session.deviceId || stored.encryption.hostId !== session.encryption.hostId)
       throw new Error("Hosted connection changed; reopen this console");
@@ -277,10 +349,10 @@ export function createHostedTransport(
       url = new URL(request.url);
     if (url.origin !== "http://hosted.clankie.invalid" || url.search || url.hash)
       throw new Error("Invalid hosted operator target");
-    const response = await secureFetch(`${base}${HOSTED_OPERATOR_PATH}`, {
+    const response = await exchange(`${base}${HOSTED_OPERATOR_PATH}`, {
       method: "POST",
       headers: { authorization: `Bearer ${session.deviceToken}`, "content-type": "application/json" },
-      signal: AbortSignal.any([request.signal, AbortSignal.timeout(40_000)]),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(220_000)]),
       body: JSON.stringify({
         method: request.method,
         path: url.pathname,
@@ -290,7 +362,32 @@ export function createHostedTransport(
     if (response.status === 401 || response.status === 403) await json(response);
     return response;
   };
+  const routed: typeof fetch = async (input, init) => {
+    try {
+      const response = await route(input, init);
+      setStatus("Connected");
+      return response;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(
+        /revoked/iu.test(message)
+          ? "Access revoked"
+          : /expired/iu.test(message)
+            ? "Sign-in expired"
+            : /asleep|wake/iu.test(message)
+              ? `Asleep · ${message}`
+              : "Unavailable",
+      );
+      throw error;
+    }
+  };
   return {
+    label: `Hosted · ${session.machine?.name ?? session.encryption.hostId}`,
+    status: () => status,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     host: "http://hosted.clankie.invalid",
     fetchImpl: routed,
     async request(path: string, body?: unknown) {
@@ -298,7 +395,7 @@ export function createHostedTransport(
         await routed(`http://hosted.clankie.invalid${path}`, {
           method: body === undefined ? "GET" : "POST",
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(220_000),
         }),
       );
     },

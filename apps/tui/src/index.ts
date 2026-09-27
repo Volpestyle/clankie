@@ -459,7 +459,7 @@ const shell = new ClankieFaceShell({
     model: currentModelDisplay,
     title: currentConversationTitle,
   }),
-  statusExtras: () => ["local", ...sideConversationStatus()],
+  statusExtras: () => ["This Mac", ...sideConversationStatus()],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal, delivery) => {
     let ready!: () => void;

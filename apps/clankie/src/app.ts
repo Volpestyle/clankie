@@ -1,3 +1,4 @@
+import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { WorkerHarnessError } from "./herdr-session.ts";
 import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
 import { createModelKeyRoutes } from "./model-key-routes.ts";
@@ -755,12 +756,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       })
       .strict()
       .safeParse(await readJson(context.req.raw));
-    if (
-      !parsed.success ||
-      parsed.data.path.startsWith("/v1/hosted/") ||
-      parsed.data.path.startsWith("/v1/gateway/") ||
-      parsed.data.path.startsWith("/v1/hooks/")
-    )
+    if (!parsed.success || !hostedOperatorAllows(parsed.data.method, parsed.data.path, parsed.data.body))
       return context.json({ error: "invalid_operator_route" }, 400);
     const inner = new Request(`http://control${parsed.data.path}`, {
       method: parsed.data.method,
@@ -3173,6 +3169,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       grants: record.grants,
       host: { name: hostDisplayName },
       sessionExpiresAt: identity.sessionExpiresAt,
+      ...(dependencies.hostedPairing !== undefined || dependencies.hostedBody !== undefined
+        ? { controlScope: "hosted" as const }
+        : {}),
     } satisfies DeviceSelfResponse);
   });
 

@@ -87,7 +87,7 @@ The iPhone and iPad app is a companion that reaches your Mac through
 `api.clankie.bot`. Clankie and the workers run on your Mac; model requests use
 the providers or local runtimes you configure. Four more steps:
 
-1. **Sign the Mac in.** `/gateway`, choose **Enable remote access**, enter the
+1. **Sign the Mac in.** `/remote-access` (`/gateway` alias), choose **Enable remote access**, enter the
    email your invitation named, then the one-time code it receives. That
    enrolls this Mac at the public doorway under your account. There are no
    URLs, host ids, or tokens to copy.
@@ -207,7 +207,7 @@ Apache-2.0 except `apps/vox`, which is AGPL-3.0-or-later under its own
 licenses; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 The Mac console can also connect to an existing hosted Clankie with
-`clankie connect hosted`, pairing as a revocable operator device without starting
+`clankie login`, pairing as a revocable operator device without starting
 a local service. Fresh installations choose their mode before startup. See
 [connection modes](docs/cli.md#local-and-hosted-connection-modes) for commands and
 matching deployment requirements.

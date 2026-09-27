@@ -278,14 +278,17 @@ The launcher runs TypeScript through Node's native type stripping; the repo's
 
 ## Hosted mode
 
-A fresh launcher offers local or hosted before starting any service. Use
-`clankie connect hosted` or `/connection` to sign in and pair the Mac as a
-revocable operator device; `/settings` exposes the mode and hosted settings.
-The hosted console uses encrypted device traffic and the same retained
-conversation service as companion clients. Its selected conversation and
-cursors are keyed by host. Closing it leaves work running.
+The first launch offers This Mac or hosted; hosted mode starts no local body.
+`clankie login`, `logout`, and `whoami` sign in, forget this device, or show its
+machine/access status. `connect hosted` and `disconnect` remain aliases.
+`/settings` and `/connection` expose modes. The footer names the machine and
+reports Asleep/Waking, Sign-in expired, Access revoked, or Unavailable.
 
-`clankie disconnect` forgets the client credential and makes the next launch
-local. Hosted mode refuses local process/socket/body-token commands and `!`
-shell escapes. See [connection modes](../../docs/cli.md#local-and-hosted-connection-modes)
-for supported commands, recovery and deployment requirements.
+Account pairing is private fleet work; the Node-free shared client is in
+`@clankie/protocol/hosted-pairing`. The current fleet model has one optional
+tenant per account. Chat, fleet, terminal, model, keys, persona and connections
+are device capabilities; restart/reset/deprovision remain account/control-plane
+operations. A paired Mac uses the app's signed wake protocol. `/remote-access`
+means self-hosted Remote access for this Mac; `/gateway` is an alias.
+See [connection modes](../../docs/cli.md#local-and-hosted-connection-modes) for
+commands, secret handling and live-verification limits.

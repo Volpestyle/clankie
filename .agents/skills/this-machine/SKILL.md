@@ -502,23 +502,29 @@ a restart: inspect effects before explicitly retrying it.
 
 ## A Mac connected to hosted Clankie
 
-`clankie connect hosted` signs in by email code and pairs this Mac as a revocable
-operator device; headless use takes `--email EMAIL --code-stdin`, with the code
-on stdin. `/connection` and `/settings` expose the choice. Hosted mode never
-starts a local body; the status line says `hosted · <gateway>`. Existing installs
-stay local, and fresh installs choose before a service starts.
+`clankie login` signs in by email code and pairs a revocable hosted device.
+Use `--email EMAIL --code-stdin` headlessly; `whoami` reports the machine and
+access state without secrets. `logout` forgets this Mac's session/wake key and
+selects This Mac for the next launch, leaving hosted work running. `connect
+hosted`/`disconnect` remain aliases. `/connection` and `/settings` expose modes.
+Hosted mode never starts a local body; the footer says `Hosted · <machine>`.
 
-Use `conversations`, `send`, `reset`, `model`, `persona` and `accounts` against
-the selected host. The hosted console resumes its saved conversation per host;
-`--chat ID` overrides it and `/reconnect` retries it. Model/account secrets stay
-in the hosted broker; the Mac keeps only its device credential after hosted sign-in.
-Local lifecycle, autostart, Herdr sockets, body tokens, `seat` and `mcp` refuse in
-hosted mode. Manage hosted lifecycle/Discord from the account page and terminals
-from the paired app. Never repair an unavailable host by starting a local copy.
+Use chat/conversations, fleet, terminal, model, keys, persona and connections
+against the selected host. Restart, reset and deprovision are account/control
+plane operations, never device-session operations. The shared policy applies
+to both operator bridge and legacy relay. Terminal control still executes its
+user's raw input; the route policy is not a shell sandbox.
 
-`disconnect` forgets this device credential and returns the next launch to local
-mode, leaving hosted work running. Account device revocation invalidates a lost
-Mac. Expired/revoked access needs a new sign-in; an unavailable/sleeping body needs
-its account lifecycle checked. `/gateway` checks for an existing hosted tenant
-before configuring a second doorway. The compatible fleet/body deployment and a
-real Mac/phone rehearsal are separate from local source verification.
+The console retains conversation/cursors per host; `--chat ID` overrides the
+selection and `/reconnect` retries it. The fleet currently gives an account one
+tenant, so login auto-selects it; the client supports a picker for multiple
+results. Account tokens are not retained after pairing. Device credentials and
+wake signing material live in the Mac broker; model/account keys stay hosted.
+
+Status distinguishes Asleep/Waking, Sign-in expired, Access revoked and
+Unavailable. A paired Mac wakes the body with the app's device-signed challenge
+protocol. First login uses account wake. Never start a local copy to repair
+hosted access. Local sockets, lifecycle, `seat`, `mcp` and shell escapes refuse.
+`/remote-access` is self-hosted Remote access for this Mac (`/gateway` alias),
+and checks for an existing hosted tenant before configuring a doorway.
+Matching deployments and a real Mac/phone rehearsal are separate gates.

@@ -103,7 +103,7 @@ async function fixture(options: {
   } as unknown as ProviderServices;
   const opened: string[] = [];
   const autostartCalls: string[] = [];
-  const commands: FaceShellCommand[] = ["persona", "gateway", "discord"].map((name) => ({
+  const commands: FaceShellCommand[] = ["persona", "remote-access", "discord"].map((name) => ({
     name,
     aliases: [],
     description: name,
@@ -226,7 +226,7 @@ describe("/setup", () => {
       );
     expect(phone({ state: "connected" })?.command).toBe("pair");
     expect(phone({ state: "sign_in_required", since: "2026-09-01" })).toMatchObject({
-      command: "gateway",
+      command: "remote-access",
       hint: "signed out",
     });
   });

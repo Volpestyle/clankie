@@ -219,7 +219,7 @@ export function checklistEntries(
         report.doorway.state === "connected"
           ? "This Mac is signed in; pair a phone or iPad."
           : "Sign this Mac in to api.clankie.bot, then pair the app.",
-      command: report.doorway.state === "connected" ? "pair" : "gateway",
+      command: report.doorway.state === "connected" ? "pair" : "remote-access",
     },
     {
       value: "discord",

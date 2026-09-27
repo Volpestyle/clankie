@@ -47,7 +47,7 @@ export function buildHostedConnectionCommands(
             message: `Connection · ${current?.mode ?? "local"}`,
             options: [
               { value: "hosted", label: "Connect to my hosted Clankie", hint: "email + one-time code" },
-              { value: "local", label: "Run Clankie on this Mac" },
+              { value: "local", label: "This Mac" },
             ],
           });
           const store = createDefaultCredentialStore();
@@ -60,7 +60,27 @@ export function buildHostedConnectionCommands(
             const code = await flow.readSecret({ message: "Code from your email" });
             if (!code) return;
             const credential = await completeClankieAccountLogin({ challenge, code });
-            await pairHostedAccount({ gatewayUrl, credential, settings, store });
+            await pairHostedAccount({
+              gatewayUrl,
+              credential,
+              settings,
+              store,
+              onStatus: (status) => flow.setStatus(status),
+              selectMachine: async (machines) => {
+                if (machines.length === 1) return machines[0]!;
+                const id = await flow.readSelect({
+                  message: "Hosted machine",
+                  options: machines.map((machine) => ({
+                    value: machine.id,
+                    label: machine.name,
+                    hint: machine.state,
+                  })),
+                });
+                const machine = machines.find((item) => item.id === id);
+                if (!machine) throw new Error("No machine selected");
+                return machine;
+              },
+            });
           } else return;
           flow.renderLine(
             "Connection saved. Exit this console and run clankie again. Existing work continues.",
@@ -89,7 +109,7 @@ export async function runHostedConsole() {
     saved.hostId !== session.encryption.hostId ||
     saved.gatewayUrl !== session.gatewayUrl
   )
-    throw new Error("Hosted connection identity mismatch; clankie connect hosted");
+    throw new Error("Hosted connection identity mismatch; clankie login");
   const state = join(clankieStateHome(), "clankie", "tui", session.encryption.hostId);
   const prompt = new OperatorConversationPromptSession({
     client,
@@ -176,6 +196,51 @@ export async function runHostedConsole() {
       },
     },
     {
+      name: "fleet",
+      aliases: [],
+      description: "Hosted fleet",
+      takesArgument: false,
+      async run() {
+        await show(["fleet"]);
+      },
+    },
+    {
+      name: "terminal",
+      aliases: [],
+      description: "Hosted terminal catalog",
+      takesArgument: false,
+      async run() {
+        await show(["terminal"]);
+        shell.insertMarkdown(
+          "Use clankie terminal tail|control|input --json-stdin for protocol requests; terminal input requires a control lease.",
+        );
+      },
+    },
+    {
+      name: "keys",
+      aliases: ["auth"],
+      description: "Hosted model keys",
+      takesArgument: true,
+      async run(argument, active) {
+        if (!argument.trim()) return show(["keys"]);
+        const flow = active.setupFlow;
+        flow.begin("keys");
+        try {
+          const key = await flow.readSecret({ message: `API key for ${argument.trim()}` });
+          if (key)
+            active.insertCommandResult(
+              "/keys",
+              JSON.stringify(
+                await transport.request("/v1/model-keys/set", { providerId: argument.trim(), apiKey: key }),
+              ),
+              "success",
+            );
+        } finally {
+          flow.end();
+        }
+      },
+    },
+    {
       name: "conversation",
       aliases: ["conversations"],
       description: "List or select a hosted conversation",
@@ -219,8 +284,8 @@ export async function runHostedConsole() {
       },
     },
     {
-      name: "disconnect",
-      aliases: [],
+      name: "logout",
+      aliases: ["disconnect"],
       description: "Forget this hosted client; work continues",
       takesArgument: false,
       async run() {
@@ -344,12 +409,15 @@ export async function runHostedConsole() {
     allowLocalShell: false,
     onHerdrJump: async () => ({
       outcome: "unavailable",
-      error: "Hosted terminals are available in the paired app; no local socket is used.",
+      error: "Use /terminal or clankie terminal for hosted terminals; no local socket is used.",
     }),
     bannerFields: { title: "Clankie" },
     historyPath: join(state, "history.jsonl"),
     footerData: () => ({ title }),
-    statusExtras: () => [`hosted · ${new URL(session.gatewayUrl).hostname}`],
+    statusExtras: () => [
+      `Hosted · ${session.machine?.name ?? session.encryption.hostId}`,
+      transport.status(),
+    ],
     onPrompt: async (text, active, signal, delivery) => {
       if (disconnected) throw new Error("Disconnected. Exit and reconnect to continue.");
       await stopObservation();
@@ -371,6 +439,7 @@ export async function runHostedConsole() {
     onInterrupt: () => prompt.interruptActive(),
     onExit: stopObservation,
   });
+  transport.subscribe(() => shell.refreshStatusView());
   shell.start();
   shell.insertMarkdown(
     notice

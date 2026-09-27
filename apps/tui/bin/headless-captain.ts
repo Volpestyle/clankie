@@ -3,6 +3,7 @@ import {
   connectHostedCli,
   disconnectHostedCli,
   hostedCommand,
+  hostedWhoami,
   hostedTransportFor,
   HOSTED_LOCAL_ONLY,
 } from "../src/command/hosted.ts";
@@ -94,11 +95,15 @@ export async function runHeadlessCaptainCommand(
   const stderr = options.stderr ?? process.stderr;
   try {
     const env = options.env ?? process.env;
-    if (command === "connect") {
-      await connectHostedCli(rest, env, stdout);
+    if (command === "connect" || command === "login") {
+      await connectHostedCli(command === "login" ? ["hosted", ...rest] : rest, env, stdout);
       return 0;
     }
-    if (command === "disconnect") {
+    if (command === "whoami") {
+      outputJson(stdout, await hostedWhoami(env));
+      return 0;
+    }
+    if (command === "disconnect" || command === "logout") {
       outputJson(stdout, await disconnectHostedCli(env));
       return 0;
     }
@@ -113,7 +118,7 @@ export async function runHeadlessCaptainCommand(
       const transport = await hostedTransportFor(env);
       // These existing commands are HTTP-only. The transport replaces their local
       // bearer inside the envelope; no Mac credential is read or transmitted.
-      if (["conversations", "conversation", "send", "reset"].includes(command ?? ""))
+      if (["conversations", "conversation", "send"].includes(command ?? ""))
         return runHeadlessCaptainCommand(args, {
           ...options,
           ...transport,
@@ -149,7 +154,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "pair") return await runPairCommand(rest, options);
     if (command === "devices") return await runDevicesCommand(rest, options);
     if (command === "operator-credential") return await runOperatorCredentialCommand(rest, options);
-    if (command === "gateway") {
+    if (command === "gateway" || command === "remote-access") {
       const result = await runGatewayCommand(rest, {
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.operatorCredentialStore === undefined

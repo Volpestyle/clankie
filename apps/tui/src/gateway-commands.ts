@@ -24,9 +24,9 @@ export function buildGatewayCommands(services: {
 }): FaceShellCommand[] {
   return [
     {
-      name: "gateway",
-      aliases: [],
-      description: "Connect this Mac to Clankie's public doorway",
+      name: "remote-access",
+      aliases: ["gateway"],
+      description: "Remote access for this Mac (self-host only)",
       argumentHint: "[status]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -46,7 +46,7 @@ async function showStatus(
 ): Promise<void> {
   const status = await gatewayStatus(services);
   shell.insertCommandResult(
-    "/gateway status",
+    "/remote-access status",
     [
       `doorway: ${doorwayLine(status)}`,
       `url: ${status.publicGateway.url ?? "—"}`,
@@ -63,7 +63,7 @@ function doorwayLine(status: GatewayCommandResult): string {
   if (!status.enabled) return "disabled";
   switch (status.doorway.state) {
     case "sign_in_required":
-      return `signed out since ${status.doorway.since} — run /gateway to sign this Mac back in`;
+      return `signed out since ${status.doorway.since} — run /remote-access to sign this Mac back in`;
     case "connected":
       return "open";
     case "connecting":
@@ -90,7 +90,7 @@ async function runWizard(
   try {
     const current = await gatewayStatus(services);
     const action = await flow.readSelect({
-      message: "Public doorway",
+      message: "Remote access for this Mac",
       options: [
         { value: "configure", label: "Enable remote access", hint: "email + one-time code" },
         { value: "status", label: "Show status" },

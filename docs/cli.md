@@ -1921,44 +1921,61 @@ Managed pi workers use OpenRouter `moonshotai/kimi-k3`; the runtime harness sele
 
 ## Local and hosted connection modes
 
-A fresh `clankie` launch asks whether to run Clankie on this Mac or connect to an
-existing hosted Clankie. Existing installations remain local. The console shows
-`local` or `hosted · <gateway>` in its status line. Hosted startup never starts a
-local service.
+A fresh `clankie` launch offers **This Mac** or a hosted connection before starting
+a service. Existing installations remain local. Hosted startup never starts a
+local body. Its footer identifies **Hosted · <machine>** and reports Connected,
+Asleep/Waking, Sign-in expired, Access revoked, or Unavailable.
 
 ```sh
-clankie connect hosted
-clankie connect hosted --email you@example.com --code-stdin
-clankie status
+clankie login
+clankie login --email you@example.com --code-stdin
+clankie whoami
 clankie conversations list
 clankie --chat global-default
-clankie disconnect
+clankie logout
 ```
 
-Sign-in sends an email code and then pairs this Mac as an operator device. For
-headless sign-in, provide the emailed code on stdin after the prompt; secrets
-are never command flags. `--url https://gateway.example` selects another
-compatible deployment (loopback HTTP is allowed for development). Credentials
-stay in the broker. The account's device list can revoke the Mac.
+`login` uses an email code, lists the signed-in account's hosted machines, and
+pairs a revocable device. The current fleet model permits one machine per
+account, so it is selected automatically. The list contract supports a picker
+if that changes; headless selection uses `--machine ID`. `--url ORIGIN` selects
+a compatible deployment (HTTPS, or loopback HTTP for development). Account
+credentials exist only during login; the broker retains the device session,
+encryption material and a separate device wake key. `whoami` shows the selected
+machine and checks access without revealing secrets. `connect hosted` and
+`disconnect` remain aliases for `login` and `logout`.
 
-`/settings` → Connection (local `/setup` → Local or hosted Clankie) and
-`/connection` select the mode. Reopen the console after changing it. In hosted
-mode `/conversation [ID]` selects a retained conversation, `/reconnect` retries
-the same selection, `/persona` edits the hosted character, `/model set
-provider/model` selects its model, and `/connect github|linear` connects accounts
-on the hosted body. Headless `model`, `persona`, `accounts`, `conversations`,
-`send` and `reset` target the hosted instance; unsupported commands refuse.
-The selected conversation and history cursors are separate for each host.
+`/connection`, `/settings` and local `/setup` expose the mode choice. Reopen the
+console after changing modes. Hosted `/conversation [ID]` selects a retained
+thread; `/reconnect` retries the saved selection. `/persona`, `/model set
+provider/model`, `/keys [PROVIDER]` and `/connect github|linear` change the
+hosted body. `/fleet` and `/terminal` show its fleet and terminal catalog.
 
-Closing the client leaves accepted work running. `disconnect` forgets the
-client's device credential and chooses local mode for the next launch; use
-account device revocation to invalidate a lost Mac. Expired or revoked access
-requires `connect hosted` again. An unavailable or sleeping body is reported;
-wake it from the account page before retrying. There is no local fallback.
+Headless `conversations`, `send`, `model`, `persona`, `accounts`, `fleet`,
+`terminal` and `keys` address the selected machine. `keys set PROVIDER
+--key-stdin` accepts a secret only on stdin. `fleet spawn|move|close --json-stdin`
+and `terminal tail|control|input --json-stdin` accept the corresponding protocol
+request fields from stdin; the verb fixes the operation. Terminal input keeps
+the existing exclusive-control lease validation. Unknown operations fail closed.
 
-Hosted `restart`, `down`, autostart, Herdr socket commands, Discord token setup,
-`seat`, `mcp` and shell escapes refuse with a managed-service explanation.
-Hosted terminals remain available in the paired app. `/gateway` detects an
-existing hosted tenant and offers connection instead of configuring another
-Clankie. This client requires a matching fleet ticket issuer and body version;
-source checks do not establish that those versions are deployed.
+The single hosted-device authority policy allows chat, fleet, terminal, model,
+keys, persona and connections. **Restart, reset and deprovision require the
+account page/control plane**, including when attempted through the old device
+relay. The API policy does not inspect shell commands typed under terminal
+control. Local lifecycle, autostart, sockets, `seat`, `mcp` and shell escapes
+refuse in hosted mode.
+
+Closing the client leaves accepted work running. `logout` forgets this Mac's
+device credential and wake key and selects This Mac for the next launch;
+account-side device revocation invalidates a lost Mac. Expired or revoked
+access requires `login`. After pairing, an asleep host is woken using the app's
+device-signed P-256 challenge protocol; status shows the wait and wake failures.
+First login can wake the selected machine using the signed-in account. A legacy
+body without wake registration needs account-page wake and a fresh login.
+There is no local fallback.
+
+`/remote-access` means **Remote access for this Mac**, for self-hosted use only;
+`/gateway` remains its alias. The headless command also accepts `remote-access`.
+It detects an existing hosted tenant and offers connection instead of creating
+another doorway. Matching fleet, body and relay deployments plus a real
+Mac/phone rehearsal remain separate from source verification.

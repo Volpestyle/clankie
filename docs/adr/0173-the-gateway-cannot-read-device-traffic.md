@@ -145,22 +145,32 @@ retain local behavior; a fresh install offers both. Hosted mode opens only a
 client. The same service owns conversations, memory and accepted work after that
 client exits. Selected conversation and cursors are stored per host on the Mac.
 
-Account sign-in obtains a one-use fleet-signed pairing ticket bound to the
-client's ephemeral key and nonce. An explicit `purpose: operator` claim permits
-an operator offer; ordinary tickets retain device-only authority. The body's
-signed, encrypted answer carries the existing secure pairing link. The client
-verifies it before redeeming, then stores its device bearer and encryption
-credential in the broker. Account tokens never traverse the gateway host route and are not retained by
-the hosted client after pairing, so device revocation does not leave a stored
-account refresh token that could silently re-enroll it.
+`login`/`logout`/`whoami` expose hosted identity alongside mode selection. The
+private fleet serves the signed-in account's machine list and pairing-offer
+endpoint. It resolves the selection through that account, signs an ephemeral
+key/nonce-bound operator ticket, and calls the machine's existing pair-offer
+route. It returns the body's signed ciphertext; it cannot decrypt the offer.
+The Node-free client in `packages/protocol/hosted-pairing` verifies through a
+platform crypto adapter before device redemption. Account tokens are discarded
+after login; the broker retains only device credentials and wake signing material.
 
-The lead-authorized default is full operator authority for an account-paired
-Mac, revocable per device. James may revise that decision. The policy seam is
-the hosted operator bridge's check for the durable `hosted-account-operator`
-issuer marker plus an active device with Take Control. A caller's platform,
-headers or ordinary pairing link cannot create that marker. Revocation and
-expiry are checked before each encrypted exchange. No reusable operator or
-captain bearer is exported to the Mac.
+Second review narrows the original full-operator default: the single shared
+`hostedOperatorAllows` policy permits chat, fleet, terminal, model, keys, persona
+and connections. Restart, reset and deprovision stay with the account/control
+plane. Both the operator bridge and the legacy device relay enforce it. The
+body marks hosted device self-responses so the relay cannot bypass the policy.
+This is an API authority boundary, not interpretation of raw terminal input.
+The bridge additionally requires the durable `hosted-account-operator` marker
+and an active Take Control device. A claimed platform/header cannot grant it;
+no reusable local operator/captain bearer is exported.
+
+The fleet currently stores one optional tenant per account. The list contract
+supports a future picker; today selection is automatic. A saved device wakes
+an asleep host with the same P-256 signed challenge as the app. Initial login
+may wake using account authority. Status names This Mac or Hosted plus the
+machine and distinguishes sleep, expiration, revocation and unavailability.
+The Mac's wake private key lives in the credential broker; unlike the mobile
+app's native hardware key, this Node adapter does not claim non-exportability.
 
 `POST /v1/hosted/operator` carries a bounded inner GET/POST request through the
 existing authenticated envelope. After the device check, an in-process request
@@ -176,11 +186,11 @@ sequenceDiagram
   participant F as Account service
   participant G as Opaque gateway
   participant H as Hosted Clankie
-  T->>F: Account sign-in, key-bound operator ticket
-  F-->>T: Ticket and trusted body public key
-  T->>G: Ticket, ephemeral key, nonce
+  T->>F: Login, select owned machine, ephemeral key and nonce
+  F->>G: Signed bound ticket and pair-offer request
   G->>H: Pair-offer request
-  H-->>T: Signed encrypted offer
+  H-->>F: Signed encrypted offer
+  F-->>T: Ciphertext and trusted body public key
   T->>H: Encrypted redeem and complete through gateway
   H-->>T: Revocable device session
   T->>H: Encrypted operator request through gateway
@@ -190,7 +200,7 @@ sequenceDiagram
 Local process, Herdr socket, autostart and body-token controls explicitly refuse
 in hosted mode. Disconnect forgets the client credential and returns the next
 launch to local mode; it does not stop hosted work. Account device revocation is
-the way to invalidate a lost Mac. `/gateway` checks the account's tenant before
+the way to invalidate a lost Mac. `/remote-access` (`/gateway` alias) checks the account's tenant before
 configuring another local doorway and offers connection to the existing host.
 A failed account lookup refuses configuration rather than assuming no tenant.
 

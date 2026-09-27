@@ -1,4 +1,4 @@
-import { randomBytes, generateKeyPairSync } from "node:crypto";
+import { randomBytes, generateKeyPairSync, createHash, verify } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,27 +103,37 @@ async function fixture(purpose: "operator" | null = "operator", tamper = false) 
       url = new URL(req.url),
       body = await req.text();
     seen.push({ path: url.pathname, body, authorization: req.headers.get("authorization") });
-    if (url.pathname === "/fleet/v1/pairing/ticket") {
+    const machine = { id: "machine-1", name: "My hosted Clankie", hostId: f.hostId, state: "running" };
+    if (url.pathname === "/fleet/v1/machines") return Response.json({ machines: [machine] });
+    if (url.pathname === "/fleet/v1/pairing/offer") {
       expect(req.headers.get("authorization")).toBe("Bearer account-only-secret");
       const binding = JSON.parse(body);
-      expect(binding.purpose).toBe("operator");
-      return Response.json({
-        ticket: f.pair({
-          bkh: binding.browserPublicKeyHash,
-          non: binding.nonce,
-          ...(purpose ? { purpose } : {}),
+      expect(binding.machineId).toBe(machine.id);
+      const pairTicket = f.pair({
+        bkh: createHash("sha256")
+          .update(Buffer.from(binding.browserPublicKey, "base64url"))
+          .digest("base64url"),
+        non: binding.nonce,
+        ...(purpose ? { purpose } : {}),
+      });
+      const response = await app.app.request("/v1/hosted/pair-offer", {
+        method: "POST",
+        body: JSON.stringify({
+          version: 2,
+          pairTicket,
+          browserPublicKey: binding.browserPublicKey,
+          nonce: binding.nonce,
         }),
+      });
+      const answer = (await response.json()) as Record<string, unknown>;
+      return Response.json({
+        machine,
         ticketId: "j".repeat(22),
-        hostId: f.hostId,
         bodyPairingKey: bodyKey.publicKey.export({ format: "jwk" }).x,
+        answer: tamper ? { ...answer, signature: randomBytes(64).toString("base64url") } : answer,
       });
     }
     const path = url.pathname.slice(`/h/${f.hostId}`.length);
-    if (path === "/v1/hosted/pair-offer") {
-      const response = await app.app.request(path, { method: "POST", body });
-      if (!tamper) return response;
-      return Response.json({ ...(await response.json()), signature: randomBytes(64).toString("base64url") });
-    }
     return encryption.handle(path, body, req.signal, async (request) => app.app.fetch(request));
   };
   return {
@@ -270,6 +280,66 @@ it("cannot nest an operator bridge or route operator authority to the gateway or
   const f = await fixture(),
     session = await f.pair();
   const transport = createHostedTransport(session, f.store, f.fetchImpl);
-  for (const path of ["/v1/hosted/operator", "/v1/gateway/encrypted", "/v1/hooks/linear"])
+  for (const path of [
+    "/v1/hosted/operator",
+    "/v1/gateway/encrypted",
+    "/v1/hooks/linear",
+    "/v1/restart",
+    "/v1/reset",
+    "/v1/deprovision",
+    "/v1/pairing/offer",
+  ])
     await expect(transport.request(path, {})).rejects.toThrow("invalid_operator_route");
+});
+
+it("denies reset even through a valid encrypted operator request", async () => {
+  const f = await fixture(),
+    session = await f.pair();
+  const transport = createHostedTransport(session, f.store, f.fetchImpl);
+  await expect(
+    transport.request("/operator/v1/dispatch", {
+      op: "reset",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      expectedRevision: 0,
+    }),
+  ).rejects.toThrow("invalid_operator_route");
+});
+
+it("wakes an asleep host with a device-signed challenge and exposes status transitions", async () => {
+  const f = await fixture(),
+    session = await f.pair();
+  const key = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  session.wakePrivateKey = key.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  let sleeping = true;
+  const challenge = `${f.f.now}.${"n".repeat(22)}.${"s".repeat(43)}`;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const req = new Request(input, init),
+      path = new URL(req.url).pathname;
+    if (path.endsWith("/wake/challenge")) {
+      expect(req.headers.has("authorization")).toBe(false);
+      return Response.json({ challenge, expiresAtMs: f.f.now + 60_000 });
+    }
+    if (path.endsWith("/wake")) {
+      const request = (await req.json()) as { deviceId: string; signature: string };
+      expect(request.deviceId).toBe(session.deviceId);
+      expect(
+        verify(
+          "sha256",
+          Buffer.from(`clankie-wake-v1\n${session.encryption.hostId}\n${session.deviceId}\n${challenge}`),
+          { key: key.publicKey, dsaEncoding: "ieee-p1363" },
+          Buffer.from(request.signature, "base64url"),
+        ),
+      ).toBe(true);
+      sleeping = false;
+      return Response.json({ state: "waking", retryAfterMs: 1 }, { status: 202 });
+    }
+    if (sleeping) return Response.json({ error: "host_unavailable" }, { status: 503 });
+    return f.fetchImpl(input, init);
+  };
+  const transport = createHostedTransport(session, f.store, fetchImpl),
+    states: string[] = [];
+  transport.subscribe(() => states.push(transport.status()));
+  expect(await transport.request("/health")).toMatchObject({ ok: true });
+  expect(states).toEqual(["Asleep", "Waking", "Connected"]);
 });

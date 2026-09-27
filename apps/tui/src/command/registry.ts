@@ -1,9 +1,14 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
-    nouns: ["connect", "disconnect"],
+    nouns: ["login", "logout", "whoami", "connect", "disconnect", "fleet", "terminal", "keys", "deprovision"],
     lines: [
-      "  connect hosted [--email EMAIL] [--url ORIGIN] [--code-stdin]",
+      "  login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]",
+      "  logout | whoami          Hosted sign-out or current machine/access status",
+      "  Hosted restart/reset/deprovision require the account page/control plane.",
+      "  fleet | terminal         Hosted fleet/terminal catalog; mutations use --json-stdin",
+      "  keys [status|set PROVIDER --key-stdin|remove PROVIDER|validate PROVIDER]",
+      "  connect hosted           Alias for login; disconnect is an alias for logout",
       "  disconnect               Forget this hosted client; hosted work continues",
     ],
   },
@@ -113,9 +118,9 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["devices"], lines: ["  devices [--json]         List paired devices"] },
   {
-    nouns: ["gateway"],
+    nouns: ["remote-access", "gateway"],
     lines: [
-      "  gateway [status]         Public doorway configuration (JSON)",
+      "  remote-access [status]   Remote access for this Mac (self-host only; gateway alias)",
       "  gateway set --url URL --host-id ID | disable",
     ],
   },

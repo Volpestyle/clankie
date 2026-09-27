@@ -4404,6 +4404,8 @@ export type DeviceSessionRefreshResponse = z.infer<typeof DeviceSessionRefreshRe
 
 /** Device-authenticated view of its own registration, used to restore a session on launch. */
 export const DeviceSelfResponseSchema = z.object({
+  /** Hosting lifecycle is never granted to a device, including through the legacy relay. */
+  controlScope: z.literal("hosted").optional(),
   deviceId: z.string().min(1),
   name: z.string().min(1),
   platform: DevicePlatformSchema,
