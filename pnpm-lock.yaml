@@ -725,8 +725,8 @@ importers:
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
       '@volpestyle/lead-skills':
-        specifier: file:../../vendor/volpestyle-lead-skills-0.1.0.tgz
-        version: file:vendor/volpestyle-lead-skills-0.1.0.tgz
+        specifier: file:../../vendor/volpestyle-lead-skills-0.1.1.tgz
+        version: file:vendor/volpestyle-lead-skills-0.1.1.tgz
       swarm-mcp:
         specifier: file:../../vendor/swarm-mcp-2.0.0-rc.1.tgz
         version: file:vendor/swarm-mcp-2.0.0-rc.1.tgz
@@ -2071,9 +2071,9 @@ packages:
     resolution: {integrity: sha512-Xfe6rpCTxSxfbswi/W/Pz7zp1WWSNn4A0eW4mLkQUewCrXXtMj31lCg+iQyTkh/CkusZSq9eDflu7tjEDXUY6g==}
     engines: {node: '>=v14.0.0', npm: '>=7.0.0'}
 
-  '@volpestyle/lead-skills@file:vendor/volpestyle-lead-skills-0.1.0.tgz':
-    resolution: {integrity: sha512-PwkrzNCgHYhvEL8wklamiyCe92Bj14TfQA9779Y+dml3Z3ZG+RQoKLgm+rO5tHi8ugHB4KjupktMeiiWJvtz5A==, tarball: file:vendor/volpestyle-lead-skills-0.1.0.tgz}
-    version: 0.1.0
+  '@volpestyle/lead-skills@file:vendor/volpestyle-lead-skills-0.1.1.tgz':
+    resolution: {integrity: sha512-upogQ6FKd1FwBzI6YXvaJwF2goMmLMFkwBp5SxLwgSlnlMkOgCPoEru6vlPAnC8YKWQESKLDl4CoDHXJ56MzZQ==, tarball: file:vendor/volpestyle-lead-skills-0.1.1.tgz}
+    version: 0.1.1
 
   '@workflow/serde@4.1.0':
     resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
@@ -4421,7 +4421,7 @@ snapshots:
 
   '@vladfrangu/async_event_emitter@2.4.7': {}
 
-  '@volpestyle/lead-skills@file:vendor/volpestyle-lead-skills-0.1.0.tgz': {}
+  '@volpestyle/lead-skills@file:vendor/volpestyle-lead-skills-0.1.1.tgz': {}
 
   '@workflow/serde@4.1.0': {}
 

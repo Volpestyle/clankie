@@ -5,7 +5,7 @@ runtime and skills. The public `swarm-mcp` npm release is the legacy runtime;
 Clankie uses the v2 candidate plus its embedding and Herdr integration.
 
 - `swarm-mcp-2.0.0-rc.1.tgz`: built source from `~/dev/swarm-mcp`.
-- `volpestyle-lead-skills-0.1.0.tgz`: `lead`, `swarm-lead`, `herdr-lead` and its
+- `volpestyle-lead-skills-0.1.1.tgz`: `lead`, `swarm-lead`, `herdr-lead` and its
   references, from `~/dev/skills/agent`, with the source repository's MIT license.
 - [provenance.json](provenance.json): base revisions and artifact SHA-256 digests.
 - `swarm-mcp.patch`: the complete source delta against the pinned Swarm base,
