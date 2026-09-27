@@ -2072,7 +2072,7 @@ packages:
     engines: {node: '>=v14.0.0', npm: '>=7.0.0'}
 
   '@volpestyle/lead-skills@file:vendor/volpestyle-lead-skills-0.1.1.tgz':
-    resolution: {integrity: sha512-upogQ6FKd1FwBzI6YXvaJwF2goMmLMFkwBp5SxLwgSlnlMkOgCPoEru6vlPAnC8YKWQESKLDl4CoDHXJ56MzZQ==, tarball: file:vendor/volpestyle-lead-skills-0.1.1.tgz}
+    resolution: {integrity: sha512-sivMEwjalOHigwhs3D5Y6Uaa9NS4lSsqqseGsarMzXox+lnxFqb9iy8gEHdLK//n9rQfxgHzdeqhQciUwc3rWA==, tarball: file:vendor/volpestyle-lead-skills-0.1.1.tgz}
     version: 0.1.1
 
   '@workflow/serde@4.1.0':
