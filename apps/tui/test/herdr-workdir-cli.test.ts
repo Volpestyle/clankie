@@ -127,16 +127,48 @@ describe("clankie linear", () => {
 
   it("defaults off, persists live follow toggles, and rejects invalid commands", async () => {
     const settings = await tempStore();
-    expect(await runLinearCommand([], { settings })).toMatchObject({
+    const credentials = { get: async () => ({ type: "api" as const, key: "test-secret" }) };
+    const options = { settings, credentials };
+    expect(await runLinearCommand([], options)).toMatchObject({
       following: false,
       conversationId: "linear-inbox",
       wakeConversationId: "global-default",
     });
-    expect(await runLinearCommand(["follow", "on"], { settings })).toMatchObject({ following: true });
+    expect(await runLinearCommand(["follow", "on"], options)).toMatchObject({
+      ok: false,
+      error: "linear_webhook_required",
+      missingWebhook: ["url"],
+    });
+    expect((await settings.load()).linearWebhook.following).toBe(false);
+    await runLinearCommand(
+      ["webhook", "set", "--url", "https://hooks.example.test/v1/hooks/linear"],
+      options,
+    );
+    expect(await runLinearCommand(["follow", "on"], options)).toMatchObject({
+      following: true,
+      active: true,
+    });
+    expect((await settings.load()).linearWebhook.url).toBe("https://hooks.example.test/v1/hooks/linear");
+    expect(
+      await runLinearCommand(["status"], { settings, credentials: { get: async () => undefined } }),
+    ).toMatchObject({
+      following: true,
+      active: false,
+      reason: "linear_webhook_required",
+      missingWebhook: ["secret"],
+    });
     expect((await settings.load()).linearWebhook.following).toBe(true);
-    expect(await runLinearCommand(["follow", "off"], { settings })).toMatchObject({ following: false });
-    await expect(runLinearCommand(["follow", "yes"], { settings })).rejects.toThrow("Usage:");
-    await expect(runLinearCommand(["status", "on"], { settings })).rejects.toThrow("Usage:");
+    expect(await runLinearCommand(["follow", "off"], options)).toMatchObject({ following: false });
+    await runLinearCommand(["webhook", "clear"], options);
+    expect(await runLinearCommand(["status"], options)).toMatchObject({
+      webhookConfigured: false,
+      missingWebhook: ["url"],
+    });
+    await expect(
+      runLinearCommand(["webhook", "set", "--url", "file:///tmp/hook"], options),
+    ).rejects.toThrow();
+    await expect(runLinearCommand(["follow", "yes"], options)).rejects.toThrow("Usage:");
+    await expect(runLinearCommand(["status", "on"], options)).rejects.toThrow("Usage:");
   });
 
   it("turns inbox read flags into the query the service expects", () => {

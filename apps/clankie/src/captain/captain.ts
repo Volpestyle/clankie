@@ -505,6 +505,8 @@ export interface CaptainOptions {
   readonly stateDir: string;
   /** Settings store; defaults to the owner-authored file. Reloaded per turn. */
   readonly settings?: SettingsStore;
+  /** Live webhook readiness, rechecked before a queued Linear wake starts. */
+  readonly linearFollowing?: () => Promise<boolean>;
   /** Real process-level overrides captured before stored settings are projected into child env. */
   readonly discordEnvironment?: NodeJS.ProcessEnv;
   /** Conversation-scoped file publication; bytes share the conversation retention lifecycle. */
@@ -1146,7 +1148,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     join(options.stateDir, "conversations"),
     trackHostedConversationRunner(async (conversationId, incoming, publish, context) => {
       // Turning follow off also drops activity still queued behind a live turn.
-      if (context.origin === "hook" && !(await settings()).linearWebhook.following) return;
+      if (
+        context.origin === "hook" &&
+        (!(await settings()).linearWebhook.following ||
+          (options.linearFollowing !== undefined && !(await options.linearFollowing())))
+      )
+        return;
       // A hook wake is worded when it starts, from whatever arrived until now.
       const message =
         context.origin === "hook" ? conversations.linearWakePrompt(conversationId, context.runId) : incoming;

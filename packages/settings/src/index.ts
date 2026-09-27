@@ -60,6 +60,7 @@ export { characterNames, personaInstructions, type PersonaRegister } from "./per
 export { clankieSkillRoots } from "./skill-roots.ts";
 export { SERVICE_LOADOUT_ENV, serviceInLoadout } from "./loadout.ts";
 export { SettingsStore, defaultSettingsPath } from "./store.ts";
+export { linearFollowStatus } from "./linear-follow.ts";
 export {
   applyDiscordSettingsToEnvironment,
   discordSettingsToEnvironment,

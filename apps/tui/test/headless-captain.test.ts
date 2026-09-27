@@ -419,3 +419,25 @@ describe("headless clankie commands", () => {
     }
   });
 });
+
+it("returns typed JSON and exits nonzero when Linear following lacks its webhook", async () => {
+  const env = await stateEnv();
+  env.XDG_CONFIG_HOME = env.XDG_STATE_HOME;
+  const stdout = outputBuffer();
+  const stderr = outputBuffer();
+  const code = await runHeadlessCaptainCommand(["linear", "follow", "on"], {
+    env,
+    repoRoot: process.cwd(),
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+  });
+  expect(code).toBe(1);
+  expect(JSON.parse(stdout.text())).toMatchObject({
+    ok: false,
+    error: "linear_webhook_required",
+    following: false,
+    active: false,
+    missingWebhook: ["url", "secret"],
+  });
+  expect(stderr.text()).toBe("");
+});

@@ -27,7 +27,11 @@ commits with the durable inbox event; a failed write can be retried.
 
 The webhook signing secret lives in the credential broker as `linear-webhook`,
 separate from the MCP OAuth token. The owner creates or updates the webhook in
-Linear's settings and stores its secret through `/connect linear`. The MCP
+Linear's settings and records its URL and secret through `/connect linear` →
+**Follow Linear** → **Configure webhook**. The public URL is stored as
+`linearWebhook.url`; the secret stays in the broker. Following requires both,
+with typed refusal and blocked status when either is missing (ADR 0168).
+There is no periodic notification polling fallback. The MCP
 token is audience-restricted to Linear's MCP resource and is not a webhook
 administration credential.
 

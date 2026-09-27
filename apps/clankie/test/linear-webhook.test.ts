@@ -671,7 +671,10 @@ describe("where a hook is delivered", () => {
 
 describe("Linear follow control", () => {
   it("requires the operator and changes follow without promoting workspace deliveries", async () => {
-    let settings = ClankieSettingsSchema.parse({ schemaVersion: 1 });
+    let settings = ClankieSettingsSchema.parse({
+      schemaVersion: 1,
+      linearWebhook: { url: "https://hooks.example.test/v1/hooks/linear" },
+    });
     const wakes: LinearActivityEvent[] = [];
     const { app } = await createClankieApp({
       captain: createStubCaptain({
@@ -747,4 +750,75 @@ describe("Linear follow control", () => {
     }
     expect(wakes).toHaveLength(0);
   });
+});
+
+it.each([
+  { url: undefined, secret: undefined, missing: ["url", "secret"] },
+  { url: "https://hooks.example.test/v1/hooks/linear", secret: undefined, missing: ["secret"] },
+  { url: undefined, secret: SECRET, missing: ["url"] },
+  { url: "https://hooks.example.test/v1/hooks/linear", secret: "  ", missing: ["secret"] },
+])("refuses following without the webhook prerequisites: $missing", async ({ url, secret, missing }) => {
+  let settings = ClankieSettingsSchema.parse({ schemaVersion: 1, linearWebhook: { url } });
+  const resume = vi.fn();
+  const { app } = await createClankieApp({
+    captain: createStubCaptain({ resumeLinearActivity: resume }),
+    authenticateOperator: async () => ({ operatorId: "test" }),
+    settings: { load: async () => settings, update: async (mutate) => (settings = mutate(settings)) },
+    linearWebhook: { secret: async () => secret },
+  });
+  const response = await app.request("/v1/linear/follow", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ following: true }),
+  });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error: "linear_webhook_required",
+    reason: "linear_webhook_required",
+    missingWebhook: missing,
+    following: false,
+    active: false,
+  });
+  expect(settings.linearWebhook.following).toBe(false);
+  expect(resume).not.toHaveBeenCalled();
+});
+
+it("reports blocked following when its webhook secret or URL is removed, and permits stopping", async () => {
+  let settings = ClankieSettingsSchema.parse({
+    schemaVersion: 1,
+    linearWebhook: { url: "https://hooks.example.test/v1/hooks/linear" },
+  });
+  let secret: string | undefined = SECRET;
+  const resume = vi.fn();
+  const { app } = await createClankieApp({
+    captain: createStubCaptain({ resumeLinearActivity: resume }),
+    authenticateOperator: async () => ({ operatorId: "test" }),
+    settings: { load: async () => settings, update: async (mutate) => (settings = mutate(settings)) },
+    linearWebhook: { secret: async () => secret },
+  });
+  const toggle = (following: boolean) =>
+    app.request("/v1/linear/follow", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ following }),
+    });
+  expect(await (await toggle(true)).json()).toMatchObject({ following: true, active: true, reason: null });
+  expect(resume).toHaveBeenCalledTimes(1);
+  expect(settings.linearWebhook.url).toBe("https://hooks.example.test/v1/hooks/linear");
+  secret = undefined;
+  expect(await (await app.request("/v1/linear/follow")).json()).toMatchObject({
+    following: true,
+    active: false,
+    reason: "linear_webhook_required",
+    missingWebhook: ["secret"],
+  });
+  secret = SECRET;
+  settings.linearWebhook = { following: true };
+  expect(await (await app.request("/v1/linear/follow")).json()).toMatchObject({
+    following: true,
+    active: false,
+    missingWebhook: ["url"],
+  });
+  expect(await (await toggle(false)).json()).toMatchObject({ following: false, active: false });
+  expect(resume).toHaveBeenCalledTimes(1);
 });

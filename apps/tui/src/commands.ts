@@ -198,7 +198,11 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[status|follow on/off|inbox read|work list/bind/unbind]",
       async run(argument, shell): Promise<void> {
         const result = await runLinearCommand(argument.trim().split(/\s+/u).filter(Boolean));
-        shell.insertCommandResult("/linear", JSON.stringify(result, null, 2), "success");
+        shell.insertCommandResult(
+          "/linear",
+          JSON.stringify(result, null, 2),
+          result.ok === false ? "error" : "success",
+        );
       },
     },
     {

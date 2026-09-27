@@ -63,6 +63,7 @@ import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-h
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
+import { linearFollowStatus } from "@clankie/settings";
 import { createRivalsClient } from "./rivals.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
@@ -737,6 +738,7 @@ const captain = createCaptain(
     stateDir: join(stateRoot, "captain"),
     swarm,
     settings: settingsStore,
+    linearFollowing,
     deliveredFiles,
     discordEnvironment: captainDiscordEnvironment,
     // The same trusted module that owns the bot token owns making a channel's
@@ -800,10 +802,19 @@ const fleetPeers = {
   },
 };
 
+async function linearFollowing(): Promise<boolean> {
+  const current = await settingsStore.load();
+  const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
+  return linearFollowStatus(
+    current.linearWebhook,
+    credential?.type === "api" && credential.key.trim().length > 0,
+  ).active;
+}
+
 const linearNotifications = new LinearNotifications({
   path: join(stateRoot, "linear-notifications.json"),
   host: mcpHost,
-  following: async () => (await settingsStore.load()).linearWebhook.following,
+  following: linearFollowing,
   receive: (activity, following) => captain.receiveLinearActivity(activity, following),
   onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
 });
@@ -915,7 +926,7 @@ const stopHostedWork =
         { available: herdr.available },
       );
 hostedHeartbeat?.start();
-if (startupSettings.linearWebhook.following) captain.resumeLinearActivity();
+if (await linearFollowing()) captain.resumeLinearActivity();
 linearNotifications.start();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its

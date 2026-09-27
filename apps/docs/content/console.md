@@ -37,6 +37,25 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 
 {{TUI_README_OPERATOR_BEHAVIOR}}
 
+## Follow Linear
+
+Following requires a registered Linear webhook; there is no periodic polling
+fallback. Connect Clankie's Linear account with `/connect linear`, then choose
+**Follow Linear → Configure webhook**. If there is no public address yet,
+configure `/gateway` first. Create the webhook in Linear with the displayed URL,
+select all activity events, and paste its signing secret into the setup flow.
+Setup records the URL and stores the secret in the credential broker. Choose
+**Start following** separately when you want notification wakes.
+
+Existing setups that stored only the secret need **Configure webhook → Keep it**
+once to record the URL. An already-registered URL can also be recorded with
+`clankie linear webhook set --url URL`. `clankie linear status` reports
+`linear_webhook_required` and the missing URL or secret if setup is incomplete.
+Removing either while following is on shows that following is blocked. Startup
+catch-up and webhook reads retain unseen notifications; webhook bursts coalesce
+and an empty read gets one short retry. See the [CLI reference](/cli/#linear-status-linear-follow-on-off)
+for the complete contract.
+
 ## Headless
 
 Use headless commands for scripts: `clankie status`, `clankie doctor`, `clankie model set`, and `clankie persona set` print JSON and exit 0 or 1. Pairing, device listing and operator credential rotation default to human-readable output; pass `--json`, for example `clankie pair --json`. Other output exceptions are listed in the CLI reference. The full contract, with every flag and payload, is the [CLI reference](/cli/). Secret entry stays interactive — `/auth`, `/discord`, `/connect`, `/voice` — because tokens never become flags.

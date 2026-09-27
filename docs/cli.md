@@ -336,14 +336,13 @@ local verification. It never accepts a secret as a flag.
 When a webhook is configured, accepted events appear in the **Linear inbox**
 conversation (`linear-inbox`) as **External activity** messages, including swarm
 posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
-account’s actual Linear notifications at startup, every 30 seconds as a fallback,
-and when webhooks arrive. A newly persisted, signed workspace event requests a
+account’s actual Linear notifications once at startup and when webhooks arrive.
+There is no periodic poll. A newly persisted, signed workspace event requests a
 refresh after a 1.5-second debounce; if no new notifications appear, it retries
-once after another 1.5 seconds. Refreshes wait for an active poll and coalesce
-bursts; fallback reads never overlap them. A failed startup, fallback or manual
-read gets one delayed catch-up attempt; a failed retry retains its checkpoint
-for the next webhook, fallback or restart. The 30-second fallback keeps automatic
-notification collection working without a configured webhook. Following controls
+once after another 1.5 seconds. Refreshes coalesce bursts and never overlap an
+active read. A failed startup or manual read gets one delayed catch-up attempt;
+a failed retry retains its checkpoint for the next webhook or restart.
+Following requires a configured webhook. Following controls
 whether those notifications wake his operator conversation:
 
 | Following     | Inbox delivery                          | Automatic model turns                       |
@@ -383,24 +382,40 @@ Following controls waking, not collection.
 `clankie linear follow off` suppresses new event-triggered turns and skips model
 turns still queued; their inbox messages remain. An already-running turn can
 finish. `clankie linear follow on|off` applies without a restart, and
-`clankie linear status` reads the switch. All three return JSON with `ok`,
-`following`, `conversationId` (`linear-inbox`), `wakeConversationId`
-(`global-default`), and `settingsFile`.
+`clankie linear status` reports the switch and webhook readiness. All three
+return JSON with `ok`, `following`, `active`, `webhookConfigured`, `reason`,
+`missingWebhook`, `detail`, `conversationId` (`linear-inbox`),
+`wakeConversationId` (`global-default`), and `settingsFile`. Enabling without a
+stored webhook URL or signing secret leaves the switch unchanged and returns
+`ok: false`, `error: "linear_webhook_required"`, and a nonzero exit status.
+`missingWebhook` names `url`, `secret`, or both, with setup guidance in `detail`.
+`PUT /v1/linear/follow` refuses with HTTP 409 and the same reason; its authenticated
+GET reports readiness. Removing a prerequisite while following is on reports
+`following: true`, `active: false`, and `reason: "linear_webhook_required"`, also
+shown plainly in the TUI. Turning following off always remains available.
 
 Notifications wake the operator conversation or its attached native seat. All
 records remain in one canonical inbox. `--conversation global-default` scopes
 reads and acknowledgments to that stream; omitting it reads all retained history.
-Removing the webhook stops workspace history delivery; disconnecting Linear
-stops notification reads. A webhook is optional for notification following.
-Following off keeps both kinds of collection enabled.
+Removing the webhook stops ongoing notification refreshes and workspace history
+delivery; disconnecting Linear stops notification reads. Startup and queued wakes
+recheck webhook readiness. Following off keeps webhook ingestion and notification
+collection enabled. Readiness checks local configuration, not delivery health or
+whether someone deleted the webhook in Linear's own settings.
 
 Configure the webhook from `/connect linear` → **Follow Linear** → **Configure
-webhook**. The flow prints the public URL and stores the signing secret in the
-credential broker (`linear-webhook`). In Linear's webhook settings, select **all
+webhook**. The flow prints and stores the registered public URL in
+`linearWebhook.url`, and stores the signing secret in the credential broker
+(`linear-webhook`). In Linear's webhook settings, select **all
 available activity events**, including issues, comments, projects, and updates.
 An existing Comments-only webhook also needs its event selection expanded there.
 Setup does not enable following; **Start following** / **Stop following** is a
-separate choice under **Follow Linear**.
+separate choice under **Follow Linear**, enabled only once both are configured.
+Existing setups that stored only a secret must run **Configure webhook** again
+and choose **Keep it**, or record the already-registered URL with
+`clankie linear webhook set --url URL`. `clankie linear webhook clear` removes the
+stored URL and leaves any requested following visible as blocked. The secret
+remains broker-owned; it is never a CLI flag.
 
 The consumer accepts signed `create`, `update`, and `remove` activity from any
 resource type and actor. A verified, matching revision of Clankie's own MCP write

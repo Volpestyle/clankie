@@ -200,8 +200,9 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "linear") {
-      outputJson(stdout, await runLinearCommand(rest, options));
-      return 0;
+      const result = await runLinearCommand(rest, options);
+      outputJson(stdout, result);
+      return result.ok === false ? 1 : 0;
     }
     if (command === "accounts") {
       outputJson(stdout, await runAccountsCommand(rest, options));

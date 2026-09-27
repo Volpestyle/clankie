@@ -664,16 +664,25 @@ paths:
     get:
       tags: [Operator]
       operationId: inspectLinearFollowing
-      summary: Inspect whether bot Linear notifications can wake the operator conversation
+      summary: Inspect notification following and required webhook readiness
       security: [{ operatorBearer: [] }]
       responses:
-        "200": { description: Following switch, canonical inbox conversation and operator wake conversation }
+        "200":
+          {
+            description: Following switch,
+            active readiness,
+            webhookConfigured,
+            reason,
+            missingWebhook,
+            detail,
+            canonical inbox conversation and operator wake conversation,
+          }
         "401": { description: Operator authentication required }
     put:
       tags: [Operator]
       operationId: setLinearFollowing
       summary: Enable or disable turns from the bot notification inbox
-      description: Enabling resumes previously accepted pending wakes; it does not wake passive backlog. Disabling leaves inbox delivery enabled.
+      description: Enabling requires a stored webhook URL and signing secret. It resumes previously accepted pending wakes, never passive backlog. Disabling leaves inbox delivery enabled. Status distinguishes the requested following switch from active readiness, with linear_webhook_required and missingWebhook when setup is removed. There is no periodic poll.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -686,9 +695,34 @@ paths:
               properties:
                 following: { type: boolean }
       responses:
-        "200": { description: Following switch, canonical inbox conversation and operator wake conversation }
+        "200":
+          {
+            description: Following switch,
+            active readiness,
+            webhookConfigured,
+            reason,
+            missingWebhook,
+            detail,
+            canonical inbox conversation and operator wake conversation,
+          }
         "400": { description: Invalid request }
         "401": { description: Operator authentication required }
+        "409":
+          description: Following requires the registered webhook URL and broker-held signing secret; the switch is unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, reason, missingWebhook, following, active, detail]
+                properties:
+                  error: { const: linear_webhook_required }
+                  reason: { const: linear_webhook_required }
+                  missingWebhook:
+                    type: array
+                    items: { enum: [url, secret] }
+                  following: { type: boolean }
+                  active: { const: false }
+                  detail: { type: string }
   /v1/swarm:
     get:
       tags: [Operator]

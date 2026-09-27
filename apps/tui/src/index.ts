@@ -348,6 +348,7 @@ const settingsStore = new SettingsStore();
 const brokeredCommands = {
   settings: settingsStore,
   listCredentials: () => services.store.list(),
+  getCredential: (providerId: string) => services.store.get(providerId),
   // The doorway the Linear webhook is registered against (ADR 0165); the
   // credential store is already open here, so the wizard needs no second one.
   gatewayHook: async () => {

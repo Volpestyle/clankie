@@ -307,6 +307,7 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       ] satisfies ToolDefinition[],
   );
   const settled = vi.fn();
+  let webhookReady = true;
   const ownerSettings = new SettingsStore(join(root, "settings.json"));
   await ownerSettings.update((settings) => ({
     ...settings,
@@ -320,6 +321,7 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       stateDir: root,
       workingDirectory: root,
       settings: ownerSettings,
+      linearFollowing: async () => webhookReady,
       swarm: {
         start: async (input: typeof callbacks) => {
           callbacks = input;
@@ -437,6 +439,10 @@ it("binds native tools, project doctrine and channel delivery to selected servic
     await captain.pollSeatEvents(0);
     expect(await captain.pollSeatEvents(0, undefined, a)).toEqual([]);
     expect(captain.receiveLinearActivity(activity, true)).toBe(false);
+    webhookReady = false;
+    const blockedWake = captain.pollSeatEvents(100);
+    expect(captain.receiveLinearActivity({ ...activity, eventId: "b".repeat(64) }, true)).toBe(true);
+    expect(await blockedWake).toEqual([]);
     expect(await captain.pollSeatEvents(0, undefined, b)).toEqual([]);
     expect(await captain.pollSeatEvents(0)).toEqual([]);
     expect(captain.seatContext("missing-project")).toBeUndefined();

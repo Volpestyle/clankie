@@ -29,6 +29,7 @@ import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@cla
  * Discord presence, the captain seam, memory, embodiment (play), browser,
  * media, and device pairing live here.
  */
+import { linearFollowStatus } from "@clankie/settings";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
 import { upgradeWebSocket } from "@hono/node-server";
@@ -2744,6 +2745,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
+    const secret = await dependencies.linearWebhook?.secret();
+    const secretPresent = secret !== undefined && secret.trim().length > 0;
     let current;
     if (context.req.method === "PUT") {
       const body = await readJson(context.req.raw);
@@ -2759,7 +2762,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
       if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
       const following = body.following;
-      current = await settingsSource.update((value) => ({ ...value, linearWebhook: { following } }));
+      let refused = false;
+      current = await settingsSource.update((value) => {
+        if (following && !linearFollowStatus(value.linearWebhook, secretPresent).webhookConfigured) {
+          refused = true;
+          return value;
+        }
+        return { ...value, linearWebhook: { ...value.linearWebhook, following } };
+      });
+      if (refused)
+        return context.json(
+          { error: "linear_webhook_required", ...linearFollowStatus(current.linearWebhook, secretPresent) },
+          409,
+        );
     } else {
       current = await settingsSource.load();
     }
@@ -2767,7 +2782,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       dependencies.captain.resumeLinearActivity();
     return context.json({
       schemaVersion: 1 as const,
-      following: current.linearWebhook.following,
+      ...linearFollowStatus(current.linearWebhook, secretPresent),
       conversationId: LINEAR_INBOX_CONVERSATION_ID,
       wakeConversationId: "global-default",
     });

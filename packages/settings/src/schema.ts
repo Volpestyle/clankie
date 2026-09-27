@@ -694,6 +694,8 @@ export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
 export const LinearWebhookSettingsSchema = z
   .object({
     following: z.boolean().default(false),
+    /** Public URL registered in Linear; the signing secret remains broker-owned. */
+    url: z.url({ protocol: /^https?$/ }).optional(),
   })
   .strict();
 export type LinearWebhookSettings = z.infer<typeof LinearWebhookSettingsSchema>;
