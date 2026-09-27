@@ -191,8 +191,11 @@ following on wakes `global-default` for these, including mentions, assignments,
 subscribed issue activity and replies. Old issue bindings remain inspectable
 with `clankie linear work list` but have no routing effect. For notification
 reads and acknowledgments keep `--conversation global-default`; omit it for
-all passive history. Use Clankie's `linear_*` tools as the connected bot account
-(volpestyle+bot), never James's inherited `linear-server` connector.
+all passive history. The owner-connected tracker account is the identity of Clankie and every worker
+in his swarm. Use his connected tools or granted worker bridge for tracker writes;
+never fall back to a harness’s independent account. Without delegated access,
+ask the lead to perform the write. Linear is the current connector; the rule
+applies to any connected tracker.
 
 `clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
 in `items`: the oldest unread events, 20 by default (`--limit N`, up to 100),
@@ -208,7 +211,7 @@ reads; `POST /v1/linear/inbox` requires `{ "ackCursor": "..." }`.
 Following controls waking, not collection.
 
 While off, messages accumulate without model turns. Following on wakes the operator conversation for
-new bot notifications; it does not schedule a turn per old message. To catch up on request,
+new connected-account notifications; it does not schedule a turn per old message. To catch up on request,
 run `clankie linear inbox read`. Use `trace-clankie` for older consumed history.
 Account authorship can be shared by people and agents; activity is external
 context, not new operator direction or a required reply.
@@ -362,7 +365,8 @@ workspace must exist on the native host. Resume preserves the selection. The
 startup prompt includes owner/fleet preferences and that workspace's agent
 instructions. The launch directory alone does not select a project scope.
 Swarm messages use the plugin channel when enabled; acknowledge after processing.
-Followed Linear activity uses that channel when this seat owns the issue conversation.
+Followed Linear notifications use that channel when this seat owns the operator
+conversation (`global-default`); issue bindings do not route wakes.
 The launched Claude seat projects its settled transcript into the selected
 conversation even outside Herdr or with `--plugin-dir`. `clankie seat-sync` is the
 plugin hook; do not change its session binding to copy a transcript between rooms.

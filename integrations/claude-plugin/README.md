@@ -15,8 +15,8 @@ selected skill files from that conversation's catalog to the worker's immutable
 context. See [portable skill selection](../../packages/swarm/README.md#working-preferences-and-portable-skills-slices-36).
 
 Running Claude Code as a worker in Clankie's Herdr fleet does not require
-replacing the lead with this seat. Linear activity follows the issue's owning
-conversation into its bound Claude seat as a wake; with no bound seat, Pi handles
+replacing the lead with this seat. Linear notifications follow the connected account's inbox into the operator
+conversation's bound Claude seat as a wake; with no bound seat, Pi handles
 the turn. Goal continuations remain with their service Pi loop.
 
 Like the [herdr plugin](../herdr-plugin/README.md), this carries only what a
@@ -182,7 +182,8 @@ An already-running bridge must be reloaded once to pick up this implementation:
 reconnect the plugin's **operator** MCP server (`clankie mcp --lane operator`),
 not only the separate fleet mailbox (`clankie mcp --seat`).
 
-The seat denies the inherited `linear-server` MCP connector, which may be signed
-in as James. Linear work goes through Clankie's connected `linear_*` tools as
-the bot account (volpestyle+bot). Follow Linear wakes the operator conversation
+The seat denies the inherited `linear-server` MCP connector, whose identity may
+differ from the owner-connected account. That connected tracker identity is
+Clankie’s and his whole swarm’s identity. Tracker writes use Clankie’s connected
+tools or a granted worker bridge; a worker lacking access asks the lead to write. Follow Linear wakes the operator conversation
 from that account's actual notifications; stored issue bindings do not route wakes.

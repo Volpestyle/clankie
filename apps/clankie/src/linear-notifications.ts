@@ -32,7 +32,7 @@ interface LinearNotificationOptions {
   now?: () => Date;
 }
 
-/** Read the bot's real inbox through its MCP audience, never a human connector
+/** Read the connected account's inbox through its MCP audience, never an inherited connector
  * or an OAuth token sent to GraphQL. Notification identity, not readAt/updatedAt,
  * drives wakes. The webhook remains a separate passive activity journal.
  */

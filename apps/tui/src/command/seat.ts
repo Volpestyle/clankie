@@ -24,7 +24,7 @@ const SEAT_USAGE = "Usage: clankie seat [--resume] [--conversation ID] [--plugin
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
 const SEAT_AGENT_NAME = "clankie";
-// Claude Code server-prefix deny rules cover every tool from James's connector.
+// Claude Code server-prefix deny rules cover every tool from the inherited connector.
 const SEAT_PERMISSIONS = {
   permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"], deny: ["mcp__linear-server"] },
 };

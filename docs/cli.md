@@ -336,13 +336,13 @@ local verification. It never accepts a secret as a flag.
 When a webhook is configured, accepted events appear in the **Linear inbox**
 conversation (`linear-inbox`) as **External activity** messages, including swarm
 posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
-bot account’s actual Linear notifications every 30 seconds. Following controls
+account’s actual Linear notifications every 30 seconds. Following controls
 whether those notifications wake his operator conversation:
 
-| Following     | Inbox delivery                          | Automatic model turns                   |
-| ------------- | --------------------------------------- | --------------------------------------- |
-| Off (default) | Events stay visible in the conversation | None from incoming events               |
-| On            | Events stay visible in the conversation | Bot notifications wake `global-default` |
+| Following     | Inbox delivery                          | Automatic model turns                       |
+| ------------- | --------------------------------------- | ------------------------------------------- |
+| Off (default) | Events stay visible in the conversation | None from incoming events                   |
+| On            | Events stay visible in the conversation | Account notifications wake `global-default` |
 
 Activity authored by Clankie's own verified Linear account, his or a
 worker's, is collected but never wakes him ([ADR 0189](adr/0189-his-own-linear-activity-does-not-wake-him.md)).
@@ -427,7 +427,13 @@ Never acknowledge truncated output or a cursor offered to another conversation.
 
 The Claude seat denies the inherited `linear-server` MCP server with Claude
 Code’s server-prefix permission rule. It uses Clankie’s connected `linear_*`
-tools as the bot account; James keeps his own account.
+tools as the owner-connected account. Whatever tracker identity the owner connects
+is the identity of Clankie and every worker he hires, across Claude, Codex and pi.
+No email, display name or installation-specific user ID selects that identity.
+Worker tracker writes use his granted broker connection; without a grant, the
+worker asks the lead to write rather than using an independent harness account.
+The remaining automatic worker-isolation work is specified in
+[worker tracker identity](worker-tracker-identity.md).
 
 <a id="account-setup"></a>
 

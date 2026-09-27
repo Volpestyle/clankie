@@ -3,10 +3,12 @@
 Status: accepted (James, 2026-09-08, operator conversation). Amended by
 [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
 
-## Amendment — the bot's inbox, 2026-09-27
+## Amendment — the connected account's inbox, 2026-09-27
 
-James's rule: Clankie is volpestyle+bot; James is volpestyle. Following means
-Clankie's notification inbox, with no issue-by-issue conversation binding.
+The owner-connected tracker identity is the identity of Clankie and his whole
+swarm, including every hired worker. No particular account, email or display
+name is a product default. Following means that connected identity’s notification
+inbox, with no issue-by-issue conversation binding.
 This supersedes the workspace-wide and issue-routed wake behavior below and
 ADR 0191's binding route. Existing bindings remain stored and inspectable but
 are inert for wakes; no automatic deletion or rebinding occurs.
@@ -17,10 +19,10 @@ reads `get_notifications` through its own verified Linear MCP connection every
 `global-default` or its attached seat. The same inbox stores both sources;
 notification-scoped reads and acknowledgments use `--conversation global-default`.
 Linear selects the recipient, covering mentions, assignments, subscriptions and
-replies without guessing names or parsing comment text. This account uses
-MCP-audience OAuth, not a GraphQL credential. Linear's `AppUserNotification`
-webhook is for OAuth app users, so it cannot represent this ordinary bot user's
-inbox without changing the account model. The live bot connection was checked
+replies without guessing names or parsing comment text. The verified connection used for the read-only check had MCP-audience OAuth,
+not a GraphQL credential. Linear's `AppUserNotification`
+webhook is for OAuth app users, so it cannot represent an ordinary connected user's
+inbox without changing the account model. The live connected account was checked
 read-only and supports paginated `get_notifications`.
 
 A private atomic checkpoint starts at first connection time, advances only after
@@ -39,6 +41,16 @@ IDs, so normal recipient/self-notification semantics are owned by Linear.
 All payloads stay untrusted context and retain explicit cursor acknowledgment.
 The seat denies `mcp__linear-server`, using Claude Code's documented server
 prefix syntax, and uses only Clankie's connected Linear tools.
+
+The rule applies to `hire_agent` and `swarm_assign` workers on Claude, Codex and
+pi, and to future tracker connectors. Writes must use Clankie's connected tools
+or explicit worker grants. Missing access goes back to the lead; it does not
+select a harness's own account. Worker-side automatic isolation is not yet
+complete: managed launches add the broker bridge but inherit other harness
+configuration, and native hires do not install that bridge. The staged
+[worker enforcement proposal](../worker-tracker-identity.md) records the current
+paths, exact owning files and acceptance checks. This amendment does not claim
+that instructions alone enforce account isolation.
 
 Sources: [Linear notifications](https://linear.app/docs/notifications),
 [app-user notification webhooks](https://linear.app/developers/agent-best-practices#inbox-notifications-webhooks),
@@ -116,20 +128,21 @@ anything deserves action; silence is ordinary. A shared account name does not
 establish human authorship. His own echoes require no reply. A webhook grants
 no new authority and requires no acknowledgment on Linear.
 
+The current flow after the 2026-09-27 amendment is:
+
 ```mermaid
 flowchart TD
-    Linear[Linear activity] --> Verify[Verify signature, freshness and delivery]
-    Verify --> Receipt{Exact returned revision?}
-    Receipt -->|Captain write| QuietEcho[Ignore self echo]
-    Receipt -->|Worker write| Provenance[Attach worker and work IDs]
-    Receipt -->|No match| Inbox[Store external message in Linear inbox]
-    Provenance --> Inbox
-    Inbox --> Owner[Pin explicit issue owner or Linear inbox]
-    Owner --> Follow{Follow Linear?}
-    Follow -->|Off| Quiet[Retain without a model turn]
-    Follow -->|On| Queue[Queue one turn per owner]
+    Webhook[Workspace activity] --> Verify[Verify signed delivery]
+    Verify --> History[Persist passive activity and write provenance]
+    Account[Verified connected Linear account] --> Poll[Read recipient notifications]
+    Poll --> Fresh{New notification ID?}
+    Fresh -->|Yes| Inbox[Persist notification as untrusted context]
+    Fresh -->|No| Done[No new delivery]
+    Inbox --> Follow{Following and not self-authored?}
+    Follow -->|No| Quiet[Retain without a model turn]
+    Follow -->|Yes| Queue[Queue operator conversation global-default]
     Queue --> Recheck{Still following?}
-    Recheck -->|No| Skip[Skip queued turn]
+    Recheck -->|No| Quiet
     Recheck -->|Yes| Clankie[Read context and decide whether to act]
 ```
 

@@ -337,13 +337,22 @@ Shared-account delivery and verification:
    live bot proof verifies two independently enrolled workers writing through the
    intended account, issue restrictions, create-only comment access and independent
    revocation. Verification does not switch the authenticated user.
-4. Durable inbox admission, explicit issue-owner routing and pending-wake recovery
-   are implemented. The live Linear/Discord proof uses the intended human and bot
+4. Durable inbox admission and pending-wake recovery are implemented. The
+   [notification-inbox amendment](../../docs/adr/0168-linear-awareness-is-opt-in.md)
+   now sends connected-account notifications to the operator conversation; stored
+   issue bindings are inert. The earlier live Linear/Discord proof uses human and bot
    accounts, one existing real worker, and an actual delivered Discord reply. Revision receipts cover
    structured, verified-account writes; unsupported or incomplete results remain
    visible rather than being guessed into an echo. External side effects require
    reconciliation after a process stops mid-turn; event deduplication alone cannot
    establish exactly-once provider writes.
+
+The owner-connected tracker identity is the identity of Clankie and every hired
+worker. The bridge enforces its grants, but managed runtimes still inherit other
+harness configuration and native hires do not automatically get the bridge.
+[Whole-swarm tracker enforcement](../../docs/worker-tracker-identity.md) records
+these gaps and the exact implementation proposal; instructions alone do not
+isolate credentials.
 
 ### Working preferences and portable skills (slices 3–6)
 

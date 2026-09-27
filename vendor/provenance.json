@@ -3,10 +3,11 @@
   "swarmBase": "0981253fc4b81fb4794ceaa706aeec363d900a32",
   "swarmPatch": "swarm-mcp.patch",
   "skillsSource": "https://github.com/Volpestyle/skills",
-  "skillsBase": "2fdccc919f9c9c3b2b0e0857a95e16a60084b6b2",
+  "skillsBase": "d31026f3676c180ed30b7f71b9d99ebf45f04b17",
   "artifacts": {
     "volpestyle-lead-skills-0.1.1.tgz": "b4d9bc5267b4569d0228c8f85608c15f11781936eea9f252434797fac7c52508",
-    "swarm-mcp-2.0.0-rc.1.tgz": "dfa3f9d1a33b93da5b6373adbd4963d93fa6536e87067ad070fc457a144ff029"
+    "swarm-mcp-2.0.0-rc.1.tgz": "dfa3f9d1a33b93da5b6373adbd4963d93fa6536e87067ad070fc457a144ff029",
+    "volpestyle-lead-skills-0.1.2.tgz": "f26dd51b501d1750ed2c14e7952000bc02fff6366ccbd7e367cb3c0076ff69a5"
   },
   "patchSha256": "02c42ac1a04c03d483df090351e9bed0e1f0a9115b724c6272af8da452d74d5c",
   "swarmRevision": "a72a2d3afa88274a60747216b8d401ab279204b5",

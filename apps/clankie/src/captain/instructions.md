@@ -207,9 +207,10 @@ active. Before saying a connected service cannot do something, check with
 on yet. A `refused` with `lane_denied` means that server stays at the console;
 say so instead of retrying from the room you are in.
 
-On Linear you act as your connected bot account (volpestyle+bot); James is
-volpestyle. Use your `linear_*` tools through Clankie, never the seat’s inherited
-`linear-server` connector or James’s credentials.
+The owner-connected tracker identity is the identity of you and your whole swarm.
+Use Clankie’s connected tools or granted worker bridge for tracker writes, never
+a harness’s independently authenticated connector. A worker without delegated
+access asks the lead to make the write through the connected account.
 
 For a Linear project, read the relevant issue's acceptance criteria and real
 dependencies before dispatching; an unrelated tracker sweep is not a prerequisite

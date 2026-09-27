@@ -235,7 +235,7 @@ describe("Linear follow setup", () => {
     expect(off.settings().linearWebhook.following).toBe(false);
   });
 
-  it("requires a connected bot account before starting from the wizard", async () => {
+  it("requires a connected Linear account before starting from the wizard", async () => {
     const h = harness({ selections: ["follow", "on"] });
     await h.connect.run("linear", h.shell);
     expect(h.settings().linearWebhook.following).toBe(false);

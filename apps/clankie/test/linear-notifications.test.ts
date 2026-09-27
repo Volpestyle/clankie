@@ -18,7 +18,7 @@ const own = {
     connectionId: "bot",
     userId: "bot",
     workspaceId: "org",
-    email: "volpestyle+bot@gmail.com",
+    email: "connected-account@example.test",
     name: "clankie",
     workspaceName: "workspace",
     verifiedAt: NOW,
@@ -177,4 +177,36 @@ it("coalesces concurrent polls and rechecks follow before admitting a wake", asy
   await f.poller.close();
   await f.poller.poll();
   expect(f.call).toHaveBeenCalledTimes(1);
+});
+
+it("follows a replacement connected identity without depending on an email or display name", async () => {
+  const f = await fixture();
+  f.page([notification("same-provider-id")]);
+  await f.poller.poll();
+  const firstId = f.received[0]!.activity.eventId;
+  const replacement = {
+    binding: "replacement-connection",
+    account: {
+      ...own.account,
+      userId: "another-user",
+      workspaceId: "another-workspace",
+      email: "owner@another-company.test",
+      name: "Owner-selected identity",
+    },
+  };
+  f.account.mockResolvedValue(replacement);
+  f.page([
+    { ...notification("same-provider-id"), actor: { id: "another-user" } },
+    { ...notification("former-account"), actor: { id: own.account.userId } },
+  ]);
+  await f.poller.poll();
+  expect(f.received[1]).toMatchObject({
+    following: true,
+    activity: { organizationId: "another-workspace", actorId: "bot" },
+  });
+  expect(f.received[2]).toMatchObject({
+    following: false,
+    activity: { organizationId: "another-workspace", actorId: "another-user" },
+  });
+  expect(f.received[2]!.activity.eventId).not.toBe(firstId);
 });
