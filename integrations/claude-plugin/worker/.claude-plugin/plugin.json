@@ -1,0 +1,13 @@
+{
+  "name": "clankie-worker",
+  "displayName": "Clankie worker channel",
+  "version": "0.1.0",
+  "description": "Serves a Swarm-dispatched worker's own Swarm MCP as a Claude Code channel, so an interactive worker receives leased Swarm mail. Separate from the operator seat; carries no operator credential.",
+  "author": {
+    "name": "James Volpe",
+    "url": "https://github.com/Volpestyle"
+  },
+  "repository": "https://github.com/Volpestyle/clankie",
+  "license": "Apache-2.0",
+  "keywords": ["clankie", "swarm", "worker", "channel"]
+}

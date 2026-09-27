@@ -112,6 +112,34 @@ clankie seat --dry-run                 # "plugin": { "source": "installed" }, "c
 In the session, `/mcp` lists the `clankie` server, `/clankie:this-machine`
 loads his install skill, and `clankie model status` runs without a prompt.
 
+## Worker channel plugin (`clankie-worker`)
+
+[`worker/`](worker/) is a second plugin in the same marketplace,
+`clankie-worker@clankie`, for Swarm-dispatched **interactive** workers
+([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
+It is not the seat and carries none of the seat's identity, hooks, skills or
+operator MCP. Its one MCP server, `swarm`, runs the Swarm MCP that the Herdr
+launcher names in `SWARM_WORKER_MCP`, in channel mode, with the worker's own
+enrolled capability; it refuses to start outside such a launch. The worker
+launch enables it for that session only (`enabledPlugins`) and starts Claude
+Code with `--channels plugin:clankie-worker@clankie`, so the worker's leased
+Swarm mail arrives as channel events.
+
+Claude Code only runs a non-official channel plugin unattended when the owner's
+managed settings allow it. That is the owner's action, never the dispatcher's:
+the exact `allowedChannelPlugins` entry and probe are in
+[managed consent](../../docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md).
+Install it disabled, like the seat:
+
+```bash
+claude plugin install clankie-worker@clankie
+claude plugin disable clankie-worker@clankie
+```
+
+Select the mode per runtime with `clankie runtime mode ID interactive|stream`;
+stream stays the default. An interactive startup that blocks stays visibly
+blocked in its pane and never falls back to stream.
+
 ## Codex
 
 Codex is not a Claude plugin. It takes the same `clankie mcp --lane operator`
