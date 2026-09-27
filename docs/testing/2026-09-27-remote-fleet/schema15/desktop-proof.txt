@@ -1,0 +1,10 @@
+ SESSIONNAME               USERNAME                 ID  STATE   TYPE        DEVICE 
+ services                                            0  Disc                        
+>console                   volpe                     1  Active                      
+
+    Id SessionId ProcessName
+    -- --------- -----------
+157536         1 powershell 
+
+
+

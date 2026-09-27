@@ -1,0 +1,29 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+ ❯ packages/swarm/test/release.test.ts (1 test | 1 failed) 1007ms
+   × relocated release includes executable Swarm dependencies and skill sources 1006ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/swarm/test/release.test.ts > relocated release includes executable Swarm dependencies and skill sources
+Error: Cannot resolve release dependency @modelcontextprotocol/client from /Users/james/dev/clankie/node_modules/.pnpm/swarm-mcp@file+vendor+swarm-mcp-2.0.0-rc.1.tgz/node_modules/swarm-mcp
+ ❯ copy scripts/release/swarm-runtime.mjs:20:22
+     18|       }
+     19|     }
+     20|     if (!root) throw new Error(`Cannot resolve release dependency ${na…
+       |                      ^
+     21|     await mkdir(dirname(destination), { recursive: true });
+     22|     const previous = copied.get(root);
+ ❯ copy scripts/release/swarm-runtime.mjs:35:7
+ ❯ copySwarmRuntime scripts/release/swarm-runtime.mjs:39:5
+ ❯ packages/swarm/test/release.test.ts:15:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  13:06:19
+   Duration  1.16s (transform 20ms, setup 0ms, import 23ms, tests 1.01s, environment 0ms)
+

@@ -1,0 +1,28 @@
+{
+  "id": "cli:agent:prompt",
+  "result": {
+    "agent": {
+      "agent": "codex",
+      "agent_session": {
+        "agent": "codex",
+        "kind": "id",
+        "source": "herdr:codex",
+        "value": "01a0e406-2778-7a21-9b8c-8944d1b82765"
+      },
+      "agent_status": "done",
+      "cwd": "C:\\Users\\volpe",
+      "focused": false,
+      "interactive_ready": true,
+      "name": "vuh1381-scratch",
+      "pane_id": "w2:p2K",
+      "revision": 28,
+      "state_change_seq": 3711,
+      "tab_id": "w2:t23",
+      "terminal_id": "term_65c79903e321341",
+      "terminal_title": "Reserve VUH-1381 canary | volpe",
+      "terminal_title_stripped": "Reserve VUH-1381 canary | volpe",
+      "workspace_id": "w2"
+    },
+    "type": "agent_prompted"
+  }
+}

@@ -1,0 +1,4 @@
+PC managed adapter 0981253 against schema-15 coordinator:
+swarm coordinator MCP: Owner API/schema/skill contract differs; use one candidate build and explicitly restart its owner before reconnecting
+
+Matching b62a68f staged separately at C:\Users\volpe\.local\share\clankie-swarm\b62a68f\package; reused the existing 0981253 dependency tree through a directory junction. No Rivals runtime changed.

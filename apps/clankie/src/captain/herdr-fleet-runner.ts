@@ -248,6 +248,11 @@ export function routeHerdrFleets(
       const paneId = await runner.createTab(options);
       return options.fleet === undefined ? paneId : fleetQualified(options.fleet, paneId);
     },
+    promptAgent: async (target, text) => {
+      const { runner, id } = route(target);
+      if (runner.promptAgent === undefined) throw new Error("Herdr agent prompt is unavailable");
+      await runner.promptAgent(id, text);
+    },
     startAgent: async (options) => {
       const { runner, id } = route(options.paneId);
       if (runner.startAgent === undefined) throw new Error("Herdr agent start is unavailable");

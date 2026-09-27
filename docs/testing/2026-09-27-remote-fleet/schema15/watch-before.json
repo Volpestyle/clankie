@@ -1,0 +1,10 @@
+[
+  {
+    "id": "33f95216-0505-4f2e-b487-dbc94cdb9dc7",
+    "conversationId": "global-default",
+    "target": "pc/w2:p2K",
+    "terminalId": "pc/term_65c79903e321341",
+    "reason": "VUH1381 schema15 restart proof: preserve this watch across lead restart; after release marker inspect VUH1381_WATCH_SURVIVED.",
+    "createdAt": "2026-09-27T18:00:49.874Z"
+  }
+]

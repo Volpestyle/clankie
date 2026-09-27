@@ -1,0 +1,30 @@
+{
+  "data": {
+    "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+    "actor": "766c124c-9211-4f42-99c3-6300f0ef8ea9",
+    "eventCursor": 7561,
+    "tasks": {
+      "items": [],
+      "cursor": 0
+    },
+    "inbox": [],
+    "compatibility": {
+      "apiVersion": 1,
+      "skillContract": "swarm-coordination/1",
+      "schemaVersion": 15,
+      "serverVersion": "2.0.0-rc.1",
+      "modernProtocol": "2026-07-28",
+      "build": {
+        "revision": "b62a68f087e9eb8685398db37b9963618d4046d4",
+        "sourceDigest": "721902b83fd9d160e07d0ab83649b3e71a7068290f8397fec37e7494c552698d",
+        "packageVersion": "2.0.0-rc.1",
+        "sdkVersion": "2.0.0"
+      }
+    },
+    "recipientGeneration": true,
+    "messageSessionIdentity": true,
+    "dispatchConfigReload": true,
+    "executionWorkspaces": true,
+    "unlimitedDispatch": true
+  }
+}

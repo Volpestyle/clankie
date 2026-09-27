@@ -1,0 +1,18 @@
+{
+  "outcome": "spawned",
+  "seat": {
+    "seatId": "pc/term_65c7aca90366f4a",
+    "occupantId": "session-8a55c40b8258a7260c5971936196d344988f34a8e125f33570be3e74ad85011f",
+    "harness": "claude",
+    "status": "idle",
+    "title": "Claude Code",
+    "workingDirectory": "C:\\Users\\volpe\\.local\\share\\clankie-swarm\\vuh1381-schema15",
+    "personaId": "agent-8759a72e-2b4c-4c92-b141-0fd3915b4673",
+    "conversationId": "conv-d1db9a64-9b0a-4b27-9e77-c90de25c97b3"
+  },
+  "brief": {
+    "outcome": "delivered",
+    "seatId": "pc/term_65c7aca90366f4a",
+    "status": "working"
+  }
+}

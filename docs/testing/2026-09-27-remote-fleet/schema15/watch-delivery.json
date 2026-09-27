@@ -1,0 +1,8 @@
+{
+  "watchId": "33f95216-0505-4f2e-b487-dbc94cdb9dc7",
+  "conversationId": "global-default",
+  "restartCompletedAt": "2026-09-27T18:04:05Z",
+  "deliveredAt": "2026-09-27T18:04:34Z",
+  "eventId": "seat-0583a701-b5de-4262-a103-f4b25169c4e5",
+  "source": "Lead w2H:p2G reported matching reason and target settled done; worker verified original record after restart, released marker afterwards, read final pane response, and observed original watch removed after delivery."
+}

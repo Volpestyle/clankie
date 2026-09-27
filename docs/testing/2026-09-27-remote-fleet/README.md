@@ -1,5 +1,7 @@
 # VUH-1381 live proof, 2026-09-27
 
+Later continuation: [schema-15 prompt/wait, desktop, remote hire and restart-watch proofs](schema15/README.md). The acceptance gaps below describe the earlier run.
+
 Partial verification of `29cf9917`, continued on the shared Mac checkout.
 [Issue](https://linear.app/vuhlp/issue/VUH-1381).
 
