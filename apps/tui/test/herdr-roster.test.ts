@@ -1,5 +1,9 @@
-import { expect, it } from "vitest";
-import { OperatorFleetSeatSchema } from "@clankie/protocol";
+import { expect, it, vi } from "vitest";
+import {
+  OperatorFleetSeatSchema,
+  OperatorFleetSnapshotSchema,
+  type OperatorFleetSnapshot,
+} from "@clankie/protocol";
 import { HerdrRoster } from "../src/observation/herdr-roster.ts";
 
 it("shows the service fleet in every console and reports a failed read", async () => {
@@ -39,4 +43,109 @@ it("shows the service fleet in every console and reports a failed read", async (
   failed = true;
   await consoles[0]!.poll();
   expect(consoles[0]!.snapshot()).toEqual({ agents: [], error: "service unavailable" });
+});
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+function fleetSnapshot(cursor: string, status: "working" | "idle"): OperatorFleetSnapshot {
+  return OperatorFleetSnapshotSchema.parse({
+    schemaVersion: 1,
+    cursor,
+    seats: [
+      {
+        seatId: "terminal-1",
+        occupantId: "agent-1",
+        personaId: "persona-1",
+        harness: "claude",
+        status,
+        title: "short turn",
+      },
+    ],
+    personas: [],
+    channels: [],
+  });
+}
+
+it("repaints on the fleet cursor the moment Herdr changes, with no roster poll (ADR 0150)", async () => {
+  const waits: { cursor: string | undefined; reply: ReturnType<typeof deferred<OperatorFleetSnapshot>> }[] =
+    [];
+  let rosterReads = 0;
+  let aborted = false;
+  const client = {
+    roster: async () => {
+      rosterReads += 1;
+      return [];
+    },
+    fleet: (cursor?: string, signal?: AbortSignal) => {
+      const reply = deferred<OperatorFleetSnapshot>();
+      signal?.addEventListener("abort", () => {
+        aborted = true;
+      });
+      waits.push({ cursor, reply });
+      return reply.promise;
+    },
+  };
+  const roster = new HerdrRoster(client);
+  let changes = 0;
+  roster.start(() => {
+    changes += 1;
+  });
+  await vi.waitFor(() => expect(waits).toHaveLength(1));
+  expect(waits[0]!.cursor).toBeUndefined();
+  waits[0]!.reply.resolve(fleetSnapshot("c1", "working"));
+  await vi.waitFor(() => expect(waits).toHaveLength(2));
+  expect(waits[1]!.cursor).toBe("c1");
+  expect(changes).toBe(1);
+  expect(roster.snapshot().agents).toEqual([
+    { paneId: "terminal-1", agent: "claude", status: "working", title: "short turn" },
+  ]);
+
+  // A turn shorter than any poll interval still lands: the parked wait answers.
+  waits[1]!.reply.resolve(fleetSnapshot("c2", "idle"));
+  await vi.waitFor(() => expect(waits).toHaveLength(3));
+  expect(waits[2]!.cursor).toBe("c2");
+  expect(changes).toBe(2);
+  expect(roster.snapshot().agents[0]?.status).toBe("idle");
+  expect(rosterReads).toBe(0);
+
+  roster.stop();
+  expect(aborted).toBe(true);
+});
+
+it("falls back to a roster read while the fleet cursor is unavailable", async () => {
+  const seat = OperatorFleetSeatSchema.parse({
+    seatId: "terminal-1",
+    occupantId: "agent-1",
+    personaId: "persona-1",
+    harness: "codex",
+    status: "working",
+    title: "older host",
+  });
+  let rosterReads = 0;
+  const client = {
+    roster: async () => {
+      rosterReads += 1;
+      return [seat];
+    },
+    fleet: async () => {
+      throw new Error("Unknown op fleet");
+    },
+  };
+  const roster = new HerdrRoster(client);
+  let changes = 0;
+  roster.start(() => {
+    changes += 1;
+  });
+  await vi.waitFor(() => expect(changes).toBe(1));
+  roster.stop();
+  expect(rosterReads).toBe(1);
+  expect(roster.snapshot().agents).toEqual([
+    { paneId: "terminal-1", agent: "codex", status: "working", title: "older host" },
+  ]);
 });
