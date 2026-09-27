@@ -3032,7 +3032,7 @@ packages:
     engines: {node: '>=14.16'}
 
   swarm-mcp@file:vendor/swarm-mcp-2.0.0-rc.1.tgz:
-    resolution: {integrity: sha512-FXCtzZY/AuogoRh1UvMUcgFb08JT6OmcPXHbAPTCziEUhnkUqFILejWzY1ATcenSg6BT8ImxAmp2wzXr46+oWA==, tarball: file:vendor/swarm-mcp-2.0.0-rc.1.tgz}
+    resolution: {integrity: sha512-CWbppToGRVvTaTqeY1ikNAdrEaKhDP+LEug0IBjQ89dSLbo24gw4Qf1AQJKoAN4in3lv/XODE4WS656L9LCesA==, tarball: file:vendor/swarm-mcp-2.0.0-rc.1.tgz}
     version: 2.0.0-rc.1
     engines: {node: '>=22'}
     hasBin: true
