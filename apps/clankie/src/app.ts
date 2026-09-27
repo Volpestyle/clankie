@@ -3,6 +3,7 @@ import { createModelKeyRoutes } from "./model-key-routes.ts";
 import { createHostedCreditsRoutes } from "./hosted-credits-routes.ts";
 import { createAccountRoutes } from "./account-routes.ts";
 import type { AccountsPort } from "./accounts.ts";
+import type { ComputerUseHarness } from "./computer-use-harnesses.ts";
 import type { ModelKeysPort } from "./model-keys.ts";
 import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
 import type { HostedPairing } from "./hosted-pairing.ts";
@@ -420,6 +421,11 @@ export interface ClankieAppDependencies {
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
+  /**
+   * Computer-use harnesses on this machine (ADR 0199). Absent on a hosted body,
+   * which has no owner desktop; the route then answers an empty list.
+   */
+  computerUseHarnesses?: { refresh(): Promise<readonly ComputerUseHarness[]> };
   rivals?: RivalsClient;
   mediaGenerator?: MediaGeneratorPort;
   /** Shared realtime voice provider composition; the app owns only loopback media transport. */
@@ -2385,6 +2391,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       });
     }
     return context.json(sight);
+  });
+
+  // Which harnesses here can drive the owner's apps and Chrome (ADR 0199). It
+  // describes the owner's machine and sessions, so only the operator reads it;
+  // an explicit read re-probes rather than trusting the prompt's cache.
+  app.get("/v1/browser/harnesses", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const harnesses = (await dependencies.computerUseHarnesses?.refresh()) ?? [];
+    return context.json(
+      { schemaVersion: 1, detected: dependencies.computerUseHarnesses !== undefined, harnesses },
+      200,
+      { "cache-control": "no-store" },
+    );
   });
 
   app.get("/v1/browser/tools", async (context) => {

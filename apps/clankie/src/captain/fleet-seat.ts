@@ -73,6 +73,24 @@ export function fleetSeatEffortArgs(harness: string, effort: string): readonly s
   }
 }
 
+/**
+ * The argv a Chrome hire becomes (ADR 0199). Claude's Chrome integration is
+ * per session unless its owner turned it on by default; Codex reaches Chrome
+ * through its own plugins and config, so it needs nothing. Undefined is a
+ * harness with no Chrome integration — a typed failure, never a hire that
+ * silently lands without the browser it was hired for.
+ */
+export function fleetSeatChromeArgs(harness: string): readonly string[] | undefined {
+  switch (harness) {
+    case "claude":
+      return ["--chrome"];
+    case "codex":
+      return [];
+    default:
+      return undefined;
+  }
+}
+
 /** `claude mcp add -s user` as the hire path sees it. */
 export interface ClaudeMcpResult {
   readonly status: number;

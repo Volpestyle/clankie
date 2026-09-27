@@ -34,6 +34,7 @@ import {
   fleetSeatCodexStartArgs,
   fleetSeatMcpAddSucceeded,
   fleetSeatModelArgs,
+  fleetSeatChromeArgs,
   fleetSeatEffortArgs,
   type ClaudeMcpResult,
 } from "./fleet-seat.ts";
@@ -923,11 +924,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (modelArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired model flag`);
       const effortArgs = input.effort === undefined ? [] : fleetSeatEffortArgs(input.harness, input.effort);
       if (effortArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired effort flag`);
+      const chromeArgs = input.chrome === true ? fleetSeatChromeArgs(input.harness) : [];
+      if (chromeArgs === undefined)
+        throw new Error(`unsupported: ${input.harness} has no Chrome integration`);
       const args = [
         ...(input.harness === "claude" && remote === undefined ? fleetSeatClaudeStartArgs() : []),
         ...(input.harness === "codex" && remote === undefined ? fleetSeatCodexStartArgs() : []),
         ...modelArgs,
         ...effortArgs,
+        ...chromeArgs,
       ];
       try {
         await startAgent({

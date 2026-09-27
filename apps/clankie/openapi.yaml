@@ -2181,6 +2181,37 @@ paths:
         "404":
           description: Unknown
 
+  /v1/browser/harnesses:
+    get:
+      tags: [Browser]
+      operationId: getBrowserHarnesses
+      summary: Computer-use harnesses on this machine
+      description: >-
+        Re-probes which installed harnesses (Codex computer use, Claude in
+        Chrome) are signed in and can drive the owner's apps or Chrome (ADR
+        0199). Detection only; nothing is started. `detected` is false on a
+        body with no owner desktop.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Harness list
+          content:
+            application/json:
+              example:
+                schemaVersion: 1
+                detected: true
+                harnesses:
+                  - harness: codex
+                    signedIn: true
+                    surfaces: [desktop, chrome]
+                    chromeNeedsHireFlag: false
+                  - harness: claude
+                    signedIn: true
+                    surfaces: [chrome]
+                    chromeNeedsHireFlag: true
+        "401":
+          description: Operator bearer required
+
   /v1/browser/tools:
     get:
       tags: [Browser]

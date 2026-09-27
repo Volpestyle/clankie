@@ -465,6 +465,13 @@ export const BrowserSettingsSchema = z
      * capture every page he opens, including signed-in ones.
      */
     recordSessions: z.boolean().default(false),
+    /**
+     * Show him the computer-use harnesses on this machine (Codex computer use,
+     * Claude in Chrome) as his main way into hard computer and browser work
+     * (ADR 0199). Off when the owner would rather not spend those plans; his
+     * own browser is then his only way in.
+     */
+    harnessDelegation: z.boolean().default(true),
   })
   .strict();
 export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;

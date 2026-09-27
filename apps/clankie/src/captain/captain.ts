@@ -99,6 +99,7 @@ import type { CaptainPort, CaptainPromptSection, HireSeat, MessageSeat } from ".
 import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
+import { renderComputerUseReach, type ComputerUseHarness } from "../computer-use-harnesses.ts";
 import {
   contextTokenCount,
   recordPiTurnEvent,
@@ -291,14 +292,24 @@ export function assembleLanePrompt(
   currentSettings: ClankieSettings,
   selected: readonly CaptainPromptSection[] = SESSION_PROMPT_SECTIONS,
   extra: Readonly<Partial<Record<CaptainPromptSection, string>>> = {},
+  computerUse: readonly ComputerUseHarness[] = [],
 ): string {
   const identity = readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
   const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
   // Machine access says only whether this room has a shell. The herdr contract —
   // joining, the census, the bare-`herdr-lead` hang — is identity, stated once in
   // instructions.md, and every lane that gets this section gets that one too.
+  // Computer-use harnesses drive the owner's own apps and sessions, so they are
+  // named only where a hire could happen at all: a room with the machine grant
+  // (ADR 0199). The owner can take them off the card to save those plans.
+  const harnessReach =
+    systemTools && currentSettings.browser.harnessDelegation ? renderComputerUseReach(computerUse) : "";
   const reach = systemTools
-    ? ["# Machine access", "You have shell and filesystem tools in this authorized context."].join("\n")
+    ? [
+        "# Machine access",
+        "You have shell and filesystem tools in this authorized context.",
+        ...(harnessReach.length > 0 ? ["", harnessReach] : []),
+      ].join("\n")
     : [
         "# This room",
         "You do not have a shell or filesystem tools in this room. If someone asks you to inspect herdr, run a command, or read a file, say you cannot from here. Do not imply you chose not to look.",
@@ -912,9 +923,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     systemTools: boolean,
     currentSettings: ClankieSettings,
     sideConversation: boolean,
+    computerUse: readonly ComputerUseHarness[],
   ): string {
-    const prompt = assembleLanePrompt(lane, systemTools, currentSettings);
+    const prompt = assembleLanePrompt(lane, systemTools, currentSettings, undefined, {}, computerUse);
     return `${prompt}${sideConversation ? SIDE_CONVERSATION_INSTRUCTIONS : ""}`;
+  }
+
+  /** Detection never holds a session back: a failed probe is an empty card. */
+  function harnessesForPrompt(): Promise<readonly ComputerUseHarness[]> {
+    return deps.computerUseHarnesses?.().catch(() => []) ?? Promise.resolve([]);
   }
 
   async function projectInstructions(cwd: string) {
@@ -961,6 +978,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     const { runtime: models, resolveRoute } = await runtime();
     const currentSettings = await settings();
+    const computerUse = systemTools ? await harnessesForPrompt() : [];
     const purpose = sessionPurpose(lane, systemTools);
     const route = { current: await resolveRoute(purpose) };
     const budget = { compactBeforeNextRun: false };
@@ -969,7 +987,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: getAgentDir(),
-      systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation),
+      systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
       noExtensions: true,
       extensionFactories: [
         captainMemoryExtension(deps.memory, lane),
@@ -2579,6 +2597,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         currentSettings,
         sections,
         selection === undefined ? {} : { model: modelCard(selection) },
+        laneHoldsSystemTools(lane) && sections.includes("reach") ? await harnessesForPrompt() : [],
       );
       if (conversationId === undefined) return prompt;
       const binding = lane === "operator" ? seatContext(conversationId) : undefined;

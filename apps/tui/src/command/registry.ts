@@ -176,7 +176,11 @@ const HEADLESS_COMMAND_HELP = [
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
     nouns: ["browser"],
-    lines: ["  browser [status] | record on|off  Save each burst of his browsing as a WebM (JSON)"],
+    lines: [
+      "  browser [status] | record on|off  Save each burst of his browsing as a WebM (JSON)",
+      "  browser harnesses | delegate on|off",
+      "                           Computer-use harnesses he can hire, and whether he is offered them (JSON)",
+    ],
   },
   {
     nouns: ["rivals"],

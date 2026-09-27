@@ -25,13 +25,13 @@ plugin can uniquely declare. Everything else lives in the service and the
 
 ## What the plugin carries
 
-| Piece                                                                                                                                         | File                       | What it does                                                                                                                 |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Output style `Clankie`                                                                                                                        | `output-styles/clankie.md` | His identity in place of the coding assistant's; forced on while the plugin is enabled. Generated from `instructions.md`.    |
-| `SessionStart` hook                                                                                                                           | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card |
-| `UserPromptSubmit` hook                                                                                                                       | `hooks/hooks.json`         | `clankie memory-card --lane operator`: the newest memory card, every turn                                                    |
-| MCP server `clankie`                                                                                                                          | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file               |
-| Skills `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:swarm-lead`, `/clankie:herdr-lead`, `/clankie:swarm-mcp` | `skills/`                  | Links to the shipped skills, available from any working directory                                                            |
+| Piece                                                                                                                                                                                                    | File                       | What it does                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Output style `Clankie`                                                                                                                                                                                   | `output-styles/clankie.md` | His identity in place of the coding assistant's; forced on while the plugin is enabled. Generated from `instructions.md`.    |
+| `SessionStart` hook                                                                                                                                                                                      | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card |
+| `UserPromptSubmit` hook                                                                                                                                                                                  | `hooks/hooks.json`         | `clankie memory-card --lane operator`: the newest memory card, every turn                                                    |
+| MCP server `clankie`                                                                                                                                                                                     | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file               |
+| Skills `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:swarm-lead`, `/clankie:herdr-lead`, `/clankie:swarm-mcp`, `/clankie:work-items`, `/clankie:computer-use-delegation` | `skills/`                  | Links to the shipped skills, available from any working directory                                                            |
 
 The output style is generated: edit `apps/clankie/src/captain/instructions.md`
 and run `node integrations/claude-plugin/build.mjs`. `node
@@ -105,7 +105,7 @@ claude plugin disable clankie@clankie
 Then confirm it took:
 
 ```bash
-claude plugin details clankie          # output style, context/transcript hooks, one MCP server, six skills
+claude plugin details clankie          # output style, context/transcript hooks, one MCP server, eight skills
 clankie seat --dry-run                 # "plugin": { "source": "installed" }, "channel": true
 ```
 

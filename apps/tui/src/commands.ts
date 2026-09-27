@@ -46,7 +46,13 @@ import {
 } from "./observation/herd-lead-companion.ts";
 import { describeHerdrBinding, formatCaptainContextUsage } from "./shell/footer.ts";
 import { formatHerdrJumpResult, type HerdrSessionEntry } from "./session/herdr-report.ts";
-import { browserSetRecording, browserStatus } from "./command/browser.ts";
+import {
+  browserHarnesses,
+  browserSetDelegation,
+  browserSetRecording,
+  browserStatus,
+  type BrowserHarnessesResult,
+} from "./command/browser.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
@@ -753,8 +759,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "browser",
       aliases: [],
-      description: "Record Clankie's browsing as video",
-      argumentHint: "[record on|off]",
+      description: "Recording, and the computer-use harnesses he can hire",
+      argumentHint: "[record on|off | delegate on|off | harnesses]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (settings === undefined) {
@@ -767,8 +773,38 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           shell.insertCommandResult("/browser", formatBrowserSettings(result.browser), "success");
           return;
         }
-        if (words.length !== 2 || words[0] !== "record" || (words[1] !== "on" && words[1] !== "off")) {
-          shell.insertCommandResult("/browser", "Usage: /browser [record on|off]", "error");
+        if (words.length === 1 && words[0] === "harnesses") {
+          try {
+            const result = await browserHarnesses({ settings });
+            shell.insertCommandResult("/browser", formatBrowserHarnesses(result), "success");
+          } catch (error) {
+            shell.insertCommandResult(
+              "/browser",
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
+          }
+          return;
+        }
+        if (
+          words.length !== 2 ||
+          (words[0] !== "record" && words[0] !== "delegate") ||
+          (words[1] !== "on" && words[1] !== "off")
+        ) {
+          shell.insertCommandResult(
+            "/browser",
+            "Usage: /browser [record on|off | delegate on|off | harnesses]",
+            "error",
+          );
+          return;
+        }
+        if (words[0] === "delegate") {
+          const next = await browserSetDelegation(words[1] === "on", { settings });
+          shell.insertCommandResult(
+            "/browser",
+            `${formatBrowserSettings(next.browser)}\n\nApplies from his next session.`,
+            "success",
+          );
           return;
         }
         const next = await browserSetRecording(words[1] === "on", { settings });
@@ -1065,7 +1101,29 @@ function formatAutonomyStatus(status: OperatorAutonomyStatus): string {
 }
 
 function formatBrowserSettings(settings: BrowserSettings): string {
-  return `Record browsing: ${settings.recordSessions ? "on" : "off"}\nVideos: ~/.clankie/runner/browser/recordings/ (newest 50)`;
+  return [
+    `Record browsing: ${settings.recordSessions ? "on" : "off"}`,
+    "Videos: ~/.clankie/runner/browser/recordings/ (newest 50)",
+    `Computer-use harnesses: ${settings.harnessDelegation ? "offered" : "off"} (/browser harnesses lists them)`,
+  ].join("\n");
+}
+
+function formatBrowserHarnesses(result: BrowserHarnessesResult): string {
+  if (!result.detected)
+    return "This body has no owner desktop, so no harness is offered; his own browser is the path.";
+  if (result.harnesses.length === 0) return "No Codex or Claude install here; his own browser is the path.";
+  const lines = result.harnesses.map((entry) => {
+    const ready = entry.signedIn && entry.surfaces.length > 0;
+    const detail = ready
+      ? `${entry.surfaces.join(", ")}${entry.chromeNeedsHireFlag ? " (hired with --chrome)" : ""}`
+      : (entry.missing ?? "not ready");
+    return `${ready ? "✓" : "·"} ${entry.harness}: ${detail}`;
+  });
+  return [
+    ...lines,
+    "",
+    `Offered to him: ${result.harnessDelegation ? "yes" : "no (/browser delegate on)"}`,
+  ].join("\n");
 }
 
 function formatGameplaySettings(settings: GameplaySettings): string {

@@ -31,6 +31,7 @@ import type { createDiscordCaptainActionClient } from "../discord-captain-action
 import type { createDiscordMusicClient } from "../discord-music.ts";
 import type { createDiscordVoicePresenceClient } from "../discord-voice-presence.ts";
 import type { EmailPort } from "../email.ts";
+import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
 import type { FinishedRender } from "../media-generation.ts";
 import type { TldrawHost } from "../tldraw-host.ts";
@@ -50,6 +51,11 @@ export interface CaptainDeps {
   readonly herdrAvailable?: () => boolean;
   /** A hosted body's model for the pi workers it hires (VUH-1373); absent, pi keeps its own. */
   readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
+  /**
+   * Harnesses on this machine that can drive the owner's apps and browser
+   * (ADR 0199). Absent on a hosted body, which has no owner desktop.
+   */
+  readonly computerUseHarnesses?: () => Promise<readonly ComputerUseHarness[]>;
   /** A hosted body's hire limit (VUH-1388); absent, hires are not counted. */
   readonly hireCapacity?: () => Promise<{ readonly live: number; readonly limit: number } | undefined>;
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;

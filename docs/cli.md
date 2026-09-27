@@ -780,6 +780,29 @@ he opens, signed-in ones included. JSON contains `browser.recordSessions`,
 `settingsFile`, and `"appliesTo": "next_browsing_burst"` — no restart is needed.
 The TUI `/browser` command calls this same writer.
 
+### `browser harnesses` / `browser delegate on|off`
+
+The computer-use harnesses on this machine that Clankie can hire for hard
+computer and browser work
+([ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
+`harnesses` asks the service (`GET /v1/browser/harnesses`, operator bearer),
+which re-probes on every read: `codex login status` and `codex features list`
+plus Codex's plugin config for Codex computer use and Chrome, and
+`claude auth status` plus `~/.claude.json` and Chrome's native host for Claude
+in Chrome. Nothing is started or driven. JSON contains `detected` (false on a
+hosted body or a non-macOS host, where nothing is probed), `harnesses` (each
+with `harness`, `signedIn`, `surfaces` of `desktop` and/or `chrome`,
+`chromeNeedsHireFlag`, and `missing` saying what the owner does when it is not
+ready) and `harnessDelegation`.
+
+`delegate on|off` sets `browser.harnessDelegation` (default on): whether the
+ready harnesses appear in the `reach` section of his prompt, on lanes with
+machine access only. Turn it off to keep him from spending those plans. His own
+browser is unaffected. JSON is the `browser status` shape with
+`"appliesTo": "next_session"`. `/browser harnesses` and `/browser delegate on|off`
+in the TUI call the same code. A listed harness is hired with `hire_agent`;
+`chrome: true` starts claude with `--chrome`.
+
 ### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
@@ -1248,14 +1271,14 @@ comes from the credential broker, so this reads the operator lane.
 
 Sections default to the five a session is built with, joined by one blank line:
 
-| Section    | What it is                                                              |
-| ---------- | ----------------------------------------------------------------------- |
-| `identity` | `instructions.md` — who he is and how he works                          |
-| `persona`  | The owner-authored character configuration                              |
-| `reach`    | The machine-access or this-room paragraph for that lane                 |
-| `fleet`    | Owner-authored routing preference; shell-holding lanes only, when set   |
-| `address`  | His own mailbox, when one is connected                                  |
-| `model`    | The card naming the model the service lanes run on (ask for it by name) |
+| Section    | What it is                                                                                                                                                    |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity` | `instructions.md` — who he is and how he works                                                                                                                |
+| `persona`  | The owner-authored character configuration                                                                                                                    |
+| `reach`    | The machine-access or this-room paragraph for that lane; with machine access, the ready computer-use harnesses (`browser harnesses`) unless delegation is off |
+| `fleet`    | Owner-authored routing preference; shell-holding lanes only, when set                                                                                         |
+| `address`  | His own mailbox, when one is connected                                                                                                                        |
+| `model`    | The card naming the model the service lanes run on (ask for it by name)                                                                                       |
 
 A seat that carries the identity some other way asks for the rest:
 `clankie prompt --sections persona,reach,address`.

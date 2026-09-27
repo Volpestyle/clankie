@@ -610,6 +610,13 @@ function hireAgentTool(
       }),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
       effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+      chrome: Type.Optional(
+        Type.Boolean({
+          description:
+            "Start it with the owner's Chrome integration on, for browser work in their own signed-in Chrome " +
+            "(claude's --chrome; codex follows its own settings). Your reach card says which harness needs it.",
+        }),
+      ),
       fleet: Type.Optional(
         Type.String({
           pattern: "^[a-z][a-z0-9-]{0,63}$",

@@ -316,6 +316,10 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   screen, so he can hand over the window for a signup, a CAPTCHA, or a phone
   check rather than grinding at it. A headed session is exempt from the
   browser's idle timeout ([ADR 0127](adr/0127-his-accounts-are-his.md)).
+  Hard work in the owner's own apps and Chrome goes to a hired computer-use
+  harness where one is ready; the service detects them and the reach card
+  lists them on machine-access lanes
+  ([ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
 - **Leading agents.** Swarm MCP owns cross-session messages and task ownership,
   guided by `lead` and `swarm-lead`. The per-conversation host and supported
   worker delivery paths live in [the Swarm package](../packages/swarm/README.md).

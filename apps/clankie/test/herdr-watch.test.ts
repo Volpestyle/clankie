@@ -1514,6 +1514,43 @@ describe("hiring a seat", () => {
     store.close();
   });
 
+  it("starts a Chrome hire with the harness's own integration flag, or fails it typed (ADR 0199)", async () => {
+    const startAgent = vi.fn(
+      (_options: { name: string; kind: string; paneId: string; args?: readonly string[] }) =>
+        Promise.resolve(),
+    );
+    const claudeHired: HerdrAgentSnapshot = {
+      ...hired,
+      agent: "claude",
+      session: { source: "herdr:claude", kind: "id", value: "session-claude" },
+    };
+    let agent: HerdrAgentSnapshot = claudeHired;
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(agent)),
+      resolveTerminal: vi.fn(() => Promise.resolve(agent)),
+      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      closePane: vi.fn(() => Promise.resolve()),
+      startAgent,
+      addClaudeMcp: vi.fn(() => Promise.resolve()),
+    };
+    const store = new HerdrWatchStore(await storePath(), { runner });
+    const seat = { schemaVersion: 1 as const, title: "Checkout", workingDirectory: tmpdir(), chrome: true };
+
+    await store.spawnSeat({ ...seat, harness: "claude" });
+    expect(startAgent.mock.calls[0]?.[0].args?.at(-1)).toBe("--chrome");
+
+    // Codex reaches Chrome through its own settings: no flag, and no failure.
+    agent = { ...hired, agent: "codex" };
+    await store.spawnSeat({ ...seat, harness: "codex" });
+    expect(startAgent.mock.calls[1]?.[0].args).toEqual(fleetSeatCodexStartArgs());
+
+    const result = await store.spawnSeat({ ...seat, harness: "gemini" });
+    expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    expect(startAgent).toHaveBeenCalledTimes(2);
+    store.close();
+  });
+
   it("installs herdr's pi integration before a pi hire, and only for pi", async () => {
     const installPiIntegration = vi.fn(() => Promise.resolve());
     const startAgent = vi.fn(() => Promise.resolve());

@@ -925,6 +925,12 @@ export const SpawnOperatorSeatSchema = z
      */
     effort: z.string().trim().min(1).max(OPERATOR_SEAT_EFFORT_MAX).optional(),
     /**
+     * Start the harness with its owner's-Chrome integration on (ADR 0199):
+     * claude's `--chrome`. Codex's Chrome and computer use follow the owner's
+     * own Codex settings, so it needs no flag; other harnesses fail typed.
+     */
+    chrome: z.boolean().optional(),
+    /**
      * The Herdr fleet it starts on (ADR 0184): a registered machine's name.
      * Absent means the local default fleet; the seat id comes back as
      * `<fleet>/<terminal>` for any other.

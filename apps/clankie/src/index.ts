@@ -60,6 +60,7 @@ import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "./world/session.ts";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
+import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
 import { createRivalsClient } from "./rivals.ts";
@@ -540,9 +541,15 @@ const workItems = createWorkItemsService({
   githubToken: () => githubConnectionToken(operatorCredentialStore),
   hosted: hostedBody !== undefined,
 });
+// Computer-use harnesses drive the owner's own Mac apps and Chrome (ADR 0199).
+// A hosted body has no owner desktop, and the probes read macOS paths, so
+// detection is only wired where both hold.
+const computerUseHarnesses =
+  hostedBody === undefined && process.platform === "darwin" ? cachedComputerUseHarnesses() : undefined;
 const captain = createCaptain(
   {
     workItems,
+    ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses: computerUseHarnesses.current }),
     // Hosted pi workers follow the captain's model path (VUH-1373).
     ...(hostedModelForwarder === undefined
       ? {}
@@ -831,6 +838,7 @@ const clankie = await createClankieApp({
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
   ...(browserHost === undefined ? {} : { browserTools: browserHost }),
+  ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses }),
   activityObservations: {
     current: (_signal) => Promise.resolve(activityObservations.current()),
   },
