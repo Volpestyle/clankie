@@ -17,7 +17,8 @@ export function createHostedCreditsRoutes(
     context.header("cache-control", "no-store");
     try {
       const authority = await authorize(context.req.raw);
-      if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
+      if (authority !== true)
+        return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
       if (credits === undefined) return context.json({ error: "not_hosted" }, 404);
       return context.json(HostedCreditsSchema.parse(await credits.readCredits()));
     } catch {
