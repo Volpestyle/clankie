@@ -590,8 +590,8 @@ paths:
     put:
       tags: [Operator]
       operationId: bindLinearWorkOwner
-      summary: Bind new issue activity to an existing Clankie conversation
-      description: Rebinding requires the expected current conversation. Already admitted events keep their original owner.
+      summary: Store a legacy issue binding (no wake routing effect)
+      description: Retained for compatibility. Rebinding requires the expected current conversation. Bot notifications always wake the operator conversation.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -606,7 +606,7 @@ paths:
     delete:
       tags: [Operator]
       operationId: unbindLinearWorkOwner
-      summary: Unbind the current issue owner for future deliveries
+      summary: Remove a legacy issue binding
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -664,15 +664,15 @@ paths:
     get:
       tags: [Operator]
       operationId: inspectLinearFollowing
-      summary: Inspect whether Linear activity can wake Clankie
+      summary: Inspect whether bot Linear notifications can wake the operator conversation
       security: [{ operatorBearer: [] }]
       responses:
-        "200": { description: Following switch and canonical inbox conversation }
+        "200": { description: Following switch, canonical inbox conversation and operator wake conversation }
         "401": { description: Operator authentication required }
     put:
       tags: [Operator]
       operationId: setLinearFollowing
-      summary: Enable or disable event-triggered turns
+      summary: Enable or disable turns from the bot notification inbox
       description: Enabling resumes previously accepted pending wakes; it does not wake passive backlog. Disabling leaves inbox delivery enabled.
       security: [{ operatorBearer: [] }]
       requestBody:
@@ -686,7 +686,7 @@ paths:
               properties:
                 following: { type: boolean }
       responses:
-        "200": { description: Following switch and canonical inbox conversation }
+        "200": { description: Following switch, canonical inbox conversation and operator wake conversation }
         "400": { description: Invalid request }
         "401": { description: Operator authentication required }
   /v1/swarm:

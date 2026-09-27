@@ -130,6 +130,7 @@ describe("clankie linear", () => {
     expect(await runLinearCommand([], { settings })).toMatchObject({
       following: false,
       conversationId: "linear-inbox",
+      wakeConversationId: "global-default",
     });
     expect(await runLinearCommand(["follow", "on"], { settings })).toMatchObject({ following: true });
     expect((await settings.load()).linearWebhook.following).toBe(true);

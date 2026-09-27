@@ -416,9 +416,10 @@ it("binds native tools, project doctrine and channel delivery to selected servic
     captain.setLinearWorkOwner(owner);
     const activity = {
       eventId: "a".repeat(64),
-      deliveryId: "linear-project-seat",
-      type: "Comment" as const,
-      action: "create" as const,
+      notification: true,
+      deliveryId: "linear-operator-notification",
+      type: "Notification" as const,
+      action: "issueNewComment" as const,
       actorName: "Human",
       actorEmail: undefined,
       actorId: "human",
@@ -428,12 +429,13 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       updatedFrom: undefined,
       data: { id: "comment", issueId: owner.issueId, body: "Check the existing work" },
     };
-    const linearWake = captain.pollSeatEvents(1000, undefined, a);
+    const linearWake = captain.pollSeatEvents(1000);
     expect(captain.receiveLinearActivity(activity, true)).toBe(true);
     expect(await linearWake).toMatchObject([
-      { conversationId: a, kind: "wake", content: expect.stringContaining(`--conversation ${a}`) },
+      { conversationId: id, kind: "wake", content: expect.stringContaining(`--conversation ${id}`) },
     ]);
-    await captain.pollSeatEvents(0, undefined, a);
+    await captain.pollSeatEvents(0);
+    expect(await captain.pollSeatEvents(0, undefined, a)).toEqual([]);
     expect(captain.receiveLinearActivity(activity, true)).toBe(false);
     expect(await captain.pollSeatEvents(0, undefined, b)).toEqual([]);
     expect(await captain.pollSeatEvents(0)).toEqual([]);

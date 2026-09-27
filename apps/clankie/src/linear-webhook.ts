@@ -41,6 +41,8 @@ const LinearActivityPayloadSchema = z.looseObject({
 
 export interface LinearActivityEvent {
   readonly eventId?: string;
+  /** True only for the connected account’s notification inbox, never a webhook. */
+  readonly notification?: boolean;
   readonly deliveryId: string | undefined;
   readonly type: string;
   readonly action: string;
@@ -416,15 +418,3 @@ export const LinearWorkOwnerSchema = z
   })
   .strict();
 export type LinearWorkOwner = z.infer<typeof LinearWorkOwnerSchema>;
-export function linearIssueId(activity: LinearActivityEvent): string | undefined {
-  const issue = activity.data.issue;
-  const raw =
-    activity.type === "Issue"
-      ? activity.data.id
-      : activity.type === "Comment"
-        ? (activity.data.issueId ??
-          (issue && typeof issue === "object" ? (issue as Record<string, unknown>).id : undefined))
-        : undefined;
-  const result = z.string().uuid().safeParse(raw);
-  return result.success ? result.data.toLowerCase() : undefined;
-}

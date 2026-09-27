@@ -5,6 +5,11 @@ Amends [ADR 0167](0167-a-linear-comment-is-answered-on-the-ticket.md),
 [ADR 0168](0168-linear-awareness-is-opt-in.md) and
 [ADR 0189](0189-his-own-linear-activity-does-not-wake-him.md).
 
+Routing amendment (2026-09-27): [ADR 0168](0168-linear-awareness-is-opt-in.md#amendment--the-bots-inbox-2026-09-27)
+replaces per-issue wake routes with the bot's actual notification inbox waking
+`global-default`. Stored issue bindings remain inert; reply provenance and
+untrusted context remain available in passive webhook history.
+
 ## Context
 
 On 2026-09-26 James asked two questions in a comment on a Rivals Agent project

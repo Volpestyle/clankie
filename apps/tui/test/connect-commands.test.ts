@@ -218,10 +218,10 @@ describe("Linear follow setup", () => {
     await keepRun.connect.run("linear", keepRun.shell);
     expect(keepRun.removed).toEqual([]);
     expect(keepRun.settings().linearWebhook.following).toBe(false);
-    expect(removeRun.settings().linearWebhook.following).toBe(false);
+    expect(removeRun.settings().linearWebhook.following).toBe(true);
   });
   it("toggles follow without rotating a credential or needing a doorway", async () => {
-    const stored = { "linear-webhook": { type: "api", redacted: "sec…" } };
+    const stored = { linear: { type: "oauth", expires: 0 } };
     const on = harness({ selections: ["follow", "on"], stored, gatewayHook: async () => undefined });
     await on.connect.run("linear", on.shell);
     expect(on.settings().linearWebhook.following).toBe(true);
@@ -235,10 +235,10 @@ describe("Linear follow setup", () => {
     expect(off.settings().linearWebhook.following).toBe(false);
   });
 
-  it("requires webhook setup before starting from the wizard", async () => {
+  it("requires a connected bot account before starting from the wizard", async () => {
     const h = harness({ selections: ["follow", "on"] });
     await h.connect.run("linear", h.shell);
     expect(h.settings().linearWebhook.following).toBe(false);
-    expect(h.results.join("\n")).toContain("Configure the Linear webhook first");
+    expect(h.results.join("\n")).toContain("Connect Clankie’s Linear account first");
   });
 });

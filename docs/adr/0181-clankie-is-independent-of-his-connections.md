@@ -99,9 +99,9 @@ resumes the existing work owner across service restarts.
 
 The current ingress uses [durable returned-revision receipts](0168-linear-awareness-is-opt-in.md)
 for conservative echo correlation and worker provenance. Signed events commit
-once to the durable inbox, retain their selected issue owner and resume pending
-followed wakes after restart. Explicit organization/issue bindings route new
-activity to existing service conversations. Live provider account migration and
+once to the durable inbox as passive history. The connected bot account’s actual
+notifications wake the operator conversation and resume pending followed wakes
+after restart (ADR 0168, amended 2026-09-27). Existing issue bindings are inert. Live provider account migration and
 end-to-end Discord/Linear operation still require verification.
 
 ## Shared connected accounts

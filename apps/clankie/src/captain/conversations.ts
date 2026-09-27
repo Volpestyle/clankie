@@ -3,7 +3,6 @@ import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import { z } from "zod";
 import {
   LinearWorkOwnerSchema,
-  linearIssueId,
   linearActivityPrompt,
   LINEAR_REPLY_MARK,
   type LinearActivityEvent,
@@ -880,18 +879,14 @@ export class ConversationStore {
 
   public receiveLinearActivity(input: string | LinearActivityEvent, following: boolean): boolean {
     const message = typeof input === "string" ? input : linearActivityPrompt(input);
-    const owner =
-      typeof input === "string"
-        ? undefined
-        : this.linearOwners.find(
-            (entry) =>
-              entry.organizationId === input.organizationId?.toLowerCase() &&
-              entry.issueId === linearIssueId(input),
-          );
     const id = this.linearInboxConversationId();
     const source =
       typeof input !== "string" && input.eventId
-        ? { eventId: input.eventId, conversationId: owner?.conversationId ?? id }
+        ? {
+            eventId: input.eventId,
+            notification: input.notification === true,
+            conversationId: input.notification === true ? this.defaultGlobalConversationId() : id,
+          }
         : undefined;
     const meta = this.metas.get(id)!;
     if (
@@ -914,7 +909,7 @@ export class ConversationStore {
     });
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
-    if (following) this.queueLinearActivity(source?.conversationId ?? id);
+    if (following) this.queueLinearActivity(this.defaultGlobalConversationId());
     return true;
   }
 
@@ -933,7 +928,12 @@ export class ConversationStore {
     const events = this.readEvents(this.linearInboxConversationId());
     for (const owner of new Set(
       events.flatMap((event) =>
-        event.type === "message" && event.linear?.following ? [event.linear.conversationId] : [],
+        event.type === "message" &&
+        event.linear?.following &&
+        event.linear.conversationId === this.defaultGlobalConversationId() &&
+        event.linear.notification === true
+          ? [event.linear.conversationId]
+          : [],
       ),
     )) {
       const meta = this.metas.get(owner);
@@ -943,6 +943,7 @@ export class ConversationStore {
           (event) =>
             event.type === "message" &&
             event.linear?.following &&
+            event.linear.notification === true &&
             event.linear.conversationId === owner &&
             event.cursor > (meta.linearWokeCursor ?? ZERO_CURSOR),
         )
@@ -956,15 +957,15 @@ export class ConversationStore {
    * wake, then nothing until more arrive. How to read deeper lives in his
    * standing instructions, not here. `undefined` when there is nothing new.
    */
-  public linearWakePrompt(id = this.linearInboxConversationId(), runId?: string): string | undefined {
+  public linearWakePrompt(id = this.defaultGlobalConversationId(), runId?: string): string | undefined {
     const meta = this.metas.get(id)!;
     const fresh = this.readEvents(this.linearInboxConversationId()).filter(
       (event): event is OperatorConversationStreamEvent & { type: "message" } =>
         event.type === "message" &&
         event.role === "external" &&
         (event.linear
-          ? event.linear.following && event.linear.conversationId === id
-          : id === LINEAR_INBOX_CONVERSATION_ID) &&
+          ? event.linear.following && event.linear.conversationId === id && event.linear.notification === true
+          : false) &&
         event.cursor > (meta.linearWokeCursor ?? ZERO_CURSOR),
     );
     if (fresh.length === 0) return undefined;

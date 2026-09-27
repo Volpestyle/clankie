@@ -97,6 +97,7 @@ export async function runLinearCommand(
     ok: true as const,
     following: current.linearWebhook.following,
     conversationId: "linear-inbox",
+    wakeConversationId: "global-default",
     settingsFile: settings.path,
   };
 }

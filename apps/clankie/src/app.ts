@@ -2670,6 +2670,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       schemaVersion: 1 as const,
       following: current.linearWebhook.following,
       conversationId: LINEAR_INBOX_CONVERSATION_ID,
+      wakeConversationId: "global-default",
     });
   });
 
@@ -2712,15 +2713,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     // Persist first; following controls model turns, not inbox delivery.
     // Anything his own account wrote, captain or worker, is kept but never wakes him.
     const own = await hook.ownAccount?.().catch(() => undefined);
-    const selfAuthored =
-      own !== undefined &&
-      outcome.activity.actorId === own.userId &&
-      outcome.activity.organizationId === own.workspaceId;
-    // A reply to his own post is someone asking about his work; the wake routes it (ADR 0191).
     const replyTo = linearReplyTo(outcome.activity, own, hook.writes, clock());
+    // Workspace webhooks are history. Only the connected bot's actual Linear
+    // notifications wake him (linear-notifications.ts); self-authored activity
+    // therefore remains quiet regardless of webhook order or receipt timing.
     const ingested = dependencies.captain.receiveLinearActivity(
       replyTo ? { ...outcome.activity, replyTo } : outcome.activity,
-      (await settingsSource.load()).linearWebhook.following && !selfAuthored,
+      false,
     );
     return context.json({ schemaVersion: 1 as const, ingested: ingested !== false });
   });

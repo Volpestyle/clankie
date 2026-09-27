@@ -109,16 +109,17 @@ async function hookApp(
 }
 
 describe("linear activity ingress", () => {
-  it("admits a signed comment while following", async () => {
-    const { post, wakes } = await hookApp();
+  it("persists a signed comment without waking even while following", async () => {
+    const { post, wakes, inbox } = await hookApp();
     const body = commentBody();
 
     const response = await post(body);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ingested: true });
-    expect(wakes).toHaveLength(1);
-    expect(wakes[0]).toMatchObject({
+    expect(wakes).toHaveLength(0);
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]).toMatchObject({
       type: "Comment",
       actorEmail: OWNER,
       data: { body: "This one is blocked on the gateway header allowlist." },
@@ -250,7 +251,7 @@ describe("linear activity ingress", () => {
       "FutureResource",
     ]) {
       for (const action of ["create", "update", "remove"]) {
-        const { post, wakes } = await hookApp();
+        const { post, inbox } = await hookApp();
         const response = await post(
           commentBody({
             type,
@@ -261,14 +262,14 @@ describe("linear activity ingress", () => {
           }),
         );
         expect(response.status).toBe(200);
-        expect(wakes).toMatchObject([
+        expect(inbox).toMatchObject([
           { type, action, data: { id: "entity-1", title: "new title" }, updatedFrom: { title: "old title" } },
         ]);
       }
     }
-    const { post, wakes } = await hookApp();
+    const { post, inbox } = await hookApp();
     await post(commentBody({ actor: { name: "Worker", email: "worker@example.com" } }));
-    expect(wakes[0]?.actorName).toBe("Worker");
+    expect(inbox[0]?.actorName).toBe("Worker");
   });
 
   it("acknowledges unsupported actions without retrying them", async () => {
@@ -340,15 +341,15 @@ describe("linear activity ingress", () => {
       "comment-james",
       "comment-elsewhere",
     ]);
-    expect(wakes.map((event) => event.data.id)).toEqual(["comment-james", "comment-elsewhere"]);
+    expect(wakes).toEqual([]);
   });
 
-  it("wakes him when his own identity cannot be verified", async () => {
+  it("keeps history passive when his own identity cannot be verified", async () => {
     const clankie = { id: "user-clankie", name: "clankie" };
     for (const ownAccount of [async () => undefined, () => Promise.reject(new Error("disconnected"))]) {
       const { post, wakes } = await hookApp(true, undefined, undefined, ownAccount);
       await post(commentBody({ organizationId: "org-1", actor: clankie }));
-      expect(wakes).toHaveLength(1);
+      expect(wakes).toHaveLength(0);
     }
   });
 
@@ -405,13 +406,13 @@ describe("linear activity ingress", () => {
         updatedFrom: { health: "onTrack" },
       });
 
-    it("names the update, marks the reply and wakes him to route it", async () => {
+    it("names the update and marks the reply in passive history", async () => {
       const { post, wakes, inbox, store } = await hookApp(true, undefined, undefined, own);
       await post(question());
 
       expect(inbox).toHaveLength(1);
       expect(inbox[0]!.replyTo).toEqual({ type: "ProjectUpdate", id: UPDATE });
-      expect(wakes).toHaveLength(1);
+      expect(wakes).toHaveLength(0);
       expect(linearActivityHeadline(inbox[0]!)).toBe(
         "Linear Comment create · Rivals Agent update 5087a961 · reply to your post · James Volpe",
       );
@@ -419,9 +420,7 @@ describe("linear activity ingress", () => {
       expect(prompt).toContain("whoever owns the work");
       expect(prompt).not.toContain("Routine updates can pass silently");
       expect(prompt).not.toContain("no obligation");
-      const wake = store.linearWakePrompt()!;
-      expect(wake).toContain("Rivals Agent update 5087a961 · reply to your post");
-      expect(wake).toContain("hand it with its link to whoever owns the work");
+      expect(store.linearWakePrompt()).toBeUndefined();
     });
 
     it("names the worker whose write receipt posted the update", async () => {
@@ -467,17 +466,17 @@ describe("linear activity ingress", () => {
 
       await post(statusEdit({ id: JAMES, name: "James Volpe" }));
       expect(inbox[2]!.replyTo).toBeUndefined();
-      expect(store.linearWakePrompt()).not.toContain("reply to your post");
+      expect(store.linearWakePrompt()).toBeUndefined();
 
       const unknown = await hookApp(true, undefined, undefined, async () => undefined);
       await unknown.post(question());
       expect(unknown.inbox[0]!.replyTo).toBeUndefined();
-      expect(unknown.wakes).toHaveLength(1);
+      expect(unknown.wakes).toHaveLength(0);
     });
   });
 
-  it("wakes him once when Linear retries the same delivery", async () => {
-    const { post, wakes } = await hookApp();
+  it("persists once without waking when Linear retries the same delivery", async () => {
+    const { post, wakes, inbox } = await hookApp();
     const body = commentBody();
 
     const first = await post(body);
@@ -486,7 +485,8 @@ describe("linear activity ingress", () => {
     expect(first.status).toBe(200);
     expect(retry.status).toBe(200);
     await expect(retry.json()).resolves.toMatchObject({ ingested: false });
-    expect(wakes).toHaveLength(1);
+    expect(inbox).toHaveLength(1);
+    expect(wakes).toHaveLength(0);
   });
 
   it("reports itself unavailable until the owner has pasted the signing secret", async () => {
@@ -652,7 +652,7 @@ describe("where a hook is delivered", () => {
 });
 
 describe("Linear follow control", () => {
-  it("requires the operator, validates writes, and applies them to the next delivery", async () => {
+  it("requires the operator and changes follow without promoting workspace deliveries", async () => {
     let settings = ClankieSettingsSchema.parse({ schemaVersion: 1 });
     const wakes: LinearActivityEvent[] = [];
     const { app } = await createClankieApp({
@@ -718,7 +718,7 @@ describe("Linear follow control", () => {
             body: JSON.stringify({ following }),
           })
         ).json(),
-      ).toMatchObject({ following, conversationId: "linear-inbox" });
+      ).toMatchObject({ following, conversationId: "linear-inbox", wakeConversationId: "global-default" });
       const body = commentBody({ type: "Issue", action: "create" });
       const response = await app.request("/v1/hooks/linear", {
         method: "POST",
@@ -727,6 +727,6 @@ describe("Linear follow control", () => {
       });
       expect(await response.json()).toMatchObject({ ingested: true });
     }
-    expect(wakes).toHaveLength(1);
+    expect(wakes).toHaveLength(0);
   });
 });

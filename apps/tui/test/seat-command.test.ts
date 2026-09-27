@@ -104,7 +104,7 @@ describe("clankie seat", () => {
     // Permission allowlist rides as --settings JSON: the one thing a plugin cannot carry.
     const settings = bundled.args[bundled.args.indexOf("--settings") + 1];
     expect(JSON.parse(settings ?? "{}")).toEqual({
-      permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"] },
+      permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"], deny: ["mcp__linear-server"] },
     });
 
     const installed = await planSeat(
@@ -119,7 +119,7 @@ describe("clankie seat", () => {
     // session); the seat enables it for this session only.
     const seatSettings = installed.args[installed.args.indexOf("--settings") + 1];
     expect(JSON.parse(seatSettings ?? "{}")).toEqual({
-      permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"] },
+      permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"], deny: ["mcp__linear-server"] },
       enabledPlugins: { [SEAT_PLUGIN_ID]: true },
     });
   });

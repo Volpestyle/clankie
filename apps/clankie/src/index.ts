@@ -69,6 +69,7 @@ import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
+import { LinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -890,7 +891,7 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
-    // Unverified or disconnected means unknown authorship, which still wakes him.
+    // Unverified identity leaves webhook history passive.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
   },
 });
@@ -907,6 +908,14 @@ const stopHostedWork =
       );
 hostedHeartbeat?.start();
 if (startupSettings.linearWebhook.following) captain.resumeLinearActivity();
+const linearNotifications = new LinearNotifications({
+  path: join(stateRoot, "linear-notifications.json"),
+  host: mcpHost,
+  following: async () => (await settingsStore.load()).linearWebhook.following,
+  receive: (activity, following) => captain.receiveLinearActivity(activity, following),
+  onError: () => logger.warn("Linear notification inbox unavailable; will retry"),
+});
+linearNotifications.start();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.
@@ -979,6 +988,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   hostedDiscord?.close();
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
+    await linearNotifications.close();
     await captain.close().catch(() => undefined);
     fleetRelays.close();
     await herdr.close();

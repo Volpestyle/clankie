@@ -1230,6 +1230,8 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     linear: z
       .object({
         eventId: z.string().regex(/^[a-f0-9]{64}$/u),
+        /** Present only for the connected bot’s notification inbox, never workspace webhooks. */
+        notification: z.boolean().optional(),
         conversationId: OperatorConversationIdSchema,
         following: z.boolean(),
       })

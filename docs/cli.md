@@ -333,19 +333,25 @@ local verification. It never accepts a secret as a flag.
 
 ### `linear status` / `linear follow on|off`
 
-With the webhook configured, accepted events appear in the **Linear inbox**
+When a webhook is configured, accepted events appear in the **Linear inbox**
 conversation (`linear-inbox`) as **External activity** messages, including swarm
-posts delivered by the webhook. Following controls whether those messages wake
-Clankie:
+posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
+bot account’s actual Linear notifications every 30 seconds. Following controls
+whether those notifications wake his operator conversation:
 
-| Following     | Inbox delivery                          | Automatic model turns                |
-| ------------- | --------------------------------------- | ------------------------------------ |
-| Off (default) | Events stay visible in the conversation | None from incoming events            |
-| On            | Events stay visible in the conversation | New events wake their selected owner |
+| Following     | Inbox delivery                          | Automatic model turns                   |
+| ------------- | --------------------------------------- | --------------------------------------- |
+| Off (default) | Events stay visible in the conversation | None from incoming events               |
+| On            | Events stay visible in the conversation | Bot notifications wake `global-default` |
 
 Activity authored by Clankie's own verified Linear account, his or a
 worker's, is collected but never wakes him ([ADR 0189](adr/0189-his-own-linear-activity-does-not-wake-him.md)).
-Before a wake, a Linear inbox context above 30k tokens is compacted.
+Mentions, assignments, subscribed issue activity and replies follow Linear’s
+own inbox semantics. No per-issue binding is needed. The first connection starts
+watching from now; existing Linear notifications remain readable with
+`linear_get_notifications`. Notification IDs and a private durable checkpoint
+prevent restart, pagination and read-state changes from creating extra wakes.
+Unavailable connections are retried without waking; no human connector is used.
 
 Open the conversation with `clankie --chat linear-inbox`. It is created on the
 first accepted event, including while off. Ask Clankie to **check the Linear
@@ -371,12 +377,15 @@ Following controls waking, not collection.
 turns still queued; their inbox messages remain. An already-running turn can
 finish. `clankie linear follow on|off` applies without a restart, and
 `clankie linear status` reads the switch. All three return JSON with `ok`,
-`following`, `conversationId` (`linear-inbox`), and `settingsFile`.
+`following`, `conversationId` (`linear-inbox`), `wakeConversationId`
+(`global-default`), and `settingsFile`.
 
-Unbound work wakes the inbox's model context. Explicit issue bindings route new
-activity to the selected Clankie conversation or native seat. Events remain in
-one canonical inbox. Removing the webhook stops delivery; following off keeps
-delivery enabled.
+Notifications wake the operator conversation or its attached native seat. All
+records remain in one canonical inbox. `--conversation global-default` scopes
+reads and acknowledgments to that stream; omitting it reads all retained history.
+Removing the webhook stops workspace history delivery; disconnecting Linear
+stops notification reads. A webhook is optional for notification following.
+Following off keeps both kinds of collection enabled.
 
 Configure the webhook from `/connect linear` → **Follow Linear** → **Configure
 webhook**. The flow prints the public URL and stores the signing secret in the
@@ -400,45 +409,25 @@ reply. A delivery supplies context, not new permission.
 The local operator API exposes `GET /v1/linear/follow` and
 `PUT /v1/linear/follow` with `{ "following": true | false }`. Both require the
 operator bearer and return `{ "schemaVersion": 1, "following": boolean,
-"conversationId": "linear-inbox" }`. The signed public ingress remains
+"conversationId": "linear-inbox", "wakeConversationId": "global-default" }`. The signed public ingress remains
 `POST /v1/hooks/linear`. Changing the local follow switch does not change which
 events Linear sends; the owner configures that subscription in Linear.
 
 #### Issue ownership
 
-Use provider UUIDs, not issue labels or email addresses. Bind only work the
-operator authorizes Clankie to lead:
+Issue bindings are legacy metadata and no longer route events or notifications.
+`clankie linear work list` and `GET /v1/linear/work` still show them. The existing
+`work bind` / `work unbind` commands and authenticated API remain compatible,
+including expected-owner checks, but changing a binding has no wake effect.
+Bindings still retain their conversations until explicitly unbound; existing
+bindings are not deleted by this change. Notifications always wake `global-default`.
+Use `clankie linear inbox read --conversation global-default` and retain the
+same conversation on `inbox ack`. Omit the conversation to inspect all history.
+Never acknowledge truncated output or a cursor offered to another conversation.
 
-```bash
-clankie linear work list
-clankie linear work bind ORG_UUID ISSUE_UUID CONVERSATION_ID
-clankie linear work bind ORG_UUID ISSUE_UUID NEW_CONVERSATION --from CURRENT_CONVERSATION
-clankie linear work unbind ORG_UUID ISSUE_UUID CURRENT_CONVERSATION
-clankie linear inbox read --conversation CONVERSATION_ID
-clankie linear inbox ack CURSOR --conversation CONVERSATION_ID
-```
-
-The same commands are available through `/linear` in the TUI. Bindings require
-an existing Clankie global/workspace conversation and prevent its automatic
-pruning or removal until unbound. The expected owner protects a rebind from
-concurrent changes. New Issue and Comment deliveries use that owner; an already
-admitted event keeps its original destination across retries and rebinding.
-Unbound activity uses `linear-inbox`. No binding grants provider access or turns
-webhook text into operator instructions. The lead checks current Swarm ownership
-before assigning work or replying.
-
-`GET /v1/linear/work` returns `{ owners: [...] }`. Operator-authenticated `PUT`
-accepts `{ organizationId, issueId, conversationId, expectedConversationId? }`;
-`DELETE` accepts the current organization, issue and conversation. Conflicts or
-unavailable owners return 409. Inbox GET accepts `conversationId`; acknowledgment
-POST accepts the same optional field alongside `ackCursor`. Omission reads the
-whole inbox. Never acknowledge a cursor under a different conversation.
-
-Signed-event identities commit with the inbox record, surviving restart and
-history trimming for the provider retry window. Pending followed wakes resume
-on startup when following is enabled; passive backlog stays passive. A recovered
-lead reconciles existing work before repeating external side effects. Current
-storage and recovery limits live in [ADR 0168](adr/0168-linear-awareness-is-opt-in.md).
+The Claude seat denies the inherited `linear-server` MCP server with Claude
+Code’s server-prefix permission rule. It uses Clankie’s connected `linear_*`
+tools as the bot account; James keeps his own account.
 
 <a id="account-setup"></a>
 

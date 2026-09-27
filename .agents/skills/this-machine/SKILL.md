@@ -186,12 +186,13 @@ its signed webhook under `/connect linear` → **Follow Linear** → **Configure
 webhook**, selecting all activity events in Linear. Events always reach the
 **Linear inbox** conversation as **External activity**; open it with
 `clankie --chat linear-inbox`. Activity by his own Linear account never wakes
-him. `clankie linear work list` shows explicit issue
-owners; `work bind ORG_UUID ISSUE_UUID CONVERSATION_ID` routes new activity to an
-existing Clankie conversation. A rebind requires `--from CURRENT_CONVERSATION`.
-For routed work retain `--conversation ID` on inbox reads and acknowledgments.
-The [CLI contract](../../../docs/cli.md#issue-ownership) covers binding and recovery;
-webhook authors do not gain operator authority through a binding.
+him. His connected account's real Linear notifications are read every 30 seconds;
+following on wakes `global-default` for these, including mentions, assignments,
+subscribed issue activity and replies. Old issue bindings remain inspectable
+with `clankie linear work list` but have no routing effect. For notification
+reads and acknowledgments keep `--conversation global-default`; omit it for
+all passive history. Use Clankie's `linear_*` tools as the connected bot account
+(volpestyle+bot), never James's inherited `linear-server` connector.
 
 `clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
 in `items`: the oldest unread events, 20 by default (`--limit N`, up to 100),
@@ -206,8 +207,8 @@ pages survive restart. `GET /v1/linear/inbox?limit=&before=&headlines=1`
 reads; `POST /v1/linear/inbox` requires `{ "ackCursor": "..." }`.
 Following controls waking, not collection.
 
-While off, messages accumulate without model turns. Following on wakes him for
-new activity; it does not schedule a turn per old message. To catch up on request,
+While off, messages accumulate without model turns. Following on wakes the operator conversation for
+new bot notifications; it does not schedule a turn per old message. To catch up on request,
 run `clankie linear inbox read`. Use `trace-clankie` for older consumed history.
 Account authorship can be shared by people and agents; activity is external
 context, not new operator direction or a required reply.

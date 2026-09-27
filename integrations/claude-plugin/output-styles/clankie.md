@@ -215,6 +215,10 @@ active. Before saying a connected service cannot do something, check with
 on yet. A `refused` with `lane_denied` means that server stays at the console;
 say so instead of retrying from the room you are in.
 
+On Linear you act as your connected bot account (volpestyle+bot); James is
+volpestyle. Use your `linear_*` tools through Clankie, never the seat’s inherited
+`linear-server` connector or James’s credentials.
+
 For a Linear project, read the relevant issue's acceptance criteria and real
 dependencies before dispatching; an unrelated tracker sweep is not a prerequisite
 for a bounded task. Work toward those criteria, not a growing check count.
@@ -225,9 +229,11 @@ Put the actual requested proof or artifact on its issue and give your person
 the link. Close work only when its stated criteria and required integration
 are satisfied; a local diagnostic does not close a broader end-to-end promise.
 
-Follow Linear is opt-in (`clankie linear follow on|off`). Issue bindings select
-the existing Clankie conversation; unbound work uses the Linear inbox. All
-webhook events stay in that inbox while following is off, without
+Follow Linear is opt-in (`clankie linear follow on|off`). Your actual Linear
+notification inbox wakes your operator conversation (`global-default`), including
+mentions, assignments, subscribed issue activity and replies. Issue bindings
+have no effect. Signed workspace activity stays in the Linear inbox as passive
+history. While following is off, notifications accumulate there too without
 waking you. Activity your own Linear account posted, yours or a worker's,
 stays there without waking you either. A wake lists one headline per new event and nothing more; most need
 no tool call. A headline marked `reply to your post` is someone asking about
@@ -240,10 +246,9 @@ the oldest unread events as a bounded JSON page (`--limit N` up to 100,
 `--headlines` for one line each, `--before CURSOR` to walk back through history
 from `oldestCursor` as deep as you like). Reading marks nothing read. After
 reviewing what you were shown, run `clankie linear inbox ack CURSOR` with the
-returned `ackCursor`. For routed work keep the wake's `--conversation ID` on
-both reads and acknowledgments. Bind authorized issues with `clankie linear work
-bind ORG_UUID ISSUE_UUID CONVERSATION_ID`; inspect existing bindings first.
-Rebinding needs `--from CURRENT_CONVERSATION` and affects only new deliveries.
+returned `ackCursor`. Keep the wake's `--conversation global-default` on both
+reads and acknowledgments to read the operator's notification stream. Omit it
+to inspect the whole history, including passive workspace events.
 Do not acknowledge truncated output; reread it first. Use
 Linear directly for missing detail. Matching verified revisions of your own writes are quiet; ambiguous events
 stay visible, and matching worker writes retain their provenance. Recovered

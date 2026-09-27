@@ -3,6 +3,47 @@
 Status: accepted (James, 2026-09-08, operator conversation). Amended by
 [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
 
+## Amendment — the bot's inbox, 2026-09-27
+
+James's rule: Clankie is volpestyle+bot; James is volpestyle. Following means
+Clankie's notification inbox, with no issue-by-issue conversation binding.
+This supersedes the workspace-wide and issue-routed wake behavior below and
+ADR 0191's binding route. Existing bindings remain stored and inspectable but
+are inert for wakes; no automatic deletion or rebinding occurs.
+
+Signed workspace webhooks remain passive, durable external history. The service
+reads `get_notifications` through its own verified Linear MCP connection every
+30 seconds, even while following is off. Only new notification IDs may wake
+`global-default` or its attached seat. The same inbox stores both sources;
+notification-scoped reads and acknowledgments use `--conversation global-default`.
+Linear selects the recipient, covering mentions, assignments, subscriptions and
+replies without guessing names or parsing comment text. This account uses
+MCP-audience OAuth, not a GraphQL credential. Linear's `AppUserNotification`
+webhook is for OAuth app users, so it cannot represent this ordinary bot user's
+inbox without changing the account model. The live bot connection was checked
+read-only and supports paginated `get_notifications`.
+
+A private atomic checkpoint starts at first connection time, advances only after
+successful inbox persistence, and keeps IDs at its timestamp boundary. Restart
+retries use stable event IDs; changing read state does not wake again. Account
+changes during pagination discard that read. A new account starts a new baseline.
+Old notifications can still be read directly; enabling following does not replay
+passive backlog. Poll failures leave the checkpoint intact for the next poll.
+Collection samples following before and after a read, and queued turns recheck
+it. Existing workspace-event wake flags are not resumed after this amendment.
+
+Self-authored webhook activity never wakes. Linear's recipient inbox is the
+notification source; when it supplies an actor ID, the existing self-authored
+filter also applies there. The notification MCP response currently omits actor
+IDs, so normal recipient/self-notification semantics are owned by Linear.
+All payloads stay untrusted context and retain explicit cursor acknowledgment.
+The seat denies `mcp__linear-server`, using Claude Code's documented server
+prefix syntax, and uses only Clankie's connected Linear tools.
+
+Sources: [Linear notifications](https://linear.app/docs/notifications),
+[app-user notification webhooks](https://linear.app/developers/agent-best-practices#inbox-notifications-webhooks),
+[Claude Code MCP permissions](https://code.claude.com/docs/en/permissions#mcp).
+
 ## Context
 
 James sometimes wants Clankie to follow the swarm live and usually wants him

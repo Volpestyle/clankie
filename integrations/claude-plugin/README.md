@@ -181,3 +181,8 @@ A failed wait is not treated as agent completion.
 An already-running bridge must be reloaded once to pick up this implementation:
 reconnect the plugin's **operator** MCP server (`clankie mcp --lane operator`),
 not only the separate fleet mailbox (`clankie mcp --seat`).
+
+The seat denies the inherited `linear-server` MCP connector, which may be signed
+in as James. Linear work goes through Clankie's connected `linear_*` tools as
+the bot account (volpestyle+bot). Follow Linear wakes the operator conversation
+from that account's actual notifications; stored issue bindings do not route wakes.
