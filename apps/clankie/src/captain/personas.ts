@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import {
   defaultOperatorAgentAppearance,
+  isInternalSwarmContact,
   OperatorAgentNameSchema,
   OperatorAgentPersonaIdSchema,
   OperatorAgentPersonaSchema,
@@ -149,6 +150,7 @@ export class PersonaStore {
   ): readonly OperatorAgentPersona[] {
     const active = new Map(seats.map((seat) => [seat.personaId, seat.seatId]));
     return [...this.records.values()]
+      .filter((persona) => !isInternalSwarmContact(persona))
       .map((persona) => {
         const activeSeatId = active.get(persona.personaId);
         const conversation = conversationForPersona(persona.personaId);
@@ -176,6 +178,7 @@ export class PersonaStore {
     const previous = new Map(this.records);
     const live = new Set<string>();
     for (const peer of peers) {
+      if (isInternalSwarmContact({ name: peer.label, swarm: peer.contact })) continue;
       const contact = OperatorSwarmContactSchema.parse(peer.contact);
       const personaId = `swarm-${createHash("sha256").update(JSON.stringify(contact)).digest("hex")}`;
       live.add(personaId);

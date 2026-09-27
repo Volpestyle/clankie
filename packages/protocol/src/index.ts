@@ -381,6 +381,21 @@ export const OperatorAgentPersonaSchema = z
   })
   .strict();
 export type OperatorAgentPersona = z.infer<typeof OperatorAgentPersonaSchema>;
+
+/** Reserved coordinator labels are diagnostics, not people in Messages.
+ * This is presentation only: it never merges identities or grants authority.
+ * Keep saved records/threads accessible by ID when hiding legacy contacts.
+ */
+export function isInternalSwarmContact(persona: {
+  readonly name: string;
+  readonly swarm?: unknown;
+}): boolean {
+  return (
+    persona.swarm !== undefined &&
+    (/^clankie:[^\s]+$/u.test(persona.name) || /^runtime:[^\s]+ transport:[^\s]+$/u.test(persona.name))
+  );
+}
+
 export const UpdateOperatorAgentPersonaSchema = z
   .object({
     schemaVersion: z.literal(1),

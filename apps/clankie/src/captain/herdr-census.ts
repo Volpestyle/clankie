@@ -441,6 +441,7 @@ export async function readFleet(
           if (
             agent.agent === "shell" ||
             agent.agent === "clankie" ||
+            agent.name === OPERATOR_HEAD_AGENT_NAME ||
             agent.terminalId === undefined ||
             agent.session === undefined
           )

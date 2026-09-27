@@ -8,12 +8,16 @@ import type { CaptainDeps } from "../src/captain/deps.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import * as census from "../src/captain/herdr-census.ts";
 
-it("discovers agents without chats, reads native history on demand, and persists only explicit sends", async () => {
+it.each([false, true])("reads native history on demand without importing it (remote=%s)", async (remote) => {
+  const seatId = remote ? "pc/external" : "external";
+  const publish = vi.fn(async () => {
+    throw new Error("remote paths must not be published locally");
+  });
   const root = mkdtempSync(join(tmpdir(), "clankie-native-chat-"));
   const native = {
     agent: {
       paneId: "w1:p2",
-      terminalId: "external",
+      terminalId: seatId,
       agent: "codex",
       status: "idle",
       title: "Codex",
@@ -24,6 +28,7 @@ it("discovers agents without chats, reads native history on demand, and persists
       entries: [
         { type: "message" as const, id: "u1", role: "operator" as const, text: "Private Codex prompt" },
         { type: "message" as const, id: "a1", role: "agent" as const, text: "Native answer" },
+        ...(remote ? [{ type: "viewed_image" as const, id: "img", path: "/tmp/remote.png" }] : []),
       ],
     },
   };
@@ -34,7 +39,7 @@ it("discovers agents without chats, reads native history on demand, and persists
   vi.spyOn(census, "readFleet").mockResolvedValue({
     seats: [
       {
-        seatId: "external",
+        seatId,
         paneId: "w1:p2",
         occupantId: "native-session",
         subject: "external",
@@ -49,6 +54,7 @@ it("discovers agents without chats, reads native history on demand, and persists
     repoRoot: root,
     stateDir: root,
     settings: new SettingsStore(join(root, "settings.json")),
+    deliveredFiles: { publish, removeConversation: async () => {} },
   });
   try {
     const roster = await captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
@@ -113,7 +119,8 @@ it("discovers agents without chats, reads native history on demand, and persists
         message: "From the app",
       },
     });
-    expect(send).toHaveBeenCalledWith("external", "From the app");
+    expect(send).toHaveBeenCalledWith(seatId, "From the app");
+    expect(publish).not.toHaveBeenCalled();
     const stored = readFileSync(path, "utf8");
     expect(stored).toContain("From the app");
     expect(stored).not.toContain("Private Codex prompt");

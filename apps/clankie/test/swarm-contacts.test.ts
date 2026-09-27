@@ -1,4 +1,4 @@
-import { localEndpoint } from "swarm-mcp/runtime";
+import { CoordinationClient, localEndpoint } from "swarm-mcp/runtime";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -43,7 +43,64 @@ it("discovers and messages a Swarm persona through the public API without a Herd
       expect(response.status).toBe(200);
       return OperatorConversationServiceResultSchema.parse(await response.json());
     });
+    const peerConnections: CoordinationClient[] = [];
     const caller = async (conversationId: string) => {
+      if (conversationId === "worker") {
+        // A worker is an independently enrolled peer, not a second captain
+        // conversation (those internal actors deliberately are not contacts).
+        const enrolled = await swarm.enrollFleetPeer("global-default", root, {
+          fleet: "test",
+          name: "worker",
+        });
+        const connection = await CoordinationClient.connect(enrolled.ownerEndpoint, enrolled.capability);
+        peerConnections.push(connection);
+        return async (name: string, args: Record<string, unknown>) => {
+          let result: unknown;
+          if (name === "swarm_sync") result = await connection.request({ op: "bootstrap" });
+          else {
+            const text = (key: string): string => {
+              const value = args[key];
+              if (typeof value !== "string") throw new Error(`Missing test argument ${key}`);
+              return value;
+            };
+            const id = text("commandId");
+            if (name === "swarm_send") {
+              result = await connection.request({
+                op: "command",
+                command: {
+                  id,
+                  type: "message.send",
+                  payload: {
+                    recipient: text("recipient"),
+                    kind: "reply",
+                    body: text("body"),
+                    threadId: text("threadId"),
+                  },
+                },
+              });
+            } else if (args.action === "fetch") {
+              result = await connection.request({
+                op: "command",
+                command: {
+                  id,
+                  type: "inbox.fetch",
+                  payload: { consumer: text("consumer"), limit: 1 },
+                },
+              });
+            } else if (args.action === "ack") {
+              result = await connection.request({
+                op: "command",
+                command: {
+                  id,
+                  type: "inbox.ack",
+                  payload: { messageId: text("messageId"), leaseToken: text("leaseToken") },
+                },
+              });
+            } else throw new Error("Unsupported test inbox action");
+          }
+          return JSON.parse(JSON.stringify(result));
+        };
+      }
       const tools = await swarm.tools({ conversationId, cwd: root });
       return async (name: string, args: Record<string, unknown>) => {
         const result = await tools
@@ -58,6 +115,7 @@ it("discovers and messages a Swarm persona through the public API without a Herd
       client,
       caller,
       close: async () => {
+        for (const connection of peerConnections) connection.close();
         app.close();
         await captain.close();
       },
@@ -71,6 +129,7 @@ it("discovers and messages a Swarm persona through the public API without a Herd
     const peer = await worker("swarm_sync", {});
     const fleet = await service.client.fleet!();
     expect(fleet.seats).toEqual([]);
+    expect(fleet.personas.some((entry) => entry.name.startsWith("clankie:"))).toBe(false);
     const persona = fleet.personas.find(
       (entry) => entry.swarm?.actor === peer.actor && entry.swarm?.conversationId === "global-default",
     )!;

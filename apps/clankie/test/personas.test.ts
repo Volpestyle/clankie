@@ -203,3 +203,51 @@ describe("PersonaStore", () => {
     expect(listed.map((persona) => persona.name)).toEqual(["Zed", "Atlas", "Mute"]);
   });
 });
+
+it("hides saved coordinator contacts without deleting their identity or thread access", () => {
+  const root = mkdtempSync(join(tmpdir(), "clankie-internal-personas-"));
+  try {
+    const peer = (actor: string, label: string) => ({
+      label,
+      contact: {
+        conversationId: "global-default",
+        connectionId: "embedded",
+        coordinator: "a".repeat(64),
+        scope: "project",
+        actor,
+        generation: 1,
+      },
+    });
+    const store = new PersonaStore(root);
+    store.reconcileSwarm([peer("worker", "Clankie app reviewer")]);
+    const worker = store.all([], () => undefined)[0]!;
+    // Simulate a contact persisted by an older build, including operator edits.
+    const legacy = { ...worker, personaId: "swarm-legacy", name: "clankie:global-default" };
+    writeFileSync(
+      join(root, "personas.json"),
+      JSON.stringify({ schemaVersion: 1, personas: [worker, legacy] }),
+    );
+    const restored = new PersonaStore(root);
+    restored.reconcileSwarm([
+      peer("captain", "clankie:linear-inbox"),
+      peer("runtime", "runtime:claude-code transport:herdr"),
+      peer("worker", "Clankie app reviewer"),
+    ]);
+    expect(restored.all([], () => conversation("saved-thread")).map((p) => p.name)).toEqual([
+      "Clankie app reviewer",
+    ]);
+    expect(restored.swarmContact("swarm-legacy")).toEqual(
+      legacy.swarm && {
+        conversationId: legacy.swarm.conversationId,
+        connectionId: legacy.swarm.connectionId,
+        coordinator: legacy.swarm.coordinator,
+        scope: legacy.swarm.scope,
+        actor: legacy.swarm.actor,
+        generation: legacy.swarm.generation,
+      },
+    );
+    expect(JSON.parse(readFileSync(join(root, "personas.json"), "utf8")).personas).toHaveLength(2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

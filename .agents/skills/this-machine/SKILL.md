@@ -36,6 +36,16 @@ Plain `clankie` opens the existing main Clankie conversation from any directory.
 Use `clankie --chat ID` for another thread, `/new` for a fresh chat, or `/cd PATH`
 for a workspace conversation. Reopening the TUI does not reset model context.
 
+## Cross-device agent conversations
+
+Messages includes seats from registered execution fleets. Opening a remote seat
+reads its native history on demand over the fleet's SSH connection; replies use
+that seat's qualified fleet address. `clankie conversations show ID` reads the
+same conversation API. Swarm relay traffic does not import harness history.
+Internal `clankie:<conversation>` and runtime-controller Swarm contacts are hidden
+from the roster without deleting saved threads. Remote native images are not
+published through the local file service.
+
 ## Reset conversation context
 
 Use `clankie reset --conversation ID` (root: `global-default`) or `/reset` in

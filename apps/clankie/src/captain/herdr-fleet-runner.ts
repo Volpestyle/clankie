@@ -1,4 +1,7 @@
 import { fleetQualified, splitFleetQualified, type HerdrFleet, type HerdrFleetRun } from "../herdr-fleet.ts";
+import { createSshAgentHost } from "@clankie/agent-hosts";
+import type { AgentTranscriptHost } from "@clankie/agent-transcript";
+import { remoteHerdrTranscriptReader } from "./remote-herdr-transcript.ts";
 import { createHerdrWatchRunner, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 
 const SETTLED = new Set(["idle", "done", "blocked"]);
@@ -29,16 +32,17 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * leave a remote process behind whenever the link drops; a poll holds nothing
  * open, so a lost link is only a missed poll.
  *
- * Machine-local powers (transcript files, lsof, codex queue, the seat MCP
+ * Machine-local powers (lsof, codex queue, the seat MCP
  * registration, pi's integration and provider files) are absent: they read or
- * write this machine, not that one. Replies fall back to `herdr agent read`
+ * write this machine, not that one. Native history reads on demand through
+ * the SSH host's confined transcript reader. Other replies use `herdr agent read`
  * and delivery to the pty lane, as ADR 0184 allows until the reverse-forward
  * mailbox lands.
  */
 export function createRemoteHerdrRunner(
   fleet: HerdrFleet,
   run: HerdrFleetRun,
-  options: { readonly pollMs?: number } = {},
+  options: { readonly pollMs?: number; readonly transcriptHost?: AgentTranscriptHost } = {},
 ): HerdrWatchRunner {
   const base = createHerdrWatchRunner(undefined, run);
   const pollMs = options.pollMs ?? REMOTE_POLL_MS;
@@ -90,7 +94,10 @@ export function createRemoteHerdrRunner(
         (snapshot) => CHANNEL_DIALOG_SETTLED.has(snapshot.status),
         Date.now() + CHANNEL_DIALOG_WAIT_MS,
       ),
-    transcript: async () => undefined,
+    transcript: remoteHerdrTranscriptReader(
+      options.transcriptHost ??
+        createSshAgentHost({ id: fleet.id, ssh: fleet.ssh.host, shell: fleet.ssh.shell }),
+    ),
     openFiles: () => Promise.reject(new Error(`fleet ${fleet.id}: open files are read on this machine only`)),
     codexQueue: async () => false,
     installPiIntegration: () =>

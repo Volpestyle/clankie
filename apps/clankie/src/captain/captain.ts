@@ -1,5 +1,6 @@
 import { trackHostedConversationRunner } from "../hosted-work.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
+import { splitFleetQualified } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import type { SwarmHost } from "@clankie/swarm";
@@ -2494,7 +2495,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 snapshot.transcript,
                 snapshot.agent.status,
                 input,
-                cwd === undefined || options.deliveredFiles === undefined
+                cwd === undefined || options.deliveredFiles === undefined || splitFleetQualified(seatId)
                   ? undefined
                   : (path) =>
                       options.deliveredFiles!.publish({
