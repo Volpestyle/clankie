@@ -12,6 +12,7 @@ import {
   PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
   publicGatewayTargetFor,
 } from "../src/public-gateway.ts";
+import { HOSTED_CREDITS_PATH } from "../src/hosted-credits.ts";
 
 const requestId = "request_12345678";
 
@@ -52,6 +53,8 @@ describe("public gateway protocol", () => {
     expect(publicGatewayTargetFor("POST", "/v1/pairing/complete")).toBe("control");
     expect(publicGatewayTargetFor("POST", "/operator/v1/terminal-tail")).toBe("relay");
     expect(publicGatewayTargetFor("POST", "/v1/hooks/linear")).toBe("control");
+    expect(publicGatewayTargetFor("GET", HOSTED_CREDITS_PATH)).toBe("control");
+    expect(publicGatewayTargetFor("POST", HOSTED_CREDITS_PATH)).toBeUndefined();
     expect(publicGatewayTargetFor("GET", "/v1/private")).toBeUndefined();
   });
 

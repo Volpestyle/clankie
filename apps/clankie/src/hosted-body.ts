@@ -8,6 +8,7 @@ import {
   PublicGatewayInstallationIdSchema,
   PublicGatewayHostIdSchema,
 } from "@clankie/protocol/public-gateway";
+import { HostedCreditsSchema, type HostedCredits } from "@clankie/protocol/hosted-credits";
 import type { CredentialStore } from "@clankie/credential-broker";
 import {
   loadConfig,
@@ -705,6 +706,20 @@ export class HostedBodyClient {
       }
       return response;
     }
+  }
+  /**
+   * This tenant's AI credits (VUH-1403), from the fleet: `POST
+   * /fleet/v1/body/credits`, signed like every body call. The answer is the
+   * fleet's, parsed and returned unchanged; neither it nor the request is logged.
+   */
+  async readCredits(): Promise<HostedCredits> {
+    const credential = await this.resolveHostToken();
+    const response = await this.request(
+      "credits",
+      { installationId: this.bootstrap.installationId },
+      credential.token,
+    );
+    return HostedCreditsSchema.parse(await response.json());
   }
   async registerWakeKey(deviceId: string, publicKey: string): Promise<void> {
     await this.post("wake-keys", { deviceId, publicKey });

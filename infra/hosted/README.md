@@ -227,6 +227,16 @@ live session chooses the device id; device revocation immediately denies local
 access and retries fleet key removal on failure and after restart. Self-hosted
 bodies answer 404, including through the encrypted gateway.
 
+The owner's app reads the account's AI credits with `GET /v1/hosted/credits`
+([VUH-1403](https://linear.app/vuhlp/issue/VUH-1403)), inside the encrypted
+device channel. Any live paired device or the operator may read it; it is
+account data, not a secret. The body asks the fleet with a signed
+`POST /fleet/v1/body/credits` carrying only `{ installationId }` and returns
+the answer unchanged once it matches `HostedCreditsSchema`
+(`@clankie/protocol/hosted-credits`), with `cache-control: no-store`. A fleet
+failure or an answer outside the contract is `503 unavailable`; self-hosted
+bodies answer `404 not_hosted`. Neither the request nor the answer is logged.
+
 Idle accounting reports actual work to `/fleet/v1/body/heartbeat`: human and
 owner-configured external-event captain turns, running owner-goal continuations,
 and working Herdr/headless seats. Self-wakes, presence and polling earn no busy
@@ -251,7 +261,8 @@ Registration completes before heartbeat, wake-key writes or credential renewal.
 A lost registration response or `5xx` retries with the same token and public
 key (three attempts). Once registered, that same Ed25519 private key signs
 every POST to `/fleet/v1/body/heartbeat`, `/fleet/v1/body/wake-keys`,
-`/fleet/v1/body/wake-keys/revoke` and `/fleet/v1/body/host-credential`.
+`/fleet/v1/body/wake-keys/revoke`, `/fleet/v1/body/credits` and
+`/fleet/v1/body/host-credential`.
 Renewal sends `{}`. Registration itself is unsigned.
 
 Signed requests retain the bearer credential and add `x-clankie-body-timestamp`

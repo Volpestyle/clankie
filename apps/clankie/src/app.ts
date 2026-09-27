@@ -1,5 +1,6 @@
 import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
 import { createModelKeyRoutes } from "./model-key-routes.ts";
+import { createHostedCreditsRoutes } from "./hosted-credits-routes.ts";
 import { createAccountRoutes } from "./account-routes.ts";
 import type { AccountsPort } from "./accounts.ts";
 import type { ModelKeysPort } from "./model-keys.ts";
@@ -377,6 +378,8 @@ export interface ClankieAppDependencies {
   hostedPairing?: HostedPairing;
   onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
+  /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
+  hostedCredits?: Pick<HostedBodyClient, "readCredits">;
   hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
@@ -713,6 +716,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   };
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets));
+  /**
+   * Owner operator or any active paired device: account data that is not a
+   * secret and needs no terminal grant, such as the hosted credit balance.
+   */
+  const authorizeOwnerDevice = async (
+    request: Request,
+  ): Promise<true | "authentication_required" | "forbidden"> => {
+    const operator = await authenticateOperator(request, dependencies);
+    if (operator && operator !== "unavailable") return true;
+    const device = await authenticateDevice(request);
+    return device === "unavailable" || "denied" in device ? "authentication_required" : true;
+  };
+  app.route("/", createHostedCreditsRoutes(dependencies.hostedCredits, authorizeOwnerDevice));
 
   /** Captain or authenticated operator, for reads the owner should never have to authorize. */
   const authenticateCaptainOrOperator = async (

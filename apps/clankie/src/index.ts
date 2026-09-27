@@ -805,6 +805,7 @@ const clankie = await createClankieApp({
     ? {}
     : {
         hostedBody,
+        hostedCredits: hostedBody,
         hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
       }),
   agentSessions,

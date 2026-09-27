@@ -23,6 +23,7 @@ import {
   PublicGatewayPushWakeResultFrameSchema,
 } from "./device-push.ts";
 import { DEVICE_WAKE_KEY_PATH } from "./wake.ts";
+import { HOSTED_CREDITS_PATH } from "./hosted-credits.ts";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
 export const PUBLIC_GATEWAY_SCHEMA_VERSION = 1 as const;
@@ -65,6 +66,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
   { method: "POST", path: LINEAR_WEBHOOK_PATH, target: "control" },
   { method: "POST", path: DEVICE_WAKE_KEY_PATH, target: "control" },
+  { method: "GET", path: HOSTED_CREDITS_PATH, target: "control" },
   { method: "POST", path: HOSTED_PAIR_OFFER_PATH, target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
