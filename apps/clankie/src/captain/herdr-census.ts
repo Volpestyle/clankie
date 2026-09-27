@@ -32,6 +32,50 @@ export interface HerdrCensusAgent {
   readonly session?: { readonly source: string; readonly kind: "id" | "path"; readonly value: string };
 }
 
+/** A remote Herdr fleet the census also reads (ADR 0184); `run` executes one herdr argv there. */
+export interface HerdrCensusFleet {
+  readonly id: string;
+  readonly session: string;
+  readonly host: string;
+  run(args: readonly string[]): Promise<string>;
+}
+
+/** Remote ids carry their fleet, so every tool that takes one routes back to it. */
+function qualifyAgent(fleet: string, entry: HerdrCensusAgent): HerdrCensusAgent {
+  return {
+    ...entry,
+    paneId: `${fleet}/${entry.paneId}`,
+    ...(entry.terminalId === undefined ? {} : { terminalId: `${fleet}/${entry.terminalId}` }),
+    ...(entry.parentPaneId === undefined ? {} : { parentPaneId: `${fleet}/${entry.parentPaneId}` }),
+  };
+}
+
+type RemoteFleetAgents =
+  | { readonly fleet: HerdrCensusFleet; readonly agents: readonly HerdrCensusAgent[] }
+  | { readonly fleet: HerdrCensusFleet; readonly error: string };
+
+/** Each fleet answers or is unreachable on its own; one down machine hides nobody else (ADR 0184). */
+async function readRemoteFleets(fleets: readonly HerdrCensusFleet[]): Promise<readonly RemoteFleetAgents[]> {
+  return Promise.all(
+    fleets.map(async (fleet): Promise<RemoteFleetAgents> => {
+      try {
+        const agents = parseHerdrAgentList(await fleet.run(["agent", "list"]));
+        return { fleet, agents: agents.map((entry) => qualifyAgent(fleet.id, entry)) };
+      } catch (caught) {
+        return { fleet, error: caught instanceof Error ? caught.message : String(caught) };
+      }
+    }),
+  );
+}
+
+function formatRemoteFleet(remote: RemoteFleetAgents): string {
+  const heading = `HERDR FLEET ${remote.fleet.id} (ssh ${remote.fleet.host}, session ${remote.fleet.session}; ids carry the ${remote.fleet.id}/ prefix)`;
+  if ("error" in remote)
+    return `${heading}
+  unreachable: ${bounded(remote.error, 200)}`;
+  return formatHerdrSessionCensus(undefined, remote.agents).replace(/^[^\n]*/u, heading);
+}
+
 export type HerdrSessionCensus =
   | { readonly outcome: "ok"; readonly text: string }
   | { readonly outcome: "unavailable"; readonly error: string };
@@ -105,6 +149,8 @@ export interface ObservedFleetSeat {
   readonly workingDirectory?: string;
   /** Herdr's workspace and tab for this seat's terminal, when the snapshot answered. */
   readonly placement?: OperatorHerdrPlacement;
+  /** The registered remote fleet (machine) holding this seat; absent on the local fleet (ADR 0184). */
+  readonly fleet?: string;
 }
 
 function defaultRunner(
@@ -382,6 +428,51 @@ export interface ObservedFleet {
  * seats offline, never a failed conversation surface.
  */
 export async function readFleet(
+  options: { readonly runCommand?: HerdrCensusRunner; readonly fleets?: readonly HerdrCensusFleet[] } = {},
+): Promise<ObservedFleet> {
+  const [local, remote] = await Promise.all([
+    readLocalFleet(options),
+    readRemoteFleets(options.fleets ?? []),
+  ]);
+  const remoteSeats = remote.flatMap((entry) =>
+    "error" in entry
+      ? []
+      : entry.agents.flatMap((agent) => {
+          if (
+            agent.agent === "shell" ||
+            agent.agent === "clankie" ||
+            agent.terminalId === undefined ||
+            agent.session === undefined
+          )
+            return [];
+          const named =
+            agent.name === undefined ? undefined : subjectForHerdrName(`${entry.fleet.id}-${agent.name}`);
+          const paneSubject = subjectForHerdrPane(agent.paneId);
+          return [
+            {
+              seatId: agent.terminalId,
+              paneId: agent.paneId,
+              ...(agent.parentPaneId === undefined ? {} : { parentPaneId: agent.parentPaneId }),
+              subject: named ?? paneSubject,
+              ...(named === undefined || agent.name === undefined
+                ? {}
+                : { renamed: { name: bounded(agent.name, 80), from: paneSubject } }),
+              occupantId: occupantIdForHerdrSession(agent.session),
+              harness: agent.agent,
+              status: agent.status,
+              title: bounded(agent.title, 200),
+              ...(agent.cwd === undefined
+                ? {}
+                : { workingDirectory: bounded(agent.cwd, SEAT_DIRECTORY_MAX) }),
+              fleet: entry.fleet.id,
+            } satisfies ObservedFleetSeat,
+          ];
+        }),
+  );
+  return remoteSeats.length === 0 ? local : { ...local, seats: [...local.seats, ...remoteSeats] };
+}
+
+async function readLocalFleet(
   options: { readonly runCommand?: HerdrCensusRunner } = {},
 ): Promise<ObservedFleet> {
   const run = options.runCommand ?? defaultRunner;
@@ -469,18 +560,20 @@ export async function readFleetSeats(
 /** Live agent census for a seated turn. Fail-soft: a down socket is not a failed turn. */
 export async function readHerdrSessionCensus(
   herdrPaneId: string | undefined,
-  options: { readonly runCommand?: HerdrCensusRunner } = {},
+  options: { readonly runCommand?: HerdrCensusRunner; readonly fleets?: readonly HerdrCensusFleet[] } = {},
 ): Promise<HerdrSessionCensus> {
   const run = options.runCommand ?? defaultRunner;
   try {
-    const { stdout } = await run("herdr", ["agent", "list"]);
+    const [{ stdout }, remote] = await Promise.all([
+      run("herdr", ["agent", "list"]),
+      readRemoteFleets(options.fleets ?? []),
+    ]);
     return {
       outcome: "ok",
-      text: formatHerdrSessionCensus(
-        herdrPaneId,
-        parseHerdrAgentList(stdout),
-        readHerdrSummariesFile().agents,
-      ),
+      text: [
+        formatHerdrSessionCensus(herdrPaneId, parseHerdrAgentList(stdout), readHerdrSummariesFile().agents),
+        ...remote.map(formatRemoteFleet),
+      ].join("\n"),
     };
   } catch (caught) {
     if (caught instanceof Error && "code" in caught && caught.code === "ENOENT") {

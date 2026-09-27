@@ -921,6 +921,54 @@ export class SwarmHost {
     }
   }
 
+  /**
+   * Enroll a peer that runs on a remote Herdr fleet into this conversation's
+   * embedded scope (VUH-1381). It is a separate actor, keyed by fleet and name,
+   * so a re-enrollment resumes the same identity with a new generation. The
+   * capability goes only to that peer; the owner endpoint is what the fleet's
+   * relay forwards to. External coordinators are not re-exported.
+   */
+  async enrollFleetPeer(conversationId: string, cwd: string, peer: { fleet: string; name: string }) {
+    await this.initialized;
+    if (this.closed) throw new Error("Swarm host closed");
+    if (!/^[a-z][a-z0-9-]{0,63}$/u.test(peer.fleet) || !/^[a-z][a-z0-9-]{0,63}$/u.test(peer.name))
+      throw new Error("Fleet and peer names are lowercase identifiers");
+    const session = await this.get({ conversationId, cwd });
+    const { projectRoot, stateDirectory } = await this.prepareOwner(session.binding.cwd);
+    const enrolled = await enrollRuntime({
+      stateDirectory,
+      nodePath: process.execPath,
+      ownerPath: executable("owner-cli.js"),
+      host: "claude-code",
+      hostSessionId: `fleet:${peer.fleet}:${peer.name}`,
+      incarnation: randomUUID(),
+      identity: {
+        directory: session.binding.cwd,
+        fileRoot: session.binding.cwd,
+        projectRoot,
+        profile: "clankie",
+      },
+      label: `fleet:${peer.fleet}/${peer.name}`,
+      skillPath: join(packageRoot, "skills/swarm-mcp/SKILL.md"),
+    });
+    if (enrolled.scope !== session.scope)
+      throw new Error("Fleet peer enrolled outside the conversation's scope");
+    return {
+      actor: enrolled.actor,
+      scope: enrolled.scope,
+      ownerEndpoint: enrolled.environment.SWARM_COORDINATOR_ENDPOINT,
+      capability: enrolled.environment.SWARM_SESSION_CAPABILITY,
+    };
+  }
+
+  /** The embedded owner endpoint for a conversation, which a fleet relay forwards to. */
+  async ownerEndpoint(conversationId: string, cwd: string): Promise<string> {
+    await this.initialized;
+    const session = await this.get({ conversationId, cwd });
+    if (session.binding.connectionId) throw new Error("An external coordinator is not relayed");
+    return session.endpoint;
+  }
+
   /** Scope selects a known service connection, never a worker-supplied destination. */
   async workerInScope(scope: string, capability: string, connectionId?: string) {
     await this.initialized;

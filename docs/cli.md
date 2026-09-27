@@ -858,8 +858,9 @@ ID to a verified socket and session label; use a new ID for a different endpoint
 Disconnect disables routing and retains identity without stopping any worker.
 An unavailable named connection never selects another session. Native Herdr
 commands/viewers require a local Clankie service. These managed launch routes
-share the service's filesystem and executable paths. For workers on another
-machine, connect their Swarm coordinator using the external-connection contract.
+share the service's filesystem and executable paths. A Herdr fleet on another
+machine is an ssh connection (`herdr add`, below); its peers reach this
+coordinator through that fleet's relay (`swarm fleet-peer`).
 
 For custom capacity/capabilities, `runtime connect CONNECTION.json` accepts
 `{ "id": "build", "session": "workers", "capacity": 2, "capabilities": ["code"] }`.
@@ -906,6 +907,9 @@ the original directory. Stale approvals grant nothing; rejected requests identif
 them as `stale_workspace` with `staleWorkspaces` details.
 `--dir` permits only that canonical directory, never its children. Paths must be
 absolute and exist on the service host. The runtime retains one capacity pool.
+An ssh fleet is the exception: its grants are exact `--dir` paths on that
+machine (a drive path such as `C:\src\rivals` for a Windows fleet), stored as
+written, because this host can neither resolve nor stat them.
 
 The operator-only POST `/v1/runtime-connections` accepts
 `{ "action": "workspaces", "id": "default", "workspaces": [{ "kind": "repository", "path": "/absolute/project" }] }`.
@@ -1067,6 +1071,55 @@ worker. The optional board requires herdr-lead installed and linked in the
 selected runtime. Pane-scoped messages and `clankie stance` carry the source
 socket in `x-clankie-herdr-socket`: unrelated pane IDs cannot attach to or
 change a worker with the same ID in another session.
+
+### `herdr fleets` / `herdr add NAME --ssh HOST` / `herdr remove NAME`
+
+A Herdr session on another machine is a **fleet** ([ADR 0184](adr/0184-clankie-leads-more-than-one-fleet.md)):
+a named runtime connection whose transport is the owner's own ssh.
+
+```sh
+clankie herdr add pc --ssh volpe@supedupsilly --session default --shell powershell
+clankie runtime workspaces pc --dir 'C:\src\rivals'
+clankie herdr fleets
+clankie restart captain
+clankie herdr remove pc
+```
+
+`add` is `runtime connect NAME --ssh HOST --session SESSION [--shell posix|powershell]`.
+`HOST` is a host or alias from the owner's ssh configuration; keys and host
+trust stay there (`BatchMode`, so an unknown host key or a locked key fails
+instead of prompting). `--shell powershell` is for a Windows host whose sshd
+default shell is PowerShell. The session must already be running there: adding
+checks `herdr --session SESSION api snapshot` over ssh and refuses otherwise.
+`remove` disables the connection and keeps its identity, like `runtime disconnect`.
+Changes reach the captain on `clankie restart captain`.
+
+What crosses the link, and what cannot:
+
+- Every call runs `herdr --session SESSION <verb> …` on the remote host with an
+  exact argv (a Windows command line is built for `CommandLineToArgvW` and
+  handed to `ProcessStartInfo`, so PowerShell never parses it). One multiplexed
+  ssh connection per fleet carries them (`~/.clankie/ssh/%C`, `ControlPersist=600`).
+- Only read and pane verbs pass: `agent list|get|read|wait|prompt|send-keys|start`,
+  `pane list|get|read|send-text|send-keys|close|process-info|layout`,
+  `tab|workspace create|list`, `api snapshot`, `session list`. Nothing that
+  launches, attaches, stops, updates or reconfigures a server can be sent, and
+  the Herdr CLI never starts a server for a subcommand. The remote server stays
+  the one its owner started, in its owner's desktop session.
+- A remote pane's ids carry the fleet: `pc/w2:p1J`, `pc/term_…`. Local ids stay
+  bare. The census Clankie reads lists each fleet under its own `HERDR FLEET`
+  heading, and the roster carries remote seats with `fleet` set.
+- He can watch (`herdr_watch pc/w2:p1J`), message and hire there
+  (`hire_agent` with `fleet: "pc"` and a granted `workingDirectory`). A watch is
+  persisted under its qualified id, so it resumes after a service restart.
+  Remote panes are observed by polling one shared `pane list` every three
+  seconds rather than holding a wait open per pane.
+- A remote seat takes the pty lane: its transcript is read with `herdr agent
+read`, a Codex seat is not reached through `codex queue`, and a Claude hire
+  there starts without the seat channel. Terminal observe/control and the
+  reverse-forward mailbox are not wired for ssh fleets yet.
+- An unreachable fleet is a state. `herdr fleets` (and `runtime list`) report
+  `state: "unreachable"` with `lastSeenAt`; other fleets answer normally.
 
 ### `workdir [status]` / `workdir set PATH` / `workdir clear`
 
@@ -1627,6 +1680,47 @@ Enrolled workers use `CLANKIE_SWARM_CONNECTION=project-team` with
 `SWARM_SESSION_CAPABILITY`. Their Clankie service URL must be reachable privately
 (for example over SSH); the public app gateway does not expose worker MCP routes.
 Enrollment still grants no provider tools. [Grant contract](worker-access.md).
+
+#### Peers on another machine: `swarm fleet-peer`
+
+One coordinator serves every fleet ([ADR 0198](adr/0198-one-coordinator-reaches-every-fleet.md)).
+A peer on a registered ssh fleet joins a conversation's embedded coordinator
+through that fleet's relay:
+
+```sh
+clankie swarm fleet-peer pc rivals-worker --conversation global-default --out ./pc-rivals-worker.json
+```
+
+The first enrollment pins the fleet's relay to that conversation's coordinator
+(`execution.connections[].relay`) and starts it; the service restores it on
+every start and reconnects with backoff. The peer is its own actor in that
+conversation's scope, keyed by fleet and name, so enrolling the same name again
+resumes the same actor with a new generation. The capability is written once,
+to the private `--out` file (0600, never overwritten), and never printed. That
+file's `environment` is exactly what the peer's stock `swarm-mcp` adapter needs
+on its machine: `SWARM_COORDINATOR_ENDPOINT` (the relay endpoint there),
+`SWARM_SESSION_CAPABILITY` and `SWARM_SCOPE`. Move it to that machine over the
+owner's ssh and keep it readable only by the peer's user. The operator API is
+POST `/v1/swarm/fleet-peers` `{ "conversationId", "fleet", "name" }`.
+
+The relay is one ssh connection per fleet, separate from the Herdr calls:
+
+- On this machine, `ssh -R 127.0.0.1:0:<owner socket>` asks sshd for a
+  loopback-only port on the remote host that forwards to the coordinator's Unix
+  socket. Nothing listens on a network address on either side.
+- On the remote host, a small Node program started by that same connection
+  (`node -e`, nothing installed) serves `\\.\pipe\clankie-swarm-<fleet>` on
+  Windows, where OpenSSH cannot forward a named pipe, or
+  `~/.clankie/swarm-relay-<fleet>.sock` (0600) elsewhere, and splices each
+  client to that port. It exits when the connection closes, so the endpoint
+  exists only while the link is up. Node must be on that host's PATH.
+- Exposure on the remote host is that loopback port and that endpoint. Any
+  local process there can open them, but the coordinator admits nothing
+  without a session capability; the relay carries bytes and holds none.
+- `runtime list` reports each fleet's `relayState`: `starting`, `ready` (with
+  the endpoint and port) or `unreachable` (with the last ssh error). While the
+  link is down a peer cannot fetch, so its mail waits unleased instead of
+  dead-lettering; it resumes when the relay is back.
 
 See [Swarm architecture](adr/0180-swarm-is-the-coordination-layer.md).
 

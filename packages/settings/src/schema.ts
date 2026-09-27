@@ -345,11 +345,24 @@ export const ExecutionWorkspacesSchema = z
     z
       .object({
         kind: z.enum(["repository", "directory"]),
-        path: z.string().startsWith("/").max(4096),
+        /** POSIX absolute, or a Windows drive path for a Windows ssh fleet (ADR 0184). */
+        path: z
+          .string()
+          .max(4096)
+          .regex(/^(?:\/|[A-Za-z]:[\\/])/u, "must be an absolute path"),
       })
       .strict(),
   )
   .max(32);
+
+/** The ssh route to a remote Herdr fleet. Authentication stays in the owner's ssh configuration. */
+export const HerdrSshTransportSchema = z
+  .object({
+    host: z.string().regex(/^(?:[a-zA-Z0-9_.-]+@)?[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u),
+    shell: z.enum(["posix", "powershell"]),
+  })
+  .strict();
+export type HerdrSshTransport = z.infer<typeof HerdrSshTransportSchema>;
 
 /** Named execution endpoints are pinned; disabling a connection keeps its identity. */
 export const ExecutionConnectionSchema = z
@@ -360,10 +373,26 @@ export const ExecutionConnectionSchema = z
       .refine((id) => id !== "default"),
     kind: z.literal("herdr").default("herdr"),
     session: z.string().regex(/^[\w][\w.-]{0,63}$/u),
+    /** A local runtime's socket. An ssh fleet names only its session (ADR 0184). */
     socketPath: z
       .string()
       .startsWith("/")
-      .refine((path) => new TextEncoder().encode(path).length <= 102),
+      .refine((path) => new TextEncoder().encode(path).length <= 102)
+      .optional(),
+    /**
+     * An ssh fleet (ADR 0184): Herdr on another machine, reached through the
+     * owner's own ssh configuration. Its CLI runs there with `--session`; the
+     * remote server is never started, stopped or replaced from here.
+     */
+    ssh: HerdrSshTransportSchema.optional(),
+    /**
+     * The embedded coordinator this ssh fleet's peers reach through its relay
+     * (VUH-1381): the conversation whose scope they join. One per fleet.
+     */
+    relay: z
+      .object({ conversationId: z.string().min(1).max(256) })
+      .strict()
+      .optional(),
     capabilities: z
       .array(
         z
@@ -709,6 +738,11 @@ export const ClankieSettingsSchema = z
       .refine(
         (value) => new Set(value.connections.map((entry) => entry.id)).size === value.connections.length,
         "Execution connection IDs must be unique",
+      )
+      .refine(
+        (value) =>
+          value.connections.every((entry) => (entry.ssh === undefined) !== (entry.socketPath === undefined)),
+        "An execution connection is either a local socket or an ssh fleet",
       )
       .default(() => ({ connections: [] })),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),

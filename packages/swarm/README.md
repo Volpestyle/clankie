@@ -60,14 +60,15 @@ captain, Swarm/Herdr worker environment and relay independently of an owner's de
 
 ### Support at a glance
 
-| Capability         | Current support and reference                                                                                                                       |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Coordination       | Embedded coordinator and [named external coordinators](#named-external-coordinators); peer communication works without Herdr                        |
-| Managed execution  | Named Herdr routes with [owner-approved workspaces](#owner-approved-execution-workspaces); capacity and budget default to 16 per scope              |
-| Connected accounts | Explicit restricted worker grants; [account verification and delivery](../../docs/worker-access.md)                                                 |
-| Worker context     | [Owner preferences and selected skills](#working-preferences-and-portable-skills-slices-36) travel with the assignment                              |
-| Runtime readiness  | [Current startup limits](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md) and upgrade precautions apply to live workers |
-| Plans and evidence | [Implementation sequence](#implementation-sequence) records acceptance boundaries and retained proofs; it is not a separate work queue              |
+| Capability         | Current support and reference                                                                                                                                                                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coordination       | Embedded coordinator and [named external coordinators](#named-external-coordinators); peer communication works without Herdr                                                                                                                                                          |
+| Other machines     | ssh fleets ([ADR 0184](../../docs/adr/0184-clankie-leads-more-than-one-fleet.md)); their peers reach the embedded coordinator through a [relay](../../docs/cli.md#peers-on-another-machine-swarm-fleet-peer) ([ADR 0198](../../docs/adr/0198-one-coordinator-reaches-every-fleet.md)) |
+| Managed execution  | Named Herdr routes with [owner-approved workspaces](#owner-approved-execution-workspaces); capacity and budget default to 16 per scope                                                                                                                                                |
+| Connected accounts | Explicit restricted worker grants; [account verification and delivery](../../docs/worker-access.md)                                                                                                                                                                                   |
+| Worker context     | [Owner preferences and selected skills](#working-preferences-and-portable-skills-slices-36) travel with the assignment                                                                                                                                                                |
+| Runtime readiness  | [Current startup limits](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md) and upgrade precautions apply to live workers                                                                                                                                   |
+| Plans and evidence | [Implementation sequence](#implementation-sequence) records acceptance boundaries and retained proofs; it is not a separate work queue                                                                                                                                                |
 
 ## Owner-approved execution workspaces
 

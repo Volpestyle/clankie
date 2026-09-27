@@ -18,7 +18,7 @@ import { runLinearCommand } from "../src/command/linear.ts";
 import { runAccountsCommand } from "../src/command/accounts.ts";
 import { runWorkCommand } from "../src/command/work.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
-import { forwardsToFleetHerdr, runHerdrCommand } from "../src/command/herdr.ts";
+import { forwardsToFleetHerdr, herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 import { runEffortCommand } from "../src/command/effort.ts";
 import { runImageModelCommand } from "../src/command/image-model.ts";
@@ -212,6 +212,14 @@ export async function runHeadlessCaptainCommand(
         return await runFleetHerdr(args, target);
       }
       if (rest.length === 1 && rest[0] === "open") return await openHerdr(options);
+      const fleetArgs = herdrFleetRuntimeArgs(rest);
+      if (fleetArgs !== undefined) {
+        outputJson(stdout, {
+          ...(await runRuntimeCommand(fleetArgs, options)),
+          restart: "clankie restart captain",
+        });
+        return 0;
+      }
       if (forwardsToFleetHerdr(rest)) return await runFleetHerdr(rest, options);
       const result = await runHerdrCommand(rest, options);
       outputJson(stdout, result);

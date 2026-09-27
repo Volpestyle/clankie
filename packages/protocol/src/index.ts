@@ -758,6 +758,14 @@ export const OperatorFleetSeatSchema = z
      */
     placement: OperatorHerdrPlacementSchema.optional(),
     /**
+     * The registered machine (Herdr fleet) holding this seat (ADR 0184), for a
+     * machine tag. Absent on the local default fleet.
+     */
+    fleet: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
+    /**
      * What the occupying agent last said it was doing, while that statement
      * stands. Absent once it expires, so a surface never has to reason about
      * staleness — the seat simply stops carrying one.
@@ -916,6 +924,15 @@ export const SpawnOperatorSeatSchema = z
      * `model_reasoning_effort`) (ADR 0185). Absent means the harness default.
      */
     effort: z.string().trim().min(1).max(OPERATOR_SEAT_EFFORT_MAX).optional(),
+    /**
+     * The Herdr fleet it starts on (ADR 0184): a registered machine's name.
+     * Absent means the local default fleet; the seat id comes back as
+     * `<fleet>/<terminal>` for any other.
+     */
+    fleet: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
   })
   .strict();
 export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;

@@ -55,6 +55,7 @@ import { Evaluator, type EvaluationCapture } from "./evaluator.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
   readFleet,
+  type HerdrCensusFleet,
   readHerdrSessionCensus,
   readSeatIdForHerdrPane,
   type HerdrSessionCensus,
@@ -67,7 +68,8 @@ import { createStanceStore } from "./stances.ts";
 import { assignmentSkills } from "./assignment-skills.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
-import { HerdrWatchStore, type DiscordWatchOrigin } from "./herdr-watch.ts";
+import { HerdrWatchStore, createHerdrWatchRunner, type DiscordWatchOrigin } from "./herdr-watch.ts";
+import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import {
   deriveFleetEdges,
@@ -768,8 +770,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.runtimes ? { connections: deps.runtimes } : {}),
     ...(deps.herdrAvailable ? { defaultAvailable: deps.herdrAvailable } : {}),
   });
+  // One runner over the local fleet and every registered remote one (ADR 0184).
+  const remoteFleets = deps.fleets?.list ?? [];
+  const censusFleets: readonly HerdrCensusFleet[] = remoteFleets.map((fleet) => ({
+    id: fleet.id,
+    session: fleet.session,
+    host: fleet.ssh.host,
+    run: (args) => deps.fleets!.run(fleet)(args),
+  }));
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
-    ...(deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable }),
+    runner: routeHerdrFleets(
+      createHerdrWatchRunner(deps.herdrAvailable),
+      new Map(
+        remoteFleets.map((fleet) => [fleet.id, createRemoteHerdrRunner(fleet, deps.fleets!.run(fleet))]),
+      ),
+    ),
+    ...(deps.fleets === undefined
+      ? {}
+      : {
+          remoteWorkspace: (fleet: string, directory: string) =>
+            deps.fleets!.remoteWorkspace(fleet, directory),
+        }),
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
   });
@@ -1281,7 +1302,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const census =
           live || deps.herdrAvailable?.() === false || conversationId === LINEAR_INBOX_CONVERSATION_ID
             ? undefined
-            : await readHerdrSessionCensus(paneId);
+            : await readHerdrSessionCensus(paneId, { fleets: censusFleets });
         const prompt = resolveOperatorPrompt(
           message,
           lane.session.resourceLoader.getSkills().skills,
@@ -1507,7 +1528,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   let swarmRoster = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
-    const fleet = deps.herdrAvailable?.() === false ? { seats: [], head: undefined } : await readFleet();
+    const fleet =
+      deps.herdrAvailable?.() === false
+        ? { seats: [], head: undefined }
+        : await readFleet({ fleets: censusFleets });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const seats = personas.reconcile(fleet.seats);

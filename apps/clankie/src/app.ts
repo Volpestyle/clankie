@@ -361,6 +361,14 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
+const FleetPeerEnrollSchema = z
+  .object({
+    conversationId: z.string().min(1).max(256),
+    fleet: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+    name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+  })
+  .strict();
+
 export interface ClankieAppDependencies {
   discordIngress?: DiscordIngress;
   modelKeys?: ModelKeysPort;
@@ -379,6 +387,14 @@ export interface ClankieAppDependencies {
   runtimes?: ExecutionConnections;
   swarm?: Pick<SwarmHost, "status"> &
     Partial<Pick<SwarmHost, "connect" | "disconnect" | "syncRuntimeConnections">>;
+  /**
+   * Enrolls a peer on a registered ssh fleet into a conversation's coordinator
+   * through that fleet's relay (VUH-1381). The capability is returned once, to
+   * the authenticated operator, for that peer alone.
+   */
+  fleetPeers?: {
+    enroll(input: { conversationId: string; fleet: string; name: string }): Promise<unknown>;
+  };
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
   /** Only a currently available connection has an active binding. */
@@ -982,6 +998,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json(await dependencies.swarm.connect(parsed.data, binding.cwd));
     } catch {
       return context.json({ error: "swarm_connection_refused" }, 409);
+    }
+  });
+
+  app.post("/v1/swarm/fleet-peers", bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.fleetPeers) return context.json({ error: "swarm_unavailable" }, 503);
+    const parsed = FleetPeerEnrollSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_fleet_peer" }, 400);
+    try {
+      return context.json(await dependencies.fleetPeers.enroll(parsed.data));
+    } catch (error) {
+      return context.json(
+        {
+          error: "fleet_peer_refused",
+          detail: error instanceof Error ? error.message : "Enrollment refused",
+        },
+        409,
+      );
     }
   });
 

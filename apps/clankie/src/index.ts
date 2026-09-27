@@ -54,6 +54,7 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
+import { FleetRelays } from "./fleet-coordinator-relay.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
@@ -497,7 +498,13 @@ const email = createEmailPort({
 
 const rivals = createRivalsClient({ settings: settingsStore, credentials: operatorCredentialStore });
 const compiledWorkerCli = join(repoRoot, "apps/tui/bin/clankie.js");
-const runtimes = new ExecutionConnections({ settings: settingsStore, primary: herdr });
+const runtimes = new ExecutionConnections({
+  settings: settingsStore,
+  primary: herdr,
+  sshControlDirectory: join(stateRoot, "ssh"),
+});
+// Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
+const herdrFleets = await runtimes.fleets();
 const swarm = new SwarmHost({
   stateDirectory: join(stateRoot, "swarm"),
   connections: { settings: settingsStore, credentials: operatorCredentialStore },
@@ -563,6 +570,11 @@ const captain = createCaptain(
     herdrAvailable: herdr.available,
     agentSessions,
     runtimes,
+    fleets: {
+      list: herdrFleets,
+      run: (fleet) => runtimes.fleetRun(fleet),
+      remoteWorkspace: (fleet, directory) => runtimes.remoteWorkspace(fleet, directory),
+    },
     mcp: mcpHost,
     email,
     rivals,
@@ -729,6 +741,51 @@ const hostedDiscord =
         captain,
         onWork: () => hostedHeartbeat?.interactive(),
       });
+// One coordinator reachable from every fleet (VUH-1381): each ssh fleet pinned
+// to a conversation gets a supervised relay into that conversation's owner.
+const fleetOwnerEndpoint = async (conversationId: string) => {
+  const binding = captain.seatContext(conversationId);
+  if (!binding) throw new Error("Unknown Clankie conversation");
+  return swarm.ownerEndpoint(conversationId, binding.cwd);
+};
+const fleetRelays = new FleetRelays({
+  fleets: () => runtimes.fleets(),
+  relayConversation: (fleet) => runtimes.relayConversation(fleet),
+  ownerEndpoint: fleetOwnerEndpoint,
+  log: (message) => logger.info({ event: "fleet.relay" }, message),
+});
+runtimes.relayStatus = (fleet) => fleetRelays.status(fleet);
+void fleetRelays.restore();
+const fleetPeers = {
+  async enroll(input: { conversationId: string; fleet: string; name: string }) {
+    const fleet = (await runtimes.fleets()).find((entry) => entry.id === input.fleet);
+    if (fleet === undefined) throw new Error(`No enabled ssh fleet ${input.fleet}`);
+    const binding = captain.seatContext(input.conversationId);
+    if (!binding) throw new Error("Unknown Clankie conversation");
+    await runtimes.setRelay(fleet.id, input.conversationId);
+    const relay = await (await fleetRelays.ensure(fleet, input.conversationId)).ready();
+    if (relay.state !== "ready")
+      throw new Error(`Fleet ${fleet.id} relay is ${relay.state}: ${"error" in relay ? relay.error : ""}`);
+    const peer = await swarm.enrollFleetPeer(input.conversationId, binding.cwd, {
+      fleet: fleet.id,
+      name: input.name,
+    });
+    return {
+      fleet: fleet.id,
+      name: input.name,
+      actor: peer.actor,
+      scope: peer.scope,
+      relay,
+      // What the peer's swarm-mcp adapter on that machine needs, and nothing else.
+      environment: {
+        SWARM_COORDINATOR_ENDPOINT: relay.endpoint,
+        SWARM_SESSION_CAPABILITY: peer.capability,
+        SWARM_SCOPE: peer.scope,
+      },
+    };
+  },
+};
+
 const clankie = await createClankieApp({
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({
@@ -760,6 +817,7 @@ const clankie = await createClankieApp({
   }),
   captain,
   swarm,
+  fleetPeers,
   deliveredFiles,
   herdrRuntime: herdr.status,
   herdrBinding: herdr.binding,
@@ -907,6 +965,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await captain.close().catch(() => undefined);
+    fleetRelays.close();
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
     await mcpHost.close().catch(() => undefined);

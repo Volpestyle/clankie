@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import {
@@ -60,7 +60,8 @@ export async function runSwarmCommand(
   }
   let path = "/v1/swarm",
     method = "GET",
-    body: string | undefined;
+    body: string | undefined,
+    fleetPeerOut: string | undefined;
   if (args.length === 2 && args[0] === "connect") {
     const file = await stat(args[1]!);
     if (
@@ -75,8 +76,31 @@ export async function runSwarmCommand(
   } else if (args.length === 2 && args[0] === "disconnect") {
     path += `/connections/${encodeURIComponent(args[1]!)}`;
     method = "DELETE";
+  } else if (args[0] === "fleet-peer") {
+    // A peer on a registered ssh fleet joins this conversation's coordinator
+    // through the fleet's relay (VUH-1381). The capability is written to a
+    // private file for that peer, never printed.
+    const [, fleet, name, ...flags] = args;
+    const conversation = flags[flags.indexOf("--conversation") + 1];
+    const out = flags[flags.indexOf("--out") + 1];
+    if (
+      fleet === undefined ||
+      name === undefined ||
+      flags.length !== 4 ||
+      !flags.includes("--conversation") ||
+      !flags.includes("--out") ||
+      conversation === undefined ||
+      out === undefined
+    )
+      throw new Error("Usage: clankie swarm fleet-peer FLEET NAME --conversation ID --out PRIVATE.json");
+    fleetPeerOut = out;
+    body = JSON.stringify({ conversationId: conversation, fleet, name });
+    path += "/fleet-peers";
+    method = "POST";
   } else if (args.length > 1 || (args[0] !== undefined && !["status", "connections"].includes(args[0])))
-    throw new Error("Usage: clankie swarm [status|connections] | connect PRIVATE.json | disconnect ID");
+    throw new Error(
+      "Usage: clankie swarm [status|connections] | connect PRIVATE.json | disconnect ID | fleet-peer FLEET NAME --conversation ID --out PRIVATE.json",
+    );
   const credential = await resolveOperatorCredential({
     env: options.env ?? process.env,
     ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
@@ -88,6 +112,15 @@ export async function runSwarmCommand(
     ...(body === undefined ? {} : { body }),
     signal: AbortSignal.timeout(30000),
   });
-  if (!response.ok) throw new Error(`Swarm connection request: ${response.status}`);
-  return response.json();
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => undefined)) as { detail?: unknown } | undefined;
+    throw new Error(
+      typeof detail?.detail === "string" ? detail.detail : `Swarm connection request: ${response.status}`,
+    );
+  }
+  const result = (await response.json()) as Record<string, unknown>;
+  if (fleetPeerOut === undefined) return result;
+  await writeFile(fleetPeerOut, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+  const { environment: _secret, ...visible } = result;
+  return { ...visible, written: fleetPeerOut };
 }

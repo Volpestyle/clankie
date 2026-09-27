@@ -36,6 +36,7 @@ import {
   type ClaudeMcpResult,
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
+import { splitFleetQualified } from "../herdr-fleet.ts";
 import {
   readHerdrSeatTranscript,
   type HerdrAgentSession,
@@ -117,7 +118,12 @@ export interface HerdrWatchRunner {
   codexQueue?(sessionId: string, text: string): Promise<boolean>;
   closePane?(target: string): Promise<void>;
   /** Open a tab in a working directory; resolves with its root pane id. */
-  createTab?(options: { readonly cwd: string; readonly label: string }): Promise<string>;
+  createTab?(options: {
+    readonly cwd: string;
+    readonly label: string;
+    /** A registered remote fleet (ADR 0184); absent is the local default. */
+    readonly fleet?: string;
+  }): Promise<string>;
   /** Start a harness in a pane already sitting at its shell prompt. */
   startAgent?(options: {
     readonly name: string;
@@ -192,7 +198,8 @@ const SEAT_TRANSCRIPT_TAIL_MS = 1_000;
 const SPAWN_READY_WAIT_MS = 30_000;
 const SPAWN_SESSION_WAIT_MS = 10_000;
 const SPAWN_SESSION_POLL_MS = 250;
-const TERMINAL_ID = /^term_[0-9a-f]+$/u;
+/** A terminal id, bare on the local fleet or `<fleet>/term_…` on a remote one (ADR 0184). */
+const TERMINAL_ID = /^(?:[a-z][a-z0-9-]{0,63}\/)?term_[0-9a-f]+$/u;
 /** How long a delivered message may take to turn an idle seat into a working one. */
 const SEAT_PICKUP_WAIT_MS = 10_000;
 const SPAWN_CHANNEL_DIALOG_WAIT_MS = 30_000;
@@ -346,11 +353,15 @@ function runExecFile(
   });
 }
 
-export function createHerdrWatchRunner(available?: () => boolean): HerdrWatchRunner {
+export function createHerdrWatchRunner(
+  available?: () => boolean,
+  /** Where each Herdr call runs; a remote fleet passes its ssh transport (ADR 0184). */
+  exec: (args: readonly string[], signal?: AbortSignal, timeoutMs?: number) => Promise<string> = execHerdr,
+): HerdrWatchRunner {
   const runHerdr = (args: readonly string[], signal?: AbortSignal, timeoutMs?: number): Promise<string> =>
     available?.() === false
       ? Promise.reject(new Error("Herdr execution is unavailable"))
-      : execHerdr(args, signal, timeoutMs);
+      : exec(args, signal, timeoutMs);
   return {
     get: async (target) => parseHerdrAgentResult(await runHerdr(["agent", "get", target])),
     resolveTerminal: async (terminalId) =>
@@ -573,6 +584,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly hireCapacity:
     | (() => Promise<{ readonly live: number; readonly limit: number } | undefined>)
     | undefined;
+  private readonly remoteWorkspace: ((fleet: string, directory: string) => Promise<boolean>) | undefined;
   private readonly path: string;
   private readonly runner: HerdrWatchRunner;
   private readonly controllers = new Map<string, AbortController>();
@@ -607,9 +619,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * Absent, or undefined when asked, there is no limit.
        */
       readonly hireCapacity?: () => Promise<{ readonly live: number; readonly limit: number } | undefined>;
+      /**
+       * Whether a remote fleet may start work in this directory (ADR 0184,
+       * ADR 0193). This machine cannot stat that one, so the owner's workspace
+       * grant for the fleet is the check. Absent, no remote hire is admitted.
+       */
+      readonly remoteWorkspace?: (fleet: string, directory: string) => Promise<boolean>;
     } = {},
   ) {
     this.path = path;
+    this.remoteWorkspace = options.remoteWorkspace;
     this.piSeatModel = options.piSeatModel;
     this.hireCapacity = options.hireCapacity;
     this.runner = options.runner ?? createHerdrWatchRunner(options.available);
@@ -773,6 +792,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private async deliverCodexQueue(agent: HerdrAgentSnapshot, text: string): Promise<boolean> {
     const { paneProcesses, openFiles, codexQueue } = this.runner;
     if (paneProcesses === undefined || openFiles === undefined || codexQueue === undefined) return false;
+    // `codex queue` and lsof run here; a remote seat takes the pty lane (ADR 0184).
+    if (splitFleetQualified(agent.paneId) !== undefined) return false;
     try {
       const processes = await paneProcesses(agent.paneId);
       const process = codexProcess(processes);
@@ -831,23 +852,39 @@ export class HerdrWatchStore implements HerdrWatchPort {
         };
       }
     }
-    // The captain runs on the machine herdr does, so this is the real check —
-    // and a missing path is the one failure worth naming precisely, because it
-    // is the one the operator can fix from the compose page.
-    if (!existsSync(input.workingDirectory)) {
-      return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
+    const remote = input.fleet;
+    if (remote === undefined) {
+      // The captain runs on the machine herdr does, so this is the real check —
+      // and a missing path is the one failure worth naming precisely, because it
+      // is the one the operator can fix from the compose page.
+      if (!existsSync(input.workingDirectory)) {
+        return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
+      }
+    } else if (!(await this.remoteWorkspace?.(remote, input.workingDirectory).catch(() => false))) {
+      // Another machine's directories are the owner's grant, not a stat from here.
+      return {
+        outcome: "failed",
+        reason: "unknown_directory",
+        detail: `${input.workingDirectory} is not a granted workspace on fleet ${remote}; grant it with clankie runtime workspaces ${remote} --dir PATH`,
+      };
     }
     let paneId: string;
     try {
-      paneId = await createTab({ cwd: input.workingDirectory, label: input.title });
+      paneId = await createTab({
+        cwd: input.workingDirectory,
+        label: input.title,
+        ...(remote === undefined ? {} : { fleet: remote }),
+      });
     } catch (caught) {
       return { outcome: "failed", reason: "herdr_unreachable", detail: reasonDetail(caught) };
     }
     try {
-      if (input.harness === "claude") await this.ensureClaudeSeatMcp();
+      // The seat mailbox and pi's integration are this machine's files. A remote
+      // seat takes the pty lane until its mailbox bridge lands (ADR 0184).
+      if (input.harness === "claude" && remote === undefined) await this.ensureClaudeSeatMcp();
       // A pi seat's durable identity is the session its herdr extension
       // reports; make sure the extension is there before starting one.
-      if (input.harness === "pi") await this.runner.installPiIntegration?.();
+      if (input.harness === "pi" && remote === undefined) await this.runner.installPiIntegration?.();
       const subject = subjectOverride ?? herdrAgentName(input.title);
       const model = input.harness === "pi" ? await this.hostedPiModel(input.model) : input.model;
       // A model or effort the harness cannot take fails the hire typed, before
@@ -858,7 +895,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const effortArgs = input.effort === undefined ? [] : fleetSeatEffortArgs(input.harness, input.effort);
       if (effortArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired effort flag`);
       const args = [
-        ...(input.harness === "claude" ? fleetSeatClaudeStartArgs() : []),
+        ...(input.harness === "claude" && remote === undefined ? fleetSeatClaudeStartArgs() : []),
         ...modelArgs,
         ...effortArgs,
       ];
@@ -1006,7 +1043,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
     readonly workingDirectory: string;
   }): Promise<HerdrSeatMoveResult> {
     if (this.closed) return { outcome: "failed", reason: "herdr_unreachable" };
-    if (!existsSync(input.workingDirectory)) {
+    const fleet = splitFleetQualified(input.seatId)?.fleet;
+    if (fleet === undefined && !existsSync(input.workingDirectory)) {
+      return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
+    }
+    if (
+      fleet !== undefined &&
+      !(await this.remoteWorkspace?.(fleet, input.workingDirectory).catch(() => false))
+    ) {
       return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
     }
     if (!(await this.closeSeat(input.seatId))) {
@@ -1019,6 +1063,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         harness: input.harness,
         title: input.title,
         workingDirectory: input.workingDirectory,
+        ...(fleet === undefined ? {} : { fleet }),
       },
       input.subject,
     );

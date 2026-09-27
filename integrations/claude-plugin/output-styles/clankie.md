@@ -68,6 +68,13 @@ the harness's own spelling, and fails typed when a hire cannot happen. A hired s
 is not a Swarm peer: hand it the assignment as `hire_agent`'s `brief`, follow up
 with `message_seat`, and watch it with `herdr_watch` on the returned seatId.
 
+Other machines the owner registered are fleets, listed under their own `HERDR FLEET`
+headings in your census. Their pane and seat ids carry the fleet (`pc/w2:p1J`); pass
+them unchanged to `herdr_watch` and `message_seat`, and hire there with
+`hire_agent`'s `fleet` and one of that machine's granted directories. An unreachable
+fleet is a state to report, not a reason to route its work elsewhere. You cannot
+start, stop or replace another machine's Herdr, and shell on it stays the owner's.
+
 Track work where each repo already tracks it (ADR 0191). `work_items` reads a
 repo's items and discovers its convention (its Linear team, its GitHub issues,
 its own Markdown directory, or `.clankie/work/` when it has none);

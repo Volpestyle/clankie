@@ -1,3 +1,4 @@
+import type { HerdrFleet, HerdrFleetRun } from "../herdr-fleet.ts";
 import type { HostedWorkStarted } from "../hosted-work.ts";
 import type { PiSeatModel } from "./herdr-watch.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
@@ -52,6 +53,15 @@ export interface CaptainDeps {
   /** A hosted body's hire limit (VUH-1388); absent, hires are not counted. */
   readonly hireCapacity?: () => Promise<{ readonly live: number; readonly limit: number } | undefined>;
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
+  /**
+   * Registered remote Herdr fleets (ADR 0184), as they stood when the captain
+   * started; changes take effect on `clankie restart captain`.
+   */
+  readonly fleets?: {
+    readonly list: readonly HerdrFleet[];
+    run(fleet: HerdrFleet): HerdrFleetRun;
+    remoteWorkspace(fleet: string, directory: string): Promise<boolean>;
+  };
   readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */
   readonly agentSessions?: Pick<AgentSessions, "list" | "read" | "send" | "run" | "cancel" | "release">;

@@ -608,6 +608,14 @@ function hireAgentTool(
       }),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
       effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+      fleet: Type.Optional(
+        Type.String({
+          pattern: "^[a-z][a-z0-9-]{0,63}$",
+          description:
+            "A registered remote fleet (machine) from the census's HERDR FLEET sections; omit for this machine. " +
+            "workingDirectory must be one of that fleet's granted workspaces, spelled the way that machine spells it.",
+        }),
+      ),
       ...(message === undefined
         ? {}
         : {
@@ -918,7 +926,9 @@ function herdrWatchTools(
         agent: Type.String({
           minLength: 1,
           maxLength: 128,
-          description: "Live Herdr agent name or pane id from the current census, such as w18:p1.",
+          description:
+            "Live Herdr agent name or pane id from the current census, such as w18:p1, or a remote fleet's " +
+            "qualified pane id such as pc/w2:p1J.",
         }),
         reason: Type.String({
           minLength: 1,
