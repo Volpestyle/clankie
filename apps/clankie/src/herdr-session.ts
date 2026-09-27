@@ -7,6 +7,8 @@ import { isDeepStrictEqual, promisify } from "node:util";
 import {
   ExecutionWorkspacesSchema,
   ExecutionConnectionSchema,
+  ExecutionWorkerModeSchema,
+  type ExecutionWorkerMode,
   type SettingsStore,
   type HerdrSettings,
 } from "@clankie/settings";
@@ -209,6 +211,13 @@ export const ExecutionConnectSchema = z.union([
   z.object({ action: z.literal("budget"), budget: z.number().int().min(0).nullable() }).strict(),
   z
     .object({
+      action: z.literal("mode"),
+      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+      mode: ExecutionWorkerModeSchema,
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal("workspaces"),
       id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
       workspaces: ExecutionWorkspacesSchema,
@@ -239,6 +248,16 @@ function sameRemoteDirectory(granted: string, requested: string, shell: "posix" 
   if (shell === "posix") return granted.replace(/\/+$/u, "") === requested.replace(/\/+$/u, "");
   const normal = (path: string) => win32.normalize(path).replace(/\\+$/u, "").toLowerCase();
   return normal(granted) === normal(requested);
+}
+
+/** Stream is stored as absent, so its route stays identical to one that never chose (ADR 0194). */
+function withWorkerMode<T extends { workerMode?: ExecutionWorkerMode | undefined }>(
+  value: T,
+  mode: ExecutionWorkerMode,
+): T {
+  const next = { ...value };
+  delete next.workerMode;
+  return mode === "interactive" ? { ...next, workerMode: mode } : next;
 }
 
 async function resolveExecutionWorkspaces(entries: z.infer<typeof ExecutionWorkspacesSchema>) {
@@ -279,6 +298,12 @@ export class ExecutionConnections {
     /** Where each ssh fleet keeps its multiplexed control socket (ADR 0184). */
     sshControlDirectory?: string;
     fleetRun?: (fleet: HerdrFleet) => HerdrFleetRun;
+    /**
+     * Whether the installed Swarm runtime accepts an interactive worker route
+     * (ADR 0194). Absent means it does not: an older owner rejects the field
+     * and with it the whole dispatch configuration.
+     */
+    interactiveWorkers?: () => Promise<boolean>;
   };
   private readonly fleetRuns = new Map<string, { key: string; run: HerdrFleetRun }>();
   /** Each ssh fleet's coordinator relay, reported beside its reachability (VUH-1381). */
@@ -367,8 +392,52 @@ export class ExecutionConnections {
       ? this.options.run(command, args, env)
       : exec(command, [...args], { env, timeout: 5_000, maxBuffer: 8 * 1024 * 1024 });
 
+  private async requireInteractiveWorkers() {
+    if (!(await this.options.interactiveWorkers?.()))
+      throw new Error(
+        "Interactive workers need an upgraded Swarm runtime; this install's swarm-mcp runs stream workers only",
+      );
+  }
+
+  /** How Swarm runs workers it dispatches into this runtime (ADR 0194). */
+  private async setWorkerMode(id: string, mode: ExecutionWorkerMode) {
+    if (mode === "interactive") {
+      const target = (await this.options.settings.load()).execution.connections.find(
+        (entry) => entry.id === id,
+      );
+      if (target?.ssh !== undefined)
+        throw new Error("An ssh fleet's peers enroll themselves; Swarm dispatches no workers into it");
+      await this.requireInteractiveWorkers();
+    }
+    await this.options.settings.update((current) => {
+      if (id === "default") return { ...current, execution: withWorkerMode(current.execution, mode) };
+      const connection = current.execution.connections.find((entry) => entry.id === id);
+      if (connection === undefined) throw new Error("Unknown runtime connection");
+      if (connection.ssh !== undefined && mode === "interactive")
+        throw new Error("An ssh fleet's peers enroll themselves; Swarm dispatches no workers into it");
+      return {
+        ...current,
+        execution: {
+          ...current.execution,
+          connections: current.execution.connections.map((entry) =>
+            entry.id === id ? withWorkerMode(entry, mode) : entry,
+          ),
+        },
+      };
+    });
+    for (const listener of this.changes) listener(id);
+    return { id, workerMode: mode };
+  }
+
   async connect(raw: unknown) {
-    const input = ExecutionConnectSchema.parse(raw);
+    const parsed = ExecutionConnectSchema.parse(raw);
+    if ("action" in parsed && parsed.action === "mode") return this.setWorkerMode(parsed.id, parsed.mode);
+    if (!("action" in parsed) && parsed.workerMode === "interactive") {
+      if (parsed.ssh !== undefined)
+        throw new Error("An ssh fleet's peers enroll themselves; Swarm dispatches no workers into it");
+      await this.requireInteractiveWorkers();
+    }
+    const input = "action" in parsed ? parsed : withWorkerMode(parsed, parsed.workerMode ?? "stream");
     if ("action" in input && input.action !== "workspaces") {
       await this.options.settings.update((current) => {
         if (input.action === "budget")
@@ -569,7 +638,9 @@ export class ExecutionConnections {
             : connection.capacity === null
               ? "unlimited"
               : "owner",
-        ...(connection.ssh === undefined ? {} : { transport: "ssh" as const }),
+        ...(connection.ssh === undefined
+          ? { workerMode: connection.workerMode ?? ("stream" as const) }
+          : { transport: "ssh" as const }),
         state: !connection.enabled
           ? "disabled"
           : connection.ssh !== undefined
@@ -611,6 +682,7 @@ export class ExecutionConnections {
             : settings.execution.capacity === null
               ? "unlimited"
               : "owner",
+        workerMode: settings.execution.workerMode ?? ("stream" as const),
         budget: settings.execution.budget === undefined ? 16 : settings.execution.budget,
         budgetSource:
           settings.execution.budget === undefined

@@ -26,7 +26,6 @@ if (
 )
   fail("SWARM_WORKER_MCP must name the absolute Node and Swarm MCP paths");
 const child = spawn(argv[0], [argv[1]], { stdio: "inherit", env: process.env });
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
-  process.on(signal, () => child.kill(signal));
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => child.kill(signal));
 child.on("error", (error) => fail(error.message));
 child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));

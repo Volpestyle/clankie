@@ -71,13 +71,14 @@ async function connectionInventory(deps: Dependencies): Promise<OperatorConnecti
   }
   return OperatorConnectionInventorySchema.parse({
     observedAt: new Date().toISOString(),
-    runtimes: runtimes.map(({ id, kind, session, state, enabled, capacity, capabilities }) => ({
+    runtimes: runtimes.map(({ id, kind, session, state, enabled, capacity, workerMode, capabilities }) => ({
       id,
       kind,
       session,
       state,
       enabled,
       capacity,
+      ...(workerMode ? { workerMode } : {}),
       capabilities,
     })),
     swarms: rows.slice(0, 64).map((row) => {
@@ -130,7 +131,7 @@ export async function manageConnections(deps: Dependencies, command: OperatorCon
   if (command.action === "reconnect_runtime") {
     const runtime = (await deps.runtimes?.list())?.find((entry) => entry.id === command.id);
     if (!runtime || runtime.id === "default") throw new Error("Unknown named runtime");
-    const { id, kind, session, socketPath, capacity, capabilities, workspaces } = runtime;
+    const { id, kind, session, socketPath, capacity, capabilities, workspaces, workerMode } = runtime;
     await changeRuntime(deps, "connect", {
       id,
       kind,
@@ -139,6 +140,7 @@ export async function manageConnections(deps: Dependencies, command: OperatorCon
       ...(runtime.capacitySource === "default" ? {} : { capacity }),
       capabilities,
       workspaces,
+      ...(workerMode === "interactive" ? { workerMode } : {}),
     });
   }
   if (command.action === "disconnect_runtime") await changeRuntime(deps, "disconnect", command.id);

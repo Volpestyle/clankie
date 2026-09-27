@@ -85,6 +85,17 @@ policy changes. Existing owners must advertise `executionWorkspaces` before rout
 configuration is updated. [ADR 0193](../../docs/adr/0193-runtime-workspaces-are-owner-approved.md)
 records authority and recovery semantics.
 
+Each local runtime also has a worker mode (`clankie runtime mode ID
+stream|interactive`). Stream, the default, runs workers unattended and writes no
+mode into the owner's route. Interactive runs Claude Code's TUI in the Herdr pane
+with Swarm mail on a Claude channel; its route carries `workerMode` and
+`channelPlugin: "clankie-worker@clankie"`, the owner-approved plugin Claude Code's
+managed settings must allow ([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
+Clankie selects interactive only when the installed swarm-mcp parses such a route;
+an older owner would reject the whole dispatch configuration. A saved interactive
+runtime whose Swarm cannot run it becomes unavailable, and an interactive start
+that blocks stays blocked. Neither falls back to stream.
+
 ## Named external coordinators
 
 `clankie swarm connect PRIVATE.json` verifies a dedicated enrolled Clankie session

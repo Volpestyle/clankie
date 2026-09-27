@@ -17,6 +17,8 @@ export {
   HerdrSshTransportSchema,
   type HerdrSshTransport,
   ExecutionWorkspacesSchema,
+  ExecutionWorkerModeSchema,
+  type ExecutionWorkerMode,
   SwarmConnectionSchema,
   SwarmSettingsSchema,
   type SwarmConnection,

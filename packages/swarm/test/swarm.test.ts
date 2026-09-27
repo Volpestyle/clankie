@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { CoordinationClient, enrollRuntime, localEndpoint, ownerState } from "swarm-mcp/runtime";
-import { SwarmHost } from "../src/index.ts";
+import { interactiveWorkersSupported, SwarmHost } from "../src/index.ts";
 import { Value } from "typebox/value";
 
 const roots: string[] = [];
@@ -794,4 +794,64 @@ test("default budget admits sixteen in-flight dispatches, owner limits reconcile
   expect(owner.dispatch?.herdr).toEqual(
     expect.arrayContaining([expect.objectContaining({ capacity: null })]),
   );
+});
+
+test("stream routes stay free of worker-mode fields and interactive needs the installed owner to accept them", async () => {
+  const packageRoot = dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json"));
+  const ownerCli = await readFile(join(packageRoot, "dist/coordination/owner-cli.js"), "utf8");
+  const supported = await interactiveWorkersSupported();
+  // The probe asks the installed parser; the owner the host launches ships beside it.
+  expect(supported).toBe(ownerCli.includes("workerMode"));
+  const root = await realpath(await mkdtemp("/tmp/clankie-worker-mode-"));
+  roots.push(root);
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  for (const name of ["herdr", "claude"])
+    await writeFile(join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+  const runtime = (id: string, workerMode?: "stream" | "interactive") => ({
+    id,
+    socketPath: join(root, `${id}.sock`),
+    enabled: true,
+    state: "healthy",
+    capacity: 1,
+    capabilities: ["code"],
+    ...(workerMode ? { workerMode } : {}),
+  });
+  const host = new SwarmHost({
+    stateDirectory: root,
+    runtimeConnections: async () => [
+      runtime("unset"),
+      runtime("streamed", "stream"),
+      runtime("attended", "interactive"),
+    ],
+    warn: (message) => {
+      throw new Error(message);
+    },
+  });
+  hosts.push(host);
+  await host.start({ ready: () => true, wake: async () => undefined });
+  await host.tools({ conversationId: "lead", cwd: root });
+  const configPath = join(root, createHash("sha256").update(root).digest("hex"), "owner.json");
+  const routes = JSON.parse(await readFile(configPath, "utf8")).dispatch.herdr as Record<string, unknown>[];
+  const route = (id: string) =>
+    routes.find((entry) => String(entry.id).startsWith(`clankie-runtime-${id}-`))!;
+  for (const id of ["unset", "streamed"]) {
+    expect(route(id)).toMatchObject({ enabled: true });
+    expect(route(id)).not.toHaveProperty("workerMode");
+    expect(route(id)).not.toHaveProperty("channelPlugin");
+  }
+  if (supported)
+    expect(route("attended")).toMatchObject({
+      enabled: true,
+      workerMode: "interactive",
+      channelPlugin: "clankie-worker@clankie",
+    });
+  else {
+    // Never silently stream: the runtime is unavailable until Swarm is upgraded.
+    expect(route("attended")).toMatchObject({ enabled: false });
+    expect(route("attended")).not.toHaveProperty("workerMode");
+  }
+  // Whatever was written, the installed owner still reads every route.
+  expect((await ownerState(dirname(configPath))).dispatch?.herdr).toHaveLength(3);
 });

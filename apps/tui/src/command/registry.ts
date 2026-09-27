@@ -10,6 +10,7 @@ const HEADLESS_COMMAND_HELP = [
       "  runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID",
       "          workspaces ID (--repo /checkout | --dir /directory)... | workspaces ID --clear",
       "          capacity ID N|--clear | budget N|--clear (per coordinator scope; default 16; clear = unlimited)",
+      "          mode ID stream|interactive (how Swarm runs its workers there; default stream)",
       "                           Manage named execution connections (JSON)",
     ],
   },

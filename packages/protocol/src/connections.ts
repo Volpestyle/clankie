@@ -32,6 +32,8 @@ export const OperatorConnectionInventorySchema = z
             state: label,
             enabled: z.boolean(),
             capacity: z.number().int().nonnegative().nullable(),
+            /** How Swarm runs workers dispatched into this runtime (ADR 0194); absent on older bodies. */
+            workerMode: z.enum(["stream", "interactive"]).optional(),
             capabilities: z.array(label).max(64),
           })
           .strict(),

@@ -13,7 +13,8 @@ import type { SwarmConnection } from "@clankie/settings";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile, rename, link, unlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rename, link, unlink, rm, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,6 +34,58 @@ const exec = promisify(execFile);
 const packageRoot = dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json"));
 const executable = (name: string) => join(packageRoot, "dist", "coordination", name);
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+/** The owner-approved installed worker plugin that carries Swarm mail to an interactive worker (ADR 0194). */
+const INTERACTIVE_WORKER_CHANNEL_PLUGIN = "clankie-worker@clankie";
+
+let interactiveWorkers: Promise<boolean> | undefined;
+/**
+ * Whether the installed swarm-mcp accepts an interactive worker route
+ * (ADR 0194). An older owner parses routes strictly and would reject the
+ * whole dispatch configuration, so this asks the installed parser itself: a
+ * throwaway owner config carrying one interactive route either reads back or
+ * it does not. Answered once per process, the lifetime of the loaded runtime.
+ */
+export function interactiveWorkersSupported(): Promise<boolean> {
+  interactiveWorkers ??= (async () => {
+    const directory = await realpath(await mkdtemp(join(tmpdir(), "clankie-swarm-probe-")));
+    try {
+      const absolute = join(directory, "probe");
+      await writeFile(
+        join(directory, "owner.json"),
+        JSON.stringify({
+          version: 1,
+          databasePath: join(directory, "coordination.db"),
+          launcherSecret: "0".repeat(64),
+          dispatch: {
+            observationMaxAgeMs: 60000,
+            peers: [],
+            herdr: {
+              id: "probe",
+              stateDirectory: directory,
+              profile: "probe",
+              socketPath: absolute,
+              herdrPath: absolute,
+              claudePath: absolute,
+              nodePath: absolute,
+              workerPath: absolute,
+              capabilities: [],
+              workerMode: "interactive",
+              channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN,
+            },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      const route = (await ownerState(directory)).dispatch?.herdr as { workerMode?: unknown } | undefined;
+      return route?.workerMode === "interactive";
+    } catch {
+      return false;
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  })();
+  return interactiveWorkers;
+}
 interface Binding {
   conversationId: string;
   cwd: string;
@@ -95,6 +148,8 @@ interface Options {
       capacity: number | null;
       capabilities: string[];
       workspaces?: { kind: "repository" | "directory"; path: string }[] | undefined;
+      /** Omitted or stream keeps the route unattended; interactive needs {@link interactiveWorkersSupported}. */
+      workerMode?: "stream" | "interactive" | undefined;
     }[]
   >;
   /** Trusted embedding bridge; contains no provider or operator credential. */
@@ -1048,6 +1103,17 @@ async function prepareOwner(cwd: string, options: Options) {
     const which = async (name: string) => (await exec("/usr/bin/which", [name])).stdout.trim();
     const paths = await Promise.all([which("herdr"), which("claude")]).catch(() => undefined);
     if (!paths) runtimes = runtimes.map((entry) => ({ ...entry, state: "unavailable" }));
+    // An interactive route the installed owner cannot parse would void every
+    // route; that runtime stays unavailable instead of silently running stream.
+    if (
+      runtimes.some((entry) => entry.workerMode === "interactive") &&
+      !(await interactiveWorkersSupported())
+    )
+      runtimes = runtimes.map((entry) =>
+        entry.workerMode === "interactive"
+          ? { ...entry, state: "unavailable", workerMode: undefined }
+          : entry,
+      );
     const desired = runtimes
       .filter((entry) => entry.socketPath)
       .map((entry) => ({
@@ -1064,6 +1130,10 @@ async function prepareOwner(cwd: string, options: Options) {
         capacity: entry.capacity,
         ...(entry.workspaces ? { workspaces: entry.workspaces } : {}),
         ...(options.workerMcp ? { mcpServers: { clankie_worker: options.workerMcp } } : {}),
+        // Stream writes neither field, the route an older owner already accepts.
+        ...(entry.workerMode === "interactive"
+          ? { workerMode: "interactive" as const, channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
+          : {}),
       }));
     // Retain old routes for their receipts; disabled routes cannot acquire new work.
     const merged = routes.map((route) => {

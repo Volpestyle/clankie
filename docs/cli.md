@@ -899,6 +899,18 @@ Settings are reconciled into existing owners without replacing in-flight receipt
 `runtime status` reports each effective value and its source: default, owner or unlimited.
 These controls use the operator API; no Swarm tool or captain bearer can change them.
 
+`clankie runtime mode ID stream|interactive` sets how Swarm runs the workers it
+dispatches into the default or a named local runtime; `runtime list` reports it as
+`workerMode`. Stream, the default, runs each worker unattended. Interactive runs
+Claude Code's TUI in the Herdr pane and delivers Swarm mail over a Claude channel,
+so a person can watch and step in. It needs the owner-approved
+`clankie-worker@clankie` plugin in Claude Code's managed settings
+([ADR 0194](adr/0194-interactive-swarm-workers-receive-leased-channel-events.md))
+and a Swarm runtime that accepts interactive routes: Clankie refuses the selection
+while the installed swarm-mcp does not. An interactive start that blocks stays
+blocked and is reported; it never falls back to stream. An ssh fleet has no worker
+mode, because its peers enroll themselves.
+
 Each call **replaces** that runtime's extra approvals; `--clear` restores the
 conversation-directory-only default. `runtime list` shows the stored policy.
 `--repo` pins the canonical Git common directory and accepts that repository's

@@ -345,3 +345,73 @@ it("only the operator can approve repositories and exact directories through run
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("selects each runtime's worker mode through CLI/API, keeps stream unwritten, and never selects interactive without Swarm support", async () => {
+  const { manageConnections } = await import("../src/connections.ts");
+  const root = await mkdtemp("/tmp/clankie-worker-mode-");
+  const settings = new SettingsStore(join(root, "settings.json"));
+  let supported = false;
+  const runtimes = new ExecutionConnections({
+    settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+    run: async () => ({ stdout: JSON.stringify({ result: { snapshot: { workspaces: [] } } }) }),
+    interactiveWorkers: async () => supported,
+  });
+  const swarm = { status: async () => ({ mode: "unavailable" }), syncRuntimeConnections: async () => {} };
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    swarm,
+    runtimes,
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+  });
+  const cli = {
+    host: "http://localhost",
+    env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+    fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
+  };
+  const named = async () =>
+    (await settings.load()).execution.connections.find((entry) => entry.id === "named");
+  try {
+    await runRuntimeCommand(["connect", "named", "--socket", "/tmp/named.sock"], cli);
+    expect((await runRuntimeCommand(["list"], cli)).connections).toMatchObject([
+      { id: "default", workerMode: "stream" },
+      { id: "named", workerMode: "stream" },
+    ]);
+    expect(await named()).not.toHaveProperty("workerMode");
+    await expect(runRuntimeCommand(["mode", "named", "sideways"], cli)).rejects.toThrow(/mode ID/u);
+    // The vendored owner would reject the route, and with it every route.
+    await expect(runRuntimeCommand(["mode", "named", "interactive"], cli)).rejects.toThrow(
+      /upgraded Swarm runtime/u,
+    );
+    await expect(
+      runtimes.connect({ id: "named", socketPath: "/tmp/named.sock", workerMode: "interactive" }),
+    ).rejects.toThrow(/upgraded Swarm runtime/u);
+    expect(await named()).not.toHaveProperty("workerMode");
+    supported = true;
+    expect(await runRuntimeCommand(["mode", "named", "interactive"], cli)).toEqual({
+      id: "named",
+      workerMode: "interactive",
+    });
+    await expect(runRuntimeCommand(["mode", "missing", "interactive"], cli)).rejects.toThrow(/Unknown/u);
+    expect(await named()).toMatchObject({ workerMode: "interactive" });
+    // A paired-device reconnect carries the owner's choice through.
+    await manageConnections({ runtimes, swarm }, { action: "disconnect_runtime", id: "named" });
+    const inventory = await manageConnections(
+      { runtimes, swarm },
+      { action: "reconnect_runtime", id: "named" },
+    );
+    expect(inventory.runtimes).toMatchObject([
+      { id: "default", workerMode: "stream" },
+      { id: "named", enabled: true, workerMode: "interactive" },
+    ]);
+    await runRuntimeCommand(["mode", "named", "stream"], cli);
+    expect(await named()).not.toHaveProperty("workerMode");
+    await runRuntimeCommand(["mode", "default", "interactive"], cli);
+    expect((await settings.load()).execution.workerMode).toBe("interactive");
+    await runRuntimeCommand(["mode", "default", "stream"], cli);
+    expect((await settings.load()).execution).not.toHaveProperty("workerMode");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

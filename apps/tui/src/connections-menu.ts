@@ -31,6 +31,8 @@ interface Runtime {
   readonly enabled?: boolean;
   readonly capacity?: number | null;
   readonly capacitySource?: string;
+  /** How Swarm runs the workers it dispatches here (ADR 0194); absent for an ssh fleet. */
+  readonly workerMode?: "stream" | "interactive";
   readonly budget?: number | null;
   readonly budgetSource?: string;
   readonly capabilities?: readonly string[];
@@ -101,6 +103,7 @@ function runtimeHint(runtime: Runtime): string {
       : runtime.capacity === null
         ? "unlimited workers"
         : `${runtime.capacity} workers per coordinator${runtime.capacitySource === "default" ? " (default)" : ""}`,
+    runtime.workerMode === undefined ? undefined : `${runtime.workerMode} workers`,
   ];
   return parts.filter(Boolean).join(" · ");
 }
@@ -420,6 +423,9 @@ async function runtimeDetail(
     ...(runtime.capabilities?.length
       ? [{ value: "info:capabilities", label: "Capabilities", hint: runtime.capabilities.join(", ") }]
       : []),
+    ...(runtime.workerMode === undefined
+      ? []
+      : [{ value: "mode", label: "Worker mode…", hint: runtime.workerMode }]),
   ];
   for (;;) {
     const action = await flow.readSelect({
@@ -434,6 +440,30 @@ async function runtimeDetail(
       allowBack: true,
     });
     if (action === undefined) return;
+    if (action === "mode") {
+      const mode = await flow.readSelect({
+        message: `How Swarm runs workers in ${runtime.id}`,
+        options: [
+          { value: "stream", label: "Stream", hint: "unattended; the default" },
+          {
+            value: "interactive",
+            label: "Interactive",
+            hint: "Claude in the pane; needs the clankie-worker plugin",
+          },
+        ],
+        allowBack: true,
+      });
+      if (mode === undefined || mode === runtime.workerMode) continue;
+      if (
+        await attempt(
+          flow,
+          () => services.runtime(["mode", runtime.id, mode]),
+          `${runtime.id} runs ${mode} workers.`,
+        )
+      )
+        return;
+      continue;
+    }
     if (action !== "disconnect") continue;
     if (!(await confirm(flow, `Disconnect ${runtime.id}?`, "Disconnect"))) continue;
     if (

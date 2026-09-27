@@ -4,7 +4,7 @@ import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
-import { SwarmHost } from "@clankie/swarm";
+import { interactiveWorkersSupported, SwarmHost } from "@clankie/swarm";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
 /**
@@ -502,6 +502,7 @@ const runtimes = new ExecutionConnections({
   settings: settingsStore,
   primary: herdr,
   sshControlDirectory: join(stateRoot, "ssh"),
+  interactiveWorkers: interactiveWorkersSupported,
 });
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();

@@ -214,3 +214,30 @@ it("puts an error that ends the menu into the chat, where it outlives the status
     { prompt: "/connections", message: "Runtime connections need the operator credential" },
   ]);
 });
+
+it("shows each runtime's worker mode and changes it through the runtime command", async () => {
+  const { shell, readSelect, lines } = fakeShell(["runtime:named", "mode", "interactive", undefined]);
+  const calls: string[][] = [];
+  const { services: deps } = services({
+    runtime: async (args: readonly string[]) => {
+      calls.push([...args]);
+      return args[0] === "list"
+        ? {
+            connections: [
+              { id: "named", state: "healthy", enabled: true, capacity: 2, workerMode: "stream" },
+              { id: "pc", state: "healthy", enabled: true, transport: "ssh" },
+            ],
+          }
+        : { id: "named", workerMode: "interactive" };
+    },
+  });
+  await runConnectionsSection("runtimes", shell, deps);
+  const list = (readSelect.mock.calls[0] as unknown[])[0] as { options: { value: string; hint?: string }[] };
+  expect(list.options[0]!.hint).toBe("healthy · 2 workers per coordinator · stream workers");
+  // An ssh fleet's peers enroll themselves: no worker mode to show or change.
+  expect(list.options[1]!.hint).toBe("healthy");
+  expect(values(readSelect.mock.calls[1]!)).toContain("mode");
+  expect(values(readSelect.mock.calls[2]!)).toEqual(["stream", "interactive"]);
+  expect(calls).toContainEqual(["mode", "named", "interactive"]);
+  expect(lines).toContain("named runs interactive workers.");
+});
