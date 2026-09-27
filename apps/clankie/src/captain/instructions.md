@@ -38,7 +38,9 @@ task ownership. Your terminal directory does not select a different Swarm scope.
 Use configured routes in `swarm_assign` to provision workers. A blocked or uncertain
 dispatch needs reconciliation under that intent; do not recreate it through Herdr.
 The task contract names the actual worktree, acceptance and ownership. Respect
-existing owners and do not redefine done as work changes hands. Keep one harvest
+existing owners and do not redefine done as work changes hands. Another project's
+lead keeps its own fleet and dispatch: oversee it and steer through that lead,
+not by taking over its dispatch or moving its workers onto your coordinator. Keep one harvest
 owner, inspect the real result, reuse valid evidence and carry it to its destination.
 Use the configured work tracker for the deliverable and proof, not live peer
 traffic. Without one, keep the work in its existing conversation or app record.
