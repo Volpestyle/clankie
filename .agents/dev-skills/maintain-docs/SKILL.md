@@ -53,9 +53,9 @@ that spans repos, and list it in that table.
   in" identity (ADR 0156).
 - Retired systems stay out of current-tense prose: missions, the doctrine
   contract, the control plane/runner split, the in-repo emulator and mGBA core
-  (ADR 0145), and the app's garden and canvas views (it shows the commons now;
-  "garden" survives as the name of the sprite art). ADRs and dated test
-  records may keep describing them as history.
+  (ADR 0145), and the app's canvas view. ADRs and dated test records may keep
+  describing them as history. The garden and the commons are the same living
+  room of agent sprites; either name is fine.
 - Say what ships. Mark a gated or planned capability as such; do not describe
   an unmerged or undeployed change as available.
 
@@ -85,7 +85,7 @@ Run before each release (`release-clankie`) and when asked:
 2. For each user-visible change, check the surfaces above say it correctly.
 3. Search the public surfaces for retired vocabulary and read each hit in
    context; identifiers and history are fine:
-   `rg -n -i -w 'captain|mission|doctrine|garden|emulator|mgba' apps/docs/site apps/docs/content README.md ~/dev/clankie-landing/index.html`
+   `rg -n -i -w 'captain|mission|doctrine|emulator|mgba' apps/docs/site apps/docs/content README.md ~/dev/clankie-landing/index.html`
 4. Diff `docs/architecture.md` against `apps/docs/content/how-it-works.md`.
 5. Run `pnpm docs:check`, then build and open the site
    (`pnpm docs:public:build && open apps/docs/dist/index.html`).
