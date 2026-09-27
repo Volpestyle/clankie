@@ -28,6 +28,7 @@ import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
 import type { DiscordWatchOrigin, HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
+import { fleetSeatBriefStartsSession } from "./fleet-seat.ts";
 import type { HireSeat, MessageSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
@@ -596,7 +597,8 @@ function hireAgentTool(
       "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
       "spelling or never came up), herdr_unreachable, at_capacity (this body already runs as many hired agents " +
       "as its plan allows; close or reuse one). A hired seat is not a Swarm peer: pass brief to hand it " +
-      "its first prompt through its conversation lane (the result says whether it was delivered), follow up " +
+      "its first prompt through its conversation lane (the result says whether it was delivered; codex needs one, " +
+      "since its session starts with its first turn), follow up " +
       "with message_seat, and watch it with herdr_watch on the returned seatId.",
     parameters: Type.Object({
       harness: StringEnum(OPERATOR_SEAT_HARNESSES),
@@ -633,8 +635,15 @@ function hireAgentTool(
       if (turn.autonomous === true) throw new Error("Autonomous turns may propose a hire, not execute one");
       if (available?.() === false) return json({ outcome: "failed", reason: "herdr_unreachable" });
       const { brief, ...seat } = params as typeof params & { brief?: string };
-      const result = await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }));
+      const result = await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }), brief);
       if (result.outcome !== "spawned" || brief === undefined || message === undefined) return json(result);
+      // A harness whose session starts on its first turn took the brief as that turn.
+      if (fleetSeatBriefStartsSession(result.seat.harness)) {
+        return json({
+          ...result,
+          brief: { outcome: "delivered", seatId: result.seat.seatId, status: result.seat.status },
+        });
+      }
       return json({ ...result, brief: await message(result.seat.seatId, brief) });
     },
   });

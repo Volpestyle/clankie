@@ -45,9 +45,10 @@ export interface LaneTool {
 /**
  * A hire with the captain's wiring around it: persona adoption, conversation
  * binding, and a watch from the first breath (ADR 0187) — never a bare
- * `herdr agent start`, which lands a stranger the roster has to notice.
+ * `herdr agent start`, which lands a stranger the roster has to notice. The
+ * brief is taken only by a harness whose first turn starts its session.
  */
-export type HireSeat = (seat: SpawnOperatorSeat) => Promise<OperatorSeatSpawnResult>;
+export type HireSeat = (seat: SpawnOperatorSeat, brief?: string) => Promise<OperatorSeatSpawnResult>;
 
 /**
  * The captain's own message into a hired seat, down the same lane an operator

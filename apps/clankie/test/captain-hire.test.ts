@@ -96,14 +96,17 @@ describe("captain hire_agent", () => {
       undefined,
       {} as never,
     );
-    expect(hireSeat).toHaveBeenCalledWith({
-      schemaVersion: 1,
-      harness: "pi",
-      title: "Release prep",
-      workingDirectory: "/tmp",
-      model: "anthropic/claude-opus-4-5",
-      effort: "xhigh",
-    });
+    expect(hireSeat).toHaveBeenCalledWith(
+      {
+        schemaVersion: 1,
+        harness: "pi",
+        title: "Release prep",
+        workingDirectory: "/tmp",
+        model: "anthropic/claude-opus-4-5",
+        effort: "xhigh",
+      },
+      undefined,
+    );
     // The typed outcome comes back to the model exactly as the store produced it.
     expect(result.details).toEqual({ outcome: "failed", reason: "not_ready" });
   });

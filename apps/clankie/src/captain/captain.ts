@@ -1449,8 +1449,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
   // persona thread created through `create` is — otherwise its first reply
   // lands in a thread nothing is listening to.
-  const hireSeat: HireSeat = async (request) => {
-    const result = await herdrWatches.spawnSeat(request);
+  const hireSeat: HireSeat = async (request, brief) => {
+    const result = await herdrWatches.spawnSeat(request, undefined, brief);
     if (result.outcome !== "spawned") return result;
     const seat = personas.adoptSpawn(result.seat, request.title);
     conversations.bindPersona(seat.personaId, seat.seatId, request.title);

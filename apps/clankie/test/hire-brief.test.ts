@@ -12,8 +12,9 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneToolBank } from "../src/captain/port.ts";
 
-// Enough of herdr for one pi hire: a tab, an agent that reports a session, the
-// pane list, and input that turns the idle agent into a working one.
+// Enough of herdr for one hire: a tab, an agent that reports a session, the
+// pane list, and input that turns the idle agent into a working one. Codex, like
+// the real one, reports its session only once a prompt starts its first turn.
 const FAKE_HERDR = `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
@@ -31,14 +32,19 @@ if (group === "tab" && command === "create") {
   out({ root_pane: { pane_id: pane.pane_id } });
 } else if (group === "agent" && command === "start") {
   const pane = find(args[args.indexOf("--pane") + 1]);
-  Object.assign(pane, {
-    name: args[2],
-    agent: args[args.indexOf("--kind") + 1],
-    agent_status: "idle",
-    agent_session: { source: "herdr:pi", kind: "path", value: process.env.FAKE_HERDR_SESSION },
-  });
+  const kind = args[args.indexOf("--kind") + 1];
+  Object.assign(pane, { name: args[2], agent: kind, agent_status: "idle" });
+  if (kind !== "codex") {
+    pane.agent_session = { source: "herdr:pi", kind: "path", value: process.env.FAKE_HERDR_SESSION };
+  }
   save();
   out({});
+} else if (group === "agent" && command === "prompt") {
+  const pane = find(args[2]);
+  pane.agent_status = "working";
+  pane.agent_session = { source: "herdr:" + pane.agent, kind: "id", value: "first-turn-session" };
+  save();
+  out({ agent: pane });
 } else if (group === "agent" && command === "get") {
   const pane = find(args[2]);
   if (pane === undefined) {
@@ -155,6 +161,46 @@ test("the captain's brief reaches a freshly hired pi seat and starts its turn", 
       outcome: "unknown_seat",
       seat: "agent-nobody",
     });
+  } finally {
+    await captain.close();
+  }
+});
+
+test("a codex hire runs off the shared daemon and its brief is the first turn that reports its session", async () => {
+  const { root, captain, commands } = await fixture();
+  try {
+    const bank = await captain.laneToolBank("operator", "global-default");
+    const brief = "BRIEF-2c9e: reply with just ok.";
+    const hired = await call(bank, "hire_agent", {
+      harness: "codex",
+      title: "codex worker",
+      workingDirectory: root,
+      brief,
+    });
+    expect(hired).toMatchObject({
+      outcome: "spawned",
+      seat: { seatId: "term_0a1b2c", harness: "codex" },
+      brief: { outcome: "delivered", seatId: "term_0a1b2c", status: "working" },
+    });
+    const sent = await commands();
+    const start = sent.find((args) => args[0] === "agent" && args[1] === "start");
+    expect(start?.slice(-2)).toEqual(["--", "--no-daemon"]);
+    // Submitted once, through herdr's own prompt, before the session could exist.
+    expect(sent.filter((args) => args.includes(brief))).toEqual([
+      [
+        "agent",
+        "prompt",
+        "w1:p1",
+        brief,
+        "--wait",
+        "--until",
+        "working",
+        "--until",
+        "blocked",
+        "--timeout",
+        "10000",
+      ],
+    ]);
   } finally {
     await captain.close();
   }

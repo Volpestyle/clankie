@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OPERATOR_CONVERSATION_TEXT_MAX, OPERATOR_CONVERSATION_TOOL_DETAIL_MAX } from "@clankie/protocol";
 import { parseHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
-import { fleetSeatClaudeStartArgs } from "../src/captain/fleet-seat.ts";
+import { fleetSeatClaudeStartArgs, fleetSeatCodexStartArgs } from "../src/captain/fleet-seat.ts";
 import {
   createHerdrWatchRunner,
   distillHerdrSeatReply,
@@ -1336,7 +1336,7 @@ describe("hiring a seat", () => {
     store.close();
   });
 
-  it("starts a claude hire with the seat channel and a codex hire without", async () => {
+  it("starts a claude hire with the seat channel and a codex hire off the shared daemon", async () => {
     const startAgent = vi.fn(
       (_options: { name: string; kind: string; paneId: string; args?: readonly string[] }) =>
         Promise.resolve(),
@@ -1371,7 +1371,7 @@ describe("hiring a seat", () => {
       title: "Release prep",
       workingDirectory: tmpdir(),
     });
-    expect(startAgent.mock.calls[1]?.[0].args).toBeUndefined();
+    expect(startAgent.mock.calls[1]?.[0].args).toEqual(fleetSeatCodexStartArgs());
     store.close();
   });
 
@@ -1447,6 +1447,7 @@ describe("hiring a seat", () => {
       effort: "high",
     });
     expect(startAgent.mock.calls[1]?.[0].args).toEqual([
+      ...fleetSeatCodexStartArgs(),
       "--model",
       "gpt-5.3-codex",
       "-c",

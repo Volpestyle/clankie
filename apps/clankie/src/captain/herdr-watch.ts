@@ -29,7 +29,9 @@ import {
 } from "./codex-seat.ts";
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
 import {
+  fleetSeatBriefStartsSession,
   fleetSeatClaudeStartArgs,
+  fleetSeatCodexStartArgs,
   fleetSeatMcpAddSucceeded,
   fleetSeatModelArgs,
   fleetSeatEffortArgs,
@@ -132,6 +134,11 @@ export interface HerdrWatchRunner {
     /** Extra argv after `--` on `herdr agent start` (the seat channel for claude). */
     readonly args?: readonly string[];
   }): Promise<void>;
+  /**
+   * `herdr agent prompt`: submits a prompt through herdr's own agent-aware
+   * submit and resolves once the agent is seen working.
+   */
+  promptAgent?(paneId: string, text: string): Promise<void>;
   /** `claude mcp add -s user <name> -- clankie mcp --seat`. Already-exists is success. */
   addClaudeMcp?(name: string): Promise<void>;
   /**
@@ -506,6 +513,24 @@ export function createHerdrWatchRunner(
         // Let Herdr return its typed startup failure before the process watchdog fires.
         SPAWN_READY_WAIT_MS + HERDR_COMMAND_TIMEOUT_MS,
       ).then(() => undefined),
+    promptAgent: (paneId, text) =>
+      runHerdr(
+        [
+          "agent",
+          "prompt",
+          paneId,
+          text,
+          "--wait",
+          "--until",
+          "working",
+          "--until",
+          "blocked",
+          "--timeout",
+          String(SPAWN_SESSION_WAIT_MS),
+        ],
+        undefined,
+        SPAWN_SESSION_WAIT_MS + HERDR_COMMAND_TIMEOUT_MS,
+      ).then(() => undefined),
   };
 }
 
@@ -834,7 +859,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return requested?.startsWith(`${hosted.provider.id}/`) === true ? requested : hosted.model;
   }
 
-  public async spawnSeat(input: SpawnOperatorSeat, subjectOverride?: string): Promise<HerdrSeatSpawnResult> {
+  public async spawnSeat(
+    input: SpawnOperatorSeat,
+    subjectOverride?: string,
+    brief?: string,
+  ): Promise<HerdrSeatSpawnResult> {
     const { createTab, startAgent } = this.runner;
     if (this.closed || createTab === undefined || startAgent === undefined) {
       return { outcome: "failed", reason: "herdr_unreachable" };
@@ -896,6 +925,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (effortArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired effort flag`);
       const args = [
         ...(input.harness === "claude" && remote === undefined ? fleetSeatClaudeStartArgs() : []),
+        ...(input.harness === "codex" && remote === undefined ? fleetSeatCodexStartArgs() : []),
         ...modelArgs,
         ...effortArgs,
       ];
@@ -915,9 +945,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw caught;
         }
       }
+      if (fleetSeatBriefStartsSession(input.harness) && brief !== undefined) {
+        if (this.runner.promptAgent === undefined) throw new Error("Herdr cannot submit a first prompt");
+        await this.runner.promptAgent(paneId, brief);
+      }
       const agent = await this.agentWithSession(paneId);
-      if (agent.session === undefined)
-        throw new Error("Herdr started an agent without a durable session identity");
+      if (agent.session === undefined) {
+        throw new Error(
+          fleetSeatBriefStartsSession(input.harness) && brief === undefined
+            ? `${input.harness} reports its session on its first turn; hire it with a brief`
+            : "Herdr started an agent without a durable session identity",
+        );
+      }
       return {
         outcome: "spawned",
         seat: {

@@ -21,6 +21,24 @@ export function fleetSeatClaudeStartArgs(): readonly string[] {
 }
 
 /**
+ * The extra argv a hired Codex pane gets. A Codex that joins the shared
+ * app-server daemon runs its hooks in the daemon's process, not the pane's, so
+ * herdr never learns its session (VUH-1398). A seat runs its own server.
+ */
+export function fleetSeatCodexStartArgs(): readonly string[] {
+  return ["--no-daemon"];
+}
+
+/**
+ * Whether a harness reports its session only once a turn starts, so its brief
+ * has to be that first turn for the hire to have an identity. Codex fires
+ * `SessionStart` from its turn loop, not at launch.
+ */
+export function fleetSeatBriefStartsSession(harness: string): boolean {
+  return harness === "codex";
+}
+
+/**
  * The argv a chosen model becomes on each harness's own CLI (ADR 0185).
  * Undefined means the harness has no wired model flag — a typed failure at
  * hire time, never a silently dropped choice.
