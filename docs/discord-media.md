@@ -138,6 +138,13 @@ That proof requires the user body to be ready, a watch transport with
 separate roles and require separate proofs. The official bot can report that
 someone is sharing but cannot receive the pixels.
 
+With an attachment root configured (`CLANKIE_DISCORD_ATTACHMENT_ROOT`), each
+distinct still is also written to `<root>/shares/` so `observe_share` can attach
+it to a reply. Those files are transient: a still is removed once it is 15
+minutes past its last capture or the directory exceeds 64 MiB, oldest first,
+never while it is one of the four samples currently shown. Stills an earlier
+process left behind are adopted into the same budget at start.
+
 ## Readiness and ownership proof
 
 These facts are deliberately not aliases:

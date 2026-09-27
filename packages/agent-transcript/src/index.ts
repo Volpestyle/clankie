@@ -68,6 +68,16 @@ export interface HerdrSeatTranscript {
 const MAX_ENTRIES = 9_000;
 // ponytail: one tail per watched seat; the fleet is panes, not thousands.
 const MAX_TAILED_TRANSCRIPTS = 32;
+/**
+ * Dedupe keys and call names a long-lived tail remembers. Twice the retained
+ * entries: a duplicate record or a tool result arriving after this many newer
+ * keys is treated as new (a second row, or the generic "tool" name) rather than
+ * holding every key a session ever produced. Whole-file and incremental parses
+ * share the bound, so they still agree.
+ */
+const MAX_REMEMBERED_KEYS = 2 * MAX_ENTRIES;
+/** A cold read of a long session folds in pieces rather than one whole-suffix buffer. */
+const READ_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /**
  * Carried across an incremental read so appended records transform exactly as
@@ -76,9 +86,34 @@ const MAX_TAILED_TRANSCRIPTS = 32;
  * keeps counting from where the previous chunk stopped.
  */
 interface FlatTranscriptState {
-  readonly toolNames: Map<string, string>;
-  readonly seen: Set<string>;
+  readonly toolNames: BoundedMap;
+  readonly seen: BoundedSet;
   index: number;
+}
+
+/** Insertion-ordered; the oldest key leaves first. */
+class BoundedSet {
+  private readonly keys = new Set<string>();
+  public has(key: string): boolean {
+    return this.keys.has(key);
+  }
+  public add(key: string): void {
+    this.keys.add(key);
+    if (this.keys.size > MAX_REMEMBERED_KEYS) this.keys.delete(this.keys.values().next().value!);
+  }
+}
+
+/** Insertion-ordered by last write; the oldest key leaves first. */
+class BoundedMap {
+  private readonly values = new Map<string, string>();
+  public get(key: string): string | undefined {
+    return this.values.get(key);
+  }
+  public set(key: string, value: string): void {
+    this.values.delete(key);
+    this.values.set(key, value);
+    if (this.values.size > MAX_REMEMBERED_KEYS) this.values.delete(this.values.keys().next().value!);
+  }
 }
 
 interface TailedTranscript {
@@ -108,7 +143,7 @@ function tailableAgent(agent: string): boolean {
 }
 
 function freshState(): FlatTranscriptState {
-  return { toolNames: new Map(), seen: new Set(), index: 0 };
+  return { toolNames: new BoundedMap(), seen: new BoundedSet(), index: 0 };
 }
 
 /** Read the harness-native session tree Herdr already identifies for resume. */
@@ -147,10 +182,22 @@ export function readHerdrSeatTranscript(
         };
 
   if (tailableAgent(agent)) {
-    const chunk = readRecordsFrom(path, tail.parsedBytes, stats.size);
-    tail.entries = [...tail.entries, ...flatEntries(agent, chunk.records, tail.state)].slice(-MAX_ENTRIES);
-    tail.state.index += chunk.records.length;
-    tail.parsedBytes += chunk.consumed;
+    let span = READ_CHUNK_BYTES;
+    while (tail.parsedBytes < stats.size) {
+      const to = Math.min(stats.size, tail.parsedBytes + span);
+      const chunk = readRecordsFrom(path, tail.parsedBytes, to);
+      if (chunk.consumed === 0) {
+        // The rest is one unfinished record: wait for the writer.
+        if (to === stats.size) break;
+        // One record longer than a chunk: widen until its newline is in view.
+        span *= 2;
+        continue;
+      }
+      span = READ_CHUNK_BYTES;
+      tail.entries = [...tail.entries, ...flatEntries(agent, chunk.records, tail.state)].slice(-MAX_ENTRIES);
+      tail.state.index += chunk.records.length;
+      tail.parsedBytes += chunk.consumed;
+    }
   } else {
     // ponytail: Claude and Pi re-walk a parent chain that an append can re-root,
     // so they re-parse on change; give them a checkpointed chain to tail too if
@@ -720,7 +767,7 @@ function transcriptTool(
 /** One invocation can appear in both the model item and a harness backend item. */
 function dedupeTools(
   entries: readonly HerdrTranscriptEntry[],
-  seen: Set<string> = new Set(),
+  seen: { has(key: string): boolean; add(key: string): unknown } = new Set(),
 ): HerdrTranscriptEntry[] {
   return entries.filter((entry) => {
     if (entry.type !== "tool") return true;

@@ -27,9 +27,7 @@ import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@cla
  * media, and device pairing live here.
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { dirname } from "node:path";
 import { upgradeWebSocket } from "@hono/node-server";
 import {
   DiscordVoiceTranscriptStore,
@@ -147,9 +145,10 @@ import {
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import {
   DiscordPresenceSessionProjection,
-  deriveDiscordVoiceHistory,
+  DiscordVoiceHistoryProjection,
   discordPresenceDomainEvent,
 } from "./discord-presence-session.ts";
+import { RecentEvents, appendEventLog, loadEventLog, persistable } from "./event-log.ts";
 import {
   DISCORD_USER_SESSION_OPT_IN_STREAM_ID,
   DISCORD_USER_SESSION_OPT_IN_RECORDED,
@@ -459,30 +458,6 @@ export interface ClankieApp {
   close(): void;
 }
 
-/** Recorded heartbeats are pure liveness noise; everything else is worth the disk. */
-function persistable(event: DomainEvent): boolean {
-  return event.type !== "captain.heartbeat";
-}
-
-function readEventLog(path: string): DomainEvent[] {
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return [];
-  }
-  const events: DomainEvent[] = [];
-  for (const line of raw.split("\n")) {
-    if (line.trim().length === 0) continue;
-    try {
-      events.push(JSON.parse(line) as DomainEvent);
-    } catch {
-      continue; // a torn tail line must not stop the boot
-    }
-  }
-  return events;
-}
-
 const AgentSessionSendSchema = z
   .object({
     ref: z.string().min(1).max(200),
@@ -507,19 +482,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   const instanceId = randomUUID();
   const hostDisplayName = dependencies.hostDisplayName ?? hostname();
 
+  // Replayed once below, then dropped: after boot the projections hold state
+  // and `recentEvents` holds only what redelivery checks need.
   const storedEvents: DomainEvent[] = dependencies.eventLogPath
-    ? readEventLog(dependencies.eventLogPath)
+    ? loadEventLog(dependencies.eventLogPath, (message) =>
+        logger.warn({ event: "event_log.compaction" }, message),
+      )
     : [];
-  if (dependencies.eventLogPath) {
-    mkdirSync(dirname(dependencies.eventLogPath), { recursive: true, mode: 0o700 });
-  }
-  const persistedEventIds = new Set(storedEvents.map((event) => event.id));
+  const recentEvents = new RecentEvents(storedEvents);
+  const discordVoiceHistory = new DiscordVoiceHistoryProjection(storedEvents);
   const appendEvent = (event: DomainEvent): void => {
-    storedEvents.push(event);
-    persistedEventIds.add(event.id);
-    if (dependencies.eventLogPath && persistable(event)) {
-      appendFileSync(dependencies.eventLogPath, `${JSON.stringify(event)}\n`, { mode: 0o600 });
-    }
+    // Heartbeats neither reach the disk nor stay in memory: the presence
+    // manager keeps the current lease, and nothing replays liveness noise.
+    if (!persistable(event)) return;
+    recentEvents.add(event);
+    discordVoiceHistory.apply(event);
+    if (dependencies.eventLogPath) appendEventLog(dependencies.eventLogPath, event);
   };
 
   const recordEvent = (
@@ -657,7 +635,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? {}
       : { recordedHeartbeatIntervalMs: dependencies.captainHeartbeatRecordIntervalMs }),
     emit: ({ event }) => {
-      if (!persistedEventIds.has(event.id)) appendEvent(event);
+      if (!recentEvents.has(event.id)) appendEvent(event);
       return Promise.resolve();
     },
     onBackgroundError: (error) => {
@@ -667,6 +645,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     },
   });
+
+  // Every boot projection has consumed the log; release its replay buffer.
+  storedEvents.length = 0;
 
   const app = new Hono();
 
@@ -1391,8 +1372,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const sessionKey = discordPresenceBindingKey(event.data.session);
     return withSerializedLock(discordPresenceSessionLocks, sessionKey, async () => {
       const domainEvent = discordPresenceDomainEvent(event, PROFILE_HASH);
-      if (persistedEventIds.has(event.id)) {
-        const existing = storedEvents.find((candidate) => candidate.id === event.id);
+      if (recentEvents.has(event.id)) {
+        const existing = recentEvents.get(event.id);
         if (existing === undefined || JSON.stringify(existing) !== JSON.stringify(domainEvent)) {
           return context.json({ error: "discord_presence_event_id_conflict" }, 409);
         }
@@ -1437,7 +1418,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     return context.json({
       schemaVersion: 1 as const,
-      stays: deriveDiscordVoiceHistory(storedEvents, parsedLimit),
+      stays: discordVoiceHistory.list(parsedLimit),
     });
   });
 
@@ -3377,7 +3358,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     captainPresence,
     presenceSessions: () => discordPresenceSessions.list(),
     streamWatch: () => discordStreamWatch.current(),
-    voiceHistory: (limit: number) => deriveDiscordVoiceHistory(storedEvents, limit),
+    voiceHistory: (limit: number) => discordVoiceHistory.list(limit),
     recentVoiceSpeech: (limit: number) => {
       const room = discordPresenceSessions
         .list()

@@ -9,16 +9,7 @@ import {
   type LinearActivityEvent,
   type LinearWorkOwner,
 } from "../linear-webhook.ts";
-import {
-  appendFileSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import {
   OPERATOR_CHANNEL_MEMBER_MAX,
@@ -56,6 +47,7 @@ import {
   type ChannelTranscriptEntry,
   type ChannelTurnRecord,
 } from "./channel-turns.ts";
+import { ConversationJournal } from "./conversation-journal.ts";
 import type {
   HerdrSeatTranscript,
   HerdrTranscriptEntry,
@@ -451,6 +443,7 @@ export class ConversationStore {
   private readonly activeInvocations = new Map<string, number>();
 
   private readonly root: string;
+  private readonly journal: ConversationJournal;
   private readonly runner: ConversationRunner;
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
   private readonly sendToSeat: SeatSender | undefined;
@@ -490,6 +483,7 @@ export class ConversationStore {
     personaRunner?: (personaId: string) => ConversationRunner | undefined,
   ) {
     this.root = root;
+    this.journal = new ConversationJournal(root);
     this.runner = runner;
     this.onPrune = onPrune;
     this.sendToSeat = sendToSeat;
@@ -1232,11 +1226,11 @@ export class ConversationStore {
     if (meta === undefined) return;
     const events = this.readEvents(meta.conversationId);
     if (body.type === "activity") {
-      const previous = events.reverse().find((event) => event.type === "activity");
+      const previous = events.findLast((event) => event.type === "activity");
       if (previous?.type === "activity" && previous.phase === body.phase) return;
     }
     if (body.type === "message" && body.role === "agent") {
-      const previous = events.reverse().find((event) => event.type === "message" && event.role === "agent");
+      const previous = events.findLast((event) => event.type === "message" && event.role === "agent");
       if (previous?.type === "message" && previous.role === "agent" && previous.text === body.text) return;
     }
     this.append(meta, body);
@@ -1912,8 +1906,12 @@ export class ConversationStore {
       };
     }
     const limit = request.limit ?? 200;
-    const remaining = events.filter((event) => event.cursor > from);
-    const page = remaining.slice(0, limit);
+    const { events: page, remaining } = this.journal.after(
+      meta.conversationId,
+      from,
+      limit,
+      meta.conversationId === LINEAR_INBOX_CONVERSATION_ID,
+    );
     return {
       schemaVersion: 1,
       status: "page",
@@ -1923,7 +1921,7 @@ export class ConversationStore {
       retainedFromCursor,
       nextCursor: page.length === 0 ? from : page[page.length - 1]!.cursor,
       safeCursor,
-      hasMore: page.length < remaining.length,
+      hasMore: page.length < remaining,
       // The volatile half of the page: what he is typing right now. A surface
       // that ignores it still gets every settled message from `events`.
       ...(this.drafts.has(meta.conversationId) ? { live: this.drafts.get(meta.conversationId)! } : {}),
@@ -2479,17 +2477,10 @@ export class ConversationStore {
       occurredAt: occurredAt ?? new Date().toISOString(),
       ...body,
     } as OperatorConversationStreamEvent;
-    const path = this.eventsPath(meta.conversationId);
     if (meta.conversationId === LINEAR_INBOX_CONVERSATION_ID) {
-      // ponytail: atomic inbox rewrites; use an indexed journal if unread histories make this costly.
-      const prior = this.readEvents(meta.conversationId);
-      writeFileSync(
-        path + ".tmp",
-        [...prior, event].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
-        { mode: 0o600 },
-      );
-      renameSync(path + ".tmp", path);
-    } else appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
+      // ponytail: atomic inbox rewrites; append in place if unread histories make this costly.
+      this.journal.rewrite(meta.conversationId, [...this.readEvents(meta.conversationId), event]);
+    } else this.journal.append(meta.conversationId, event);
     this.counts.set(meta.conversationId, retainedCount + 1);
     this.sequences.set(meta.conversationId, sequence);
     if (body.type === "context") {
@@ -2639,10 +2630,7 @@ export class ConversationStore {
       this.saveMeta(meta);
     }
     meta.retainedFromCursor = dropped[dropped.length - 1]?.cursor ?? meta.retainedFromCursor ?? ZERO_CURSOR;
-    const path = this.eventsPath(meta.conversationId);
-    const temporary = `${path}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${retained.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
-    renameSync(temporary, path);
+    this.journal.rewrite(meta.conversationId, retained);
     this.counts.set(meta.conversationId, retained.length);
     this.saveMeta(meta);
   }
@@ -2708,42 +2696,15 @@ export class ConversationStore {
         ...body,
       } as OperatorConversationStreamEvent;
     });
-    const path = this.eventsPath(meta.conversationId);
-    const temporary = `${path}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${rebuilt.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
-    renameSync(temporary, path);
+    this.journal.rewrite(meta.conversationId, rebuilt);
     this.counts.set(meta.conversationId, rebuilt.length);
     this.sequences.set(meta.conversationId, sequence);
     this.wakeTails(meta.conversationId);
   }
 
-  private readEvents(conversationId: string): OperatorConversationStreamEvent[] {
-    let raw: string;
-    try {
-      raw = readFileSync(this.eventsPath(conversationId), "utf8");
-    } catch (error) {
-      if (
-        conversationId === LINEAR_INBOX_CONVERSATION_ID &&
-        (error as NodeJS.ErrnoException).code !== "ENOENT"
-      )
-        throw error;
-      return [];
-    }
-    return raw
-      .split("\n")
-      .filter((line) => line.length > 0)
-      .flatMap((line) => {
-        try {
-          return [JSON.parse(line) as OperatorConversationStreamEvent];
-        } catch (error) {
-          if (conversationId === LINEAR_INBOX_CONVERSATION_ID) throw error;
-          return [];
-        }
-      });
-  }
-
-  private eventsPath(conversationId: string): string {
-    return join(this.root, conversationId, "events.jsonl");
+  private readEvents(conversationId: string): readonly OperatorConversationStreamEvent[] {
+    // Losing the inbox would silently drop unread Linear work, so it fails loudly.
+    return this.journal.read(conversationId, conversationId === LINEAR_INBOX_CONVERSATION_ID);
   }
 
   private saveMeta(meta: ConversationMeta): void {
@@ -2815,6 +2776,7 @@ export class ConversationStore {
     this.internalRuns.delete(meta.conversationId);
     this.counts.delete(meta.conversationId);
     this.sequences.delete(meta.conversationId);
+    this.journal.forget(meta.conversationId);
     this.onPrune?.(meta.conversationId, meta.scope);
   }
 
@@ -2877,6 +2839,7 @@ export class ConversationStore {
     }
     this.metas.set(conversationId, fresh);
     this.chains.delete(conversationId);
+    this.journal.forget(conversationId);
     this.counts.set(conversationId, 0);
     this.sequences.set(conversationId, boundary);
     this.drafts.delete(conversationId);
