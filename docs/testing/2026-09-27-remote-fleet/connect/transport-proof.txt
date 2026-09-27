@@ -1,0 +1,24 @@
+{"at":"2026-09-27T20:54:10.061Z","endpoint":"/tmp/clankie-swarm-connect-aHxuMl/endpoint.sock","mode":"600"}
+remoteWhileLinked={
+    "splicePids":  [
+                       67744
+                   ],
+    "listeners":  [
+                      {
+                          "LocalAddress":  "127.0.0.1",
+                          "LocalPort":  59363
+                      }
+                  ],
+    "rivalsOwnerRunning":  true
+}
+{"response":{"id":"vuh1381-read-only","error":{"code":"invalid_input","message":"capability must be nonempty text of at most 512 characters"}}}
+{"localSocketRemoved":true}
+remoteAfterClose={
+    "splicePids":  [
+
+                   ],
+    "listeners":  [
+
+                  ],
+    "rivalsOwnerRunning":  true
+}

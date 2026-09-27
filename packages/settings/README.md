@@ -113,7 +113,10 @@ owner changes it in Discord with `/clankie tools mode:on|off|status`.
 ## Swarm connections
 
 `swarm.connections` retains named coordinator endpoints, verified actor/scope,
-conversation ownership, enabled state and a broker reference. Capabilities are
+conversation ownership, enabled state and a broker reference. An optional `ssh`
+names an enabled execution fleet; `endpoint` then names its remote coordinator
+socket or Windows pipe. The fleet and remote endpoint are pinned; ephemeral
+local relay sockets are never persisted as coordinator identity. Capabilities are
 absent from settings. Configure through `clankie swarm connect PRIVATE.json` or
 `disconnect ID` (the TUI exposes the same commands); the service verifies identity
 and prevents a retained connection ID from redirecting outstanding work.

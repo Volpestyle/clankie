@@ -286,213 +286,241 @@ test("real MCP delivers isolated inboxes, explicit acknowledgment and stable ide
   });
 }, 30000);
 
-test("named external coordinators retain independent work, doctrine and grants across restart", async () => {
-  const { SettingsStore } = await import("@clankie/settings");
-  const { FileCredentialStore } = await import("@clankie/credential-broker");
-  const root = await mkdtemp("/tmp/clankie-external-");
-  roots.push(join(root, "clankie"), root);
-  const settings = new SettingsStore(join(root, "settings.json"));
-  const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  const ownerPath = join(
-    dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json")),
-    "dist/coordination/owner-cli.js",
-  );
-  const enroll = (name: string, hostSessionId: string) =>
-    enrollRuntime({
-      stateDirectory: join(root, name),
-      nodePath: process.execPath,
-      ownerPath,
-      host: "pi",
-      hostSessionId,
-      incarnation: "first",
-      identity: { directory: root, fileRoot: root, projectRoot: root, profile: "external" },
-    });
-  const alpha = await enroll("alpha", "lead");
-  const beta = await enroll("beta", "lead");
-  expect(alpha.scope).toBe(beta.scope); // Same project/profile is not coordinator identity.
-  const worker = await enroll("alpha", "user-started-terminal");
-  const peer = await CoordinationClient.connect(
-    worker.environment.SWARM_COORDINATOR_ENDPOINT,
-    worker.environment.SWARM_SESSION_CAPABILITY,
-  );
-  const messages: string[] = [];
-  let ready = false;
-  const open = async () => {
-    const host = new SwarmHost({
-      stateDirectory: join(root, "clankie"),
-      connections: { settings, credentials },
-      canDispatch: () => false,
-      warn: () => {},
-    });
-    hosts.push(host);
-    await host.start({
-      ready: () => ready,
-      wake: async (_id, message) => {
-        messages.push(message);
-      },
-      instructions: async (binding) => `${binding.conversationId}: owner doctrine`,
-    });
-    return host;
-  };
-  const caller = async (host: SwarmHost, conversationId = "global-default") => {
-    const tools = await host.tools({ conversationId, cwd: root });
-    return async (name: string, args: Record<string, unknown>) => {
-      const tool = tools.find((tool) => tool.name === name)!;
-      expect(Value.Check(tool.parameters, args)).toBe(true);
-      return JSON.parse(
-        ((await tool.execute("test", args, undefined, undefined, {} as never)).content[0] as { text: string })
-          .text,
-      ).data;
-    };
-  };
-  const input = (id: string, enrolled: typeof alpha) => ({
-    id,
-    conversationId: "global-default",
-    endpoint: enrolled.environment.SWARM_COORDINATOR_ENDPOINT,
-    capability: enrolled.environment.SWARM_SESSION_CAPABILITY,
-  });
-  let host = await open();
-  try {
-    await host.connect(input("alpha", alpha), root);
-    await host.connect(input("beta", beta), root);
-    const contact = (await host.contacts()).find(
-      (entry) => entry.contact.connectionId === "alpha" && entry.contact.actor === worker.actor,
-    )!.contact;
-    await expect(
-      host.sendContact({ ...contact, connectionId: "beta" }, "wrong owner", "cross-contact", "thread"),
-    ).rejects.toThrow("coordinator changed");
-    await host.sendContact(contact, "Direct contact", "direct-contact", "contact-thread");
-    const direct = (await peer.request({
-      op: "command",
-      command: { id: "direct-fetch", type: "inbox.fetch", payload: { consumer: "test" } },
-    })) as { value: { deliveries: Array<{ message: { body: string; id: string }; leaseToken: string }> } };
-    expect(direct.value.deliveries[0]!.message.body).toBe("Direct contact");
-    await peer.request({
-      op: "command",
-      command: {
-        id: "direct-ack",
-        type: "inbox.ack",
-        payload: {
-          messageId: direct.value.deliveries[0]!.message.id,
-          leaseToken: direct.value.deliveries[0]!.leaseToken,
-        },
-      },
-    });
-    ready = true;
-    await peer.request({
-      op: "command",
-      command: {
-        id: "first-contact",
-        type: "message.send",
-        payload: {
-          recipient: alpha.actor,
-          threadId: "introduction",
-          kind: "question",
-          body: "Already listening?",
-        },
-      },
-    });
-    await expect.poll(() => messages.length).toBe(1);
-    expect(messages[0]).toContain("connection=alpha");
-    ready = false;
-    const firstEnvelope = JSON.parse(messages[0]!.split("\n").slice(1).join("\n"));
-    const call = await caller(host);
-    await call("swarm_inbox", {
-      connection: "alpha",
-      action: "ack",
-      commandId: "ack-first",
-      messageId: firstEnvelope.message.id,
-      leaseToken: firstEnvelope.leaseToken,
-    });
-    messages.length = 0;
-    expect((await call("swarm_sync", { connection: "alpha" })).actor).toBe(alpha.actor);
-    expect((await call("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
-    await expect(call("swarm_sync", { connection: "missing" })).rejects.toThrow("unavailable");
-    const other = await caller(host, "other-project");
-    await expect(other("swarm_sync", { connection: "alpha" })).rejects.toThrow("another conversation");
-    const work = {
-      commandId: "same-command",
-      title: "Review existing work",
-      contract: {
-        objective: "Review",
-        worktree: root,
-        acceptanceCriteria: ["Checked"],
-        expectedArtifacts: [],
-        constraints: [],
-      },
-    };
-    const a = await call("swarm_assign", { ...work, connection: "alpha" });
-    const b = await call("swarm_assign", { ...work, connection: "beta" });
-    expect(a.value.task.id).not.toBe(b.value.task.id);
-    const taskId = a.value.task.id;
-    const detail = await call("swarm_find", { connection: "alpha", kind: "task", taskId });
-    const instruction = await call("swarm_evidence", {
-      connection: "alpha",
-      action: "read",
-      commandId: "read",
-      artifactId: detail.contract.instructions[0].split("/").at(-1),
-    });
-    expect(instruction.text).toBe("global-default: owner doctrine");
-    await expect(call("swarm_find", { connection: "beta", kind: "task", taskId })).rejects.toThrow();
-    await peer.request({
-      op: "command",
-      command: { id: "claim", type: "task.claim", payload: { taskId, expectedVersion: 1 } },
-    });
-    expect(await host.assignment("global-default", taskId, worker.actor, "alpha")).toMatchObject({
-      connectionId: "alpha",
-      actor: worker.actor,
-    });
-    await expect(host.assignment("global-default", taskId, worker.actor, "beta")).rejects.toThrow();
-    expect(
-      await host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY, "alpha"),
-    ).toEqual({ actor: worker.actor, scope: worker.scope });
-    await expect(
-      host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY, "beta"),
-    ).rejects.toThrow();
-    await expect(
-      host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY),
-    ).rejects.toThrow();
-    await expect(host.connect(input("alpha", beta), root)).rejects.toThrow("pinned");
-    expect(await readFile(settings.path, "utf8")).not.toContain(alpha.environment.SWARM_SESSION_CAPABILITY);
-    await host.close();
-    hosts.splice(hosts.indexOf(host), 1);
-    host = await open();
-    const resumed = await caller(host);
-    expect((await resumed("swarm_assign", { ...work, connection: "alpha" })).value.task.id).toBe(taskId);
-    expect((await resumed("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
-    await peer.request({
-      op: "command",
-      command: {
-        id: "question",
-        type: "message.send",
-        payload: {
-          recipient: alpha.actor,
-          threadId: "existing-work",
-          kind: "question",
-          body: "Review complete?",
-        },
-      },
-    });
-    ready = true;
-    host.settled("global-default");
-    await expect.poll(() => messages.length).toBe(1);
-    expect(messages[0]).toContain("connection=alpha");
-    await host.disconnect("alpha");
-    expect((await host.contacts()).some((entry) => entry.contact.connectionId === "alpha")).toBe(false);
-    await expect(host.sendContact(contact, "disconnected", "disabled-contact", "thread")).rejects.toThrow(
-      "disabled",
+test.each([false, true])(
+  "external coordinator isolation and restart (SSH: %s)",
+  async (ssh) => {
+    const { SettingsStore } = await import("@clankie/settings");
+    const { FileCredentialStore } = await import("@clankie/credential-broker");
+    const root = await mkdtemp("/tmp/clankie-external-");
+    roots.push(join(root, "clankie"), root);
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const credentials = new FileCredentialStore(join(root, "credentials.json"));
+    const ownerPath = join(
+      dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json")),
+      "dist/coordination/owner-cli.js",
     );
-    await expect(resumed("swarm_sync", { connection: "alpha" })).rejects.toThrow("disabled");
-    await expect(host.assignment("global-default", taskId, worker.actor, "alpha")).rejects.toThrow(
-      "disabled",
+    const enroll = (name: string, hostSessionId: string) =>
+      enrollRuntime({
+        stateDirectory: join(root, name),
+        nodePath: process.execPath,
+        ownerPath,
+        host: "pi",
+        hostSessionId,
+        incarnation: "first",
+        identity: { directory: root, fileRoot: root, projectRoot: root, profile: "external" },
+      });
+    const alpha = await enroll("alpha", "lead");
+    const beta = await enroll("beta", "lead");
+    expect(alpha.scope).toBe(beta.scope); // Same project/profile is not coordinator identity.
+    const worker = await enroll("alpha", "user-started-terminal");
+    const peer = await CoordinationClient.connect(
+      worker.environment.SWARM_COORDINATOR_ENDPOINT,
+      worker.environment.SWARM_SESSION_CAPABILITY,
     );
-    expect((await resumed("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
-    await host.connect(input("alpha", alpha), root);
-    expect((await resumed("swarm_sync", { connection: "alpha" })).actor).toBe(alpha.actor);
-  } finally {
-    peer.close();
-  }
-}, 30_000);
+    const messages: string[] = [];
+    let ready = false;
+    const resolved: string[] = [];
+    const closed: Array<string | undefined> = [];
+    const open = async () => {
+      const host = new SwarmHost({
+        stateDirectory: join(root, "clankie"),
+        connections: {
+          settings,
+          credentials,
+          transport: {
+            endpoint: async (connection) => {
+              resolved.push(connection.id);
+              return connection.endpoint;
+            },
+            close: (id) => {
+              closed.push(id);
+            },
+          },
+        },
+        canDispatch: () => false,
+        warn: () => {},
+      });
+      hosts.push(host);
+      await host.start({
+        ready: () => ready,
+        wake: async (_id, message) => {
+          messages.push(message);
+        },
+        instructions: async (binding) => `${binding.conversationId}: owner doctrine`,
+      });
+      return host;
+    };
+    const caller = async (host: SwarmHost, conversationId = "global-default") => {
+      const tools = await host.tools({ conversationId, cwd: root });
+      return async (name: string, args: Record<string, unknown>) => {
+        const tool = tools.find((tool) => tool.name === name)!;
+        expect(Value.Check(tool.parameters, args)).toBe(true);
+        return JSON.parse(
+          (
+            (await tool.execute("test", args, undefined, undefined, {} as never)).content[0] as {
+              text: string;
+            }
+          ).text,
+        ).data;
+      };
+    };
+    const input = (id: string, enrolled: typeof alpha) => ({
+      id,
+      conversationId: "global-default",
+      endpoint: enrolled.environment.SWARM_COORDINATOR_ENDPOINT,
+      capability: enrolled.environment.SWARM_SESSION_CAPABILITY,
+      ...(ssh && id === "alpha" ? { ssh: "pc" } : {}),
+    });
+    let host = await open();
+    try {
+      await host.connect(input("alpha", alpha), root);
+      await host.connect(input("beta", beta), root);
+      const contact = (await host.contacts()).find(
+        (entry) => entry.contact.connectionId === "alpha" && entry.contact.actor === worker.actor,
+      )!.contact;
+      await expect(
+        host.sendContact({ ...contact, connectionId: "beta" }, "wrong owner", "cross-contact", "thread"),
+      ).rejects.toThrow("coordinator changed");
+      await host.sendContact(contact, "Direct contact", "direct-contact", "contact-thread");
+      const direct = (await peer.request({
+        op: "command",
+        command: { id: "direct-fetch", type: "inbox.fetch", payload: { consumer: "test" } },
+      })) as { value: { deliveries: Array<{ message: { body: string; id: string }; leaseToken: string }> } };
+      expect(direct.value.deliveries[0]!.message.body).toBe("Direct contact");
+      await peer.request({
+        op: "command",
+        command: {
+          id: "direct-ack",
+          type: "inbox.ack",
+          payload: {
+            messageId: direct.value.deliveries[0]!.message.id,
+            leaseToken: direct.value.deliveries[0]!.leaseToken,
+          },
+        },
+      });
+      ready = true;
+      await peer.request({
+        op: "command",
+        command: {
+          id: "first-contact",
+          type: "message.send",
+          payload: {
+            recipient: alpha.actor,
+            threadId: "introduction",
+            kind: "question",
+            body: "Already listening?",
+          },
+        },
+      });
+      await expect.poll(() => messages.length).toBe(1);
+      expect(messages[0]).toContain("connection=alpha");
+      ready = false;
+      const firstEnvelope = JSON.parse(messages[0]!.split("\n").slice(1).join("\n"));
+      const call = await caller(host);
+      await call("swarm_inbox", {
+        connection: "alpha",
+        action: "ack",
+        commandId: "ack-first",
+        messageId: firstEnvelope.message.id,
+        leaseToken: firstEnvelope.leaseToken,
+      });
+      messages.length = 0;
+      expect((await call("swarm_sync", { connection: "alpha" })).actor).toBe(alpha.actor);
+      expect((await call("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
+      await expect(call("swarm_sync", { connection: "missing" })).rejects.toThrow("unavailable");
+      const other = await caller(host, "other-project");
+      await expect(other("swarm_sync", { connection: "alpha" })).rejects.toThrow("another conversation");
+      const work = {
+        commandId: "same-command",
+        title: "Review existing work",
+        contract: {
+          objective: "Review",
+          worktree: root,
+          acceptanceCriteria: ["Checked"],
+          expectedArtifacts: [],
+          constraints: [],
+        },
+      };
+      const a = await call("swarm_assign", { ...work, connection: "alpha" });
+      const b = await call("swarm_assign", { ...work, connection: "beta" });
+      expect(a.value.task.id).not.toBe(b.value.task.id);
+      const taskId = a.value.task.id;
+      const detail = await call("swarm_find", { connection: "alpha", kind: "task", taskId });
+      const instruction = await call("swarm_evidence", {
+        connection: "alpha",
+        action: "read",
+        commandId: "read",
+        artifactId: detail.contract.instructions[0].split("/").at(-1),
+      });
+      expect(instruction.text).toBe("global-default: owner doctrine");
+      await expect(call("swarm_find", { connection: "beta", kind: "task", taskId })).rejects.toThrow();
+      await peer.request({
+        op: "command",
+        command: { id: "claim", type: "task.claim", payload: { taskId, expectedVersion: 1 } },
+      });
+      expect(await host.assignment("global-default", taskId, worker.actor, "alpha")).toMatchObject({
+        connectionId: "alpha",
+        actor: worker.actor,
+      });
+      await expect(host.assignment("global-default", taskId, worker.actor, "beta")).rejects.toThrow();
+      expect(
+        await host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY, "alpha"),
+      ).toEqual({ actor: worker.actor, scope: worker.scope });
+      await expect(
+        host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY, "beta"),
+      ).rejects.toThrow();
+      await expect(
+        host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY),
+      ).rejects.toThrow();
+      await expect(host.connect(input("alpha", beta), root)).rejects.toThrow("pinned");
+      expect(await readFile(settings.path, "utf8")).not.toContain(alpha.environment.SWARM_SESSION_CAPABILITY);
+      if (ssh) expect(resolved).toContain("alpha");
+      else expect(resolved).toEqual([]);
+      const resolutionCount = resolved.length;
+      await host.close();
+      expect(closed).toContain(undefined);
+      hosts.splice(hosts.indexOf(host), 1);
+      host = await open();
+      if (ssh) expect(resolved.length).toBeGreaterThan(resolutionCount);
+      const resumed = await caller(host);
+      expect((await resumed("swarm_assign", { ...work, connection: "alpha" })).value.task.id).toBe(taskId);
+      expect((await resumed("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
+      await peer.request({
+        op: "command",
+        command: {
+          id: "question",
+          type: "message.send",
+          payload: {
+            recipient: alpha.actor,
+            threadId: "existing-work",
+            kind: "question",
+            body: "Review complete?",
+          },
+        },
+      });
+      ready = true;
+      host.settled("global-default");
+      await expect.poll(() => messages.length).toBe(1);
+      expect(messages[0]).toContain("connection=alpha");
+      await host.disconnect("alpha");
+      expect(closed).toContain("alpha");
+      expect((await host.contacts()).some((entry) => entry.contact.connectionId === "alpha")).toBe(false);
+      await expect(host.sendContact(contact, "disconnected", "disabled-contact", "thread")).rejects.toThrow(
+        "disabled",
+      );
+      await expect(resumed("swarm_sync", { connection: "alpha" })).rejects.toThrow("disabled");
+      await expect(host.assignment("global-default", taskId, worker.actor, "alpha")).rejects.toThrow(
+        "disabled",
+      );
+      expect((await resumed("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
+      await host.connect(input("alpha", alpha), root);
+      expect((await resumed("swarm_sync", { connection: "alpha" })).actor).toBe(alpha.actor);
+    } finally {
+      peer.close();
+    }
+  },
+  30_000,
+);
 
 test("updating Clankie's worker bridge preserves other configured execution routes", async () => {
   const root = await mkdtemp("/tmp/clankie-swarm-routes-");

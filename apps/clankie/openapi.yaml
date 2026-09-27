@@ -704,7 +704,7 @@ paths:
       tags: [Operator]
       operationId: connectSwarmCoordinator
       summary: Connect an externally enrolled Clankie session
-      description: Verifies the actor and scope at an explicit local socket, including an owner-managed SSH socket forward. Capabilities stay in the broker. A retained ID cannot change coordinator identity or owning conversation. Maximum body size is 16 KiB.
+      description: Verifies the actor and scope at an explicit local socket, or a remote socket/named pipe through the optional registered SSH fleet. The service supervises that private SSH relay without managing the external owner. Capabilities stay in the broker. A retained ID cannot change endpoint, fleet, coordinator identity or owning conversation. Maximum body size is 16 KiB.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -722,7 +722,18 @@ paths:
                     description: External name; embedded is reserved,
                   }
                 conversationId: { type: string, minLength: 1, maxLength: 256 }
-                endpoint: { type: string, pattern: "^/", maxLength: 4096 }
+                endpoint:
+                  {
+                    type: string,
+                    maxLength: 4096,
+                    description: Absolute Unix socket path or Windows named pipe (the latter requires ssh). Remote when ssh is supplied.,
+                  }
+                ssh:
+                  {
+                    type: string,
+                    pattern: "^[a-z][a-z0-9-]{0,63}$",
+                    description: Registered enabled SSH fleet; omit for a local endpoint.,
+                  }
                 capability: { type: string, minLength: 32, maxLength: 512, writeOnly: true }
       responses:
         "200": { description: Verified actor, scope, endpoint, conversation and non-secret broker reference }

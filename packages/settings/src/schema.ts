@@ -429,7 +429,22 @@ export const SwarmConnectionSchema = z
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
       .refine((id) => id !== "embedded"),
     conversationId: z.string().min(1).max(256),
-    endpoint: z.string().startsWith("/").max(4096),
+    endpoint: z
+      .string()
+      .max(4096)
+      .refine(
+        (value) =>
+          !value.includes("\0") &&
+          !value.includes("\r") &&
+          !value.includes("\n") &&
+          (value.startsWith("/") || /^\\\\\.\\pipe\\[^\\/]+$/u.test(value)),
+        "Expected an absolute Unix socket or Windows named pipe",
+      ),
+    /** Registered SSH fleet; endpoint is on that machine when present. */
+    ssh: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
     scope: z.string().min(1).max(256),
     actor: z.string().min(1).max(256),
     credential: z.string().min(1).max(128),

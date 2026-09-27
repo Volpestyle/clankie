@@ -65,6 +65,46 @@ flowchart LR
   port -. "ssh channel" .-> ssh --> owner
 ```
 
+## Oversight of an independent project coordinator
+
+Criterion 4 was rescoped on 2026-09-27: the PC project lead keeps its existing
+coordinator, workers and dispatch. Clankie joins that coordinator as one extra
+peer through a named connection with a Clankie-only capability. The embedded
+coordinator remains the authority for Clankie's own fleets; independent project
+coordinators are not federated or migrated into it.
+
+The reverse transport lives alongside the fleet relay. `swarm connect` accepts
+an optional registered SSH fleet (`ssh`) and the coordinator's remote `endpoint`.
+One dedicated SSH master starts a stdlib Node splice, which binds an ephemeral
+port on remote `127.0.0.1` and connects to the existing pipe/socket. After it
+reports its port, `ssh -O forward -L` installs a local Unix-socket forward on that
+same master. The local socket is 0600 inside a process-private 0700 directory;
+the master socket is private too. Nothing is installed on the remote machine.
+
+The remote loopback listener is reachable by other processes on that host.
+Swarm still authenticates every operation; no capability travels in SSH argv,
+relay stdin, settings, or logs. The splice exits when SSH stdin closes. The
+service retries a lost link with backoff, refreshes local clients after recovery,
+and removes its sockets on disconnect/shutdown. Reconnecting never enrolls a
+session, restarts the remote owner, re-enrolls workers, or replays an assignment.
+The connection pins the remote endpoint and fleet alongside actor/scope and
+conversation. Manual local socket forwards retain their operator-owned lifecycle.
+
+```mermaid
+flowchart LR
+  subgraph mac["Mac"]
+    clankie["Clankie: named connection"] --> local["Private Unix socket, 0600"]
+    local --> forward["SSH local forward"]
+  end
+  subgraph pc["Project machine"]
+    splice["Temporary Node splice<br/>127.0.0.1:allocated port"] --> owner["Existing coordinator pipe/socket"]
+    lead["Project lead and workers"] --> owner
+  end
+  forward -. "Same SSH link starts splice" .-> splice
+```
+
+[Read-only Windows transport proof and prepared enrollment](../testing/2026-09-27-remote-fleet/connect/README.md).
+
 ## Windows execution sessions
 
 The first PC proof uses its existing `default` Herdr server in Windows
@@ -81,8 +121,8 @@ process session ID. A successful SSH call or an Active console in
 A plain shell pane cannot satisfy `agent prompt`, `agent wait`, or an agent
 completion watch; prepare a recognized disposable agent before that proof.
 
-The [lead handoff runbook](../fleet-lead-handoff.md) is a scheduled procedure,
-not authorization to retire the PC lead during verification.
+The [lead handoff runbook](../fleet-lead-handoff.md) is an optional procedure,
+not part of the rescoped oversight proof or authorization to retire the PC lead.
 
 ## Alternatives
 

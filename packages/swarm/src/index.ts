@@ -4,6 +4,7 @@ import {
   connectionTarget,
   connectExternal,
   inspectConnection,
+  resolveConnectionEndpoint,
   type ConnectionStores,
 } from "./connections.ts";
 export { SwarmConnectSchema } from "./connections.ts";
@@ -108,7 +109,12 @@ const SavedBindingSchema = z
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
       .optional(),
     target: z
-      .object({ endpoint: z.string().min(1), scope: z.string().min(1), actor: z.string().min(1) })
+      .object({
+        endpoint: z.string().min(1),
+        scope: z.string().min(1),
+        actor: z.string().min(1),
+        ssh: z.string().optional(),
+      })
       .strict()
       .optional(),
   })
@@ -246,10 +252,19 @@ export class SwarmHost {
       throw new Error("Swarm connection identity changed; outstanding work cannot be redirected");
     const credential = await stores.credentials.get(connection.credential);
     if (credential?.type !== "api") throw new Error("Swarm connection credential unavailable");
+    const endpoint = await resolveConnectionEndpoint(stores, connection);
     return {
       connection,
+      endpoint,
       capability: credential.key,
-      signature: hash(JSON.stringify([connectionTarget(connection), credential.key])),
+      signature: hash(
+        JSON.stringify([
+          connectionTarget(connection),
+          credential.key,
+          endpoint,
+          stores.transport?.generation?.(connection.id),
+        ]),
+      ),
     };
   }
 
@@ -279,6 +294,7 @@ export class SwarmHost {
       };
     });
     await this.closeConnection(id);
+    stores.transport?.close(id);
     if (credential) await stores.credentials.delete(credential);
   }
 
@@ -298,14 +314,14 @@ export class SwarmHost {
   ): Promise<Session> {
     let enrolled;
     if (external) {
-      const { connection, capability } = external;
-      const identity = await inspectConnection(connection.endpoint, capability);
+      const { connection, capability, endpoint } = external;
+      const identity = await inspectConnection(endpoint, capability);
       if (!isDeepStrictEqual(identity, { actor: connection.actor, scope: connection.scope }))
         throw new Error("Swarm connection identity does not match its configured actor and scope");
       enrolled = {
         ...identity,
         environment: {
-          SWARM_COORDINATOR_ENDPOINT: connection.endpoint,
+          SWARM_COORDINATOR_ENDPOINT: endpoint,
           SWARM_SESSION_CAPABILITY: capability,
           SWARM_SCOPE: connection.scope,
           SWARM_SKILL_PATH: join(packageRoot, "skills/swarm-mcp/SKILL.md"),
@@ -1090,6 +1106,7 @@ export class SwarmHost {
     this.closed = true;
     await Promise.allSettled([...this.sessions.values()].map(async (pending) => (await pending).close()));
     await this.saveTail;
+    this.options.connections?.transport?.close();
   }
 }
 

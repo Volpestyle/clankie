@@ -129,16 +129,23 @@ that blocks stays blocked. Neither falls back to stream.
 
 `clankie swarm connect PRIVATE.json` verifies a dedicated enrolled Clankie session
 at an existing coordinator. Settings retain its ID, actor, scope, owning
-conversation and local endpoint; the broker retains the capability. The external
-owner and its agents need no Herdr integration with Clankie. Local Unix sockets
-and operator-managed SSH socket forwards use the same existing authenticated
-transport; no network server or speculative transport framework is added.
+conversation, endpoint and optional SSH fleet; the broker retains the capability.
+The external owner and its agents need no Herdr integration with Clankie. Local
+Unix sockets and operator-managed forwards still work. With `ssh: "pc"`, the
+endpoint is a remote Unix socket or Windows named pipe. The service owns a
+private local socket forwarded through SSH to a temporary remote loopback-only
+Node splice, started by that same SSH connection. Nothing is installed, and the
+splice holds no credentials or owner authority. It exits with the link; the
+service retries with backoff and removes its sockets on disconnect/shutdown.
+Remote loopback is accessible to other local processes; Swarm capability checks
+remain the authentication boundary. A named connection can join a project lead
+as an oversight peer while that lead keeps its coordinator, workers and dispatch.
 [CLI setup](../../docs/cli.md#swarm-coordination) owns the import-file contract.
 
 Each of the nine mounted tools accepts `connection: "id"`. The default is the
 embedded coordinator. One conversation can lead several named connections, each
 with its own actor/inbox and retained assignment instruction snapshots. A name
-cannot redirect existing work to another endpoint, actor, scope or conversation.
+cannot redirect existing work to another endpoint, SSH fleet, actor, scope or conversation.
 Credentials and configured identity are rechecked before calls and wake admission;
 connection loss never creates or selects another owner. Disconnect retains the
 identity and work binding, closes local sessions and removes the capability.

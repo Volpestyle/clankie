@@ -49,10 +49,18 @@ it("imports coordinator capabilities only for an operator and an existing conver
     expect((await post({ ...input, endpoint: "https://arbitrary.example" })).status).toBe(400);
     expect((await post({ ...input, id: "embedded" })).status).toBe(400);
     expect((await post({ ...input, capability: "x".repeat(20_000) })).status).toBe(413);
+    const remote = { ...input, ssh: "pc", endpoint: String.raw`\\.\pipe\swarm-mcp-owner` };
+    expect((await post({ ...remote, ssh: undefined })).status).toBe(400);
+    expect((await post({ ...remote, ssh: "-bad" })).status).toBe(400);
+    expect((await post({ ...remote, endpoint: "127.0.0.1:4321" })).status).toBe(400);
+    expect((await post(remote)).status).toBe(200);
     const response = await post(input);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(connection);
-    expect(imported).toEqual([{ value: input, cwd: "/tmp" }]);
+    expect(imported).toEqual([
+      { value: remote, cwd: "/tmp" },
+      { value: input, cwd: "/tmp" },
+    ]);
     expect((await clankie.app.request("/v1/swarm/connections/team", { method: "DELETE" })).status).toBe(401);
     expect(
       (

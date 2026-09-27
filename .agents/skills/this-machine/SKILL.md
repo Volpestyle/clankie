@@ -400,7 +400,12 @@ A replacement generation has a new contact; never redirect an old thread by name
 For coordination diagnostics, run `clankie swarm status` or `connections`.
 `swarm connect PRIVATE.json` imports a dedicated externally enrolled Clankie session;
 `disconnect ID` disables it without stopping its owner or moving work. Use the
-CLI contract for the private file and tunnel setup. Every `swarm_*` call accepts
+CLI contract for the private file and tunnel setup. An optional `ssh: "fleet"`
+uses that registered fleet to reach the remote `endpoint` (Unix socket or Windows
+named pipe). Clankie supervises a private SSH relay; the project owner and its
+workers stay in place. Discover the real endpoint and have the project launcher
+issue a Clankie-only capability; never reuse its launcher secret or a worker
+session. Every `swarm_*` call accepts
 `connection: "name"`; omit for embedded. Incoming wakes name their connection.
 Keep it on replies, evidence reads and retries. External grants use
 `swarm.connectionId`; enrolled worker bridges set `CLANKIE_SWARM_CONNECTION`.

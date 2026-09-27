@@ -54,7 +54,7 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
-import { FleetRelays } from "./fleet-coordinator-relay.ts";
+import { ExternalCoordinatorRelays, FleetRelays } from "./fleet-coordinator-relay.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
@@ -508,9 +508,13 @@ const runtimes = new ExecutionConnections({
 });
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
+const externalRelays = new ExternalCoordinatorRelays({
+  fleets: () => runtimes.fleets(),
+  log: (message) => logger.info({ event: "swarm.relay" }, message),
+});
 const swarm = new SwarmHost({
   stateDirectory: join(stateRoot, "swarm"),
-  connections: { settings: settingsStore, credentials: operatorCredentialStore },
+  connections: { settings: settingsStore, credentials: operatorCredentialStore, transport: externalRelays },
   socketPath: herdr.binding()?.socketPath,
   runtimeConnections: () => runtimes.list(),
   dispatchBudget: () => runtimes.dispatchBudget(),

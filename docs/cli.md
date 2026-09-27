@@ -1704,8 +1704,37 @@ The regular file must be private (0600) and at most 16 KiB. Its exact shape is:
 Use a session enrolled for Clankie, distinct from worker sessions. The service
 verifies its actor/scope and stores only a broker reference in settings. This
 connects to the refactored coordinator protocol, not the legacy database API.
-An SSH Unix-socket forward can provide the local endpoint for a remote owner;
-Clankie does not start, modify or stop that external owner. Provisioning uses
+An operator-managed SSH Unix-socket forward can provide the local endpoint.
+Alternatively, name a registered, enabled SSH fleet with `ssh`; `endpoint` then
+names the existing coordinator socket or Windows named pipe on that machine:
+
+```json
+{
+  "id": "rivals",
+  "conversationId": "global-default",
+  "ssh": "pc",
+  "endpoint": "\\\\.\\pipe\\swarm-mcp-<owner-endpoint-hash>",
+  "capability": "<dedicated Clankie session capability from the PC launcher>"
+}
+```
+
+Discover the endpoint from that coordinator; do not guess its hash. This uses
+the fleet's SSH target and shell, without calling Herdr. For each connection,
+Clankie starts a stdlib `node -e` splice on the remote machine, listening only
+on `127.0.0.1` at an OS-allocated port and connecting to the existing endpoint.
+The same SSH connection carries a local forward from a private Mac/Linux Unix
+socket (0600, inside a process-private 0700 directory). Nothing is installed.
+The remote splice exits when SSH stdin closes. The loopback listener is reachable
+by other users/processes on that remote machine; the coordinator still requires
+a session capability for every operation. The splice holds no credentials.
+
+Clankie supervises the link with bounded backoff, restores it for saved bindings
+on service start, and refreshes its local clients after reconnection. Disconnect
+and service shutdown close the link and remove its local sockets. A failed
+import closes a newly created link. Existing manually forwarded local endpoints
+remain operator-managed. Clankie does not start, modify or stop the external
+owner. An oversight peer leaves the project lead's dispatch authority and workers
+in place; joining a coordinator does not require a lead handoff. Provisioning uses
 that coordinator's configured routes. A configured connection belongs to one
 conversation; that conversation can address several independent coordinators.
 Import starts inbox listening immediately, including before its next model turn.
@@ -1715,15 +1744,14 @@ Pass `connection: "project-team"` on any `swarm_*` call. Omit it (or use
 replying, acknowledging, reading evidence or retrying an intent. Incoming wake
 context names the connection. Instruction snapshots come from the selected
 Clankie conversation and stay pinned to that coordinator's work. Reusing a
-connection ID for another actor, scope, endpoint or conversation is refused.
+connection ID for another actor, scope, endpoint, SSH fleet or conversation is refused.
 
 `clankie swarm disconnect project-team` disables access, closes its sessions and
 removes the brokered capability. External workers and work records stay with
 their owner. Import a valid capability for the same retained identity to reconnect;
 use a new ID for a different identity. A disconnected or unreachable connection
-never falls back to another coordinator. Endpoint/tunnel lifecycle remains the
-operator's selected runtime's responsibility; connection loss does not enroll
-another session or replay uncertain assignments.
+never falls back to another coordinator. Connection loss does not enroll another
+session or replay uncertain assignments.
 
 For grants on external work, add `swarm.connectionId` to the issuance request.
 Enrolled workers use `CLANKIE_SWARM_CONNECTION=project-team` with
