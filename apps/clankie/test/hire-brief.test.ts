@@ -42,7 +42,13 @@ if (group === "tab" && command === "create") {
 } else if (group === "agent" && command === "prompt") {
   const pane = find(args[2]);
   pane.agent_status = "working";
-  pane.agent_session = { source: "herdr:" + pane.agent, kind: "id", value: "first-turn-session" };
+  const delay = Number(process.env.FAKE_HERDR_FIRST_TURN_DELAY_MS ?? 0);
+  if (delay > 0) {
+    // The turn has started but is still connecting MCP servers.
+    pane.session_at = Date.now() + delay;
+  } else {
+    pane.agent_session = { source: "herdr:" + pane.agent, kind: "id", value: "first-turn-session" };
+  }
   save();
   out({ agent: pane });
 } else if (group === "agent" && command === "get") {
@@ -50,6 +56,11 @@ if (group === "tab" && command === "create") {
   if (pane === undefined) {
     process.stderr.write("agent target " + args[2] + " not found");
     process.exit(1);
+  }
+  if (pane.session_at !== undefined && Date.now() >= pane.session_at) {
+    pane.agent_session = { source: "herdr:" + pane.agent, kind: "id", value: "first-turn-session" };
+    delete pane.session_at;
+    save();
   }
   out({ agent: pane });
 } else if (group === "agent" && command === "wait") {
@@ -75,6 +86,7 @@ afterEach(async () => {
   delete process.env.FAKE_HERDR_STATE;
   delete process.env.FAKE_HERDR_LOG;
   delete process.env.FAKE_HERDR_SESSION;
+  delete process.env.FAKE_HERDR_FIRST_TURN_DELAY_MS;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -205,3 +217,20 @@ test("a codex hire runs off the shared daemon and its brief is the first turn th
     await captain.close();
   }
 });
+
+test("a codex hire waits past the old 10 s limit for a first turn still connecting MCP servers", async () => {
+  const { root, captain } = await fixture();
+  process.env.FAKE_HERDR_FIRST_TURN_DELAY_MS = "11000";
+  try {
+    const bank = await captain.laneToolBank("operator", "global-default");
+    const hired = await call(bank, "hire_agent", {
+      harness: "codex",
+      title: "slow codex worker",
+      workingDirectory: root,
+      brief: "BRIEF-7f31: reply with just ok.",
+    });
+    expect(hired).toMatchObject({ outcome: "spawned", seat: { seatId: "term_0a1b2c", harness: "codex" } });
+  } finally {
+    await captain.close();
+  }
+}, 30_000);

@@ -205,6 +205,11 @@ const SEAT_TRANSCRIPT_TAIL_MS = 1_000;
 // Harness startup includes loading extensions; it is not a short Herdr query.
 const SPAWN_READY_WAIT_MS = 30_000;
 const SPAWN_SESSION_WAIT_MS = 10_000;
+// A harness that reports its session on its first turn (Codex) must start that
+// turn first: connect every configured MCP server (Codex allows each 10 s by
+// default, so one dead server spends all of SPAWN_SESSION_WAIT_MS), then begin
+// the model call. A live hire was torn down at exactly 10 s waiting on it.
+const SPAWN_FIRST_TURN_SESSION_WAIT_MS = 30_000;
 const SPAWN_SESSION_POLL_MS = 250;
 /** A terminal id, bare on the local fleet or `<fleet>/term_…` on a remote one (ADR 0184). */
 const TERMINAL_ID = /^(?:[a-z][a-z0-9-]{0,63}\/)?term_[0-9a-f]+$/u;
@@ -954,7 +959,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
         if (this.runner.promptAgent === undefined) throw new Error("Herdr cannot submit a first prompt");
         await this.runner.promptAgent(paneId, brief);
       }
-      const agent = await this.agentWithSession(paneId);
+      const agent = await this.agentWithSession(
+        paneId,
+        fleetSeatBriefStartsSession(input.harness) ? SPAWN_FIRST_TURN_SESSION_WAIT_MS : SPAWN_SESSION_WAIT_MS,
+      );
       if (agent.session === undefined) {
         throw new Error(
           fleetSeatBriefStartsSession(input.harness) && brief === undefined
@@ -1044,8 +1052,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * writes one on launch, so the gap is a race, not an absence. Waiting through
    * it is what keeps a good hire from being torn down as a failure.
    */
-  private async agentWithSession(paneId: string): Promise<HerdrAgentSnapshot> {
-    const deadline = Date.now() + SPAWN_SESSION_WAIT_MS;
+  private async agentWithSession(paneId: string, waitMs: number): Promise<HerdrAgentSnapshot> {
+    const deadline = Date.now() + waitMs;
     let agent = await this.runner.get(paneId);
     while (agent.session === undefined && Date.now() < deadline) {
       await delay(SPAWN_SESSION_POLL_MS);
