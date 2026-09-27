@@ -1,8 +1,11 @@
 # Handing a fleet lead to a Mac seat
 
-Status: runbook only; not executed. Tracks [VUH-1381](https://linear.app/vuhlp/issue/VUH-1381)
-and [ADR 0198](adr/0198-one-coordinator-reaches-every-fleet.md).
-The current PC lead keeps dispatch until both leads schedule the transfer.
+Status: not planned. James wants Clankie to oversee a project's lead and steer
+through it, not take over its fleet (2026-09-27), so
+[VUH-1381](https://linear.app/vuhlp/issue/VUH-1381) now asks Clankie to reach
+the PC lead as one extra peer on that project's coordinator instead. Keep this
+runbook only for a transfer the owner explicitly asks for. See
+[ADR 0198](adr/0198-one-coordinator-reaches-every-fleet.md).
 
 ## Preconditions and proof
 
