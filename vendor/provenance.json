@@ -6,12 +6,13 @@
   "skillsBase": "2fdccc919f9c9c3b2b0e0857a95e16a60084b6b2",
   "artifacts": {
     "volpestyle-lead-skills-0.1.1.tgz": "b4d9bc5267b4569d0228c8f85608c15f11781936eea9f252434797fac7c52508",
-    "swarm-mcp-2.0.0-rc.1.tgz": "b276e0346038a7912718b3aab9f89ffcc99dd60b207138ee26dad65eef55f8b6"
+    "swarm-mcp-2.0.0-rc.1.tgz": "0efa3a87e361f98d5254dcd5e180f29b45529b35f1a09218c5e4983684fb8103"
   },
-  "patchSha256": "918c0689661378bb0101572a251a955008cad8cfd8b085a9f461b41d08e46d87",
-  "swarmRevision": "dff68e3a8e42e8b1cb479b9c10722a1b0f2cacfe",
+  "patchSha256": "a5c628182a510b25936dadded503729408c8f77d1c1cf45759a54fabfa484954",
+  "swarmRevision": "e60891b130e98f56c18857b898cd63e5657a83fe",
   "swarmIncludes": [
     "bf910a1: retire legacy Swarm; coordinator is sole API",
-    "e93dc70: remove legacy migration/cutover tooling; add offline maintenance"
+    "e93dc70: remove legacy migration/cutover tooling; add offline maintenance",
+    "e60891b: a bound dispatched worker may reclaim its task after its lease lapses"
   ]
 }
