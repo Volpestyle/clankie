@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 test("relocated release includes executable Swarm dependencies and skill sources", async () => {
@@ -25,6 +25,8 @@ test("relocated release includes executable Swarm dependencies and skill sources
       const require = createRequire(join(process.cwd(), 'package.json'));
       const path = require.resolve('swarm-mcp/package.json');
       const runtime = await import(join(dirname(path), 'dist/coordination/runtime.js'));
+      const extension = await import(join(dirname(path), 'dist/coordination/pi-worker-extension.js'));
+      if (typeof extension.default !== 'function') throw new Error('Managed pi extension failed to load');
       const state = join(process.cwd(), 'state');
       const enrolled = await runtime.enrollRuntime({ stateDirectory: state,
         nodePath: process.execPath, ownerPath: join(dirname(path), 'dist/coordination/owner-cli.js'),
@@ -46,3 +48,23 @@ test("relocated release includes executable Swarm dependencies and skill sources
     await rm(root, { recursive: true, force: true });
   }
 }, 90000);
+
+test("vendored Swarm manifest dependencies are retained in the pnpm snapshot", async () => {
+  const repo = fileURLToPath(new URL("../../../", import.meta.url));
+  const { stdout } = await promisify(execFile)("tar", [
+    "-xOf",
+    `${repo}/vendor/swarm-mcp-2.0.0-rc.1.tgz`,
+    "package/package.json",
+  ]);
+  const manifest = JSON.parse(stdout);
+  const lock = await readFile(`${repo}/pnpm-lock.yaml`, "utf8");
+  const snapshots = lock.split("\nsnapshots:\n")[1]!;
+  const block = snapshots.match(
+    /\n  swarm-mcp@file:vendor\/swarm-mcp-2\.0\.0-rc\.1\.tgz:\n([\s\S]*?)(?=\n  \S|$)/,
+  )?.[1];
+  expect(block).toBeDefined();
+  const retained = [...block!.matchAll(/^      (?:'([^']+)'|([^ :]+)):/gm)].map(
+    (match) => match[1] ?? match[2],
+  );
+  for (const dependency of Object.keys(manifest.dependencies)) expect(retained).toContain(dependency);
+});

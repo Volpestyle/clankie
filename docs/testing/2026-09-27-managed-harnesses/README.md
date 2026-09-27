@@ -2,7 +2,10 @@
 
 Issue: https://linear.app/vuhlp/issue/VUH-1407
 
-## Candidate and decisions
+Current repair and reconciliation evidence: [repair report](repair.md). The first
+installed candidate below failed both live canaries; it is historical evidence.
+
+## Original candidate and decisions
 
 Swarm source commit: `b62a68f087e9eb8685398db37b9963618d4046d4`, based on
 `0981253fc4b81fb4794ceaa706aeec363d900a32`. The candidate tarball SHA-256 is
@@ -37,7 +40,7 @@ Remote PC enrollment remains on the existing shared coordinator relay.
 Local check logs: `/tmp/vuh1407-swarm-check.log`,
 `/tmp/vuh1407-clankie-focused.log`, `/tmp/vuh1407-clankie-check.log`.
 
-## Live proof pending
+## Original live-proof plan (superseded by repair report)
 
 The candidate is prepared, not installed. The lead must coordinate the install,
 lockfile update, SQLite backups and shared owner/service restart. No install or

@@ -1,0 +1,21 @@
+[
+  {
+    "harness": "codex",
+    "model": "gpt-6-astra",
+    "taskId": "abaf23ca-dd83-4547-86b4-810ad35103e3",
+    "intentId": "one-task",
+    "token": "07ea4ee4-5aaf-406a-bb6a-d2d98da2c877",
+    "command": "/Users/james/.local/bin/codex",
+    "cwd": "/private/tmp/swarm-herdr-test-S9T9kd",
+    "nativeTurnModels": ["gpt-6-astra"]
+  },
+  {
+    "harness": "pi",
+    "model": "openrouter/moonshotai/kimi-k3",
+    "taskId": "e678c5e4-f1e5-46c2-af39-85ae6349eef1",
+    "intentId": "one-task",
+    "token": "0241e1d9-4612-4bef-9009-04c76b5a51b5",
+    "command": "/Users/james/dev/clankie/apps/clankie/node_modules/.bin/pi",
+    "cwd": "/private/tmp/swarm-herdr-test-wCoWq5"
+  }
+]

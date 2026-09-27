@@ -1869,3 +1869,5 @@ Revert with `clankie model set <provider>/<model>` and another
 - [Distribution](distribution.md) — install layout and `clankie doctor` on a release
 - [Credentials](credentials.md) — bot vs user vs internal tokens
 - [Architecture canonical homes](architecture.md#canonical-homes)
+
+Managed pi workers use OpenRouter `moonshotai/kimi-k3`; the runtime harness selector chooses that explicit model instead of inheriting pi’s personal default.

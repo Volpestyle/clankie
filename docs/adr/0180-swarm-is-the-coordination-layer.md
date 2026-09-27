@@ -85,3 +85,12 @@ a route cannot adopt an existing launch. Codex/pi initially support stream;
 interactive support remains the independent ADR 0194 axis. Remote PC peers keep
 the shared coordinator and relay. Protocol tests are separate from live canary
 proof: each installed harness must finish a managed task and release its intent.
+
+The repaired launcher preapproves only `swarm_inbox` and `swarm_task` on its own
+enrolled Swarm server, as explicitly authorized for unattended lifecycle work.
+Other MCP and shell approval policies remain unchanged. Managed pi selects
+OpenRouter `moonshotai/kimi-k3` explicitly. A disabled retained route still owns
+stop authority for its verified tokens; disabling new provisioning must not strand
+old dispatch capacity. Production package tests import the pi extension, and a
+manifest-to-lockfile check prevents same-version tarball updates from retaining
+an obsolete dependency snapshot.

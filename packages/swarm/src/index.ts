@@ -1188,7 +1188,7 @@ async function prepareOwner(cwd: string, options: Options) {
           ? {
               harness: entry.workerHarness,
               harnessPath: harnessPath(entry.workerHarness) ?? process.execPath,
-              ...(entry.workerHarness === "codex" ? { model: "gpt-6-astra" } : {}),
+              model: entry.workerHarness === "codex" ? "gpt-6-astra" : "openrouter/moonshotai/kimi-k3",
             }
           : { claudePath: claudePath ?? process.execPath }),
         nodePath: process.execPath,

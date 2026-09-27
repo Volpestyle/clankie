@@ -32,12 +32,17 @@ skill links continue to resolve to the original source repositories. Release
 assembly dereferences product links and copies Swarm's dependency graph; an
 installed release needs no sibling checkout or globally installed npm package.
 
-The candidate artifact is built from Swarm `b62a68f`, based on pushed upstream
+The candidate artifact is built from Swarm `a72a2d3`, based on pushed upstream
 `0981253`. `swarm-mcp.patch` reproduces the complete committed source delta;
 `provenance.json` pins both revisions and checksums. This candidate adds managed
 Codex (`gpt-6-astra`) and pi worker adapters, per-launch MCP configuration, and
-persisted harness selection. It has not yet passed the required live managed
-canaries; install and owner/service restart remain lead-controlled.
+persisted harness selection. The first installed candidate (`b62a68f`) failed both
+live canaries. This repair corrects Codex override keys, explicitly preapproves only
+its enrolled `swarm_inbox`/`swarm_task` lifecycle tools, and preserves stop authority
+for disabled routes. Pi's missing client dependency is now included in the lockfile
+snapshot; the former hash-only update retained an incomplete dependency graph.
+Clean production-package and real-binary fixtures are separate from the required
+live Clankie canaries; install and owner/service restart remain lead-controlled.
 
 This candidate advances schema 14 to schema 15 with `dispatch_intents.harness`.
 Back up each live DB with SQLite's backup API before the coordinated upgrade;

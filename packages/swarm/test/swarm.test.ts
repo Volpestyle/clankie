@@ -896,7 +896,7 @@ test("managed harness routes retain separate identities and never silently subst
     if (supported) {
       expect(route).toMatchObject({ harness: selected, harnessPath: join(bin, selected) });
       expect(route).not.toHaveProperty("claudePath");
-      if (selected === "codex") expect(route.model).toBe("gpt-6-astra");
+      expect(route.model).toBe(selected === "codex" ? "gpt-6-astra" : "openrouter/moonshotai/kimi-k3");
     } else expect(route.enabled).toBe(false);
   }
   // Selecting Claude explicitly cannot execute pi or revive the disabled old route.

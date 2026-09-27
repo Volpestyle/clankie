@@ -1271,6 +1271,10 @@ packages:
     resolution: {integrity: sha512-ABnA53mdfkGZwOFUdZNv2S0CWGO/EIuPj8Vv9xmBFmSYg/qFc7ihO6q5FcQjvoE67kZpWkEc4AhD6B/os04yuA==}
     engines: {node: '>= 10'}
 
+  '@modelcontextprotocol/client@2.0.0':
+    resolution: {integrity: sha512-8f1OghQ2rjzIOfqgUCP+8GiUWqRs89njoWLNqAe8kWmDePv3s1fZXseej+QXemssEuuOvLLmLO/kqM3IQHtISw==}
+    engines: {node: '>=20'}
+
   '@modelcontextprotocol/core@2.0.0':
     resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
     engines: {node: '>=20'}
@@ -3032,7 +3036,7 @@ packages:
     engines: {node: '>=14.16'}
 
   swarm-mcp@file:vendor/swarm-mcp-2.0.0-rc.1.tgz:
-    resolution: {integrity: sha512-57ttuGEphOKfaH+8QeId0rrwb48RzZBxSHyb/sBF+w3ZueIdWSaJQ0TUCFr/KMd4oXpml9dmJnEr6cQorW/MeA==, tarball: file:vendor/swarm-mcp-2.0.0-rc.1.tgz}
+    resolution: {integrity: sha512-ncB09lJEp4b5WTHBi5Sqy+WT3RvxQH5KFIei9adu3ge9ssWA5cv6qcXMmSyGddQ7Kbg2iXmuU+1ywBvloar19Q==, tarball: file:vendor/swarm-mcp-2.0.0-rc.1.tgz}
     version: 2.0.0-rc.1
     engines: {node: '>=22'}
     hasBin: true
@@ -3885,6 +3889,16 @@ snapshots:
       '@mariozechner/clipboard-win32-arm64-msvc': 0.3.9
       '@mariozechner/clipboard-win32-x64-msvc': 0.3.9
     optional: true
+
+  '@modelcontextprotocol/client@2.0.0':
+    dependencies:
+      '@modelcontextprotocol/core': 2.0.0
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.1.0
+      jose: 6.2.3
+      pkce-challenge: 5.0.1
+      zod: 4.4.3
 
   '@modelcontextprotocol/core@2.0.0':
     dependencies:
@@ -5450,6 +5464,7 @@ snapshots:
 
   swarm-mcp@file:vendor/swarm-mcp-2.0.0-rc.1.tgz:
     dependencies:
+      '@modelcontextprotocol/client': 2.0.0
       '@modelcontextprotocol/server': 2.0.0
       '@opencode-ai/sdk': 1.4.3
       ajv: 8.20.0

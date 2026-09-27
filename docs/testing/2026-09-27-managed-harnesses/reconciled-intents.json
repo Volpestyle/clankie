@@ -1,0 +1,18 @@
+[
+  {
+    "intent_id": "lead-p2G-vuh1407-codex-canary-1",
+    "task_id": "cdc89ec8-cca1-4517-8481-1de4711c16dc",
+    "provision_token": "ea346371-268e-4bcd-b6c9-23b04e3b9a2e",
+    "state": "released",
+    "harness": "codex",
+    "taskStatus": "cancelled"
+  },
+  {
+    "intent_id": "lead-p2G-vuh1407-pi-canary-1",
+    "task_id": "a1d108a2-5680-43ca-95e0-3fab44ac740e",
+    "provision_token": "afd01278-118e-420d-84eb-07c7dadd2e38",
+    "state": "released",
+    "harness": "pi",
+    "taskStatus": "cancelled"
+  }
+]

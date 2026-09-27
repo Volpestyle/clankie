@@ -427,3 +427,5 @@ coordinators sharing one Herdr runtime can together exceed its configured limit.
 Settings are reconciled into existing owners without replacing in-flight receipts.
 `runtime status` reports each effective value and its source: default, owner or unlimited.
 These controls use the operator API; no Swarm tool or captain bearer can change them.
+
+Managed pi uses OpenRouter Kimi K3 explicitly. Codex preapproves only the enrolled Swarm `swarm_inbox` and `swarm_task` tools for unattended lifecycle work; other MCP and shell approvals retain their policy. A same-version vendor update must refresh the dependency snapshot as well as the tarball integrity. The release test imports the pi extension to catch missing production dependencies.
