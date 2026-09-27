@@ -2,7 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
+import {
+  isHeadlessCaptainCommand,
+  runHeadlessCaptainCommand,
+  unknownLauncherCommand,
+} from "../bin/headless-captain.ts";
 import { loadConfig } from "@clankie/model-provider";
 
 const tempDirs: string[] = [];
@@ -169,4 +173,13 @@ describe("clankie model refresh", () => {
     const result = await runModel(["refresh", "openai"]);
     expect(result.exit).not.toBe(0);
   });
+});
+
+it("the launcher refuses an unknown command instead of starting the service for a console", () => {
+  expect(unknownLauncherCommand(undefined)).toBeUndefined();
+  expect(unknownLauncherCommand("restart")).toBeUndefined();
+  expect(unknownLauncherCommand("down")).toBeUndefined();
+  expect(unknownLauncherCommand("stop")).toContain("clankie down");
+  expect(unknownLauncherCommand("start")).toContain("clankie restart");
+  expect(unknownLauncherCommand("frobnicate")).toBe('unknown command "frobnicate"; run `clankie help`');
 });

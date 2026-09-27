@@ -30,6 +30,8 @@ starts the clankie service if needed and opens the existing main **Clankie**
 conversation, regardless of the launch directory. It does not create a chat.
 Use `--chat ID` for another retained conversation, `/new` for a fresh chat,
 or `/cd PATH` to select a project conversation.
+An unknown command exits 1 without starting anything. Common near-misses name
+the real command: stop the service with `clankie down`, not `stop`.
 
 ## Conventions
 

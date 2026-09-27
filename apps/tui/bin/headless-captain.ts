@@ -46,7 +46,7 @@ import { runAutostartCommand } from "../src/command/autostart.ts";
 import { commandHelp } from "../src/command/registry.ts";
 import { outputJson, type Writable } from "../src/command/io.ts";
 
-export { isHeadlessCaptainCommand } from "../src/command/registry.ts";
+export { isHeadlessCaptainCommand, unknownLauncherCommand } from "../src/command/registry.ts";
 
 export interface HeadlessCaptainCommandOptions {
   readonly env?: NodeJS.ProcessEnv;

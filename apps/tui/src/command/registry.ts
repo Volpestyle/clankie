@@ -294,6 +294,27 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
   );
 }
 
+/** Words people reach for that name a different launcher command. */
+const LAUNCHER_COMMAND_HINTS: Readonly<Record<string, string>> = {
+  stop: "down",
+  start: "restart",
+  up: "restart",
+  kill: "down",
+};
+
+/**
+ * The launcher opens the console only when no command is given. Any other
+ * word that is not a headless command must be refused before the launcher
+ * starts the service for a console that will never open.
+ */
+export function unknownLauncherCommand(command: string | undefined): string | undefined {
+  if (command === undefined || isHeadlessCaptainCommand(command)) return undefined;
+  const hint = LAUNCHER_COMMAND_HINTS[command];
+  return hint === undefined
+    ? `unknown command "${command}"; run \`clankie help\``
+    : `unknown command "${command}"; did you mean \`clankie ${hint}\`? Run \`clankie help\` for all commands`;
+}
+
 export function commandHelp(): string {
   return [
     "Usage: clankie [--version|-V] [--chat <conversationId>] [<command> ...]",

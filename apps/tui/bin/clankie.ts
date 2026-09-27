@@ -5,7 +5,11 @@ import { resolve } from "node:path";
 import { ensureCaptainCredential, ensureOperatorCredential } from "@clankie/credential-broker";
 import { discordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
 import packageMetadata from "../../../package.json" with { type: "json" };
-import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "./headless-captain.ts";
+import {
+  isHeadlessCaptainCommand,
+  runHeadlessCaptainCommand,
+  unknownLauncherCommand,
+} from "./headless-captain.ts";
 import { startOne } from "./services.ts";
 import { parseDirectConversation } from "../src/session/operator-conversations.ts";
 
@@ -27,6 +31,11 @@ try {
 // operator console (src/index.ts) re-parses argv and confirms the explicit
 // resume against the server, so no process-global env couples the lane.
 const args = direct.remaining;
+const unknown = unknownLauncherCommand(args[0]);
+if (unknown !== undefined) {
+  process.stderr.write(`clankie: ${unknown}\n`);
+  process.exit(1);
+}
 
 if (
   args[0] === undefined ||
