@@ -261,6 +261,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     return {
       id: entry.id,
       name: entry.name,
+      root: entry.path,
       ...(convention === undefined ? {} : { backend: convention.backend }),
       needsDecision: convention === undefined,
     };

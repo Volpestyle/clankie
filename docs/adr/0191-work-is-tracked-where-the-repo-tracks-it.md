@@ -78,6 +78,12 @@ readable over the device contract only when it is the captain's working
 directory or was registered by `clankie work init` on this machine. A paired
 device cannot name an arbitrary filesystem path.
 
+Each listed repo also says its `root`, the directory it was registered at
+([VUH-1401](https://linear.app/vuhlp/issue/VUH-1401)). The app's commons keys
+districts by the directory a seat works in, and the root lets it hang a repo's
+work in the right district without guessing from the name. Showing the path
+changes nothing above: a device still names a repo only by its `id`.
+
 ## Negative space
 
 - Not a project-management tool: status, criteria, ownership and evidence only.
