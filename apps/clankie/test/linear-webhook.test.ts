@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProviderAccount } from "@clankie/credential-broker";
 import { ClankieSettingsSchema, type ClankieSettings } from "@clankie/settings";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { seatEventKindFor } from "../src/captain/captain.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -65,6 +65,7 @@ async function hookApp(
   const store = new ConversationStore(root, async () => {});
   const wakes: LinearActivityEvent[] = [];
   const inbox: LinearActivityEvent[] = [];
+  const requestNotificationPoll = vi.fn();
   const clankie = await createClankieApp({
     captain: createStubCaptain({
       receiveLinearActivity: (comment, following) => {
@@ -87,6 +88,7 @@ async function hookApp(
     },
     linearWebhook: {
       secret: () => Promise.resolve(SECRET),
+      requestNotificationPoll,
       ...(writes === undefined ? {} : { writes }),
       ...(ownAccount === undefined ? {} : { ownAccount }),
     },
@@ -105,10 +107,24 @@ async function hookApp(
       body,
     });
   hookStores.push({ root, store, close: () => clankie.close() });
-  return { post, wakes, inbox, root, store };
+  return { post, wakes, inbox, root, store, requestNotificationPoll };
 }
 
 describe("linear activity ingress", () => {
+  it("requests a notification refresh only after verified, newly persisted activity, even while off", async () => {
+    const f = await hookApp(false);
+    expect((await f.post(commentBody(), { "linear-signature": "bad" })).status).toBe(401);
+    expect((await f.post(commentBody({ webhookTimestamp: NOW.getTime() - 61_000 }))).status).toBe(401);
+    expect((await f.post(commentBody({ data: "bad" }))).status).toBe(400);
+    await f.post(commentBody({ action: "test" }));
+    expect(f.requestNotificationPoll).not.toHaveBeenCalled();
+    await f.post(commentBody());
+    expect(f.inbox).toHaveLength(1);
+    expect(f.requestNotificationPoll).toHaveBeenCalledTimes(1);
+    await f.post(commentBody());
+    expect(f.requestNotificationPoll).toHaveBeenCalledTimes(1);
+    expect(f.wakes).toEqual([]);
+  });
   it("persists a signed comment without waking even while following", async () => {
     const { post, wakes, inbox } = await hookApp();
     const body = commentBody();
@@ -299,8 +315,10 @@ describe("linear activity ingress", () => {
     first.store.linearInboxConversationId();
     await mkdir(path);
     expect((await first.post(commentBody())).status).toBe(500);
+    expect(first.requestNotificationPoll).not.toHaveBeenCalled();
     await rm(path, { recursive: true });
     expect(await (await first.post(commentBody())).json()).toMatchObject({ ingested: true });
+    expect(first.requestNotificationPoll).toHaveBeenCalledTimes(1);
     await first.store.close();
     const second = await hookApp(false, undefined, first.root);
     expect(

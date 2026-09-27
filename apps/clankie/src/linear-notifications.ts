@@ -38,8 +38,11 @@ interface LinearNotificationOptions {
  */
 export class LinearNotifications {
   private checkpoint: z.infer<typeof CheckpointSchema> | undefined;
-  private pending: Promise<void> | undefined;
+  private pending: Promise<boolean> | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
+  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private refreshing = false;
+  private refreshRequested = false;
   private closed = false;
 
   private readonly options: LinearNotificationOptions;
@@ -62,13 +65,52 @@ export class LinearNotifications {
   async close(): Promise<void> {
     this.closed = true;
     if (this.timer) clearInterval(this.timer);
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
     await this.pending;
   }
 
-  poll(): Promise<void> {
-    if (this.closed) return Promise.resolve();
+  /** Coalesce verified webhook deliveries without delaying their HTTP response. */
+  requestPoll(): void {
+    if (this.closed) return;
+    this.refreshRequested = true;
+    if (!this.refreshing) this.scheduleRefresh(true);
+  }
+
+  private scheduleRefresh(retry: boolean): void {
+    if (this.closed) return;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      void this.refresh(retry);
+    }, 1_500);
+    this.refreshTimer.unref();
+  }
+
+  private async refresh(retry: boolean): Promise<void> {
+    this.refreshing = true;
+    try {
+      // A delivery during a running read needs a fresh read afterward, not just
+      // the existing poll's result. Signals while waiting collapse into this one.
+      await this.pending;
+      if (this.closed) return;
+      this.refreshRequested = false;
+      const found = await this.poll();
+      if (this.refreshRequested) this.scheduleRefresh(true);
+      // Linear may publish the recipient notification after its workspace hook.
+      else if (!found && retry) this.scheduleRefresh(false);
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  /** True when at least one previously unseen notification was persisted. */
+  poll(): Promise<boolean> {
+    if (this.closed) return Promise.resolve(false);
     return (this.pending ??= this.read()
-      .catch(() => this.options.onError())
+      .catch(() => {
+        this.options.onError();
+        return false;
+      })
       .finally(() => {
         this.pending = undefined;
       }));
@@ -81,9 +123,9 @@ export class LinearNotifications {
     this.checkpoint = checkpoint;
   }
 
-  private async read(): Promise<void> {
+  private async read(): Promise<boolean> {
     const own = await this.options.host.account("linear", "operator").catch(() => undefined);
-    if (!own) return;
+    if (!own) return false;
     const account = `${own.account.workspaceId}:${own.account.userId}`;
     if (this.checkpoint?.account !== account) {
       // First connection / account switch starts now, without waking on old
@@ -120,9 +162,10 @@ export class LinearNotifications {
       cursor = page.cursor;
     } while (cursor);
     // Credential rotation during pagination cannot relabel somebody else's inbox.
-    if ((await this.options.host.account("linear", "operator")).binding !== own.binding) return;
-    if (this.closed) return;
+    if ((await this.options.host.account("linear", "operator")).binding !== own.binding) return false;
+    if (this.closed) return false;
     const wake = following && (await this.options.following());
+    let found = false;
     for (const item of notifications.reverse()) {
       if (item.createdAt === since && ids.includes(item.id)) continue;
       this.options.receive(
@@ -143,6 +186,7 @@ export class LinearNotifications {
         },
         wake && item.actor?.id !== own.account.userId,
       );
+      found = true;
     }
     const newest = notifications.reduce(
       (latest, item) => (Date.parse(item.createdAt) > Date.parse(latest) ? item.createdAt : latest),
@@ -160,5 +204,6 @@ export class LinearNotifications {
         ]),
       ],
     });
+    return found;
   }
 }

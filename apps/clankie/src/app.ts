@@ -453,6 +453,8 @@ export interface ClankieAppDependencies {
   linearWebhook?: {
     secret(): Promise<string | undefined>;
     writes?: LinearWriteReceipts;
+    /** Refresh the recipient inbox after a verified event is persisted. */
+    requestNotificationPoll?(): void;
     /** His own verified Linear identity; activity it authors is kept without a wake. */
     ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
   };
@@ -2714,13 +2716,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     // Anything his own account wrote, captain or worker, is kept but never wakes him.
     const own = await hook.ownAccount?.().catch(() => undefined);
     const replyTo = linearReplyTo(outcome.activity, own, hook.writes, clock());
-    // Workspace webhooks are history. Only the connected bot's actual Linear
+    // Workspace webhooks are history. Only the connected account's actual Linear
     // notifications wake him (linear-notifications.ts); self-authored activity
     // therefore remains quiet regardless of webhook order or receipt timing.
     const ingested = dependencies.captain.receiveLinearActivity(
       replyTo ? { ...outcome.activity, replyTo } : outcome.activity,
       false,
     );
+    if (ingested !== false) hook.requestNotificationPoll?.();
     return context.json({ schemaVersion: 1 as const, ingested: ingested !== false });
   });
 

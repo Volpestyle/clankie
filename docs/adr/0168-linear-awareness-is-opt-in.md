@@ -15,7 +15,14 @@ are inert for wakes; no automatic deletion or rebinding occurs.
 
 Signed workspace webhooks remain passive, durable external history. The service
 reads `get_notifications` through its own verified Linear MCP connection every
-30 seconds, even while following is off. Only new notification IDs may wake
+30 seconds, even while following is off. Newly persisted signed webhook events
+also request a refresh after a 1.5-second debounce. A refresh waits for any active
+poll; deliveries during it coalesce into a subsequent refresh. An empty or
+duplicate-only result gets at most one delayed retry after another 1.5 seconds
+to allow notification creation to catch up. Shutdown cancels these timers. The
+periodic poll stays active for missing webhooks and later notifications. Invalid,
+ignored, duplicate or failed webhook ingests do not request a refresh.
+Only new notification IDs may wake
 `global-default` or its attached seat. The same inbox stores both sources;
 notification-scoped reads and acknowledgments use `--conversation global-default`.
 Linear selects the recipient, covering mentions, assignments, subscriptions and
@@ -134,7 +141,9 @@ The current flow after the 2026-09-27 amendment is:
 flowchart TD
     Webhook[Workspace activity] --> Verify[Verify signed delivery]
     Verify --> History[Persist passive activity and write provenance]
-    Account[Verified connected Linear account] --> Poll[Read recipient notifications]
+    History --> Debounce[Debounce recipient inbox refresh]
+    Debounce --> Poll[Read recipient notifications]
+    Account[Verified connected Linear account] --> Poll
     Poll --> Fresh{New notification ID?}
     Fresh -->|Yes| Inbox[Persist notification as untrusted context]
     Fresh -->|No| Done[No new delivery]

@@ -8,6 +8,10 @@ import type { LinearActivityEvent } from "../src/linear-webhook.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
+  if (vi.isFakeTimers()) {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 const NOW = "2026-09-27T12:00:00.000Z";
@@ -32,6 +36,13 @@ const notification = (id: string, type = "issueNewComment", createdAt = NOW) => 
   title: "Issue title",
   url: "https://linear.app/issue/ABC-1",
 });
+function pendingCall() {
+  let resolve!: (result: Awaited<ReturnType<McpHost["call"]>>) => void;
+  const promise = new Promise<Awaited<ReturnType<McpHost["call"]>>>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "linear-notifications-"));
   roots.push(root);
@@ -209,4 +220,128 @@ it("follows a replacement connected identity without depending on an email or di
     activity: { organizationId: "another-workspace", actorId: "another-user" },
   });
   expect(f.received[2]!.activity.eventId).not.toBe(firstId);
+});
+
+it("debounces webhook bursts, collects while off, and skips retry when a notification arrives", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  f.following.mockResolvedValue(false);
+  f.page([notification("new")]);
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(1_000);
+  f.poller.requestPoll();
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(1_499);
+  expect(f.call).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(f.received).toMatchObject([{ following: false, activity: { data: { id: "new" } } }]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(f.call).toHaveBeenCalledTimes(1);
+  await f.poller.close();
+});
+
+it("retries once when the notification lags behind the webhook, including duplicate-only reads", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  f.page([notification("old")]);
+  await f.poller.poll();
+  f.page([notification("old")]);
+  f.page([notification("new"), notification("old")]);
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(1_500);
+  expect(f.received).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(1_500);
+  expect(f.received).toHaveLength(2);
+  f.page([]);
+  f.page([]);
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(f.call).toHaveBeenCalledTimes(5);
+  expect(f.onError).not.toHaveBeenCalled();
+  await f.poller.close();
+});
+
+it("waits for an active poll and coalesces deliveries during the subsequent refresh", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  const first = pendingCall();
+  const second = pendingCall();
+  f.call.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  const running = f.poller.poll();
+  await vi.advanceTimersByTimeAsync(0);
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(1_500);
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(f.call).toHaveBeenCalledTimes(1);
+  first.resolve({
+    outcome: "ok",
+    isError: false,
+    content: JSON.stringify({ notifications: [], hasNextPage: false }),
+  });
+  await running;
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.call).toHaveBeenCalledTimes(2);
+  f.poller.requestPoll();
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(f.call).toHaveBeenCalledTimes(2);
+  f.page([notification("after")]);
+  second.resolve({
+    outcome: "ok",
+    isError: false,
+    content: JSON.stringify({ notifications: [], hasNextPage: false }),
+  });
+  await vi.advanceTimersByTimeAsync(1_500);
+  expect(f.call).toHaveBeenCalledTimes(3);
+  expect(f.received).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(f.call).toHaveBeenCalledTimes(3);
+  await f.poller.close();
+});
+
+it("keeps the 30-second fallback and cancels debounce and retry timers on close", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  f.page([]);
+  f.poller.start();
+  await vi.advanceTimersByTimeAsync(29_999);
+  expect(f.call).toHaveBeenCalledTimes(1);
+  f.page([]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(f.call).toHaveBeenCalledTimes(2);
+  f.poller.requestPoll();
+  await f.poller.close();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(f.call).toHaveBeenCalledTimes(2);
+
+  const retry = await fixture();
+  retry.page([]);
+  retry.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(1_500);
+  await retry.poller.close();
+  retry.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(retry.call).toHaveBeenCalledTimes(1);
+});
+
+it("does not start a queued refresh after closing during an active read", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  const result = pendingCall();
+  f.call.mockReturnValueOnce(result.promise);
+  const running = f.poller.poll();
+  await vi.advanceTimersByTimeAsync(0);
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(1_500);
+  const closing = f.poller.close();
+  result.resolve({
+    outcome: "ok",
+    isError: false,
+    content: JSON.stringify({ notifications: [notification("late")], hasNextPage: false }),
+  });
+  await Promise.all([running, closing]);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(f.call).toHaveBeenCalledTimes(1);
+  expect(f.received).toEqual([]);
 });

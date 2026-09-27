@@ -800,6 +800,13 @@ const fleetPeers = {
   },
 };
 
+const linearNotifications = new LinearNotifications({
+  path: join(stateRoot, "linear-notifications.json"),
+  host: mcpHost,
+  following: async () => (await settingsStore.load()).linearWebhook.following,
+  receive: (activity, following) => captain.receiveLinearActivity(activity, following),
+  onError: () => logger.warn("Linear notification inbox unavailable; will retry"),
+});
 const clankie = await createClankieApp({
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({
@@ -891,6 +898,7 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
+    requestNotificationPoll: () => linearNotifications.requestPoll(),
     // Unverified identity leaves webhook history passive.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
   },
@@ -908,13 +916,6 @@ const stopHostedWork =
       );
 hostedHeartbeat?.start();
 if (startupSettings.linearWebhook.following) captain.resumeLinearActivity();
-const linearNotifications = new LinearNotifications({
-  path: join(stateRoot, "linear-notifications.json"),
-  host: mcpHost,
-  following: async () => (await settingsStore.load()).linearWebhook.following,
-  receive: (activity, following) => captain.receiveLinearActivity(activity, following),
-  onError: () => logger.warn("Linear notification inbox unavailable; will retry"),
-});
 linearNotifications.start();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its

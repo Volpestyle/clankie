@@ -336,7 +336,11 @@ local verification. It never accepts a secret as a flag.
 When a webhook is configured, accepted events appear in the **Linear inbox**
 conversation (`linear-inbox`) as **External activity** messages, including swarm
 posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
-account’s actual Linear notifications every 30 seconds. Following controls
+account’s actual Linear notifications every 30 seconds. A newly persisted, signed
+workspace event requests a refresh after a 1.5-second debounce; if no new
+notifications appear, it retries once after another 1.5 seconds. Refreshes wait
+for an active poll and coalesce bursts. The periodic poll remains a fallback
+without webhooks or when a notification arrives later. Following controls
 whether those notifications wake his operator conversation:
 
 | Following     | Inbox delivery                          | Automatic model turns                       |

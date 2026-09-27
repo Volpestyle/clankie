@@ -186,8 +186,10 @@ its signed webhook under `/connect linear` → **Follow Linear** → **Configure
 webhook**, selecting all activity events in Linear. Events always reach the
 **Linear inbox** conversation as **External activity**; open it with
 `clankie --chat linear-inbox`. Activity by his own Linear account never wakes
-him. His connected account's real Linear notifications are read every 30 seconds;
-following on wakes `global-default` for these, including mentions, assignments,
+him. His connected account's real Linear notifications are read every 30 seconds.
+Newly persisted signed webhook events also request a refresh after a 1.5-second
+debounce, with one delayed retry if nothing new appears; polls never overlap.
+Following on wakes `global-default` for these, including mentions, assignments,
 subscribed issue activity and replies. Old issue bindings remain inspectable
 with `clankie linear work list` but have no routing effect. For notification
 reads and acknowledgments keep `--conversation global-default`; omit it for
