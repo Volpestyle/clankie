@@ -23,8 +23,7 @@ for (const path of markdown) {
     const target = match[1];
     if (!target || /^(https?:|mailto:|#)/.test(target)) continue;
     // Site-rooted links in the public docs content resolve inside apps/docs/dist; its own check verifies them.
-    if (target.startsWith("/") && path.includes("/apps/docs/content/"))
-      continue;
+    if (target.startsWith("/") && path.includes("/apps/docs/content/")) continue;
     const clean = target.split("#")[0];
     if (!clean) continue;
     try {
@@ -49,7 +48,5 @@ if (failures.length) {
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exitCode = 1;
 } else {
-  console.log(
-    `Checked ${markdown.length} markdown files; local links resolve.`,
-  );
+  console.log(`Checked ${markdown.length} markdown files; local links resolve.`);
 }
