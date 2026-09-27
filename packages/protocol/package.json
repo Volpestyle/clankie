@@ -7,6 +7,7 @@
     "./public-gateway": "./src/public-gateway.ts",
     "./gateway-encryption": "./src/gateway-encryption.ts",
     "./model-keys": "./src/model-keys.ts",
+    "./hosted-credits": "./src/hosted-credits.ts",
     "./accounts": "./src/accounts.ts",
     "./wake": "./src/wake.ts",
     "./work-items": "./src/work-items.ts",
