@@ -40,6 +40,7 @@ export class LinearNotifications {
   private checkpoint: z.infer<typeof CheckpointSchema> | undefined;
   private pending: Promise<boolean> | undefined;
   private started = false;
+  private fallbackTimer: ReturnType<typeof setInterval> | undefined;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing = false;
   private refreshRequested = false;
@@ -59,10 +60,13 @@ export class LinearNotifications {
     if (this.started || this.closed) return;
     this.started = true;
     void this.poll();
+    this.fallbackTimer = setInterval(() => void this.poll(), 30_000);
+    this.fallbackTimer.unref();
   }
 
   async close(): Promise<void> {
     this.closed = true;
+    if (this.fallbackTimer) clearInterval(this.fallbackTimer);
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     await this.pending;
   }
@@ -107,7 +111,7 @@ export class LinearNotifications {
     return (this.pending ??= this.read()
       .catch(() => {
         this.options.onError();
-        // One catch-up attempt after a failed startup/manual read. Webhook
+        // One catch-up attempt after a failed startup, fallback or manual read. Webhook
         // refreshes own their retry budget; a failed retry never schedules more.
         if (retryOnFailure && !this.refreshing && !this.refreshTimer) this.scheduleRefresh(false);
         return false;

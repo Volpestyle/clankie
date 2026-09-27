@@ -304,22 +304,29 @@ it("waits for an active poll and coalesces deliveries during the subsequent refr
   await f.poller.close();
 });
 
-it("reads once at startup without a periodic timer and cancels delayed work on close", async () => {
+it("reads at startup and every 30 seconds without webhooks, and cancels timers on close", async () => {
   vi.useFakeTimers();
   const interval = vi.spyOn(globalThis, "setInterval");
   const f = await fixture();
   f.page([]);
   f.poller.start();
   f.poller.start();
-  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+  await vi.advanceTimersByTimeAsync(29_999);
   expect(f.call).toHaveBeenCalledTimes(1);
-  expect(interval).not.toHaveBeenCalled();
-  expect(vi.getTimerCount()).toBe(0);
+  expect(interval).toHaveBeenCalledTimes(1);
+  expect(interval).toHaveBeenCalledWith(expect.any(Function), 30_000);
+  f.page([notification("fallback")]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(f.call).toHaveBeenCalledTimes(2);
+  expect(f.received).toHaveLength(1);
+  expect(f.received[0]?.following).toBe(true);
+  expect(vi.getTimerCount()).toBe(1);
   interval.mockRestore();
   f.poller.requestPoll();
   await f.poller.close();
   await vi.advanceTimersByTimeAsync(60_000);
-  expect(f.call).toHaveBeenCalledTimes(1);
+  expect(f.call).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
 
   const retry = await fixture();
   retry.page([]);
@@ -329,6 +336,30 @@ it("reads once at startup without a periodic timer and cancels delayed work on c
   retry.poller.requestPoll();
   await vi.advanceTimersByTimeAsync(10_000);
   expect(retry.call).toHaveBeenCalledTimes(1);
+});
+
+it("coalesces fallback ticks with an active webhook read", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  f.page([]);
+  f.poller.start();
+  await vi.advanceTimersByTimeAsync(0);
+  const result = pendingCall();
+  f.call.mockReturnValueOnce(result.promise);
+  f.poller.requestPoll();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(f.call).toHaveBeenCalledTimes(2);
+  result.resolve({
+    outcome: "ok",
+    isError: false,
+    content: JSON.stringify({ notifications: [notification("webhook")], hasNextPage: false }),
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.received).toHaveLength(1);
+  f.page([notification("fallback-after-webhook")]);
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(f.call).toHaveBeenCalledTimes(3);
+  expect(f.received).toHaveLength(2);
 });
 
 it("makes one catch-up attempt after a failed startup read, without a recurring failure loop", async () => {
@@ -341,17 +372,22 @@ it("makes one catch-up attempt after a failed startup read, without a recurring 
   expect(f.call).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(1_500);
   expect(f.received).toHaveLength(1);
-  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+  await vi.advanceTimersByTimeAsync(10_000);
   expect(f.call).toHaveBeenCalledTimes(2);
-  expect(vi.getTimerCount()).toBe(0);
+  expect(vi.getTimerCount()).toBe(1);
+  await f.poller.close();
 
   const offline = await fixture();
   offline.call.mockRejectedValue(new Error("still offline"));
   offline.poller.start();
-  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+  await vi.advanceTimersByTimeAsync(29_999);
   expect(offline.call).toHaveBeenCalledTimes(2);
   expect(offline.onError).toHaveBeenCalledTimes(2);
-  expect(vi.getTimerCount()).toBe(0);
+  expect(vi.getTimerCount()).toBe(1);
+  await vi.advanceTimersByTimeAsync(1_501);
+  expect(offline.call).toHaveBeenCalledTimes(4);
+  expect(offline.onError).toHaveBeenCalledTimes(4);
+  expect(vi.getTimerCount()).toBe(1);
   offline.page([notification("next-webhook")]);
   offline.poller.requestPoll();
   await vi.advanceTimersByTimeAsync(1_500);
@@ -371,10 +407,10 @@ it("catches up from a persisted checkpoint on startup without replaying seen not
     notification("seen"),
   ]);
   restarted.start();
-  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+  await vi.advanceTimersByTimeAsync(0);
   expect(f.received.map((item) => item.activity.data.id)).toEqual(["seen", "during-downtime"]);
   expect(f.call).toHaveBeenCalledTimes(2);
-  expect(vi.getTimerCount()).toBe(0);
+  expect(vi.getTimerCount()).toBe(1);
 });
 
 it("does not start a queued refresh after closing during an active read", async () => {
