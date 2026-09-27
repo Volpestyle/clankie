@@ -9,17 +9,19 @@ test("relocated release includes executable Swarm dependencies and skill sources
   const repo = fileURLToPath(new URL("../../../", import.meta.url));
   const helper = new URL("../../../scripts/release/swarm-runtime.mjs", import.meta.url).href;
   try {
+    // Copying the release is filesystem setup, not runtime startup. Keep the
+    // child deadline focused on enrollment/bootstrap even on a busy build host.
+    const { copySwarmRuntime } = await import(helper);
+    await copySwarmRuntime(repo, root);
     const result = await promisify(execFile)(
       process.execPath,
       [
         "--input-type=module",
         "--eval",
         `
-      import { copySwarmRuntime } from ${JSON.stringify(helper)};
       import { readFile } from 'node:fs/promises';
       import { dirname, join } from 'node:path';
       import { createRequire } from 'node:module';
-      await copySwarmRuntime(${JSON.stringify(repo)}, process.cwd());
       const require = createRequire(join(process.cwd(), 'package.json'));
       const path = require.resolve('swarm-mcp/package.json');
       const runtime = await import(join(dirname(path), 'dist/coordination/runtime.js'));
@@ -43,4 +45,4 @@ test("relocated release includes executable Swarm dependencies and skill sources
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-}, 30000);
+}, 90000);

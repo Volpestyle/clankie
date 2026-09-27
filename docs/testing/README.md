@@ -1,5 +1,7 @@
 # Testing records
 
+Repeatable CI and local checks: [quality gates](quality-gates.md).
+
 Dated verification and evaluation records live here when the evidence is useful
 beyond a single CI run.
 
