@@ -56,7 +56,7 @@ flowchart LR
     seat["Mac seat / Clankie"] --> owner
     ssh["ssh -R 127.0.0.1:0:owner.sock"]
   end
-  subgraph pc["Windows PC (desktop session)"]
+  subgraph pc["Windows PC (agent session)"]
     relay["node relay<br/>\\\\.\\pipe\\clankie-swarm-pc"]
     worker["PC worker<br/>swarm-mcp adapter"] --> relay
     port["127.0.0.1:port"]
@@ -64,6 +64,25 @@ flowchart LR
   relay --> port
   port -. "ssh channel" .-> ssh --> owner
 ```
+
+## Windows execution sessions
+
+The first PC proof uses its existing `default` Herdr server in Windows
+session 0. Herdr panes are agent seats; they do not need access to the
+interactive desktop. Capture, virtual pad and GPU work run in session 1
+through the existing `C:\desk` job bridge. No second Herdr server is started
+in session 1, and fleet registration never replaces the existing server.
+This is the lead's 2026-09-27 decision on VUH-1381, amending criterion 1.
+
+Verify these paths separately: list/read/prompt/wait against an explicitly
+reserved agent pane, and one harmless bridge job that reports its own
+process session ID. A successful SSH call or an Active console in
+`query session` alone does not prove the bridge job ran in that session.
+A plain shell pane cannot satisfy `agent prompt`, `agent wait`, or an agent
+completion watch; prepare a recognized disposable agent before that proof.
+
+The [lead handoff runbook](../fleet-lead-handoff.md) is a scheduled procedure,
+not authorization to retire the PC lead during verification.
 
 ## Alternatives
 

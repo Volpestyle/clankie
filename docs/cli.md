@@ -1140,7 +1140,8 @@ What crosses the link, and what cannot:
   `tab|workspace create|list`, `api snapshot`, `session list`. Nothing that
   launches, attaches, stops, updates or reconfigures a server can be sent, and
   the Herdr CLI never starts a server for a subcommand. The remote server stays
-  the one its owner started, in its owner's desktop session.
+  the one its owner started. Agent seats may run in a service session;
+  desktop-bound work uses that machine's separately authorized desktop bridge.
 - A remote pane's ids carry the fleet: `pc/w2:p1J`, `pc/term_…`. Local ids stay
   bare. The census Clankie reads lists each fleet under its own `HERDR FLEET`
   heading, and the roster carries remote seats with `fleet` set.

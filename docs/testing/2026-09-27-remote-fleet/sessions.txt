@@ -1,0 +1,4 @@
+ SESSIONNAME               USERNAME                 ID  STATE   TYPE        DEVICE 
+>services                                            0  Disc                        
+ console                   volpe                     1  Active                      
+{"sessions":[{"default":true,"name":"default","running":true,"session_dir":"C:\\Users\\volpe\\AppData\\Roaming\\herdr","socket_path":"C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock"}]}

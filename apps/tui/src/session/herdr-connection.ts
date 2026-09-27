@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { HerdrSshTransportSchema } from "@clankie/settings";
+import { createHerdrFleetRun } from "../../../clankie/src/herdr-fleet.ts";
+import { runRuntimeCommand } from "../command/runtime.ts";
 import { ClankieApiClient } from "@clankie/api-client";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { HerdrBindingSchema, type HerdrBinding } from "@clankie/protocol";
@@ -78,6 +82,29 @@ export async function runFleetHerdr(
   args: readonly string[],
   options: HerdrConnectionOptions,
 ): Promise<number> {
+  if (options.connectionId) {
+    const inventory = await runRuntimeCommand(["list"], options);
+    const connections = inventory.connections as Array<{
+      id: string;
+      enabled: boolean;
+      session?: string;
+      ssh?: unknown;
+    }>;
+    const remote = connections.find((entry) => entry.id === options.connectionId && entry.enabled);
+    if (remote?.ssh !== undefined) {
+      if (!remote.session) throw new Error("Remote fleet is missing its session");
+      const run = createHerdrFleetRun(
+        {
+          id: remote.id,
+          session: remote.session,
+          ssh: HerdrSshTransportSchema.parse(remote.ssh),
+        },
+        { controlDirectory: join(options.env?.HOME ?? homedir(), ".clankie", "ssh") },
+      );
+      process.stdout.write(await run(args));
+      return 0;
+    }
+  }
   const { command, env } = herdrConnection(await readHerdrBinding(options), options);
   return await new Promise<number>((resolve, reject) => {
     const child = spawn(command, [...args], { env, stdio: "inherit" });
