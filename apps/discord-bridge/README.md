@@ -203,3 +203,10 @@ Voice stays end automatically after the gateway roster has contained no humans
 for five seconds. A human rejoining cancels the grace period; bots, consent
 counts, and audio subscriptions do not keep an empty stay alive. The voice leave
 receipt records `reason: room_empty` (ADR 0057).
+
+Speech interruption waits for a substantive transcript with speech-level overlap
+from the floor holder, or a direct re-address. Brief fragments and acknowledgements
+let playback continue; “stop”, “wait”, and “hold on” remain valid interruptions.
+`interrupted`, completed `response`, and synthesis `failed` receipts include
+playback and provider item ids when available, alongside the delivery id.
+Intentional TTS teardown does not emit a synthesis failure for late socket errors.

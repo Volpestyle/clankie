@@ -94,8 +94,8 @@ const DEFAULT_NARRATION_MIN_INTERVAL_MS = 12_000;
 const CAPTURE_END_SILENCE_MS = 800;
 /**
  * Speech-level audio required before a consented speaker is treated as talking
- * over him. Deliberately the same bar as {@link MIN_UTTERANCE_MS}: if it is not
- * enough to count as an utterance, it is not enough to cut him off.
+ * over him. Only overlapping audio counts, and a substantive transcript must
+ * confirm it before playback is truncated.
  */
 const BARGE_IN_PCM_BYTES = Math.round(
   REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * (MIN_UTTERANCE_MS / 1_000),
@@ -300,7 +300,8 @@ export interface VoiceConversationOpenInput {
   readonly onFunctionCall: (call: RealtimeFunctionCall) => void;
   readonly onResponseDone: (meta: RealtimeResponseMeta) => void;
   readonly onClose: (reason: RealtimeSessionCloseReason) => void;
-  readonly onError: (message: string) => void;
+  /** null explicitly means an idle mouth failure, with no utterance to attribute. */
+  readonly onError: (message: string, itemId?: string | null) => void;
 }
 
 /**
@@ -436,6 +437,8 @@ interface PendingTranscriptTurn extends RoomTurn {
    * from a silent one. Written by the capture loop, read once by the receipt.
    */
   peakRms?: number;
+  overlapPlaybackId?: string;
+  overlapSpeechBytes?: number;
 }
 
 interface FinalizedUtterance {
@@ -470,8 +473,6 @@ interface ActiveCapture {
   readonly turn: PendingTranscriptTurn;
   transcription?: VoiceTranscriptionPort;
   audioBytes: number;
-  bargeInChecked: boolean;
-  bargeInSpeechBytes: number;
 }
 
 const defaultTimers: RealtimeTimers = {
@@ -1195,8 +1196,6 @@ export class DiscordVoiceSession {
       generation,
       turn,
       audioBytes: 0,
-      bargeInChecked: false,
-      bargeInSpeechBytes: 0,
     };
     this.captures.set(userId, capture);
     const transcriptTurns = this.transcriptTurns.get(userId) ?? [];
@@ -1276,16 +1275,13 @@ export class DiscordVoiceSession {
     capture.audioBytes += pcm.byteLength;
     const rms = pcmRms(pcm);
     if (rms > (capture.turn.peakRms ?? 0)) capture.turn.peakRms = rms;
-    if (!capture.bargeInChecked) {
-      if (rms >= BARGE_IN_SPEECH_RMS) capture.bargeInSpeechBytes += pcm.byteLength;
-      if (
-        capture.bargeInSpeechBytes >= BARGE_IN_PCM_BYTES &&
-        frame.userId === this.floor.floorHolderId &&
-        this.isPlaying()
-      ) {
-        capture.bargeInChecked = true;
-        this.truncatePlayback(frame.userId);
+    const playback = this.playingJob;
+    if (playback !== undefined && this.isPlaying() && rms >= BARGE_IN_SPEECH_RMS) {
+      if (capture.turn.overlapPlaybackId !== playback.playbackId) {
+        capture.turn.overlapPlaybackId = playback.playbackId;
+        capture.turn.overlapSpeechBytes = 0;
       }
+      capture.turn.overlapSpeechBytes = (capture.turn.overlapSpeechBytes ?? 0) + pcm.byteLength;
     }
     this.forwardAudio(capture.transcription, pcm);
     frame.pcm.fill(0);
@@ -1424,7 +1420,12 @@ export class DiscordVoiceSession {
     }
     // Barge-in (b): being re-addressed while playing truncates immediately —
     // a re-address must not wait for an earlier overlapping capture to finish.
-    if (this.isPlaying() && addressed) {
+    const confirmedOverlap =
+      userId === this.floor.floorHolderId &&
+      turn.overlapPlaybackId === this.playingJob?.playbackId &&
+      (turn.overlapSpeechBytes ?? 0) >= BARGE_IN_PCM_BYTES &&
+      isSubstantiveInterruption(text);
+    if (this.isPlaying() && (addressed || confirmedOverlap)) {
       this.truncatePlayback(userId);
     }
     this.finalizedUtterances.push({
@@ -1783,20 +1784,32 @@ export class DiscordVoiceSession {
         onClose: (reason) => {
           this.handleConversationClose(reason, generation, guildId, channelId);
         },
-        onError: (message) => {
+        onError: (message, itemId) => {
           // The mouth failing is the only voice failure the room feels and
           // no trail recorded. It can die before audio or after an audible
           // prefix, so the failure receipt is what distinguishes either case
           // from silence or a cleanly settled response. Boundary messages are
           // already sanitized one-liners; the code keeps them machine-readable.
           if (generation !== this.sessionGeneration) return;
-          const pending = this.pendingResponses.find((candidate) => !candidate.done);
+          const job = [this.openPlayback, this.playingJob].find(
+            (candidate) =>
+              candidate !== undefined &&
+              (itemId === undefined || candidate.itemId === itemId) &&
+              candidate.outcome === undefined,
+          );
+          const pending =
+            itemId === null
+              ? undefined
+              : (job?.pending ?? this.pendingResponses.find((candidate) => !candidate.done));
+          const failedItemId = itemId ?? job?.itemId;
           void this.emitSafely({
             type: "failed",
             guildId,
             channelId,
             ...(pending === undefined ? {} : { deliveryId: pending.deliveryId }),
             ...(pending?.speakerId === undefined ? {} : { userId: pending.speakerId }),
+            ...(job === undefined ? {} : { playbackId: job.playbackId }),
+            ...(failedItemId === undefined ? {} : { itemId: failedItemId }),
             stage: "speech_synthesis",
             code: sanitizeFailureCode(message, "voice_speech_synthesis_failed"),
           });
@@ -2599,6 +2612,8 @@ export class DiscordVoiceSession {
       this.staySpokenCount += 1;
       await this.emitSafely({
         type: "response",
+        playbackId: job.playbackId,
+        itemId: job.itemId,
         guildId,
         channelId,
         deliveryId: pending.deliveryId,
@@ -2744,7 +2759,16 @@ export class DiscordVoiceSession {
         code: voxCommandFailureCode(error, "voice_playback_stop_failed"),
       });
     }
-    void this.emitSafely({ type: "interrupted", guildId, channelId, userId, phase: "playing" });
+    void this.emitSafely({
+      type: "interrupted",
+      guildId,
+      channelId,
+      userId,
+      phase: "playing",
+      deliveryId: job.pending.deliveryId,
+      playbackId: job.playbackId,
+      itemId: job.itemId,
+    });
   }
 
   // ------------------------------------------------------------------
@@ -3207,4 +3231,14 @@ function waitForVoxEvent<T extends VoxControlEvent>(
     signal?.addEventListener("abort", onAbort, { once: true });
     if (signal?.aborted === true) onAbort();
   });
+}
+
+/** Short controls are intentional; fragments and acknowledgements are not. */
+function isSubstantiveInterruption(text: string): boolean {
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (words.some((word) => word === "stop" || word === "wait") || /\bhold on\b/iu.test(text)) return true;
+  const content = words.filter(
+    (word) => !["uh", "um", "hmm", "mhm", "yeah", "yes", "yep", "okay", "ok", "right", "aha"].includes(word),
+  );
+  return content.length >= 3;
 }

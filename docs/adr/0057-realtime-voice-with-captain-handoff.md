@@ -91,12 +91,14 @@ chatter. The repository therefore owns the floor machine:
 Barge-in is deliberate: the floor holder speaking over Clankie or addressing
 him again truncates playback; unrelated crosstalk does not.
 
-"Speaking over" is measured, not assumed. An open mic streams room tone
-continuously, so a capture only counts toward barge-in once it carries 350 ms of
-audio above a speech-level RMS floor (`BARGE_IN_SPEECH_RMS` in
-`voice-session.ts`). Duration alone cut him off mid-sentence on fans and
-keystrokes whose transcripts came back empty. The floor is a calibration knob:
-mics and noise suppression move both the room tone and the speech level.
+"Speaking over" requires 350 ms of speech-level audio overlapping the current
+playback, plus a substantive final transcript from the floor holder. Brief
+fragments (such as “What I”) and acknowledgements do not truncate. Short
+intentional controls (“stop”, “wait”, “hold on”) do; so do longer utterances
+with at least three words beyond acknowledgements and fillers. Direct
+re-address remains immediate on transcription. A delayed transcript cannot
+interrupt a later playback. This waits for transcription rather than guessing
+intent from loudness; tuning that latency needs a consented live test.
 
 ### Empty-room body hygiene (2026-09-28)
 

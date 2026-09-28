@@ -124,6 +124,7 @@ interface Harness {
     done: RealtimeResponseMeta[];
     closes: string[];
     errors: string[];
+    errorItems: (string | null | undefined)[];
   };
   failNextTtsOpen: { value: boolean };
 }
@@ -137,14 +138,17 @@ async function openHarness(): Promise<
   const ttsHandlers: ExternalVoiceTtsHandlers[] = [];
   const failNextTtsOpen = { value: false };
   let realtimeHandlers: ExternalVoiceRealtimeHandlers | undefined;
-  const events: Harness["events"] = { audio: [], done: [], closes: [], errors: [] };
+  const events: Harness["events"] = { audio: [], done: [], closes: [], errors: [], errorItems: [] };
   const input: VoiceConversationOpenInput = {
     instructions: "Be Clankie.",
     onAudioDelta: (pcm, itemId) => events.audio.push({ pcm: Buffer.from(pcm), itemId }),
     onFunctionCall: () => undefined,
     onResponseDone: (meta) => events.done.push(meta),
     onClose: (reason) => events.closes.push(reason),
-    onError: (message) => events.errors.push(message),
+    onError: (message, itemId) => {
+      events.errors.push(message);
+      events.errorItems.push(itemId);
+    },
   };
   const factories: ExternalVoiceSessionFactories = {
     openRealtime: (handlers) => {
@@ -168,6 +172,18 @@ async function openHarness(): Promise<
 }
 
 describe("external voice conversation", () => {
+  it("correlates live synthesis failures and suppresses errors from intentional teardown", async () => {
+    const { port, realtimeHandlers, ttsHandlers, events } = await openHarness();
+    realtimeHandlers.onTextDelta("Still speaking.", "failed_item");
+    await settle();
+    ttsHandlers[0]?.onError("ElevenLabs transport error");
+    expect(events.errors).toEqual(["ElevenLabs transport error"]);
+    expect(events.errorItems).toEqual(["failed_item"]);
+    port.close();
+    ttsHandlers[0]?.onError("ElevenLabs transport error");
+    expect(events.errors).toHaveLength(1);
+  });
+
   it("closes the ears when the mouth cannot open", async () => {
     const realtime = new FakeRealtimePort();
     const factories: ExternalVoiceSessionFactories = {

@@ -84,6 +84,14 @@ The reference defines `close_context` as flushing remaining generation. Thus
 local interruption is guaranteed by dropping late output, not by a claim that
 the provider cancels billing immediately.
 
+### Teardown and cutoff attribution (2026-09-28)
+
+Intentional conversation close suppresses late TTS socket errors. Genuine
+synthesis failures retain the provider item id, delivery id, and playback id
+when PCM has reached a playback job; before first audio there is no playback id.
+Interruption and completed-playback receipts carry those same join keys. A
+socket failure with no live utterance must not borrow the previous reply's ids.
+
 ## Alternatives considered
 
 - **Voice-change realtime audio** was rejected because it doubles synthesis and

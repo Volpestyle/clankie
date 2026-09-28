@@ -1869,7 +1869,9 @@ describe("fast path responses", () => {
     harness.clock.now = 7_000;
     harness.vox.emit({ type: "tts_playback_state", playbackId, status: "started" });
     harness.clock.now = 7_400;
-    capture.stream.write(monoPcm(2));
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.transcribe(ALICE, "stop");
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_prebuffered", audioEndMs: 400 }]);
   });
@@ -2374,6 +2376,43 @@ describe("ability path", () => {
     });
   });
 
+  it("attributes synthesis failures after model completion to their still-playing job", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "synthesis_item");
+    await flush();
+    const playbackId = harness.vox.activePlaybackId;
+    const deliveryId = at(harness.ofType("model_response"), 0).deliveryId;
+    conversation.input.onResponseDone({
+      responseId: "done",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 5,
+    });
+    conversation.input.onError("ElevenLabs transport error", "synthesis_item");
+    await flush();
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({
+      deliveryId,
+      playbackId,
+      itemId: "synthesis_item",
+      stage: "speech_synthesis",
+    });
+  });
+
+  it("does not attribute an idle TTS socket error to audio still draining", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "previous_item");
+    await flush();
+    conversation.input.onError("ElevenLabs transport error", null);
+    await flush();
+    const failure = at(harness.ofType("failed"), -1);
+    expect(failure).not.toHaveProperty("deliveryId");
+    expect(failure).not.toHaveProperty("playbackId");
+    expect(failure).not.toHaveProperty("itemId");
+  });
+
   it("rejects malformed ask_clankie arguments without hanging", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
@@ -2551,6 +2590,55 @@ describe("barge-in", () => {
     return { harness, conversation };
   }
 
+  it.each(["What I", "yeah", "yeah yeah yeah", "okay right uh", ""])(
+    "does not cut speech for the fragment %j even with loud overlapping PCM",
+    async (text) => {
+      const { harness, conversation } = await playingHarness();
+      const capture = harness.startCapture(ALICE);
+      capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4));
+      await flush();
+      expect(conversation.truncations).toHaveLength(0);
+      harness.transcribe(ALICE, text);
+      await flush();
+      expect(conversation.truncations).toHaveLength(0);
+      expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
+    },
+  );
+
+  it.each(["stop", "wait", "hold on", "I meant the other one"])(
+    "preserves a real floor-holder interruption: %s",
+    async (text) => {
+      const { harness, conversation } = await playingHarness();
+      const capture = harness.startCapture(ALICE);
+      capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+      await flush();
+      harness.transcribe(ALICE, text);
+      await flush();
+      expect(conversation.truncations).toHaveLength(1);
+    },
+  );
+
+  it("does not apply a delayed transcript to a different playback", async () => {
+    const { harness, conversation } = await playingHarness();
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    conversation.input.onResponseDone({
+      responseId: "first",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
+    await flush();
+    await harness.session.narrate("another moment in the game");
+    conversation.input.onAudioDelta(pcmDelta(480), "item_next");
+    await flush();
+    expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
+    harness.transcribe(ALICE, "wait a second");
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+  });
+
   it("sustained speech from the floor holder truncates deliberately at the played offset", async () => {
     const { harness, conversation } = await playingHarness();
     const playbackId = harness.vox.activePlaybackId;
@@ -2558,11 +2646,22 @@ describe("barge-in", () => {
     const capture = harness.startCapture(ALICE);
     capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
+    harness.transcribe(ALICE, "wait I meant something else");
+    await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
     expect(harness.vox.activePlaybackId).toBeUndefined();
     expect(harness.vox.stops).toContain(playbackId);
     expect(harness.ofType("interrupted")).toMatchObject([
-      { type: "interrupted", guildId: GUILD, channelId: CHANNEL, userId: ALICE, phase: "playing" },
+      {
+        type: "interrupted",
+        guildId: GUILD,
+        channelId: CHANNEL,
+        userId: ALICE,
+        phase: "playing",
+        playbackId,
+        itemId: "item_play",
+        deliveryId: at(harness.ofType("model_response"), 0).deliveryId,
+      },
     ]);
   });
 
@@ -2572,6 +2671,8 @@ describe("barge-in", () => {
     harness.clock.now = 5_400;
     const capture = harness.startCapture(ALICE);
     capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.transcribe(ALICE, "wait I meant something else");
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
     expect(harness.ofType("interrupted")).toHaveLength(1);
@@ -2619,11 +2720,13 @@ describe("barge-in", () => {
     expect(conversation.truncations).toHaveLength(0);
     capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
+    harness.transcribe(ALICE, "wait I meant something else");
+    await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
     expect(harness.vox.activePlaybackId).toBeUndefined();
   });
 
-  it("speech already underway when playback starts still truncates", async () => {
+  it("speech already underway must overlap playback before it truncates", async () => {
     const harness = await engagedHarness({ narrationMinIntervalMs: 0 });
     const conversation = harness.conversation();
     conversation.input.onResponseDone({
@@ -2645,6 +2748,11 @@ describe("barge-in", () => {
 
     harness.clock.now = 400;
     capture.stream.write(monoPcm(3_840));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.transcribe(ALICE, "hold on");
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_narration", audioEndMs: 400 }]);
     expect(harness.vox.activePlaybackId).toBeUndefined();

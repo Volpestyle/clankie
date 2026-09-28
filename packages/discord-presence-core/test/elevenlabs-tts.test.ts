@@ -119,6 +119,17 @@ async function openSession(overrides: Partial<ElevenLabsTtsSessionOptions> = {})
 }
 
 describe("elevenlabs tts session", () => {
+  it.each(["eleven_flash_v2_5", "eleven_v4_turbo"])(
+    "ignores socket errors after intentional %s teardown",
+    async (modelId) => {
+      const { session, socket, errors, closes } = await openSession({ modelId });
+      session.close();
+      socket.emitError(new Error("late close error"));
+      expect(errors).toEqual([]);
+      expect(closes).toEqual(["closed"]);
+    },
+  );
+
   it("connects to the multi-context endpoint with the pinned 24 kHz format and the key in headers only", async () => {
     const { session, socket, factory } = await openSession();
     expect(factory[0]?.headers).toEqual({ "xi-api-key": "xi-test-secret" });

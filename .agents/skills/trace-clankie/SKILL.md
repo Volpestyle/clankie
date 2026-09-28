@@ -192,6 +192,13 @@ Following controls waking, not collection.
   — an `ask_clankie` round trip spends **one** `deliveryId` on two responses
   (the "let me check" and the answer), so a naive join credits the answer with
   the filler's audio and hides exactly the turn worth looking at.
+- **Cutoffs correlate by playback, not just delivery.** New `interrupted`,
+  `response`, and `failed` (`speech_synthesis`) receipts carry `playbackId` and
+  provider `itemId` when a playback exists. Pre-audio failures have no playback
+  id; idle socket failures have no utterance to attribute. Intentional close
+  suppresses late socket errors. A `left` reason of `room_empty` means the
+  gateway roster remained human-empty for the five-second grace; floor decay
+  and Vox subscription counts alone do not establish that.
 - **An ElevenLabs byte-limit failure can follow audible speech.**
   `discord.voice.failed` with code
   `elevenlabs_context_audio_exceeded_the_byte_limit` means synthesized PCM hit

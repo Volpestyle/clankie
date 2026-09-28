@@ -165,6 +165,7 @@ export class ElevenLabsTtsSession {
       this.closeWith("socket");
     });
     socket.onError(() => {
+      if (this.closed) return;
       // The transport error object can carry connection detail; it is never
       // inspected or forwarded, exactly as the realtime boundary treats it.
       this.onErrorCallback?.("ElevenLabs transport error");

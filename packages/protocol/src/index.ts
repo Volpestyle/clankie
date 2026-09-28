@@ -5795,6 +5795,8 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("response"),
         ...discordVoiceChannelScope,
+        playbackId: DiscordVoiceLocalIdSchema.optional(),
+        itemId: DiscordVoiceLocalIdSchema.optional(),
         deliveryId: DiscordVoiceLocalIdSchema,
         /** Gateway speaker whose immutable utterance id caused this response. */
         userId: DiscordVoiceGatewayIdSchema.optional(),
@@ -5837,6 +5839,9 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("interrupted"),
         ...discordVoiceChannelScope,
+        playbackId: DiscordVoiceLocalIdSchema.optional(),
+        itemId: DiscordVoiceLocalIdSchema.optional(),
+        deliveryId: DiscordVoiceLocalIdSchema.optional(),
         userId: DiscordVoiceGatewayIdSchema,
         /** Deliberate truncation while playing; streamed audio has no synthesizing phase to cut. */
         phase: z.literal("playing"),
@@ -5846,6 +5851,8 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("failed"),
         ...discordVoiceChannelScope,
+        playbackId: DiscordVoiceLocalIdSchema.optional(),
+        itemId: DiscordVoiceLocalIdSchema.optional(),
         deliveryId: DiscordVoiceLocalIdSchema.optional(),
         userId: DiscordVoiceGatewayIdSchema.optional(),
         stage: DiscordVoiceFailureStageSchema,

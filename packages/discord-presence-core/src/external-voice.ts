@@ -259,7 +259,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     }
     this.lastTextItemId = "";
     const handle = this.timers.setTimeout(() => {
-      this.input.onError("External voice synthesis did not drain in time");
+      this.input.onError("External voice synthesis did not drain in time", itemId);
       // A context that missed the drain window is abandoned, not merely
       // un-held. Left open it keeps its ElevenLabs context slot forever, and
       // the still-live item pins `discardMouth` shut — so the next utterances
@@ -310,7 +310,11 @@ class ExternalVoiceConversation implements VoiceConversationPort {
         }
         for (const itemId of this.heldDone.keys()) this.releaseHeldDone(itemId);
       },
-      onError: this.input.onError,
+      onError: (message) => {
+        if (this.closed) return;
+        if (this.liveItemIds.size === 0) this.input.onError(message, null);
+        else for (const itemId of this.liveItemIds) this.input.onError(message, itemId);
+      },
     };
   }
 
@@ -345,10 +349,14 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       try {
         await step();
       } catch (error) {
+        if (!this.closed)
+          this.input.onError(
+            error instanceof Error ? error.message : "External voice synthesis failed",
+            itemId,
+          );
         this.markSpeechFailure(itemId);
         this.dropItem(itemId);
         this.discardMouth();
-        throw error;
       }
     });
   }
@@ -398,7 +406,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       .catch((error: unknown) => {
         // Boundary errors are already sanitized one-liners; anything else is
         // reduced to a fixed string so socket detail never escapes here.
-        this.input.onError(error instanceof Error ? error.message : "External voice synthesis failed");
+        if (!this.closed)
+          this.input.onError(error instanceof Error ? error.message : "External voice synthesis failed");
       });
   }
 
