@@ -38,8 +38,10 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
-    nouns: ["agents"],
+    nouns: ["agents", "sessions"],
     lines: [
+      "  agents contacts          Known agent identities and availability (JSON)",
+      "  sessions                 Alias for agents session commands",
       "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",
       "  agents send HOST:SESSION MESSAGE | runs [RUN] | cancel RUN | release RUN",
       "  agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID",

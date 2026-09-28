@@ -34,6 +34,7 @@ import type {
   OperatorConversationSessionState,
   EvaluatorStatus,
   OperatorConversationScope,
+  OperatorAgentPersona,
 } from "@clankie/protocol";
 import type { PresenceSnapshot } from "./observation/presence.ts";
 import type { HerdrRosterSnapshot } from "./observation/herdr-roster.ts";
@@ -94,6 +95,8 @@ export interface ConsoleCommandContext {
     readonly title?: string | undefined;
     /** Directory the selected conversation's session works in. */
     readonly workspace?: string;
+    agents?(): Promise<readonly OperatorAgentPersona[]>;
+    openAgent?(agent: OperatorAgentPersona): Promise<{ readonly title: string }>;
     conversations(): Promise<
       readonly {
         readonly conversationId: string;
@@ -246,6 +249,57 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "agents",
       aliases: [],
+      description: "Known agents, their connections, and current availability",
+      takesArgument: true,
+      argumentHint: "[contacts | legacy session commands; see /sessions]",
+      async run(argument, shell): Promise<void> {
+        if (argument.trim()) {
+          const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
+          shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
+          return;
+        }
+        if (!conversations?.agents || !conversations.openAgent) {
+          shell.insertCommandResult("/agents", "Agent directory is unavailable.", "error");
+          return;
+        }
+        const flow = shell.setupFlow;
+        flow.begin("agents");
+        try {
+          const agents = await conversations.agents();
+          flow.renderLine(
+            "Known identities, not a complete connection history. /sessions browses saved harness sessions.",
+          );
+          if (!agents.length) {
+            flow.renderLine("No known agents.");
+            return;
+          }
+          const id = await flow.readSelect({
+            message: "Agents",
+            options: agents.map((agent) => ({
+              value: agent.personaId,
+              label: agent.name,
+              hint: agent.swarm
+                ? `Swarm · ${agent.swarm.connectionId} · ${agent.swarm.available ? "available" : "offline"}`
+                : `Herdr · ${agent.harness} · ${agent.activeSeatId ? "available" : "offline"}`,
+              description: agent.personaId,
+            })),
+          });
+          const agent = agents.find((entry) => entry.personaId === id);
+          if (!agent) return;
+          if (!(agent.swarm ? agent.swarm.available : agent.activeSeatId) && !agent.conversationId) {
+            flow.renderLine("This agent is offline and has no saved thread.", "warning");
+            return;
+          }
+          const selected = await conversations.openAgent(agent);
+          shell.insertCommandResult("/agents", `Opened ${selected.title}.`, "success");
+        } finally {
+          flow.end();
+        }
+      },
+    },
+    {
+      name: "sessions",
+      aliases: [],
       description: "List, read or resume Claude/Codex/Grok/Pi sessions here or on SSH hosts",
       takesArgument: true,
       argumentHint:
@@ -257,10 +311,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         }
         try {
           const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
-          shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
+          shell.insertCommandResult("/sessions", JSON.stringify(result, null, 2), "success");
         } catch (error) {
           shell.insertCommandResult(
-            "/agents",
+            "/sessions",
             error instanceof Error ? error.message : String(error),
             "error",
           );
@@ -374,105 +428,151 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.insertCommandResult("/help", lines.join("\n"), "success");
       },
     },
-    {
-      name: "conversation",
-      aliases: ["chat", "conversations"],
-      description: "Choose or switch persistent chat conversations",
-      argumentHint: "[<name-or-path>]",
-      takesArgument: true,
-      async run(argument, shell): Promise<void> {
-        if (conversations === undefined) {
-          shell.insertCommandResult("/conversation", "Conversations are unavailable.", "error");
-          return;
-        }
-        const selector = argument.trim();
-        if (selector.length === 0) {
-          const flow = shell.setupFlow;
-          flow.begin("conversation");
-          try {
-            for (;;) {
-              const rows = await conversations.conversations();
-              const currentConversationId = conversations.conversationId;
-              let conversationIdToClose: string | undefined;
-              const picked = await flow.readSelect({
-                message: "Conversations",
-                options: rows.map((item) => ({
-                  value: item.conversationId,
-                  label: item.title,
-                  hint: conversationHint(item),
-                  ...(item.scope.kind === "workspace" ? { description: item.scope.workspaceId } : {}),
-                })),
-                ...(currentConversationId === undefined
-                  ? {}
-                  : { currentValue: currentConversationId, initialValue: currentConversationId }),
-                ...(conversations.close === undefined
-                  ? {}
-                  : { onClose: (conversationId: string) => (conversationIdToClose = conversationId) }),
-              });
-              if (conversationIdToClose !== undefined && conversations.close !== undefined) {
-                const closing = rows.find((item) => item.conversationId === conversationIdToClose);
-                const closed = await conversations.close(conversationIdToClose);
-                if (!closed) {
-                  flow.renderLine(
-                    closing?.isDefault === true
-                      ? "The default conversation stays available."
-                      : closing?.sessionState === "active"
-                        ? "That conversation is still active."
-                        : "That conversation could not be closed.",
-                    "warning",
-                  );
+    ...[
+      {
+        name: "chats",
+        aliases: ["chat", "conversation", "conversations"],
+        description: "Talk with Clankie in personal and workspace chats",
+        argumentHint: "[<name-or-path>]",
+        takesArgument: true,
+        title: "Chats",
+        kinds: ["global", "workspace"],
+      },
+      {
+        name: "rooms",
+        aliases: [],
+        description: "Group channels and Discord text or voice history",
+        argumentHint: "[<name-or-path>]",
+        takesArgument: true,
+        title: "Rooms",
+        kinds: ["channel", "room"],
+      },
+      {
+        name: "history",
+        aliases: [],
+        description: "Browse all retained threads, including offline agents",
+        argumentHint: "[<name-or-path>]",
+        takesArgument: true,
+        title: "History",
+        kinds: [],
+      },
+    ].map(
+      ({ name, aliases, title, description, kinds, argumentHint, takesArgument }): FaceShellCommand => ({
+        name,
+        aliases,
+        description,
+        argumentHint,
+        takesArgument,
+        async run(argument, shell): Promise<void> {
+          if (conversations === undefined) {
+            shell.insertCommandResult(`/${name}`, "Conversations are unavailable.", "error");
+            return;
+          }
+          const selector = argument.trim();
+          if (selector.length === 0) {
+            const flow = shell.setupFlow;
+            flow.begin(name);
+            try {
+              flow.renderLine(
+                "/chats · Clankie   /agents · directory   /rooms · shared spaces   /history · all threads",
+              );
+              for (;;) {
+                const rows = (await conversations.conversations()).filter(
+                  (item) => kinds.length === 0 || kinds.includes(item.scope.kind),
+                );
+                if (!rows.length) {
+                  flow.renderLine(`No saved threads in ${title.toLowerCase()}.`);
+                  return;
+                }
+                const currentConversationId = conversations.conversationId;
+                let conversationIdToClose: string | undefined;
+                const picked = await flow.readSelect({
+                  message: title,
+                  options: rows.map((item) => ({
+                    value: item.conversationId,
+                    label: item.title,
+                    hint: conversationHint(item),
+                    ...(item.scope.kind === "workspace" ? { description: item.scope.workspaceId } : {}),
+                  })),
+                  ...(currentConversationId === undefined ||
+                  !rows.some((item) => item.conversationId === currentConversationId)
+                    ? {}
+                    : { currentValue: currentConversationId, initialValue: currentConversationId }),
+                  ...(conversations.close === undefined
+                    ? {}
+                    : { onClose: (conversationId: string) => (conversationIdToClose = conversationId) }),
+                });
+                if (conversationIdToClose !== undefined && conversations.close !== undefined) {
+                  const closing = rows.find((item) => item.conversationId === conversationIdToClose);
+                  const closed = await conversations.close(conversationIdToClose);
+                  if (!closed) {
+                    flow.renderLine(
+                      closing?.isDefault === true
+                        ? "The default conversation stays available."
+                        : closing?.sessionState === "active"
+                          ? "That conversation is still active."
+                          : "That conversation could not be closed.",
+                      "warning",
+                    );
+                    continue;
+                  }
+                  if (conversationIdToClose === currentConversationId) {
+                    const remaining = await conversations.conversations();
+                    const fallback =
+                      remaining.find((item) => item.isDefault && item.scope.kind === "global") ??
+                      remaining[0];
+                    if (fallback === undefined) throw new Error("No conversation remains after close");
+                    await conversations.select(fallback.conversationId);
+                  }
+                  flow.renderLine(`Closed ${closing?.title ?? "conversation"}.`, "success");
                   continue;
                 }
-                if (conversationIdToClose === currentConversationId) {
-                  const fallback = (await conversations.conversations())[0];
-                  if (fallback === undefined) throw new Error("No conversation remains after close");
-                  await conversations.select(fallback.conversationId);
-                }
-                flow.renderLine(`Closed ${closing?.title ?? "conversation"}.`, "success");
-                continue;
+                const conversationId = picked;
+                if (conversationId === undefined) return;
+                const selected = await conversations.select(conversationId);
+                shell.insertCommandResult(`/${name}`, `Switched to ${selected.title}.`, "success");
+                return;
               }
-              const conversationId = picked;
-              if (conversationId === undefined) return;
-              const selected = await conversations.select(conversationId);
-              shell.insertCommandResult("/conversation", `Switched to ${selected.title}.`, "success");
-              return;
+            } finally {
+              flow.end();
             }
-          } finally {
-            flow.end();
           }
-        }
-        const rows = await conversations.conversations();
-        const byId = rows.find((item) => item.conversationId === selector);
-        const matches =
-          byId === undefined
-            ? rows.filter(
-                (item) =>
-                  item.title.toLowerCase() === selector.toLowerCase() ||
-                  (item.scope.kind === "workspace" && item.scope.workspaceId === selector) ||
-                  (item.scope.kind === "room" &&
-                    (item.scope.targetId === selector || item.scope.targetId.split(":").at(-1) === selector)),
-              )
-            : [byId];
-        if (matches.length === 0) {
-          shell.insertCommandResult(
-            `/conversation ${selector}`,
-            `No conversation matches ${selector}. Run /conversation to choose one.`,
-            "error",
+          const rows = (await conversations.conversations()).filter(
+            (item) => kinds.length === 0 || kinds.includes(item.scope.kind),
           );
-          return;
-        }
-        if (matches.length > 1) {
-          shell.insertCommandResult(
-            `/conversation ${selector}`,
-            `More than one conversation is named ${selector}. Use /cd <path> to choose its workspace.`,
-            "error",
-          );
-          return;
-        }
-        const selected = await conversations.select(matches[0]!.conversationId);
-        shell.insertCommandResult(`/conversation ${selector}`, `Switched to ${selected.title}.`, "success");
-      },
-    },
+          const byId = rows.find((item) => item.conversationId === selector);
+          const matches =
+            byId === undefined
+              ? rows.filter(
+                  (item) =>
+                    item.title.toLowerCase() === selector.toLowerCase() ||
+                    (item.scope.kind === "workspace" && item.scope.workspaceId === selector) ||
+                    (item.scope.kind === "room" &&
+                      (item.scope.targetId === selector ||
+                        item.scope.targetId.split(":").at(-1) === selector)),
+                )
+              : [byId];
+          if (matches.length === 0) {
+            shell.insertCommandResult(
+              `/${name} ${selector}`,
+              `No conversation matches ${selector}. Run /${name} to choose one; /history searches all retained threads.`,
+              "error",
+            );
+            return;
+          }
+          if (matches.length > 1) {
+            shell.insertCommandResult(
+              `/${name} ${selector}`,
+              `More than one thread is named ${selector}. Use its conversation ID to choose one.`,
+              "error",
+            );
+            return;
+          }
+          const selected = await conversations.select(matches[0]!.conversationId);
+          shell.insertCommandResult(`/${name} ${selector}`, `Switched to ${selected.title}.`, "success");
+        },
+      }),
+    ),
     {
       name: "new",
       aliases: [],
@@ -1077,16 +1177,16 @@ function conversationHint(conversation: {
     case "workspace":
       return "workspace";
     case "seat":
-      return "seat";
+      return "agent thread · legacy seat";
     case "persona":
-      return "agent";
+      return "agent thread · availability in /agents";
     case "channel":
       return "channel";
     case "global":
       // The default global room is the head (ADR 0152) — the same thread the
       // app pins as Clankie. Name it that here too, so one room does not read
       // as two things depending on which face you opened.
-      return conversation.isDefault ? "head" : "global";
+      return conversation.isDefault ? "Clankie" : "personal chat";
   }
 }
 

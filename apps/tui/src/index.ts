@@ -222,6 +222,21 @@ const conversationsContext = {
     return currentWorkspace;
   },
   conversations: () => conversationSelection.conversations(),
+  agents: async () => {
+    if (!conversationClient.fleet) throw new Error("Agent directory is unavailable");
+    return (await conversationClient.fleet()).personas;
+  },
+  openAgent: async (agent: import("@clankie/protocol").OperatorAgentPersona) => {
+    const id =
+      agent.conversationId ??
+      (
+        await conversationClient.create({
+          scope: { kind: "persona", personaId: agent.personaId },
+          title: agent.name,
+        })
+      ).conversationId;
+    return conversationsContext.select(id);
+  },
   close: (conversationId: string) => conversationClient.close(conversationId),
   reset: async () => {
     const id = conversationSelection.conversationId;

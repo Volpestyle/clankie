@@ -469,12 +469,13 @@ describe("shell assembly", () => {
           return { conversationId, title: conversationId === "global-default" ? "Clankie" : "dev" };
         },
       },
-    }).find((candidate) => candidate.name === "conversation");
+    }).find((candidate) => candidate.name === "chats");
     if (command === undefined) throw new Error("conversation command not found");
     const shell = {
       setupFlow: {
         begin() {},
         end() {},
+        renderLine() {},
         readSelect(options: NonNullable<typeof menu>) {
           menu = options;
           return Promise.resolve("global-default");
@@ -493,13 +494,13 @@ describe("shell assembly", () => {
       initialValue: "conv-dev",
       options: [
         { label: "dev", hint: "workspace", description: "/Users/james/dev" },
-        { label: "Clankie", hint: "head" },
+        { label: "Clankie", hint: "Clankie" },
       ],
     });
     expect(selected).toEqual(["global-default", "conv-dev"]);
     expect(results).toEqual([
-      { invocation: "/conversation", text: "Switched to Clankie." },
-      { invocation: "/conversation dev", text: "Switched to dev." },
+      { invocation: "/chats", text: "Switched to Clankie." },
+      { invocation: "/chats dev", text: "Switched to dev." },
     ]);
   });
 
@@ -542,7 +543,7 @@ describe("shell assembly", () => {
           return { conversationId, title: "Clankie" };
         },
       },
-    }).find((candidate) => candidate.name === "conversation");
+    }).find((candidate) => candidate.name === "chats");
     if (command === undefined) throw new Error("conversation command not found");
     let reads = 0;
     const statuses: string[] = [];
@@ -564,7 +565,7 @@ describe("shell assembly", () => {
 
     expect(closed).toEqual(["conv-dev"]);
     expect(selected).toEqual(["global-default"]);
-    expect(statuses).toEqual(["Closed dev."]);
+    expect(statuses).toContain("Closed dev.");
   });
 
   it("starts a fresh conversation in the current scope", async () => {

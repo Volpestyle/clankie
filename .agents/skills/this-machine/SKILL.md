@@ -500,6 +500,18 @@ Message Content access, unmentioned follow-ups and ping-disabled replies may
 need a mention or DM. A failed delivery marked interrupted was admitted before
 a restart: inspect effects before explicitly retrying it.
 
+## Chats, agents, rooms, and history
+
+In the TUI, `/chats` means personal/workspace chats with Clankie; `/agents`
+means known identities with connection source and availability; `/rooms`
+means group channels and Discord inspection; `/history` means all retained
+threads, including ongoing ones. `/conversation` and `/chat` alias `/chats`.
+Use `/history ID` to open any retained thread. `/sessions` browses saved harness
+sessions, which are not agent identities. Existing `/agents` session arguments
+still work. Headless: `clankie agents contacts` lists identities and availability;
+`clankie sessions` browses harness records; `clankie conversations list|show|tail`
+reads retained threads. Never infer reachability or completion from a saved thread.
+
 ## A Mac connected to hosted Clankie
 
 `clankie login` signs in by email code and pairs a revocable hosted device.

@@ -84,3 +84,27 @@ it("surfaces the service's reason for a refused read", async () => {
     }),
   ).rejects.toThrow("Invalid transcript cursor");
 });
+
+it("reads known identities from the fleet API rather than the saved session inventory", async () => {
+  const calls: unknown[] = [];
+  const result = await runAgentsCommand(["contacts"], {
+    env: { CLANKIE_CAPTAIN_TOKEN: "captain" },
+    fetchImpl: (async (_url, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer captain");
+      calls.push(JSON.parse(init!.body as string));
+      return Response.json({
+        op: "fleet",
+        schemaVersion: 1,
+        snapshot: {
+          schemaVersion: 1,
+          cursor: "000000000001",
+          seats: [],
+          personas: [],
+          channels: [],
+        },
+      });
+    }) as typeof fetch,
+  });
+  expect(result).toEqual([]);
+  expect(calls).toEqual([expect.objectContaining({ op: "fleet" })]);
+});

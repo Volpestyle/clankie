@@ -230,7 +230,7 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await runSwarmCommand(rest, options));
       return 0;
     }
-    if (command === "agents") {
+    if (command === "agents" || command === "sessions") {
       outputJson(stdout, await runAgentsCommand(rest, options));
       return 0;
     }

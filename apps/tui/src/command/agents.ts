@@ -1,8 +1,14 @@
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import {
+  createCaptainOperatorConversationClient,
+  createCaptainRouteClient,
+  resolveCaptainRouteToken,
+} from "../session/operator-conversations.ts";
 import { commandHost } from "./io.ts";
 
 const AGENTS_USAGE =
-  "Usage: clankie agents [list] [--host ID] [--limit N]\n" +
+  "Usage: clankie agents contacts\n" +
+  "       clankie agents [list] [--host ID] [--limit N]\n" +
   "       clankie agents read HOST:SESSION [--tail N | --after CURSOR]\n" +
   "       clankie agents send HOST:SESSION MESSAGE | runs [RUN] | cancel RUN | release RUN\n" +
   "       clankie agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID";
@@ -28,6 +34,17 @@ export async function runAgentsCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "contacts" && args.length === 1) {
+    const token = await resolveCaptainRouteToken({ env: options.env ?? process.env });
+    const client = createCaptainOperatorConversationClient(
+      createCaptainRouteClient({
+        host: commandHost(options),
+        ...(token ? { captainToken: token } : {}),
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      }),
+    );
+    return (await client.fleet!()).personas;
+  }
   let path: string,
     method = "GET",
     body: string | undefined;
