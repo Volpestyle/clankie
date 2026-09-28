@@ -185,6 +185,7 @@ async function copyRuntimeAssets(targetRoot) {
     ["README.md", "README.md"],
     ["docs/bundled-skills.md", "docs/bundled-skills.md"],
     ["vendor/opinionated-skills.json", "vendor/opinionated-skills.json"],
+    ["vendor/opinionated-skills/LICENSE", "vendor/opinionated-skills/LICENSE"],
     ["vendor/opinionated-skills/LICENSE", "licenses/opinionated-skills-MIT.txt"],
     ["docs/cli.md", "docs/cli.md"],
     ["docs/worker-access.md", "docs/worker-access.md"],
