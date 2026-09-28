@@ -298,6 +298,7 @@ const voiceSession =
           config: voiceConfig,
         }),
         briefing: createVoiceBriefingProvider(voiceApi),
+        channelOccupants: (guildId, channelId) => gateway.voiceOccupants(guildId, channelId),
         lookAtScreen: createVoiceLookAtScreenProvider(voiceApi),
         floor: {
           names: characterNames(storedSettings.persona),

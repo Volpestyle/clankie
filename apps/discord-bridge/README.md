@@ -198,3 +198,8 @@ satisfy these live gates.
 
 Receipts contain bounded ids, counts, durations, and typed outcomes only. They
 exclude message bodies, transcripts, names, media, and credentials.
+
+Voice stays end automatically after the gateway roster has contained no humans
+for five seconds. A human rejoining cancels the grace period; bots, consent
+counts, and audio subscriptions do not keep an empty stay alive. The voice leave
+receipt records `reason: room_empty` (ADR 0057).

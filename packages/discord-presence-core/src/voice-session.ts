@@ -113,6 +113,7 @@ const BARGE_IN_PCM_BYTES = Math.round(
  * a soft talker cannot interrupt him.
  */
 const BARGE_IN_SPEECH_RMS = 1_200;
+export const EMPTY_ROOM_GRACE_MS = 5_000;
 const VOICE_READY_TIMEOUT_MS = 20_000;
 const DAVE_READY_TIMEOUT_MS = 10_000;
 const PLAYBACK_TIMEOUT_MS = 2 * 60_000;
@@ -335,6 +336,7 @@ export type LookAtScreenResult =
 export interface VoiceRoomOccupant {
   readonly userId: string;
   readonly displayName?: string;
+  readonly isBot?: boolean;
 }
 
 export interface DiscordVoiceSessionOptions {
@@ -515,6 +517,7 @@ export class DiscordVoiceSession {
   private readonly speakerLastActiveAtMs = new Map<string, number>();
   private conversation: VoiceConversationPort | undefined;
   private channelMembers = new Set<string>();
+  private emptyRoomHandle: unknown;
   /** Room lines stored as buffers so {@link leave} can zero the bytes, not merely drop references. */
   private transcriptRing: Buffer[] = [];
   /** Live consumers of the room; see {@link subscribeTranscript}. Never retains by itself. */
@@ -666,6 +669,7 @@ export class DiscordVoiceSession {
       }
       this.voiceReady = true;
       this.channelMembers = new Set(this.occupantIds(input.guildId, input.channelId));
+      this.updateEmptyRoomTimer();
       await this.emitSafely({
         type: "joined",
         guildId: input.guildId,
@@ -731,6 +735,7 @@ export class DiscordVoiceSession {
     const isPresent = channelId === activeChannelId;
     if (isPresent) this.channelMembers.add(userId);
     else this.channelMembers.delete(userId);
+    this.updateEmptyRoomTimer();
     this.consent.memberChannelChanged(userId, channelId);
     if (!isPresent) {
       this.cancelCapture(userId);
@@ -741,6 +746,36 @@ export class DiscordVoiceSession {
     } else if (wasPresent && !isPresent) {
       this.invalidateConversationForRosterChange();
     }
+  }
+
+  /** Gateway membership, never consent or media subscriptions, proves an empty room. */
+  private updateEmptyRoomTimer(): void {
+    if (!this.voiceReady || this.hasHumanOccupants() !== false) {
+      this.cancelEmptyRoomTimer();
+      return;
+    }
+    if (this.emptyRoomHandle !== undefined) return;
+    const generation = this.sessionGeneration;
+    this.emptyRoomHandle = this.timers.setTimeout(() => {
+      this.emptyRoomHandle = undefined;
+      if (generation === this.sessionGeneration && this.hasHumanOccupants() === false) {
+        this.leaveSafely("room_empty");
+      }
+    }, EMPTY_ROOM_GRACE_MS);
+  }
+
+  private hasHumanOccupants(): boolean | undefined {
+    if (this.guildId === undefined || this.channelId === undefined) return undefined;
+    // Missing roster knowledge is not evidence of emptiness.
+    return this.options
+      .channelOccupants?.(this.guildId, this.channelId)
+      .some((occupant) => occupant.isBot !== true);
+  }
+
+  private cancelEmptyRoomTimer(): void {
+    if (this.emptyRoomHandle === undefined) return;
+    this.timers.clearTimeout(this.emptyRoomHandle);
+    this.emptyRoomHandle = undefined;
   }
 
   public handleMusic(command: VoiceMusicCommand, requestedBy?: string): Promise<string> {
@@ -764,6 +799,7 @@ export class DiscordVoiceSession {
     // Vox commands are synchronous and may throw after process loss. Make the
     // local session inactive first so no failing cleanup command can preserve
     // stale authority, content, or media correlation.
+    this.cancelEmptyRoomTimer();
     this.voiceReady = false;
     this.connectionId = undefined;
     this.guildId = undefined;
@@ -853,6 +889,7 @@ export class DiscordVoiceSession {
     if (guildId !== undefined && channelId !== undefined) {
       await this.emitSafely({
         type: "left",
+        reason: sanitizeFailureCode(reason),
         guildId,
         channelId,
         ...(stayId === undefined ? {} : { stayId }),

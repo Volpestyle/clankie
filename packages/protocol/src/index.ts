@@ -5856,6 +5856,7 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("left"),
         ...discordVoiceChannelScope,
+        reason: DiscordVoiceFailureCodeSchema.optional(),
         inputTokens: DiscordVoiceCounterSchema.optional(),
         outputTokens: DiscordVoiceCounterSchema.optional(),
         spokenCount: DiscordVoiceCounterSchema.optional(),

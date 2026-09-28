@@ -28,6 +28,7 @@ import { DiscordVoiceIngress } from "../src/voice-ingress.ts";
 import {
   CAPTAIN_UNREACHABLE_TEXT,
   DiscordVoiceSession,
+  EMPTY_ROOM_GRACE_MS,
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
   SPEAKER_TRANSCRIPTION_IDLE_MS,
@@ -439,7 +440,11 @@ interface HarnessOptions {
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
   readonly speakerTranscriptionGate?: Promise<void>;
-  readonly occupants?: readonly { readonly userId: string; readonly displayName?: string }[];
+  readonly occupants?: readonly {
+    readonly userId: string;
+    readonly displayName?: string;
+    readonly isBot?: boolean;
+  }[];
 }
 
 function buildHarness(options: HarnessOptions = {}) {
@@ -3037,5 +3042,65 @@ describe("voice stay correlation", () => {
       inputTokens: 640,
       outputTokens: 80,
     });
+  });
+});
+
+describe("empty voice room", () => {
+  it("leaves after the last human departs, even with a bot remaining", async () => {
+    const occupants = [
+      { userId: ALICE, isBot: false },
+      { userId: BOB, isBot: true },
+    ];
+    const harness = await joinedHarness({ occupants });
+    occupants.shift();
+    harness.session.memberChannelChanged(GUILD, ALICE, undefined);
+    expect(harness.vox.leaves).not.toContain("room_empty");
+    harness.timers.fire(EMPTY_ROOM_GRACE_MS);
+    await flush();
+    expect(harness.vox.leaves).toContain("room_empty");
+    expect(harness.ofType("left")).toMatchObject([{ reason: "room_empty", stayId: expect.any(String) }]);
+  });
+
+  it("cancels for an unconsented human rejoining and restarts a full grace on departure", async () => {
+    const occupants = [{ userId: ALICE }];
+    const harness = await joinedHarness({ occupants });
+    occupants.pop();
+    harness.session.memberChannelChanged(GUILD, ALICE, undefined);
+    const stale = harness.timers.scheduled.findLast((entry) => entry.delayMs === EMPTY_ROOM_GRACE_MS);
+    occupants.push({ userId: BOB });
+    harness.session.memberChannelChanged(GUILD, BOB, CHANNEL);
+    expect(stale?.cleared).toBe(true);
+    expect(harness.vox.leaves).not.toContain("room_empty");
+    occupants.pop();
+    harness.session.memberChannelChanged(GUILD, BOB, undefined);
+    harness.timers.fireLast(EMPTY_ROOM_GRACE_MS);
+    await flush();
+    expect(harness.vox.leaves).toContain("room_empty");
+  });
+
+  it("does not mistake media disconnection or a different guild for an empty roster", async () => {
+    const occupants = [{ userId: ALICE }, { userId: BOB }];
+    const harness = await joinedHarness({ occupants });
+    harness.vox.emit({ type: "client_disconnect", userId: ALICE });
+    harness.session.memberChannelChanged("99999", BOB, undefined);
+    expect(harness.timers.pending()).not.toContainEqual({ delayMs: EMPTY_ROOM_GRACE_MS });
+    occupants.shift();
+    harness.session.memberChannelChanged(GUILD, ALICE, undefined);
+    expect(harness.timers.pending()).not.toContainEqual({ delayMs: EMPTY_ROOM_GRACE_MS });
+    await harness.session.leave();
+  });
+
+  it("cancels on leave and cannot end a replacement stay", async () => {
+    const occupants: { userId: string }[] = [];
+    const harness = await joinedHarness({ occupants });
+    const stale = harness.timers.scheduled.findLast((entry) => entry.delayMs === EMPTY_ROOM_GRACE_MS);
+    await harness.session.leave();
+    occupants.push({ userId: BOB });
+    await harness.session.join({ guildId: GUILD, channelId: CHANNEL });
+    stale?.handler();
+    await flush();
+    expect(harness.session.status().active).toBe(true);
+    expect(harness.vox.leaves).not.toContain("room_empty");
+    await harness.session.leave();
   });
 });

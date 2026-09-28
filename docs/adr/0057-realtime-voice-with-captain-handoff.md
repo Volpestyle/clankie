@@ -98,6 +98,17 @@ audio above a speech-level RMS floor (`BARGE_IN_SPEECH_RMS` in
 keystrokes whose transcripts came back empty. The floor is a calibration knob:
 mics and noise suppression move both the room tone and the speech level.
 
+### Empty-room body hygiene (2026-09-28)
+
+When the gateway roster contains no non-bot participants, the body leaves after
+five seconds, cancelling if a human rejoins. A silent or unconsented human still
+counts; media subscriptions and floor decay cannot prove absence. A missing
+roster never proves emptiness. The leave receipt carries `reason: room_empty`.
+This releases an unused body without scripting Clankie's conversational choices
+or waiting for a model to notice that nobody remains. Explicit requests to leave
+still cross the normal captain handoff; a handoff omitted by the realtime model
+cannot be recovered from its eventual result.
+
 ### Evidence retained from implementation
 
 - Per-speaker input kept overlapping speakers causally attributed while still

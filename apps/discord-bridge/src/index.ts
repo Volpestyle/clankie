@@ -329,7 +329,11 @@ const voiceSession =
           // He is in his own channel and is not someone he needs memory of.
           return [...channel.members.values()]
             .filter((member) => member.id !== client.user?.id)
-            .map((member) => ({ userId: member.id, displayName: member.displayName }));
+            .map((member) => ({
+              userId: member.id,
+              displayName: member.displayName,
+              isBot: member.user.bot,
+            }));
         },
         realtime: createVoiceRealtimePorts({
           apiKey: realtimeCredential.key,
