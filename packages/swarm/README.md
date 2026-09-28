@@ -39,7 +39,9 @@ can terminate owned work even when MCP is unavailable. Legacy launches retain
 uncertain capacity until stop proof exists. [The original incident](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
 records the failure that led to these safeguards.
 
-The bundled skills are `lead`, `swarm-lead`, `herdr-lead`, and `swarm-mcp`.
+The coordination skills are `lead`, `swarm-lead`, `herdr-lead`, and `swarm-mcp`.
+Clankie also ships a [process-skill bundle](../../docs/bundled-skills.md) for local
+hires; Swarm assignments still use the explicit portable selection below.
 Their sources live in the skills and Swarm repositories; distribution artifacts
 and provenance are in [vendor](../../vendor/README.md). Architecture:
 [ADR 0180](../../docs/adr/0180-swarm-is-the-coordination-layer.md).

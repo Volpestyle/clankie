@@ -40,6 +40,7 @@ import {
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
+import { workerSkills } from "./worker-skills.ts";
 import {
   readHerdrSeatTranscript,
   type HerdrAgentSession,
@@ -124,6 +125,7 @@ export interface HerdrWatchRunner {
   createTab?(options: {
     readonly cwd: string;
     readonly label: string;
+    readonly env?: Readonly<Record<string, string>>;
     /** A registered remote fleet (ADR 0184); absent is the local default. */
     readonly fleet?: string;
   }): Promise<string>;
@@ -485,17 +487,18 @@ export function createHerdrWatchRunner(
         throw new Error(result.stderr.trim() || `claude mcp add ${name} failed`);
       }
     },
-    createTab: async ({ cwd, label }) => {
+    createTab: async ({ cwd, label, env }) => {
+      const envArgs = Object.entries(env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
       try {
         return parseHerdrRootPaneId(
-          await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus"]),
+          await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus", ...envArgs]),
         );
       } catch (caught) {
         // A fresh owned session has no workspace yet (ADR 0166): the first hire
         // founds one, and its root pane is the hire's pane.
         if (!isHerdrWorkspaceMissing(caught)) throw caught;
         return parseHerdrRootPaneId(
-          await runHerdr(["workspace", "create", "--cwd", cwd, "--label", label, "--no-focus"]),
+          await runHerdr(["workspace", "create", "--cwd", cwd, "--label", label, "--no-focus", ...envArgs]),
         );
       }
     },
@@ -618,6 +621,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly remoteWorkspace: ((fleet: string, directory: string) => Promise<boolean>) | undefined;
   private readonly path: string;
   private readonly runner: HerdrWatchRunner;
+  private readonly skillBundle: { repoRoot: string; stateDir: string } | undefined;
   private readonly controllers = new Map<string, AbortController>();
   private readonly seatControllers = new Map<string, AbortController>();
   private readonly seatStatuses = new Map<string, string>();
@@ -638,6 +642,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public constructor(
     path: string,
     options: {
+      readonly skillBundle?: { readonly repoRoot: string; readonly stateDir: string };
       readonly runner?: HerdrWatchRunner;
       readonly available?: () => boolean;
       readonly summariesPath?: string;
@@ -659,6 +664,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } = {},
   ) {
     this.path = path;
+    this.skillBundle = options.skillBundle;
     this.remoteWorkspace = options.remoteWorkspace;
     this.piSeatModel = options.piSeatModel;
     this.hireCapacity = options.hireCapacity;
@@ -904,10 +910,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
     }
     let paneId: string;
+    let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = { args: [] };
     try {
+      if (remote === undefined && this.skillBundle !== undefined) {
+        skillLaunch = await workerSkills(input.harness, this.skillBundle.repoRoot, this.skillBundle.stateDir);
+      }
       paneId = await createTab({
         cwd: input.workingDirectory,
         label: input.title,
+        ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
         ...(remote === undefined ? {} : { fleet: remote }),
       });
     } catch (caught) {
@@ -933,6 +944,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (chromeArgs === undefined)
         throw new Error(`unsupported: ${input.harness} has no Chrome integration`);
       const args = [
+        ...skillLaunch.args,
         ...(input.harness === "claude" && remote === undefined ? fleetSeatClaudeStartArgs() : []),
         ...(input.harness === "codex" && remote === undefined ? fleetSeatCodexStartArgs() : []),
         ...modelArgs,

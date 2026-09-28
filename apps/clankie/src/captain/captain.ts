@@ -793,6 +793,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     run: (args) => deps.fleets!.run(fleet)(args),
   }));
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    skillBundle: { repoRoot: options.repoRoot, stateDir: options.stateDir },
     runner: routeHerdrFleets(
       createHerdrWatchRunner(deps.herdrAvailable),
       new Map(

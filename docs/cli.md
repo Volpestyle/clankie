@@ -1979,3 +1979,11 @@ There is no local fallback.
 It detects an existing hosted tenant and offers connection instead of creating
 another doorway. Matching fleet, body and relay deployments plus a real
 Mac/phone rehearsal remain separate from source verification.
+
+## Bundled working skills
+
+Clankie's seats include his process and leadership skill bundle. Local hired
+Claude, Codex and Pi workers receive it through their launch configuration; a
+plain harness keeps the owner's independent global selection. See
+[bundled working skills](bundled-skills.md) for the inventory, source revisions,
+per-harness mechanisms, deployment gate and remote/Swarm limitations.

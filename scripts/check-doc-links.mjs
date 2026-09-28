@@ -7,6 +7,7 @@ for await (const path of glob("**/*.md", {
   cwd: root,
   exclude: [
     "**/node_modules/**",
+    "vendor/opinionated-skills/**",
     "**/target/**",
     "**/.git/**",
     "**/.turbo/**",

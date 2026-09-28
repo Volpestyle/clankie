@@ -211,3 +211,6 @@ The Mac console can also connect to an existing hosted Clankie with
 a local service. Fresh installations choose their mode before startup. See
 [connection modes](docs/cli.md#local-and-hosted-connection-modes) for commands and
 matching deployment requirements.
+
+Clankie ships [working and leadership skills](docs/bundled-skills.md) for his
+seats and local hired workers, independently of the owner’s global tool skills.

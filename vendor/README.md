@@ -51,3 +51,9 @@ also labels its mode-column migration schema 15. These schema-15 builds are NOT
 interchangeable: integration must sequence both migrations under distinct versions.
 The interactive-worker branch is not part of this artifact. Remote peers continue
 to enroll through the shared coordinator relay; this adds no private PC owner.
+
+## Opinionated process bundle
+
+`opinionated-skills/` is an immutable MIT-licensed export from Volpestyle/skills.
+`opinionated-skills.json` pins its full revision and selected source paths.
+See [the bundle guide](../docs/bundled-skills.md) for inventory and refresh steps.

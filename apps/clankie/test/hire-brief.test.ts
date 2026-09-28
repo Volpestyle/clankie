@@ -81,8 +81,11 @@ if (group === "tab" && command === "create") {
 
 const roots: string[] = [];
 const path = process.env.PATH;
+const codexHome = process.env.CODEX_HOME;
 afterEach(async () => {
   process.env.PATH = path;
+  if (codexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = codexHome;
   delete process.env.FAKE_HERDR_STATE;
   delete process.env.FAKE_HERDR_LOG;
   delete process.env.FAKE_HERDR_SESSION;
@@ -94,7 +97,12 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "clankie-hire-brief-"));
   roots.push(root);
   const bin = join(root, "bin");
-  await import("node:fs/promises").then((fs) => fs.mkdir(bin));
+  await import("node:fs/promises").then(async (fs) => {
+    await fs.mkdir(bin);
+    await fs.mkdir(join(root, ".agents/skills"), { recursive: true });
+    await fs.mkdir(join(root, "codex/skills"), { recursive: true });
+  });
+  process.env.CODEX_HOME = join(root, "codex");
   await writeFile(join(bin, "herdr"), FAKE_HERDR);
   await chmod(join(bin, "herdr"), 0o755);
   process.env.PATH = `${bin}:${path}`;

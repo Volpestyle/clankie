@@ -42,7 +42,7 @@ browser-downloaded package.
     ├── libexec/node
     ├── bin/clankie-herdr      # attach-only viewer shortcut
     ├── libexec/herdr          # Clankie-owned native worker runtime
-    ├── .agents/skills/        # product skills (this-machine, trace-clankie)
+    ├── .agents/skills/        # product and working skills
     ├── docs/cli.md            # headless command contract
     ├── apps/                  # bundled services, assets, and clankvox
     ├── integrations/          # game runtime assets and the optional herdr plugin
@@ -87,7 +87,8 @@ models and credentials are configured, and whether those optional commands
 are on PATH. The headless command contract is
 [`docs/cli.md`](cli.md) (`clankie help` prints the same index). Checkout-only
 skills under `.agents/dev-skills` stay out of the archive. The release also
-ships `docs/worker-access.md`, `docs/model-keys.md`, `docs/rivals.md`,
+ships `docs/bundled-skills.md`, the pinned process-skill manifest and MIT license,
+`docs/worker-access.md`, `docs/model-keys.md`, `docs/rivals.md`,
 `docs/discord-ingress.md`, `packages/swarm/README.md`, and
 `infra/hosted/README.md` for the installed skills' operational references.
 Other repository documentation does not ship.

@@ -183,6 +183,9 @@ async function copyRuntimeAssets(targetRoot) {
     ["apps/discord-activity/src/client.html", "apps/discord-activity/src/client.html"],
     ["LICENSE", "LICENSE"],
     ["README.md", "README.md"],
+    ["docs/bundled-skills.md", "docs/bundled-skills.md"],
+    ["vendor/opinionated-skills.json", "vendor/opinionated-skills.json"],
+    ["vendor/opinionated-skills/LICENSE", "licenses/opinionated-skills-MIT.txt"],
     ["docs/cli.md", "docs/cli.md"],
     ["docs/worker-access.md", "docs/worker-access.md"],
     ["docs/model-keys.md", "docs/model-keys.md"],
@@ -201,7 +204,12 @@ async function copyRuntimeAssets(targetRoot) {
     await mkdir(dirname(target), { recursive: true });
     await copyFile(join(repoRoot, source), target);
   }
-  for (const directory of [".agents/skills", "integrations/herdr-plugin", "integrations/claude-plugin"]) {
+  for (const directory of [
+    ".agents/skills",
+    "integrations/herdr-plugin",
+    "integrations/claude-plugin",
+    "integrations/worker-skills",
+  ]) {
     await cp(join(repoRoot, directory), join(targetRoot, directory), {
       recursive: true,
       dereference: true,

@@ -528,3 +528,13 @@ hosted access. Local sockets, lifecycle, `seat`, `mcp` and shell escapes refuse.
 `/remote-access` is self-hosted Remote access for this Mac (`/gateway` alias),
 and checks for an existing hosted tenant before configuring a doorway.
 Matching deployments and a real Mac/phone rehearsal are separate gates.
+
+## Bundled working skills
+
+Read `docs/bundled-skills.md` under the `repoRoot` reported by doctor for the
+inventory and source revision. Local Claude hires receive a skills-only plugin,
+Pi hires an explicit skill path, and Codex hires a private home overlay. The
+operator Claude seat retains the full Clankie plugin. No global skill installation
+is needed for these local launches after the service reloads the change.
+Remote hires and Swarm dispatch have separate coverage limits documented there;
+do not infer full-bundle delivery from a successful local canary.
