@@ -22,6 +22,7 @@ import { statusCommand } from "../src/command/status.ts";
 import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
 import { runBrowserCommand } from "../src/command/browser.ts";
+import { runSkillsCommand } from "../src/command/skills.ts";
 import { runGamesCommand } from "../src/command/games.ts";
 import { runLinearCommand } from "../src/command/linear.ts";
 import { runAccountsCommand } from "../src/command/accounts.ts";
@@ -197,6 +198,10 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "browser") {
       outputJson(stdout, await runBrowserCommand(rest, options));
+      return 0;
+    }
+    if (command === "skills") {
+      outputJson(stdout, await runSkillsCommand(rest, options));
       return 0;
     }
     if (command === "games") {

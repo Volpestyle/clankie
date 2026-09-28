@@ -794,7 +794,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     run: (args) => deps.fleets!.run(fleet)(args),
   }));
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
-    skillBundle: { repoRoot: options.repoRoot, stateDir: options.stateDir },
+    skillBundle: {
+      repoRoot: options.repoRoot,
+      stateDir: options.stateDir,
+      settings: async () => (await settings()).skills,
+    },
     runner: routeHerdrFleets(
       createHerdrWatchRunner(deps.herdrAvailable),
       new Map(
@@ -1018,7 +1022,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // Every root explicitly: the loader is given in-memory settings and
       // resolves no defaults of its own, so a path absent here is a skill he
       // cannot load however plainly it is named.
+      noSkills: true,
       additionalSkillPaths: clankieSkillRoots({
+        skills: currentSettings.skills,
         repoRoot: options.repoRoot,
         agentDir: getAgentDir(),
         home: homedir(),
@@ -1487,7 +1493,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     herdrWatches.trackSeat(seat.seatId);
     seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
     fleetChanges.touch();
-    return { outcome: "spawned", seat };
+    return { ...result, seat };
   };
 
   /**
@@ -1702,7 +1708,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           `# Owner preferences: fleet.notes\n${current.fleet.notes}`,
           ...files.map((file) => `# Instructions: ${file.path}\n${file.content}`),
           WORK_TRACKING_BRIEF,
-          await assignmentSkills({ cwd: selected.cwd, repoRoot: options.repoRoot, names: skills }),
+          await assignmentSkills({
+            cwd: selected.cwd,
+            repoRoot: options.repoRoot,
+            names: skills,
+            skills: (await settings()).skills,
+          }),
         ]
           .filter(Boolean)
           .join("\n\n");
@@ -2275,6 +2286,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             op: "composer_catalog",
             schemaVersion: 1,
             catalog: captainComposerCatalog({
+              skills: (await settings()).skills,
               cwd:
                 conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : workingDirectory,
               repoRoot: options.repoRoot,

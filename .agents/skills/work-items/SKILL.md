@@ -10,7 +10,8 @@ description: >-
 # Work items
 
 Track work where the repo already tracks it. Never impose a tracker on a repo
-that has one (ADR 0191).
+that has one (ADR 0191). Use tracking only when the user or project workflow
+calls for it; an available tracker is not a reason to create ceremony.
 
 ## The contract
 
@@ -50,6 +51,20 @@ and `work_item_write` tools.
    item another agent owns without telling them.
 5. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
    estimates or extra workflow.
+
+## Ownership and useful updates
+
+When work needs the user specifically (a decision, credentials, a physical or
+live check), assign that item to their tracker account and make their part an
+explicit acceptance criterion. The lead owns scope and assignment boundaries;
+workers publish their own results and evidence directly, following the project's
+rules for status transitions. Shared integration, disputed acceptance and scope
+changes go to their decision owner. Keep the latest scope, decisions, result and
+actionable blockers on the issue; keep live coordination in the handoff.
+
+For a bug investigation where a tracker is in use, search in-progress and recent
+closed items for the symptom or related changes before forming a code hypothesis.
+Use `linear-issues` when available for Linear-specific formatting and attachments.
 
 ## When the backend is unavailable
 

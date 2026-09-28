@@ -187,6 +187,13 @@ const HEADLESS_COMMAND_HELP = [
       "                           Track work in the repo's own convention, with evidence (JSON)",
     ],
   },
+  {
+    nouns: ["skills"],
+    lines: [
+      "  skills [opinionated on|off | exclude NAME | include NAME]",
+      "                           Bundled skill classes and selection (JSON)",
+    ],
+  },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
     nouns: ["browser"],
@@ -351,7 +358,7 @@ export function commandHelp(): string {
     "  An endpoint that wants a key reads it from the credential store under the provider",
     "  id; put it there with /auth <providerId> in the console.",
     "  --set selects the first listed model as captain.",
-    "  Config writes need `clankie restart captain`, except Linear follow which applies live.",
+    "  Config writes need `clankie restart captain`, except Linear follow (live) and skills (new sessions/hires).",
     "",
     "pair / devices / operator-credential rotate default to human text; pass --json.",
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",

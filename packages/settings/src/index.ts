@@ -2,6 +2,8 @@ export {
   AgentHostConnectionSchema,
   type AgentHostConnection,
   CaptainSettingsSchema,
+  SkillsSettingsSchema,
+  type SkillsSettings,
   ClankieSettingsSchema,
   DiscordSettingsSchema,
   EmailSettingsSchema,
@@ -57,6 +59,7 @@ export {
 } from "./schema.ts";
 export { discordAttachmentRoot } from "./attachments.ts";
 export { characterNames, personaInstructions, type PersonaRegister } from "./persona.ts";
+export { bundledSkills, projectSkillPlugin } from "./bundled-skills.ts";
 export { clankieSkillRoots } from "./skill-roots.ts";
 export { SERVICE_LOADOUT_ENV, serviceInLoadout } from "./loadout.ts";
 export { SettingsStore, defaultSettingsPath } from "./store.ts";

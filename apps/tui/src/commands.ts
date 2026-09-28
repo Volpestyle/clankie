@@ -54,6 +54,7 @@ import {
   browserStatus,
   type BrowserHarnessesResult,
 } from "./command/browser.ts";
+import { runSkillsCommand } from "./command/skills.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
@@ -63,6 +64,7 @@ import type { InstallDoctorReport } from "./command/doctor.ts";
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
+  readonly repoRoot?: string;
   readonly settings?: SettingsStore;
   readonly herdrOptions?: HerdrConnectionOptions;
   /** Herdr's saved sessions, for the `/herdr` session picker. */
@@ -824,6 +826,66 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       availableInSideConversation: true,
       run(argument, shell): void {
         runLayoutCommand(shell, argument);
+      },
+    },
+    {
+      name: "skills",
+      aliases: [],
+      description: "Choose Clankie's bundled working skills",
+      argumentHint: "[opinionated on|off | exclude NAME | include NAME]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (!settings || !context.repoRoot) {
+          shell.insertCommandResult("/skills", "Skill settings are unavailable.", "error");
+          return;
+        }
+        const options = { settings, repoRoot: context.repoRoot };
+        const words = argument.trim().split(/\s+/u).filter(Boolean);
+        if (words.length > 0) {
+          const result = await runSkillsCommand(words, options);
+          shell.insertCommandResult(
+            "/skills",
+            `${result.catalog.map((skill) => `${skill.included ? "✓" : "○"} ${skill.name} (${skill.class})`).join("\n")}\n\n${result.applies}`,
+            "success",
+          );
+          return;
+        }
+        const flow = shell.setupFlow;
+        flow.begin("skills");
+        try {
+          for (;;) {
+            const result = await runSkillsCommand([], options);
+            const choice = await flow.readSelect({
+              message: "Bundled skills · product/tool skills are always on",
+              options: [
+                {
+                  value: "opinionated",
+                  label: `Opinionated skills: ${result.skills.opinionated ? "on" : "off"}`,
+                  hint: "Toggle the whole class",
+                },
+                ...result.catalog
+                  .filter((skill) => skill.class === "opinionated")
+                  .map((skill) => ({
+                    value: skill.name,
+                    label: `${skill.included ? "✓" : "○"} ${skill.name}`,
+                    hint: result.skills.exclude.includes(skill.name)
+                      ? "excluded"
+                      : "included when opinionated is on",
+                  })),
+              ],
+              statusActions: [{ value: "done", label: "Done", hint: "applies to new sessions and hires" }],
+            });
+            if (!choice || choice === "done") break;
+            await runSkillsCommand(
+              choice === "opinionated"
+                ? ["opinionated", result.skills.opinionated ? "off" : "on"]
+                : [result.skills.exclude.includes(choice) ? "include" : "exclude", choice],
+              options,
+            );
+          }
+        } finally {
+          flow.end();
+        }
       },
     },
     {

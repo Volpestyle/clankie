@@ -36,6 +36,21 @@ Plain `clankie` opens the existing main Clankie conversation from any directory.
 Use `clankie --chat ID` for another thread, `/new` for a fresh chat, or `/cd PATH`
 for a workspace conversation. Reopening the TUI does not reset model context.
 
+## Optional working guidance
+
+Opinionated skills are on by default. An owner turns them off with
+`clankie skills opinionated off`, or uses `/skills` in the console. Product/tool
+and repo-authored skills always remain. `clankie skills exclude NAME` removes an
+individual opinionated skill; `include NAME` restores it when the class is on.
+These settings apply to new sessions and local hires. Start a fresh Claude seat
+or reset the service conversation to remove already-loaded guidance; no service
+restart is needed for the setting itself. Never edit settings JSON directly.
+
+Turning guidance off leaves Clankie able to lead using his own instructions,
+`swarm-mcp` and `herdr`. Local `hire_agent` can use `skills: "plain"` or
+`"bundled"` for a single hire; its result records the condition. Global/project
+skills discovered independently by a harness are outside Clankie's bundle switch.
+
 ## Cross-device agent conversations
 
 Messages includes seats from registered execution fleets. Opening a remote seat
@@ -145,6 +160,9 @@ index). Configure through the headless CLI:
 | Can he take a turn                    | `clankie doctor` → `captain` (`ready`, or `no_model` / `no_credential`)               |
 | Start at login                        | `clankie autostart status`, `clankie autostart enable`                                |
 | Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                 |
+| Bundled skill classes and selection   | `clankie skills`; also `clankie doctor` → `skills`                                    |
+| Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                               |
+| Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                        |
 | Captain + local providers             | `clankie model status`                                                                |
 | Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`             |
 | Switch captain                        | `clankie model set provider/model`                                                    |
@@ -358,8 +376,8 @@ tools over the `clankie` MCP server, your persona and memory card injected by
 the plugin's hooks, and these skills as `/clankie:this-machine` and
 `/clankie:trace-clankie`. Doctor's `laneTools` says whether the service's
 `/v1/mcp` route answers; `clankie seat --dry-run` prints the launch plan
-(`plugin.source` is `installed` or `plugin-dir`, `channel` says whether wakes
-reach that session). The seat's own brain is Claude Code's `/model`;
+(`plugin.source` is `plugin-dir`, with the selected catalog and the
+`clankie@inline` channel identity). The seat's own brain is Claude Code's `/model`;
 `clankie model` changes the service lanes. Inside a herdr pane the seat is the
 agent named `clankie`, and that pane is your head: the app's Clankie thread
 shows its settled turns, and your self-wakes and herdr watches arrive there as

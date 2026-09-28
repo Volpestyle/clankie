@@ -48,24 +48,31 @@ before new sessions receive the change.
 ## Launch
 
 ```bash
-clankie seat              # sit down; a checkout loads this directory with --plugin-dir
+clankie seat              # sit down with a projection of the selected skills
 clankie seat --conversation ID  # select an existing service project conversation
 clankie seat --resume     # reopen the last seat's conversation
 clankie seat --dry-run    # print the launch plan as JSON without starting Claude Code
 ```
 
-`clankie seat` needs Claude Code on `PATH` and a TTY. It passes `--settings`
-with the permission allowlist for `clankie` commands and, when the plugin is
-installed, `enabledPlugins` for this session only; names the herdr pane
-`clankie` when it is one; and starts Claude Code with `--name Clankie`. With
-the plugin installed from the repo's marketplace it also passes the channel
-development flag, so wakes and escalations reach the session. The launcher's
-`--plugin-dir` path currently gets tools and skills without enabling wakes.
-That is a launcher constraint, not a universal plugin-only channel requirement:
-[an isolated probe](../../docs/testing/2026-09-26-interactive-swarm-workers/README.md)
-on Claude Code 2.1.283 received events through a bare MCP server with the development
-channel flag. That probe does not change the operator-seat launch path or establish
-`--plugin-dir` channel support.
+`clankie seat` needs Claude Code on `PATH` and a TTY. It projects this plugin into
+a fresh private directory, linking the same identity, hooks and MCP config with
+only skills included by `skills.opinionated` and `skills.exclude`. This supports
+arbitrary exclusions as well as a product-only seat without generating a separate
+build for every combination. The output-style generator remains the single source
+for both settings.
+
+The launcher passes the permission allowlist for `clankie` commands, disables an
+older installed `clankie@clankie` for this session, enables the projected
+`clankie@inline`, and addresses that identity with the development channel flag.
+Claude's [session plugin identity and precedence](https://code.claude.com/docs/en/plugins/loading)
+keep the old marketplace skill catalog from leaking into this seat. The session
+keeps its MCP tools, hooks and wake channel with either skill setting. It starts
+with `--name Clankie` and names the Herdr pane `clankie` when appropriate.
+`--plugin-dir` chooses the component source while retaining skill filtering.
+
+Use `clankie skills opinionated off` or `/skills` to change the selection.
+`--dry-run` shows the plugin projection and catalog; start a fresh session when
+changing conditions because resumed history can contain previously loaded skills.
 
 `--conversation ID` resolves an existing global/workspace conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and
@@ -91,22 +98,13 @@ plugin's operator bearer belongs to this trusted seat; it is not a worker creden
 Scoped access for other workers is tracked in the
 [shared-account plan](../../packages/swarm/README.md#shared-connected-accounts-slices-35).
 
-Install from a checkout or an installed release (`clankie doctor` names
-`repoRoot`), then disable it at user scope: the forced output style applies to
-every Claude Code session while the plugin is enabled there, and the seat is
-the only session that should be him.
+The bundled seat needs no marketplace installation. If an older seat plugin is
+installed, leave it disabled at user scope: its forced style otherwise applies
+to ordinary Claude sessions too. The launcher only changes session settings.
 
 ```bash
-claude plugin marketplace add "$PWD/integrations/claude-plugin"
-claude plugin install clankie@clankie
-claude plugin disable clankie@clankie
-```
-
-Then confirm it took:
-
-```bash
-claude plugin details clankie          # output style, context/transcript hooks, one MCP server, eight skills
-clankie seat --dry-run                 # "plugin": { "source": "installed" }, "channel": true
+claude plugin disable clankie@clankie  # if previously installed
+clankie seat --dry-run                # projected plugin, selected skills, channel: true
 ```
 
 In the session, `/mcp` lists the `clankie` server, `/clankie:this-machine`

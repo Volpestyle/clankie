@@ -1,0 +1,27 @@
+id = "herd-lead"
+version = "0.1.0"
+name = "Herd Lead"
+description = "Live agent roster and worktree board for the herdr-lead skill"
+min_herdr_version = "0.7.5"
+platforms = ["macos", "linux"]
+
+[[panes]]
+id = "board"
+title = "Herd Lead"
+description = "Agents and worktrees, side by side"
+placement = "split"
+command = ["node", "dash.ts"]
+
+[[actions]]
+id = "open"
+title = "Open herd lead board"
+description = "Split a Herd Lead board next to the focused pane"
+contexts = ["global", "pane"]
+command = ["node", "open.ts"]
+
+[[actions]]
+id = "focus"
+title = "Jump to / from herd lead board"
+description = "Toggle focus between the board and the lead agent pane; opens it if closed"
+contexts = ["global", "pane"]
+command = ["node", "focus.ts"]

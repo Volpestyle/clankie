@@ -91,6 +91,7 @@ describe("captain hire_agent", () => {
         workingDirectory: "/tmp",
         model: "anthropic/claude-opus-4-5",
         effort: "xhigh",
+        skills: "plain",
       },
       undefined,
       undefined,
@@ -104,6 +105,7 @@ describe("captain hire_agent", () => {
         workingDirectory: "/tmp",
         model: "anthropic/claude-opus-4-5",
         effort: "xhigh",
+        skills: "plain",
       },
       undefined,
     );

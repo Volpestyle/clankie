@@ -80,6 +80,7 @@ Do not edit `~/.config/clankie/clankie.json`,
 | [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`                  |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                    |
 | [Connect accounts and track work](#account-setup)      | `accounts`, `work`                              |
+| [Choose working skills](#skill-setup)                  | `skills`                                        |
 | [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model` |
 | [Select runtime connections](#runtime-setup)           | `connections`, `runtime`, `agents`, `herdr`     |
 | [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`       |
@@ -1421,27 +1422,60 @@ spool file has shipped and advances only after CloudWatch accepts.
 and `{"ok":false,"error":…}` on stderr when a pass fails; a failed pass is
 retried from the same cursor. See [hosted bodies](../infra/hosted/README.md#body-telemetry).
 
+<a id="skill-setup"></a>
+
+### `skills [opinionated on|off | exclude NAME | include NAME]`
+
+List the bundled skill catalog as JSON, with `class` (`product` or `opinionated`)
+and `included` for each skill. `clankie doctor` includes the same selection.
+
+```bash
+clankie skills
+clankie skills opinionated off
+clankie skills opinionated on
+clankie skills exclude reflect
+clankie skills include reflect
+```
+
+`skills.opinionated` defaults to `true`; `skills.exclude` defaults to `[]`.
+Product/tool and repo-authored skills always stay on; excluding one is refused.
+`include` removes an exclusion and leaves the class switch unchanged. The console
+has the same controls in `/skills` and `/setup` → Working skills.
+
+Changes apply to new service sessions, local hires and Claude seats; existing
+context is not erased. Reset a service conversation or start a fresh seat after
+changing the selection, and reopen the console for its initial autocomplete.
+No service restart is needed for selection changes once this code is running.
+
+`hire_agent` accepts `skills: "bundled" | "plain"` for one local Claude, Pi or
+Codex hire; omission follows the owner setting. `bundled` still honors exclusions.
+The result records the condition and supplied names. Unsupported/remote routes
+cannot honor an explicit override and refuse it. Independent global or project
+skills can still be discovered by Claude/Codex; this switch does not rewrite
+owner-global selection. See [the full bundle and A/B limits](bundled-skills.md).
+
 <a id="seat-commands"></a>
 
 ### `seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
 
 Sit in Claude Code as Clankie ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
-Needs a TTY and `claude` on `PATH`. The launcher does the things the plugin
-cannot: it passes `--settings` with the permission allowlist for `clankie`
-commands and, when the plugin is installed from the repo's marketplace
-(`clankie@clankie`), `enabledPlugins` for this session only plus the channel
-development flag so wakes and escalations reach the session. The plugin stays
-disabled at user scope, because its forced output style would otherwise make
-every Claude Code session answer as him. When the plugin is not installed it
-loads the bundled `integrations/claude-plugin` with `--plugin-dir` (tools and
-skills, no channel). Inside a herdr pane it names that pane `clankie` once Claude Code
+Needs a TTY and `claude` on `PATH`. The launcher projects the bundled plugin
+(or `--plugin-dir` source) into a private launch directory with only the selected
+skills. Identity, hooks, and MCP are retained. It passes the permission allowlist
+for `clankie` commands, disables an older installed `clankie@clankie` for this
+session, and enables `clankie@inline` with the development channel flag for that
+same identity. This also prevents a stale marketplace copy from restoring pruned
+or disabled skills. Keep any marketplace seat plugin disabled globally, since
+its forced output style makes every session answer as him when enabled there.
+Inside a herdr pane it names that pane `clankie` once Claude Code
 is detected there, which binds the pane to his own persona rather than a fleet
 contact; a second pane claiming the name stays an ordinary fleet agent and is
 told so on stderr. The pane is un-named again when the session ends.
 
 Every seat starts a new Claude Code session under a recorded id;
 `--resume` reopens the last one from the directory it was opened in. The
-selection is retained on resume, and a different `--conversation` is refused.
+conversation selection is retained on resume, and a different `--conversation` is refused.
+Skill selection is reapplied at launch, but resumed history can still contain previously loaded guidance.
 `--conversation ID` selects an existing global/workspace service conversation,
 resolves its cwd through `/v1/captain/seat-context`, and opens Claude there. That
 workspace must exist on the native host. The prompt includes its agent
@@ -1462,12 +1496,14 @@ Selected project seats do not rename themselves as the global Herdr head.
     "--settings",
     "{…}",
     "--plugin-dir",
-    "…/integrations/claude-plugin",
+    "…/skill-projections/launch-…",
+    "--dangerously-load-development-channels",
+    "plugin:clankie@inline",
     "--session-id",
     "…"
   ],
-  "plugin": { "source": "plugin-dir", "path": "…/integrations/claude-plugin" },
-  "channel": false,
+  "plugin": { "source": "plugin-dir", "path": "…/skill-projections/launch-…" },
+  "channel": true,
   "sessionId": "…",
   "resumed": false,
   "cwd": "/Users/me/dev/project",
@@ -1475,11 +1511,9 @@ Selected project seats do not rename themselves as the global Herdr head.
 }
 ```
 
-`plugin.source` is `installed` with `channel: true` after
-`claude plugin marketplace add <repoRoot>/integrations/claude-plugin`,
-`claude plugin install clankie@clankie`, and `claude plugin disable
-clankie@clankie`. The plugin README documents the install and what the plugin
-carries.
+`plugin.source` is `plugin-dir`; the projected skill catalog is also in the plan.
+The [plugin README](../integrations/claude-plugin/README.md) describes the component
+source and session-only channel identity.
 
 ### `mcp [--lane operator] [--conversation ID]`
 
@@ -1708,12 +1742,14 @@ through its existing turn queue; processing requires explicit acknowledgment.
 through the Clankie MCP server; omission selects the global head. Its launch
 directory does not select another Swarm scope.
 With the plugin channel enabled, queued envelopes reach the native seat through
-that channel; processing still requires `swarm_inbox` acknowledgment. A plugin-dir
-seat has tools but no channel wakes. See the [seat plugin](../integrations/claude-plugin/README.md)
+that channel; processing still requires `swarm_inbox` acknowledgment. The projected
+plugin uses its `clankie@inline` channel identity. See the [seat plugin](../integrations/claude-plugin/README.md)
 for context, resume and native-workspace requirements.
 
-Use `swarm-lead` for the default leadership workflow, `lead` for shared judgment,
-and `swarm-mcp` for peer participation. `herdr-lead` is the explicit fallback.
+When included, use `swarm-lead` for the default leadership workflow, `lead` for
+shared judgment, and `herdr-lead` for the explicit fallback. `swarm-mcp` always
+remains available for peer participation; turning opinionated skills off retains
+the captain's own leadership instructions.
 Through `clankie mcp`, Pi or the Claude seat, `swarm_assign` accepts optional
 `skills: ["installed-name"]`. Selected skills and supporting files travel with the
 assignment's pinned project context. The existing conversation composer catalog

@@ -1225,6 +1225,61 @@ describe("hiring a seat", () => {
     return join(root, "herdr-watches.json");
   }
 
+  it.each([
+    { opinionated: true, override: undefined, mode: "bundled", lead: true },
+    { opinionated: false, override: undefined, mode: "plain", lead: false },
+    { opinionated: true, override: "plain" as const, mode: "plain", lead: false },
+    { opinionated: false, override: "bundled" as const, mode: "bundled", lead: true },
+  ])("records the hire's skill condition: %j", async (condition) => {
+    const path = await storePath();
+    const startAgent = vi.fn(async () => {});
+    const store = new HerdrWatchStore(path, {
+      skillBundle: {
+        repoRoot: join(import.meta.dirname, "../../.."),
+        stateDir: path + ".state",
+        settings: async () => ({ opinionated: condition.opinionated, exclude: ["reflect"] }),
+      },
+      runner: {
+        get: async () => ({
+          ...hired,
+          agent: "pi",
+          session: { source: "herdr:pi", kind: "id", value: "session-pi" },
+        }),
+        resolveTerminal: async () => hired,
+        wait: async () => hired,
+        createTab: async () => "w1C:p9",
+        startAgent,
+      },
+    });
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "Test skills",
+      workingDirectory: tmpdir(),
+      ...(condition.override ? { skills: condition.override } : {}),
+    });
+    expect(result.outcome).toBe("spawned");
+    if (result.outcome === "spawned") {
+      expect(result.skills).toMatchObject({
+        mode: condition.mode,
+        source: condition.override ? "override" : "setting",
+        applied: true,
+      });
+      expect(result.skills!.included.includes("lead")).toBe(condition.lead);
+      expect(result.skills!.included).toContain("this-machine");
+      expect(result.skills!.excluded).toContain("reflect");
+    }
+    const refused = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "grok",
+      title: "Test",
+      workingDirectory: tmpdir(),
+      skills: "plain",
+    });
+    expect(refused).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    store.close();
+  });
+
   it("opens a tab in the directory, starts the harness, and returns the seat", async () => {
     const createTab = vi.fn((_options: { cwd: string; label: string }) => Promise.resolve("w1C:p9"));
     const startAgent = vi.fn((_options: { name: string; kind: string; paneId: string }) => Promise.resolve());

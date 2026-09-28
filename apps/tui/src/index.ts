@@ -409,6 +409,7 @@ const commands = [
   ...buildHostedConnectionCommands(settingsStore, true),
   ...buildSetupCommands(setupServices),
   ...buildConsoleCommands({
+    repoRoot,
     settings: settingsStore,
     commandStatus: () =>
       statusCommand({

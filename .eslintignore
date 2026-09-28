@@ -1,0 +1,4 @@
+# Immutable upstream skill code, also reached through the native skill links.
+vendor/opinionated-skills/**
+.agents/skills/herdr-lead/**
+integrations/*/skills/herdr-lead/**

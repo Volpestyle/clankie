@@ -610,6 +610,12 @@ function hireAgentTool(
       }),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
       effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+      skills: Type.Optional(
+        StringEnum(["bundled", "plain"], {
+          description:
+            "Override the owner's opinionated skill setting for this local hire. Product/tool skills always remain; bundled still respects exclusions. Result records the condition. Other harness/global/project skills are unchanged.",
+        }),
+      ),
       chrome: Type.Optional(
         Type.Boolean({
           description:

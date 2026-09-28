@@ -1,3 +1,4 @@
+import { bundledSkills, projectSkillPlugin, SettingsStore, defaultSettingsPath } from "@clankie/settings";
 /**
  * `clankie seat` — land in Claude Code as Clankie
  * ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
@@ -32,18 +33,20 @@ const SEAT_PERMISSIONS = {
  * The plugin's output style is forced on wherever the plugin is enabled, so an
  * installed plugin stays disabled at user scope — otherwise every Claude Code
  * session on the machine would answer as him — and the seat enables it for
- * its own session only.
+ * its own session only. The launch projection supersedes the installed copy.
  */
-const SEAT_SETTINGS = { ...SEAT_PERMISSIONS, enabledPlugins: { [SEAT_PLUGIN_ID]: true } };
+const SEAT_SETTINGS = {
+  ...SEAT_PERMISSIONS,
+  enabledPlugins: { [SEAT_PLUGIN_ID]: false, "clankie@inline": true },
+};
 const HERDR_DETECT_TIMEOUT_MS = 30_000;
 const HERDR_DETECT_POLL_MS = 500;
 
 export interface SeatPlan {
   readonly command: string;
   readonly args: readonly string[];
-  readonly plugin:
-    | { readonly source: "installed" }
-    | { readonly source: "plugin-dir"; readonly path: string };
+  readonly plugin: { readonly source: "plugin-dir"; readonly path: string };
+  readonly skills: ReturnType<typeof bundledSkills>;
   /** Whether wakes and escalations can reach this session as channel events. */
   readonly channel: boolean;
   readonly sessionId: string;
@@ -165,22 +168,6 @@ function defaultSpawn(
   });
 }
 
-/** Whether the plugin is installed at any scope, enabled or not, per `claude plugin list --json`. */
-export function pluginInstalled(listJson: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(listJson);
-    return (
-      Array.isArray(parsed) &&
-      parsed.some(
-        (entry) =>
-          typeof entry === "object" && entry !== null && (entry as { id?: unknown }).id === SEAT_PLUGIN_ID,
-      )
-    );
-  } catch {
-    return false;
-  }
-}
-
 /** Herdr's own reason for refusing a name, or the raw failure. */
 function herdrFailureText(caught: unknown): string {
   const failure = caught as { readonly stderr?: unknown; readonly message?: unknown };
@@ -206,28 +193,18 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     throw new Error("Claude Code is not on PATH; install it first (https://code.claude.com).");
   }
 
-  let plugin: SeatPlan["plugin"];
-  if (flags.pluginDir !== undefined) {
-    plugin = { source: "plugin-dir", path: flags.pluginDir };
-  } else {
-    let listed = "";
-    try {
-      listed = (await execFile("claude", ["plugin", "list", "--json"])).stdout;
-    } catch {
-      // No plugin registry yet reads the same as "not installed".
-    }
-    if (pluginInstalled(listed)) {
-      plugin = { source: "installed" };
-    } else {
-      const bundled = join(options.repoRoot, "integrations", "claude-plugin");
-      if (!existsSync(join(bundled, ".claude-plugin", "plugin.json"))) {
-        throw new Error(
-          `The Clankie plugin is neither installed (${SEAT_PLUGIN_ID}) nor bundled at ${bundled}; run \`claude plugin marketplace add ${bundled}\` then \`claude plugin install ${SEAT_PLUGIN_ID}\`.`,
-        );
-      }
-      plugin = { source: "plugin-dir", path: bundled };
-    }
+  const source = flags.pluginDir ?? join(options.repoRoot, "integrations", "claude-plugin");
+  if (!existsSync(join(source, ".claude-plugin", "plugin.json"))) {
+    throw new Error(
+      `The Clankie plugin is not bundled at ${source}; update this install or pass --plugin-dir PATH.`,
+    );
   }
+  const selection = (await new SettingsStore(defaultSettingsPath(env)).load()).skills;
+  const skills = bundledSkills(options.repoRoot, selection);
+  const plugin: SeatPlan["plugin"] = {
+    source: "plugin-dir",
+    path: await projectSkillPlugin(source, join(clankieStateHome(env), "clankie"), skills),
+  };
 
   const previous = flags.resume ? readSeatRecord(env) : undefined;
   if (flags.resume && previous === undefined) {
@@ -261,17 +238,18 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
       throw new Error("Invalid service seat context");
     cwd = binding.cwd;
   }
-  // Channels are a research preview: the development flag is per plugin entry
-  // and only a marketplace-installed plugin has one, so a checkout loaded with
-  // --plugin-dir gets his tools and skills but not his wakes.
-  const channel = plugin.source === "installed";
+  // Session-only plugins have the native @inline identity. Keep wakes on the
+  // same projected plugin, without enabling an older installed skill catalog.
+  const channel = true;
   const args = [
     "--name",
     "Clankie",
     "--settings",
-    JSON.stringify(plugin.source === "installed" ? SEAT_SETTINGS : SEAT_PERMISSIONS),
-    ...(plugin.source === "plugin-dir" ? ["--plugin-dir", plugin.path] : []),
-    ...(channel ? ["--dangerously-load-development-channels", `plugin:${SEAT_PLUGIN_ID}`] : []),
+    JSON.stringify(SEAT_SETTINGS),
+    "--plugin-dir",
+    plugin.path,
+    "--dangerously-load-development-channels",
+    "plugin:clankie@inline",
     ...(previous === undefined ? ["--session-id", sessionId] : ["--resume", sessionId]),
   ];
   // This pane is his head only inside the fleet the service leads (ADR 0164):
@@ -288,6 +266,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   const herdrPaneId = fleetSocket !== undefined && env.HERDR_SOCKET_PATH === fleetSocket ? paneId : undefined;
   return {
     command: "claude",
+    skills,
     args,
     plugin,
     channel,

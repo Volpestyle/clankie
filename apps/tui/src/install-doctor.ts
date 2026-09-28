@@ -17,7 +17,7 @@ import {
   type ClankieConfig,
   type LoadConfigResult,
 } from "@clankie/model-provider";
-import { SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
+import { bundledSkills, SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
 import { commandHost } from "./command/io.ts";
 import { probeDoorway, type GatewayDoorwayReport } from "./command/gateway.ts";
 
@@ -82,6 +82,10 @@ export interface InstallDoctorReport {
   };
   readonly gameplay: {
     readonly pokeagentMmoEnabled: boolean;
+  };
+  readonly skills: {
+    readonly selection: { readonly opinionated: boolean; readonly exclude: readonly string[] };
+    readonly catalog: readonly ReturnType<typeof bundledSkills>[number][];
   };
   readonly emailConfigured: boolean;
   readonly mcpServers: readonly string[];
@@ -234,6 +238,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     gameplay: {
       pokeagentMmoEnabled: settings.gameplay.pokeagentMmoEnabled,
     },
+    skills: { selection: settings.skills, catalog: bundledSkills(options.repoRoot, settings.skills) },
     emailConfigured:
       settings.email.username !== undefined ||
       settings.email.fromAddress !== undefined ||

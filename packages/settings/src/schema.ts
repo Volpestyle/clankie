@@ -745,6 +745,15 @@ export const AgentHostConnectionSchema = z
   .strict();
 export type AgentHostConnection = z.infer<typeof AgentHostConnectionSchema>;
 
+/** Product/tool skills are always available; this selection controls the opinionated bundle. */
+export const SkillsSettingsSchema = z
+  .object({
+    opinionated: z.boolean().default(true),
+    exclude: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]*$/u)).default([]),
+  })
+  .strict();
+export type SkillsSettings = z.infer<typeof SkillsSettingsSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
@@ -797,6 +806,7 @@ export const ClankieSettingsSchema = z
       .default(() => ({ connections: [] })),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
     swarm: SwarmSettingsSchema.default(() => SwarmSettingsSchema.parse({})),
+    skills: SkillsSettingsSchema.default(() => SkillsSettingsSchema.parse({})),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),

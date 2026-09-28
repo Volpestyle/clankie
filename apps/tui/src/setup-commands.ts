@@ -248,6 +248,13 @@ export function checklistEntries(
       command: "video-model",
     },
     {
+      value: "skills",
+      label: "Working skills",
+      hint: report.skills.selection.opinionated ? "opinionated on" : "product/tools only",
+      description: "Toggle opinionated guidance or exclude individual skills; product/tool skills stay on.",
+      command: "skills",
+    },
+    {
       value: "games",
       label: "Pokémon",
       hint: report.gameplay.pokeagentMmoEnabled ? "✓ on" : "off",

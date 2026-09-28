@@ -36,6 +36,11 @@ to browse the loaded skills, or invoke one with `/skill-name task`. The service
 reads its bundled skills and the supported project and user skill roots. A skill
 provides guidance; it does not grant credentials or machine access.
 
+Opinionated working skills are on by default. Use `/skills` in the console or
+`clankie skills opinionated off` to disable that class; product and tool references
+stay available. `clankie skills exclude NAME` disables one opinionated skill.
+Start a fresh session after changing the selection to remove guidance already loaded.
+
 The [bundled-skills guide](https://github.com/Volpestyle/clankie/blob/main/docs/bundled-skills.md)
 owns the catalog, discovery paths, and which worker routes receive that guidance.
 

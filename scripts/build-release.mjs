@@ -1,3 +1,4 @@
+import { copySkillAssets } from "./release/skills.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -184,6 +185,7 @@ function gitRevision() {
 }
 
 async function copyRuntimeAssets(targetRoot) {
+  await copySkillAssets(repoRoot, targetRoot);
   const files = [
     ["apps/clankie/src/captain/instructions.md", "apps/clankie/src/instructions.md"],
     ["apps/discord-activity/src/client.html", "apps/discord-activity/src/client.html"],
@@ -211,12 +213,7 @@ async function copyRuntimeAssets(targetRoot) {
     await mkdir(dirname(target), { recursive: true });
     await copyFile(join(repoRoot, source), target);
   }
-  for (const directory of [
-    ".agents/skills",
-    "integrations/herdr-plugin",
-    "integrations/claude-plugin",
-    "integrations/worker-skills",
-  ]) {
+  for (const directory of ["integrations/herdr-plugin"]) {
     await cp(join(repoRoot, directory), join(targetRoot, directory), {
       recursive: true,
       dereference: true,

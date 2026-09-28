@@ -972,6 +972,8 @@ export const SpawnOperatorSeatSchema = z
      * own Codex settings, so it needs no flag; other harnesses fail typed.
      */
     chrome: z.boolean().optional(),
+    /** Local hire's opinionated skill condition; product/tool skills remain present. */
+    skills: z.enum(["bundled", "plain"]).optional(),
     /**
      * The Herdr fleet it starts on (ADR 0184): a registered machine's name.
      * Absent means the local default fleet; the seat id comes back as
@@ -992,7 +994,22 @@ export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;
  * the same call the send lane makes with `undelivered`.
  */
 export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
-  z.object({ outcome: z.literal("spawned"), seat: OperatorFleetSeatSchema }).strict(),
+  z
+    .object({
+      outcome: z.literal("spawned"),
+      seat: OperatorFleetSeatSchema,
+      skills: z
+        .object({
+          mode: z.enum(["bundled", "plain"]),
+          source: z.enum(["setting", "override"]),
+          applied: z.boolean(),
+          included: z.array(z.string()),
+          excluded: z.array(z.string()),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
   z
     .object({
       outcome: z.literal("failed"),

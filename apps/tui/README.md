@@ -182,6 +182,9 @@ credential holder.
   the skill picker. The transcript records a compact `skill loaded` receipt.
 - `/activity` shows the current goal, commentary, intent, observed outcome, and
   the loopback watch URL without controlling the body.
+- `/skills` opens the working-skill picker (also in `/setup`). Opinionated skills
+  default on; product/tool skills always stay on. `/skills opinionated off` and
+  `/skills exclude NAME` apply to new sessions and local hires.
 - `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
   disable it. `/games on|off` remains available for direct use. Restart Clankie
   to apply a change. Saves live with the world server, not here.

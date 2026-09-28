@@ -1,3 +1,4 @@
+import { bundledSkills, type SkillsSettings } from "@clankie/settings";
 import { execFile, type ExecFileException } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -591,7 +592,9 @@ export function herdrAgentName(title: string, suffix: string = randomUUID().slic
 
 export type HerdrSeatSpawnResult =
   | Exclude<OperatorSeatSpawnResult, { readonly outcome: "spawned" }>
-  | { readonly outcome: "spawned"; readonly seat: ObservedFleetSeat };
+  | (Omit<Extract<OperatorSeatSpawnResult, { outcome: "spawned" }>, "seat"> & {
+      readonly seat: ObservedFleetSeat;
+    });
 
 type HerdrSeatSpawnFailure = Extract<HerdrSeatSpawnResult, { readonly outcome: "failed" }>;
 /** A move re-hires an existing seat, so it is never refused for capacity. */
@@ -621,7 +624,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly remoteWorkspace: ((fleet: string, directory: string) => Promise<boolean>) | undefined;
   private readonly path: string;
   private readonly runner: HerdrWatchRunner;
-  private readonly skillBundle: { repoRoot: string; stateDir: string } | undefined;
+  private readonly skillBundle:
+    | { repoRoot: string; stateDir: string; settings?: () => Promise<SkillsSettings> }
+    | undefined;
   private readonly controllers = new Map<string, AbortController>();
   private readonly seatControllers = new Map<string, AbortController>();
   private readonly seatStatuses = new Map<string, string>();
@@ -642,7 +647,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public constructor(
     path: string,
     options: {
-      readonly skillBundle?: { readonly repoRoot: string; readonly stateDir: string };
+      readonly skillBundle?: {
+        readonly repoRoot: string;
+        readonly stateDir: string;
+        readonly settings?: () => Promise<SkillsSettings>;
+      };
       readonly runner?: HerdrWatchRunner;
       readonly available?: () => boolean;
       readonly summariesPath?: string;
@@ -909,11 +918,45 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail: `${input.workingDirectory} is not a granted workspace on fleet ${remote}; grant it with clankie runtime workspaces ${remote} --dir PATH`,
       };
     }
+    const canApplySkills =
+      remote === undefined &&
+      this.skillBundle !== undefined &&
+      ["claude", "pi", "codex"].includes(input.harness);
+    if (input.skills !== undefined && !canApplySkills) {
+      return {
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail: "Skill overrides require a local Claude, Pi or Codex hire.",
+      };
+    }
+    const configuredSkills = (await this.skillBundle?.settings?.()) ?? { opinionated: true, exclude: [] };
+    const selectedSkills = {
+      ...configuredSkills,
+      opinionated: input.skills === undefined ? configuredSkills.opinionated : input.skills === "bundled",
+    };
+    const catalog = canApplySkills ? bundledSkills(this.skillBundle!.repoRoot, selectedSkills) : [];
+    const skillCondition: Extract<OperatorSeatSpawnResult, { outcome: "spawned" }>["skills"] =
+      this.skillBundle === undefined
+        ? undefined
+        : {
+            mode: selectedSkills.opinionated ? "bundled" : "plain",
+            source: input.skills === undefined ? "setting" : "override",
+            applied: canApplySkills,
+            included: catalog.filter((skill) => skill.included).map((skill) => skill.name),
+            excluded: catalog.filter((skill) => !skill.included).map((skill) => skill.name),
+          };
     let paneId: string;
     let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = { args: [] };
     try {
       if (remote === undefined && this.skillBundle !== undefined) {
-        skillLaunch = await workerSkills(input.harness, this.skillBundle.repoRoot, this.skillBundle.stateDir);
+        skillLaunch = await workerSkills(
+          input.harness,
+          this.skillBundle.repoRoot,
+          this.skillBundle.stateDir,
+          undefined,
+          selectedSkills,
+          input.workingDirectory,
+        );
       }
       paneId = await createTab({
         cwd: input.workingDirectory,
@@ -984,6 +1027,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       return {
         outcome: "spawned",
+        ...(skillCondition === undefined ? {} : { skills: skillCondition }),
         seat: {
           seatId: agent.terminalId,
           paneId,

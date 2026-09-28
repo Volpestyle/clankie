@@ -1,3 +1,6 @@
+import { existsSync, readdirSync } from "node:fs";
+import { bundledSkills } from "./bundled-skills.ts";
+import type { SkillsSettings } from "./schema.ts";
 import { join } from "node:path";
 
 /**
@@ -16,9 +19,8 @@ import { join } from "node:path";
  * reports the rest as collisions, so the skills that ship with this body win
  * over a personal skill that happens to share a name.
  *
- * Paths are returned whether or not they exist. Callers filter, because the
- * two consumers want opposite things from a missing one: the loader reports it
- * as a diagnostic, the catalog just skips it.
+ * With exclusions, expand roots into selected entries so disabled names cannot
+ * return via a second root. Without exclusions, callers handle missing roots.
  */
 export function clankieSkillRoots(input: {
   /** The checkout or installed release: the skills shipped with this body. */
@@ -33,8 +35,9 @@ export function clankieSkillRoots(input: {
    * a boot-time catalog has no workspace yet and omits this.
    */
   readonly cwd?: string;
+  readonly skills?: SkillsSettings;
 }): readonly string[] {
-  return [
+  const roots = [
     join(input.repoRoot, ".pi", "skills"),
     join(input.repoRoot, ".agents", "skills"),
     join(input.repoRoot, ".agents", "dev-skills"),
@@ -42,4 +45,19 @@ export function clankieSkillRoots(input: {
     join(input.agentDir, "skills"),
     join(input.home, ".agents", "skills"),
   ];
+  const excluded = new Set(
+    bundledSkills(input.repoRoot, input.skills)
+      .filter((skill) => !skill.included)
+      .map((skill) => skill.name),
+  );
+  if (excluded.size === 0) return roots;
+  // Enumerate each root so a disabled bundled name cannot sneak back through a
+  // workspace/global copy. Other owner skills remain available and untouched.
+  return [...new Set(roots)].flatMap((root) =>
+    existsSync(root)
+      ? readdirSync(root)
+          .filter((name) => !excluded.has(name.replace(/\.md$/u, "")))
+          .map((name) => join(root, name))
+      : [],
+  );
 }
