@@ -53,7 +53,7 @@ constraints, and any decisions you want to make yourself. You can ask who is
 doing what, open a helper's conversation, and steer the work as it develops.
 
 For DIY users, helper agents use the installed and authenticated tools you
-choose. [Make him yours](/diy/#bring-your-own-team) explains the setup. Hosted
+choose. [Customize Clankie](/diy/#bring-your-own-team) explains the setup. Hosted
 worker availability depends on the service and plan; the [current plans](https://clankie.bot/#plans)
 are the source for those limits.
 

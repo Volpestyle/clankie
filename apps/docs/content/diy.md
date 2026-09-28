@@ -1,4 +1,4 @@
-# Make Clankie yours
+# Customize Clankie
 
 Run a persistent assistant on your own machine, choose how he thinks, and give
 him the tools that fit your life. Start with a conversation; add a coding team,

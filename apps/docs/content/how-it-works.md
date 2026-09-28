@@ -66,7 +66,7 @@ shell.
 
 The DIY setup lets you choose models and connect capabilities independently.
 Conversation, images, video, and voice have separate configuration. Hosted
-availability follows the managed service's current offering. See [make him yours](/diy/)
+availability follows the managed service's current offering. See [Customize Clankie](/diy/)
 for the practical setup and [clankie.bot](https://clankie.bot) for hosted availability.
 
 ## A team around him

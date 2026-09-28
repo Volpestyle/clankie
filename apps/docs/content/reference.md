@@ -2,7 +2,7 @@
 
 Choose the reference for the job. [Get started](/get-started/) covers setup;
 [using Clankie](/using-clankie/) explains the everyday experience;
-[make him yours](/diy/) introduces the optional technical depth.
+[Customize Clankie](/diy/) introduces the optional technical depth.
 
 ## Operate Clankie
 

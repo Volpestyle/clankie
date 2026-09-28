@@ -4,7 +4,7 @@ Turns Clankie configuration plus the
 [`@clankie/model-registry`](../model-registry/README.md) catalog and
 [`@clankie/credential-broker`](../credential-broker/README.md) credentials into
 ready-to-call AI SDK language models and Pi provider declarations. User-facing
-model setup is in [Make him yours](https://docs.clankie.bot/diy/#choose-his-models);
+model setup is in [Customize Clankie](https://docs.clankie.bot/diy/#choose-his-models);
 this reference describes resolution and authentication.
 
 ```mermaid

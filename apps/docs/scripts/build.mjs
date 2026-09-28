@@ -54,7 +54,7 @@ const PAGES = [
   },
   {
     path: "/diy/",
-    title: "Make him yours",
+    title: "Customize Clankie",
     description:
       "Choose models, skills, coding agents, services, Discord, voice, and play on your own machine.",
   },

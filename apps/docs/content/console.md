@@ -3,7 +3,7 @@
 The console is a full conversation with Clankie in your terminal. Ask for help,
 work on a project, configure his connections, or inspect an agent's progress.
 For the first installation, follow [Get started](/get-started/); for models,
-skills, and worker setup, use [Make him yours](/diy/).
+skills, and worker setup, use [Customize Clankie](/diy/).
 
 In local mode, `clankie` starts the service if needed and opens the console.
 In hosted mode it connects to your existing remote Clankie. First launch asks

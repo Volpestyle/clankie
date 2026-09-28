@@ -12,7 +12,7 @@ the tools you want. The iPhone and iPad app gives you a window into the same
 Clankie wherever you are.
 
 [Get started](https://docs.clankie.bot/get-started/#diy-start-on-your-mac) ·
-[Make him yours](https://docs.clankie.bot/diy/) ·
+[Customize Clankie](https://docs.clankie.bot/diy/) ·
 [Watch the film](https://clankie.bot/#film) ·
 [Technical reference](docs/README.md)
 

@@ -85,7 +85,7 @@ any constraints that matter. For a bigger task, ask him to explain his plan
 and show the result when it is ready.
 
 Next: [using Clankie](/using-clankie/) for everyday requests and working with
-his team, or [make him yours](/diy/) for models, skills, and connections.
+his team, or [customize Clankie](/diy/) with models, skills, and connections.
 
 ## If you cannot reach him
 
