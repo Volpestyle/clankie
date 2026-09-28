@@ -1417,6 +1417,11 @@ paths:
         returns 409 without changing a worker. Seat-control operations
         return 503 with herdr_unavailable when the default runtime is unavailable;
         ordinary conversations and their durable records remain accessible.
+        `fleet` returns one cursor-coherent snapshot. Optional `view: home`
+        omits historical personas that are neither seated, reachable Swarm
+        contacts nor channel participants. Seats, channels, tallies and edges
+        are unchanged. Omitting the selector preserves the full directory;
+        `personas` and conversation IDs still address retained history.
         `terminal_catalog` lists up to 48 panes per execution connection (16 connections).
         Each row carries runtime identity separately from Herdr workspace/tab IDs.
         Named terminal addresses pin their endpoint; tail, control and input refuse

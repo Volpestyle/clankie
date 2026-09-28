@@ -21,6 +21,7 @@ import {
 } from "@clankie/settings";
 import {
   CAPTAIN_SILENT_REPLY_SENTINEL,
+  operatorFleetHome,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   OPERATOR_SEAT_HARNESSES,
   type CaptainChannelTurnResult,
@@ -2306,7 +2307,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       if (request.op === "fleet") {
         await fleetChanges.wait(request.cursor, request.waitMs ?? 0);
-        return fleetSnapshot();
+        const result = await fleetSnapshot();
+        return request.view === "home" ? { ...result, snapshot: operatorFleetHome(result.snapshot) } : result;
       }
       if (request.op === "state_stance") {
         // The pane is the whole claim of identity, and it is checked against the

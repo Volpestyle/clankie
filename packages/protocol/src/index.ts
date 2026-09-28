@@ -886,6 +886,27 @@ export const OperatorFleetSnapshotSchema = z
   .strict();
 export type OperatorFleetSnapshot = z.infer<typeof OperatorFleetSnapshotSchema>;
 
+/** Home needs seated people, reachable Swarm threads, and room participants.
+ * Archived personas remain addressable through personas/get; never delete them.
+ * Shared by the service projection and older-host client fallback.
+ */
+export function operatorFleetHome(snapshot: OperatorFleetSnapshot): OperatorFleetSnapshot {
+  const visible = new Set(snapshot.seats.map((seat) => seat.personaId));
+  for (const channel of snapshot.channels) {
+    for (const member of channel.members) visible.add(member.personaId);
+  }
+  return {
+    ...snapshot,
+    personas: snapshot.personas.filter(
+      (persona) =>
+        visible.has(persona.personaId) ||
+        (!isInternalSwarmContact(persona) &&
+          persona.swarm !== undefined &&
+          (persona.swarm.available || persona.conversationId !== undefined)),
+    ),
+  };
+}
+
 /**
  * Herdr's `agent start --kind` allowlist. A harness value reaches an exec
  * boundary, so it is checked against this list rather than passed through as
@@ -2213,6 +2234,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("fleet"),
       schemaVersion: z.literal(1),
+      /** Omitted preserves the full durable directory for existing clients. */
+      view: z.literal("home").optional(),
       cursor: OperatorConversationCursorSchema.optional(),
       waitMs: z.number().int().min(0).max(OPERATOR_FLEET_WAIT_MS_MAX).optional(),
     })
