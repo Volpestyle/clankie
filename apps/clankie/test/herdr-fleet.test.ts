@@ -372,32 +372,44 @@ describe("census across fleets", () => {
       fleets: [
         {
           id: "pc",
-          session: "default",
+          session: "gaming",
           host: "supedupsilly",
-          run: async () =>
-            JSON.stringify({
-              result: {
-                agents: [
-                  {
-                    pane_id: "w2:p1J",
-                    terminal_id: "term_abc",
-                    agent: "claude",
-                    agent_status: "working",
-                    name: "rivals-lead",
-                    cwd: "C:\\src\\rivals",
-                    agent_session: { source: "herdr:claude", kind: "id", value: "s1" },
+          run: async (args) =>
+            args[0] === "api"
+              ? JSON.stringify({
+                  result: {
+                    snapshot: {
+                      workspaces: [{ workspace_id: "w2", label: "Rivals", number: 2 }],
+                      tabs: [{ tab_id: "t1", label: "Renderer", number: 1 }],
+                      panes: [
+                        { terminal_id: "term_abc", pane_id: "w2:p1J", workspace_id: "w2", tab_id: "t1" },
+                      ],
+                    },
                   },
-                  {
-                    pane_id: "w2:p2",
-                    terminal_id: "term_head",
-                    agent: "claude",
-                    name: "clankie",
-                    agent_status: "idle",
-                    agent_session: { source: "herdr:claude", kind: "id", value: "head" },
+                })
+              : JSON.stringify({
+                  result: {
+                    agents: [
+                      {
+                        pane_id: "w2:p1J",
+                        terminal_id: "term_abc",
+                        agent: "claude",
+                        agent_status: "working",
+                        name: "rivals-lead",
+                        cwd: "C:\\src\\rivals",
+                        agent_session: { source: "herdr:claude", kind: "id", value: "s1" },
+                      },
+                      {
+                        pane_id: "w2:p2",
+                        terminal_id: "term_head",
+                        agent: "claude",
+                        name: "clankie",
+                        agent_status: "idle",
+                        agent_session: { source: "herdr:claude", kind: "id", value: "head" },
+                      },
+                    ],
                   },
-                ],
-              },
-            }),
+                }),
         },
       ],
     });
@@ -407,6 +419,11 @@ describe("census across fleets", () => {
         paneId: "pc/w2:p1J",
         subject: "pc-rivals-lead",
         fleet: "pc",
+        herdrSession: "gaming",
+        placement: {
+          workspace: { id: "w2", label: "Rivals", number: 2 },
+          tab: { id: "t1", label: "Renderer", number: 1 },
+        },
         workingDirectory: "C:\\src\\rivals",
       }),
     ]);

@@ -772,6 +772,10 @@ export const OperatorFleetSeatSchema = z
      * could not be read; the seat is still a seat.
      */
     placement: OperatorHerdrPlacementSchema.optional(),
+    /** Display identity of the host machine; fleet remains the routing key. */
+    machine: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
+    /** Named Herdr server session, independent of the occupying harness session. */
+    herdrSession: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
     /**
      * The registered machine (Herdr fleet) holding this seat (ADR 0184), for a
      * machine tag. Absent on the local default fleet.

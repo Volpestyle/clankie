@@ -1,9 +1,11 @@
+import { hostname } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   formatHerdrSessionCensus,
   occupantIdForHerdrSession,
   parseHerdrAgentList,
   parseHerdrTerminalCatalog,
+  readFleet,
   readFleetSeats,
   readHerdrSessionCensus,
   readSeatIdForHerdrPane,
@@ -106,6 +108,7 @@ describe("herdr session census", () => {
       }),
     ).resolves.toEqual([
       {
+        machine: hostname(),
         seatId: "term-worker",
         paneId: "w15:p8",
         subject: "release-prep-ab12",
@@ -116,6 +119,7 @@ describe("herdr session census", () => {
         title: "",
       },
       {
+        machine: hostname(),
         seatId: "term-unmanaged",
         paneId: "w15:p7",
         subject: expect.stringMatching(/^adhoc-[a-f0-9]{20}$/u),
@@ -197,7 +201,12 @@ describe("herdr session census", () => {
           : Promise.resolve({ stdout: snapshotStdout, stderr: "" })
         : Promise.resolve({ stdout: JSON.stringify({ result: { agents: [agent] } }), stderr: "" });
 
-    const placed = await readFleetSeats({ runCommand: runner(JSON.stringify(snapshot)) });
+    const { seats: placed } = await readFleet({
+      runCommand: runner(JSON.stringify(snapshot)),
+      herdrSession: "Product",
+    });
+    expect(placed[0]?.herdrSession).toBe("Product");
+    expect(placed[0]?.machine).toBe(hostname());
     expect(placed[0]?.placement).toEqual({
       workspace: { id: "w2", label: "clankie", number: 2 },
       tab: { id: "w2:t4", label: "Delivered files", number: 4 },

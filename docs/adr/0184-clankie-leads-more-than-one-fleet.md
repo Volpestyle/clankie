@@ -67,7 +67,11 @@ name no fleet.
 - **Seat identity carries the fleet.** A seat id is `<fleet>/<terminal id>`;
   the census, the terminal catalog, and the fleet snapshot carry a `fleet`
   coordinate above workspace, tab, and pane. The local default fleet keeps
-  bare ids, so existing conversations keep their seats.
+  bare ids, so existing conversations keep their seats. The roster also carries
+  the host's display `machine` and named `herdrSession`, independent of the
+  harness-session occupant identity. Remote workspace/tab placement comes from
+  that fleet's snapshot; a failed snapshot preserves its agent roster without
+  claiming placement. Older hosts may omit these presentation fields.
 - **An unreachable fleet is a state, not a failure.** The census reports it
   `unreachable` with the last-seen time and every other fleet answers normally.
 - **Every lead is a contact.** A pane on any fleet is a seat, so the lead

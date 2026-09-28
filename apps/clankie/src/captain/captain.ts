@@ -1554,10 +1554,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   let swarmRoster = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
+    const binding = await deps.runtimes?.configuredBinding("default");
     const fleet =
       deps.herdrAvailable?.() === false
         ? { seats: [], head: undefined }
-        : await readFleet({ fleets: censusFleets });
+        : await readFleet({ fleets: censusFleets, ...(binding ? { herdrSession: binding.session } : {}) });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const seats = personas.reconcile(fleet.seats);

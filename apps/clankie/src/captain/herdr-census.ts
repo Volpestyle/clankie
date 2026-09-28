@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import { promisify } from "node:util";
 import {
   OPERATOR_HEAD_AGENT_NAME,
@@ -151,6 +152,8 @@ export interface ObservedFleetSeat {
   readonly placement?: OperatorHerdrPlacement;
   /** The registered remote fleet (machine) holding this seat; absent on the local fleet (ADR 0184). */
   readonly fleet?: string;
+  readonly machine?: string;
+  readonly herdrSession?: string;
 }
 
 function defaultRunner(
@@ -428,12 +431,27 @@ export interface ObservedFleet {
  * seats offline, never a failed conversation surface.
  */
 export async function readFleet(
-  options: { readonly runCommand?: HerdrCensusRunner; readonly fleets?: readonly HerdrCensusFleet[] } = {},
+  options: {
+    readonly runCommand?: HerdrCensusRunner;
+    readonly fleets?: readonly HerdrCensusFleet[];
+    readonly herdrSession?: string;
+  } = {},
 ): Promise<ObservedFleet> {
-  const [local, remote] = await Promise.all([
+  const [local, remote, remotePlacements] = await Promise.all([
     readLocalFleet(options),
     readRemoteFleets(options.fleets ?? []),
+    Promise.all(
+      (options.fleets ?? []).map(async (fleet) => {
+        const catalog = await readTerminalCatalog({
+          runCommand: async (_command, args) => ({ stdout: await fleet.run(args), stderr: "" }),
+        });
+        return catalog.map(
+          ({ terminalId, workspace, tab }) => [`${fleet.id}/${terminalId}`, { workspace, tab }] as const,
+        );
+      }),
+    ),
   ]);
+  const placements = new Map<string, OperatorHerdrPlacement>(remotePlacements.flat());
   const remoteSeats = remote.flatMap((entry) =>
     "error" in entry
       ? []
@@ -466,6 +484,9 @@ export async function readFleet(
                 ? {}
                 : { workingDirectory: bounded(agent.cwd, SEAT_DIRECTORY_MAX) }),
               fleet: entry.fleet.id,
+              machine: bounded(entry.fleet.host, 200),
+              herdrSession: bounded(entry.fleet.session, 200),
+              ...(placements.has(agent.terminalId) ? { placement: placements.get(agent.terminalId)! } : {}),
             } satisfies ObservedFleetSeat,
           ];
         }),
@@ -474,7 +495,7 @@ export async function readFleet(
 }
 
 async function readLocalFleet(
-  options: { readonly runCommand?: HerdrCensusRunner } = {},
+  options: { readonly runCommand?: HerdrCensusRunner; readonly herdrSession?: string } = {},
 ): Promise<ObservedFleet> {
   const run = options.runCommand ?? defaultRunner;
   try {
@@ -543,6 +564,8 @@ async function readLocalFleet(
           ...(written?.next === undefined ? {} : { next: bounded(written.next, SEAT_SUMMARY_MAX) }),
           ...(entry.cwd === undefined ? {} : { workingDirectory: bounded(entry.cwd, SEAT_DIRECTORY_MAX) }),
           ...(placement === undefined ? {} : { placement }),
+          machine: bounded(hostname(), 200),
+          ...(options.herdrSession ? { herdrSession: bounded(options.herdrSession, 200) } : {}),
         };
       });
     return head === undefined ? { seats } : { seats, head };
