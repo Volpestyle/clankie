@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const connectionId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u);
 const label = z.string().max(4096);
+export const RUNTIME_CAPACITY_DEFAULT = 16;
+export const RUNTIME_CAPACITY_MAX = 256;
 
 /** Connection changes share the operator relay's steer authority. No credentials cross it. */
 export const OperatorConnectionCommandSchema = z.discriminatedUnion("action", [
@@ -15,6 +17,14 @@ export const OperatorConnectionCommandSchema = z.discriminatedUnion("action", [
     .strict(),
   z.object({ action: z.literal("reconnect_runtime"), id: connectionId }).strict(),
   z.object({ action: z.literal("disconnect_runtime"), id: connectionId }).strict(),
+  /** How many workers one runtime (a Herdr session) may hold at once; the host default is 16. */
+  z
+    .object({
+      action: z.literal("set_runtime_capacity"),
+      id: connectionId,
+      capacity: z.number().int().min(1).max(RUNTIME_CAPACITY_MAX),
+    })
+    .strict(),
   z.object({ action: z.literal("disconnect_swarm"), id: connectionId }).strict(),
 ]);
 export type OperatorConnectionCommand = z.infer<typeof OperatorConnectionCommandSchema>;

@@ -6,6 +6,8 @@ import {
   MODEL_KEY_VALIDATE_PATH,
   MODEL_SELECT_PATH,
   MODEL_KEY_REMOVE_PATH,
+  MODEL_SUBSCRIPTIONS_PATH,
+  ModelSubscriptionsResponseSchema,
   ModelKeySetRequestSchema,
   ModelKeyValidateRequestSchema,
   ModelSelectRequestSchema,
@@ -27,6 +29,7 @@ export function createModelKeyRoutes(
     MODEL_KEY_VALIDATE_PATH,
     MODEL_SELECT_PATH,
     MODEL_KEY_REMOVE_PATH,
+    MODEL_SUBSCRIPTIONS_PATH,
   ]) {
     app.use(path, async (context, next) => {
       context.header("cache-control", "no-store");
@@ -51,6 +54,14 @@ export function createModelKeyRoutes(
   app.get(MODEL_KEYS_PATH, async (context) => {
     try {
       return context.json(ModelKeysResponseSchema.parse(await models!.list()));
+    } catch {
+      return context.json({ ok: false, error: "unavailable" }, 503);
+    }
+  });
+  app.get(MODEL_SUBSCRIPTIONS_PATH, async (context) => {
+    try {
+      const listed = (await models!.subscriptions?.()) ?? { subscriptions: [] };
+      return context.json(ModelSubscriptionsResponseSchema.parse(listed));
     } catch {
       return context.json({ ok: false, error: "unavailable" }, 503);
     }

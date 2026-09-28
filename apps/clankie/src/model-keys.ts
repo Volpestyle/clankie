@@ -12,7 +12,11 @@ import {
   setCaptainModel,
 } from "@clankie/model-provider";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { ModelKeyResult, ModelKeysResponse } from "@clankie/protocol/model-keys";
+import type {
+  ModelKeyResult,
+  ModelKeysResponse,
+  ModelSubscriptionsResponse,
+} from "@clankie/protocol/model-keys";
 import { BrokerCredentialStore } from "./captain/model.ts";
 
 export interface ModelKeysPort {
@@ -21,6 +25,8 @@ export interface ModelKeysPort {
   validate(providerId: string, modelId: string): Promise<ModelKeyResult>;
   select(model: string): Promise<ModelKeyResult>;
   remove(providerId: string): Promise<ModelKeyResult>;
+  /** Account sign-ins (OAuth/subscription) in use instead of an API key. */
+  subscriptions?(): Promise<ModelSubscriptionsResponse>;
 }
 
 /** The CLI's config, broker, Pi runtime and models.dev fill, with a write-only wire projection. */
@@ -118,6 +124,15 @@ export function createModelKeys(options: {
             keyConfigured: credentials[provider.id]?.type === "api",
             models: piModelsFor(state.models, provider.id, state).map(({ id, name }) => ({ id, name })),
           }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    },
+    async subscriptions() {
+      const [state, credentials] = await Promise.all([snapshot(), store.list()]);
+      return {
+        subscriptions: state.providers
+          .filter((provider) => credentials[provider.id]?.type === "oauth")
+          .map((provider) => ({ providerId: provider.id, name: provider.name }))
           .sort((a, b) => a.name.localeCompare(b.name)),
       };
     },

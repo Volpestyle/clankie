@@ -52,6 +52,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/health",
       "/v1/operator/persona",
       "/v1/model-keys",
+      "/v1/model-keys/subscriptions",
       "/v1/accounts",
       "/v1/connections",
       "/v1/runtime-connections",

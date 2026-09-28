@@ -149,6 +149,8 @@ export async function manageConnections(deps: Dependencies, command: OperatorCon
     });
   }
   if (command.action === "disconnect_runtime") await changeRuntime(deps, "disconnect", command.id);
+  if (command.action === "set_runtime_capacity")
+    await changeRuntime(deps, "connect", { action: "capacity", id: command.id, capacity: command.capacity });
   if (command.action === "disconnect_swarm") {
     if (!deps.swarm?.disconnect) throw new Error("Swarm connections unavailable");
     await deps.swarm.disconnect(command.id);

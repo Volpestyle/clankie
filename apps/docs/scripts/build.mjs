@@ -178,6 +178,14 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/model-keys/subscriptions",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Name the providers signed in through an account (OAuth or subscription), without token details.",
+      },
+    ],
+    [
       "POST /v1/model-keys/remove",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

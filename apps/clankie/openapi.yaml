@@ -97,6 +97,27 @@ paths:
         "401": { description: authentication_required }
         "403": { description: forbidden — terminalControl required }
         "503": { description: unavailable }
+  /v1/model-keys/subscriptions:
+    get:
+      tags: [Operator]
+      operationId: listModelSubscriptions
+      summary: List providers signed in through an account (OAuth or subscription) instead of an API key
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. Returns provider ids and
+        names only; no tokens, expiry or account metadata. A separate read so
+        clients parsing the strict model catalog never meet a new field.
+        Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Providers signed in through an account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelSubscriptionsResponse" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
   /v1/model-keys/set:
     post:
       tags: [Operator]
@@ -2667,6 +2688,21 @@ components:
               provider_rejected,
               unavailable,
             ]
+    ModelSubscriptionsResponse:
+      type: object
+      additionalProperties: false
+      required: [subscriptions]
+      properties:
+        subscriptions:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [providerId, name]
+            properties:
+              providerId: { type: string }
+              name: { type: string }
     ModelKeysResponse:
       type: object
       additionalProperties: false

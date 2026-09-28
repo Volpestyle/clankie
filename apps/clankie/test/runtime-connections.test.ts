@@ -405,6 +405,30 @@ it("selects each runtime's worker mode through CLI/API, keeps stream unwritten, 
       { id: "default", workerMode: "stream" },
       { id: "named", enabled: true, workerMode: "interactive" },
     ]);
+    // A paired device sets a session's capacity; the default stays unwritten until then.
+    expect(inventory.runtimes).toMatchObject([
+      { id: "default", capacity: 16 },
+      { id: "named", capacity: 16 },
+    ]);
+    expect(
+      (
+        await manageConnections(
+          { runtimes, swarm },
+          { action: "set_runtime_capacity", id: "named", capacity: 6 },
+        )
+      ).runtimes,
+    ).toMatchObject([
+      { id: "default", capacity: 16 },
+      { id: "named", capacity: 6, workerMode: "interactive" },
+    ]);
+    await manageConnections(
+      { runtimes, swarm },
+      { action: "set_runtime_capacity", id: "default", capacity: 24 },
+    );
+    expect((await settings.load()).execution.capacity).toBe(24);
+    await expect(
+      manageConnections({ runtimes, swarm }, { action: "set_runtime_capacity", id: "missing", capacity: 4 }),
+    ).rejects.toThrow(/Unknown/u);
     await runRuntimeCommand(["mode", "named", "stream"], cli);
     expect(await named()).not.toHaveProperty("workerMode");
     await runRuntimeCommand(["mode", "default", "interactive"], cli);
