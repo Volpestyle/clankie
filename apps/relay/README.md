@@ -5,7 +5,7 @@ The launcher supervises the relay like every other member of the stack:
 with the clankie service whose brokered captain bearer it holds. Pairing goes
 further and guarantees it: `clankie pair` and `/pair` reuse a healthy relay,
 start a stopped one, and mint no offer at all if it will not come up, so a
-paired device never points at a relay nobody started. A control plane that is
+paired device never points at a relay nobody started. A Clankie service that is
 not this machine runs its own relay; pairing says so instead of starting a
 local one that proves nothing. The headless command contract is
 [`docs/cli.md`](../../docs/cli.md). In the
@@ -16,7 +16,7 @@ captain credential without a launcher-provided environment token.
 It listens on `CLANKIE_RELAY_PORT` (default 4321 — 4320 belongs to the
 activity surface). The origin remote devices should reach it on is
 owner-authored settings (`relay.url` in `~/.config/clankie/settings.json`, or
-the `CLANKIE_RELAY_URL` override): when set, the control plane advertises it
+the `CLANKIE_RELAY_URL` override): when set, the service advertises it
 in pairing and session-refresh responses, so paired devices follow a moved
 relay without a rebuild.
 

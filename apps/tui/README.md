@@ -1,10 +1,11 @@
 # Clankie TUI (`@clankie/tui`)
 
-The TUI is the primary workspace for Clankie as your persistent lead. Give him
-work here and choose which installed worker harnesses he uses in Herdr, such
-as Claude Code or Codex. Clankie's own pi-based runtime keeps the conversation,
-goals, and memory; workers run in their own inspectable terminal panes. The
-companion app reaches the same service through Messages, Terminal, and Commons.
+The terminal console is a full client for Clankie: conversation, project work,
+configuration, and inspection of connected agents. It can reach a local service
+or an existing hosted Clankie. The app reaches the same service through
+Messages, Commons, and Terminal. For first setup, use
+[Get started](https://docs.clankie.bot/get-started/); this README owns terminal
+interaction, workspace selection, and launcher behavior.
 
 The chat surface is pi's,
 in pi's fullscreen mode: messages, tool executions, the working indicator, and
@@ -18,7 +19,7 @@ the banner, slash-command typeahead, guided setup flows, and the `Ctrl+/`
 command workbench — dressed in pi's dark palette
 ([ADR 0137](../../docs/adr/0137-the-face-wears-pis-chat-surface.md)).
 
-It talks to one backend: the clankie service on port `4310`. Plain prompts use
+In local mode it talks to the Clankie service on port `4310`. Plain prompts use
 the shared operator-conversation dispatch contract at
 `POST /operator/v1/dispatch`; lane observation uses
 `GET /captain/v1/lanes`; health, devices, pairing, presence, embodiment,
@@ -26,6 +27,10 @@ activity, and memory use the operator APIs in the
 [HTTP catalog](../clankie/openapi.yaml). `CLANKIE_CONTROL_PLANE_URL` overrides
 the default `http://127.0.0.1:4310`; `CLANKIE_CAPTAIN_URL` remains a
 compatibility alias.
+
+Hosted mode uses the paired-device transport and a smaller command set; see
+[local and hosted modes](../../docs/cli.md#local-and-hosted-connection-modes).
+The following process and workspace details describe local mode unless noted.
 
 ## Run
 
@@ -35,7 +40,7 @@ launcher with `pnpm cli:install`. Flags, JSON stdout, exit codes, and the
 prints the same index.
 
 ```bash
-clankie                         # start the core service and open the console
+clankie                         # choose mode on first run; open the selected console
 clankie --chat <conversationId> # select a server-owned conversation
 clankie status                  # probe every launcher-owned service
 clankie doctor                  # this install: checkout vs release, models, credentials, optional herdr
@@ -47,7 +52,7 @@ clankie devices --json          # list paired devices
 clankie devices revoke <id> --json
 clankie operator-credential rotate --json
 clankie play status|stop
-clankie model status            # captain model + local providers (JSON)
+clankie model status            # Clankie model + local providers (JSON)
 clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set
 clankie model set provider/model
 clankie effort set high
@@ -136,10 +141,19 @@ credential holder.
   acknowledgement, **Delivery unconfirmed** asks you to check the conversation
   before retrying. Sends never retry automatically; an accepted turn's dropped
   observation reconnects without resending its message.
-- `/conversation` (aliases `/conversations`, `/chat`) opens a searchable dialog
-  for all retained conversations: Clankie's head and workspace threads, fleet
-  agents and channels, and Discord text/voice rooms. `/conversation <name-or-path>`
-  switches directly; a Discord channel id also selects its room.
+- `/chats` (aliases `/chat`, `/conversation`, `/conversations`) opens only
+  personal and workspace chats with Clankie. `/chats <name-or-path>` switches directly.
+- `/agents` opens known agent identities with Swarm/Herdr source and current
+  availability. Selecting one opens its thread; an offline agent needs an existing
+  thread. This is not a complete record of agents ever connected.
+- `/rooms` opens group channels and Discord text/voice rooms. A Discord channel
+  ID also selects its room with `/rooms <id>`.
+- `/history` searches all retained threads, including agent threads. History
+  includes ongoing threads; it does not mean archived, completed, or online.
+  `/history <conversationId>` selects any retained thread directly.
+- `/sessions` browses saved harness sessions on local or SSH hosts; these are
+  execution records, distinct from agent identities. Existing `/agents` session
+  arguments remain supported. See the [product vocabulary](../../docs/product-vocabulary.md).
   Discord rooms are read-only inspection views, with expandable context and tool
   arguments/results (`Ctrl+O` toggles tools). Their transport still owns input;
   typing in the inspector cannot send to Discord or grant operator authority.

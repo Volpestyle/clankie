@@ -1,11 +1,18 @@
 # Credentials and identities
 
 Clankie keeps account secrets in the credential broker (macOS Keychain by
-default). Non-secret application, guild, channel, role, and allowlist settings
-live in `~/.config/clankie/settings.json`. Do not put Discord tokens in that
+default; a private file backend on Linux). Non-secret persona, account,
+runtime, Discord, voice, and game preferences live in
+`~/.config/clankie/settings.json`. Non-secret settings can still be private.
+Do not put Discord tokens in that
 file, `.env.local`, shell profiles, commands, logs, or issue text. The
 headless CLI never takes secrets as flags; its contract is
 [`docs/cli.md`](cli.md).
+
+For initial setup, use [Get started](https://docs.clankie.bot/get-started/).
+This reference owns credential identities and trust boundaries. The
+[broker implementation](../packages/credential-broker/README.md) owns storage
+and locking; [worker access](worker-access.md) owns restricted delegation.
 
 ## Discord bot token versus user token
 

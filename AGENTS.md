@@ -31,6 +31,8 @@ This repository is public. Both neighbors are private and consume
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/relay` — remote access for the phone/desktop app.
+- `apps/docs` — public field guide and generated technical references. The
+  [library index](docs/README.md) maps current guides, proposals, and history.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
 - `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
   actions); all other herdr integration is vanilla CLI/socket (ADR 0139).
@@ -49,7 +51,8 @@ This repository is public. Both neighbors are private and consume
   the composer offers is what a session can load.
 - `packages/play` — his play mind above one body seam; the body itself is his
   seat in a hosted PokeAgents world (ADR 0145). No emulator lives in this repo.
-- `packages/` — shared contracts and adapters; `protocol` depends on nothing.
+- `packages/` — shared contracts and adapters; `protocol` has no other workspace
+  dependencies.
   `vox-client` is the Apache process boundary for the AGPL Vox executable;
   `play-voice` connects only Clankie's own play to his active Discord body.
 

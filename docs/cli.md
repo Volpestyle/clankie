@@ -1,16 +1,19 @@
 # CLI
 
-The `clankie <noun> <verb>` command layer is the canonical local control
-product. Its noun modules return JSON-shaped results. The argv face prints
-those results; the fullscreen TUI is chrome over the same functions, with
-modals that collect flags, render the result, and navigate. Neither face shells
-out to the other or owns a second config writer
+This is the command contract for agents, scripts, and people using Clankie from
+a terminal. For installation, use [Get started](https://docs.clankie.bot/get-started/).
+For console keys and slash commands, use the [console reference](https://docs.clankie.bot/console/).
+
+`clankie <noun> <verb>` exposes headless configuration and control. The CLI and
+local TUI share command functions and configuration writers; the TUI adds
+interactive forms and navigation
 ([ADR 0012](adr/0012-provider-auth-model-registry.md)).
 
 Live operator work stays on the service HTTP catalog already shared by the TUI,
 phone, relay, and menu bar: chat, play, memory, pairing, and conversations are
-not launcher configuration commands. This page is the contract for agents,
-scripts, and anyone driving Clankie without a TTY.
+not separate copies of the service's state. The commands below describe local
+mode unless noted. [Hosted mode](#local-and-hosted-connection-modes) connects to
+an existing remote service with a smaller supported set.
 
 `clankie help` prints the same command index. On every install the file lives
 at `{repoRoot}/docs/cli.md` — `clankie doctor` names `repoRoot`.
@@ -18,15 +21,15 @@ at `{repoRoot}/docs/cli.md` — `clankie doctor` names `repoRoot`.
 ## Invocation
 
 ```bash
-clankie                         # start the core service and open the console (TTY)
+clankie                         # choose mode on first run; open the selected console (TTY)
 clankie --version               # also -V
 clankie --chat <conversationId> # resume a server-owned operator conversation
 clankie <command>               # headless; no TTY
 clankie help                    # also --help, -h
 ```
 
-`--chat` is stripped before headless routing. With no command, the launcher
-starts the clankie service if needed and opens the existing main **Clankie**
+`--chat` is stripped before headless routing. In local mode, with no command,
+the launcher starts the service if needed and opens the existing main **Clankie**
 conversation, regardless of the launch directory. It does not create a chat.
 Use `--chat ID` for another retained conversation, `/new` for a fresh chat,
 or `/cd PATH` to select a project conversation.
@@ -883,7 +886,7 @@ In the TUI, `/connections` opens a menu over the same data: execution runtimes
 (details, connect, disconnect, Herdr settings), Swarm (contacts, one row per
 actor, and messaging; external coordinators), agent sessions (hosts → sessions →
 read or send, add or remove SSH hosts), and accounts. `/runtime`, `/swarm` and
-`/agents` with no argument open their own section; with arguments they print JSON
+`/sessions` with no argument open their own section; with arguments they print JSON
 as before, and `/connections json` prints the raw inventory.
 
 ```sh
@@ -1048,8 +1051,19 @@ permissions, so it may decline tools that need approval.
 remote turn may still be running and the session stays locked until `cancel`
 releases it. Runs live in the service process and are forgotten on restart.
 
-`/agents` in the TUI takes the same arguments, or opens the agent sessions menu
-with none. The operator API is
+`/sessions` in the TUI takes the same arguments, or opens the saved sessions menu
+with none. `clankie sessions` is also an alias for these CLI commands. Existing
+`/agents` session arguments remain supported, but `/agents` without arguments
+now opens known agent identities with Swarm/Herdr source and availability.
+`clankie agents contacts` returns those identities through the existing fleet API.
+
+The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
+(known identities), `/rooms` (group channels and Discord inspection), and
+`/history` (all retained threads, including ongoing ones). `/conversation`,
+`/conversations`, and `/chat` alias `/chats`; use `/history ID` for any retained
+thread. See [product vocabulary](product-vocabulary.md).
+
+The operator API for saved sessions is
 GET `/v1/agent-sessions?host=&limit=`, GET `/v1/agent-sessions/read?ref=&tail=|after=`,
 GET/POST `/v1/agent-hosts`, DELETE `/v1/agent-hosts/ID`, POST `/v1/agent-sessions/send`
 `{ref, message}`, and GET/DELETE `/v1/agent-sessions/runs[/ID]`. Clankie's own tools

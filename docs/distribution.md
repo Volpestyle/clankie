@@ -7,13 +7,10 @@ executable; the launcher keeps the existing process boundaries behind it.
 
 ## Install
 
-The release supports macOS 14 or newer on Apple silicon.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
-clankie --version
-clankie
-```
+Follow the [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-mac)
+for requirements, installation, local/hosted selection, and first model setup.
+This reference covers the installer and runtime layout. `clankie --version`
+reports the installed release.
 
 The installer verifies the archive's published SHA-256 checksum and installs
 each version immutably under `~/.local/share/clankie/releases/`. It updates
@@ -114,8 +111,7 @@ from the Mac release and reuses its existing private S3 and CloudFront hosting.
 
 ## Build and release
 
-On an Apple silicon Mac with the repository toolchain and Zig 0.15.2 installed
-(the Herdr source pin supplies its own Rust toolchain):
+On an Apple silicon Mac with the [repository toolchain](../CONTRIBUTING.md):
 
 ```bash
 pnpm release:build

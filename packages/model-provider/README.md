@@ -1,20 +1,38 @@
 # @clankie/model-provider
 
-Turns clankie configuration plus the
+Turns Clankie configuration plus the
 [`@clankie/model-registry`](../model-registry/README.md) catalog and
 [`@clankie/credential-broker`](../credential-broker/README.md) credentials into
-ready-to-call AI SDK language models and Pi provider declarations. The
-non-captain AI SDK path has four pure layers:
+ready-to-call AI SDK language models and Pi provider declarations. User-facing
+model setup is in [Make him yours](https://docs.clankie.bot/diy/#choose-his-models);
+this reference describes resolution and authentication.
 
-![Model-provider configuration and resolution pipeline](../../docs/diagrams/model-provider.jpg)
+```mermaid
+flowchart LR
+  Config["Global + project configuration"] --> Selection["Catalog + role + variant resolution"]
+  Catalog["Model registry"] --> Selection
+  Selection --> Pi["Pi provider declarations + ModelRuntime"]
+  Selection --> SDK["AI SDK language model construction"]
+  Broker["Credential broker"] --> Pi
+  Broker --> SDK
+  Pi --> Agent["Clankie's conversations"]
+  SDK --> Play["Gameplay language-model calls"]
+  Config --> Media["Media selection"]
+  Media --> Adapters["Media connector adapters"]
+  Broker --> Adapters
+```
 
-[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
+The [older pipeline export](../../docs/diagrams/model-provider.jpg) is a
+historical snapshot; its [editable source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
+remains in the archive.
 
-The captain takes a separate final branch: `registerConfiguredPiProviders`
+`registerConfiguredPiProviders`
 projects custom Clankie provider declarations into Pi, while Pi's `ModelRuntime`
 owns its catalog, auth, implementation, and thinking levels
 ([ADR 0101](../../docs/adr/0101-pi-owns-the-captain-model-runtime.md)). Gameplay
-and image/video generation keep the AI SDK path above.
+language-model calls use the AI SDK path. Image and video generation use
+[`@clankie/media-connector`](../media-connector/README.md) adapters, composed by
+the service's [`ConfiguredMediaGenerator`](../../apps/clankie/src/media-generation.ts).
 
 One selection, two catalogs — and Pi's ships inside its package, so it lags
 models.dev. For `openai` and `openai-codex`, `piModelsFor`/`piModelFor` fill a

@@ -28,9 +28,10 @@ and the files being changed before editing. The active implementation lives in:
 - Keep the artifact's repository-shaped paths. Bundled code derives runtime
   roots from `import.meta`, and flattening the tree silently breaks assets and
   native children.
-- Interactive conversations use the directory where the operator invokes
-  `clankie`. Supervised services use the installed release root. Mutable state,
-  settings, and credentials stay outside immutable release directories.
+- The console resumes its saved main conversation; each conversation carries
+  its own workspace. `/cd` chooses another project. Supervised services use the
+  installed release root. Mutable state, settings, and credentials stay outside
+  immutable release directories.
 - A source checkout continues to launch workspace services through pnpm. An
   installed release uses `libexec/node` and compiled `.js` entrypoints. Require
   both the bundled Node binary and entrypoint before selecting the installed

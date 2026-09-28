@@ -14,3 +14,8 @@ GitHub Markdown references look like `/branding/clankie-logo-512.png`.
 
 The figure is intentional pixel art — prefer integer-ratio scaling; do not
 anti-alias when upscaling.
+
+Public docs use the existing mark, garden greens, warm cream and gold, and
+readable serif headings. Keep the nostalgia in the art and atmosphere; use
+plain labels for setup, navigation, and controls. The [docs source guide](../apps/docs/README.md)
+owns audience framing and the split between everyday guidance and technical depth.

@@ -1,69 +1,58 @@
 # Architecture
 
-Clankie is one service plus the surfaces that reach it. The service owns the
-captain (a [pi](https://pi.dev)-based agent with durable sessions), his tools,
-his game bodies, and the HTTP API every surface speaks.
-[ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md) defines how
-portals, runtime connections, Swarm and optional trackers compose. The
-[Swarm host README](../packages/swarm/README.md#connection-contract-status) records
-current support and the implementation sequence.
+Clankie is a persistent assistant implemented as one service plus the clients
+and connections around it. The service owns his built-in pi runtime,
+conversations, goals, memory, tools, credentials, and authority. It can run on
+an owner's machine or a hosted machine. The app and console are clients of
+that service; a worker runtime and a work tracker are independent connections.
+
+For a product overview, read [How he works](https://docs.clankie.bot/how-it-works/).
+For source setup and the subsystem map, use [Contributing](../CONTRIBUTING.md)
+and the [library index](README.md). This document owns the current system shape
+and cross-component request flows. Historical diagrams remain in the ADR archive.
 
 ```mermaid
 flowchart LR
-  Argv["clankie argv"] --> Commands["launcher noun commands<br/>durable non-secret control"]
-  TUI["operator TUI"] --> Commands --> Config["clankie.json + settings.json"]
-  TUI --> Service["apps/clankie<br/>captain, tools, HTTP authority"]
-  TUI -. "secret wizards" .-> State
-  OperatorSeat["Claude Code seat<br/>clankie plugin · owner's plan"] -->|"clankie mcp · hooks"| Service
-  Phone["iPhone / iPad"] --> Gateway["api.clankie.bot<br/>Lightsail + Caddy gateway"]
-  Service -->|"outbound WebSocket<br/>Cognito access token"| Gateway
-  Service -->|"email one-time code<br/>access + refresh token"| Accounts["Cognito user pool<br/>account authority"]
-  Gateway -. "verifies the JWT via JWKS<br/>derives the host route" .-> Accounts
-  Gateway --> Relay["apps/relay<br/>device-authorized operator API"]
-  Gateway --> Service
-  Phone -. "optional direct Tailscale lane" .-> Relay
-  Phone -. "optional direct Tailscale lane" .-> Service
-  Body["one active Discord body<br/>official bot or lab user"] --> Service
-  Body --> Client["@clankie/vox-client<br/>Apache-2.0 IPC boundary"]
-  Client --> Vox["one clankvox child<br/>AGPL-3.0-or-later"]
-  Vox --> Media["Discord media<br/>voice + user-body stream roles"]
-  Service --> CaptainParent["captain is parent"] --> PlayDriver["@clankie/play is driver"] --> Contract["pinned @pokeagents/world-protocol"] --> Seat["Clankie's hosted seat<br/>separate player identity"]
-  Seat --> Activity["Discord Activity<br/>rendered game media"]
-  Harness["every other harness"] --> OtherParent["parent conversation"] --> OtherDriver["driver: MCP Task · subagent · CLI"] --> Doors["@pokeagents/world-mcp<br/>world-cli · pokeagent-mmo skill"] --> OtherSeat["its own seat"]
-  Service --> State["Keychain + bounded local state"]
-  Service --> External["models, browser, Linear, email, Herdr"]
-  Service <--> Swarm["per-conversation Swarm MCP actors<br/>durable coordinator per repository"]
-  Swarm <--> Workers["enrolled agents"]
-  Swarm --> Dispatch["trusted Herdr route<br/>Claude stream workers"]
-  Dispatch --> Workers
+  App["iPhone / iPad app"] <-->|"encrypted device exchanges"| Gateway["Public gateway"]
+  Gateway <-->|"authenticated outbound connection"| Service["Clankie's service<br/>pi · conversations · goals · tools"]
+  Console["Console / CLI"] --> Service
+  Native["Optional native operator seat"] -->|"MCP + transcript bridge"| Service
+  Discord["Configured Discord body"] --> Service
+  MacVoice["Private Mac voice"] --> Service
+  Service --> State["Host-owned state<br/>memory · files · credential broker"]
+  Service --> Models["Configured models and services"]
+  Service <--> Swarm["Swarm coordinators<br/>messages · tasks · ownership"]
+  Service --> Runtime["Execution connections<br/>built-in route: Herdr"]
+  Runtime --> Workers["Worker agents"]
+  Workers <--> Swarm
+  Service --> World["Clankie's own PokeAgents seat"]
+  World --> Viewer["Optional game watch surface"]
+  Discord --> Vox["One native Vox child<br/>when media is enabled"]
 ```
 
-This Mermaid diagram, [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md),
-[ADR 0129](adr/0129-each-player-owns-a-body.md), and
-[ADR 0145](adr/0145-the-world-is-the-only-body.md) are the canonical current
-architecture diagrams. The JPG/tldraw exports under `docs/diagrams/` are
-historical snapshots.
+Capabilities are configured per host. A managed Linux deployment does not
+implicitly provide Mac voice, desktop input, Discord media, or a game world.
+The [Linux guide](../infra/hosted/README.md) owns that deployment's capability
+set; [Swarm](../packages/swarm/README.md#support-at-a-glance) owns worker-route
+support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
+records the separation between Clankie and his connections.
 
-The public gateway routes to the configured Clankie host. It keeps live host
-connections, expiring pairing-route hashes, and bounded in-flight exchanges.
-Optional APNs delivery also persists device-authorized routing registrations
-and revocation versions ([ADR 0159](adr/0159-the-device-authorizes-push-delivery.md)).
-The Mac remains authoritative for offers, devices, grants, conversations,
-terminal sessions, Herdr, and credentials. Pairing begins at the stable global
-origin, then the Mac returns `/h/{hostId}` as the control and relay base for the
-device session. See [ADR 0151](adr/0151-the-public-doorway-routes-home.md).
+## Device and host authority
 
-A Mac earns its place at that doorway by signing in, not by an operator copying
-a bearer. One Cognito user pool is the account authority: `/gateway` completes
-an email one-time code, the broker keeps the access and rotating refresh token
-as `clankie-account`, and the Mac presents the access token on its outbound
-WebSocket. The gateway verifies that JWT against Cognito's published keys and
-derives the host route from the account subject plus a per-installation id, so
-it needs no account or host database and every Mac under one account keeps a
-distinct route. Cognito identifies Macs only; phones are identified by device
-sessions the Mac itself signs. See
-[ADR 0153](adr/0153-an-account-signs-the-mac-in.md) and the secret-by-secret
-trust map in [`docs/credentials.md`](credentials.md#who-holds-which-secret).
+The host issues pairing offers and device sessions and decides every grant.
+The public gateway carries bounded exchanges to an authenticated host over its
+outbound connection. A paired device follows the returned host-scoped route;
+its encrypted application payload stays between that device and the host.
+Optional push delivery has a separate metadata store and authorization contract.
+The [network reference](https://docs.clankie.bot/network/) owns the public
+host-route table and transport boundary.
+
+On a self-managed Mac, account sign-in enrolls the host at that doorway. On a
+managed machine, signed bootstrap and pairing contracts supply the host identity.
+The service-side contracts are documented in [credentials](credentials.md) and
+[Linux deployment](../infra/hosted/README.md). Account, gateway deployment, and
+managed provisioning implementation belong in the private operations repository
+([ADR 0183](adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
 
 ## How a message becomes a turn
 
@@ -79,7 +68,7 @@ is a historical snapshot; the present flow is described below.
 
 A Discord message reaches the active bridge. A text-only message in the live
 voice channel's attached chat enters that room's existing `VoiceFloor`; the
-realtime room thread may answer aloud, ask the captain to act, or stay silent,
+realtime room thread may answer aloud, ask Clankie to act, or stay silent,
 and no separate text turn races it ([ADR 0124](adr/0124-one-self-has-many-local-threads.md)).
 Every other message posts to `POST /v1/captain/channel-turns`. The service normalizes it — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
@@ -108,7 +97,7 @@ host also edits one quiet tool-activity card with public-safe work categories,
 counts, elapsed time, and a terminal state; tool names, arguments, and results
 stay in the local Pi trail ([ADR 0134](adr/0134-discord-tool-work-is-a-status-card.md)).
 Discord shows him typing as soon as ingress accepts a live message asked of
-him (a DM, a mention, or one of his names), before calling the captain, and it
+him (a DM, a mention, or one of his names), before calling Clankie, and it
 stays visible through thinking and tool work. Room chatter he is merely shown
 lights only when his reply stream can no longer be the silence sentinel, so a
 turn he ends in silence never shows the room a reply being written. Buffered,
@@ -268,7 +257,7 @@ card into the system prompt. The host supplies the destination lane, filters
 operator-private notes out of ambient lanes, and refreshes recall without
 persisting duplicate cards in the conversation. Discord turns also receive the
 newest visible person facts for their authenticated guild/user identity. The
-global 128-episode ring and per-person fact files live under
+bounded recent and retained episodes and per-person fact files live under
 `~/.clankie/memory/`; the TUI's `/memory` command browses, edits, and forgets
 that same store through operator-only routes. [`docs/memory.md`](memory.md) is
 the full picture — what each store holds, who may read it, and what bounds it.
@@ -282,7 +271,7 @@ address — no tool call, no guess, and silence if the selection cannot be resol
 
 ## Where things run
 
-- **Captain tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
+- **Machine tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
   attach to the operator console and to Discord turns authorized by the
   machine-control grants
   ([ADR 0095](adr/0095-discord-system-actors.md),
@@ -339,7 +328,7 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   defaulting to the world's own socket under `WORLD_STATE_DIR`) and entered
   with the `pokeagent_join_mmo` tool
   ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md),
-  [ADR 0145](adr/0145-the-world-is-the-only-body.md)). The captain is the
+  [ADR 0145](adr/0145-the-world-is-the-only-body.md)). Clankie is the
   parent of that sitting; `@clankie/play` is the driver — the same split other
   harnesses get from an MCP Task, a subagent, or a CLI loop. That seam consumes
   verified FireRed adapter-v2 and Emerald adapter-v2 payloads, selected by the
@@ -393,7 +382,7 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   remains a body configured by `/discord` ([credential guide](credentials.md),
   [ADR 0093](adr/0093-owner-authored-service-connections.md)). The mailbox is
   his own address, not the owner's inbox: `email.fromAddress` carries the
-  identity when the provider login differs, the captain states that address
+  identity when the provider login differs, Clankie states that address
   from settings, and mail stays console-only because sign-in codes arrive there
   ([ADR 0127](adr/0127-his-accounts-are-his.md)). That address is public, so every
   message the mail tools return is labelled untrusted sender text the way a
@@ -432,8 +421,8 @@ caller's `connectionId`. The detailed current diagram and evidence rules live in
 
 ## Current architecture constraints
 
-Clankie uses pi's `ModelRuntime` and `createAgentSession` for the captain's
-models, sessions, tools, skills, and compaction. The captain, HTTP surface, and
+Clankie uses pi's `ModelRuntime` and `createAgentSession` for Clankie's
+models, sessions, tools, skills, and compaction. The agent runtime, HTTP surface, and
 play host share one service
 ([ADR 0101](adr/0101-pi-owns-the-captain-model-runtime.md)).
 Swarm owns cross-session task coordination and messages. Herdr exposes the
@@ -458,29 +447,11 @@ release so he can describe and set up this machine without a git tree
 
 ## Canonical Homes
 
-| Concern                           | Canonical reference                                                                               |
-| --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| HTTP API                          | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                                       |
-| Launcher command layer            | [`docs/cli.md`](cli.md)                                                                           |
-| Operator console and launcher     | [`apps/tui/README.md`](../apps/tui/README.md)                                                     |
-| Herdr plugin (board, console)     | [`integrations/herdr-plugin/README.md`](../integrations/herdr-plugin/README.md)                   |
-| Claude Code seat plugin           | [`integrations/claude-plugin/README.md`](../integrations/claude-plugin/README.md)                 |
-| Hosted gateway and accounts       | [ADR 0183](adr/0183-the-harness-is-public-the-hosted-service-is-private.md)                       |
-| Binary installation and releases  | [`docs/distribution.md`](distribution.md)                                                         |
-| Public docs site                  | [`apps/docs/README.md`](../apps/docs/README.md)                                                   |
-| Install card (`clankie doctor`)   | [`docs/adr/0142-the-install-tells-him-the-truth.md`](adr/0142-the-install-tells-him-the-truth.md) |
-| macOS menu-bar app                | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                           |
-| Official Discord bot operation    | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                               |
-| Shared Discord behavior           | [`packages/discord-presence-core/README.md`](../packages/discord-presence-core/README.md)         |
-| Personal-lab Discord body         | [`apps/discord-user-session/README.md`](../apps/discord-user-session/README.md)                   |
-| Clankie's play commentary/hearing | [`packages/play-voice/README.md`](../packages/play-voice/README.md)                               |
-| Game-body ownership               | [ADR 0129](adr/0129-each-player-owns-a-body.md)                                                   |
-| Native media                      | [`apps/vox/README.md`](../apps/vox/README.md)                                                     |
-| Discord media surfaces            | [`docs/discord-media.md`](discord-media.md)                                                       |
-| Durable memory                    | [`docs/memory.md`](memory.md)                                                                     |
-| Credential identities/setup       | [`docs/credentials.md`](credentials.md)                                                           |
-| Credential implementation         | [`packages/credential-broker/README.md`](../packages/credential-broker/README.md)                 |
-| Models                            | [`packages/model-provider/README.md`](../packages/model-provider/README.md)                       |
+The [documentation library](README.md) maps each concern to its owning reference.
+Command syntax belongs in [CLI](cli.md), HTTP operations in
+[OpenAPI](../apps/clankie/openapi.yaml), and subsystem implementation in the
+owning package. This architecture document links to those contracts rather
+than keeping a second catalog.
 
 ## Hosted Mac console
 

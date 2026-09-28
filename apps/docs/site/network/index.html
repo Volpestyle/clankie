@@ -17,7 +17,10 @@
     <a class="skip-link" href="#content">Skip to content</a>
     <header class="site-header">
       <div class="header-inner">
-        <a class="brand" href="/"><span class="seed" aria-hidden="true"></span>clankie <em>docs</em></a>
+        <a class="brand" href="/"
+          ><img class="brand-mark" src="/assets/clankie.png" width="28" height="28" alt="" />clankie
+          <em>docs</em></a
+        >
         <nav class="site-nav" aria-label="Primary navigation">{{NAV}}</nav>
       </div>
     </header>
@@ -25,19 +28,20 @@
     <main id="content" class="page">
       <article class="article">
         <p class="eyebrow">Public network surface</p>
-        <h1>A narrow doorway, not a hosted Clankie.</h1>
+        <h1>How your devices reach Clankie.</h1>
         <p class="article-lede">
-          <code>api.clankie.bot</code> accepts only the routes below. The gateway carries bounded exchanges to
-          an authenticated machine; your machine still owns devices, grants, conversations, and terminal
-          authority.
+          This reference describes the gateway's allowed host routes. The gateway carries bounded exchanges to
+          Clankie's authenticated host, whether that is your Mac or a managed machine. That host owns devices,
+          grants, conversations, and terminal authority. Account and billing services at the same public
+          origin have separate contracts; this is not a catalog of every hosted-service endpoint.
         </p>
 
         <h2>Connection shape</h2>
-        <pre><code>iPhone or iPad ── HTTPS ── api.clankie.bot ── outbound WebSocket ── your machine</code></pre>
+        <pre><code>iPhone or iPad ── HTTPS ── api.clankie.bot ── outbound WebSocket ── Clankie's host</code></pre>
         <p>
           The first pairing redemption uses the stable public origin. Successful redemption returns an opaque,
-          host-scoped origin. Normal app calls use that origin and a device credential minted by your machine.
-          Users do not copy a host id, URL, or bearer token.
+          host-scoped origin. Normal app calls use that origin and a device credential minted by Clankie's
+          host. Users do not copy a host id, URL, or bearer token.
         </p>
 
         <h2>Published routes</h2>
@@ -84,10 +88,10 @@
         <h2>Security boundary</h2>
         <p>
           Device application requests and responses use an authenticated encrypted envelope between the device
-          and your machine. TLS also protects both connections, but terminating TLS does not let the gateway
-          decrypt device bearers, conversations or terminal bytes. Your machine enforces device grants on
-          every request. Pairing uses a secure QR or full link whose fragment carries the encryption
-          credential directly to the device; short codes work only on direct private connections.
+          and Clankie's host. TLS also protects both connections, but terminating TLS does not let the gateway
+          decrypt device bearers, conversations or terminal bytes. The host enforces device grants on every
+          request. Pairing uses a secure QR or full link whose fragment carries the encryption credential
+          directly to the device; short codes work only on direct private connections.
         </p>
         <p>
           The gateway can observe routing identifiers, ciphertext sizes and timing, and can interrupt service.
@@ -100,9 +104,9 @@
         <h2>For integrators</h2>
         <p>
           These routes document the product’s observable internet boundary; they are not a general third-party
-          API. Clients pair through Clankie and must use credentials and grants issued by the user’s machine.
-          The private local service has a larger contract — the <a href="/api/">HTTP API</a> — which is served
-          only on your machine, never at the public origin.
+          API. Clients pair through Clankie and must use credentials and grants issued by his host. The
+          private local service has a larger contract — the <a href="/api/">HTTP API</a> — which is served on
+          the host, never wholesale at the public origin.
         </p>
         <p>
           See the <a href="https://github.com/Volpestyle/clankie">source repository</a> for the current
@@ -113,7 +117,7 @@
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>Clankie runs on your machine.</span>
+        <span>One Clankie. Plenty of possibilities.</span>
         <div class="footer-links">
           <a href="https://clankie.bot">Home</a>
           <a href="https://clankie.bot/privacy/">Privacy</a>

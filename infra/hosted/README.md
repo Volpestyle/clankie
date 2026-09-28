@@ -1,6 +1,11 @@
-# Hosted Clankie
+# Self-hosted Clankie on Linux
 
-This Compose deployment runs one owner's captain, embedded Swarm coordinator,
+This is the advanced deployment guide for operators maintaining their own
+Linux host. For the managed product and app onboarding, use
+[Get started](https://docs.clankie.bot/get-started/). Running this image does not
+provision a managed account or promise the same enabled features.
+
+This Compose deployment runs one owner's Clankie service, embedded Swarm coordinator,
 Herdr workers and app relay on a Linux host. It does not need an owner's desktop
 or an open TUI. Each Compose project has separate state and workspace volumes;
 use a dedicated VM for mutually untrusted owners. Containers within one deployment
@@ -11,12 +16,12 @@ flowchart LR
   Operator[Operator] -->|SSH / docker compose exec| CLI[CLI / TUI / Claude seat]
   App[Clankie app] --> Gateway[Optional public gateway]
   subgraph Owner[One owner deployment]
-    CLI --> Captain[Persistent captain]
+    CLI --> Captain[Clankie's persistent service]
     Gateway <-->|Authenticated outbound connection| Captain
     Captain <--> Relay[App relay]
     Captain <--> Swarm[Swarm coordinator]
     Captain --> Herdr[Bundled Herdr]
-    Herdr --> Workers[Claude workers]
+    Herdr --> Workers[Configured worker harnesses]
     Workers <--> Swarm
     Workers -->|Explicit tool grants| Captain
     Captain --> Broker[Owner credential broker]

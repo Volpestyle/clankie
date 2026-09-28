@@ -1,105 +1,130 @@
 # How Clankie works
 
-Clankie is your persistent lead agent, running on your machine. Start in his terminal console, give him work, and choose the worker harnesses he coordinates through Herdr. The lead runs on [pi](https://pi.dev); Claude Code, Codex, and other supported harnesses run as workers in their own terminal panes. Choosing a worker harness does not change the lead's runtime.
+Clankie lives in a persistent service. The app, terminal console, and configured
+Discord and voice connections are ways to reach him. His machine can be one you
+maintain or a private hosted machine; the service owns his conversations,
+memory, tools, and access in either case.
 
-The service owns Clankie's durable conversations, goals, memory, tools, and device access. The TUI and companion app reach that same service, so you can direct work at your desk and follow it from your phone while the host remains awake and online. Discord, voice, media generation, and play extend what Clankie can do.
+You can use him without knowing the pieces below. They become useful when you
+want to customize him, connect a team, or understand where your work goes.
 
-<div class="diagram" role="img" aria-label="Surfaces reach one local service, which reaches models, a browser, a herdr fleet, a PokeAgents world, and connected services. State stays on your machine.">
+<div class="diagram" role="img" aria-label="The app and console, plus optional Discord and Mac voice, reach Clankie's persistent service. The service stores conversations and memory and uses configured models, tools, and agent connections. Capabilities depend on the host.">
   <div class="diagram-col">
-    <h4>Surfaces</h4>
-    <div class="dnode"><strong>Console</strong><span>primary workspace with the lead</span></div>
-    <div class="dnode"><strong>iPhone / iPad app</strong><span>Messages · Terminal · Commons</span></div>
-    <div class="dnode"><strong>Discord</strong><span>one active body, text and voice</span></div>
-    <div class="dnode"><strong>Menu bar</strong><span>private local voice</span></div>
+    <h4>Talk to him</h4>
+    <div class="dnode"><strong>The app</strong><span>Messages · Commons · Terminal</span></div>
+    <div class="dnode"><strong>The console</strong><span>local or hosted connection</span></div>
+    <div class="dnode"><strong>Optional rooms</strong><span>Discord · private Mac voice</span></div>
   </div>
   <div class="diagram-col diagram-center">
-    <h4>The service</h4>
-    <div class="dnode dnode-main"><strong>Clankie, the lead</strong><span>pi · goals · tools · memory</span><span>HTTP on 127.0.0.1:4310</span></div>
-    <div class="dnode"><strong>On your machine</strong><span>Keychain credential broker</span><span>~/.clankie · ~/.config/clankie</span></div>
+    <h4>His home</h4>
+    <div class="dnode dnode-main"><strong>Clankie's service</strong><span>conversations · memory · goals</span><span>tools · credentials · access</span></div>
+    <div class="dnode"><strong>On his host</strong><span>your machine or a managed machine</span></div>
   </div>
   <div class="diagram-col">
-    <h4>What he reaches</h4>
-    <div class="dnode"><strong>Models</strong><span>any provider, or a local runtime</span></div>
-    <div class="dnode"><strong>Browser</strong><span>agent-browser, his own profile</span></div>
-    <div class="dnode"><strong>Herdr workers</strong><span>your choice of installed harnesses</span><span>real sessions in visible panes</span></div>
-    <div class="dnode"><strong>PokeAgents world</strong><span>his own seat, watched live</span></div>
-    <div class="dnode"><strong>Linear · email</strong><span>connected by the owner</span></div>
+    <h4>His connections</h4>
+    <div class="dnode"><strong>Models and tools</strong><span>chosen for the task</span></div>
+    <div class="dnode"><strong>Helper agents</strong><span>Swarm coordination · runtime connections</span></div>
+    <div class="dnode"><strong>Optional services</strong><span>accounts · browser · media · play</span></div>
   </div>
 </div>
 
-## One service, launcher-owned
+## One identity, separate conversations
 
-In local mode, `clankie` with no arguments starts the service if it is not running and opens the console. The launcher supervises the long-lived local processes and starts them in dependency order: the service, the relay for the app, the one Discord body you selected (which owns a native media child for voice), and the optional watch-me-play surface. `clankie restart [service]` and `clankie down [service]` name them; `clankie autostart enable` makes the same start happen at login. The service stays up when a console exits, so several consoles, the app, and Discord can be open at once.
+Clankie's character belongs to the service. A chat in the app, a project in the
+console, and a Discord room do not each create a new personality. They do have
+separate conversation histories and permissions. Sharing an identity does not
+mean every room receives everything said elsewhere.
 
-Clankie runs on pi: models, sessions, tools, skills, and compaction are pi's. What Clankie adds is who he is, the rooms he lives in, the bodies he can put on, and the authority each caller carries.
+His built-in agent uses [pi](https://pi.dev) for models, sessions, tools, skills,
+and compaction. Clankie adds durable identity, memory, the connections around
+him, and the authority each caller carries. The optional [Claude operator seat](https://github.com/Volpestyle/clankie/blob/main/integrations/claude-plugin/README.md)
+can use the same service through a different harness; its delivery and
+continuation limits are documented separately.
 
-## Three views of the same work
+## History, memory, and goals
 
-| View         | Use it to                                                                                                                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Messages** | Give Clankie direction, talk to individual workers, and read shared conversations and tool activity. Agent contacts outlive their current terminal sessions.              |
-| **Terminal** | Open the real Herdr pane behind an agent. Observe its output or use direct input when the paired device has control permission.                                           |
-| **Commons**  | See workers grouped by working directory, their activity, who spawned whom, and recent message exchanges. Tap a figure to chat, open its terminal, or reach its controls. |
+These serve different purposes:
 
-Commons is a practical map of the live fleet. Its figures and relationships come from the same host snapshot that supplies the other views. When the connection is lost, live figures disappear rather than continuing to act out stale activity. Decoration and camera preferences belong to the app.
+| Store                | What it gives you                                                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Conversation history | The thread you return to, with messages, visible tool work, and delivered files.                                        |
+| Memory               | Selected experiences and facts that can inform later conversations. Recent and retained notes have different lifetimes. |
+| Goal                 | An explicit objective that can continue across turns when autonomy is enabled.                                          |
 
-A figure becoming idle means its turn stopped; it does not prove a test passed. A celebration is an agent's statement about its work. Use the conversation and terminal to inspect the supporting results.
+Closing a client does not erase those records. Memory is bounded and filtered
+by the receiving conversation's authority; operator-private notes do not enter
+social Discord recall. Goals and scheduled wakes use the existing conversation
+and tool permissions. They do not create extra access. The [memory reference](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)
+and [CLI](/cli/) own retention and continuation controls.
 
-## Rooms, not agents
+## Models, skills, and tools
 
-The console, Discord text channels, voice channels, and gameplay are rooms, not separate agents. Each room is a lane with its own continuing pi session that survives restarts — operator conversations, voice channels, and text channels each keep a durable tree under `~/.clankie/captain/`. He can read his other rooms, and his persona is owner-authored settings that no caller can change.
+A model supplies reasoning. A tool performs an operation. A skill supplies
+instructions for using tools or approaching a task. Choosing a model does not
+install a browser, log in to an account, or authorize a Discord room to run a
+shell.
 
-Where you type `clankie` decides which room opens: a launch inside a project creates a conversation for that project and his tools run there; `/conversation` and `/cd` move between them. `/new` starts a fresh one; `/btw` forks an ephemeral side question and throws it away on `Ctrl+C`.
+The DIY setup lets you choose models and connect capabilities independently.
+Conversation, images, video, and voice have separate configuration. Hosted
+availability follows the managed service's current offering. See [make him yours](/diy/)
+for the practical setup and [clankie.bot](https://clankie.bot) for hosted availability.
 
-## How a message becomes a turn
+## A team around him
 
-Every surface speaks the same operator-conversation contract, `POST /operator/v1/dispatch`: list, create, send, replay, tail, cancel, fork, close, autonomy. The console and the app both use it. A tail carries the settled events plus the message he is typing right now, so a console shows him typing.
+**Swarm coordinates:** identities, messages, assignments, and task ownership.
+**An execution runtime runs agents:** Herdr supplies the built-in terminal
+routes. A tracker such as Linear or GitHub records project work when connected.
+These are separate connections; a tracker account is not a worker login.
 
-A Discord message reaches the active body, which posts it to `POST /v1/captain/channel-turns`. The service fences the untrusted body, resolves images to bytes at the last hop, attaches channel context, and prompts that room's session. A message that arrives while he is already answering steers into the running turn instead of queueing a second reply. Replying with silence sends nothing: silence is a real answer. Nothing caps how long a turn takes, but a turn that emits no event for five minutes is a dead stream and is settled as stalled.
+The app presents those agents in Messages and, where execution seats exist,
+Commons and Terminal. A worker's contact can outlive its terminal session.
+Live activity and a completion claim are evidence to inspect, not substitutes
+for the finished result and its checks. The [Swarm support table](https://github.com/Volpestyle/clankie/blob/main/packages/swarm/README.md#support-at-a-glance)
+explains runtime choices, external peers, and the current limits.
 
-## What he can do, and from where
+## Finding your way in the console
 
-- **Coding tools.** Read, bash, edit, and write are pi built-ins. They attach to the console, and to Discord turns from people on the machine-grant allowlists (`discord.systemActorUserIds`, trusted guilds or channels). Everyone else stays social. Voice is as capable as the room it is in.
-- **Browser.** A persistent `agent-browser` profile that holds his own accounts. He can hand the window over on your screen for a signup or a CAPTCHA.
-- **Pictures and video.** One provider-neutral seam over OpenAI, Google, and Grok; `/image-model` and `/video-model` pick the models.
-- **Leading agents.** He leads coding agents through the herdr CLI over bash, guided by skills. There is no worker protocol: he delegates, watches, and reports what actually happened. `clankie herdr set --session` picks the session he leads; the herdr-lead board is the companion dashboard.
-- **Playing.** His body is a separately credentialed seat in a hosted PokeAgents world; the play mind in `packages/play` drives it, frames flow to the Discord Activity, and voice commentary rides the run. Other agents join the same world through PokeAgents' own doors and get their own seats. Nobody takes his body.
+A local console opens the existing main conversation unless you select another
+with `--chat`. `/cd` selects a project workspace; tools use the selected
+conversation's directory. The TUI separates the things you can open:
 
-Model output, Discord bodies, images, and web content are untrusted input. They never become instructions.
+- `/chats`: personal and workspace chats with Clankie.
+- `/agents`: known agent identities and observed availability.
+- `/rooms`: shared channels and read-only Discord inspection.
+- `/history`: all retained threads, including ongoing and offline ones.
+- `/sessions`: saved harness execution records.
 
-## Memory
+`/new` starts a fresh chat. `/btw` opens an ephemeral side question; `Ctrl+X`
+switches between it and the main thread, while `Ctrl+C` discards it. The
+[console reference](/console/) owns commands and keys, and
+[product vocabulary](https://github.com/Volpestyle/clankie/blob/main/docs/product-vocabulary.md)
+defines the TUI terms. Other clients may organize navigation differently.
 
-He keeps a bounded ring of self-authored episodes and per-person facts about the people he talks to under `~/.clankie/memory/`. Before each run a hidden host extension reads the newest recall card into the prompt, filtered by lane — operator-private notes never reach a Discord room. `/memory` in the console browses, edits, and forgets that store through operator-only routes; `clankie memory-card` prints the card a lane's next run will see.
+## Where the service and data live
 
-## Goals and self-wakes
+In local mode, the launcher keeps Clankie's service running after the console
+closes. Your Mac must remain awake and online. In hosted mode, the console and
+app connect to a remote service; closing those clients leaves the remote work
+running, subject to the host's lifecycle and limits.
 
-`/goal <objective>` gives a conversation a durable goal; `--tokens` caps it. Continuations run through the same session and event log as your own messages, so every tool call stays visible. `/autonomy on|off` is the global switch for goal continuations and scheduled self-wakes. He proposes goals in chat; proposals never activate themselves.
+The host stores service state and brokered credentials. macOS uses Keychain by
+default; Linux deployments use the documented private file backend. Model
+requests reach the configured provider or runtime, so running Clankie locally
+does not automatically make every model request local. See [credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)
+for the exact stores and exceptions.
 
-## Optional: a different operator seat
+The public gateway routes encrypted device exchanges to the host. The host
+issues pairing offers and device grants and enforces them on requests. The
+gateway cannot decrypt those device payloads; it can see routing metadata,
+sizes, and timing. Accounts, model providers, and optional push delivery have
+separate data flows. The [network reference](/network/) explains the transport
+boundary; the [privacy notice](https://clankie.bot/privacy/) covers the product's
+data handling.
 
-The TUI's pi-based Clankie is the primary lead. Separately, `clankie seat` opens Claude Code on your own plan as an alternative operator seat, with Clankie's identity, tools, memory card, and skills supplied by the service. Wakes, Herdr completion watches, and head-conversation messages can reach that seat; goal continuations and Linear hook turns remain in pi. Social lanes also remain in the service. This alternative is not required to use Claude Code as a worker. The [plugin guide](https://github.com/Volpestyle/clankie/blob/main/integrations/claude-plugin/README.md) describes setup and limitations.
+## Go deeper
 
-## Where secrets live
-
-The credential broker (Keychain on macOS, service `bot.clankie.credentials`) is the only secret store. `/auth` writes provider keys and OAuth logins; `/discord`, `/connect`, and `/voice` write body and service credentials; the CLI never accepts a secret as a flag. Non-secret model configuration is `~/.config/clankie/clankie.json` and owner settings (persona, Discord ids, allowlists) are `~/.config/clankie/settings.json`; both are written through `clankie <noun> set` or the matching console command, never by hand.
-
-## The doorway
-
-The app does not move Clankie into a cloud. Your machine signs in to one account with an email one-time code (`/gateway`), then holds one outbound WebSocket to `api.clankie.bot` carrying that account's access token. The gateway verifies the token, derives your machine's route from the account plus a per-installation id, and forwards bounded, application-encrypted exchanges; it keeps no account, host, or message database. Pairing is a single-use secure QR or full link minted by your machine (`clankie pair`); its fragment carries the encryption credential directly to the device. The public gateway cannot decrypt application content, including device bearers and terminal bytes. Direct private connections can use short pairing codes; the device credential and every grant it carries are decided on your machine. The [network page](/network/) lists the exact public routes, and the [HTTP API](/api/) is the full local contract underneath.
-
-When push is configured, the gateway keeps a separate delivery database with APNs tokens, routing identifiers, delivery-key hashes and versioned revocations. The app authorizes that delivery; its machine holds only the registration reference. A wake contains a fixed alert and host/conversation identifiers, never a message excerpt. Pairing and messaging work without push configuration.
-
-## Read deeper
-
-- [Architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md) — the canonical diagram and where each concern lives
-- [Decision records](https://github.com/Volpestyle/clankie/blob/main/docs/adr) — why each boundary is where it is
-- [Credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md) — who holds which secret
-- [Memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md) — what each store holds and who may read it
-- [Distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md) — the installed layout and releases
-
-The Mac console can instead connect to an existing hosted Clankie. Fresh installs
-choose local or hosted before startup; `clankie connect hosted` signs in and
-pairs this Mac as a revocable device. Hosted mode starts no local service, and
-closing the client leaves work running. The status line shows the mode; local
-process controls refuse in hosted mode. See the [CLI reference](/cli/#local-and-hosted-connection-modes)
-for supported commands and compatible deployment requirements.
+The [architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md)
+is the canonical current system diagram and request-flow reference.
+The [reference shelf](/reference/) leads to the CLI, API, and subsystem guides.
+[Decision records](https://github.com/Volpestyle/clankie/tree/main/docs/adr)
+explain how the design changed; older records describe older systems.

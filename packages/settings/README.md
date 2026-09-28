@@ -14,19 +14,20 @@ Operator and captain bearers retain explicit test/CI overrides.
 The [credential guide](../../docs/credentials.md) lists the concrete account and
 local bearer identities.
 
-This package stores values that are **public identifiers** — application ids,
-guild and channel ids, role ids, allowlists, booleans. An operator reads them off
-the Discord UI and legitimately wants to see them plainly when checking their
-config, so broker redaction would hide exactly what makes settings useful.
+This package stores **non-secret preferences and connection metadata**: persona,
+Discord identifiers and allowlists, voice and game settings, runtime endpoints,
+and coordinator references. Non-secret does not mean public: names, paths, and
+account identifiers can still be private. Status views show the configuration
+needed to operate the service; credentials stay in the broker.
 
 Same directory, same permissions, different file, different rules:
 
-|               | credential broker                    | settings           |
-| ------------- | ------------------------------------ | ------------------ |
-| Holds         | secrets                              | public identifiers |
-| Display       | redacted                             | plain              |
-| macOS storage | Keychain                             | 0600 file          |
-| Env supplied  | provider-specific compatibility only | **override wins**  |
+|               | credential broker                    | settings            |
+| ------------- | ------------------------------------ | ------------------- |
+| Holds         | secrets                              | non-secret settings |
+| Display       | redacted                             | plain               |
+| macOS storage | Keychain                             | 0600 file           |
+| Env supplied  | provider-specific compatibility only | **override wins**   |
 
 The write path calls `assertNoSecretShapedValue` and refuses anything
 token-shaped, so a secret cannot land here by accident. `.strict()` on the schema
@@ -54,10 +55,10 @@ enable a plane.
 
 ## Editing
 
-Use `/discord`, `/voice`, `/connect`, `/games`, or `/browser` in the Clankie TUI. Tokens and API keys
-go to the credential broker (same destination as `/auth`). Public identifiers —
-Discord ids, an IMAP host and username, MCP server commands and URLs — and
-gameplay enablement, and browser recording write here.
+Use the matching TUI flow or headless CLI command: `/persona`, `/discord`,
+`/voice`, `/connect`, `/games`, `/browser`, or `/connections`. Tokens and API
+keys go to the broker. Non-secret configuration writes here. The [CLI reference](../../docs/cli.md)
+owns command syntax; do not edit generated settings by hand.
 
 `voice.realtimeProvider` selects `openai` or `xai`. Provider-specific model and
 voice fields are retained when switching, so trying Grok does not erase the

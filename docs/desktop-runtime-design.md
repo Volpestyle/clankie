@@ -1,7 +1,9 @@
 # An owned desktop runtime for Clankie
 
-Status: design proposal, 2026-09-05. The installed provider remains Peekaboo.
-No independent desktop runtime is implemented or live-proven by this document.
+Status: retained design proposal, 2026-09-05. This is a dated investigation,
+not the current installation guide. See [desktop control](desktop-control.md)
+for the supported paths and their evidence limits. No independent desktop
+runtime is implemented or live-proven by this document.
 
 ## Product requirement
 

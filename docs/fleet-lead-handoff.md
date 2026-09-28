@@ -1,6 +1,6 @@
 # Handing a fleet lead to a Mac seat
 
-Status: not planned. James wants Clankie to oversee a project's lead and steer
+Status: retained inactive runbook, 2026-09-27. James wants Clankie to oversee a project's lead and steer
 through it, not take over its fleet (2026-09-27), so
 [VUH-1381](https://linear.app/vuhlp/issue/VUH-1381) now asks Clankie to reach
 the PC lead as one extra peer on that project's coordinator instead. Keep this
@@ -80,7 +80,8 @@ Returning dispatch to the PC requires explicit acknowledgment that the Mac
 lead has stopped; never let both dispatch during recovery. Restore connectivity
 without replacing Herdr or copying coordinator state. Keep failed proof records.
 
-Close acceptance only with the remote list/read/prompt/wait transcript, bridge
+Accept a requested transfer only with the remote list/read/prompt/wait transcript, bridge
 session proof, acknowledged round trip, remote hire identity, pre/post-restart
-watch evidence, and both leads' scheduled transfer acknowledgments. Until then,
-the runbook is preparation and VUH-1381 remains incomplete.
+watch evidence, and both leads' scheduled transfer acknowledgments. This runbook
+records preparation, not proof of a completed transfer or the current status of
+the differently scoped VUH-1381.

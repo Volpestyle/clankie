@@ -1,5 +1,11 @@
 # Discord media and visual surfaces
 
+This guide covers configured DIY Discord integrations. It does not promise
+that the managed hosted product enables them. Start with the
+[official bot setup](credentials.md#configure-discord) and select a voice
+provider through `/voice`; the table below helps match a request to the right
+surface.
+
 Clankie has three distinct ways to show or inspect moving pictures and one
 shared native voice path. They use different Discord capabilities and should
 not be described as one generic stream.

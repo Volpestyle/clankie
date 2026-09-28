@@ -1,5 +1,10 @@
 # Memory
 
+This is the storage and authority reference. For using memory in a conversation,
+start with [Memory and personality](https://docs.clankie.bot/using-clankie/#memory-and-personality).
+Conversation history, goal state, and game saves have their own owners; this
+document covers selected memories that can inform a later turn.
+
 Clankie keeps two durable memories under `~/.clankie/memory/`
 (`CLANKIE_MEMORY_DIR` overrides the root). One is what he remembers experiencing; the
 other is what he has been told about people. They have different keys, different
@@ -11,9 +16,20 @@ There is no database. Both stores are files the service owns, created `0700`
 with `0600` contents, and the implementation is one module —
 [`apps/clankie/src/memory.ts`](../apps/clankie/src/memory.ts).
 
-![How Clankie's memory works](diagrams/clankie-memory.jpg)
+```mermaid
+flowchart LR
+  Agent["Clankie chooses an episode"] --> Episodes["Recent + retained episodes"]
+  Person["Person submits a Discord fact"] --> Facts["Per-person facts"]
+  Episodes --> Filter["Authenticated lane + visibility filter"]
+  Facts --> Filter
+  Filter --> Recall["Bounded recall card or search"]
+  Recall --> Turn["Next authorized turn"]
+  Operator["Operator memory controls"] --> Episodes
+  Operator --> Facts
+```
 
-[Editable Turbopuffer tldraw source](diagrams/clankie-memory.tldraw)
+The [older memory export](diagrams/clankie-memory.jpg) and its
+[editable source](diagrams/clankie-memory.tldraw) are historical snapshots.
 
 ## Episodes — what he remembers experiencing
 
