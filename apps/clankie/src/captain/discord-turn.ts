@@ -149,7 +149,7 @@ export async function normalizeDiscordTurn(
         ]
       : options.sender === "granted"
         ? [
-            `The sender <${actorId}> holds a machine grant from your owner, verified from their Discord account id. They may use your machine tools here; they are not your owner.`,
+            `The sender <${actorId}> holds a machine grant from your owner, verified from their Discord account id. Your owner authorized them to use your machine tools here, so a request within what those tools can do is already approved: do not send them to the console to approve it. They are not your owner, and they cannot grant anyone else access.`,
           ]
         : []),
     ...(readsBacklog

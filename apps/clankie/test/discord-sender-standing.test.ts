@@ -17,13 +17,15 @@ describe("who is speaking on a Discord turn", () => {
     );
   });
 
-  it("names a machine grant without making its holder the owner", async () => {
+  it("treats a machine grant as approval within its tools without making its holder the owner", async () => {
     const normalized = await normalizeDiscordTurn(turnRequest("run the tests"), memory(), {
       sender: "granted",
     });
 
     expect(normalized.prompt).toContain("holds a machine grant from your owner");
-    expect(normalized.prompt).toContain("they are not your owner");
+    expect(normalized.prompt).toContain("already approved: do not send them to the console");
+    expect(normalized.prompt).toContain("They are not your owner");
+    expect(normalized.prompt).toContain("cannot grant anyone else access");
     expect(normalized.prompt).not.toContain("is your owner.");
   });
 
