@@ -66,19 +66,62 @@ across arbitrary sites. No third-party skill text is redistributed.
 
 ## Body-owned authority and customer flow
 
-Reuse the account flow in ADR 0196: the app or account page starts **Connect**,
-the owner consents at the provider, and the body exchanges the code and persists
-tokens in its own credential broker. One tap starts consent; it cannot remove
-the provider's consent screen. Hosted settings and broker remain on that tenant's
-private machine. Account/fleet services get no provider tokens or refresh tokens.
-Provider-hosted MCP necessarily receives the access bearer; “body-owned” does not
-mean credentials never reach the provider.
+**One catalog, served by the tenant's machine, rendered in three surfaces.**
+This surface/ownership decision is accepted by James and the lead (2026-09-28);
+the proposed provider rollout and its proof gates remain as stated above.
+Provider definitions, capabilities and connection states have one machine-owned
+source. Each client renders that response, without a separate provider list or
+client-side inference that a stored credential means a healthy connection.
 
-The authenticated owner API is the first interface, then CLI/TUI and app/account
-page controls. The account page needs the same body-authorized encrypted channel,
-not a fleet endpoint that accepts provider secrets. Hosting-only implementation
-and deployment belong in the private repository under
+| Surface                                    | Experience                                                                                                                          | Code ownership and existing integration points                                                                                                                                                      |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App: Settings → Connections                | Primary for hosted users. Tap **Connect** to open provider sign-in in a system auth sheet, then show the machine's resulting state. | Private `clankie-app`: `packages/command-center/src/settings/ConnectionsSettings.tsx`, wired by `apps/mobile/App.tsx`; device transport in `packages/device-session/apple/GatewayEncryption.swift`. |
+| Web account dashboard at `api.clankie.bot` | The same catalog and states; a convenient place for browser OAuth redirects.                                                        | Private `clankie-ops`: `apps/fleet/web/app.js` and `index.html`; pairing bootstrap in `apps/fleet/web/pairing.js`.                                                                                  |
+| TUI `/connect`                             | The same catalog in the existing DIY interaction style.                                                                             | Public `clankie`: `apps/tui/src/connect-commands.ts`; headless commands in `apps/tui/src/command/accounts.ts`.                                                                                      |
+
+Machine code stays public in `clankie`: `apps/clankie/src/accounts.ts`,
+`apps/clankie/src/account-routes.ts`, `apps/clankie/src/mcp-host.ts`,
+`packages/credential-broker` and the `packages/protocol/src/accounts.ts` contract.
+Extend these account interfaces with the single catalog; the current APIs do
+not yet establish that all three surfaces share it. Hosting-only gateway,
+account and dashboard code stays in `clankie-ops`, under
 [ADR 0183](0183-the-harness-is-public-the-hosted-service-is-private.md).
+
+Reuse ADR 0196's flow through the existing E2E device channel to the selected
+tenant. The machine owns state and the PKCE verifier. After provider consent,
+the client forwards the authorization code and state through that same encrypted
+channel via the gateway. **OAuth completion executes on the tenant's machine:**
+it validates the flow, exchanges the code directly with the provider and stores
+access/refresh tokens in its own broker. Only redacted status returns to clients.
+
+```mermaid
+sequenceDiagram
+  participant UI as App auth sheet / dashboard browser
+  participant G as Gateway (encrypted relay)
+  participant M as Tenant machine
+  participant P as Provider
+  UI->>G: E2E catalog / OAuth start
+  G->>M: Encrypted device request
+  M-->>UI: Catalog or authorization URL (E2E)
+  UI->>P: Owner signs in and consents
+  P-->>UI: Authorization code + state
+  UI->>G: E2E OAuth completion(code, state)
+  G->>M: Encrypted device request
+  M->>P: Exchange code + body-held verifier
+  P-->>M: Access / refresh tokens
+  M->>M: Persist in tenant broker
+  M-->>UI: Redacted connection state (E2E)
+```
+
+One tap starts consent; it does not bypass the provider's screen. The account
+service and dashboard show status and never receive or store a provider token.
+The dashboard browser can carry the one-time authorization code, but cannot
+exchange it or send it to a fleet/account completion endpoint. Its redirect
+handler forwards completion through the authorized paired-device channel.
+Account login and a pairing offer do not substitute for that device authority.
+Keep callback codes out of server access logs, analytics and referrers. If the
+channel is unavailable, report it without falling back to account-service token
+exchange. Provider MCP receives the bearer directly from the tenant machine.
 
 States distinguish unconfigured, awaiting consent, connected, expired, revoked
 and temporarily unavailable. Show connected account, granted access and last
@@ -115,9 +158,26 @@ skills add only their own directories and plugin links.
 
 ## First slice and release gate
 
+**Choose the app for the first end-to-end surface.** Its paired-device transport
+already reaches the machine through the gateway with E2E encryption. Adding the
+account call and auth-sheet callback reuses that authority. The dashboard is
+convenient for redirects but currently retrieves pairing offers; it needs a
+complete device client before it can perform this flow. A local TUI callback
+alone would not prove the remote tenant path. This is an implementation choice
+based on current code, not a claim that app Google auth already exists.
+
+Build the machine API first, then wire only app Settings → Connections for the
+rehearsal. The dashboard and TUI will consume the same catalog; all three UIs
+are not a prerequisite for the first proof. On an isolated development tenant,
+complete app consent through the gateway, verify app status and that tenant's
+broker entry, and perform the read-only MCP call there. Verify that no provider
+token appears in gateway/account-service handling or client responses. Check
+the app auth-sheet flow on both iPhone and iPad.
+
 The [development probe and evidence](../testing/2026-09-28-hosted-essentials/README.md)
 use the real credential broker and MCP host with a private Gmail configuration.
-They do not enable a production connector. Missing consent stops the live proof.
+They do not enable a production connector or prove remote E2E OAuth completion.
+Missing consent stops the live proof.
 The current provider refresher and verified worker-account schema are
 Linear-specific; Google OAuth begin/complete/refresh/revoke, verified identity,
 owner API/CLI/TUI states and portal controls remain implementation work.

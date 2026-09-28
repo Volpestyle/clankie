@@ -81,6 +81,13 @@ and nonempty response size. Do not enable HTTP debug logging during a real read.
 
 ## Exact next step for the owner and implementer
 
+The first UI rehearsal uses **app Settings → Connections**, its provider auth
+sheet and existing paired-device E2E channel through the gateway to an isolated
+development tenant. The machine serves one catalog for the app, dashboard and
+TUI. Only the app is needed for this first proof; the local probe above alone
+does not establish remote OAuth completion. See ADR 0201 for repository ownership
+and the callback/token boundary. Verify the app flow on iPhone and iPad.
+
 1. The owner selects a dedicated Google test account and Cloud project with
    [Workspace Developer Preview membership](https://developers.google.com/workspace/guides/configure-mcp-servers).
    Confirm that the selected account type is eligible; consumer Gmail is not
@@ -94,11 +101,13 @@ and nonempty response size. Do not enable HTTP debug logging during a real read.
    effective-scope validation, a verified account, and atomic broker lifecycle.
    There is **no working `clankie accounts connect google` command yet**.
    The current refresher and worker-account schema only support Linear.
-4. Once that flow exists, the owner's exact Chrome action is: open its returned
-   Google authorization URL, select the dedicated test account, review the
-   read-only Gmail permission and approve, then let the registered callback
-   complete on the development body. Never paste tokens into chat, a shell
-   argument or this archive. Stop if the displayed account/scope is wrong.
+4. Once that flow exists, tap **Connect** in the app, select the dedicated test
+   account in the Google auth sheet, review read-only Gmail access and approve.
+   The callback carries code/state through the E2E device channel; the development
+   tenant completes the exchange and stores the token. A desktop Chrome consent
+   is an optional local probe, not the remote-path acceptance test. Never paste
+   tokens into chat, a shell argument or this archive. Stop if the displayed
+   account/scope is wrong.
 5. Run the probe and then triage/digest a known fixture email, retaining only
    redacted results. Prove expiry, refresh, local disablement, provider revocation
    and isolation before enabling the customer catalog. For hosted distribution,
