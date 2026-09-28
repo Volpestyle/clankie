@@ -169,6 +169,16 @@ the native session to one conversation. Ordinary plugin use without the launcher
 session binding does not publish. See [CLI sync contract](../../docs/cli.md#native-seat-transcript-sync)
 and [Claude hook input](https://code.claude.com/docs/en/hooks#common-input-fields).
 
+### Hook latency
+
+Memory and transcript hooks read the operator bearer without waiting behind an
+unrelated Keychain OAuth refresh. Transcript uploads share one ten-second HTTP
+budget across all pages; the next hook retries retained records if an upload
+fails. The memory-card request also has a ten-second HTTP timeout. These budgets
+start after credential lookup and do not bound CLI startup or native transcript
+parsing. Claude gives each hook 60 seconds overall to allow CLI startup and scheduling
+on a loaded machine. Raising that outer limit alone does not fix credential contention.
+
 ### Service restarts
 
 The operator bridge renews its MCP session after an explicit `unknown_session`

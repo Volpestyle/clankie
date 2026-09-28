@@ -33,6 +33,7 @@ describe("clankie claude plugin", () => {
       type: "command",
       command: "clankie",
       args: ["memory-card", "--lane", "operator"],
+      timeout: 60,
     });
     for (const event of [
       "SessionStart",
@@ -43,7 +44,7 @@ describe("clankie claude plugin", () => {
       "PreCompact",
     ]) {
       expect(hooks.hooks[event]?.[0]?.hooks).toContainEqual(
-        expect.objectContaining({ command: "clankie", args: ["seat-sync"] }),
+        expect.objectContaining({ command: "clankie", args: ["seat-sync"], timeout: 60 }),
       );
     }
     const mcp = JSON.parse(await readFile(join(pluginRoot, ".mcp.json"), "utf8")) as {

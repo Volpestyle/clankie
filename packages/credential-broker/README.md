@@ -36,6 +36,11 @@ Disconnect waits for an admitted refresh, then deletes its result. Once disconne
 completes, that refresh cannot restore the account. Replacement follows the same
 ordering. Token requests have a 20-second deadline. One lock covers the whole file
 or Keychain service, so a refresh can briefly delay unrelated credential writes.
+Single-item Keychain reads do not acquire that write lock: Keychain atomically
+publishes each item, so a hook reading the operator bearer need not wait for an
+unrelated OAuth network refresh. A read can observe the previous or next complete
+credential; callers that refresh or modify credentials must still use `update`.
+Index enumeration and mutations remain serialized.
 `proper-lockfile` (also used by Pi) maintains and releases the lock; Keychain lock
 directories under `~/.config/clankie/credential-locks` contain no credentials.
 All writer processes must run this implementation; restart older CLI/service

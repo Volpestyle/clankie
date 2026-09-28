@@ -337,7 +337,10 @@ export class KeychainCredentialStore implements CredentialStore {
 
   public get(providerId: string): Promise<ProviderCredential | undefined> {
     const id = normalizeProviderId(providerId);
-    return this.enqueue(() => this.getDirect(id));
+    // Keychain reads one atomically published item. Do not wait behind an
+    // unrelated provider's OAuth network refresh holding the store write lock.
+    // Index reads and all read-modify-write operations remain serialized.
+    return this.getDirect(id);
   }
 
   public set(providerId: string, credential: ProviderCredential): Promise<void> {

@@ -65,7 +65,10 @@ export async function runSeatSyncCommand(
   if (!credential) throw new Error("Seat transcript needs the operator credential");
   const url = new URL("/v1/seat/transcript", commandHost({ ...options, env }));
   if (env.CLANKIE_CONVERSATION_ID) url.searchParams.set("conversationId", env.CLANKIE_CONVERSATION_ID);
+  // One upload budget for the whole transcript, not ten seconds per page.
+  const signal = AbortSignal.timeout(10_000);
   const send = async (entries: SeatTranscriptUpload["entries"], final = false) => {
+    signal.throwIfAborted();
     const body = SeatTranscriptUploadSchema.parse({
       sessionId,
       entries,
@@ -75,8 +78,10 @@ export async function runSeatSyncCommand(
       method: "POST",
       headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
+      signal,
     });
+    // Release the response connection before uploading another page.
+    await response.body?.cancel();
     if (response.status === 409)
       throw new Error(
         "Seat session is bound elsewhere or retired by reset; launch a new seat for this conversation",
