@@ -28,7 +28,6 @@ import { DiscordVoiceIngress } from "../src/voice-ingress.ts";
 import {
   CAPTAIN_UNREACHABLE_TEXT,
   DiscordVoiceSession,
-  EMPTY_ROOM_GRACE_MS,
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
   SPEAKER_TRANSCRIPTION_IDLE_MS,
@@ -1498,7 +1497,9 @@ describe("floor decisions", () => {
     expect(
       harness
         .conversation()
-        .textItems.some((item) => item.includes(JSON.stringify({ speakerId: ALICE, displayName: "Alice" }))),
+        .textItems.some((item) =>
+          item.includes(JSON.stringify({ userId: ALICE, displayName: "Alice", isBot: false })),
+        ),
     ).toBe(true);
   });
 
@@ -2121,7 +2122,7 @@ describe("ability path", () => {
     expect(at(harness.submitCalls, 0).trigger).toMatchObject({
       kind: "voice_event",
       actorId: ALICE,
-      body: "check the deploy",
+      body: expect.stringContaining("check the deploy"),
     });
   });
 
@@ -2164,7 +2165,7 @@ describe("ability path", () => {
       guildId: GUILD,
       channelId: CHANNEL,
       actorId: ALICE,
-      body: "check the deploy status",
+      body: expect.stringContaining("check the deploy status"),
     });
     harness.clock.now = 1_200;
     at(resolvers, 0)(settledResult("turn-1", "Deploy is green."));
@@ -3153,62 +3154,227 @@ describe("voice stay correlation", () => {
   });
 });
 
-describe("empty voice room", () => {
-  it("leaves after the last human departs, even with a bot remaining", async () => {
+describe("voice room membership and self-directed departure", () => {
+  const silent = { responseId: "silent", status: "completed" as const, audioBytes: 0, textCharacters: 0 };
+
+  it("offers an empty-room event without speech and lets him choose to stay", async () => {
     const occupants = [
-      { userId: ALICE, isBot: false },
-      { userId: BOB, isBot: true },
+      { userId: ALICE, displayName: "Alice", isBot: false },
+      { userId: BOB, displayName: "Music bot", isBot: true },
     ];
     const harness = await joinedHarness({ occupants });
     occupants.shift();
     harness.session.memberChannelChanged(GUILD, ALICE, undefined);
-    expect(harness.vox.leaves).not.toContain("room_empty");
-    harness.timers.fire(EMPTY_ROOM_GRACE_MS);
     await flush();
-    expect(harness.vox.leaves).toContain("room_empty");
-    expect(harness.ofType("left")).toMatchObject([{ reason: "room_empty", stayId: expect.any(String) }]);
+    const conversation = harness.conversation();
+    expect(conversation.responseCreates).toBe(1);
+    expect(conversation.textItems.join("\n")).toContain('"event":"participant_left"');
+    expect(conversation.textItems.join("\n")).toContain('"displayName":"Alice"');
+    expect(conversation.textItems.join("\n")).toContain('"humanCount":0');
+    expect(harness.ofType("participant")).toMatchObject([{ action: "left", humanCount: 0, userId: ALICE }]);
+    conversation.input.onResponseDone(silent);
+    harness.clock.now += 3_600_000;
+    await flush();
+    expect(harness.session.status().active).toBe(true);
+    expect(harness.vox.leaves).toEqual([]);
+    expect(harness.submitCalls).toEqual([]);
+    await harness.session.leave();
   });
 
-  it("cancels for an unconsented human rejoining and restarts a full grace on departure", async () => {
+  it("lets a speakerless membership turn leave its own stay directly", async () => {
+    const occupants = [{ userId: ALICE }];
+    const harness = await joinedHarness({ occupants });
+    const stayId = harness.session.status().stayId;
+    occupants.pop();
+    harness.session.memberChannelChanged(GUILD, ALICE, undefined);
+    await flush();
+    harness
+      .conversation()
+      .input.onFunctionCall({ callId: "leave_self", name: "voice_leave", argumentsJson: "{}" });
+    await flush();
+    expect(harness.vox.leaves).toEqual(["self_decided"]);
+    expect(harness.ofType("left")).toMatchObject([{ reason: "self_decided", stayId }]);
+    expect(harness.ofType("realtime_tool")).toMatchObject([
+      { callId: "leave_self", name: "voice_leave", phase: "called", stayId },
+      { callId: "leave_self", name: "voice_leave", phase: "completed", stayId },
+    ]);
+    expect(harness.submitCalls).toEqual([]);
+  });
+
+  it("leaves on his decision during an ordinary spoken request while others remain", async () => {
+    const harness = await engagedHarness({ occupants: [{ userId: ALICE }, { userId: BOB }] });
+    harness
+      .conversation()
+      .input.onFunctionCall({ callId: "leave_requested", name: "voice_leave", argumentsJson: "{}" });
+    await flush();
+    expect(harness.vox.leaves).toEqual(["self_decided"]);
+  });
+
+  it("does not lend a departed human's machine authority to a room event", async () => {
     const occupants = [{ userId: ALICE }];
     const harness = await joinedHarness({ occupants });
     occupants.pop();
     harness.session.memberChannelChanged(GUILD, ALICE, undefined);
-    const stale = harness.timers.scheduled.findLast((entry) => entry.delayMs === EMPTY_ROOM_GRACE_MS);
-    occupants.push({ userId: BOB });
-    harness.session.memberChannelChanged(GUILD, BOB, CHANNEL);
-    expect(stale?.cleared).toBe(true);
-    expect(harness.vox.leaves).not.toContain("room_empty");
-    occupants.pop();
-    harness.session.memberChannelChanged(GUILD, BOB, undefined);
-    harness.timers.fireLast(EMPTY_ROOM_GRACE_MS);
     await flush();
-    expect(harness.vox.leaves).toContain("room_empty");
+    harness.conversation().input.onFunctionCall({
+      callId: "no_actor",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"run a shell command"}',
+    });
+    await flush();
+    expect(harness.submitCalls).toEqual([]);
+    expect(harness.ofType("realtime_tool")).toContainEqual(
+      expect.objectContaining({ code: "speakerless_trigger" }),
+    );
+    await harness.session.leave();
   });
 
-  it("does not mistake media disconnection or a different guild for an empty roster", async () => {
-    const occupants = [{ userId: ALICE }, { userId: BOB }];
-    const harness = await joinedHarness({ occupants });
-    harness.vox.emit({ type: "client_disconnect", userId: ALICE });
-    harness.session.memberChannelChanged("99999", BOB, undefined);
-    expect(harness.timers.pending()).not.toContainEqual({ delayMs: EMPTY_ROOM_GRACE_MS });
-    occupants.shift();
+  it("retains a captain exchange through departure and notices the latest roster afterward", async () => {
+    const occupants = [{ userId: ALICE, displayName: "Alice" }];
+    let finish: ((result: CaptainChannelTurnResult) => void) | undefined;
+    const harness = await engagedHarness({
+      occupants,
+      captain: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall({
+      callId: "investigate",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"investigate this session"}',
+    });
+    conversation.input.onResponseDone(silent);
+    await flush();
+    occupants.pop();
     harness.session.memberChannelChanged(GUILD, ALICE, undefined);
-    expect(harness.timers.pending()).not.toContainEqual({ delayMs: EMPTY_ROOM_GRACE_MS });
+    await flush();
+    expect(conversation.isOpen).toBe(true);
+    expect(conversation.responseCreates).toBe(1);
+    expect(conversation.textItems.join("\n")).toContain('"humanCount":0');
+    // A rejoin while the captain is working must be visible before the next turn.
+    occupants.push({ userId: BOB, displayName: "Bob" });
+    harness.session.memberChannelChanged(GUILD, BOB, CHANNEL);
+    await flush();
+    finish?.(settledResult("investigation", "Findings are ready."));
+    await flush();
+    expect(conversation.functionResults).toContainEqual({
+      callId: "investigate",
+      output: "Findings are ready.",
+    });
+    conversation.input.onResponseDone(silent);
+    await flush();
+    expect(conversation.textItems.join("\n")).toContain('"event":"participant_joined"');
+    expect(conversation.textItems.join("\n")).toContain('"humanCount":1');
+    expect(harness.ofType("realtime_tool").some((event) => event.code === "result_not_submitted")).toBe(
+      false,
+    );
+    expect(at(harness.ofType("model_response"), -1)).toMatchObject({ phase: "requested" });
+    expect(harness.vox.leaves).toEqual([]);
     await harness.session.leave();
   });
 
-  it("cancels on leave and cannot end a replacement stay", async () => {
-    const occupants: { userId: string }[] = [];
+  it("gives captain handoffs original compound speech and current membership observations", async () => {
+    const occupants = [{ userId: ALICE, displayName: "Alice" }];
     const harness = await joinedHarness({ occupants });
-    const stale = harness.timers.scheduled.findLast((entry) => entry.delayMs === EMPTY_ROOM_GRACE_MS);
+    occupants.push({ userId: BOB, displayName: "Bob" });
+    harness.session.memberChannelChanged(GUILD, BOB, CHANNEL);
+    await flush();
+    harness.conversation().input.onResponseDone(silent);
+    await harness.consent(ALICE);
+    await harness.say(ALICE, "clankie I'm hopping out and so will you. Then investigate this session.");
+    const conversation = harness.conversation();
+    occupants.splice(1, 1);
+    harness.session.memberChannelChanged(GUILD, BOB, undefined);
+    await flush();
+    conversation.input.onFunctionCall({
+      callId: "compound",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"investigate this session"}',
+    });
+    await flush();
+    const request = at(harness.submitCalls, -1);
+    expect(request.trigger.actorId).toBe(ALICE);
+    expect(request.trigger.body).toContain("hopping out and so will you");
+    expect(request.trigger.body).toContain('"event":"participant_joined"');
+    expect(request.trigger.body).toContain('"event":"participant_left"');
+    expect(request.trigger.body).toContain('"humanCount":1');
     await harness.session.leave();
-    occupants.push({ userId: BOB });
+  });
+
+  it("waits for existing playback, then offers the room event once", async () => {
+    const occupants = [{ userId: ALICE }];
+    const harness = await engagedHarness({ occupants });
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "speaking");
+    await flush();
+    const playbackId = harness.vox.activePlaybackId;
+    conversation.input.onResponseDone({ ...silent, audioBytes: 480 });
+    occupants.pop();
+    harness.session.memberChannelChanged(GUILD, ALICE, undefined);
+    await flush();
+    expect(conversation.responseCreates).toBe(1);
+    if (playbackId === undefined) throw new Error("missing playback");
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
+    await flush();
+    expect(conversation.responseCreates).toBe(2);
+    conversation.input.onResponseDone(silent);
+    await flush();
+    expect(conversation.responseCreates).toBe(2);
+    await harness.session.leave();
+  });
+
+  it("ignores self, duplicate, other-guild and media-only events", async () => {
+    const occupants = [{ userId: ALICE }];
+    const harness = await joinedHarness({ occupants });
+    harness.session.memberChannelChanged(GUILD, OWNER, CHANNEL);
+    harness.session.memberChannelChanged(GUILD, ALICE, CHANNEL);
+    harness.session.memberChannelChanged("99999", ALICE, undefined);
+    harness.vox.emit({ type: "client_disconnect", userId: ALICE });
+    await flush();
+    expect(harness.ofType("participant")).toEqual([]);
+    expect(harness.conversations).toHaveLength(0);
+    // The actual gateway departure still produces its observation after Vox disconnect.
+    occupants.pop();
+    harness.session.memberChannelChanged(GUILD, ALICE, undefined);
+    await flush();
+    expect(harness.ofType("participant")).toHaveLength(1);
+    await harness.session.leave();
+  });
+
+  it("does not let a consent-invalidated conversation leave a reopened one in the same stay", async () => {
+    const harness = await engagedHarness();
+    const stale = harness.conversation();
+    const stayId = harness.session.status().stayId;
+    await harness.session.setConsent(GUILD, CHANNEL, ALICE, false);
+    await harness.consent(BOB);
+    await harness.say(BOB, "clankie are you there");
+    expect(harness.session.status().stayId).toBe(stayId);
+    expect(harness.conversation()).not.toBe(stale);
+    stale.input.onFunctionCall({ callId: "old_context", name: "voice_leave", argumentsJson: "{}" });
+    await flush();
+    expect(harness.vox.leaves).toEqual([]);
+    await harness.session.leave();
+  });
+
+  it("rejects target arguments and ignores stale tool callbacks after replacement", async () => {
+    const harness = await engagedHarness();
+    const stale = harness.conversation();
+    stale.input.onFunctionCall({
+      callId: "wrong_target",
+      name: "voice_leave",
+      argumentsJson: '{"channelId":"elsewhere"}',
+    });
+    await flush();
+    expect(harness.vox.leaves).toEqual([]);
+    await harness.session.leave();
     await harness.session.join({ guildId: GUILD, channelId: CHANNEL });
-    stale?.handler();
+    stale.input.onFunctionCall({ callId: "stale", name: "voice_leave", argumentsJson: "{}" });
     await flush();
     expect(harness.session.status().active).toBe(true);
-    expect(harness.vox.leaves).not.toContain("room_empty");
+    expect(harness.vox.leaves).toEqual(["session_leave"]);
     await harness.session.leave();
   });
 });

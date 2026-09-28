@@ -22,12 +22,12 @@ describe("DiscordUserGateway", () => {
       t: "GUILD_CREATE",
       d: {
         id: "guild-1",
-        members: [{ user: { id: "bot-1", bot: true } }],
+        members: [{ user: { id: "bot-1", bot: true }, nick: "Music" }],
         voice_states: ["self-1", "bot-1", "human-1"].map((user_id) => ({ user_id, channel_id: "voice-1" })),
       },
     });
     expect(gateway.voiceOccupants("guild-1", "voice-1")).toEqual([
-      { userId: "bot-1", isBot: true },
+      { userId: "bot-1", isBot: true, displayName: "Music" },
       { userId: "human-1", isBot: false },
     ]);
     socket.deliver({
@@ -46,7 +46,7 @@ describe("DiscordUserGateway", () => {
       },
     });
     expect(gateway.voiceOccupants("guild-1", "voice-1")).toEqual([
-      { userId: "bot-1", isBot: true },
+      { userId: "bot-1", isBot: true, displayName: "Music" },
       { userId: "bot-2", isBot: true },
     ]);
     gateway.close();

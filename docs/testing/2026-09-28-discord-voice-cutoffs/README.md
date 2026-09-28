@@ -1,5 +1,10 @@
 # Discord empty stays and false speech interruptions
 
+The original grace-timer approach below was **superseded by James's correction**
+in the same session. Current behavior is participant context plus a model turn
+and a local departure tool; no automatic leave timer remains. BUG 2 is unchanged.
+See [the agency correction](#agency-correction) for the replacement proof.
+
 2026-09-28 · [VUH-1440](https://linear.app/vuhlp/issue/VUH-1440/fix-empty-discord-voice-stays-and-false-speech-interruptions)
 
 Historical source: live stay `97b29808-4e01-4315-bb31-b8ae36eae825`,
@@ -24,9 +29,9 @@ performed during this investigation. The audible result remains untested.
    did not carry a leave instruction that its dropped result could lose.
    Departure closes the realtime conversation through roster invalidation;
    the returned findings therefore got `result_not_submitted` at 23:13:56.497.
-   Auto-leave covers this human-empty case without requiring another model
-   decision. Explicit departures while humans remain still use the ordinary
-   captain handoff; no goodbye phrase or scripted decision was added.
+   The original auto-leave workaround was subsequently rejected. The replacement
+   exposes departure directly to the realtime model, preserves the conversation,
+   and carries the original compound utterance into captain handoff context.
 3. **Loudness alone caused the confirmed cutoff.** The old floor-holder path
    truncated as soon as a capture accumulated 350 ms above RMS 1200, including
    audio preceding playback. At 23:11:05.067 the interruption receipt and Vox
@@ -62,7 +67,7 @@ or retained PCM, and no independent provider-first-chunk timestamp in these
 logs. Vox `Buffered` is the earliest observed PCM boundary, not the provider's
 production timestamp. No speculative warm-up delay was added.
 
-## Changes
+## Initial implementation (superseded for BUG 1)
 
 | Piece                                    | Behavior                                                                                                                                                                                                                                                     |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -72,7 +77,7 @@ production timestamp. No speculative warm-up delay was added.
 | Receipts                                 | Interrupted speech, completed playback and synthesis failure gain delivery/playback/item correlation where available. Before audio there is no playback id; explicitly idle socket errors do not borrow an earlier utterance's ids.                          |
 | ADRs and guides                          | ADR 0057 records body hygiene and transcript-confirmed interruption; ADR 0070 and trace skill describe teardown and correlation.                                                                                                                             |
 
-## Verification
+## Initial verification
 
 ```mermaid
 flowchart LR
@@ -139,3 +144,52 @@ pnpm check
 
 No live credentials or Discord session are required for these fixture checks.
 Activation and a consented recipient-side recording remain James's next step.
+
+## Agency correction
+
+James rejected the grace timer as a substitute for Clankie's decision. The
+replacement removes it completely, with no hours-alone backstop. Existing
+metered-listener idle timeouts and conversation expiry remain resource guards;
+neither chooses to leave Discord.
+
+- Gateway joins/leaves and a human headcount enter realtime context as ordinary
+  observations. The initial roster includes bots and humans separately; human
+  counts include unconsented participants without opening their microphones.
+- A membership event creates a speakerless turn, including when the room is
+  empty. Events received during a response, playback or captain work remain
+  visible and receive a turn after that work, coalescing to the latest roster.
+- The realtime `voice_leave` tool can end only the current stay, with no target
+  parameters. Its result and `left.reason = self_decided` carry the stay id.
+  Tests demonstrate both choices: remaining silently and calling leave.
+- Departures revoke capture while retaining the conversation and pending
+  captain results. Explicit consent opt-out still invalidates that context.
+- Every captain handoff gets bounded current-room observations and the original
+  attributed utterance as untrusted context. The original speaker remains the
+  authority owner; membership events cannot borrow that identity for shell work.
+- A closed or previous conversation cannot act on the current stay.
+
+**What blocked 23:13:** a captain `voice_leave` tool already existed and the
+voice lane could reach it through `ask_clankie`; departure does not require the
+requester to remain in voice. The realtime model had no direct leave tool and
+sent only the investigation request. Thus no departure tool ran. The later
+`result_not_submitted` lost the investigation's spoken result, not a leave
+operation. Roster-triggered conversation closure also removed the opportunity
+for the realtime side to reconsider after the participant left. The fix repairs
+all three mechanisms: direct reach, complete handoff context, and room-event
+awareness without closing the conversation.
+
+This is a capability and scheduling proof with fake model decisions. It does
+not prove that the live model will choose to leave for a particular event or
+phrase; that choice intentionally remains his. No live activation was performed.
+
+Replacement verification passed:
+
+- [Focused agency and cutoff tests](evidence/agency-tests.txt): 8 files, 207 tests.
+- [Bridge tool wiring](evidence/agency-wiring-tests.txt): 1 file, 4 tests.
+- [Final `pnpm check`](evidence/agency-workspace-check.txt): all gates passed;
+  353 JavaScript test files, 2,954 tests passed and 2 skipped; 123 Rust tests;
+  Vox IPC smoke passed.
+
+The first replacement full check found a stale bridge integration expectation
+that omitted the new `voice_leave` tool. Updating that expectation, rerunning
+the wiring test and then the entire workspace check resolved it.

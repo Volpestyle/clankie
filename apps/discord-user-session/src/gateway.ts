@@ -105,6 +105,7 @@ export class DiscordUserGateway {
   private selfVoiceSessionId: string | undefined;
   private readonly voiceChannels = new Map<string, string>();
   private readonly botUserIds = new Set<string>();
+  private readonly voiceDisplayNames = new Map<string, string>();
   private reconnectAttempts = 0;
   private acked = true;
   private closed = false;
@@ -131,20 +132,35 @@ export class DiscordUserGateway {
   }
 
   /** Gateway roster for body hygiene; unknown users count as human conservatively. */
-  public voiceOccupants(guildId: string, channelId: string): readonly { userId: string; isBot: boolean }[] {
+  public voiceOccupants(
+    guildId: string,
+    channelId: string,
+  ): readonly { userId: string; isBot: boolean; displayName?: string }[] {
     const prefix = `${guildId}:`;
     return [...this.voiceChannels.entries()]
       .filter(([key, channel]) => key.startsWith(prefix) && channel === channelId)
       .map(([key]) => key.slice(prefix.length))
       .filter((userId) => userId !== this.selfUserId)
-      .map((userId) => ({ userId, isBot: this.botUserIds.has(userId) }));
+      .map((userId) => {
+        const displayName = this.voiceDisplayNames.get(`${guildId}:${userId}`);
+        return {
+          userId,
+          isBot: this.botUserIds.has(userId),
+          ...(displayName === undefined ? {} : { displayName }),
+        };
+      });
   }
 
-  private rememberMemberBot(value: unknown): void {
-    const user = record(record(value)?.user);
+  private rememberMemberBot(value: unknown, guildId: unknown): void {
+    const member = record(value);
+    const user = record(member?.user);
     if (typeof user?.id !== "string") return;
     if (user.bot === true) this.botUserIds.add(user.id);
     else this.botUserIds.delete(user.id);
+    const name = member?.nick ?? user.global_name ?? user.username;
+    if (typeof guildId === "string" && typeof name === "string") {
+      this.voiceDisplayNames.set(`${guildId}:${user.id}`, name.slice(0, 100));
+    }
   }
 
   /** Every guild/channel the actor is currently in. Used when the operator lane has no guild. */
@@ -246,6 +262,7 @@ export class DiscordUserGateway {
         this.reconnectAttempts = 0;
         this.voiceChannels.clear();
         this.botUserIds.clear();
+        this.voiceDisplayNames.clear();
         const user = record(payload.user);
         this.sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined;
         this.resumeUrl =
@@ -266,12 +283,12 @@ export class DiscordUserGateway {
       case "GUILD_CREATE": {
         if (typeof payload.id !== "string" || !Array.isArray(payload.voice_states)) return;
         if (Array.isArray(payload.members)) {
-          for (const member of payload.members) this.rememberMemberBot(member);
+          for (const member of payload.members) this.rememberMemberBot(member, payload.id);
         }
         for (const value of payload.voice_states) {
           const state = record(value);
           if (typeof state?.user_id !== "string" || typeof state.channel_id !== "string") continue;
-          this.rememberMemberBot(state.member);
+          this.rememberMemberBot(state.member, payload.id);
           this.voiceChannels.set(`${payload.id}:${state.user_id}`, state.channel_id);
           if (state.user_id === this.selfUserId) {
             this.selfVoiceSessionId = typeof state.session_id === "string" ? state.session_id : undefined;
@@ -319,7 +336,7 @@ export class DiscordUserGateway {
         return;
       }
       case "VOICE_STATE_UPDATE": {
-        this.rememberMemberBot(payload.member);
+        this.rememberMemberBot(payload.member, payload.guild_id);
         if (typeof payload.user_id !== "string") return;
         if (typeof payload.guild_id === "string") {
           const key = `${payload.guild_id}:${payload.user_id}`;

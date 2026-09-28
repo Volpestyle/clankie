@@ -34,6 +34,7 @@ const currentReceiptTypes = [
   "discord.voice.volition",
   "discord.voice.overlap",
   "discord.voice.interrupted",
+  "discord.voice.participant",
   "discord.voice.failed",
   "discord.voice.left",
   "discord.voice.play_connection",

@@ -220,9 +220,10 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     // ...group-room turn-taking (no auto-response, no auto-interrupt)...
     expect(sessionUpdate.session.audio.input.turn_detection.create_response).toBe(false);
     expect(sessionUpdate.session.audio.input.turn_detection.interrupt_response).toBe(false);
-    // ...ask_clankie stays the privileged tool; music tools are local to the call...
+    // ...ask_clankie stays privileged; departure and music are local to the call...
     expect(sessionUpdate.session.tools.map((tool) => tool.name)).toEqual([
       "ask_clankie",
+      "voice_leave",
       "look_at_screen",
       "youtube_search",
       "music_play",

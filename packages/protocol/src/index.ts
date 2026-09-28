@@ -5555,7 +5555,7 @@ export type DiscordVoiceResponseState = z.infer<typeof DiscordVoiceResponseState
  * the latency line cannot tell a real reply from a play narration — which is
  * exactly the ambiguity that slowed the 2026-08-02 diagnosis.
  */
-export const DiscordVoiceResponseTriggerSchema = z.enum(["room", "narration"]);
+export const DiscordVoiceResponseTriggerSchema = z.enum(["room", "narration", "membership"]);
 export type DiscordVoiceResponseTrigger = z.infer<typeof DiscordVoiceResponseTriggerSchema>;
 
 /** Content-free checkpoints between captured audio and a spoken response. */
@@ -5590,6 +5590,7 @@ export const DiscordVoiceModelResponseOutcomeSchema = z.enum(["audio", "tool", "
 export type DiscordVoiceModelResponseOutcome = z.infer<typeof DiscordVoiceModelResponseOutcomeSchema>;
 
 export const DiscordVoiceRealtimeToolNameSchema = z.enum([
+  "voice_leave",
   "ask_clankie",
   "look_at_screen",
   "youtube_search",
@@ -5669,6 +5670,16 @@ export type DiscordVoicePlayConnectionPhase = z.infer<typeof DiscordVoicePlayCon
 
 export const DiscordVoiceEvidenceSchema = z
   .discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("participant"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        action: z.enum(["joined", "left"]),
+        humanCount: DiscordVoiceCounterSchema,
+        deliveryId: DiscordVoiceLocalIdSchema,
+      })
+      .strict(),
     z
       .object({
         type: z.literal("joined"),

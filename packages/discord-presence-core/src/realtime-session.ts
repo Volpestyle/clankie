@@ -125,6 +125,7 @@ export const DEFAULT_REALTIME_TRUNCATION_RETENTION_RATIO = 0.7;
 export const DEFAULT_REALTIME_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
 
 export const ASK_CLANKIE_TOOL_NAME = "ask_clankie";
+export const VOICE_LEAVE_TOOL_NAME = "voice_leave";
 /** Read-only glance at his own live play screen. Not a controller (ADR 0099). */
 export const LOOK_AT_SCREEN_TOOL_NAME = "look_at_screen";
 export const YOUTUBE_SEARCH_TOOL_NAME = "youtube_search";
@@ -153,6 +154,7 @@ const ASK_CLANKIE_TOOL = {
     "the story of this playthrough, facts the briefing does not cover, or something from the " +
     "conversation you choose to remember as part of your own experience. Do not wait for someone to ask you to remember it. " +
     "Never say you cannot do or see something without asking through this first — it decides what each speaker may have. " +
+    "Your own departure is available directly through voice_leave. " +
     "Do not use it just to look at your screen. " +
     "Do not use it for songs or YouTube — those are youtube_search and music_play.",
   parameters: {
@@ -166,6 +168,16 @@ const ASK_CLANKIE_TOOL = {
     required: ["request"],
     additionalProperties: false,
   },
+} as const;
+
+const VOICE_LEAVE_TOOL = {
+  type: "function",
+  name: VOICE_LEAVE_TOOL_NAME,
+  description:
+    "Leave your current Discord voice channel when you decide to end your stay. " +
+    "This closes only your own voice connection, including its speech and listening. " +
+    "It takes no target and grants no machine authority.",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
 } as const;
 
 const LOOK_AT_SCREEN_TOOL = {
@@ -766,7 +778,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               // becoming a second, conflicting floor owner.
               turn_detection: null,
               audio: { output: { format: REALTIME_PCM_FORMAT } },
-              tools: [ASK_CLANKIE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
             }
           : {
               type: "realtime",
@@ -796,7 +808,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
                     }
                   : {}),
               },
-              tools: [ASK_CLANKIE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
               tool_choice: "auto",
               truncation: {
                 type: "retention_ratio",

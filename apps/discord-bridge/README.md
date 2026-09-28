@@ -199,10 +199,14 @@ satisfy these live gates.
 Receipts contain bounded ids, counts, durations, and typed outcomes only. They
 exclude message bodies, transcripts, names, media, and credentials.
 
-Voice stays end automatically after the gateway roster has contained no humans
-for five seconds. A human rejoining cancels the grace period; bots, consent
-counts, and audio subscriptions do not keep an empty stay alive. The voice leave
-receipt records `reason: room_empty` (ADR 0057).
+Gateway participant joins and leaves supply the current human count as room
+observations and offer Clankie a turn even when nobody speaks. He decides
+whether to remain, speak, or use `voice_leave` to end his own stay. There is no
+automatic leave timer. Departures revoke capture without discarding an
+in-flight captain exchange. Handoffs include room observations and the original
+attributed utterance so a model summary cannot hide part of a compound request.
+The voice leave receipt records `reason: self_decided` for the local tool
+(ADR 0057).
 
 Speech interruption waits for a substantive transcript with speech-level overlap
 from the floor holder, or a direct re-address. Brief fragments and acknowledgements

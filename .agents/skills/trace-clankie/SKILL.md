@@ -196,9 +196,12 @@ Following controls waking, not collection.
   `response`, and `failed` (`speech_synthesis`) receipts carry `playbackId` and
   provider `itemId` when a playback exists. Pre-audio failures have no playback
   id; idle socket failures have no utterance to attribute. Intentional close
-  suppresses late socket errors. A `left` reason of `room_empty` means the
-  gateway roster remained human-empty for the five-second grace; floor decay
-  and Vox subscription counts alone do not establish that.
+  suppresses late socket errors. `discord.voice.participant` records gateway
+  joins/leaves and human headcounts; its `deliveryId` joins the offered model
+  turn. Bursts may coalesce into the latest event's turn after current work.
+  A `left` reason of `self_decided` follows the realtime `voice_leave` tool.
+  There is no empty-room leave timer. Membership observations carry no human
+  authority; they do not become privileged captain requests.
 - **An ElevenLabs byte-limit failure can follow audible speech.**
   `discord.voice.failed` with code
   `elevenlabs_context_audio_exceeded_the_byte_limit` means synthesized PCM hit

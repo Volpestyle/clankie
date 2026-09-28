@@ -208,6 +208,7 @@ describe("realtime conversation session", () => {
       ?.session?.tools;
     expect(tools?.map((tool) => tool.name)).toEqual([
       "ask_clankie",
+      "voice_leave",
       "look_at_screen",
       "youtube_search",
       "music_play",

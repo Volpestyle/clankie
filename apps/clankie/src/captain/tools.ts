@@ -1129,11 +1129,9 @@ function discordVoicePresenceTools(
     defineTool({
       name: "voice_leave",
       label: "Leave voice",
-      description: fromOperator
-        ? "Leave your active Discord voice channel when the operator asks you to leave, hang up, or dip. The live " +
-          "Discord body enforces authority and prevents one server from ending a call in another."
-        : "Leave your active Discord voice channel when someone asks you to leave, hang up, or dip. The live " +
-          "Discord body enforces authority and prevents one server from ending a call in another.",
+      description:
+        "Leave your active Discord voice channel when you decide to end your stay. The live " +
+        "Discord body enforces authority and prevents one server from ending a call in another.",
       parameters: Type.Object({}),
       execute: () => call("leave"),
     }),

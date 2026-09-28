@@ -23,7 +23,10 @@ const base = {
   embodiment: { submitIntent: unused, getSession: unused, getLiveSession: unused },
 };
 
-function names(deps: Record<string, unknown>, lane: "operator" | "discord_presence"): string[] {
+function names(
+  deps: Record<string, unknown>,
+  lane: "operator" | "discord_presence" | "discord_voice",
+): string[] {
   return captainTools({ ...base, ...deps } as unknown as CaptainDeps, {}, {} as LaneLog, lane).map(
     (tool) => tool.name,
   );
@@ -36,13 +39,13 @@ describe("tools that need a Discord body", () => {
       discordVoicePresence: {},
       streamWatch: { current: unused },
     };
-    for (const lane of ["operator", "discord_presence"] as const) {
+    for (const lane of ["operator", "discord_presence", "discord_voice"] as const) {
       expect(names(withBody, lane)).toEqual(expect.arrayContaining(DISCORD_BODY_TOOLS));
     }
   });
 
   it("are left out of a loadout without one, such as a hosted body", () => {
-    for (const lane of ["operator", "discord_presence"] as const) {
+    for (const lane of ["operator", "discord_presence", "discord_voice"] as const) {
       const offered = names({}, lane);
       expect(offered.filter((name) => DISCORD_BODY_TOOLS.includes(name))).toEqual([]);
       // The rest of his reach is untouched.

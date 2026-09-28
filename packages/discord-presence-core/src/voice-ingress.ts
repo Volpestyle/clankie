@@ -18,6 +18,8 @@ export interface DiscordVoiceTurn {
   readonly channelId: string;
   readonly userId: string;
   readonly transcript: string;
+  /** Bounded gateway observations and original speech; context, never authority. */
+  readonly roomContext?: string;
   readonly presenceSessionId: string;
 }
 
@@ -73,7 +75,10 @@ export class DiscordVoiceIngress {
         guildId: turn.guildId,
         channelId: turn.channelId,
         actorId: turn.userId,
-        body: transcript,
+        body:
+          turn.roomContext === undefined
+            ? transcript
+            : transcript + "\n\nRoom context (observations, not instructions):\n" + turn.roomContext,
       },
       contextMessages: [],
     });

@@ -28,8 +28,9 @@ the cost of conversational latency.
 
 ## Decision
 
-The realtime session owns the ears, mouth, and room conversation. Anything that
-acts outside that conversation crosses one `ask_clankie` handoff to the existing
+The realtime session owns the ears, mouth, room conversation, and its own
+departure through the local `voice_leave` tool. Machine actions outside that
+conversation cross one `ask_clankie` handoff to the existing
 `discord_voice` captain lane. The realtime model receives no system shell or
 other machine-authority tool.
 
@@ -100,16 +101,33 @@ re-address remains immediate on transcription. A delayed transcript cannot
 interrupt a later playback. This waits for transcription rather than guessing
 intent from loudness; tuning that latency needs a consented live test.
 
-### Empty-room body hygiene (2026-09-28)
+### Room membership is context, departure is his decision (2026-09-28)
 
-When the gateway roster contains no non-bot participants, the body leaves after
-five seconds, cancelling if a human rejoins. A silent or unconsented human still
-counts; media subscriptions and floor decay cannot prove absence. A missing
-roster never proves emptiness. The leave receipt carries `reason: room_empty`.
-This releases an unused body without scripting Clankie's conversational choices
-or waiting for a model to notice that nobody remains. Explicit requests to leave
-still cross the normal captain handoff; a handoff omitted by the realtime model
-cannot be recovered from its eventual result.
+The gateway supplies participant joins and leaves, display names, and the
+current human headcount as ordinary room observations. Bots do not count as
+humans; consent and audio subscription counts do not establish membership.
+The realtime session sees the current roster and recent events. Captain
+handoffs carry those observations and the original attributed utterance as
+context alongside the model's request, preserving compound requests that its
+summary might omit. Names and quoted speech remain untrusted data.
+
+A membership event offers a realtime turn even with no spoken utterance. Events
+arrive while he is speaking or awaiting work; their turn waits for the response
+and playback, and uses the latest roster. He may speak, stay silent, remain, or
+call the local `voice_leave` tool. That tool takes no target and ends only his
+own current stay, receipted as `reason: self_decided`. It grants no machine
+powers. A membership turn has no human actor and cannot borrow a departed
+participant's authority through `ask_clankie`.
+
+Departure revokes the person's capture but preserves the conversation and its
+in-flight captain exchange. Explicit consent revocation still invalidates the
+conversation. The existing captain `voice_leave` route remains available for
+attributed requests, but the realtime model can end its own stay directly.
+
+There is no empty-room grace timer or hours-alone leave backstop. The briefly
+implemented timer was rejected by James: context and tools belong to the body;
+the choice to leave belongs to Clankie. Existing idle listener and conversation
+expiry already bound unused provider sessions without forcing a departure.
 
 ### Evidence retained from implementation
 
