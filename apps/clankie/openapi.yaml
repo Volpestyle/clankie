@@ -1422,6 +1422,15 @@ paths:
         contacts nor channel participants. Seats, channels, tallies and edges
         are unchanged. Omitting the selector preserves the full directory;
         `personas` and conversation IDs still address retained history.
+        `replay` optionally takes `direction: backward`, `turnLimit` (1..40,
+        default 20) and `limit` (1..500, default 500 for backward). Omit `cursor`
+        to open the newest window; pass the page's `previousCursor` as the next
+        exclusive upper bound to load older history. Events remain chronological.
+        `hasOlder` and `hasMore` say whether more retained history precedes the
+        backward page. `nextCursor` is still the newest event in that page and
+        can resume an ordinary forward `tail`. The event ceiling wins when one
+        turn exceeds 500 events. Omitted direction preserves forward replay and
+        tail behavior. Clients keep distinct older-history and live-tail cursors.
         `terminal_catalog` lists up to 48 panes per execution connection (16 connections).
         Each row carries runtime identity separately from Herdr workspace/tab IDs.
         Named terminal addresses pin their endpoint; tail, control and input refuse
@@ -1498,6 +1507,18 @@ paths:
                     conversationId: replace-me
                     surfaceClientId: yaak
                     limit: 50
+              replay_latest:
+                summary: Open the newest 20 turns
+                value:
+                  op: replay
+                  schemaVersion: 1
+                  replay:
+                    schemaVersion: 1
+                    conversationId: replace-me
+                    surfaceClientId: yaak
+                    direction: backward
+                    turnLimit: 20
+                    limit: 500
               autonomy:
                 summary: Read autonomy state for one conversation
                 value:

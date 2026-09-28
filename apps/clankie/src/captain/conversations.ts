@@ -11,6 +11,7 @@ import {
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import {
+  operatorConversationWindow,
   OPERATOR_CHANNEL_MEMBER_MAX,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
@@ -1870,7 +1871,8 @@ export class ConversationStore {
     const events = this.readEvents(meta.conversationId);
     const retainedFromCursor = meta.retainedFromCursor ?? ZERO_CURSOR;
     const safeCursor = events.length === 0 ? retainedFromCursor : events[events.length - 1]!.cursor;
-    const rawFrom = request.cursor ?? ZERO_CURSOR;
+    const backward = request.direction === "backward";
+    const rawFrom = request.cursor ?? (backward ? safeCursor : ZERO_CURSOR);
     if (!/^\d+$/u.test(rawFrom) || rawFrom.length > CURSOR_WIDTH) {
       return {
         schemaVersion: 1,
@@ -1904,6 +1906,27 @@ export class ConversationStore {
         recoverable: true,
         resetCursor: safeCursor,
         message: "That cursor is ahead of this conversation; resume from its latest event.",
+      };
+    }
+    if (backward) {
+      const window = operatorConversationWindow(events, {
+        ...(request.cursor === undefined ? {} : { before: from }),
+        ...(request.limit === undefined ? {} : { limit: request.limit }),
+        ...(request.turnLimit === undefined ? {} : { turnLimit: request.turnLimit }),
+      });
+      return {
+        schemaVersion: 1,
+        status: "page",
+        conversationId: meta.conversationId,
+        surfaceClientId: request.surfaceClientId,
+        events: window.events,
+        retainedFromCursor,
+        previousCursor: window.events[0]?.cursor ?? retainedFromCursor,
+        nextCursor: window.events.at(-1)?.cursor ?? from,
+        safeCursor,
+        hasOlder: window.hasOlder,
+        hasMore: window.hasOlder,
+        ...(this.drafts.has(meta.conversationId) ? { live: this.drafts.get(meta.conversationId)! } : {}),
       };
     }
     const limit = request.limit ?? 200;

@@ -234,6 +234,8 @@ export const OPERATOR_SEAT_EFFORT_MAX = 64;
 export const OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX = 32;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX = 500;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_DEFAULT = 200;
+export const OPERATOR_CONVERSATION_WINDOW_TURNS_DEFAULT = 20;
+export const OPERATOR_CONVERSATION_WINDOW_TURNS_MAX = 40;
 /**
  * Longest a tail request may park on the server waiting for the next change
  * ([ADR 0141](../../../docs/adr/0141-the-console-watches-him-type.md)). Bounded
@@ -1392,6 +1394,95 @@ export function foldOperatorConversationReactions(
   return [...standing.values()];
 }
 
+/**
+ * Select the newest bounded transcript window, preserving chronological order.
+ * `before` is exclusive; omitted means the newest retained event. The event
+ * ceiling still applies when one assistant turn alone has hundreds of events.
+ *
+ * Operator and external messages each make a visible turn. Accepted runs make
+ * one assistant turn, including their captain prose, reasoning and tools. Bare
+ * seat/agent messages settle their own turn. A truncated run starts an implicit
+ * assistant turn at its first retained content event, never forcing a scan of
+ * the entire journal. This helper is node-free so device caches use the same
+ * window as the captain.
+ */
+export function operatorConversationWindow(
+  events: readonly OperatorConversationStreamEvent[],
+  options: { readonly before?: string; readonly limit?: number; readonly turnLimit?: number } = {},
+): { events: OperatorConversationStreamEvent[]; hasOlder: boolean } {
+  const limit = Math.max(
+    1,
+    Math.min(options.limit ?? OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX, OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX),
+  );
+  const turnLimit = Math.max(
+    1,
+    Math.min(
+      options.turnLimit ?? OPERATOR_CONVERSATION_WINDOW_TURNS_DEFAULT,
+      OPERATOR_CONVERSATION_WINDOW_TURNS_MAX,
+    ),
+  );
+  let end = events.length;
+  if (options.before !== undefined) {
+    let low = 0;
+    while (low < end) {
+      const middle = (low + end) >>> 1;
+      if (events[middle]!.cursor < options.before) low = middle + 1;
+      else end = middle;
+    }
+  }
+  const floor = Math.max(0, end - limit);
+  const starts: number[] = [];
+  let assistantOpen = false;
+  let lifecycleOpen = false;
+  for (let index = floor; index < end; index += 1) {
+    const event = events[index]!;
+    if (event.type === "turn") {
+      if (event.phase === "accepted") {
+        starts.push(index);
+        assistantOpen = true;
+        lifecycleOpen = true;
+      } else {
+        assistantOpen = false;
+        lifecycleOpen = false;
+      }
+    } else if (event.type === "message") {
+      if (event.role === "external") {
+        if (!event.streaming) {
+          starts.push(index);
+          // A window can begin on this independent message, omitting a run
+          // that began earlier. Budget a subsequent assistant continuation as
+          // another turn so folding that suffix cannot exceed the ceiling.
+          assistantOpen = false;
+        }
+      } else if (event.role === "operator") {
+        if (!event.streaming) starts.push(index);
+        assistantOpen = false;
+        lifecycleOpen = false;
+      } else {
+        if (!assistantOpen) starts.push(index);
+        assistantOpen = event.role !== "agent" || event.streaming;
+      }
+    } else if (
+      event.type === "reasoning" ||
+      event.type === "tool" ||
+      event.type === "file" ||
+      event.type === "input_requested" ||
+      event.type === "auth"
+    ) {
+      if (!assistantOpen) starts.push(index);
+      assistantOpen = true;
+    } else if (
+      (event.type === "activity" && event.phase === "waiting") ||
+      (event.type === "session" && event.phase !== "started")
+    ) {
+      // A live run can publish waiting mid-turn; bare projections settle here.
+      if (!lifecycleOpen) assistantOpen = false;
+    }
+  }
+  const start = starts.length > turnLimit ? starts[starts.length - turnLimit]! : floor;
+  return { events: events.slice(start, end), hasOlder: start > 0 };
+}
+
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 /**
@@ -1406,7 +1497,9 @@ export type OperatorConversationEventBody = DistributiveOmit<
 
 /**
  * Bounded, pageable replay/tail request. `limit` caps the returned page; `cursor`
- * is the exclusive lower bound (surface clients keep independent cursors).
+ * is the exclusive lower bound by default. Backward replay uses an exclusive
+ * upper bound; omitting it starts at the newest event. Surfaces keep their own
+ * forward-tail and backward-history cursors.
  */
 export const ReplayOperatorConversationRequestSchema = z
   .object({
@@ -1415,6 +1508,9 @@ export const ReplayOperatorConversationRequestSchema = z
     surfaceClientId: OperatorSurfaceClientIdSchema,
     cursor: OperatorConversationCursorSchema.optional(),
     limit: z.number().int().positive().max(OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX).optional(),
+    direction: z.literal("backward").optional(),
+    /** Visible turn ceiling for backward replay; defaults to 20. */
+    turnLimit: z.number().int().positive().max(OPERATOR_CONVERSATION_WINDOW_TURNS_MAX).optional(),
     /**
      * Highest live-draft sequence this surface has already rendered. A tail that
      * would return neither a new event nor a newer draft parks for `waitMs`
@@ -1457,8 +1553,12 @@ export const OperatorConversationReplayPageSchema = z
     events: z.array(OperatorConversationStreamEventSchema).max(OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX),
     /** Oldest cursor still retained; clients below this must reset. */
     retainedFromCursor: OperatorConversationCursorSchema,
-    /** Resume cursor for the next page (exclusive lower bound). */
+    /** Forward replay/tail resume cursor (exclusive lower bound), even on a backward page. */
     nextCursor: OperatorConversationCursorSchema,
+    /** Exclusive upper bound for the next backward page; present on backward replay. */
+    previousCursor: OperatorConversationCursorSchema.optional(),
+    /** More retained events precede this page; present on backward replay. */
+    hasOlder: z.boolean().optional(),
     /** Latest durable cursor (upper bound). */
     safeCursor: OperatorConversationCursorSchema,
     hasMore: z.boolean(),
