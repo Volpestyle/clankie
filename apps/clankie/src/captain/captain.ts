@@ -2197,7 +2197,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // to be told. A one-shot never owns history, even when the social lane in
       // the same room is warm. A lane resumed after restart reads as cold and
       // gets one redundant bounded backlog once per boot.
+      const owner =
+        authority?.verifiedOwner === true ||
+        (discord.ownerUserId !== undefined && discord.ownerUserId === request.trigger.actorId);
+      const sender = owner
+        ? ("owner" as const)
+        : plan.systemTools && discord.systemActorUserIds.includes(request.trigger.actorId)
+          ? ("granted" as const)
+          : undefined;
       const heard = await normalizeDiscordTurn(request, deps, {
+        ...(sender === undefined ? {} : { sender }),
         carriesHistory: plan.durable && sessions.has(plan.sessionKey),
         ...(plan.durable ? { shownContextVisuals: shownContextVisualsFor(plan.sessionKey) } : {}),
       });
