@@ -54,18 +54,6 @@ export async function resolveCaptainRouteToken(
 }
 
 /**
- * Connects the TUI to the captain route with the same optional bearer the
- * clankie service authenticates. An absent or blank token preserves local-dev
- * loopback authentication; a configured token is attached to every request.
- */
-export function createProductionOperatorConversationClient(input: {
-  readonly host: string;
-  readonly captainToken?: string;
-}): OperatorConversationClient {
-  return createCaptainOperatorConversationClient(createCaptainRouteClient(input));
-}
-
-/**
  * One authenticated fetcher for every console-side captain route — the
  * conversation dispatch and the lane listing both ride it. Plain `fetch`
  * against the single clankie service; no client library in between.

@@ -65,13 +65,6 @@ export function relayArgv(fleet: string): string[] {
   ];
 }
 
-/** The endpoint a peer on that machine dials; the relay reports the same path when ready. */
-export function relayEndpoint(fleet: HerdrFleet): string {
-  return fleet.ssh.shell === "powershell"
-    ? `\\\\.\\pipe\\clankie-swarm-${fleet.id}`
-    : `~/.clankie/swarm-relay-${fleet.id}.sock`;
-}
-
 /**
  * The ssh argv for one relay connection. It has its own connection, not the
  * fleet's multiplexed one: ssh reports the port it allocated for `-R 0` on

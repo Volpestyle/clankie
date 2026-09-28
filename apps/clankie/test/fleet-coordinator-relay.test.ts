@@ -11,7 +11,6 @@ import {
   FleetCoordinatorRelay,
   FleetRelays,
   relayArgv,
-  relayEndpoint,
   relaySshArgs,
 } from "../src/fleet-coordinator-relay.ts";
 import type { HerdrFleet } from "../src/herdr-fleet.ts";
@@ -32,7 +31,6 @@ describe("coordinator relay", () => {
       expect.arrayContaining(["ControlMaster=no", "ControlPath=none", "ExitOnForwardFailure=yes"]),
     );
     expect(args.at(-1)).toMatch(/^powershell\.exe -NoProfile -NonInteractive -EncodedCommand /u);
-    expect(relayEndpoint(pc)).toBe("\\\\.\\pipe\\clankie-swarm-pc");
     expect(relaySshArgs(box, "/owner.sock").at(-1)).toMatch(/^exec node '-e' 'eval\(Buffer\.from\(/u);
   });
 

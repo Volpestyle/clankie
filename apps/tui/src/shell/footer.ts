@@ -6,7 +6,6 @@
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import type { HerdrBinding, OperatorConversationContextUsage } from "@clankie/protocol";
 import type { ClankieFaceAnsiTheme } from "../face/clankie-face-theme.ts";
-import type { PresenceSnapshot } from "../observation/presence.ts";
 
 export interface ClankieFooterData {
   readonly model?: string | undefined;
@@ -22,10 +21,6 @@ export interface ClankieFooterState extends ClankieFooterData {
 /** Which fleet he leads right now: his own, or a named session of the owner's. */
 export function describeHerdrBinding(binding: HerdrBinding): string {
   return binding.runtime === "bundled" ? "Clankie’s own session" : binding.session;
-}
-
-export function formatCaptainPresenceStatus(presence: PresenceSnapshot | undefined): string {
-  return `discord ${presence?.phase.replaceAll("_", " ") ?? "unavailable"}`;
 }
 
 /** Human context readout for `/status`: `72.4k / 200k`. */

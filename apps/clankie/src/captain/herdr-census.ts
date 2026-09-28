@@ -574,13 +574,6 @@ async function readLocalFleet(
   }
 }
 
-/** The fleet's contacts only; the head is not one of them. */
-export async function readFleetSeats(
-  options: { readonly runCommand?: HerdrCensusRunner } = {},
-): Promise<readonly ObservedFleetSeat[]> {
-  return (await readFleet(options)).seats;
-}
-
 /** Live agent census for a seated turn. Fail-soft: a down socket is not a failed turn. */
 export async function readHerdrSessionCensus(
   herdrPaneId: string | undefined,

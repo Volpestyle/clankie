@@ -6,7 +6,6 @@ import {
   parseHerdrAgentList,
   parseHerdrTerminalCatalog,
   readFleet,
-  readFleetSeats,
   readHerdrSessionCensus,
   readSeatIdForHerdrPane,
   readTerminalCatalog,
@@ -103,9 +102,9 @@ describe("herdr session census", () => {
       },
     };
     await expect(
-      readFleetSeats({
+      readFleet({
         runCommand: () => Promise.resolve({ stdout: JSON.stringify(roster), stderr: "" }),
-      }),
+      }).then((fleet) => fleet.seats),
     ).resolves.toEqual([
       {
         machine: hostname(),
@@ -161,7 +160,7 @@ describe("herdr session census", () => {
         ],
       },
     };
-    const seats = await readFleetSeats({
+    const { seats } = await readFleet({
       runCommand: () => Promise.resolve({ stdout: JSON.stringify(roster), stderr: "" }),
     });
 
@@ -212,7 +211,7 @@ describe("herdr session census", () => {
       tab: { id: "w2:t4", label: "Delivered files", number: 4 },
     });
 
-    const unplaced = await readFleetSeats({ runCommand: runner(undefined) });
+    const { seats: unplaced } = await readFleet({ runCommand: runner(undefined) });
     expect(unplaced).toHaveLength(1);
     expect(unplaced[0]).not.toHaveProperty("placement");
   });

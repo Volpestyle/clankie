@@ -3,11 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  FreePlayJournalSummarySchema,
-  openFreePlayJournal,
-  parseFreePlayJournal,
-} from "../src/free-play-journal.ts";
+import { openFreePlayJournal, parseFreePlayJournal } from "../src/free-play-journal.ts";
 import type { FreePlayResult, FreePlayTurn, FreePlayTurnEvidence } from "../src/free-play.ts";
 
 const journalIdentity = {
@@ -341,21 +337,23 @@ describe("free-play journal", () => {
   });
 
   it("defaults loop metrics on summaries written before they existed", () => {
-    const legacy = FreePlayJournalSummarySchema.parse({
-      kind: "summary",
-      schemaVersion: 1,
-      at: "2026-08-15T21:00:00.000Z",
-      outcome: "stopped",
-      turnsTaken: 1,
-      accepted: 1,
-      durationMs: 1,
-      framesPublished: 1,
-      framesDropped: 0,
-      checkpointId: null,
-      progress: { distinctTiles: 1, maps: ["house"], turnsSinceNewTile: 1, actionsPerNewTile: null },
-      volition: { offered: 1, taken: 0, suppressed: 0 },
-      coherence: null,
-    });
+    const [legacy] = parseFreePlayJournal(
+      JSON.stringify({
+        kind: "summary",
+        schemaVersion: 1,
+        at: "2026-08-15T21:00:00.000Z",
+        outcome: "stopped",
+        turnsTaken: 1,
+        accepted: 1,
+        durationMs: 1,
+        framesPublished: 1,
+        framesDropped: 0,
+        checkpointId: null,
+        progress: { distinctTiles: 1, maps: ["house"], turnsSinceNewTile: 1, actionsPerNewTile: null },
+        volition: { offered: 1, taken: 0, suppressed: 0 },
+        coherence: null,
+      }),
+    );
 
     expect(legacy).toMatchObject({ longestRecurringRun: 0, objectivesRetired: 0 });
   });

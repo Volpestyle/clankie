@@ -50,49 +50,6 @@ export function nextChannelTurn(state: ChannelTurnState): OperatorChannelMember 
 }
 
 /**
- * Whether the round has anything left to offer. A round ends when every member
- * has had its turn, not when someone answers: a second member may have
- * something worth adding, and in a real room it would say so.
- */
-export function channelRoundComplete(state: ChannelTurnState): boolean {
-  return nextChannelTurn(state) === undefined;
-}
-
-/**
- * What a member is shown when its turn comes: the transcript as it stands right
- * now, including anything a member earlier in the order just said. Passing that
- * along is what lets a member see its point already made and stay quiet.
- */
-export interface ChannelTurnPrompt {
-  readonly personaId: string;
-  /** Members who already spoke on this message, in the order they spoke. */
-  readonly spokeBefore: readonly string[];
-  /** True when nobody has answered yet, so this member is first to respond. */
-  readonly firstResponder: boolean;
-}
-
-export function channelTurnPrompt(state: ChannelTurnState, member: OperatorChannelMember): ChannelTurnPrompt {
-  const spokeBefore = state.taken
-    .filter((record) => record.outcome === "spoke")
-    .map((record) => record.personaId);
-  return {
-    personaId: member.personaId,
-    spokeBefore,
-    firstResponder: spokeBefore.length === 0,
-  };
-}
-
-/**
- * The per-message cost of a round, in model calls, before anyone is asked.
- * Sequential turn-taking charges for every member whether it speaks or passes,
- * which is the known price of the emergent behaviour and the reason membership
- * is bounded (ADR 0146).
- */
-export function channelRoundCost(state: ChannelTurnState): number {
-  return state.members.filter((member) => member.personaId !== state.lastSpeakerPersonaId).length;
-}
-
-/**
  * What a member answers with when it has nothing to add. Passing has to be
  * something the member can say in the same breath as an answer, because the
  * decision is the member's and is made in one turn — there is no second channel
