@@ -22,10 +22,27 @@ Clankie's own product skills remain authored in `.agents/skills`.
 | Working methods | solution-space, update-review-ethos                                                                                    |
 
 The bundle also retains the product/tool skills `this-machine`, `trace-clankie`,
-`computer-use-delegation`, `desktop-control` and `swarm-mcp`. `work-tracking`
+`computer-use-delegation`, `desktop-control`, `swarm-mcp` and `herdr`. `work-tracking`
 retains tracker policy; `work-items` owns Clankie's tracker mechanics.
 `clankie-mode` and `clankie-perf` are checkout-only links in `.agents/dev-skills`,
 excluded from releases. They require the sibling skills checkout.
+
+Herdr is both a bundled tool skill and an independently selectable global skill.
+Fresh installs and hosted bodies need its instructions without any owner-global
+skills. Its source is the pinned executable's `--skill` output, not a hand-maintained
+copy in the process-skill snapshot. Release assembly runs `libexec/herdr --skill`
+after installing the checksum-verified pin from `scripts/release/herdr.json`, and
+writes identical bytes into `.agents/skills` and both Claude plugin projections.
+The hosted image also verifies all three copies and the pinned version as its
+unprivileged runtime user.
+
+In a source checkout, `pnpm herdr:skill` regenerates the checked-in skill from the
+same checksum-verified pin; `pnpm herdr:skill:check` fails on drift and runs as part
+of `pnpm check`. The binary is cached under `.data/herdr/bin`; a fresh checkout
+downloads it from the official release. Do not edit or format the generated prose.
+James's global `herdr` skill may remain for plain harnesses and should likewise
+mirror the resolved `herdr --skill`. A runtime upgraded beyond the packaged pin
+owns its current reference through `herdr --skill`.
 
 ## Harness discovery
 

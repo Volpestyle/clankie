@@ -10,6 +10,7 @@
     ".data/**",
     "**/.eve/**",
     "packages/model-registry/data/**",
-    "vendor/opinionated-skills/**"
+    "vendor/opinionated-skills/**",
+    ".agents/skills/herdr/**"
   ]
 }

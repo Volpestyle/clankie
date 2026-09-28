@@ -8,9 +8,10 @@ Date: 2026-09-27
 ## Decision
 
 Bundle proven process, leadership, review and delivery guidance with Clankie.
-Keep tool/domain knowledge and personal workflows in the owner's independent
-selection. Plain harnesses must be usable without inheriting Clankie's working
-methods, so their relative effectiveness can be measured.
+Keep independent tool/domain knowledge and personal workflows in the owner's
+selection. Also bundle references for tools Clankie ships. Plain harnesses must
+be usable without inheriting Clankie's working methods, so their relative
+effectiveness can be measured.
 
 Reusable skills retain one authoring source in Volpestyle/skills. Clankie vendors
 an immutable MIT-licensed snapshot at a full Git revision. Its existing leadership
@@ -18,6 +19,17 @@ archive has the same source; Swarm owns the separate coordination protocol skill
 Product-specific skills remain authored in this repository. Personal account and
 team defaults are removed upstream before export. Checkout-only Clankie development
 workflows are not shipped.
+
+Herdr is a shipped tool, not a global-only exception: fresh installs and hosted
+bodies ship its pinned executable and cannot depend on James's global skills.
+Generate its bundled skill directly from `libexec/herdr --skill` during release
+assembly, after installing the checksum-verified `scripts/release/herdr.json` pin.
+Generate the checkout skill from that same pin, and fail `pnpm check` if its bytes
+drift. The release writes and checks the product root and both Claude plugin
+copies; the hosted image repeats the version/content check as the runtime user.
+No manually authored Herdr snapshot belongs in the opinionated-skills vendor tree.
+James's global `herdr` remains available for plain-harness tool use and should
+mirror the resolved `herdr --skill` too.
 
 Each local hire gets native discovery: a skills-only Claude plugin, Pi's explicit
 skill path, or a private Codex home overlay. Worker identity, permissions and
@@ -27,6 +39,7 @@ into the user's global harness configuration. See [the current bundle and limits
 ```mermaid
 flowchart LR
   S[Versioned skill sources] --> B[Pinned Clankie bundle]
+  R[Pinned Herdr binary --skill] --> B
   B --> C[Claude skills-only worker plugin]
   B --> P[Pi explicit skill path]
   B --> X[Codex private home overlay]

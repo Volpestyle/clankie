@@ -61,6 +61,11 @@ Supervised services run from their installed release root.
 Herdr ships as an official stable release binary, verified against the
 platform checksum in `scripts/release/herdr.json`. Its matching source archive
 is retained for license inventory; no fork or Rust/Zig build is needed for Herdr.
+The build generates the bundled `herdr` skill directly from that executable's
+`--skill` output, including both Claude plugin copies. `pnpm herdr:skill` refreshes
+the checkout copy from the same checksum-verified pin; `pnpm check` rejects drift.
+The hosted image verifies the skill bytes and pinned version as its runtime user,
+so a fresh body needs no globally installed Herdr skill.
 The service checks `https://herdr.dev/latest.json` at startup and every six hours,
 staging verified releases outside the immutable install. Live workers keep a
 matching server/CLI copy. Staged releases apply when Clankie's own fleet starts

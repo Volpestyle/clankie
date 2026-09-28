@@ -20,6 +20,7 @@ import { pipeline } from "node:stream/promises";
 import { build } from "esbuild";
 import { copySwarmRuntime } from "./release/swarm-runtime.mjs";
 import { buildHerdr, herdrPin, herdrSource } from "./build-herdr.mjs";
+import { bundleHerdrSkill } from "./release/herdr-skill.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const outputDir = join(repoRoot, "dist");
@@ -121,6 +122,11 @@ try {
     await installNodeRuntime(releaseRoot, temporaryRoot);
     await installNativeBinaries(releaseRoot);
   }
+  const herdrBinary = join(releaseRoot, "libexec/herdr");
+  // The hosted runtime runs as node, while assembly runs as root.
+  await chmod(herdrBinary, 0o755);
+  await bundleHerdrSkill(releaseRoot, herdrBinary, herdrPin.release.version);
+  await bundleHerdrSkill(releaseRoot, herdrBinary, herdrPin.release.version, true);
   await writeReleaseInventory(releaseRoot, metafile);
   await writeFile(join(releaseRoot, "VERSION"), `${releaseVersion}\n`);
   await writeFile(
