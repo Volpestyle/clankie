@@ -154,36 +154,37 @@ layer. Do not write Keychain entries, `~/.config/clankie/clankie.json`, or
 contract is `{repoRoot}/docs/cli.md` (every install) and `clankie help` (same
 index). Configure through the headless CLI:
 
-| Job                                   | Command                                                                               |
-| ------------------------------------- | ------------------------------------------------------------------------------------- |
-| This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                     |
-| Can he take a turn                    | `clankie doctor` → `captain` (`ready`, or `no_model` / `no_credential`)               |
-| Start at login                        | `clankie autostart status`, `clankie autostart enable`                                |
-| Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                 |
-| Bundled skill classes and selection   | `clankie skills`; also `clankie doctor` → `skills`                                    |
-| Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                               |
-| Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                        |
-| Captain + local providers             | `clankie model status`                                                                |
-| Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`             |
-| Switch captain                        | `clankie model set provider/model`                                                    |
-| Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`            |
-| Cheaper model for everyday turns      | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`  |
-| When long sessions compact            | `clankie model compaction`, `clankie model compaction set 250000`, `… default`        |
-| Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`    |
-| Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`              |
-| Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`      |
-| Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`               |
-| Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                   |
-| Herdr session                         | `clankie herdr status`, `clankie herdr use NAME`, `clankie herdr create`              |
-| His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`         |
-| Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)       |
-| Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                |
-| Pick up model/provider config         | `clankie restart captain`                                                             |
-| Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json` |
-| Rotate operator credential            | `clankie operator-credential rotate --json`                                           |
-| Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                 |
-| Play session                          | `clankie play status` / `clankie play stop`                                           |
-| Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it  |
+| Job                                   | Command                                                                                        |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                              |
+| Can he take a turn                    | `clankie doctor` → `captain` (`ready`, or `no_model` / `no_credential`)                        |
+| Start at login                        | `clankie autostart status`, `clankie autostart enable`                                         |
+| Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                          |
+| Bundled skill classes and selection   | `clankie skills`; also `clankie doctor` → `skills`                                             |
+| Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                                        |
+| Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                                 |
+| Captain + local providers             | `clankie model status`                                                                         |
+| Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                      |
+| Switch captain                        | `clankie model set provider/model`                                                             |
+| Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                     |
+| Cheaper model for everyday turns      | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`           |
+| When long sessions compact            | `clankie model compaction`, `clankie model compaction set 250000`, `… default`                 |
+| ElevenLabs voice model                | `clankie voice status`, `clankie voice model set eleven_v4_turbo`, `clankie voice model clear` |
+| Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`             |
+| Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                       |
+| Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`               |
+| Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                        |
+| Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                            |
+| Herdr session                         | `clankie herdr status`, `clankie herdr use NAME`, `clankie herdr create`                       |
+| His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                  |
+| Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)                |
+| Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                         |
+| Pick up model/provider config         | `clankie restart captain`                                                                      |
+| Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`          |
+| Rotate operator credential            | `clankie operator-credential rotate --json`                                                    |
+| Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                          |
+| Play session                          | `clankie play status` / `clankie play stop`                                                    |
+| Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it           |
 
 Clankie's Spider-Man bridge stays disabled under [VUH-1325](https://linear.app/vuhlp/issue/VUH-1325).
 Its sources passed independent review, but the practice-range freeze lift does
@@ -368,6 +369,16 @@ finished worker, then `herdr pane close ID` and verify it is gone. Keep panes
 needed for follow-up or requested by your person; leave borrowed or repurposed
 panes and operator drafts alone. Your own finished-worker cleanup is already
 authorized.
+
+Voice model selection preserves the configured voice ID and providers. Explicit
+`eleven_v4_turbo` uses Text to Dialogue WebSockets; an unset model retains Flash
+v2.5. `voice status` reports stored/effective settings and environment overrides.
+`voice model clear` restores an originally unset model; restore any explicit
+previous model with `voice model set ID`. The launcher does not restart for these
+writes. When authorized, `clankie restart clankie` reloads the service and its
+dependent bodies. Older installations have only the console `/voice` wizard.
+A readiness check skips paid ElevenLabs synthesis: separate offline tests, real
+provider audio, and actual Discord audibility when reporting verification.
 
 ## The seat
 

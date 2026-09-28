@@ -485,6 +485,33 @@ app through `/v1/accounts/linear/start` and `/complete`.
 is configured. GitHub revocation needs the OAuth app's client secret as the
 broker entry `github-oauth-app`.
 
+### `voice [status]` / `voice model set MODEL_ID` / `voice model clear`
+
+The headless launcher now supports inspecting voice settings and changing only
+an already configured ElevenLabs model. Earlier builds exposed `/voice` only
+inside the console and rejected `clankie voice`.
+
+`voice status` returns `voice` (stored), `effectiveVoice`,
+`overriddenByEnvironment` (environment variable names), `settingsFile`, and
+`restart`. No credential is returned. Model writes preserve the voice ID,
+realtime provider, consent and all other settings; they never restart services.
+Select the provider and voice ID with the console's `/voice` first.
+
+```bash
+clankie voice status
+clankie voice model set eleven_v4_turbo
+# After reviewing settings and arranging an interruption of active calls/work:
+clankie restart clankie
+```
+
+`eleven_v4_turbo` selects Text to Dialogue multi-context WebSocket synthesis.
+An unset model retains `eleven_flash_v2_5` on the legacy TTS transport. To roll
+back an originally unset model, use `clankie voice model clear`, then the same
+restart. If a model was explicitly set, restore it with `model set ORIGINAL_ID`.
+Environment overrides still win: check `effectiveVoice` before restarting.
+This command is local-only; hosted mode refuses it. See the
+[voice operating guide](../apps/discord-bridge/README.md) for verification limits.
+
 ### `work [status]` / `work init` / `work list|show|create|update|close|attach`
 
 Tracks work where the repo already does ([ADR 0191](adr/0191-work-is-tracked-where-the-repo-tracks-it.md)):

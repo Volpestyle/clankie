@@ -1,3 +1,4 @@
+import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { readFile } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -246,5 +247,64 @@ describe("canonical owner command layer", () => {
     const entrypoint = await readFile(new URL("../src/index.ts", import.meta.url), "utf8");
     expect(entrypoint).toMatch(/statusCommand/u);
     expect(entrypoint).toMatch(/doctorCommand/u);
+  });
+});
+
+describe("headless ElevenLabs model selection", () => {
+  it("changes only the model, reports environment precedence, and restores an unset model", async () => {
+    const env = await isolatedEnv();
+    const store = new SettingsStore(defaultSettingsPath(env));
+    const before = await store.update((current) => ({
+      ...current,
+      voice: {
+        ...current.voice,
+        ttsProvider: "elevenlabs",
+        elevenLabsVoiceId: "existing_voice",
+        openAiVoice: "marin",
+      },
+      discord: { ...current.discord, voiceConsentPolicy: "presence" },
+    }));
+    const selected = await run(["voice", "model", "set", "eleven_v4_turbo"], env);
+    expect(selected).toMatchObject({
+      ok: true,
+      voice: { elevenLabsModelId: "eleven_v4_turbo", elevenLabsVoiceId: "existing_voice" },
+      restart: "clankie restart clankie",
+    });
+    expect(await store.load()).toEqual({
+      ...before,
+      voice: { ...before.voice, elevenLabsModelId: "eleven_v4_turbo" },
+    });
+    expect(
+      await run(["voice", "status"], { ...env, CLANKIE_VOICE_ELEVENLABS_MODEL_ID: "eleven_flash_v2_5" }),
+    ).toMatchObject({
+      voice: { elevenLabsModelId: "eleven_v4_turbo" },
+      effectiveVoice: { elevenLabsModelId: "eleven_flash_v2_5" },
+      overriddenByEnvironment: ["CLANKIE_VOICE_ELEVENLABS_MODEL_ID"],
+    });
+    await run(["voice", "model", "clear"], env);
+    expect(await store.load()).toEqual(before);
+  });
+
+  it("refuses unknown commands, unsafe IDs and native-provider selection without writing", async () => {
+    const env = await isolatedEnv();
+    const store = new SettingsStore(defaultSettingsPath(env));
+    const before = await store.load();
+    for (const args of [
+      ["voice", "status", "extra"],
+      ["voice", "model", "set", "../bad"],
+      ["voice", "model", "set", "eleven_v4_turbo"],
+    ]) {
+      const stdout = outputBuffer();
+      const stderr = outputBuffer();
+      expect(
+        await runHeadlessCaptainCommand(args, {
+          repoRoot: "/unused",
+          env,
+          stdout: stdout.stream,
+          stderr: stderr.stream,
+        }),
+      ).toBe(1);
+      expect(await store.load()).toEqual(before);
+    }
   });
 });

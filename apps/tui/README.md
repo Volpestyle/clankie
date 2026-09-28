@@ -228,6 +228,9 @@ credential holder.
 - `/voice` selects OpenAI Realtime, Grok Voice, or OpenAI plus ElevenLabs and
   configures the active model, voice, xAI reasoning effort, and brokered API
   keys. `/voice status` shows the effective settings and environment overrides.
+  `eleven_v4_turbo` opts into dialogue synthesis; unset keeps legacy Flash.
+  Headless `clankie voice status`, `voice model set MODEL_ID`, and
+  `voice model clear` inspect, select, or restore the default without restarting.
 - YouTube music is an ordinary prompt, not a slash command. Audible playback is
   on the active Discord body's Vox primary-voice role; see the
   [Discord media guide](../../docs/discord-media.md).

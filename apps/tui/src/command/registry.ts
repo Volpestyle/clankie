@@ -157,6 +157,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["effort"],
     lines: ["  effort set LEVEL [--model provider/model] | clear [--model provider/model]"],
   },
+  { nouns: ["voice"], lines: ["  voice [status] | model set MODEL_ID | model clear (ElevenLabs)"] },
   { nouns: ["image-model"], lines: ["  image-model [status] | set provider/model | clear"] },
   { nouns: ["video-model"], lines: ["  video-model [status] | set provider/model | clear"] },
   { nouns: ["persona"], lines: ["  persona [status]         Read owner-authored character configuration"] },

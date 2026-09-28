@@ -55,6 +55,29 @@ to the pinned `grok-voice-think-fast-2.0` model and `eve` voice; `/voice` can
 change both and xAI's `high`/`none` reasoning effort. xAI does not expose a
 streaming-STT model selector, so no fake model knob is presented.
 
+For OpenAI plus ElevenLabs, explicit `voice.elevenLabsModelId: eleven_v4_turbo`
+selects `/v1/text-to-dialogue/multi-stream-input`. It registers the existing
+voice ID, sends dialogue `inputs`, and requests the same 24 kHz mono PCM as
+legacy TTS. Context keep-alives cover model pauses; `is_final` releases a
+completed utterance, while `is_final_audio_for_turn` alone does not. Barge-in
+retires the context and discards late audio. The provider flushes a retired
+dialogue context, so this does not guarantee cancellation of billed generation.
+Room audio still goes only to the realtime provider, under the existing consent
+and trust policies. Unset models retain `eleven_flash_v2_5`; other legacy model
+IDs retain the TTS endpoint. No automatic fallback changes the chosen model.
+
+Set the model through the console `/voice`, or the new headless
+`clankie voice model set eleven_v4_turbo`; `clankie voice status` reports stored
+and effective settings. Review before `clankie restart clankie`, which also
+restarts dependent bodies. Roll back an originally unset model with
+`clankie voice model clear` and the same restart. Explicit models can be restored
+with `model set ORIGINAL_ID`. See [CLI contract](../../docs/cli.md).
+
+Offline transport/wiring tests prove client behavior; a broker-authenticated
+provider canary proves real synthesis; only listening in Discord proves room
+audibility. `pnpm discord:voice-readiness` skips paid ElevenLabs synthesis and
+cannot establish either of the latter claims.
+
 `CLANKIE_API_URL` defaults to `http://127.0.0.1:4310`.
 `DISCORD_BRIDGE_RECEIPT_PATH` may select an absolute receipt path; otherwise it
 uses `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-live-receipts.jsonl`.

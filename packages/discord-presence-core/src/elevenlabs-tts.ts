@@ -7,8 +7,8 @@
  * multi-context TTS WebSocket, and the PCM that comes back feeds the same
  * playback path the realtime audio deltas fed. One context per response maps
  * onto the floor machine's one-response-at-a-time discipline — barge-in is
- * `closeContext`, which stops server-side generation instead of letting an
- * interrupted sentence finish billing.
+ * `closeContext`, which drops late audio locally and retires that context.
+ * Dialogue close_context flushes at the provider; it is not a billing-cancellation guarantee.
  *
  * The discipline mirrors {@link ../realtime-session.ts}: injected transport so
  * tests are deterministic and offline, WSS-or-loopback endpoints, the API key
@@ -31,6 +31,8 @@ import {
 /** Flash is the latency tier ElevenLabs builds for conversational use (~75 ms inference). */
 const DEFAULT_ELEVENLABS_MODEL = "eleven_flash_v2_5";
 const DEFAULT_ELEVENLABS_BASE_URL = "wss://api.elevenlabs.io/v1/text-to-speech";
+const ELEVENLABS_DIALOGUE_BASE_URL = "wss://api.elevenlabs.io/v1/text-to-dialogue";
+const DIALOGUE_KEEP_ALIVE_MS = 10_000;
 
 /**
  * Pinned, never configurable: 24 kHz mono s16le is what the realtime audio
@@ -131,6 +133,9 @@ export class ElevenLabsTtsSession {
   private readonly onCloseCallback: ((reason: ElevenLabsTtsCloseReason) => void) | undefined;
   private readonly onErrorCallback: ((message: string) => void) | undefined;
   private readonly voiceSettings: ElevenLabsVoiceSettings | undefined;
+  private readonly dialogue: boolean;
+  private readonly voiceId: string;
+  private keepAliveHandle: unknown;
   private readonly contextAudioBytes = new Map<string, number>();
   /** Contexts closed normally but still draining their final server audio. */
   private readonly closingContexts = new Set<string>();
@@ -151,6 +156,8 @@ export class ElevenLabsTtsSession {
     this.onCloseCallback = options.onClose;
     this.onErrorCallback = options.onError;
     this.voiceSettings = options.voiceSettings;
+    this.dialogue = options.modelId?.trim() === "eleven_v4_turbo";
+    this.voiceId = safeIdentifier(options.voiceId, "ElevenLabs voice id");
     socket.onMessage((data) => {
       this.receive(data);
     });
@@ -169,6 +176,7 @@ export class ElevenLabsTtsSession {
       },
       boundedSessionLifetime(options.maxLifetimeMs ?? DEFAULT_ELEVENLABS_SESSION_LIFETIME_MS),
     );
+    if (this.dialogue) this.scheduleKeepAlive();
   }
 
   public get isOpen(): boolean {
@@ -176,8 +184,8 @@ export class ElevenLabsTtsSession {
   }
 
   /**
-   * Starts an utterance. The initial single-space text is the documented
-   * context-initialization handshake, and voice settings ride along here so a
+   * Starts an utterance: legacy TTS uses a space, dialogue registers one voice.
+   * Voice settings ride along here so a
    * mid-call settings change cannot restyle an utterance already in flight.
    */
   public openContext(contextId: string): void {
@@ -191,7 +199,7 @@ export class ElevenLabsTtsSession {
     }
     this.contextAudioBytes.set(id, 0);
     this.sendFrame({
-      text: " ",
+      ...(this.dialogue ? { voices: [this.voiceId] } : { text: " " }),
       context_id: id,
       ...(this.voiceSettings === undefined ? {} : { voice_settings: wireVoiceSettings(this.voiceSettings) }),
     });
@@ -210,7 +218,10 @@ export class ElevenLabsTtsSession {
     if (text.length > MAX_ELEVENLABS_TEXT_APPEND_CHARACTERS) {
       throw new Error("ElevenLabs text append exceeded the character limit");
     }
-    this.sendFrame({ text, context_id: id });
+    this.sendFrame({
+      context_id: id,
+      ...(this.dialogue ? { inputs: [{ text, voice_id: this.voiceId }] } : { text }),
+    });
   }
 
   /** Flushes buffered text and closes the context so ElevenLabs emits its final frame. */
@@ -223,8 +234,8 @@ export class ElevenLabsTtsSession {
   }
 
   /**
-   * Ends an utterance. On barge-in this is called before the flush would
-   * have been, which stops server-side generation of speech nobody will hear.
+   * Abandons an utterance locally and retires its provider context. Dialogue
+   * close_context flushes remaining generation, whose late audio we discard.
    */
   public closeContext(contextId: string): void {
     this.assertOpen();
@@ -261,10 +272,11 @@ export class ElevenLabsTtsSession {
       // ElevenLabs error frames carry prose that can echo submitted text;
       // only a short machine-readable code is ever surfaced.
       this.onErrorCallback?.(describeServerError(event));
+      if (this.dialogue) this.closeWith("error");
       return;
     }
     const contextId = asString(event.contextId) ?? asString(event.context_id);
-    if (contextId === undefined) return;
+    if (contextId === undefined || !this.contextAudioBytes.has(contextId)) return;
     if (event.isFinal === true || event.is_final === true) {
       // A dangling carry byte at the end of a context is a truncated final
       // sample nothing can play; it is dropped, not surfaced.
@@ -325,6 +337,22 @@ export class ElevenLabsTtsSession {
     }
   }
 
+  /** Dialogue contexts expire after 20s without input, even while the model is thinking. */
+  private scheduleKeepAlive(): void {
+    this.keepAliveHandle = this.timers.setTimeout(() => {
+      if (this.closed) return;
+      try {
+        for (const id of this.contextAudioBytes.keys()) {
+          if (!this.closingContexts.has(id)) this.sendFrame({ context_id: id, keep_alive: true });
+        }
+      } catch {
+        this.onErrorCallback?.("ElevenLabs keep-alive failed");
+        return;
+      }
+      this.scheduleKeepAlive();
+    }, DIALOGUE_KEEP_ALIVE_MS);
+  }
+
   private requireOpenContext(contextId: string): string {
     const id = boundedContextId(contextId);
     if (!this.contextAudioBytes.has(id) || this.closingContexts.has(id)) {
@@ -337,6 +365,7 @@ export class ElevenLabsTtsSession {
     if (this.closed) return;
     this.closed = true;
     this.timers.clearTimeout(this.lifetimeHandle);
+    if (this.keepAliveHandle !== undefined) this.timers.clearTimeout(this.keepAliveHandle);
     this.contextAudioBytes.clear();
     this.closingContexts.clear();
     this.contextCarry.clear();
@@ -360,7 +389,12 @@ export async function openElevenLabsTtsSession(
   const url = buildElevenLabsUrl(options);
   const apiKey = nonEmpty(options.apiKey, "ElevenLabs API key");
   const factory = options.socketFactory ?? openRealtimeWebSocket;
-  const socket = await factory(url, Object.freeze({ "xi-api-key": apiKey }));
+  let socket: RealtimeSocket;
+  try {
+    socket = await factory(url, Object.freeze({ "xi-api-key": apiKey }));
+  } catch {
+    throw new Error("ElevenLabs connection failed");
+  }
   try {
     return new ElevenLabsTtsSession(socket, options);
   } catch (error) {
@@ -384,13 +418,18 @@ const globalTimers: RealtimeTimers = {
 function buildElevenLabsUrl(options: ElevenLabsTtsSessionOptions): string {
   const voiceId = safeIdentifier(options.voiceId, "ElevenLabs voice id");
   const modelId = safeIdentifier(options.modelId ?? DEFAULT_ELEVENLABS_MODEL, "ElevenLabs model id");
-  const base = (options.baseUrl ?? DEFAULT_ELEVENLABS_BASE_URL).replace(/\/+$/, "");
-  const url = new URL(`${base}/${voiceId}/multi-stream-input`);
+  const dialogue = modelId === "eleven_v4_turbo";
+  const base = (
+    options.baseUrl ?? (dialogue ? ELEVENLABS_DIALOGUE_BASE_URL : DEFAULT_ELEVENLABS_BASE_URL)
+  ).replace(/\/+$/, "");
+  const url = new URL(dialogue ? `${base}/multi-stream-input` : `${base}/${voiceId}/multi-stream-input`);
   if (url.protocol !== "wss:" && !(url.protocol === "ws:" && isLoopback(url))) {
     throw new Error("ElevenLabs base URL must use WSS unless it is loopback");
   }
   url.searchParams.set("model_id", modelId);
   url.searchParams.set("output_format", ELEVENLABS_OUTPUT_FORMAT);
+  // Dialogue owns its buffering and fixed 20-second context inactivity timeout.
+  if (dialogue) return url.toString();
   // Disables the chunk schedule and every server-side buffer, so a short
   // conversational reply does not wait for a 120-character floor to fill.
   //

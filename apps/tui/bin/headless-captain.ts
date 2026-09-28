@@ -31,6 +31,7 @@ import { runFleetCommand } from "../src/command/fleet.ts";
 import { forwardsToFleetHerdr, herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 import { runEffortCommand } from "../src/command/effort.ts";
+import { runVoiceCommand } from "../src/command/voice.ts";
 import { runImageModelCommand } from "../src/command/image-model.ts";
 import { runVideoModelCommand } from "../src/command/video-model.ts";
 import { runDiscordCommand } from "../src/command/discord.ts";
@@ -180,6 +181,10 @@ export async function runHeadlessCaptainCommand(
       const result = await runEffortCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
+    }
+    if (command === "voice") {
+      outputJson(stdout, await runVoiceCommand(rest, options));
+      return 0;
     }
     if (command === "image-model") {
       const result = await runImageModelCommand(rest, options);

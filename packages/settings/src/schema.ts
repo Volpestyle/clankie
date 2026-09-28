@@ -221,7 +221,7 @@ export const VoiceSettingsSchema = z
     xAiReasoningEffort: z.enum(["high", "none"]).default("high"),
     /** Public ElevenLabs voice identifier, required when {@link ttsProvider} is `elevenlabs`. */
     elevenLabsVoiceId: VendorIdentifierSchema.optional(),
-    /** ElevenLabs model (e.g. `eleven_flash_v2_5`); unset defers to the runtime default. */
+    /** ElevenLabs model: `eleven_v4_turbo` uses dialogue; unset keeps legacy `eleven_flash_v2_5`. */
     elevenLabsModelId: VendorIdentifierSchema.optional(),
   })
   .strict()
