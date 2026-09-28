@@ -1,0 +1,80 @@
+pnpm check, 2026-09-28 UTC, exit 1.
+
+Formatting, lint (including clippy), deadcode, docs, infra and typecheck passed.
+Vitest: 345 files passed, 1 failed; 2886 tests passed, 2 failed, 2 skipped.
+The two failing tests are outside this change, in the concurrently edited hire-brief.test.ts.
+
+Failure excerpt (fixture values only):
+ FAIL  apps/clankie/test/hire-brief.test.ts > a codex hire runs off the shared daemon and its brief is the first turn that reports its session
+AssertionError: expected { outcome: 'failed', …(2) } to match object { outcome: 'spawned', …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "brief": {
+-     "outcome": "delivered",
+-     "seatId": "term_0a1b2c",
+-     "status": "working",
+-   },
+-   "outcome": "spawned",
+-   "seat": {
+-     "harness": "codex",
+-     "seatId": "term_0a1b2c",
+-   },
++   "outcome": "failed",
+  }
+
+ ❯ apps/clankie/test/hire-brief.test.ts:192:19
+    190|   const { root, captain, commands } = await fixture();
+    191|   try {
+    192|     const bank = await captain.laneToolBank("operator", "global-defaul…
+       |                   ^
+    193|     const brief = "BRIEF-2c9e: reply with just ok.";
+    194|     const hired = await call(bank, "hire_agent", {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  apps/clankie/test/hire-brief.test.ts > a codex hire waits past the old 10 s limit for a first turn still connecting MCP servers
+AssertionError: expected { outcome: 'failed', …(2) } to match object { outcome: 'spawned', seat: { …(2) } }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "outcome": "spawned",
+-   "seat": {
+-     "harness": "codex",
+-     "seatId": "term_0a1b2c",
+-   },
++   "outcome": "failed",
+  }
+
+ ❯ apps/clankie/test/hire-brief.test.ts:232:19
+    231|   process.env.FAKE_HERDR_FIRST_TURN_DELAY_MS = "11000";
+    232|   try {
+    233|     const bank = await captain.laneToolBank("operator", "global-defaul…
+       |           ^
+    234|     const hired = await call(bank, "hire_agent", {
+    235|       harness: "codex",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+
+ Test Files  1 failed | 345 passed (346)
+      Tests  2 failed | 2886 passed | 2 skipped (2890)
+   Start at  23:13:14
+   Duration  242.39s (transform 4.73s, setup 0ms, import 101.47s, tests 106.36s, environment 19ms)
+
+[ELIFECYCLE] Test failed. See above for more details.
+[ELIFECYCLE] Command failed with exit code 1.
+
+After the sibling bundle change, focused rerun of hire-brief.test.ts and claude-plugin.test.ts: 2 files, 9 tests passed in 15.66s.
+This does not retroactively make the full-check invocation pass.
+
+Remaining pnpm test chain run separately after the Vitest failure:
+@clankie/vox test: 123 passed, 0 failed.
+@clankie/vox-client smoke debug: exit 0, Vox IPC ready.
