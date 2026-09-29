@@ -209,11 +209,19 @@ The voice leave receipt records `reason: self_decided` for the local tool
 (ADR 0057).
 
 Speech interruption waits for a substantive transcript with speech-level overlap
-from the floor holder, or a direct re-address. Brief fragments and acknowledgements
+from a recently engaged speaker, or a direct re-address. Brief fragments and acknowledgements
 let playback continue; “stop”, “wait”, and “hold on” remain valid interruptions.
 `interrupted`, completed `response`, and synthesis `failed` receipts include
 playback and provider item ids when available, alongside the delivery id.
 Intentional TTS teardown does not emit a synthesis failure for late socket errors.
+
+Group engagement retains up to five recent speakers; their follow-ups remain
+optional response opportunities. Different people's actionable asks receive
+separate handoffs in order, while same-person refinements can steer live work.
+Realtime banter continues while handoffs wait. Results identify their recipient
+so Clankie can name who he is answering. See
+[ADR 0091](../../docs/adr/0091-a-mid-turn-message-steers-the-turn.md) for the
+serialization tradeoff and pending live verification.
 
 ### Interpreting voice latency
 

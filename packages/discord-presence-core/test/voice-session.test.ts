@@ -294,6 +294,7 @@ class FakeConversation implements VoiceConversationPort {
   public readonly textItems: string[] = [];
   public readonly imageItems: string[] = [];
   public responseCreates = 0;
+  public readonly responseContexts: (string | undefined)[] = [];
   public readonly truncations: { itemId: string; audioEndMs: number }[] = [];
   public readonly functionResults: { callId: string; output: string }[] = [];
   public readonly input: VoiceConversationOpenInput;
@@ -321,9 +322,10 @@ class FakeConversation implements VoiceConversationPort {
     this.imageItems.push(pngBase64);
   }
 
-  public createResponse(): void {
+  public createResponse(context?: string): void {
     this.assertOpen();
     this.responseCreates += 1;
+    this.responseContexts.push(context);
   }
 
   public truncate(itemId: string, audioEndMs: number): void {
@@ -2253,9 +2255,8 @@ describe("ability path", () => {
     });
   });
 
-  // Required mission evidence: two ask_clankie calls serialize on the turn
-  // queue, and their spoken results never talk over each other.
-  it("serializes ask_clankie through the unchanged captain lane with evidence", async () => {
+  // Same-person calls can reach Pi's steering mechanism; speech stays ordered.
+  it("admits same-speaker refinements during a handoff with separate delivery ids", async () => {
     const resolvers: ((result: CaptainChannelTurnResult) => void)[] = [];
     const harness = await joinedHarness({
       captain: () =>
@@ -2285,8 +2286,8 @@ describe("ability path", () => {
       textCharacters: 0,
     });
     await flush();
-    // Serialized: the second handoff waits for the first to finish.
-    expect(harness.submitCalls).toHaveLength(1);
+    expect(harness.submitCalls).toHaveLength(2);
+    expect(harness.submitCalls[0]?.deliveryId).not.toBe(harness.submitCalls[1]?.deliveryId);
     expect(at(harness.submitCalls, 0).trigger).toMatchObject({
       kind: "voice_event",
       guildId: GUILD,
@@ -2297,12 +2298,17 @@ describe("ability path", () => {
     harness.clock.now = 1_200;
     at(resolvers, 0)(settledResult("turn-1", "Deploy is green."));
     await flush();
-    expect(conversation.functionResults).toEqual([{ callId: "call_1", output: "Deploy is green." }]);
+    expect(conversation.functionResults).toEqual([
+      { callId: "call_1", output: expect.stringContaining("Deploy is green.") },
+    ]);
     expect(harness.submitCalls).toHaveLength(2);
     harness.clock.now = 1_300;
     at(resolvers, 1)(settledResult("turn-2", "Runner restarted."));
     await flush();
-    expect(at(conversation.functionResults, 1)).toEqual({ callId: "call_2", output: "Runner restarted." });
+    expect(at(conversation.functionResults, 1)).toEqual({
+      callId: "call_2",
+      output: expect.stringContaining("Runner restarted."),
+    });
 
     // Their spoken results play and receipt in order.
     conversation.input.onAudioDelta(pcmDelta(480), "item_r1");
@@ -2345,7 +2351,7 @@ describe("ability path", () => {
     expect(responses[0]).toMatchObject({ fastPath: false, state: "settled", wake: "waking", handoffMs: 200 });
     // Both calls came from the same waking response, so both spoken results
     // carry that decision's wake classification.
-    expect(responses[1]).toMatchObject({ fastPath: false, state: "settled", wake: "waking", handoffMs: 100 });
+    expect(responses[1]).toMatchObject({ fastPath: false, state: "settled", wake: "waking", handoffMs: 300 });
   });
 
   // Required mission evidence (criterion 4): approval-shaped outcomes speak
@@ -2377,7 +2383,9 @@ describe("ability path", () => {
     });
     await flush();
     const result = at(conversation.functionResults, 0);
-    expect(result.output).toBe("I need you to continue that request on the authenticated operator surface.");
+    expect(result.output).toContain(
+      "I need you to continue that request on the authenticated operator surface.",
+    );
     expect(result.output).not.toContain("secret");
     conversation.input.onAudioDelta(pcmDelta(480), "item_r1");
     await flush();
@@ -2430,7 +2438,10 @@ describe("ability path", () => {
       argumentsJson: '{"request":"try again"}',
     });
     await flush();
-    expect(at(conversation.functionResults, 1)).toEqual({ callId: "call_2", output: "Back online." });
+    expect(at(conversation.functionResults, 1)).toEqual({
+      callId: "call_2",
+      output: expect.stringContaining("Back online."),
+    });
   });
 
   it("correlates a realtime music tool through its queue and spoken result", async () => {
@@ -2632,7 +2643,10 @@ describe("ability path", () => {
       argumentsJson: '{"request":"still there?"}',
     });
     await flush();
-    expect(at(conversation.functionResults, 0)).toEqual({ callId: "call_2", output: "Still here." });
+    expect(at(conversation.functionResults, 0)).toEqual({
+      callId: "call_2",
+      output: expect.stringContaining("Still here."),
+    });
   });
 
   it("receipts absorbed as absorbed, not as a decline", async () => {
@@ -2681,7 +2695,7 @@ describe("ability path", () => {
     expect(harness.session.status().floorState).toBe("engaged");
     release?.(settledResult("turn-slow", "Found it."));
     await flush();
-    expect(at(harness.conversation().functionResults, 0).output).toBe("Found it.");
+    expect(at(harness.conversation().functionResults, 0).output).toContain("Found it.");
   });
 
   // A handoff that never settles is not a slow one: `stopFloorWork` lives in a
@@ -2942,7 +2956,7 @@ describe("reconnect", () => {
     });
     await flush();
 
-    expect(at(harness.submitCalls, -1).deliveryId).toBe(secondDeliveryId);
+    expect(at(harness.submitCalls, -1).deliveryId).toBe(`${secondDeliveryId}:call_realigned`);
   });
 
   it("a lost listener emits failed evidence and reopens with bounded backoff, resetting on success", async () => {
@@ -3508,7 +3522,7 @@ describe("voice room membership and self-directed departure", () => {
     await flush();
     expect(conversation.functionResults).toContainEqual({
       callId: "investigate",
-      output: "Findings are ready.",
+      output: expect.stringContaining("Findings are ready."),
     });
     conversation.input.onResponseDone(silent);
     await flush();
@@ -3624,4 +3638,100 @@ describe("voice room membership and self-directed departure", () => {
     expect(harness.vox.leaves).toEqual(["session_leave"]);
     await harness.session.leave();
   });
+});
+
+it("keeps a chaotic room talking while Alice refines and Bob waits for his own answer", async () => {
+  const resolvers: ((result: CaptainChannelTurnResult) => void)[] = [];
+  const harness = await joinedHarness({
+    occupants: [
+      { userId: ALICE, displayName: "Alice" },
+      { userId: BOB, displayName: "Bob" },
+      { userId: MALLORY, displayName: "Carol" },
+    ],
+    captain: () => new Promise((resolve) => resolvers.push(resolve)),
+  });
+  await harness.consent(ALICE);
+  await harness.consent(BOB);
+  await harness.consent(MALLORY);
+  await harness.say(ALICE, "hey clankie find a co-op game");
+  const conversation = harness.conversation();
+  const done = () =>
+    conversation.input.onResponseDone({
+      responseId: "r",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+  const ask = (callId: string, request: string) => {
+    conversation.input.onFunctionCall({
+      callId,
+      name: "ask_clankie",
+      argumentsJson: JSON.stringify({ request }),
+    });
+    done();
+  };
+  ask("alice-game", "find a co-op game");
+  await flush();
+  await harness.say(BOB, "hey clankie what is tomorrow's weather");
+  ask("bob-weather", "look up tomorrow's weather");
+  await flush();
+  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE]);
+
+  // A nameless refinement survives Bob engaging; it steers only Alice's run.
+  await harness.say(ALICE, "only games for four players");
+  ask("alice-refines", "only games for four players");
+  await flush();
+  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, ALICE]);
+
+  // Unengaged crosstalk is heard without spending a response.
+  const beforeCrosstalk = conversation.responseCreates;
+  await harness.say(MALLORY, "pass the chips please");
+  expect(conversation.responseCreates).toBe(beforeCrosstalk);
+  expect(conversation.textItems.some((text) => text.includes("pass the chips please"))).toBe(true);
+  await harness.say(MALLORY, "hey clankie that boss fight was ridiculous");
+  expect(conversation.responseCreates).toBeGreaterThan(beforeCrosstalk);
+  conversation.input.onAudioDelta(pcmDelta(480), "banter");
+  done();
+  await flush();
+  expect(harness.ofType("response")).toContainEqual(
+    expect.objectContaining({ userId: MALLORY, fastPath: true }),
+  );
+  expect(conversation.functionResults).toHaveLength(0);
+
+  resolvers[0]!(settledResult("alice-turn", "Try this four-player game."));
+  resolvers[1]!({ state: "absorbed", captainSessionId: "room", turnId: "refinement" });
+  await flush();
+  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, ALICE, BOB]);
+  expect(conversation.functionResults[0]?.output).toContain('"displayName":"Alice"');
+  expect(conversation.functionResults[0]?.output).toContain("Address this person by name");
+  conversation.input.onAudioDelta(pcmDelta(480), "alice-answer");
+  done();
+  await flush();
+  resolvers[2]!(settledResult("bob-turn", "Rain tomorrow."));
+  await flush();
+  expect(conversation.functionResults.map((result) => result.output)).toEqual([
+    expect.stringContaining('"displayName":"Alice"'),
+    expect.stringContaining('"displayName":"Bob"'),
+  ]);
+  conversation.input.onAudioDelta(pcmDelta(480), "bob-answer");
+  done();
+  await flush();
+  expect(
+    harness
+      .ofType("response")
+      .filter((event) => !event.fastPath)
+      .map((event) => [event.userId, event.turnId]),
+  ).toEqual([
+    [ALICE, "alice-turn"],
+    [BOB, "bob-turn"],
+  ]);
+  expect(conversation.functionResults.map((result) => result.callId)).toEqual(["alice-game", "bob-weather"]);
+  expect(
+    conversation.responseContexts.filter((context) => context?.includes("Response opportunity")),
+  ).toEqual([
+    expect.stringContaining(`"speakerId":"${ALICE}"`),
+    expect.stringContaining(`"speakerId":"${BOB}"`),
+    expect.stringContaining(`"speakerId":"${ALICE}"`),
+    expect.stringContaining(`"speakerId":"${MALLORY}"`),
+  ]);
 });

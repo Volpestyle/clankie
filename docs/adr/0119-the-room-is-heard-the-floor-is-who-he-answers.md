@@ -21,8 +21,18 @@ Consent is not part of this amendment. Unconsented speakers stay unsubscribed.
 
 ## Decision
 
-**An open session hears every consented utterance. `holderId` is who may barge
-in, not who forces him to speak. Silence is a real floor outcome.**
+**An open session hears every consented utterance. Recently engaged speakers
+may receive follow-up offers and deliberately barge in; none forces him to
+speak. Silence is a real floor outcome.**
+
+Amendment (2026-09-28): retain up to five engaged speakers, each with the
+existing 60-second recency window. A clean hail, an accepted speech offer, or
+that person's pending work refreshes their entry. Unanswered follow-ups and
+assistant speech do not renew every participant. The oldest entry is evicted
+when a sixth person engages. This replaces the exclusive holder, which dropped
+Alice's nameless refinement as soon as Bob addressed him. `floorHolderId` still
+reports the most recently selected speaker for compatibility; admission and
+barge-in consult the recent set. Decay and the volition caps are unchanged.
 
 ```mermaid
 flowchart TD
@@ -31,7 +41,7 @@ flowchart TD
   H --> F{Floor}
   F -->|addressed| S[wake/hold + offer]
   F -->|mentioned| M[wake/offer — he may stay silent]
-  F -->|holder, unnamed| O[offer]
+  F -->|recently engaged, unnamed| O[offer]
   F -->|reply policy all, dormant| P[offer — engage only if he speaks]
   F -->|no name| L[listen / volition]
 ```
@@ -45,10 +55,10 @@ across the whole sentence reopen the same hole ("bob can you ask clankie").
 So:
 
 1. **Nothing forces a spoken reply.** A clean hail, an ambiguous mention, and
-   a nameless holder line all create a turn he may leave empty. Autonomy is
+   a nameless engaged-speaker line all create a turn he may leave empty. Autonomy is
    the same; the matcher only decides whether to ask.
 2. **`addressed`** (vocative, name-first that is not a third-person report,
-   name-last) opens or keeps the session and moves `holderId`.
+   name-last) opens or keeps the session and refreshes that speaker's engagement.
 3. **`mentioned`** (name hit that is not clearly about him — including
    "clankie did you see that", "alright clankie go ahead") also opens or
    offers, from anyone, dormant or engaged. Word lists never drop these.
@@ -59,10 +69,10 @@ So:
    word order: no other name is in evidence, and every discourse marker people
    open a sentence with reads as a hail. "so what do you think clankie" is a
    direct question.
-5. **Holder nameless speech** is still `offer`. Occupant display names label
+5. **Engaged speakers' nameless speech** is still `offer`. Occupant display names label
    utterances; identity stays `speakerId`.
 6. **`replyPolicy: all` offers every dormant utterance without manufacturing
-   an engagement.** If he speaks, that speaker takes the floor; if he stays
+   an engagement.** If he speaks, that speaker joins the engaged set; if he stays
    silent, the next utterance receives a fresh offer.
 7. **A running `ask_clankie` holds the floor, for a bounded time.** Looking
    something up is work, and a 90-second lookup must not decay mid-answer, so
@@ -105,7 +115,7 @@ held for reorder, so a re-address can still barge in. Other finals wait at most
 - A side conversation no longer looks like a private 1:1 with the last person
   who said his name.
 - An open session bills overheard text. Existing truncation is the bound.
-- A nameless holder line costs a realtime turn opportunity. Silence is cheap
+- A nameless engaged-speaker line costs a realtime turn opportunity. Silence is cheap
   compared with speaking, and cheaper than answering Bob.
 - A display name is what the gateway had at read time. Missing names stay ids.
 - A name mention while talking about him still opens a session and spends an
@@ -114,5 +124,7 @@ held for reorder, so a re-address can still barge in. Other finals wait at most
 - Offer settlement is per pending turn. A session-wide flag would drop the
   second of two quick offers and emit a volition receipt on every addressed
   turn.
-- `holderId` moves on a clean hail, or when he takes a mention or all-policy
-  offer. A silent offer does not manufacture a conversation or steal barge-in.
+- The recent set refreshes on a clean hail or a taken offer, independently for
+  each speaker. Silent offers do not manufacture engagement. Increasing the set
+  to five may spend more follow-up opportunities than an exclusive holder; it
+  still does not spend one on every overheard line.

@@ -1,0 +1,10 @@
+Command: pnpm check
+Exit status: 0
+Final source verification, 2026-09-28 (America/Chicago).
+All stages passed: bundled skill check, formatting, lint, dead-code, docs, infrastructure, typecheck, Vitest, Rust, Vox IPC smoke.
+
+Tasks:    27 successful, 27 total
+Test Files  353 passed (353)
+Tests  2972 passed | 2 skipped (2974)
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox

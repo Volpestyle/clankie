@@ -89,17 +89,53 @@ chatter. The repository therefore owns the floor machine:
   Clankie decides whether an offered turn produces speech; and
 - floor release is inactivity decay, not a brittle goodbye phrase.
 
-Barge-in is deliberate: the floor holder speaking over Clankie or addressing
+Barge-in is deliberate: a recently engaged speaker talking over Clankie or addressing
 him again truncates playback; unrelated crosstalk does not.
 
 "Speaking over" requires 350 ms of speech-level audio overlapping the current
-playback, plus a substantive final transcript from the floor holder. Brief
+playback, plus a substantive final transcript from a recently engaged speaker. Brief
 fragments (such as “What I”) and acknowledgements do not truncate. Short
 intentional controls (“stop”, “wait”, “hold on”) do; so do longer utterances
 with at least three words beyond acknowledgements and fillers. Direct
 re-address remains immediate on transcription. A delayed transcript cannot
 interrupt a later playback. This waits for transcription rather than guessing
 intent from loudness; tuning that latency needs a consented live test.
+
+### Overlapping asks and the one mouth (2026-09-28)
+
+[ADR 0091](0091-a-mid-turn-message-steers-the-turn.md) now admits one speaker's
+captain work at a time per room, allowing that person's refinements to steer.
+Other speakers get independent handoffs in order. The session no longer puts
+`ask_clankie` on the local music/screen tool queue. Work heartbeats are tracked
+per call, so one settled refinement cannot stop another pending ask's heartbeat.
+
+Realtime responses are serialized at the provider boundary until `response.done`,
+not until captain work completes. Each room response carries a speaker-bound
+opportunity, injected when its queued response actually starts, so later
+crosstalk cannot replace the actor whose request it may hand off. External TTS additionally waits for the prior
+speech to drain before starting another response, preserving audio attribution.
+Banter can therefore finish while a handoff remains unresolved. Each tool result
+carries its recipient and asks Clankie to name that person in his own wording.
+Playback remains one ordered voice; consent, grants, and approval handling do
+not change.
+
+```mermaid
+flowchart LR
+  Room[Attributed room speech] --> Fast[Realtime conversation]
+  Fast --> Mouth[Ordered responses and playback]
+  Fast --> Ask[ask_clankie]
+  Ask --> Admission{Active speaker?}
+  Admission -->|same person| Steer[Refine live work]
+  Admission -->|different person| Wait[Wait for own handoff]
+  Steer --> Result[Recipient plus result]
+  Wait --> Work[Next independent run]
+  Work --> Result
+  Result --> Fast
+```
+
+The dated diagram export above predates this amendment. Synthetic multi-speaker
+checks do not pass ADR 0045's three-human live gate; audible naming, crosstalk
+behavior, and queue delay still need that ceremony.
 
 ### Room membership is context, departure is his decision (2026-09-28)
 

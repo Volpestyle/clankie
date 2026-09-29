@@ -142,9 +142,10 @@ describe("holding the floor", () => {
     f.observeTranscript(said("alice", "hey clankie", 0));
     expect(f.observeTranscript(said("bob", "clanky what about you", 10_000))).toEqual({ action: "hold" });
     expect(f.floorHolderId).toBe("bob");
-    // The previous holder is a bystander now; nameless speech from them is overheard.
+    // Both people remain engaged; he may decline a same-breath pivot.
     expect(f.observeTranscript(said("alice", "and then i told him", 20_000))).toEqual({
-      action: "listen",
+      action: "offer",
+      reason: "holder",
     });
   });
 
@@ -392,4 +393,25 @@ describe("options validation", () => {
     expect(() => floor({ volition: { maxPerHour: -1 } })).toThrow(/maxPerHour/u);
     expect(() => floor({ volition: { maxPerHour: 1.5 } })).toThrow(/maxPerHour/u);
   });
+});
+
+it("retains five recent participants without letting crosstalk or assistant speech renew them", () => {
+  const f = floor();
+  for (let i = 0; i < 5; i += 1) f.observeTranscript(said(`friend-${i}`, "hey clankie", i * 1_000));
+  for (let i = 0; i < 5; i += 1) {
+    expect(f.observeTranscript(said(`friend-${i}`, "what about mine", 5_000))).toEqual({
+      action: "offer",
+      reason: "holder",
+    });
+    expect(f.isEngagedSpeaker(`friend-${i}`, 5_000)).toBe(true);
+  }
+  expect(f.observeTranscript(said("bystander", "pass the chips", 5_000))).toEqual({ action: "listen" });
+  f.observeTranscript(said("sixth", "hey clankie", 6_000));
+  expect(f.isEngagedSpeaker("friend-0", 6_000)).toBe(false);
+  f.noteAssistantSpokeAt(59_000);
+  expect(f.observeTranscript(said("friend-1", "talking to someone else", 61_001))).toEqual({
+    action: "listen",
+  });
+  expect(f.isEngagedSpeaker("sixth", 61_001)).toBe(true);
+  expect(f.accounting()).toEqual({ offered: 0, taken: 0, suppressed: 0 });
 });

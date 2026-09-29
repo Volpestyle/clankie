@@ -50,7 +50,7 @@ export interface ExternalVoiceRealtimePort {
   appendAudio(pcm: Buffer): void;
   createTextItem(text: string): void;
   createImageItem(pngBase64: string, mimeType?: "image/png"): void;
-  createResponse(): void;
+  createResponse(context?: string): void;
   submitFunctionResult(callId: string, output: string): void;
   close(): void;
 }
@@ -129,6 +129,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   private readonly pendingText = new Map<string, string>();
   private lastTextItemId = "";
   private closed = false;
+  private responseActive = false;
+  private readonly responseQueue: (() => void)[] = [];
 
   public constructor(
     input: VoiceConversationOpenInput,
@@ -183,12 +185,38 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     this.requireRealtime().createImageItem(pngBase64, mimeType);
   }
 
-  public createResponse(): void {
-    this.requireRealtime().createResponse();
+  public createResponse(context?: string): void {
+    this.queueResponse(() => this.requireRealtime().createResponse(context));
   }
 
   public submitFunctionResult(callId: string, output: string): void {
-    this.requireRealtime().submitFunctionResult(callId, output);
+    this.queueResponse(() => this.requireRealtime().submitFunctionResult(callId, output));
+  }
+
+  private queueResponse(start: () => void): void {
+    this.requireRealtime();
+    if (this.responseActive) {
+      this.responseQueue.push(start);
+      return;
+    }
+    this.responseActive = true;
+    try {
+      start();
+    } catch (error) {
+      this.responseActive = false;
+      throw error;
+    }
+  }
+
+  private finishResponse(meta: RealtimeResponseMeta): void {
+    this.input.onResponseDone(meta);
+    this.responseActive = false;
+    if (this.closed) {
+      this.responseQueue.length = 0;
+      return;
+    }
+    const next = this.responseQueue.shift();
+    if (next !== undefined) this.queueResponse(next);
   }
 
   /**
@@ -247,7 +275,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
 
   private handleResponseDone(meta: RealtimeResponseMeta): void {
     if (this.closed) {
-      this.input.onResponseDone(meta);
+      this.finishResponse(meta);
       return;
     }
     const itemId = this.lastTextItemId;
@@ -255,7 +283,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     // trip, a truncated utterance, or a silent model — owes the media owner
     // its done event immediately.
     if (itemId.length === 0 || !this.liveItemIds.has(itemId)) {
-      this.input.onResponseDone(meta);
+      this.finishResponse(meta);
       return;
     }
     this.lastTextItemId = "";
@@ -367,7 +395,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     if (held === undefined) return;
     this.heldDone.delete(itemId);
     this.timers.clearTimeout(held.handle);
-    this.input.onResponseDone(held.meta);
+    this.finishResponse(held.meta);
   }
 
   /**

@@ -732,6 +732,8 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private currentResponseId = "";
   private currentResponseAudioBytes = 0;
   private currentResponseTextCharacters = 0;
+  private responseActive = false;
+  private readonly queuedResponses: (() => void)[] = [];
   private readonly provider: "openai" | "xai";
 
   public constructor(socket: RealtimeSocket, options: RealtimeConversationSessionOptions) {
@@ -824,8 +826,25 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
    * items, transcripts, and audio never trigger a response on their own —
    * {@link submitFunctionResult} resumes a tool round trip by calling this.
    */
-  public createResponse(): void {
-    this.sendFrame({ type: "response.create" });
+  public createResponse(context?: string): void {
+    const bounded =
+      context === undefined
+        ? undefined
+        : boundedText(context, MAX_REALTIME_TEXT_ITEM_CHARACTERS, "Realtime response context");
+    this.queueResponse(() => {
+      if (bounded !== undefined) this.createTextItem(bounded);
+      this.sendFrame({ type: "response.create" });
+    });
+  }
+
+  private queueResponse(start: () => void): void {
+    if (!this.isOpen) throw new Error("Realtime session is closed");
+    if (this.responseActive) {
+      this.queuedResponses.push(start);
+      return;
+    }
+    start();
+    this.responseActive = true;
   }
 
   /** User-role text item: speaker-change markers, transcript seeding, briefing refresh. */
@@ -901,11 +920,13 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   public submitFunctionResult(callId: string, output: string): void {
     const id = nonEmpty(callId, "Realtime function call id");
     const bounded = boundedText(output, MAX_REALTIME_TEXT_ITEM_CHARACTERS, "Realtime function result");
-    this.sendFrame({
-      type: "conversation.item.create",
-      item: { type: "function_call_output", call_id: id, output: bounded },
+    this.queueResponse(() => {
+      this.sendFrame({
+        type: "conversation.item.create",
+        item: { type: "function_call_output", call_id: id, output: bounded },
+      });
+      this.sendFrame({ type: "response.create" });
     });
-    this.createResponse();
   }
 
   protected override handleServerEvent(type: string, event: Record<string, unknown>): void {
@@ -934,6 +955,11 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       }
       case "response.done": {
         this.handleResponseDone(event);
+        this.responseActive = false;
+        if (this.queuedResponses.length > 0 && this.isOpen) {
+          const next = this.queuedResponses.shift();
+          if (next !== undefined) this.queueResponse(next);
+        }
         return;
       }
       case "response.output_item.done": {

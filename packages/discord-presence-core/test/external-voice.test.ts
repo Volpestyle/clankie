@@ -431,6 +431,8 @@ describe("external voice conversation", () => {
     port.createTextItem("Speaker: james");
     port.createResponse();
     port.submitFunctionResult("call_1", "done");
+    expect(realtime.functionResults).toEqual([]);
+    realtimeHandlers.onResponseDone(doneMeta("tool-call"));
     port.appendAudio(Buffer.from([1, 0]));
     expect(realtime.textItems).toEqual(["Speaker: james"]);
     expect(realtime.responseCreates).toBe(1);
@@ -481,4 +483,27 @@ describe("splitSpeakableUnits", () => {
       rest: "first",
     });
   });
+});
+
+it("keeps queued room responses and handoff answers behind the previous TTS drain", async () => {
+  const { port, realtime, realtimeHandlers, ttsHandlers, events } = await openHarness();
+  port.createResponse();
+  realtimeHandlers.onTextDelta("Room banter.", "banter");
+  await settle();
+  port.submitFunctionResult("alice-result", "For Alice: the game");
+  port.createResponse();
+  realtimeHandlers.onResponseDone(doneMeta("banter-response"));
+  expect(realtime.functionResults).toEqual([]);
+  expect(realtime.responseCreates).toBe(1);
+  expect(events.done).toEqual([]);
+  ttsHandlers[0]!.onContextDone("banter");
+  expect(events.done).toEqual([doneMeta("banter-response")]);
+  expect(realtime.functionResults).toEqual([{ callId: "alice-result", output: "For Alice: the game" }]);
+  expect(realtime.responseCreates).toBe(1);
+  realtimeHandlers.onResponseDone(doneMeta("alice-answer"));
+  expect(realtime.responseCreates).toBe(2);
+  port.createResponse();
+  port.close();
+  realtimeHandlers.onResponseDone(doneMeta("closed"));
+  expect(realtime.responseCreates).toBe(2);
 });

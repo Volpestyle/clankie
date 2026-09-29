@@ -108,3 +108,18 @@ playback are transport evidence, not measurements of phoneme or headphone time.
 Voice receipts allow up to 32 scalar, content-free fields so correlation IDs,
 token counts, and timings survive together. Older 16-field writers could lose
 response receipts even when Vox logged a successful start and drain.
+
+### Chaotic group calls
+
+Voice ingress keeps different speakers' asks in separate handoffs, one active
+speaker per room. The active speaker's refinements can steer their live run;
+other speakers wait for their own answer. The realtime conversation and local
+voice tools keep running while that work waits. Tool results carry their
+recipient, and the mouth names them naturally. Responses serialize through
+provider completion and, for external voices, TTS drain.
+
+The floor retains up to five recently engaged speakers for 60 seconds each.
+Their unnamed follow-ups are offers Clankie may decline; unrelated chatter is
+still heard without forcing a response. Volition caps, consent, and machine
+grants are unchanged. See ADRs [0091](../../docs/adr/0091-a-mid-turn-message-steers-the-turn.md)
+and [0119](../../docs/adr/0119-the-room-is-heard-the-floor-is-who-he-answers.md).

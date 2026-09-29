@@ -151,6 +151,11 @@ Following controls waking, not collection.
   never its arguments or result — the content fence applies. To see arguments,
   follow `ask_clankie` into the captain: the durable channel tree under
   `~/.clankie/captain/voice/`, or `turns/` when that handoff was privileged.
+  A voice handoff's captain delivery id is `<room-deliveryId>:<callId>`;
+  join both fields from `realtime_tool`. Different speakers wait for separate
+  handoffs; only the active speaker's refinements can be absorbed. A long
+  handoff should not stop fast-path room responses. Recipient labels travel
+  with each result; audible naming still requires listening evidence.
 - **A voice capability denial may never have reached the captain.** Join the
   room delivery to `model_response`, `realtime_tool`, and `response`. A settled
   fast-path response with no `ask_clankie` receipt means the realtime mouth

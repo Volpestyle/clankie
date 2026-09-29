@@ -721,3 +721,24 @@ describe("xAI voice sessions", () => {
     ]);
   });
 });
+
+it.each(["openai", "xai"] as const)(
+  "queues overlapping %s responses without waiting for captain tool results",
+  async (provider) => {
+    const { session, socket } = await openConversation({ provider });
+    session.createResponse();
+    session.createResponse();
+    expect(framesOfType(socket, "response.create")).toHaveLength(1);
+    // A tool-calling response is complete even while its handoff is unresolved.
+    socket.emit({ type: "response.done", response: { id: "ask", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    session.submitFunctionResult("ask-call", "Alice's answer");
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    socket.emit({ type: "response.done", response: { id: "banter", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(3);
+    session.createResponse();
+    session.close();
+    socket.emit({ type: "response.done", response: { id: "answer", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(3);
+  },
+);

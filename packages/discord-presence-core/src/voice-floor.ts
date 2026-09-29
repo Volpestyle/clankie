@@ -51,16 +51,16 @@ export interface VoiceTranscriptEvent {
 
 export type FloorDecision =
   | { readonly action: "wake"; readonly reason: "addressed" | "volition" }
-  /** Engaged: a clean hail; floor moves. Speech is still an offer he may decline. */
+  /** Engaged: a clean hail; speaker joins or refreshes engagement. Speech is still an offer he may decline. */
   | { readonly action: "hold" }
   /**
-   * A turn whose correct answer may be silence: the holder kept talking
+   * A turn whose correct answer may be silence: an engaged speaker kept talking
    * without naming him, his name came up without a clean hail, or the owner
    * configured every dormant utterance to reach him.
    */
   | { readonly action: "offer"; readonly reason?: "mentioned" | "holder" | "reply_policy_all" }
   /**
-   * Someone else spoke without addressing him. Inject it; do not spend a turn.
+   * A speaker outside the recent set spoke without addressing him. Inject it; do not spend a turn.
    * Does not refresh decay.
    */
   | { readonly action: "listen" }
@@ -148,6 +148,7 @@ export class VoiceFloor {
 
   private floorState: FloorState = "dormant";
   private holderId: string | undefined;
+  private readonly engagedSpeakers = new Map<string, number>();
   private lastRelevantAtMs: number | undefined;
 
   private offerTimesMs: number[] = [];
@@ -182,10 +183,32 @@ export class VoiceFloor {
   /**
    * Undefined while dormant. While engaged it is whoever most recently
    * addressed him — or, after a taken volition offer, whoever's remark
-   * provoked it. Used for barge-in, not to force a spoken turn.
+   * provoked it. Compatibility observation only; the recent set owns offers and barge-in.
    */
   public get floorHolderId(): string | undefined {
     return this.holderId;
+  }
+
+  /** Recent engagement grants an offer and deliberate barge-in, never forced speech. */
+  public isEngagedSpeaker(speakerId: string, atMs: number): boolean {
+    this.pruneSpeakers(atMs);
+    return this.engagedSpeakers.has(speakerId);
+  }
+
+  private rememberSpeaker(speakerId: string, atMs: number): void {
+    this.pruneSpeakers(atMs);
+    this.engagedSpeakers.delete(speakerId);
+    this.engagedSpeakers.set(speakerId, atMs);
+    if (this.engagedSpeakers.size > 5) {
+      const oldest = this.engagedSpeakers.keys().next().value;
+      if (oldest !== undefined) this.engagedSpeakers.delete(oldest);
+    }
+  }
+
+  private pruneSpeakers(atMs: number): void {
+    for (const [speakerId, lastAtMs] of this.engagedSpeakers) {
+      if (atMs - lastAtMs > this.decayWindowMs) this.engagedSpeakers.delete(speakerId);
+    }
   }
 
   public observeTranscript(event: VoiceTranscriptEvent): FloorDecision {
@@ -211,7 +234,7 @@ export class VoiceFloor {
 
   /**
    * He took an offered turn from this speaker. Mentioned-name offers do not
-   * move the holder until he actually speaks — otherwise a "hey bob what did
+   * add the speaker until he actually speaks — otherwise a "hey bob what did
    * clankie say" style mention would steal barge-in.
    */
   public noteSpeechFrom(speakerId: string, atMs: number): void {
@@ -220,6 +243,7 @@ export class VoiceFloor {
       return;
     }
     this.holderId = speakerId;
+    this.rememberSpeaker(speakerId, atMs);
     this.lastRelevantAtMs = atMs;
   }
 
@@ -228,6 +252,7 @@ export class VoiceFloor {
    * floor already lapsed, re-engage on the speaker who asked.
    */
   public holdForWork(speakerId: string, atMs: number): void {
+    this.rememberSpeaker(speakerId, atMs);
     if (this.floorState === "engaged") {
       this.lastRelevantAtMs = atMs;
       return;
@@ -281,13 +306,14 @@ export class VoiceFloor {
     const kind = classifyVoiceAddress(event.text, this.names);
     if (kind === "addressed") {
       this.holderId = event.speakerId;
+      this.rememberSpeaker(event.speakerId, event.atMs);
       this.lastRelevantAtMs = event.atMs;
       return { action: "hold" };
     }
     if (kind === "mentioned") {
       return { action: "offer", reason: "mentioned" };
     }
-    if (event.speakerId === this.holderId) return { action: "offer", reason: "holder" };
+    if (this.isEngagedSpeaker(event.speakerId, event.atMs)) return { action: "offer", reason: "holder" };
     return { action: "listen" };
   }
 
@@ -326,12 +352,14 @@ export class VoiceFloor {
   private engage(speakerId: string, atMs: number): void {
     this.floorState = "engaged";
     this.holderId = speakerId;
+    this.rememberSpeaker(speakerId, atMs);
     this.lastRelevantAtMs = atMs;
   }
 
   private drop(): void {
     this.floorState = "dormant";
     this.holderId = undefined;
+    this.engagedSpeakers.clear();
     this.lastRelevantAtMs = undefined;
   }
 

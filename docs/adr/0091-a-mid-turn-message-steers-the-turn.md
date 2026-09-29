@@ -38,20 +38,40 @@ flowchart LR
 
 ## Context
 
-The durable Discord voice lane is one pi session per channel. A second utterance
-during an active turn enters that turn instead of failing or waiting behind
-strict queue semantics. The second speaker reaches the thought in progress and
-the room receives one merged reply.
+The durable Discord voice lane is one Pi session per channel. Mid-turn input
+from the same person can refine the thought in progress. A different person's
+unrelated ask must retain its own run and reply attribution.
 
-In a live voice room, words arriving mid-reply are the normal case, not an
-edge case. The conversationally right behavior is interruption: fold the new
-words into the thought in progress and answer once. pi already ships the
-mechanism — `prompt()` with `streamingBehavior: "steer"` queues the message
-into the live run, the agent loop delivers it at the next turn boundary and
-drains the queue before settling, and the original `prompt()` promise
-resolves only after the merged run finishes. (Design cribbed from opencode's
-v2 steer/queue input admission, minus the durable inbox: pi's in-process
-queue is the admission.)
+Pi's `prompt()` with `streamingBehavior: "steer"` delivers new input at the next
+turn boundary and keeps the owning run alive until that input is consumed.
+The original caller owns the answer; refinements report `absorbed`.
+
+### Group voice admission (2026-09-28)
+
+`DiscordVoiceIngress` admits one speaker's handoffs per guild/channel at a time.
+That speaker's further handoffs can reach the active run as steers; other
+speakers wait in arrival order and receive their own handoffs. Queued refinements
+from the next speaker enter together. Admission remains held until every call
+in the current speaker's group settles, including absorbed calls and failures.
+Room identity and actor identity come from Discord, never model arguments.
+A queued request whose originating voice conversation closed is dropped before
+submission. Text-lane admission and authority planning are unchanged.
+
+We considered bounded parallel per-speaker sessions. We retain one active
+speaker instead: handoffs can mutate the same machine, and parallel sessions
+would introduce tool-order races and split the room's durable history. This
+choice bounds active work to one speaker but can delay another person's lookup.
+It does not serialize the realtime room: banter, hearing, and local voice tools
+continue during a handoff. Revisit parallel read-only work if live evidence
+shows queue delay dominates; do not infer safe parallelism from a model summary.
+
+Each realtime tool call has a distinct delivery id (room delivery plus call id).
+The result includes its gateway-attributed recipient, with instructions to name
+that person naturally. The result and recipient travel together, so intervening
+room turns cannot change whose answer it is. Same-speaker absorption is intended
+for refinements: the realtime model decides what needs a handoff, not a phrase
+classifier. Offline simulations are evidence of admission, not proof that the
+model consistently selects the right handoff in a real call.
 
 Two captain-side gaps remain around pi's mechanism. First, exactly one HTTP
 caller may carry the reply — voice ingress speaks every `settled` response,
@@ -67,9 +87,8 @@ both believe the lane is idle and start racing runs.
   lane records the run's settlement promise while it is in flight.
 - A lane already streaming gets the message steered into the live run, and
   the caller reports `absorbed` once the merged run settles. An absorbed turn
-  returns `state: "silent"` — voice ingress already speaks nothing for
-  silent, so the run owner's merged reply answers everything heard, exactly
-  once, with no protocol change.
+  returns `state: "absorbed"`, distinct from a deliberate `silent` result.
+  Voice ingress speaks neither; the run owner's answer covers its refinements.
 - The idle check and the `prompt()` call share one synchronous stretch (with
   template expansion off, pi reaches its own streaming check without
   awaiting), so the state observed is the state pi acts on. The window where
@@ -84,12 +103,11 @@ live run's captured media. The lane log stays honest under merging: two
 
 ## Consequences
 
-- One spoken reply covers everything heard during the run, at the model's
-  next turn boundary instead of after full settlement — interruption, not a
-  ticket queue.
-- The reply rides the first caller's HTTP response; later callers get
-  `silent`. Nothing downstream distinguishes "chose silence" from "absorbed",
-  which is sufficient while the only consumer speaks or stays quiet.
+- One voice reply covers the active speaker's refinements. Other speakers'
+  actionable requests wait for independent turns while the realtime room keeps
+  talking. A continually refined ask can delay later work.
+- The reply rides the first caller's HTTP response; its refinements get
+  `absorbed`, distinguishable from choosing silence in receipts.
 - A message arriving during auto-compaction still fails its turn (pi refuses
   prompts mid-compaction). Rare, and no worse than before; a retry inside
   `runDurableTurn` is the upgrade path if it shows up in lane logs.
