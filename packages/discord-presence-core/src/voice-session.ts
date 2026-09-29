@@ -121,6 +121,10 @@ const BARGE_IN_SPEECH_RMS = 1_200;
 const VOICE_READY_TIMEOUT_MS = 20_000;
 const DAVE_READY_TIMEOUT_MS = 10_000;
 const PLAYBACK_TIMEOUT_MS = 2 * 60_000;
+// Synthesis can outrun speech. Keep at most one second ahead of real time,
+// in 100ms writes, instead of bursting an entire answer into Vox's 15s queue.
+const PLAYBACK_CHUNK_BYTES = (REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES) / 10;
+const PLAYBACK_LEAD_MS = 1_000;
 
 /**
  * How long a released engagement keeps its conversation session connected.
@@ -486,6 +490,9 @@ interface PlaybackJob {
   settle: ((result: "drained" | "stopped" | "failed" | "timeout") => void) | undefined;
   failureReason: string | undefined;
   startedAtMs?: number;
+  sentUntilMs?: number;
+  pumpTimer?: unknown;
+  finishSent?: boolean;
 }
 
 interface ActiveCapture {
@@ -2116,7 +2123,7 @@ export class DiscordVoiceSession {
     if (this.openPlayback !== undefined) {
       this.openPlayback.providerDone = true;
       if (this.playingJob === this.openPlayback) {
-        this.finishPlayback(this.openPlayback);
+        this.pumpPlayback(this.openPlayback);
       }
       keep.add(this.openPlayback.pending);
       this.openPlayback = undefined;
@@ -2693,15 +2700,6 @@ export class DiscordVoiceSession {
       return;
     }
     pending.firstAudioChunkAtMs ??= this.clock();
-    let encoded: string;
-    try {
-      encoded = pcm.toString("base64");
-    } catch {
-      pcm.fill(0);
-      return;
-    }
-    // Delta zeroing is this caller's duty per T2's contract.
-    pcm.fill(0);
     if (this.openPlayback === undefined || this.openPlayback.pending !== pending) {
       const job: PlaybackJob = {
         pending,
@@ -2718,9 +2716,13 @@ export class DiscordVoiceSession {
       this.playbackChain = this.playbackChain.then(() => this.playJob(job)).catch(() => undefined);
     }
     const job = this.openPlayback;
-    if (job.stopping || job.outcome !== undefined) return;
-    if (this.playingJob === job) this.sendPlaybackAudio(job, encoded);
-    else job.encodedChunks.push(encoded);
+    if (!job.stopping && job.outcome === undefined) {
+      for (let offset = 0; offset < pcm.byteLength; offset += PLAYBACK_CHUNK_BYTES) {
+        job.encodedChunks.push(pcm.subarray(offset, offset + PLAYBACK_CHUNK_BYTES).toString("base64"));
+      }
+    }
+    pcm.fill(0);
+    if (this.playingJob === job) this.pumpPlayback(job);
   }
 
   private handleResponseDone(meta?: RealtimeResponseMeta): void {
@@ -2730,7 +2732,7 @@ export class DiscordVoiceSession {
     if (job !== undefined) {
       job.providerDone = true;
       if (this.playingJob === job && !job.stopping && job.outcome === undefined) {
-        this.finishPlayback(job);
+        this.pumpPlayback(job);
       }
       this.openPlayback = undefined;
     }
@@ -2810,10 +2812,7 @@ export class DiscordVoiceSession {
         this.timers.clearTimeout(timeout);
         settle(outcome);
       };
-      for (const encoded of job.encodedChunks.splice(0)) this.sendPlaybackAudio(job, encoded);
-      if (job.providerDone && !job.stopping && job.outcome === undefined) {
-        this.finishPlayback(job);
-      }
+      this.pumpPlayback(job);
     });
     const playbackMs = Math.max(0, this.clock() - (job.startedAtMs ?? this.clock()));
     if (this.playingJob === job) this.playingJob = undefined;
@@ -2828,6 +2827,8 @@ export class DiscordVoiceSession {
         channelId,
         deliveryId: pending.deliveryId,
         ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
+        playbackId: job.playbackId,
+        itemId: job.itemId,
         stage: "playback",
         code: "voice_playback_timeout",
       });
@@ -2838,6 +2839,8 @@ export class DiscordVoiceSession {
         channelId,
         deliveryId: pending.deliveryId,
         ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
+        playbackId: job.playbackId,
+        itemId: job.itemId,
         stage: "playback",
         code: sanitizeFailureCode(job.failureReason ?? "voice_playback_failed", "voice_playback_failed"),
       });
@@ -2896,6 +2899,34 @@ export class DiscordVoiceSession {
     return fields;
   }
 
+  private pumpPlayback(job: PlaybackJob): void {
+    if (job.stopping || job.outcome !== undefined || job.generation !== this.sessionGeneration) return;
+    if (job.pumpTimer !== undefined) return;
+    const now = this.clock();
+    while (job.encodedChunks.length > 0) {
+      const encoded = job.encodedChunks[0]!;
+      const durationMs =
+        (Buffer.byteLength(encoded, "base64") / (REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES)) * 1_000;
+      const sendAt = Math.max(now, job.sentUntilMs ?? now);
+      const delay = sendAt + durationMs - now - PLAYBACK_LEAD_MS;
+      if (delay > 0) {
+        job.pumpTimer = this.timers.setTimeout(() => {
+          job.pumpTimer = undefined;
+          this.pumpPlayback(job);
+        }, Math.ceil(delay));
+        return;
+      }
+      job.encodedChunks.shift();
+      job.sentUntilMs = sendAt + durationMs;
+      this.sendPlaybackAudio(job, encoded);
+      if (job.stopping || job.outcome !== undefined) return;
+    }
+    if (job.providerDone && !job.finishSent) {
+      job.finishSent = true;
+      this.finishPlayback(job);
+    }
+  }
+
   private sendPlaybackAudio(job: PlaybackJob, pcmBase64: string): void {
     if (job.stopping || job.outcome !== undefined || job.generation !== this.sessionGeneration) return;
     try {
@@ -2927,7 +2958,7 @@ export class DiscordVoiceSession {
       job.pending.firstAudioAtMs = job.startedAtMs;
       if (job.pending.offer !== undefined) this.settleOffer(job.pending, true);
       if (job.pending.done) this.emitModelResponseCompletion(job.pending);
-    } else if (event.status === "drained" && job.providerDone) this.settlePlayback(job, "drained");
+    } else if (event.status === "drained" && job.finishSent) this.settlePlayback(job, "drained");
     else if (event.status === "stopped") this.settlePlayback(job, "stopped");
     else if (event.status === "failed") {
       this.failPlayback(job, event.reason ?? "voice_playback_failed");
@@ -2973,6 +3004,9 @@ export class DiscordVoiceSession {
   private settlePlayback(job: PlaybackJob, outcome: "drained" | "stopped" | "failed" | "timeout"): void {
     if (job.outcome !== undefined) return;
     job.outcome = outcome;
+    if (job.pumpTimer !== undefined) this.timers.clearTimeout(job.pumpTimer);
+    job.pumpTimer = undefined;
+    job.encodedChunks.length = 0;
     const settle = job.settle;
     job.settle = undefined;
     settle?.(outcome);
@@ -3016,6 +3050,8 @@ export class DiscordVoiceSession {
         channelId,
         deliveryId: job.pending.deliveryId,
         ...(job.pending.speakerId === undefined ? {} : { userId: job.pending.speakerId }),
+        playbackId: job.playbackId,
+        itemId: job.itemId,
         stage: "playback",
         code: voxCommandFailureCode(error, "voice_playback_stop_failed"),
       });

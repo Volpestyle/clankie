@@ -229,6 +229,13 @@ Following controls waking, not collection.
   A `left` reason of `self_decided` follows the realtime `voice_leave` tool.
   There is no empty-room leave timer. Membership observations carry no human
   authority; they do not become privileged captain requests.
+- **A Vox buffer overflow cuts off an already audible answer.**
+  `discord.voice.failed` with stage `playback` and code `tts_buffer_overflow`
+  means Vox discarded that playback after its PCM queue exceeded the cap.
+  Join `playbackId` to native `Started` / `Failed` logs; older receipts may
+  require joining by delivery and timestamp. The sender now paces PCM before
+  Vox, and sends finish only after its local queue empties. A successful tool
+  result does not prove its spoken answer survived playback.
 - **An ElevenLabs byte-limit failure can follow audible speech.**
   `discord.voice.failed` with code
   `elevenlabs_context_audio_exceeded_the_byte_limit` means synthesized PCM hit

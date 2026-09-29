@@ -123,3 +123,8 @@ Their unnamed follow-ups are offers Clankie may decline; unrelated chatter is
 still heard without forcing a response. Volition caps, consent, and machine
 grants are unchanged. See ADRs [0091](../../docs/adr/0091-a-mid-turn-message-steers-the-turn.md)
 and [0119](../../docs/adr/0119-the-room-is-heard-the-floor-is-who-he-answers.md).
+
+Voice playback paces synthesized PCM in 100ms chunks with at most one second
+of real-time lead before sending it to Vox. Provider completion waits for the
+local queue to empty before `finish_tts_playback`; stop, failure, leave, and
+timeout discard queued audio. Vox retains its fail-closed 15-second buffer cap.

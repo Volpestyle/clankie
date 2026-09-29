@@ -2070,6 +2070,141 @@ describe("fast path responses", () => {
     expect(conversation.responseCreates).toBe(responseCount + 1);
   });
 
+  it("paces a burst longer than Vox's cap and finishes only after its last PCM", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    const original = Buffer.alloc(24_000 * 2 * 25, 7);
+    const incoming = Buffer.from(original);
+    conversation.input.onAudioDelta(incoming, "item_long_answer");
+    conversation.input.onResponseDone({
+      responseId: "resp_paced",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(incoming.every((value) => value === 0)).toBe(true);
+    expect(harness.vox.finishes).toHaveLength(0);
+    const sentBytes = () => harness.vox.audio.reduce((sum, chunk) => sum + chunk.pcm.length, 0);
+    expect(sentBytes()).toBe(48_000);
+    for (let tick = 0; tick < 240; tick += 1) {
+      harness.clock.now += 100;
+      harness.timers.fire(100);
+      expect(sentBytes()).toBeLessThanOrEqual(48_000 + (tick + 1) * 4_800);
+    }
+    await flush();
+    expect(Buffer.concat(harness.vox.audio.map((chunk) => chunk.pcm))).toEqual(original);
+    expect(harness.vox.finishes).toHaveLength(1);
+    expect(harness.ofType("failed")).toHaveLength(0);
+    expect(harness.ofType("response")).toHaveLength(1);
+  });
+
+  it("drains already received paced audio when the conversation closes", async () => {
+    const harness = await engagedHarness();
+    const original = pcmDelta(48_000 * 2, 3);
+    harness.conversation().input.onAudioDelta(Buffer.from(original), "item_close_paced");
+    await flush();
+    harness.conversation().close();
+    await flush();
+    expect(harness.vox.finishes).toHaveLength(0);
+    for (let tick = 0; tick < 10; tick += 1) {
+      harness.clock.now += 100;
+      harness.timers.fire(100);
+    }
+    await flush();
+    expect(Buffer.concat(harness.vox.audio.map((chunk) => chunk.pcm))).toEqual(original);
+    expect(harness.vox.finishes).toHaveLength(1);
+    expect(harness.ofType("response")).toHaveLength(1);
+    expect(harness.ofType("failed")).toHaveLength(0);
+    expect(harness.timers.pending().some((timer) => timer.delayMs === 100)).toBe(false);
+  });
+
+  it("cancels the paced queue on leave", async () => {
+    const harness = await engagedHarness();
+    harness.conversation().input.onAudioDelta(pcmDelta(48_000 * 25), "item_leave_paced");
+    await flush();
+    expect(harness.vox.audio).toHaveLength(10);
+    await harness.session.leave();
+    await flush();
+    expect(harness.timers.pending()).toHaveLength(0);
+    expect(harness.vox.finishes).toHaveLength(0);
+    expect(harness.vox.audio).toHaveLength(10);
+  });
+
+  it("keeps a second completed answer behind the paced first answer", async () => {
+    let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
+    const harness = await engagedHarness({
+      captain: () =>
+        new Promise<CaptainChannelTurnResult>((resolve) => {
+          resolveCaptain = resolve;
+        }),
+    });
+    const conversation = harness.conversation();
+    // The acknowledgement is still playing when the tool result requests its answer.
+    conversation.input.onFunctionCall({
+      callId: "call_paced",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"check Linear"}',
+    });
+    conversation.input.onAudioDelta(pcmDelta(48_000 * 2, 3), "item_first_paced");
+    conversation.input.onResponseDone({
+      responseId: "resp_first",
+      status: "completed",
+      audioBytes: 96_000,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.submitCalls).toHaveLength(1);
+    resolveCaptain(settledResult("turn_paced", "Found the Linear issue."));
+    await flush();
+    expect(harness.ofType("model_response").filter((event) => event.phase === "requested")).toHaveLength(2);
+    expect(conversation.functionResults).toEqual([
+      { callId: "call_paced", output: expect.stringContaining("Found the Linear issue.") },
+    ]);
+    conversation.input.onAudioDelta(pcmDelta(480, 7), "item_second_paced");
+    conversation.input.onResponseDone({
+      responseId: "resp_second",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(new Set(harness.vox.audio.map((chunk) => chunk.playbackId)).size).toBe(1);
+    for (let tick = 0; tick < 10; tick += 1) {
+      harness.clock.now += 100;
+      harness.timers.fire(100);
+    }
+    await flush();
+    expect(harness.vox.finishes).toHaveLength(2);
+    expect(at(harness.vox.audio, -1).pcm).toEqual(Buffer.alloc(480, 7));
+    expect(harness.ofType("response")).toHaveLength(2);
+  });
+
+  it("drops paced audio and its timer when playback fails", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(48_000 * 25), "item_paced_failure");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    harness.vox.emit({
+      type: "tts_playback_state",
+      playbackId,
+      status: "failed",
+      reason: "transport_send_failed",
+    });
+    conversation.input.onResponseDone({
+      responseId: "resp_paced",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.timers.pending().some((timer) => timer.delayMs === 100)).toBe(false);
+    expect(harness.vox.finishes).toHaveLength(0);
+    expect(harness.vox.audio).toHaveLength(10);
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({ playbackId, itemId: "item_paced_failure" });
+  });
+
   it("treats a correlated native TTS buffer overflow as failed playback", async () => {
     const harness = await engagedHarness();
     harness.vox.autoDrain = false;
