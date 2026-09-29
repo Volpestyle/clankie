@@ -44,6 +44,20 @@ Start a fresh session after changing the selection to remove guidance already lo
 The [bundled-skills guide](https://github.com/Volpestyle/clankie/blob/main/docs/bundled-skills.md)
 owns the catalog, discovery paths, and which worker routes receive that guidance.
 
+### Give him a visual persona
+
+Point him at a folder in the console: “Use the images in ~/Pictures/clankie-vibe
+as your persona.” Or run [`clankie persona images set ~/Pictures/clankie-vibe`](/cli/#persona-images-status-set-folder-clear).
+
+Files in the folder shape his **vibe**—the feel of who he is, not what he looks
+like. Put references for his physical appearance in an **`appearance/` subfolder**;
+those are the ones he uses for self-portraits. Videos work too: with ffmpeg and
+ffprobe installed, each becomes one contact sheet of ten chronological frames.
+
+Run [`clankie persona images status`](/cli/#persona-images-status-set-folder-clear)
+to see what loaded and find the contact-sheet paths. Restart Clankie to apply
+the selection or changes to the files. His written character still takes precedence.
+
 ## Bring your own team
 
 Clankie's built-in service runs on [pi](https://pi.dev). Worker agents can use
