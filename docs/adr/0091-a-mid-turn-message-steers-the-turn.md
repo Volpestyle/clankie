@@ -66,12 +66,21 @@ continue during a handoff. Revisit parallel read-only work if live evidence
 shows queue delay dominates; do not infer safe parallelism from a model summary.
 
 Each realtime tool call has a distinct delivery id (room delivery plus call id).
-The result includes its gateway-attributed recipient, with instructions to name
-that person naturally. The result and recipient travel together, so intervening
+The result includes its gateway-attributed recipient for a brief, clearly
+addressed spoken gist. The result and recipient travel together, so intervening
 room turns cannot change whose answer it is. Same-speaker absorption is intended
 for refinements: the realtime model decides what needs a handoff, not a phrase
 classifier. Offline simulations are evidence of admission, not proof that the
 model consistently selects the right handoff in a real call.
+
+The 2026-09-29 amendment to [ADR 0057](0057-realtime-voice-with-captain-handoff.md)
+absorbs unheard realtime replies across a room burst before provider dispatch
+or playback. This does not cancel work already admitted to the durable lane.
+Repeated asks join the same speaker's pending handoff (normalized identical
+request, or a model-selected `join_call_id` checked against that speaker), so
+only the original call delivers the result. New refinements still steer;
+other speakers still receive separately attributed work. A stop suppresses
+late spoken results without discarding completed work or changing text lanes.
 
 Two captain-side gaps remain around pi's mechanism. First, exactly one HTTP
 caller may carry the reply — voice ingress speaks every `settled` response,

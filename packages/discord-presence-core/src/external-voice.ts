@@ -50,8 +50,8 @@ export interface ExternalVoiceRealtimePort {
   appendAudio(pcm: Buffer): void;
   createTextItem(text: string): void;
   createImageItem(pngBase64: string, mimeType?: "image/png"): void;
-  createResponse(context?: string): void;
-  submitFunctionResult(callId: string, output: string): void;
+  createResponse(context?: string, shouldStart?: () => boolean): void;
+  submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void;
   close(): void;
 }
 
@@ -130,7 +130,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   private lastTextItemId = "";
   private closed = false;
   private responseActive = false;
-  private readonly responseQueue: (() => void)[] = [];
+  private readonly responseQueue: { start: () => void; shouldStart?: () => boolean }[] = [];
 
   public constructor(
     input: VoiceConversationOpenInput,
@@ -185,26 +185,33 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     this.requireRealtime().createImageItem(pngBase64, mimeType);
   }
 
-  public createResponse(context?: string): void {
-    this.queueResponse(() => this.requireRealtime().createResponse(context));
+  public createResponse(context?: string, shouldStart?: () => boolean): void {
+    this.queueResponse(() => this.requireRealtime().createResponse(context), shouldStart);
   }
 
-  public submitFunctionResult(callId: string, output: string): void {
-    this.queueResponse(() => this.requireRealtime().submitFunctionResult(callId, output));
+  public submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void {
+    this.requireRealtime().submitFunctionResult(callId, output, false);
+    if (shouldRespond !== false) this.createResponse(undefined, shouldRespond);
   }
 
-  private queueResponse(start: () => void): void {
+  private queueResponse(start: () => void, shouldStart?: () => boolean): void {
     this.requireRealtime();
-    if (this.responseActive) {
-      this.responseQueue.push(start);
-      return;
-    }
-    this.responseActive = true;
-    try {
-      start();
-    } catch (error) {
-      this.responseActive = false;
-      throw error;
+    this.responseQueue.push({ start, ...(shouldStart === undefined ? {} : { shouldStart }) });
+    this.startNextResponse();
+  }
+
+  private startNextResponse(): void {
+    while (!this.responseActive && !this.closed) {
+      const next = this.responseQueue.shift();
+      if (next === undefined) return;
+      if (next.shouldStart?.() === false) continue;
+      this.responseActive = true;
+      try {
+        next.start();
+      } catch (error) {
+        this.responseActive = false;
+        throw error;
+      }
     }
   }
 
@@ -215,8 +222,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       this.responseQueue.length = 0;
       return;
     }
-    const next = this.responseQueue.shift();
-    if (next !== undefined) this.queueResponse(next);
+    this.startNextResponse();
   }
 
   /**

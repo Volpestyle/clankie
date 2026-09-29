@@ -742,3 +742,45 @@ it.each(["openai", "xai"] as const)(
     expect(framesOfType(socket, "response.create")).toHaveLength(3);
   },
 );
+
+it.each(["openai", "xai"] as const)(
+  "drops stale %s response requests but retains their tool results",
+  async (provider) => {
+    const { session, socket } = await openConversation({ provider });
+    let revision = 0;
+    session.createResponse();
+    session.submitFunctionResult("old", "Useful context", () => revision === 0);
+    for (let index = 1; index <= 3; index += 1) {
+      revision = index;
+      session.createResponse(`turn ${index}`, () => revision === index);
+    }
+    socket.emit({ type: "response.done", response: { id: "first", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    expect(framesOfType(socket, "conversation.item.create")).toMatchObject([
+      { item: { type: "function_call_output", call_id: "old", output: "Useful context" } },
+      { item: { content: [{ text: "turn 3" }] } },
+    ]);
+    socket.emit({ type: "response.done", response: { id: "latest", status: "completed" } });
+    session.submitFunctionResult("joined", "Joined the original", false);
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    session.close();
+  },
+);
+
+it.each([
+  ["audio", 160],
+  ["text", 80],
+] as const)(
+  "bounds %s output in the session so every response inherits it",
+  async (outputModality, limit) => {
+    const { session, socket } = await openConversation({ outputModality, onTextDelta: () => undefined });
+    expect(framesOfType(socket, "session.update")[0]).toMatchObject({
+      session: { max_output_tokens: limit },
+    });
+    session.createResponse();
+    socket.emit({ type: "response.done", response: { id: "first", status: "completed" } });
+    session.submitFunctionResult("handoff", "A very long result");
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    session.close();
+  },
+);

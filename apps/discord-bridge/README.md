@@ -210,7 +210,11 @@ The voice leave receipt records `reason: self_decided` for the local tool
 
 Speech interruption waits for a substantive transcript with speech-level overlap
 from a recently engaged speaker, or a direct re-address. Brief fragments and acknowledgements
-let playback continue; “stop”, “wait”, and “hold on” remain valid interruptions.
+let playback continue; “wait” and “hold on” remain valid interruptions. An explicit
+“stop talking” cuts playback on its final transcript even below the overlap
+loudness gate, discards queued speech, and keeps late handoff results silent.
+New speech also replaces unheard replies during ordinary conversation; voice
+uses brief gists with a six-second audio backstop.
 `interrupted`, completed `response`, and synthesis `failed` receipts include
 playback and provider item ids when available, alongside the delivery id.
 Intentional TTS teardown does not emit a synthesis failure for late socket errors.

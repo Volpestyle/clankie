@@ -232,10 +232,22 @@ Following controls waking, not collection.
 - **Hearing and answering are separate evidence.** An accepted transcription
   with `floor_decision: listen` means the old floor withheld a model turn, not
   a bad microphone. Finalized consented speech now always receives an offer
-  (including reason `transcript`); a completed silent model response is his
-  decision. Typed room text retains its existing reply policy. When an
+  (including reason `transcript`). Compare provider audio/text counts with
+  audible receipts to distinguish model silence from unheard output. A queued
+  request dropped before dispatch settles silently without a provider response
+  id. Typed room text retains its existing reply policy. When an
   interruption seems ineffective, join playback IDs: stopping one reply is
-  insufficient if an older queued reply begins immediately afterward.
+  insufficient if an older queued reply begins immediately afterward. New room
+  speech now supersedes unheard replies before provider dispatch or playback;
+  a burst can have several heard lines but one audible response. Tool output
+  remains context even when its speech goes stale. `realtime_tool` code
+  `handoff_joined` means a same-speaker repeat reused pending work; only the
+  original call returns a spoken result. A slow handoff offers at most one
+  brief status beat after 1.2 seconds. Explicit stop bypasses the normal
+  loudness gate once transcribed; `speech_stopped` means its late result was
+  retained silently. OpenAI output has a token cap and every Discord response
+  has a six-second PCM ceiling; a cutoff at that boundary is the backstop,
+  not evidence of Vox overflow.
 - **A Vox buffer overflow cuts off an already audible answer.**
   `discord.voice.failed` with stage `playback` and code `tts_buffer_overflow`
   means Vox discarded that playback after its PCM queue exceeded the cap.

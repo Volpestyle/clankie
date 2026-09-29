@@ -160,6 +160,11 @@ const ASK_CLANKIE_TOOL = {
   parameters: {
     type: "object",
     properties: {
+      join_call_id: {
+        type: "string",
+        description:
+          "Join this speaker's still-pending handoff when they repeat the same ask, even in different words. Use its call id from the pending-work context. A changed request is a new request instead.",
+      },
       request: {
         type: "string",
         description: "What is being asked of Clankie, as one plain-language request.",
@@ -733,7 +738,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private currentResponseAudioBytes = 0;
   private currentResponseTextCharacters = 0;
   private responseActive = false;
-  private readonly queuedResponses: (() => void)[] = [];
+  private readonly queuedResponses: { start: () => void; shouldStart?: () => boolean }[] = [];
   private readonly provider: "openai" | "xai";
 
   public constructor(socket: RealtimeSocket, options: RealtimeConversationSessionOptions) {
@@ -786,6 +791,8 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               type: "realtime",
               model,
               output_modalities: [outputModality],
+              // Audio tokens also consume this budget; text feeds an external mouth.
+              max_output_tokens: outputModality === "audio" ? 160 : 80,
               instructions,
               audio: {
                 input: {
@@ -826,7 +833,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
    * items, transcripts, and audio never trigger a response on their own —
    * {@link submitFunctionResult} resumes a tool round trip by calling this.
    */
-  public createResponse(context?: string): void {
+  public createResponse(context?: string, shouldStart?: () => boolean): void {
     const bounded =
       context === undefined
         ? undefined
@@ -834,17 +841,28 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     this.queueResponse(() => {
       if (bounded !== undefined) this.createTextItem(bounded);
       this.sendFrame({ type: "response.create" });
-    });
+    }, shouldStart);
   }
 
-  private queueResponse(start: () => void): void {
+  private queueResponse(start: () => void, shouldStart?: () => boolean): void {
     if (!this.isOpen) throw new Error("Realtime session is closed");
-    if (this.responseActive) {
-      this.queuedResponses.push(start);
-      return;
+    this.queuedResponses.push({ start, ...(shouldStart === undefined ? {} : { shouldStart }) });
+    this.startNextResponse();
+  }
+
+  private startNextResponse(): void {
+    while (!this.responseActive && this.isOpen) {
+      const next = this.queuedResponses.shift();
+      if (next === undefined) return;
+      if (next.shouldStart?.() === false) continue;
+      this.responseActive = true;
+      try {
+        next.start();
+      } catch (error) {
+        this.responseActive = false;
+        throw error;
+      }
     }
-    start();
-    this.responseActive = true;
   }
 
   /** User-role text item: speaker-change markers, transcript seeding, briefing refresh. */
@@ -917,16 +935,15 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
    * back as a `function_call_output` item and the session resumes speaking it
    * via an explicit response.
    */
-  public submitFunctionResult(callId: string, output: string): void {
+  public submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void {
     const id = nonEmpty(callId, "Realtime function call id");
     const bounded = boundedText(output, MAX_REALTIME_TEXT_ITEM_CHARACTERS, "Realtime function result");
-    this.queueResponse(() => {
-      this.sendFrame({
-        type: "conversation.item.create",
-        item: { type: "function_call_output", call_id: id, output: bounded },
-      });
-      this.sendFrame({ type: "response.create" });
+    // Resolve every tool call, even when its spoken continuation has gone stale.
+    this.sendFrame({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: id, output: bounded },
     });
+    if (shouldRespond !== false) this.createResponse(undefined, shouldRespond);
   }
 
   protected override handleServerEvent(type: string, event: Record<string, unknown>): void {
@@ -956,10 +973,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       case "response.done": {
         this.handleResponseDone(event);
         this.responseActive = false;
-        if (this.queuedResponses.length > 0 && this.isOpen) {
-          const next = this.queuedResponses.shift();
-          if (next !== undefined) this.queueResponse(next);
-        }
+        this.startNextResponse();
         return;
       }
       case "response.output_item.done": {

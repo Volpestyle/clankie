@@ -431,11 +431,11 @@ describe("external voice conversation", () => {
     port.createTextItem("Speaker: james");
     port.createResponse();
     port.submitFunctionResult("call_1", "done");
-    expect(realtime.functionResults).toEqual([]);
+    expect(realtime.functionResults).toHaveLength(1);
     realtimeHandlers.onResponseDone(doneMeta("tool-call"));
     port.appendAudio(Buffer.from([1, 0]));
     expect(realtime.textItems).toEqual(["Speaker: james"]);
-    expect(realtime.responseCreates).toBe(1);
+    expect(realtime.responseCreates).toBe(2);
     expect(realtime.functionResults).toEqual([{ callId: "call_1", output: "done" }]);
     expect(realtime.appended).toHaveLength(1);
 
@@ -493,17 +493,38 @@ it("keeps queued room responses and handoff answers behind the previous TTS drai
   port.submitFunctionResult("alice-result", "For Alice: the game");
   port.createResponse();
   realtimeHandlers.onResponseDone(doneMeta("banter-response"));
-  expect(realtime.functionResults).toEqual([]);
+  expect(realtime.functionResults).toHaveLength(1);
   expect(realtime.responseCreates).toBe(1);
   expect(events.done).toEqual([]);
   ttsHandlers[0]!.onContextDone("banter");
   expect(events.done).toEqual([doneMeta("banter-response")]);
   expect(realtime.functionResults).toEqual([{ callId: "alice-result", output: "For Alice: the game" }]);
-  expect(realtime.responseCreates).toBe(1);
-  realtimeHandlers.onResponseDone(doneMeta("alice-answer"));
   expect(realtime.responseCreates).toBe(2);
+  realtimeHandlers.onResponseDone(doneMeta("alice-answer"));
+  expect(realtime.responseCreates).toBe(3);
   port.createResponse();
   port.close();
   realtimeHandlers.onResponseDone(doneMeta("closed"));
+  expect(realtime.responseCreates).toBe(3);
+});
+
+it("absorbs a burst behind TTS and retains stale function results without speaking them", async () => {
+  const { port, realtime, realtimeHandlers, ttsHandlers } = await openHarness();
+  let revision = 0;
+  port.createResponse();
+  realtimeHandlers.onTextDelta("Already speaking.", "first");
+  await settle();
+  port.submitFunctionResult("old", "Useful context", () => revision === 0);
+  for (let index = 1; index <= 3; index += 1) {
+    revision = index;
+    port.createResponse(`turn ${index}`, () => revision === index);
+  }
+  realtimeHandlers.onResponseDone(doneMeta("first"));
+  expect(realtime.responseCreates).toBe(1);
+  ttsHandlers[0]!.onContextDone("first");
   expect(realtime.responseCreates).toBe(2);
+  expect(realtime.functionResults).toEqual([{ callId: "old", output: "Useful context" }]);
+  realtimeHandlers.onResponseDone(doneMeta("latest"));
+  expect(realtime.responseCreates).toBe(2);
+  port.close();
 });

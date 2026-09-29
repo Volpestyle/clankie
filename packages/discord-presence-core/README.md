@@ -116,7 +116,7 @@ Voice ingress keeps different speakers' asks in separate handoffs, one active
 speaker per room. The active speaker's refinements can steer their live run;
 other speakers wait for their own answer. The realtime conversation and local
 voice tools keep running while that work waits. Tool results carry their
-recipient, and the mouth names them naturally. Responses serialize through
+recipient, and the mouth gives that person the gist briefly. Responses serialize through
 provider completion and, for external voices, TTS drain.
 
 The floor retains up to five recently engaged speakers for 60 seconds each.
@@ -130,8 +130,18 @@ of real-time lead before sending it to Vox. Provider completion waits for the
 local queue to empty before `finish_tts_playback`; stop, failure, leave, and
 timeout discard queued audio. Vox retains its fail-closed 15-second buffer cap.
 
-Barge-in discards older speech queued for the interrupting speaker, including
-already-queued spoken tool answers. Other speakers keep their replies; captain
-work and result data retain their attribution. Unfinished discarded
-responses stay correlated until provider completion so late audio cannot become
-the next answer. Spoken turns favor one short thought and room for a reply.
+New speech replaces unheard replies across the room: bursts during opening
+collapse to one opportunity, provider/TTS queues drop stale response requests,
+and queued PCM is discarded before playback. Tool results stay in context;
+in-flight work retains its actor. Explicit “stop talking” cuts playback on the
+final transcript even below the ordinary barge-in loudness gate, drops queued
+speech, and keeps late handoff results silent.
+
+Repeated identical asks from the same person join pending work. For paraphrases,
+`ask_clankie.join_call_id` joins only that authenticated speaker's handoff;
+changed requests remain refinements. Slow work offers one brief acknowledgment
+after 1.2 seconds, canceled if the room moves on or work finishes. Voice usually
+uses one short sentence and offers detailed results in text. OpenAI output is
+bounded to 160 audio / 80 text tokens per response, and all Discord mouths have
+a six-second PCM ceiling. These are backstops; live taste and transcription
+latency still require a call.

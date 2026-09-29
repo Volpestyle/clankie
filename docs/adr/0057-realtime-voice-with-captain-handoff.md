@@ -115,7 +115,7 @@ opportunity, injected when its queued response actually starts, so later
 crosstalk cannot replace the actor whose request it may hand off. External TTS additionally waits for the prior
 speech to drain before starting another response, preserving audio attribution.
 Banter can therefore finish while a handoff remains unresolved. Each tool result
-carries its recipient and asks Clankie to name that person in his own wording.
+carries its recipient, so Clankie can make the addressee clear in his own wording.
 Playback remains one ordered voice; consent, grants, and approval handling do
 not change.
 
@@ -136,6 +136,50 @@ flowchart LR
 The dated diagram export above predates this amendment. Synthetic multi-speaker
 checks do not pass ADR 0045's three-human live gate; audible naming, crosstalk
 behavior, and queue delay still need that ceremony.
+
+### A call is brief and absorbs bursts (2026-09-29)
+
+Clankie is a friend in the call: usually one short sentence, sometimes a few
+words, rarely more than two sentences. No lists, request restatements, menus,
+or assistant-speak. Text stays thorough. Spoken handoff results get the gist;
+he can offer to drop details in text. OpenAI realtime sessions cap output at
+160 tokens for native audio or 80 for text feeding an external mouth. Every
+Discord mouth also caps each response at six seconds of PCM, including xAI;
+this is a runaway backstop, not a target duration.
+
+Every admitted utterance stays in room context, but newer room speech replaces
+responses that have not become audible. Bursts during session opening collapse
+to the latest opportunity; provider and external-TTS queues check freshness at
+actual dispatch. Already generated stale PCM is discarded without losing its
+response slot until completion. Function outputs remain context even if their
+spoken continuation is dropped. In-flight actions keep their original actor.
+
+A repeat ask joins an in-flight handoff for that same speaker. Identical
+normalized requests join automatically; the realtime model can use
+`join_call_id` for a paraphrase, checked against the authenticated speaker.
+Changed requests still refine the work through ADR 0091. After 1.2 seconds a
+pending handoff offers one brief acknowledgment in Clankie's own words, unless
+he already spoke or the room moved on. That opportunity expires when work
+settles; there is no repeated filler loop.
+
+An explicit stop cuts local playback as soon as its final transcript arrives,
+without the normal loudness/overlap gate, and discards all queued speech.
+Late handoff results remain available silently. Ordinary crosstalk retains the
+existing deliberate barge-in rules. Transcription latency, conversational taste,
+and paraphrase joining still need James's live activation and call.
+
+```mermaid
+flowchart LR
+  Speech[Attributed speech] --> Context[Keep all room context]
+  Context --> Latest[Latest reply opportunity]
+  Latest --> Fresh{Still current at dispatch?}
+  Fresh -->|yes| Voice[Brief response and paced audio]
+  Fresh -->|no| Drop[Drop unheard speech]
+  Voice --> Ask[Attributed handoff]
+  Ask --> Join[Join same-speaker repeats]
+  Ask --> Result[Result retained as context]
+  Result --> Fresh
+```
 
 ### Room membership is context, departure is his decision (2026-09-28)
 

@@ -198,6 +198,10 @@ describe("clankie app smoke", () => {
     expect(briefing.instructions).toContain("part of your own experience or developing personality");
     expect(briefing.instructions).toContain("your own captain mind");
     expect(briefing.instructions).toContain("web browsing and research");
+    expect(briefing.instructions).toContain("friend hanging out in a call");
+    expect(briefing.instructions).toContain("Usually one short sentence");
+    expect(briefing.instructions).toContain("Text can be thorough");
+    expect(briefing.instructions).toContain("Handoff results get the same brief delivery");
     clankie.close();
   });
 
