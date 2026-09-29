@@ -1044,7 +1044,7 @@ paths:
       tags: [Operator]
       operationId: getOperatorPersona
       summary: Read the hosted or local owner-authored persona
-      description: Includes persona image diagnostics (files, roles, counts, sizes, video timestamps, load errors), never image bytes. Status previews the current folder; the running image snapshot changes on restart.
+      description: Includes persona image diagnostics (files, roles, counts, sizes, video timestamps, viewable cached sheet paths, load errors), never image bytes. Status previews the current folder; the running image snapshot changes on restart.
       security: [{ operatorBearer: [] }]
       responses:
         "200": { description: Persona settings }

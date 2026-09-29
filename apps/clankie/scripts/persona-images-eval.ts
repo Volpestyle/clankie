@@ -70,7 +70,7 @@ async function save() {
       .map((f) => f.name)
       .join(", ")}. Appearance board hash: ${board.hash}.\n\n${
       vibe
-        ? `Vibe arm: ${vibe.images.length} frames/images read in place from the owner's folder; source video durations: ${vibe.files
+        ? `Vibe arm: ${vibe.images.length} references (${vibe.files.filter((f) => f.kind === "video" && f.status === "loaded").length} video contact sheets) read in place from the owner's folder; source video durations: ${vibe.files
             .filter((f) => f.duration !== undefined)
             .map((f) => f.duration?.toFixed(3) + " s")
             .join(

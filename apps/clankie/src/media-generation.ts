@@ -1,4 +1,4 @@
-import { PERSONA_IMAGE_FRAMING } from "@clankie/persona-images";
+import { PERSONA_IMAGE_FRAMING, PERSONA_VIDEO_FRAMING } from "@clankie/persona-images";
 import type { PersonaImageSource } from "./persona-images.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
@@ -275,7 +275,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
         schemaVersion: MEDIA_GENERATION_SCHEMA_VERSION,
         kind: "image",
         prompt: board
-          ? `${PERSONA_IMAGE_FRAMING}\nDepict the character using these visual references.\n${request.prompt}`
+          ? `${PERSONA_IMAGE_FRAMING}${appearance.some((image) => image.contactSheet) ? `\nSome references are video contact sheets. ${PERSONA_VIDEO_FRAMING}` : ""}\nDepict the character using these visual references.\n${request.prompt}`
           : request.prompt,
         ...(board
           ? { referenceImages: appearance.map((image) => `data:${image.mimeType};base64,${image.data}`) }

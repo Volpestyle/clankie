@@ -19,12 +19,17 @@ identity. Role labels accompany every image and the cached description. Existing
 owners move intended appearance files into the child directory; no inferred roles.
 
 Accept PNG/JPEG/WebP (10 MiB each), MOV/MP4/WebM (256 MiB, ten minutes each).
-Use ffmpeg/ffprobe to sample three evenly spaced frames, deduplicate near-identical
-samples, and cache them by source content hash. Audio is ignored; future voice
+Use ffmpeg/ffprobe to turn each video into one chronological 5×2 contact sheet
+from ten evenly spaced samples, cached by source content hash. Preserve repeated
+frames: sequence and continuity matter more than distinct isolated poses. A sheet
+counts as one reference; role labels also explain reading order and temporal intent. Audio is ignored; future voice
 input needs a separate design. Missing video tools skip clips with diagnostics.
 Appearance files load first, then vibe, filename-sorted in each. Bound both source
-slots and total stills/frames to eight. Pi's existing processor caps final pixels
-at a 1024-pixel edge and 128 KiB base64 per image. Broken inputs never prevent
+slots and total stills/sheets to eight. Stills retain their 1024-pixel edge cap;
+video tiles fit within 400×400, making sheets at most 2000×800. Pi's processor
+compresses/downscales both to 128 KiB base64 per image. Status exposes viewable
+sheet paths, dimensions and timestamps. The larger pixel cap preserves tile
+legibility while the board payload stays at most 1 MiB; exact token cost is model-dependent. Broken inputs never prevent
 startup. Cache keys include processing version and description roles.
 
 Pi accepts only text system prompts. Put the board in the first transient user

@@ -108,8 +108,9 @@ On a DIY installation, put PNG/JPEG/WebP images or MOV/MP4/WebM videos in a fold
 in `/persona`. Check `clankie persona images status`, then restart Clankie.
 Top-level files color his vibe: the feel of who he is, not what he looks like.
 Put physical character references in `appearance/`; only these feed self-portraits.
-He uses up to eight stills/frames total. Videos need ffmpeg/ffprobe and contribute
-up to three sampled frames each; audio is ignored. His written character wins. Voice uses a short description
+He uses up to eight stills/contact sheets total. Videos need ffmpeg/ffprobe and each
+contributes one sheet of ten chronological tiles; audio is ignored. Status lists
+viewable sheet paths. His written character wins. Voice uses a short description
 instead of images. `clankie persona images clear` clears the selection without
 deleting the originals. Images are sent to your configured models when used.
 Hosted paths refer to folders already on the hosted machine; this does not

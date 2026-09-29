@@ -40,7 +40,14 @@ const board = {
       width: 1,
       height: 1,
     },
-    { role: "vibe" as const, data: "VIBE_PIXELS", mimeType: "image/png" as const, width: 1, height: 1 },
+    {
+      role: "vibe" as const,
+      contactSheet: true as const,
+      data: "VIBE_PIXELS",
+      mimeType: "image/png" as const,
+      width: 1,
+      height: 1,
+    },
   ],
   description: "Appearance: A green seed creature with a leaf. Vibe: Joyful cosmic grandeur.",
 };
@@ -125,7 +132,10 @@ it.each(["operator", "discord_presence", "discord_voice"] as const)(
           { type: "text", text: PERSONA_IMAGE_FRAMING },
           { type: "text", text: "Appearance reference: how you look." },
           { type: "image", data: "PERSONA_PIXELS" },
-          { type: "text", text: expect.stringContaining("the feel of who you are, not what you look like") },
+          {
+            type: "text",
+            text: expect.stringMatching(/Vibe reference.*contact sheet.*the sequence is the point/),
+          },
           { type: "image", data: "VIBE_PIXELS" },
         ],
       });

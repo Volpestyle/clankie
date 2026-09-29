@@ -1,24 +1,17 @@
 import { spawn } from "node:child_process";
 import { z } from "zod";
-import { PERSONA_IMAGE_LIMITS, PixelSchema, processImage } from "./processing.ts";
+import { PERSONA_IMAGE_LIMITS, SheetPixelSchema, processImage } from "./processing.ts";
 
 export const VideoSchema = z.object({
   duration: z.number().positive().max(PERSONA_IMAGE_LIMITS.videoSeconds),
-  frames: z
-    .array(PixelSchema.extend({ timestamp: z.number().nonnegative(), fingerprint: z.string().length(1024) }))
-    .min(1)
-    .max(PERSONA_IMAGE_LIMITS.framesPerVideo),
+  sheet: SheetPixelSchema,
+  timestamps: z.array(z.number().nonnegative()).length(PERSONA_IMAGE_LIMITS.framesPerVideo),
 });
 /** Bounded subprocess, no shell, and an inherited regular-file descriptor rather than re-opening a path. */
-async function run(
-  binary: string,
-  args: string[],
-  fd?: number,
-): Promise<{ output: Buffer; fingerprint: Buffer }> {
+async function run(binary: string, args: string[], fd?: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe", fd ?? "ignore", "pipe"] });
-    const output: Buffer[] = [],
-      fingerprint: Buffer[] = [];
+    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe", fd ?? "ignore"] });
+    const output: Buffer[] = [];
     let size = 0,
       failure: Error | undefined;
     const fail = (reason: string) => {
@@ -36,8 +29,6 @@ async function run(
       size += chunk.length;
       if (size > 8 * 1024 * 1024) fail("video_output_limit");
     });
-    const extra = child.stdio[4];
-    if (extra && "on" in extra) extra.on("data", collect(fingerprint));
     child.on("error", (error: NodeJS.ErrnoException) => {
       failure = new Error(
         error.code === "ENOENT"
@@ -49,7 +40,7 @@ async function run(
       clearTimeout(timer);
       if (failure) reject(failure);
       else if (code !== 0) reject(new Error("video_decode_failed"));
-      else resolve({ output: Buffer.concat(output), fingerprint: Buffer.concat(fingerprint) });
+      else resolve(Buffer.concat(output));
     });
   });
 }
@@ -57,15 +48,7 @@ export async function checkVideoTools(tools: { ffmpeg: string; ffprobe: string }
   await run(tools.ffmpeg, ["-version"]);
   await run(tools.ffprobe, ["-version"]);
 }
-/** Mean RGB difference on a 16x16 thumbnail; ignores tiny codec/screen-recording noise. */
-function nearDuplicate(left: string, right: string): boolean {
-  const a = Buffer.from(left, "base64"),
-    b = Buffer.from(right, "base64");
-  if (a.length !== 768 || b.length !== 768) return false;
-  let delta = 0;
-  for (let i = 0; i < a.length; i++) delta += Math.abs(a[i]! - b[i]!);
-  return delta / a.length <= 2;
-}
+/** One chronological contact sheet per clip, retaining repetition as temporal context. */
 export async function sampleVideo(fd: number, extension: string, tools: { ffmpeg: string; ffprobe: string }) {
   // Forced demuxers exclude playlists; network protocols and audio are never consumed.
   const input = [
@@ -81,65 +64,45 @@ export async function sampleVideo(fd: number, extension: string, tools: { ffmpeg
     ["-v", "error", ...input, "-show_entries", "format=duration", "-of", "default=nk=1:nw=1"],
     fd,
   );
-  const duration = Number(probe.output.toString().trim());
+  const duration = Number(probe.toString().trim());
   if (!Number.isFinite(duration) || duration <= 0 || duration > PERSONA_IMAGE_LIMITS.videoSeconds)
     throw new Error("video_duration_limit");
-  const frames: z.infer<typeof VideoSchema>["frames"] = [];
-  for (let i = 0; i < PERSONA_IMAGE_LIMITS.framesPerVideo; i++) {
-    const timestamp = Number(((duration * (i + 0.5)) / PERSONA_IMAGE_LIMITS.framesPerVideo).toFixed(3));
-    const { output, fingerprint } = await run(
-      tools.ffmpeg,
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-nostdin",
-        "-threads",
-        "1",
-        "-ss",
-        String(timestamp),
-        ...input,
-        "-filter_complex_threads",
-        "1",
-        "-filter_complex",
-        "[0:v:0]split=2[frame][thumb];[frame]scale=w='min(1024,iw)':h='min(1024,ih)':force_original_aspect_ratio=decrease[picture];[thumb]scale=16:16,format=rgb24[small]",
-        "-map",
-        "[picture]",
-        "-frames:v",
-        "1",
-        "-an",
-        "-sn",
-        "-dn",
-        "-threads",
-        "1",
-        "-c:v",
-        "png",
-        "-f",
-        "image2pipe",
-        "pipe:1",
-        "-map",
-        "[small]",
-        "-frames:v",
-        "1",
-        "-an",
-        "-sn",
-        "-dn",
-        "-threads",
-        "1",
-        "-c:v",
-        "rawvideo",
-        "-pix_fmt",
-        "rgb24",
-        "-f",
-        "rawvideo",
-        "pipe:4",
-      ],
-      fd,
-    );
-    if (fingerprint.length !== 768) throw new Error("video_frame_unavailable");
-    const signature = fingerprint.toString("base64");
-    if (frames.some((frame) => nearDuplicate(frame.fingerprint, signature))) continue;
-    frames.push({ ...(await processImage(output)), timestamp, fingerprint: signature });
-  }
-  return VideoSchema.parse({ duration, frames });
+  const count = PERSONA_IMAGE_LIMITS.framesPerVideo;
+  const timestamps = Array.from({ length: count }, (_, i) =>
+    Number(((duration * (i + 0.5)) / count).toFixed(3)),
+  );
+  const edge = PERSONA_IMAGE_LIMITS.sheetTileEdge;
+  // Normalize PTS, sample the centers of ten equal temporal bins, then pad the
+  // final held frame if a short/low-frame-rate clip ends before the final bin.
+  // Audio is not decoded. One bounded decode avoids ten independent seeks.
+  const output = await run(
+    tools.ffmpeg,
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-threads",
+      "1",
+      ...input,
+      "-filter_threads",
+      "1",
+      "-vf",
+      `setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${duration / count},fps=fps=${count / duration}:start_time=${duration / (2 * count)}:round=near:eof_action=pass,scale=${edge}:${edge}:force_original_aspect_ratio=decrease,setsar=1,tile=${PERSONA_IMAGE_LIMITS.sheetColumns}x${PERSONA_IMAGE_LIMITS.sheetRows}:nb_frames=${count}`,
+      "-frames:v",
+      "1",
+      "-an",
+      "-sn",
+      "-dn",
+      "-threads",
+      "1",
+      "-c:v",
+      "png",
+      "-f",
+      "image2pipe",
+      "pipe:1",
+    ],
+    fd,
+  );
+  return VideoSchema.parse({ duration, timestamps, sheet: await processImage(output, true) });
 }

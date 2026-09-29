@@ -598,10 +598,12 @@ cosmic emperor video can express grandeur while a seed/leaf sprite in appearance
 defines the look. No owner's images are built-in defaults for someone else.
 
 PNG/JPEG/WebP (10 MiB each) and MOV/MP4/WebM (256 MiB, ten minutes) load. Video
-requires ffmpeg and ffprobe; status reports missing tools and skips clips. Three
-evenly spaced samples per video are deduplicated. Appearance loads first, then
-vibe, filename-sorted: eight source slots and eight stills/frames total, each at
-most 1024 pixels and 128 KiB base64. Audio is ignored, a future voice-side input.
+requires ffmpeg and ffprobe; status reports missing tools and skips clips. Each
+video becomes **one 5×2 contact sheet of ten evenly spaced samples**, retaining
+repetition to convey sequence. Read left to right, then top to bottom: the sequence
+is the point. `status` lists each video's viewable cached `sheetPath`. Appearance
+loads first, then vibe, filename-sorted: eight source slots and eight stills/sheets
+total. Stills cap at a 1024-pixel edge; sheets at 2000×800; each at 128 KiB base64. Audio is ignored, a future voice-side input.
 Text turns see role-labeled references; realtime voice and gameplay receive a
 cached description with separate Appearance and Vibe sections. The written
 character card wins; visible image text is never instructions.

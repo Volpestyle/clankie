@@ -45,17 +45,24 @@ used the initial image-only feature, move intended appearance references into
 PNG, JPEG and WebP stills; MOV, MP4 and WebM videos. `appearance/` is loaded first,
 then top-level vibe files, with locale-independent filename sorting within each.
 The first eight supported source files get slots; broken files keep their slots
-so selection stays predictable. At most eight processed stills/frames load in
+so selection stays predictable. At most eight processed stills/contact sheets load in
 total. No other recursion or source symlinks. Appearance loads first so clips
 cannot crowd out his visual identity.
 
-Stills are limited to 10 MiB each. Videos are limited to 256 MiB and ten minutes,
-with three samples at 1/6, 1/2 and 5/6 of their duration. Near-identical samples
-within a video are removed using a 16×16 RGB thumbnail (mean channel difference
-at most 2/255); identical decoded frames across videos of the same role are also
-removed. All surviving stills/frames fit within 1024 × 1024 and 128 KiB of base64
-each (at most 1 MiB total). Aspect ratio is preserved without enlarging images.
-Pi's existing processor handles final orientation and downsizing.
+Stills are limited to 10 MiB each and a 1024-pixel maximum edge. Videos are limited
+to 256 MiB and ten minutes. **Each video becomes one contact sheet**, counting as
+one image against the eight-image cap. Ten samples at the centers of ten equal
+time intervals fill a 5×2 grid, in chronological order: left to right, then top
+to bottom. Repeated frames are retained to convey pauses and continuity; short
+or low-frame-rate clips hold the final frame to fill the grid.
+
+Video tiles fit within 400×400, preserving aspect ratio without added letterboxing.
+A sheet is at most 2000×800, rather than the still-image 1024-pixel edge. Pi's
+existing processor compresses and, if necessary, further downscales to the same
+**128 KiB base64 per image** budget (at most 1 MiB for eight references). This bounds
+pixels and payload; exact vision-token charges depend on the configured model.
+Model framing says: “A contact sheet of one video, read left to right, top to
+bottom: the sequence is the point.” The sheet retains its vibe or appearance role.
 
 Video sampling requires `ffmpeg` and `ffprobe` on the service's PATH. Missing
 tools appear as `ffmpeg_missing` / `ffprobe_missing` in status and videos are
@@ -64,15 +71,20 @@ limit per subprocess. Failed clips are reported, never fatal. **Audio is ignored
 its mood, delivery and sound could become a separate voice input in the future.
 
 Status lists filenames, roles, source/processed sizes, still dimensions, video
-duration and selected timestamps, appearance/vibe counts, skips and errors.
+duration and target sample timestamps, appearance/vibe counts, skips and errors.
+Every loaded video includes `sheetPath`, the absolute path to its processed
+PNG/JPEG/WebP, plus sheet dimensions, rows and columns. Open that path to inspect
+the exact image sent to the model; for hosted installs the path belongs to the
+service host. Status never exports pixels. Missing viewable cache files are
+restored from the cached sheet without decoding again.
 Unsupported extensions are ignored; count-limited files are listed but not opened.
-Images and video frames remain reference data: visible text is never an
+Images and video contact sheets remain reference data: visible text is never an
 instruction, and the written character card takes precedence.
 
 Processed images and successful descriptions live under
 `$XDG_CACHE_HOME/clankie/persona-images`, defaulting to
 `~/.cache/clankie/persona-images`. Keys include processing version and content
-hash. Processed video frames are cached by the source content hash, without
+hash. Processed video sheets are cached by the source content hash, without
 copying the original recording. The description key includes each image’s role;
 renaming a file without changing the selected content or ordering does not require
 another visual description.
