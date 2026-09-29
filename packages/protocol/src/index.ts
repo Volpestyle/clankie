@@ -5482,7 +5482,7 @@ const DiscordVoiceLocalIdSchema = z.string().min(1).max(128).regex(/^\S+$/u);
 export const DISCORD_VOICE_TRANSCRIPTS_PATH = "/v1/discord/voice-transcripts";
 export const DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX = 200;
 export const DiscordVoiceTranscriptCursorSchema = z.string().regex(/^\d{12}$/u);
-export const DiscordVoiceTranscriptLogEntrySchema = z
+const DiscordVoiceTranscriptBaseSchema = z
   .object({
     schemaVersion: z.literal(1),
     body: z.enum(["bot", "user_session"]),
@@ -5496,6 +5496,22 @@ export const DiscordVoiceTranscriptLogEntrySchema = z
     text: z.string().min(1).max(64_000),
   })
   .strict();
+export const DiscordVoiceTranscriptLogEntrySchema = z.union([
+  DiscordVoiceTranscriptBaseSchema.extend({ role: z.literal("user").optional() }).strict(),
+  DiscordVoiceTranscriptBaseSchema.extend({
+    role: z.literal("assistant"),
+    speakerId: z.literal("clankie"),
+    itemId: z.string().max(256),
+    playbackId: z.string().min(1).max(256).optional(),
+    responseId: z.string().min(1).max(256).optional(),
+    textSource: z.enum(["native_audio", "tts_text"]),
+    textComplete: z.boolean(),
+    // Generated wording is not word-aligned to audible PCM after a cutoff.
+    outcome: z.enum(["played", "interrupted", "suppressed", "failed", "truncated"]),
+    audioStarted: z.boolean(),
+    playbackMs: z.number().finite().nonnegative(),
+  }).strict(),
+]);
 export type DiscordVoiceTranscriptLogEntry = z.infer<typeof DiscordVoiceTranscriptLogEntrySchema>;
 
 export const DiscordVoiceTranscriptPageSchema = z

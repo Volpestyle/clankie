@@ -88,7 +88,7 @@ export const DiscordSettingsSchema = z
      */
     voiceConsentPolicy: z.enum(["explicit", "presence"]).default("explicit"),
     /**
-     * Retain exact consented speech for local development diagnostics. The
+     * Retain consented speech and generated reply text for local development diagnostics. The
      * transcript file is private, separate from the content-free receipt log,
      * and disabled until the owner deliberately enables it.
      */

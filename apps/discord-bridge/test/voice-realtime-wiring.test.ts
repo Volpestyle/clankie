@@ -332,6 +332,8 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
         timers,
       });
 
+      const spoken: unknown[] = [];
+      session.subscribeSpokenTranscript((entry) => spoken.push(entry));
       await session.join({
         guildId: GUILD,
         channelId: CHANNEL,
@@ -413,6 +415,15 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       const responses = evidence.filter((event) => event.type === "response");
       expect(responses).toHaveLength(1);
       expect(responses[0]).toMatchObject({ fastPath: true, wake: "continuing", toFirstAudioMs: 120 });
+      expect(spoken).toEqual([
+        expect.objectContaining({
+          text: "Right here.",
+          textSource: "tts_text",
+          itemId: "item_say",
+          textComplete: true,
+          outcome: "played",
+        }),
+      ]);
 
       // A three-utterance burst while the provider is thinking becomes one
       // further audible answer through the real session and both response queues.
@@ -512,3 +523,45 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     });
   });
 });
+
+it.each(["openai", "xai"])(
+  "forwards %s native spoken transcript deltas and finals with item identity",
+  async (provider) => {
+    const sockets: FakeRealtimeSocket[] = [];
+    const output: unknown[] = [];
+    const ports = createVoiceRealtimePorts({
+      apiKey: "test-key",
+      config: parseVoiceRealtimeEnv({ CLANKIE_VOICE_REALTIME_PROVIDER: provider }),
+      socketFactory: async (url, headers) => {
+        const socket = new FakeRealtimeSocket(url, headers);
+        sockets.push(socket);
+        return socket;
+      },
+      timers: new TestTimers(),
+    });
+    const conversation = await ports.openConversation({
+      instructions: "Test",
+      onAudioDelta: (pcm) => pcm.fill(0),
+      onFunctionCall: () => undefined,
+      onResponseDone: () => undefined,
+      onClose: () => undefined,
+      onError: () => undefined,
+      onOutputTranscript: (event, source) => output.push({ ...event, source }),
+    });
+    sockets[0]!.serverEvent({
+      type: "response.output_audio_transcript.delta",
+      item_id: "native",
+      delta: "Right ",
+    });
+    sockets[0]!.serverEvent({
+      type: "response.audio_transcript.done",
+      item_id: "native",
+      transcript: "Right here.",
+    });
+    expect(output).toEqual([
+      { itemId: "native", text: "Right ", final: false, source: "native_audio" },
+      { itemId: "native", text: "Right here.", final: true, source: "native_audio" },
+    ]);
+    conversation.close();
+  },
+);

@@ -504,7 +504,7 @@ private struct DiscordVoiceTranscript: View {
         Text("Listening for retained speech…").font(.caption).foregroundStyle(.secondary)
       }
       ForEach(entries.suffix(20)) { entry in
-        TranscriptBubble(speaker: entry.displayName ?? entry.speakerId, text: entry.text)
+        TranscriptBubble(speaker: entry.speakerLabel, text: entry.text)
       }
     }
   }

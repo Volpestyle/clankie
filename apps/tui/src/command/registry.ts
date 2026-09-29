@@ -304,6 +304,10 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  discord [status]         Read non-secret Discord identifiers and body selection"],
   },
   { nouns: ["discord"], lines: ["  discord set --field value […] | clear --field […]"] },
+  {
+    nouns: ["discord"],
+    lines: ["  discord transcripts [--cursor CURSOR] [--limit N]  Read private retained voice text"],
+  },
 ] as const;
 
 export const HEADLESS_NOUNS: readonly string[] = [

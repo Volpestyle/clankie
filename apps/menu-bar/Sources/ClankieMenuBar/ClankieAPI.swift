@@ -57,7 +57,20 @@ struct VoiceTranscriptEntry: Decodable, Identifiable, Sendable {
   let displayName: String?
   let text: String
 
-  var id: String { "\(body):\(deliveryId)" }
+  let role: String?
+  let itemId: String?
+  let outcome: String?
+  let audioStarted: Bool?
+  let textComplete: Bool?
+
+  var id: String { role == "assistant" ? "\(body):\(deliveryId):assistant:\(itemId ?? "")" : "\(body):\(deliveryId)" }
+  var speakerLabel: String {
+    let name = displayName ?? speakerId
+    guard role == "assistant" else { return name }
+    if outcome == "played" && textComplete == true { return "Clankie · played" }
+    let detail = audioStarted == true ? "audible cutoff unknown" : "not played"
+    return "Clankie · \(outcome ?? "unknown") · generated text; \(detail)"
+  }
   var roomId: String { "\(guildId):\(channelId)" }
 }
 

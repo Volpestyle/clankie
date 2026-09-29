@@ -1271,7 +1271,13 @@ paths:
       description: |
         Captain bearer only. Exact speech is returned only while
         `discord.voiceTranscriptLoggingEnabled` is enabled; otherwise the route
-        returns an empty page with `enabled: false`.
+        returns an empty page with `enabled: false`. Includes legacy human
+        recognition and assistant generated wording (`role: assistant`,
+        `speakerId: clankie`, `itemId`, optional `playbackId`/`responseId`,
+        `textSource`, `textComplete`, `audioStarted`, `playbackMs`, `outcome`).
+        Outcomes are played, interrupted, suppressed, failed, or truncated.
+        Generated text may include an unheard ending after a cutoff; no raw
+        audio or word-aligned audible transcript is retained.
       security: [{ captainBearer: [] }]
       parameters:
         - in: query

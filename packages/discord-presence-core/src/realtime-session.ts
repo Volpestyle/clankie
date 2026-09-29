@@ -370,7 +370,7 @@ export interface RealtimeConversationSessionOptions extends RealtimeSessionCommo
   /**
    * Response text deltas, only in `"text"` modality. This is what Clankie is
    * about to say out loud through the external voice — bounded per response
-   * by {@link MAX_REALTIME_RESPONSE_TEXT_CHARACTERS} and never logged.
+   * by {@link MAX_REALTIME_RESPONSE_TEXT_CHARACTERS}; retained only by the opt-in private transcript sink.
    */
   readonly onTextDelta?: (delta: string, itemId: string) => void;
   readonly onResponseDone?: (meta: RealtimeResponseMeta) => void;
@@ -995,8 +995,8 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     if (text.length === 0) return;
     this.onTranscriptCallback?.({
       itemId: asString(event.item_id) ?? "",
-      text: text.slice(0, MAX_TRANSCRIPT_CHARACTERS),
-      final,
+      text: text.slice(0, MAX_REALTIME_RESPONSE_TEXT_CHARACTERS),
+      final: final && text.length <= MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
     });
   }
 

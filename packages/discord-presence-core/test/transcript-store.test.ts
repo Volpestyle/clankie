@@ -76,3 +76,32 @@ describe("DiscordVoiceTranscriptStore", () => {
     ).rejects.toThrow(/regular file/u);
   });
 });
+
+it("pages legacy inbound and assistant playback entries together without losing attribution", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-spoken-log-"));
+  roots.push(root);
+  const path = join(root, "transcript.jsonl");
+  const store = new DiscordVoiceTranscriptStore(path);
+  await store.append("bot", transcript("Question", "same"));
+  for (const itemId of ["ack", "answer"])
+    await store.append("bot", {
+      ...transcript("Generated reply", "same"),
+      role: "assistant",
+      speakerId: "clankie",
+      displayName: "Clankie",
+      itemId,
+      playbackId: itemId,
+      textSource: "tts_text",
+      textComplete: true,
+      outcome: "interrupted",
+      audioStarted: true,
+      playbackMs: 700,
+    });
+  const first = await store.read("000000000000", 2);
+  expect(first.entries).toHaveLength(2);
+  expect(first.entries[0]!.role).toBeUndefined();
+  expect(first.entries[1]).toMatchObject({ role: "assistant", itemId: "ack", outcome: "interrupted" });
+  const next = await store.read(first.nextCursor);
+  expect(next.entries).toEqual([expect.objectContaining({ itemId: "answer" })]);
+  expect((await stat(path)).mode & 0o777).toBe(0o600);
+});

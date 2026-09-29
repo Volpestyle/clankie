@@ -371,6 +371,11 @@ const voiceGateway =
       });
 const voiceTranscriptStore = voiceTranscriptLoggingEnabled ? new DiscordVoiceTranscriptStore() : undefined;
 if (voiceSession !== undefined && voiceTranscriptStore !== undefined) {
+  voiceSession.subscribeSpokenTranscript((transcript) => {
+    void voiceTranscriptStore.append("bot", transcript).catch(() => {
+      console.error({ deliveryId: transcript.deliveryId }, "Discord spoken transcript append failed");
+    });
+  });
   voiceSession.subscribeTranscript((_line, transcript) => {
     void voiceTranscriptStore.append("bot", transcript).catch((error: unknown) => {
       console.error(

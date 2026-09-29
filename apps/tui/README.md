@@ -197,7 +197,10 @@ credential holder.
 - `/memory` browses and edits episodes and permitted Discord person facts through
   operator-only APIs.
 - `/vt` (aliases `/voice-log`, `/voice-transcripts`) opens a live overlay of
-  retained Discord voice transcripts. `Ctrl+Shift+V` toggles the same view;
+  retained Discord voice transcripts, including Clankie's generated wording
+  labeled with playback outcome. Cut-off text may include an unheard ending.
+  `clankie discord transcripts` reads the same page headlessly.
+  `Ctrl+Shift+V` toggles the same view;
   Esc or `/vt off` closes it. Exact speech appears only when
   `discord.voiceTranscriptLoggingEnabled` is on ([ADR 0121](../../docs/adr/0121-development-voice-transcripts-are-explicit.md));
   otherwise the overlay points at `/discord`. This is not `/trace`: voice lanes

@@ -30,7 +30,10 @@ does not request Input Monitoring access.
 The session list and expandable tails use `/operator/v1/dispatch`. Local voice
 uses `/operator/v1/voice-chat`; raw 24 kHz mono PCM remains in memory. Discord
 speech appears only when `discord.voiceTranscriptLoggingEnabled` is enabled in
-owner settings, through `/v1/discord/voice-transcripts`.
+owner settings, through `/v1/discord/voice-transcripts`. Clankie's generated
+wording appears alongside human recognition, with playback outcomes. Interrupted
+or failed speech is labeled with an unknown audible cutoff; the text may
+include an unheard ending.
 
 Each inactive, non-default Pi session has a trash button that clears that one
 session through the shared conversation close operation. Active sessions and

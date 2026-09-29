@@ -192,8 +192,10 @@ for a room whose participants understand it.
 
 Full transcript logging is off by default. Enable it in `/discord`, or with
 `clankie discord set --voice-transcript-logging-enabled on`, then open `/vt`
-in the console to read it. It retains exact consented speech in a private local
-log, separate from the content-free receipts. Turn it off with the same flag
+in the console to read it, or run `clankie discord transcripts`. It retains
+consented speech and Clankie's generated reply wording in a private local log,
+separate from the content-free receipts. Replies carry playback outcomes;
+interrupted text may include an unheard ending. No raw audio is saved. Turn it off with the same flag
 set to `off`. The [voice log reference](https://github.com/Volpestyle/clankie/blob/main/apps/discord-bridge/README.md#configure)
 covers its location. Check [`clankie discord status`](/cli/#discord-status)
 for effective settings and the restart instruction.

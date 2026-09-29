@@ -1671,6 +1671,21 @@ Return stored and effective non-secret Discord configuration:
 `discord` is the stored value. `effectiveDiscord` includes environment
 overrides, whose variable names appear in `overriddenByEnvironment`.
 
+### `discord transcripts [--cursor CURSOR] [--limit N]`
+
+Read the private retained voice log through the authenticated service API.
+The default page contains the newest 100 entries; `--limit` accepts 1–200.
+Pass `nextCursor` to read later entries and follow `hasMore` when paging.
+Logging must be enabled through `discord set --voice-transcript-logging-enabled on`
+and activated by restarting the relevant services; otherwise the page is empty
+with `enabled: false`. `/vt` shows the same entries in the console.
+
+Human entries retain consented final recognition. Clankie's entries have
+`role: assistant`, generated `text`, provider `itemId`, and playback outcomes
+(`played`, `interrupted`, `suppressed`, `failed`, `truncated`). An interrupted
+or failed reply may include words that never played: the exact audible word
+cutoff is unknown. No raw audio is saved. See [ADR 0121](adr/0121-development-voice-transcripts-are-explicit.md).
+
 ### `discord set --field value […]` / `discord clear --field […]`
 
 Set several fields atomically, or reset fields to their schema defaults.

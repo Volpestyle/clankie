@@ -1,0 +1,13 @@
+Focused Vitest: 8 files, 244 tests passed.
+Menu bar: swift build and 3 Swift tests passed.
+CLI: authenticated bounded read of existing log passed.
+
+Command: pnpm check
+Result: passed (exit 0)
+Herdr skill, formatting, lint, dead-code, docs and infrastructure checks: passed.
+Workspace typechecks: 28 successful.
+Vitest: 359 files passed; 3047 tests passed, 2 skipped.
+Vox Rust: 123 tests passed.
+Vox IPC smoke: passed.
+
+No service restart, live voice join, or push performed.

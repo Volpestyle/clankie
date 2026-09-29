@@ -62,7 +62,9 @@ export function createDiscordVoiceTranscriptClient(
 }
 
 export function voiceTranscriptEntryKey(entry: DiscordVoiceTranscriptLogEntry): string {
-  return `${entry.body}:${entry.deliveryId}`;
+  return entry.role === "assistant"
+    ? `${entry.body}:${entry.deliveryId}:assistant:${entry.itemId}`
+    : `${entry.body}:${entry.deliveryId}`;
 }
 
 function voiceTranscriptRoomKey(entry: DiscordVoiceTranscriptLogEntry): string {
@@ -123,6 +125,13 @@ export function formatVoiceTranscriptLines(
     const speaker = entry.displayName ?? entry.speakerId;
     const age = formatVoiceTranscriptAge(entry.occurredAt, options.now);
     lines.push(`${theme.bold(theme.cyan(speaker))} · ${theme.dim(age)}`);
+    if (entry.role === "assistant") {
+      const detail =
+        entry.outcome === "played" && entry.textComplete
+          ? "played"
+          : `${entry.outcome} · generated text; ${entry.audioStarted ? "audible cutoff unknown" : "not played"}`;
+      lines.push(theme.dim(detail));
+    }
     for (const wrapped of wrap(entry.text, Math.max(1, width))) lines.push(wrapped);
   }
   return lines;

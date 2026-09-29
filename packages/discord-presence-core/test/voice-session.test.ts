@@ -2133,6 +2133,12 @@ describe("fast path responses", () => {
   it("caps runaway speech at 45 seconds while preserving paced playback", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
+    const spoken: unknown[] = [];
+    harness.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+    conversation.input.onOutputTranscript?.(
+      { itemId: "item_long_answer", text: "Runaway reply.", final: true },
+      "tts_text",
+    );
     const original = Buffer.alloc(24_000 * 2 * 60, 7);
     const incoming = Buffer.from(original);
     conversation.input.onAudioDelta(incoming, "item_long_answer");
@@ -2157,6 +2163,9 @@ describe("fast path responses", () => {
       original.subarray(0, 48_000 * 45),
     );
     expect(conversation.truncations).toEqual([{ itemId: "item_long_answer", audioEndMs: 45_000 }]);
+    expect(spoken).toEqual([
+      expect.objectContaining({ outcome: "truncated", audioStarted: true, text: "Runaway reply." }),
+    ]);
     const late = pcmDelta(480);
     conversation.input.onAudioDelta(late, "item_long_answer");
     expect(late.every((value) => value === 0)).toBe(true);
@@ -4447,4 +4456,169 @@ it("lets a new ask after stop rejoin pending work and request its result again",
   done();
   await flush();
   expect(harness.ofType("response")).toHaveLength(1);
+});
+
+describe("opt-in spoken transcripts", () => {
+  const done = (h: Awaited<ReturnType<typeof engagedHarness>>) =>
+    h.conversation().input.onResponseDone({
+      responseId: "spoken-response",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 15,
+    });
+
+  it.each(["native_audio", "tts_text"] as const)(
+    "records %s wording once with completed playback, separate from human speech and receipts",
+    async (source) => {
+      const h = await engagedHarness();
+      const spoken: import("../src/voice-session.ts").DiscordVoiceSpokenTranscript[] = [];
+      const humans: string[] = [];
+      h.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+      h.session.subscribeTranscript((line) => humans.push(line));
+      const input = h.conversation().input;
+      input.onOutputTranscript?.({ itemId: "spoken-item", text: "Private words.", final: false }, source);
+      input.onOutputTranscript?.({ itemId: "spoken-item", text: "Private words.", final: true }, source);
+      input.onAudioDelta(pcmDelta(480), "spoken-item");
+      done(h);
+      await flush();
+      expect(spoken).toEqual([
+        expect.objectContaining({
+          role: "assistant",
+          speakerId: "clankie",
+          text: "Private words.",
+          textSource: source,
+          textComplete: true,
+          outcome: "played",
+          audioStarted: true,
+          itemId: "spoken-item",
+          playbackId: h.vox.audio[0]!.playbackId,
+          guildId: GUILD,
+          channelId: CHANNEL,
+        }),
+      ]);
+      expect(humans).toEqual([]);
+      expect(JSON.stringify(h.ofType("response"))).not.toContain("Private words.");
+    },
+  );
+
+  it("retains interrupted wording as generated text with an unknown audible cutoff, and ignores its late tail", async () => {
+    const h = await engagedHarness();
+    const spoken: import("../src/voice-session.ts").DiscordVoiceSpokenTranscript[] = [];
+    h.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+    const input = h.conversation().input;
+    input.onOutputTranscript?.(
+      { itemId: "old", text: "A longer generated ending.", final: true },
+      "tts_text",
+    );
+    input.onAudioDelta(pcmDelta(48_000 * 3), "old");
+    await flush();
+    h.clock.now += 250;
+    await h.say(ALICE, "Can you stop talking?");
+    input.onOutputTranscript?.({ itemId: "old", text: "late unwanted tail", final: false }, "tts_text");
+    done(h);
+    await flush();
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]).toMatchObject({
+      text: "A longer generated ending.",
+      outcome: "interrupted",
+      audioStarted: true,
+    });
+    expect(spoken[0]!.playbackMs).toBeGreaterThanOrEqual(250);
+  });
+
+  it("labels stale text that never reached playback as suppressed", async () => {
+    const h = await engagedHarness();
+    const spoken: unknown[] = [];
+    h.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+    h.conversation().input.onOutputTranscript?.(
+      { itemId: "stale", text: "Yesterday.", final: true },
+      "tts_text",
+    );
+    await h.say(ALICE, "actually tomorrow");
+    done(h);
+    await flush();
+    expect(spoken).toEqual([
+      expect.objectContaining({
+        text: "Yesterday.",
+        outcome: "suppressed",
+        audioStarted: false,
+        playbackMs: 0,
+      }),
+    ]);
+  });
+
+  it("keeps disabled and unsubscribed output private and isolates failing subscribers", async () => {
+    const h = await engagedHarness();
+    const spoken: unknown[] = [];
+    const input = h.conversation().input;
+    input.onOutputTranscript?.({ itemId: "private", text: "Not retained.", final: true }, "tts_text");
+    h.session.subscribeSpokenTranscript(() => {
+      throw new Error("sink down");
+    });
+    const unsub = h.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+    input.onAudioDelta(pcmDelta(480), "private");
+    done(h);
+    await flush();
+    expect(spoken).toEqual([]);
+    await h.say(ALICE, "clankie next question");
+    input.onOutputTranscript?.({ itemId: "next", text: "Still speaking.", final: true }, "tts_text");
+    input.onAudioDelta(pcmDelta(480), "next");
+    done(h);
+    await flush();
+    expect(spoken).toHaveLength(1);
+    unsub();
+  });
+
+  it.each(["leave", "provider", "playback"])(
+    "records partial wording when %s ends speech",
+    async (failure) => {
+      const h = await engagedHarness();
+      const spoken: unknown[] = [];
+      h.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+      const input = h.conversation().input;
+      input.onOutputTranscript?.({ itemId: "partial", text: "Unfinished", final: false }, "native_audio");
+      if (failure === "provider") h.conversation().lose("error");
+      else {
+        input.onAudioDelta(pcmDelta(480), "partial");
+        await flush();
+        if (failure === "leave") await h.session.leave();
+        else
+          h.vox.emit({
+            type: "tts_playback_state",
+            playbackId: h.vox.audio[0]!.playbackId,
+            status: "failed",
+            reason: "test_failure",
+          });
+      }
+      await flush();
+      expect(spoken).toEqual([
+        expect.objectContaining({
+          text: "Unfinished",
+          textComplete: false,
+          outcome: failure === "leave" ? "interrupted" : "failed",
+        }),
+      ]);
+    },
+  );
+});
+
+it("drops in-flight wording when the last retention subscriber leaves", async () => {
+  const h = await engagedHarness();
+  const spoken: unknown[] = [];
+  const unsubscribe = h.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+  h.conversation().input.onOutputTranscript?.(
+    { itemId: "private", text: "Forget this buffer.", final: true },
+    "tts_text",
+  );
+  unsubscribe();
+  h.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+  h.conversation().input.onAudioDelta(pcmDelta(480), "private");
+  h.conversation().input.onResponseDone({
+    responseId: "private",
+    status: "completed",
+    audioBytes: 480,
+    textCharacters: 19,
+  });
+  await flush();
+  expect(spoken).toEqual([]);
 });

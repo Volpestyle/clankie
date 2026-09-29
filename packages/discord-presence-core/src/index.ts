@@ -81,6 +81,7 @@ export {
   type DiscordVoiceSessionOptions,
   type DiscordVoiceSessionStatus,
   type DiscordVoiceTranscript,
+  type DiscordVoiceSpokenTranscript,
   type JoinDiscordVoiceInput,
   type VoiceRoomOccupant,
   type VoiceConversationOpenInput,

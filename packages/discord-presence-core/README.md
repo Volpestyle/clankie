@@ -147,3 +147,11 @@ proportion, with details available in text. OpenAI output is bounded to 4096
 audio / 1024 text tokens per response, and all Discord mouths have a 45-second
 PCM ceiling. These runaway backstops leave room for deliberate 20–30 second
 riffs; live taste and transcription latency still require a call.
+
+Opt-in voice transcripts include Clankie's generated wording from native audio
+transcripts or external TTS text, correlated with item/playback ids and outcomes.
+`subscribeSpokenTranscript` is separate from the consented human listener, so
+output cannot masquerade as room input. Without a subscriber the session does
+not accumulate output text. Interrupted/failed/truncated entries may include an
+unheard ending; suppressed entries never played. The private transcript store
+and authenticated API retain these labels; content-free receipts never carry text.

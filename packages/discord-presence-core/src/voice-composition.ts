@@ -1,6 +1,7 @@
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
 import type { DiscordBridgeReceipt, DiscordBridgeReceiptType } from "./receipt-store.ts";
 import {
+  MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
   openXaiStreamingTranscriptionSession,
@@ -270,6 +271,7 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
     config.ttsProvider === "elevenlabs" && elevenLabsApiKey !== undefined
       ? (open: TranscriptVoiceConversationOpenInput) => {
           let transcript = "";
+          let transcriptItemId = "";
           return openExternalVoiceConversation(
             open,
             {
@@ -283,14 +285,18 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
                   postInstructionsTokenLimit: config.postInstructionsTokenLimit,
                   onAudioDelta: open.onAudioDelta,
                   onTextDelta: (delta, itemId) => {
-                    transcript += delta;
+                    transcript = (transcript + delta).slice(0, MAX_REALTIME_RESPONSE_TEXT_CHARACTERS);
+                    transcriptItemId = itemId;
+                    open.onOutputTranscript?.({ itemId, text: delta, final: false }, "tts_text");
                     handlers.onTextDelta(delta, itemId);
                     open.onTranscript?.({ itemId, text: delta, final: false });
                   },
                   onFunctionCall: handlers.onFunctionCall,
                   onResponseDone: (meta) => {
                     if (transcript.trim().length > 0) {
-                      open.onTranscript?.({ itemId: "", text: transcript, final: true });
+                      const event = { itemId: transcriptItemId, text: transcript, final: true };
+                      open.onTranscript?.(event);
+                      open.onOutputTranscript?.(event, "tts_text");
                     }
                     transcript = "";
                     handlers.onResponseDone(meta);
@@ -333,7 +339,10 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
             truncationRetentionRatio: config.truncationRetentionRatio,
             postInstructionsTokenLimit: config.postInstructionsTokenLimit,
             onAudioDelta: open.onAudioDelta,
-            ...(open.onTranscript === undefined ? {} : { onTranscript: open.onTranscript }),
+            onTranscript: (event) => {
+              open.onTranscript?.(event);
+              open.onOutputTranscript?.(event, "native_audio");
+            },
             onFunctionCall: open.onFunctionCall,
             onResponseDone: open.onResponseDone,
             onClose: open.onClose,

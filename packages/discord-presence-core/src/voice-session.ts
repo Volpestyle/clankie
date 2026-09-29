@@ -37,6 +37,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import type {
   DiscordVoiceEvidence,
+  DiscordVoiceTranscriptLogEntry,
   DiscordVoiceRealtimeToolName,
   DiscordVoiceResponseTrigger,
   DiscordVoiceWake,
@@ -54,6 +55,7 @@ import {
   MUSIC_STOP_TOOL_NAME,
   YOUTUBE_SEARCH_TOOL_NAME,
   MAX_REALTIME_AUDIO_APPEND_BYTES,
+  MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
   MAX_REALTIME_TEXT_ITEM_CHARACTERS,
   REALTIME_AUDIO_SAMPLE_RATE,
   type RealtimeFunctionCall,
@@ -279,6 +281,11 @@ export interface DiscordVoiceTranscript {
   readonly text: string;
 }
 
+export type DiscordVoiceSpokenTranscript = Omit<
+  Extract<DiscordVoiceTranscriptLogEntry, { role: "assistant" }>,
+  "schemaVersion" | "body"
+>;
+
 /**
  * What this media owner needs from the dormant listener. Structural rather
  * than the concrete `RealtimeTranscriptionSession` class so tests can inject
@@ -310,6 +317,8 @@ export interface VoiceTranscriptionHandlers {
 }
 
 export interface VoiceConversationOpenInput {
+  /** Private generated wording; separate from content-free receipts. */
+  readonly onOutputTranscript?: (event: RealtimeTranscriptEvent, source: "native_audio" | "tts_text") => void;
   readonly instructions: string;
   readonly onAudioDelta: (pcm: Buffer, itemId: string) => void;
   /** Content-free notification before external synthesis waits for a clause. */
@@ -408,6 +417,18 @@ export interface DiscordVoiceSessionOptions {
 
 /** One `response.create` decision awaiting its audio; receipts are cut from these. */
 interface PendingVoiceResponse {
+  /** Allocated only for an explicit spoken-transcript subscriber. */
+  outputTranscript?: {
+    guildId: string;
+    channelId: string;
+    stayId?: string;
+    itemId: string;
+    text: string;
+    textSource: "native_audio" | "tts_text";
+    textComplete: boolean;
+    emitted?: boolean;
+    failed?: boolean;
+  };
   readonly deliveryId: string;
   readonly wake: DiscordVoiceWake;
   readonly fastPath: boolean;
@@ -565,6 +586,7 @@ export class DiscordVoiceSession {
   /** Room lines stored as buffers so {@link leave} can zero the bytes, not merely drop references. */
   private transcriptRing: Buffer[] = [];
   /** Live consumers of the room; see {@link subscribeTranscript}. Never retains by itself. */
+  private readonly spokenTranscriptListeners = new Set<(transcript: DiscordVoiceSpokenTranscript) => void>();
   private readonly transcriptListeners = new Set<
     (line: string, transcript: DiscordVoiceTranscript) => void
   >();
@@ -929,6 +951,14 @@ export class DiscordVoiceSession {
     const transcriptions = [...this.transcriptions.values()];
     const conversation = this.conversation;
     const playbackJobs = new Set([this.openPlayback, this.playingJob]);
+    for (const pending of this.pendingResponses) {
+      const job = [...playbackJobs].find((candidate) => candidate?.pending === pending);
+      this.emitSpokenTranscript(
+        pending,
+        pending.firstAudioAtMs === undefined ? "suppressed" : "interrupted",
+        job,
+      );
+    }
     const transcriptRing = this.transcriptRing;
 
     // Vox commands are synchronous and may throw after process loss. Make the
@@ -1226,6 +1256,17 @@ export class DiscordVoiceSession {
   ): () => void {
     this.transcriptListeners.add(listener);
     return () => this.transcriptListeners.delete(listener);
+  }
+
+  /** Retention is opt-in; this never feeds Clankie's own words into the room listener. */
+  public subscribeSpokenTranscript(listener: (transcript: DiscordVoiceSpokenTranscript) => void): () => void {
+    this.spokenTranscriptListeners.add(listener);
+    return () => {
+      this.spokenTranscriptListeners.delete(listener);
+      if (this.spokenTranscriptListeners.size === 0) {
+        for (const pending of this.pendingResponses) delete pending.outputTranscript;
+      }
+    };
   }
 
   public canHear(userId: string): boolean {
@@ -2035,6 +2076,25 @@ export class DiscordVoiceSession {
     try {
       port = await this.options.realtime.openConversation({
         instructions: briefing.instructions,
+        onOutputTranscript: (event, source) => {
+          if (generation !== this.sessionGeneration || this.invalidPlaybackItemIds.has(event.itemId)) return;
+          if (this.spokenTranscriptListeners.size === 0) return;
+          const pending = this.pendingResponses.find((candidate) => !candidate.done);
+          if (pending === undefined || pending.outputTranscript?.emitted) return;
+          const output = (pending.outputTranscript ??= {
+            guildId,
+            channelId,
+            ...(this.stayId === undefined ? {} : { stayId: this.stayId }),
+            itemId: event.itemId,
+            text: "",
+            textSource: source,
+            textComplete: false,
+          });
+          if (output.itemId !== event.itemId) return;
+          const text = event.final ? event.text : output.text + event.text;
+          output.text = text.slice(0, MAX_REALTIME_RESPONSE_TEXT_CHARACTERS);
+          output.textComplete = event.final && text.length <= MAX_REALTIME_RESPONSE_TEXT_CHARACTERS;
+        },
         onFirstText: (itemId) => {
           if (generation !== this.sessionGeneration || this.invalidPlaybackItemIds.has(itemId)) return;
           const pending = this.pendingResponses.find((candidate) => !candidate.done);
@@ -2072,6 +2132,7 @@ export class DiscordVoiceSession {
             itemId === null
               ? undefined
               : (job?.pending ?? this.pendingResponses.find((candidate) => !candidate.done));
+          if (pending?.outputTranscript !== undefined) pending.outputTranscript.failed = true;
           const failedItemId = itemId ?? job?.itemId;
           void this.emitSafely({
             type: "failed",
@@ -2218,6 +2279,9 @@ export class DiscordVoiceSession {
     // session's audio cannot be attributed to a dead decision. Whatever is
     // already streaming or playing finishes and receipts normally.
     const keep = new Set<PendingVoiceResponse>();
+    for (const job of [this.playingJob, this.openPlayback]) {
+      if (job?.pending.outputTranscript !== undefined) job.pending.outputTranscript.failed = true;
+    }
     if (this.playingJob !== undefined) keep.add(this.playingJob.pending);
     if (this.openPlayback !== undefined) {
       this.openPlayback.providerDone = true;
@@ -2229,10 +2293,16 @@ export class DiscordVoiceSession {
     }
     // A closed provider owes no further done event. Buffered audio may drain,
     // but its decision must not capture PCM from a replacement conversation.
-    for (const pending of keep) pending.done = true;
+    for (const pending of keep) {
+      pending.done = true;
+      if (pending.outputTranscript !== undefined) pending.outputTranscript.failed = true;
+    }
     const dropped = this.pendingResponses.filter((pending) => !keep.has(pending));
     this.pendingResponses = this.pendingResponses.filter((pending) => keep.has(pending));
-    for (const pending of dropped) this.settleOffer(pending, false);
+    for (const pending of dropped) {
+      this.settleOffer(pending, false);
+      this.emitSpokenTranscript(pending, "failed");
+    }
     if (reason === "closed") return;
     void this.emitSafely({
       type: "failed",
@@ -2954,6 +3024,10 @@ export class DiscordVoiceSession {
   private handleResponseDone(meta?: RealtimeResponseMeta): void {
     const settled = this.pendingResponses.find((candidate) => !candidate.done);
     if (settled === undefined) return;
+    settled.done = true;
+    if (meta !== undefined) settled.responseMeta = meta;
+    if (meta?.inputTokens !== undefined) settled.inputTokens = meta.inputTokens;
+    if (meta?.outputTokens !== undefined) settled.outputTokens = meta.outputTokens;
     const job = this.openPlayback?.pending === settled ? this.openPlayback : undefined;
     if (job !== undefined) {
       job.providerDone = true;
@@ -2962,10 +3036,6 @@ export class DiscordVoiceSession {
       }
       this.openPlayback = undefined;
     }
-    settled.done = true;
-    if (meta !== undefined) settled.responseMeta = meta;
-    if (meta?.inputTokens !== undefined) settled.inputTokens = meta.inputTokens;
-    if (meta?.outputTokens !== undefined) settled.outputTokens = meta.outputTokens;
     const playbackPending = job !== undefined && settled.firstAudioAtMs === undefined && !settled.superseded;
     if (settled.offer !== undefined && (!playbackPending || settled.toolCalled === true)) {
       this.settleOffer(settled, settled.firstAudioAtMs !== undefined || settled.toolCalled === true);
@@ -2977,6 +3047,11 @@ export class DiscordVoiceSession {
       settled.superseded ||
       (job === undefined && settled.firstAudioAtMs === undefined)
     ) {
+      this.emitSpokenTranscript(
+        settled,
+        settled.invalidated || settled.responseMeta?.status === "failed" ? "failed" : "suppressed",
+        job,
+      );
       // The response spoke nothing: a function-call round trip (whose
       // follow-up response carries the speech) or a model that chose
       // silence. No audio, nothing to receipt. Tokens still landed.
@@ -3016,6 +3091,7 @@ export class DiscordVoiceSession {
     const channelId = this.channelId;
     if (job.generation !== this.sessionGeneration || guildId === undefined || channelId === undefined) {
       job.encodedChunks.length = 0;
+      this.emitSpokenTranscript(job.pending, "suppressed", job);
       this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== job.pending);
       return;
     }
@@ -3246,9 +3322,64 @@ export class DiscordVoiceSession {
     }
   }
 
+  private emitSpokenTranscript(
+    pending: PendingVoiceResponse,
+    outcome: DiscordVoiceSpokenTranscript["outcome"],
+    job?: PlaybackJob,
+  ): void {
+    const output = pending.outputTranscript;
+    if (output === undefined || output.emitted) return;
+    output.emitted = true;
+    const text = output.text;
+    output.text = "";
+    if (text.trim().length === 0) return;
+    const entry: DiscordVoiceSpokenTranscript = {
+      occurredAt: new Date().toISOString(),
+      guildId: output.guildId,
+      channelId: output.channelId,
+      ...(output.stayId === undefined ? {} : { stayId: output.stayId }),
+      deliveryId: pending.deliveryId,
+      role: "assistant",
+      speakerId: "clankie",
+      displayName: "Clankie",
+      itemId: output.itemId,
+      ...(job === undefined ? {} : { playbackId: job.playbackId }),
+      ...(pending.responseMeta?.responseId ? { responseId: pending.responseMeta.responseId } : {}),
+      text,
+      textSource: output.textSource,
+      textComplete: output.textComplete,
+      outcome:
+        output.failed || pending.responseMeta?.status === "failed"
+          ? "failed"
+          : pending.audioLimitReached || pending.responseMeta?.status === "incomplete"
+            ? "truncated"
+            : outcome,
+      audioStarted: pending.firstAudioAtMs !== undefined,
+      playbackMs: Math.max(0, Math.round(this.clock() - (pending.firstAudioAtMs ?? this.clock()))),
+    };
+    for (const listener of this.spokenTranscriptListeners) {
+      try {
+        listener(entry);
+      } catch {
+        /* Diagnostics must never disrupt speech. */
+      }
+    }
+  }
+
   private settlePlayback(job: PlaybackJob, outcome: "drained" | "stopped" | "failed" | "timeout"): void {
     if (job.outcome !== undefined) return;
     job.outcome = outcome;
+    this.emitSpokenTranscript(
+      job.pending,
+      outcome === "failed" || outcome === "timeout"
+        ? "failed"
+        : job.startedAtMs === undefined
+          ? "suppressed"
+          : outcome === "drained"
+            ? "played"
+            : "interrupted",
+      job,
+    );
     if (job.pumpTimer !== undefined) this.timers.clearTimeout(job.pumpTimer);
     job.pumpTimer = undefined;
     job.encodedChunks.length = 0;

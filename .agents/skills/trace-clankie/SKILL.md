@@ -38,7 +38,7 @@ through the trail map below.
 | Historical shared-body artifacts          | `~/.local/state/clankie/gba-body/possession-events.jsonl` and `body.lock`, when left by an older build                                         | Inert historical files only. Current play and GBA MCP neither read nor write them; do not infer current ownership from them.                                                                                                                                                                                                                                                                                                                               |
 | Official-bot Discord actions              | `~/.local/state/clankie/discord-live-receipts.jsonl` (override: `DISCORD_BRIDGE_RECEIPT_PATH`)                                                 | What the bot bridge actually did, including text and bot voice — content-free receipts, never message bodies.                                                                                                                                                                                                                                                                                                                                              |
 | User-session Discord actions              | `~/.local/state/clankie/discord-user-session-receipts.jsonl` (override: `DISCORD_USER_SESSION_RECEIPT_PATH`)                                   | What the personal-lab body actually did, including voice, screen watch, and Go Live publish — content-free receipts, never message bodies or media.                                                                                                                                                                                                                                                                                                        |
-| Opt-in development voice transcript       | `~/.local/state/clankie/discord-voice-transcripts.jsonl`                                                                                       | Exists only when `discord.voiceTranscriptLoggingEnabled` is on. Exact consented final speech with body, guild/channel, stay/delivery ids, speaker id/display name, and timestamp. Mode 0600; receipts remain content-free.                                                                                                                                                                                                                                 |
+| Opt-in development voice transcript       | `~/.local/state/clankie/discord-voice-transcripts.jsonl`                                                                                       | Exists only when `discord.voiceTranscriptLoggingEnabled` is on. Consented final speech and Clankie’s generated wording with body, room/stay/delivery ids, identity, and timestamp. Assistant entries also carry item/playback ids and outcomes. Mode 0600; receipts remain content-free.                                                                                                                                                                   |
 | Browser recordings (opt-in)               | `~/.clankie/runner/browser/recordings/*.webm`, named by start time                                                                             | Exists only while `browser.recordSessions` is on (`clankie browser record on`). One WebM per burst of browsing, closed after 60 s idle; newest 50 kept. Join a video to its turn by timestamp against the room's `browser_*` tool calls, or by `browser.recording.saved` in `clankie.log`. Pixels only — the accessibility snapshots he actually read are in the pi tree.                                                                                  |
 | Service stdout + lifecycle                | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                                                                                         | Service ids: `clankie`, `discord-bridge`, `discord-user-session`, `activity`, `tunnel`.                                                                                                                                                                                                                                                                                                                                                                    |
 | Live status                               | `clankie status` / `/trace` in the face                                                                                                        | `/trace` lists rooms and tails their bounded `heard`/`said` lane logs through the service.                                                                                                                                                                                                                                                                                                                                                                 |
@@ -180,7 +180,14 @@ Following controls waking, not collection.
   the GBA journal line and the same `deliveryId` on the submission / response /
   suppressed receipts. Human words persist only in the opt-in transcript log;
   otherwise they live in the bridge's in-memory window and live provider call.
-  Fast-path model text and exact audible wording are not added to that log. A journal
+  With logging enabled, assistant entries now include generated wording from native
+  audio transcripts or external TTS text. `role: assistant` / `speakerId: clankie`
+  identifies his own output; older inbound entries have no role. Use `itemId`
+  and `playbackId`, not delivery alone, to distinguish an acknowledgment from
+  its answer. `outcome` is played, interrupted, suppressed, failed, or truncated;
+  `textComplete` records whether a complete provider text arrived, and
+  `audioStarted`/`playbackMs` describe playback. After a cutoff the text may
+  include an unheard ending: exact audible word alignment is unknown. A journal
   `speechDeliveryId` is only a join key: only a matching response, suppression,
   refusal, or settled `model_response` receipt proves the outcome. Absence of
   `discord.voice.response` does not mean the narration was lost — that receipt
@@ -399,10 +406,16 @@ Did he speak this stay, and are play reports dropped:
 jq -c 'select(.type == "discord.voice.response" or .type == "discord.voice.play_narration_suppressed" or .type == "discord.voice.left") | {type, at: .occurredAt, stayId: .data.stayId, deliveryId: .data.deliveryId, trigger: .data.trigger, reason: .data.reason, spoken: .data.spokenCount, suppressed: .data.narrationSuppressed, tokens: {in: .data.inputTokens, out: .data.outputTokens}}' ~/.local/state/clankie/discord-live-receipts.jsonl | tail -n 40
 ```
 
-What exact consented speech did Discord transcribe in development:
+What did the room and Clankie say in development (private, opt-in):
 
 ```bash
-tail -n 40 ~/.local/state/clankie/discord-voice-transcripts.jsonl | jq -c '{at: .occurredAt, body, guildId, channelId, stayId, deliveryId, speakerId, displayName, text}'
+clankie discord transcripts --limit 40
+```
+
+Raw file inspection keeps output outcomes alongside generated text:
+
+```bash
+tail -n 40 ~/.local/state/clankie/discord-voice-transcripts.jsonl | jq -c '{at: .occurredAt, body, guildId, channelId, stayId, deliveryId, role, speakerId, displayName, itemId, playbackId, outcome, textComplete, audioStarted, playbackMs, text}'
 ```
 
 Where did one voice/music turn stop:

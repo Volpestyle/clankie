@@ -82,9 +82,12 @@ cannot establish either of the latter claims.
 `DISCORD_BRIDGE_RECEIPT_PATH` may select an absolute receipt path; otherwise it
 uses `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-live-receipts.jsonl`.
 When the owner enables full transcript logging in `/discord`, exact consented
-final speech from either body is appended to the mode-0600
-`${XDG_STATE_HOME:-~/.local/state}/clankie/discord-voice-transcripts.jsonl`.
-Receipts remain content-free.
+final speech and Clankie's generated reply wording from either body are appended
+to the mode-0600 `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-voice-transcripts.jsonl`.
+Assistant entries include provider/playback ids and outcomes: played, interrupted,
+suppressed, failed, or truncated. After a cutoff, text may include an unheard
+ending; no raw audio or word alignment is saved. Read with
+`clankie discord transcripts`, `/vt`, or the menu bar. Receipts remain content-free.
 
 ## Start And Verify
 
