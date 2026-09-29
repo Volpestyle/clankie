@@ -46,10 +46,12 @@ describe("captain voice presence tools", () => {
       const join = captainTools(deps, {}, {} as LaneLog, lane).find((tool) => tool.name === "voice_join");
       if (join === undefined) throw new Error(`voice_join is missing on ${lane}`);
       const description = join.description ?? "";
-      // The situation: what consent blocks, and what the room does not know.
+      // The situation: what consent blocks, and that telling the room is the
+      // owner's settled arrangement (ADR 0071), not an arrival announcement.
       expect(description).toContain("/clankie voice-consent opt-in");
       expect(description).toContain("you are transcribing them");
-      expect(description).toContain("they have not been told");
+      expect(description).toContain("owner chose presence as consent and handles telling people");
+      expect(description).toContain("None of it is news you owe on arrival");
       // No sentence he can lift into the room, and no order to say one.
       expect(description).not.toMatch(/their audio is transcribed/i);
       expect(description).not.toMatch(/may remain with|may stay with/i);

@@ -55,8 +55,11 @@ voice state. Raw user, guild, channel, and message ids are never tool arguments.
   the required consent guidance in his own reply.
 - **Consent remains separate.** An official-bot asked join opts in nobody;
   participants use `/clankie voice-consent opt-in`. The owner-only lab body
-  auto-opts its authenticated owner when it creates the media session, and the
-  captain discloses live speaker-attributed transcription in the reply.
+  auto-opts its authenticated owner when it creates the media session.
+  (Amended 2026-09-28: the join no longer asks him to announce transcription.
+  The owner chose that setting, and ADR 0071 puts telling a presence-policy
+  room on the owner; he answers plainly when asked instead of reciting a
+  disclaimer on arrival.)
 - **Grounded catalog coverage.** Replies, generated media, and typing already
   happen as consequences of a captain turn. Reactions and threads target that
   turn's trigger; live-watch targets fresh voice state. Arbitrary

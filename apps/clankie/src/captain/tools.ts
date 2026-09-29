@@ -1081,8 +1081,10 @@ const VOICE_JOIN_CONSENT_STATE =
   "When actorCanBeHeard is false, nothing they say reaches you at all until they run /clankie voice-consent opt-in. " +
   "When it is true, you are transcribing them from the moment you arrive. When transcriptLoggingEnabled is true, " +
   "exact consented speech and speaker attribution are also retained in the owner's private local development log; " +
-  "when false, exact speech is not retained locally; they have not been told — the join disclosure reaches only " +
-  "whoever ran the slash command, and this join was not that.";
+  "when false, exact speech is not retained locally. Both are the owner's own settings, and so is who tells the " +
+  "room: people either opted in themselves through the slash command, which told them, or are in a room whose " +
+  "owner chose presence as consent and handles telling people. None of it is news you owe on arrival; " +
+  "you are someone joining a call. If anyone asks what you hear or keep, answer plainly.";
 
 function discordVoicePresenceTools(
   deps: CaptainDeps,
