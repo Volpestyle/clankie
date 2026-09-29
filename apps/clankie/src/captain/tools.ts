@@ -1,5 +1,7 @@
+import { VOICE_JOIN_REQUEST_MAX_CHARS } from "@clankie/discord-presence-core";
 import {
   CAPTAIN_EPISODE_SUMMARY_MAX,
+  CAPTAIN_SILENT_REPLY_SENTINEL,
   DrawErDiagramRequestSchema,
   DrawSequenceDiagramRequestSchema,
   OPERATOR_SEAT_DIRECTORY_MAX,
@@ -57,6 +59,8 @@ export interface TurnContext {
   /** Discord channel and trigger message for grounded social actions. */
   channelId?: string | undefined;
   messageId?: string | undefined;
+  /** Host-copied asking message; untrusted context for a voice arrival. */
+  requestText?: string | undefined;
   /** Host-stamped: this session holds shell tools under its authority plan. */
   shell?: boolean | undefined;
   /** Host-stamped Discord message a `herdr_watch` from this turn answers. */
@@ -1069,13 +1073,9 @@ function turnActor(turn: TurnContext, lane: CaptainSessionLaneV2): string {
 /**
  * The consent situation a join lands him in — not a line about it.
  *
- * ADR 0062 puts the consent disclosure in Clankie's own reply, so this text is
- * read by the character who has to speak it. Written as a finished sentence it
- * stopped being context and became a cue card: he read "your audio is
- * transcribed live and may stay with the configured provider for this call"
- * into a group chat, placeholder and all. Describe what is true of the room and
- * what the people in it do not know yet; he can see for himself that it is
- * theirs to hear.
+ * A finished disclosure sentence once became a cue card that he read into a
+ * group chat, placeholder and all. Describe consent and arrival choices as
+ * context, leaving whether and where to speak to him (ADR 0062).
  */
 const VOICE_JOIN_CONSENT_STATE =
   "When actorCanBeHeard is false, nothing they say reaches you at all until they run /clankie voice-consent opt-in. " +
@@ -1084,7 +1084,10 @@ const VOICE_JOIN_CONSENT_STATE =
   "when false, exact speech is not retained locally. Both are the owner's own settings, and so is who tells the " +
   "room: people either opted in themselves through the slash command, which told them, or are in a room whose " +
   "owner chose presence as consent and handles telling people. None of it is news you owe on arrival; " +
-  "you are someone joining a call. If anyone asks what you hear or keep, answer plainly.";
+  "you are someone joining a call. If anyone asks what you hear or keep, answer plainly. " +
+  "A text reply after joining is optional: you can reply here, or use " +
+  `${CAPTAIN_SILENT_REPLY_SENTINEL} to send nothing here. Your arrival also gives your voice side ` +
+  "the room and invitation context and a turn, so you can greet in voice instead or stay quiet there too.";
 
 function discordVoicePresenceTools(
   deps: CaptainDeps,
@@ -1105,7 +1108,15 @@ function discordVoicePresenceTools(
     if (guildId === undefined || actorId === undefined) {
       return json({ action: action === "join" ? "join_refused" : "leave_refused", reason: "failed" });
     }
-    return json(await voice[action]({ guildId, actorId }));
+    return json(
+      await voice[action]({
+        guildId,
+        actorId,
+        ...(action !== "join" || turn.requestText === undefined
+          ? {}
+          : { requestText: turn.requestText.slice(0, VOICE_JOIN_REQUEST_MAX_CHARS) }),
+      }),
+    );
   };
   const fromOperator = lane === "operator";
   return [

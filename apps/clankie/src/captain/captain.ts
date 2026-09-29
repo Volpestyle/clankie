@@ -1938,6 +1938,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane.capture.guildId = normalized.guildId;
     lane.capture.channelId = normalized.channelId;
     lane.capture.messageId = normalized.messageId;
+    lane.capture.requestText = normalized.heard;
     lane.capture.discordOrigin = normalized.lane === "discord_presence" ? origin : undefined;
     const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
     await laneLog.append(normalized.lane, normalized.targetId, {

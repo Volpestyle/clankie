@@ -614,6 +614,10 @@ async function executeCaptainVoicePresenceNow(
       guildId: target.guildId,
       channelId: target.channelId,
       invokingUserId: target.actorId,
+      arrival: {
+        requestedBy: target.actorId,
+        ...(input.requestText === undefined ? {} : { requestText: input.requestText }),
+      },
     }),
   );
   if (!confirmed) {

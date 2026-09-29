@@ -1,6 +1,8 @@
 import type { DiscordVoicePresenceResult } from "@clankie/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+export const VOICE_JOIN_REQUEST_MAX_CHARS = 1_000;
+
 export type VoicePresenceControlAction = "join" | "leave";
 
 export interface VoicePresenceControlInput {
@@ -8,6 +10,8 @@ export interface VoicePresenceControlInput {
   readonly guildId?: string;
   /** Absent on an operator follow; required when `guildId` is present. */
   readonly actorId?: string;
+  /** Host-copied invitation, untrusted context only; never consent or authority. */
+  readonly requestText?: string;
 }
 
 export interface OwnerVoiceCandidate {
@@ -84,7 +88,14 @@ function voicePresenceControlInput(value: unknown): VoicePresenceControlInput {
   const body = value as Record<string, unknown>;
   const guildId = optionalControlId(body.guildId);
   const actorId = optionalControlId(body.actorId);
+  const requestText = body.requestText;
+  if (
+    requestText !== undefined &&
+    (typeof requestText !== "string" || requestText.length > VOICE_JOIN_REQUEST_MAX_CHARS)
+  )
+    throw new Error("invalid_voice_presence_request");
   return {
+    ...(requestText === undefined ? {} : { requestText }),
     ...(guildId === undefined ? {} : { guildId }),
     ...(actorId === undefined ? {} : { actorId }),
   };

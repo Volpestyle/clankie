@@ -1262,6 +1262,7 @@ async function executeCaptainVoicePresence(
     },
     {
       intent: action,
+      ...(input.requestText === undefined ? {} : { requestText: input.requestText }),
       guildId: target.guildId,
       principal: { userId: target.actorId, roleIds: new Set(target.member.roles.cache.keys()) },
       memberVoiceChannelId: target.member.voice.channelId ?? undefined,

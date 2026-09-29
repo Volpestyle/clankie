@@ -199,6 +199,10 @@ Following controls waking, not collection.
   suppresses late socket errors. `discord.voice.participant` records gateway
   joins/leaves and human headcounts; its `deliveryId` joins the offered model
   turn. Bursts may coalesce into the latest event's turn after current work.
+  His own arrival also offers a `membership` turn after `discord.voice.joined`,
+  without a participant event or incoming speech. A silent text reply or a
+  silent voice arrival is a valid choice; joining does not promise either reply.
+  Invitation text is bounded untrusted model context and is absent from receipts.
   A `left` reason of `self_decided` follows the realtime `voice_leave` tool.
   There is no empty-room leave timer. Membership observations carry no human
   authority; they do not become privileged captain requests.

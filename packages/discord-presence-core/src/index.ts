@@ -113,6 +113,7 @@ export {
   parseVoicePresenceControlPath,
   resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
+  VOICE_JOIN_REQUEST_MAX_CHARS,
   type OwnerFollowTarget,
   type OwnerVoiceCandidate,
   type VoicePresenceControlAction,

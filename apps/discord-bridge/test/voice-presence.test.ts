@@ -1,3 +1,4 @@
+import type { JoinDiscordVoiceInput } from "@clankie/discord-presence-core";
 import { describe, expect, it } from "vitest";
 import {
   executeVoicePresenceIntent,
@@ -6,7 +7,7 @@ import {
 } from "../src/voice-presence.ts";
 
 class FakeVoiceSession implements VoicePresenceSessionPort {
-  public readonly joins: { guildId: string; channelId: string }[] = [];
+  public readonly joins: JoinDiscordVoiceInput[] = [];
   public readonly heardUserIds = new Set<string>();
   public leaves = 0;
   public state: { active: boolean; guildId?: string; channelId?: string } = { active: false };
@@ -19,8 +20,8 @@ class FakeVoiceSession implements VoicePresenceSessionPort {
     return this.heardUserIds.has(userId);
   }
 
-  public join(input: { guildId: string; channelId: string }): Promise<void> {
-    this.joins.push({ guildId: input.guildId, channelId: input.channelId });
+  public join(input: JoinDiscordVoiceInput): Promise<void> {
+    this.joins.push(input);
     this.state = { active: true, guildId: input.guildId, channelId: input.channelId };
     return Promise.resolve();
   }
@@ -46,6 +47,7 @@ function config(session: VoicePresenceSessionPort): VoicePresenceExecutionConfig
 function input(intent: "join" | "leave", roleIds: readonly string[] = ["voice-role"]) {
   return {
     intent,
+    requestText: "hop in vc clankie",
     guildId: "guild-1",
     principal: { userId: "user-1", roleIds: new Set(roleIds) },
     memberVoiceChannelId: "voice-1",
@@ -68,7 +70,13 @@ describe("captain voice presence execution", () => {
       actorCanBeHeard: true,
       transcriptLoggingEnabled: true,
     });
-    expect(session.joins).toEqual([{ guildId: "guild-1", channelId: "voice-1" }]);
+    expect(session.joins).toEqual([
+      {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        arrival: { requestedBy: "user-1", requestText: "hop in vc clankie" },
+      },
+    ]);
 
     // Idempotent: a second agent call does not reset the room's consent state.
     await executeVoicePresenceIntent(config(session), input("join"));

@@ -91,7 +91,7 @@ const CHANNEL = "333333333333333333";
 const OWNER = "444444444444444444";
 
 describe("bridge realtime wiring (dormant → engaged, offline)", () => {
-  it("wakes on an addressed transcript and opens the engaged session with the briefing", async () => {
+  it("offers arrival with the briefing, then hears an addressed transcript", async () => {
     const sockets: FakeRealtimeSocket[] = [];
     const socketFactory: RealtimeSocketFactory = (url, headers) => {
       const socket = new FakeRealtimeSocket(url, headers);
@@ -179,11 +179,19 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     expect(listenerUpdate.session.type).toBe("transcription");
     expect(listenerUpdate.session.audio.input.transcription.model).toBe("gpt-realtime-whisper");
 
+    await flush();
+    const arrivalSession = sockets[1] as FakeRealtimeSocket;
+    expect(arrivalSession.frames().some((frame) => frame.type === "response.create")).toBe(true);
+    expect(JSON.stringify(arrivalSession.frames())).toContain("self_joined");
+    expect(vox.subscriptions).toHaveLength(0);
+    arrivalSession.serverEvent({ type: "response.done", response: { id: "arrival", status: "completed" } });
+    await flush();
+
     // One consented utterance: capture opens (gateway attribution span), PCM
     // streams into the listener, then the final transcript addresses him.
     vox.emit({ type: "speaking_start", userId: OWNER });
     await flush();
-    const listener = sockets[1] as FakeRealtimeSocket;
+    const listener = sockets[2] as FakeRealtimeSocket;
     const captureId = vox.subscriptions.at(-1)?.captureId;
     if (captureId === undefined) throw new Error("Vox did not open the speaker capture");
     vox.emitAudio(OWNER, Buffer.alloc(3_840, 1));
@@ -200,7 +208,7 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
 
     // The wake opened the engaged session on the conversation model...
     expect(sockets).toHaveLength(3);
-    const engaged = sockets[2] as FakeRealtimeSocket;
+    const engaged = sockets[1] as FakeRealtimeSocket;
     expect(engaged.headers.authorization).toBe("Bearer brokered-openai-key");
     expect(engaged.url).toContain("model=gpt-realtime-2.1");
     const frames = engaged.frames();
@@ -246,18 +254,14 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       { schemaVersion: 1, guildId: GUILD, channelId: CHANNEL, consentedUserIds: [OWNER] },
     ]);
 
-    // Seeding order: the gateway-attributed transcript ring, then the briefing
-    // projection and explicit response decision.
+    // Arrival seeds room context before anyone speaks; speech follows with attribution.
     const textItems = frames
       .filter((frame) => frame.type === "conversation.item.create")
       .map((frame) => (frame as { item: { content: { text: string }[] } }).item.content[0]?.text ?? "");
-    expect(textItems[0]).toContain("Recent room conversation (JSONL;");
-    expect(textItems[0]).toContain(
-      JSON.stringify({ speakerId: OWNER, text: "clankie, you there?", source: "speech" }),
-    );
+    expect(textItems[0]).toContain('"event":"self_joined"');
     expect(textItems[1]).toBe("Right now: tending the garden.");
-    expect(textItems[2]).toBe(ADDRESSED_OFFER_TURN_ITEM);
-    expect(textItems).toHaveLength(3);
+    expect(textItems.join("\n")).toContain("clankie, you there?");
+    expect(textItems).toContain(ADDRESSED_OFFER_TURN_ITEM);
     expect(frames.some((frame) => frame.type === "response.create")).toBe(true);
 
     // The wake is receipt-visible: floor evidence reports engaged/addressed.

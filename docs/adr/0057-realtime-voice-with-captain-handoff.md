@@ -111,6 +111,12 @@ handoffs carry those observations and the original attributed utterance as
 context alongside the model's request, preserving compound requests that its
 summary might omit. Names and quoted speech remain untrusted data.
 
+His own arrival also offers a membership turn after transport, DAVE, and the
+transcription probe are ready. It carries the current roster, resolved asker,
+and up to 1,000 characters of invitation text marked as untrusted data. This
+opens a conversation, not an audio capture or consent grant; he may greet or
+stay silent. The asker is context only, not an actor for `ask_clankie`.
+
 A membership event offers a realtime turn even with no spoken utterance. Events
 arrive while he is speaking or awaiting work; their turn waits for the response
 and playback, and uses the latest roster. He may speak, stay silent, remain, or

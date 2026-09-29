@@ -1,3 +1,4 @@
+import type { JoinDiscordVoiceInput } from "@clankie/discord-presence-core";
 import type { DiscordVoicePresenceResult } from "@clankie/protocol";
 import {
   authorizeVoicePresenceCommand,
@@ -9,7 +10,7 @@ import {
 export interface VoicePresenceSessionPort {
   status(): { readonly active: boolean; readonly guildId?: string; readonly channelId?: string };
   canHear(userId: string): boolean;
-  join(input: { readonly guildId: string; readonly channelId: string }): Promise<unknown>;
+  join(input: JoinDiscordVoiceInput): Promise<unknown>;
   leave(): Promise<void>;
 }
 
@@ -24,6 +25,7 @@ export interface VoicePresenceExecutionConfig {
 
 export interface VoicePresenceExecutionInput {
   readonly intent: "join" | "leave";
+  readonly requestText?: string;
   readonly guildId: string;
   readonly principal: DiscordCommandPrincipal;
   /** Fresh gateway state. The model never supplies a voice channel id. */
@@ -75,7 +77,14 @@ export async function executeVoicePresenceIntent(
     };
   }
   try {
-    await session.join({ guildId: input.guildId, channelId });
+    await session.join({
+      guildId: input.guildId,
+      channelId,
+      arrival: {
+        requestedBy: input.principal.userId,
+        ...(input.requestText === undefined ? {} : { requestText: input.requestText }),
+      },
+    });
   } catch {
     return { action: "join_refused", reason: "failed" };
   }
