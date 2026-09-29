@@ -2,6 +2,9 @@
 
 [Work item VUH-1444](https://linear.app/vuhlp/issue/VUH-1444/owner-authored-persona-image-folders)
 
+Latest: [video support and vibe/appearance evaluation](video-verification.md).
+The original image-only evidence below is retained as history.
+
 ## A/B result
 
 [Side-by-side answers](ab-report.md): 24/24 live model calls completed using
