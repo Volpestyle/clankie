@@ -63,19 +63,20 @@ export const DiscordBridgeReceiptSchema = z
     id: z.string().min(1).max(256),
     occurredAt: z.string().datetime(),
     type: z.enum([...currentReceiptTypes, ...legacyPossessorReceiptTypes]),
-    data: z
-      .record(z.string().min(1).max(64), z.string().max(512).or(z.boolean()).or(z.number().finite()))
-      .superRefine((data, context) => {
-        if (Object.keys(data).length > 16) {
-          context.addIssue({
-            code: "custom",
-            message: "Discord receipt data is limited to 16 content-free fields",
-          });
-        }
-      }),
+    data: z.record(z.string().min(1).max(64), z.string().max(512).or(z.boolean()).or(z.number().finite())),
   })
   .strict()
   .superRefine((receipt, context) => {
+    // Voice responses include playback correlation and per-stage timings.
+    // Keep the scalar/content fences and the smaller budget for other receipts.
+    const fieldLimit = receipt.type.startsWith("discord.voice.") ? 32 : 16;
+    if (Object.keys(receipt.data).length > fieldLimit) {
+      context.addIssue({
+        code: "custom",
+        path: ["data"],
+        message: `Discord receipt data is limited to ${fieldLimit} content-free fields`,
+      });
+    }
     // Prefix match: every discord.voice.* type — including ADR 0057's floor
     // and volition receipts — inherits the content fence.
     if (receipt.type.startsWith("discord.stream.")) {

@@ -129,9 +129,9 @@ interface Harness {
   failNextTtsOpen: { value: boolean };
 }
 
-async function openHarness(): Promise<
-  Harness & { port: Awaited<ReturnType<typeof openExternalVoiceConversation>> }
-> {
+async function openHarness(
+  onFirstText?: (itemId: string) => void,
+): Promise<Harness & { port: Awaited<ReturnType<typeof openExternalVoiceConversation>> }> {
   const realtime = new FakeRealtimePort();
   const ttsPorts: FakeTtsPort[] = [];
   const timers = new FakeTimers();
@@ -141,6 +141,7 @@ async function openHarness(): Promise<
   const events: Harness["events"] = { audio: [], done: [], closes: [], errors: [], errorItems: [] };
   const input: VoiceConversationOpenInput = {
     instructions: "Be Clankie.",
+    ...(onFirstText === undefined ? {} : { onFirstText }),
     onAudioDelta: (pcm, itemId) => events.audio.push({ pcm: Buffer.from(pcm), itemId }),
     onFunctionCall: () => undefined,
     onResponseDone: (meta) => events.done.push(meta),
@@ -172,6 +173,20 @@ async function openHarness(): Promise<
 }
 
 describe("external voice conversation", () => {
+  it("reports first text before clause buffering without exposing its content", async () => {
+    const firstItems: string[] = [];
+    const harness = await openHarness((itemId) => firstItems.push(itemId));
+    harness.realtimeHandlers.onTextDelta("A quiet", "item-timing");
+    await settle();
+    expect(firstItems).toEqual(["item-timing"]);
+    expect(harness.ttsPorts[0]?.frames.filter((frame) => frame.kind === "append")).toEqual([]);
+    harness.realtimeHandlers.onTextDelta(" sentence.", "item-timing");
+    await settle();
+    expect(firstItems).toEqual(["item-timing"]);
+    expect(harness.ttsPorts[0]?.frames.filter((frame) => frame.kind === "append")).toHaveLength(1);
+    harness.port.close();
+  });
+
   it("correlates live synthesis failures and suppresses errors from intentional teardown", async () => {
     const { port, realtimeHandlers, ttsHandlers, events } = await openHarness();
     realtimeHandlers.onTextDelta("Still speaking.", "failed_item");

@@ -84,3 +84,27 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
 - [`apps/discord-user-session`](../../apps/discord-user-session/README.md) —
   personal-lab user session, gated by
   [ADR 0048](../../docs/adr/0048-discord-user-session-transport.md).
+
+### Voice latency evidence
+
+Voice capture commits after 500ms without input audio. Transcription streams
+before that boundary, but replies wait for a final transcript. Captures that
+never reach 80 RMS (s16 full scale 32,768) are marked `filtered` and send no
+provider audio or commit; a bounded 200ms lead-in preserves quiet word onsets
+when speech arrives. This near-silence filter is separate from the unchanged
+1,200 RMS, transcript-confirmed interruption guard.
+
+`transcription.latencyMs` includes speaking time; `captureEndToFinalMs` measures
+finalization and `lastAudioToFinalMs` also includes endpoint delay. Response
+receipts retain input timing through wake and tool handoffs:
+`lastAudioToFirstAudioMs`, `captureEndToFirstAudioMs`,
+`transcriptToFirstAudioMs`, and `transcriptToRequestMs`. The existing
+`toFirstAudioMs` starts at the individual response request. External voice
+also reports `requestToFirstTextMs`; `requestToFirstAudioChunkMs` and
+`firstAudioChunkToPlaybackMs` distinguish synthesis delivery from playback.
+Missing measurements are omitted, not zero. Input PCM arrival and transmitted
+playback are transport evidence, not measurements of phoneme or headphone time.
+
+Voice receipts allow up to 32 scalar, content-free fields so correlation IDs,
+token counts, and timings survive together. Older 16-field writers could lose
+response receipts even when Vox logged a successful start and drain.

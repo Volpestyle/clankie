@@ -439,6 +439,7 @@ interface HarnessOptions {
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
   readonly speakerTranscriptionGate?: Promise<void>;
+  readonly conversationGate?: Promise<void>;
   readonly occupants?: readonly {
     readonly userId: string;
     readonly displayName?: string;
@@ -472,7 +473,8 @@ function buildHarness(options: HarnessOptions = {}) {
       transcriptions.push(transcription);
       return transcription;
     },
-    openConversation: (input: VoiceConversationOpenInput): Promise<VoiceConversationPort> => {
+    openConversation: async (input: VoiceConversationOpenInput): Promise<VoiceConversationPort> => {
+      if (options.conversationGate !== undefined) await options.conversationGate;
       const conversation = new FakeConversation(input);
       conversations.push(conversation);
       return Promise.resolve(conversation);
@@ -1011,7 +1013,7 @@ describe("consent boundary", () => {
     expect(at(harness.vox.subscriptions, -1)).toMatchObject({
       userId: ALICE,
       captureId: expect.any(String),
-      options: { sampleRate: 24_000, silenceDurationMs: 800 },
+      options: { sampleRate: 24_000, silenceDurationMs: 500 },
     });
   });
 
@@ -1070,6 +1072,53 @@ describe("consent boundary", () => {
     await flush();
     expect(harness.session.status().activeCaptureCount).toBe(1);
     expect(harness.vox.subscriptions).toHaveLength(1);
+  });
+
+  it("filters near-silent captures without committing or stealing the next transcript", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    const capture = harness.startCapture(ALICE);
+    const quiet = Buffer.alloc(24_000);
+    for (let i = 0; i < quiet.length; i += 2) quiet.writeInt16LE(40, i);
+    capture.stream.write(quiet);
+    await flush();
+    capture.stream.end();
+    await flush();
+    expect(harness.transcriptionFor(ALICE).appended).toEqual([]);
+    expect(harness.transcriptionFor(ALICE).commits).toBe(0);
+    expect(at(harness.ofType("utterance"), -1)).toMatchObject({
+      filtered: true,
+      peakRms: 40,
+      silenceDurationMs: 500,
+    });
+    expect(harness.ofType("transcription")).toEqual([]);
+    await harness.say(ALICE, "hey clankie, listen");
+    expect(at(harness.ofType("transcription"), -1).deliveryId).toBe(
+      at(harness.ofType("utterance"), -1).deliveryId,
+    );
+    expect(harness.conversation().responseCreates).toBe(1);
+  });
+
+  it("bounds quiet pre-roll and forwards it before soft speech below the interruption threshold", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    const capture = harness.startCapture(ALICE);
+    const quiet = Buffer.alloc(48_000);
+    for (let i = 0; i < quiet.length; i += 2) quiet.writeInt16LE(40, i);
+    capture.stream.write(quiet);
+    await flush();
+    expect(harness.transcriptionFor(ALICE).appended).toEqual([]);
+    const soft = monoPcm(3_840, ROOM_TONE_FILL); // RMS 257: well below barge-in.
+    capture.stream.write(soft);
+    await flush();
+    const appended = harness.transcriptionFor(ALICE).appended;
+    expect(appended.map((pcm) => pcm.length)).toEqual([9_600, 3_840]);
+    expect(appended[0]?.readInt16LE(0)).toBe(40);
+    expect(appended[1]?.readInt16LE(0)).toBe(257);
+    capture.stream.end();
+    await flush();
+    expect(harness.transcriptionFor(ALICE).commits).toBe(1);
+    expect(at(harness.ofType("utterance"), -1).filtered).toBe(false);
   });
 
   it("forwards an ordered final PCM tail before the matching audio-end finalizes capture", async () => {
@@ -1744,6 +1793,65 @@ describe("speaker attribution", () => {
 });
 
 describe("fast path responses", () => {
+  it("includes endpoint, finalization and cold-open time while splitting text, synthesis and playback", async () => {
+    let open!: () => void;
+    const options: { conversationGate?: Promise<void> } = {};
+    const harness = await joinedHarness(options);
+    options.conversationGate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    await harness.consent(ALICE);
+    const capture = harness.startCapture(ALICE);
+    harness.clock.now = 1_000;
+    capture.stream.write(monoPcm(24_000));
+    await flush();
+    harness.clock.now = 1_500;
+    capture.stream.end();
+    await flush();
+    harness.clock.now = 1_900;
+    harness.transcribe(ALICE, "hey clankie, are you there?");
+    await flush();
+    expect(at(harness.ofType("transcription"), -1)).toMatchObject({
+      captureEndToFinalMs: 400,
+      lastAudioToFinalMs: 900,
+    });
+    harness.clock.now = 2_600;
+    open();
+    await flush();
+    const conversation = harness.conversation();
+    harness.clock.now = 2_800;
+    conversation.input.onFirstText?.("item_latency");
+    harness.vox.autoBuffer = false;
+    harness.vox.autoDrain = false;
+    harness.clock.now = 3_200;
+    conversation.input.onAudioDelta(pcmDelta(480), "item_latency");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    harness.clock.now = 3_250;
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "started" });
+    conversation.input.onResponseDone({
+      responseId: "resp_latency",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 10,
+    });
+    await flush();
+    harness.clock.now = 3_800;
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
+    await flush();
+    expect(at(harness.ofType("response"), -1)).toMatchObject({
+      lastAudioToFirstAudioMs: 2250,
+      captureEndToFirstAudioMs: 1750,
+      transcriptToFirstAudioMs: 1350,
+      transcriptToRequestMs: 700,
+      requestToFirstTextMs: 200,
+      requestToFirstAudioChunkMs: 600,
+      firstAudioChunkToPlaybackMs: 50,
+      toFirstAudioMs: 650,
+      playbackMs: 550,
+    });
+  });
+
   it("measures toFirstAudioMs and playbackMs, reports waking then continuing, and zeroes playback buffers", async () => {
     const harness = await joinedHarness();
     await harness.consent(ALICE);
@@ -2222,6 +2330,18 @@ describe("ability path", () => {
       0,
     );
     expect(responses[0]).toMatchObject({ deliveryId: utterance.deliveryId, userId: ALICE });
+    expect(responses[0]).toMatchObject({
+      transcriptToRequestMs: 200,
+      transcriptToFirstAudioMs: 300,
+      lastAudioToFirstAudioMs: 300,
+      toFirstAudioMs: 100,
+    });
+    expect(responses[1]).toMatchObject({
+      transcriptToRequestMs: 300,
+      transcriptToFirstAudioMs: 300,
+      lastAudioToFirstAudioMs: 300,
+      toFirstAudioMs: 0,
+    });
     expect(responses[0]).toMatchObject({ fastPath: false, state: "settled", wake: "waking", handoffMs: 200 });
     // Both calls came from the same waking response, so both spoken results
     // carry that decision's wake classification.

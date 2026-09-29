@@ -214,3 +214,14 @@ let playback continue; “stop”, “wait”, and “hold on” remain valid in
 `interrupted`, completed `response`, and synthesis `failed` receipts include
 playback and provider item ids when available, alongside the delivery id.
 Intentional TTS teardown does not emit a synthesis failure for late socket errors.
+
+### Interpreting voice latency
+
+The bridge log labels first-audio time from the response request separately
+from time since the last input audio and the final transcript. The latter
+measurements include wake setup and any Clankie tool handoff; an acknowledgment
+and the resulting answer each have their own playback. Detailed content-free
+stage measurements live in the voice response receipts; see the
+[voice core latency contract](../../packages/discord-presence-core/README.md#voice-latency-evidence).
+Missing historical response receipts can be a writer field-limit failure;
+check Vox playback starts and drains before concluding that speech was lost.

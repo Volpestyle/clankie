@@ -5704,6 +5704,11 @@ export const DiscordVoiceEvidenceSchema = z
         userId: DiscordVoiceGatewayIdSchema,
         deliveryId: DiscordVoiceLocalIdSchema,
         durationMs: DiscordVoiceDurationMsSchema,
+        /** Capture endpoint, not proof of the last spoken phoneme. */
+        silenceDurationMs: DiscordVoiceDurationMsSchema.optional(),
+        /** Near-silent captures never sent to the transcription provider. */
+        filtered: z.boolean().optional(),
+        peakRms: z.number().nonnegative().max(32_768).optional(),
       })
       .strict(),
     z
@@ -5715,7 +5720,10 @@ export const DiscordVoiceEvidenceSchema = z
         outcome: DiscordVoiceTranscriptionOutcomeSchema,
         /** Character count only; transcript content remains unrepresentable. */
         characters: DiscordVoiceCounterSchema,
+        /** Capture start to final transcript; includes speaking time. */
         latencyMs: DiscordVoiceDurationMsSchema,
+        captureEndToFinalMs: DiscordVoiceDurationMsSchema.optional(),
+        lastAudioToFinalMs: DiscordVoiceDurationMsSchema.optional(),
         addressed: z.boolean(),
         /**
          * Loudest RMS in the capture, full scale 32_768. Content-free — it is
@@ -5823,6 +5831,15 @@ export const DiscordVoiceEvidenceSchema = z
         /** Captain round trip inside `ask_clankie`; 0 on the fast path. */
         handoffMs: DiscordVoiceDurationMsSchema,
         playbackMs: DiscordVoiceDurationMsSchema,
+        /** Last received input PCM to transmitted speech; not headphone latency. */
+        lastAudioToFirstAudioMs: DiscordVoiceDurationMsSchema.optional(),
+        captureEndToFirstAudioMs: DiscordVoiceDurationMsSchema.optional(),
+        transcriptToFirstAudioMs: DiscordVoiceDurationMsSchema.optional(),
+        /** Includes wake setup, queuing, and any handoff before this response. */
+        transcriptToRequestMs: DiscordVoiceDurationMsSchema.optional(),
+        requestToFirstTextMs: DiscordVoiceDurationMsSchema.optional(),
+        requestToFirstAudioChunkMs: DiscordVoiceDurationMsSchema.optional(),
+        firstAudioChunkToPlaybackMs: DiscordVoiceDurationMsSchema.optional(),
         /** Realtime `response.done` usage; omitted when the provider sent none. */
         inputTokens: DiscordVoiceCounterSchema.optional(),
         outputTokens: DiscordVoiceCounterSchema.optional(),

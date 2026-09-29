@@ -18,10 +18,20 @@ export function describeVoiceResponse(evidence: Extract<DiscordVoiceEvidence, { 
     ? "fast path"
     : `clankie handoff ${String(Math.round(evidence.handoffMs))}ms`;
   const trigger = evidence.trigger === "narration" ? "narration" : "room";
+  const total =
+    evidence.lastAudioToFirstAudioMs === undefined
+      ? ""
+      : `${String(Math.round(evidence.lastAudioToFirstAudioMs))}ms since last input audio; `;
+  const transcript =
+    evidence.transcriptToFirstAudioMs === undefined
+      ? ""
+      : `${String(Math.round(evidence.transcriptToFirstAudioMs))}ms since final transcript; `;
   return (
     `voice turn (${evidence.wake}, ${trigger}, ${path}): ` +
+    total +
+    transcript +
     `${String(Math.round(evidence.toFirstAudioMs))}ms ` +
-    `to first audio, then ${String(Math.round(evidence.playbackMs))}ms speaking`
+    `from response request to first audio, then ${String(Math.round(evidence.playbackMs))}ms speaking`
   );
 }
 

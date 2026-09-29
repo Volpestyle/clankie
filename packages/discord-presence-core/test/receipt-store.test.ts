@@ -9,6 +9,9 @@ import {
   resolveDiscordReceiptPath,
 } from "../src/receipt-store.ts";
 
+import { DiscordVoiceEvidenceSchema } from "@clankie/protocol";
+import { voiceEvidenceReceiptData, voiceEvidenceReceiptType } from "../src/voice-composition.ts";
+
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -16,6 +19,65 @@ afterEach(async () => {
 });
 
 describe("DiscordBridgeReceiptStore", () => {
+  it("persists a fully attributed voice answer with playback and latency evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-voice-receipts-"));
+    roots.push(root);
+    const path = join(root, "receipts.jsonl");
+    const store = new DiscordBridgeReceiptStore({ path });
+    const evidence = DiscordVoiceEvidenceSchema.parse({
+      type: "response",
+      guildId: "123",
+      channelId: "456",
+      userId: "789",
+      stayId: "stay-1",
+      deliveryId: "delivery-1",
+      turnId: "turn-1",
+      playbackId: "playback-1",
+      itemId: "item-1",
+      state: "settled",
+      fastPath: false,
+      trigger: "room",
+      wake: "waking",
+      toFirstAudioMs: 600,
+      handoffMs: 9000,
+      playbackMs: 2000,
+      inputTokens: 1200,
+      outputTokens: 30,
+      lastAudioToFirstAudioMs: 11000,
+      captureEndToFirstAudioMs: 10500,
+      transcriptToFirstAudioMs: 10000,
+      transcriptToRequestMs: 9400,
+      requestToFirstTextMs: 200,
+      requestToFirstAudioChunkMs: 550,
+      firstAudioChunkToPlaybackMs: 50,
+    });
+    const data = voiceEvidenceReceiptData(evidence);
+    expect(Object.keys(data).length).toBeGreaterThan(16);
+    await store.append(voiceEvidenceReceiptType(evidence), data);
+    const rows = await readDiscordBridgeReceipts(path);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.data).toEqual(data);
+  });
+
+  it("keeps voice receipts bounded and does not expand other receipt budgets", () => {
+    const base = { schemaVersion: 1, id: "bounded", occurredAt: "2026-09-29T00:00:00.000Z" };
+    const fields = (count: number) =>
+      Object.fromEntries(Array.from({ length: count }, (_, i) => [`n${i}`, i]));
+    expect(() =>
+      parseDiscordBridgeReceipt({ ...base, type: "discord.voice.response", data: fields(33) }),
+    ).toThrow("32 content-free fields");
+    expect(() =>
+      parseDiscordBridgeReceipt({ ...base, type: "discord.text.reply", data: fields(17) }),
+    ).toThrow("16 content-free fields");
+    expect(() =>
+      parseDiscordBridgeReceipt({
+        ...base,
+        type: "discord.voice.response",
+        data: { ...fields(20), transcript: "private" },
+      }),
+    ).toThrow("cannot contain transcript");
+  });
+
   it("appends content-free replayable receipts with private filesystem modes", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-discord-receipts-"));
     roots.push(root);

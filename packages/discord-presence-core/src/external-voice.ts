@@ -219,6 +219,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     if (this.closed || this.droppedItemIds.has(itemId)) return;
     if (!this.liveItemIds.has(itemId)) {
       this.liveItemIds.add(itemId);
+      this.input.onFirstText?.(itemId);
       this.lastTextItemId = itemId;
       this.queueItemStep(itemId, async () => {
         await this.ensureTts();

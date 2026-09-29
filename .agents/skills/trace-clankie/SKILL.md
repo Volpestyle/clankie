@@ -184,14 +184,32 @@ Following controls waking, not collection.
   else. V2 `narrationEvent` is the bounded game
   event offered to the room, not generated voice wording; exact audible wording
   remains unknown by policy.
-- **Words with no audio is the mute-mouth signature.** A `model_response`
-  `phase: "completed"` carrying `textCharacters > 0` whose `deliveryId` never
-  reaches a `discord.voice.response` is a reply the room never heard: he wrote
-  it, synthesis dropped it. `discord.voice.failed` with stage
-  `speech_synthesis` names the throw. Join by `deliveryId`, never by adjacency
-  — an `ask_clankie` round trip spends **one** `deliveryId` on two responses
-  (the "let me check" and the answer), so a naive join credits the answer with
-  the filler's audio and hides exactly the turn worth looking at.
+- **Measure each voice stage, not just the printed first-audio number.**
+  `transcription.latencyMs` starts at capture start and includes the person's
+  speaking time. `captureEndToFinalMs` isolates finalization;
+  `lastAudioToFinalMs` also includes endpoint silence. On `response`,
+  `toFirstAudioMs` starts at this response request, while
+  `lastAudioToFirstAudioMs` and `transcriptToFirstAudioMs` retain the original
+  room input across wake setup and `ask_clankie`. `transcriptToRequestMs`
+  includes that setup/queue/handoff time. `requestToFirstTextMs`,
+  `requestToFirstAudioChunkMs`, and `firstAudioChunkToPlaybackMs` split text
+  generation, synthesis, and playback; first-text timing is available for the
+  external voice path. Absent fields mean unmeasured, never zero. Last input
+  PCM is a transport boundary, not the last spoken phoneme or headphone time.
+  `utterance.filtered: true` means a near-silent capture was withheld from
+  transcription; it should have no matching provider transcript. The 500ms
+  capture endpoint commits streamed input; only final transcripts trigger replies.
+- **Missing response receipts are not sufficient proof of a mute mouth.**
+  First join by delivery and playback ids, and inspect the bridge's Vox
+  `Started`/`Drained` log. Older writers capped receipt data at 16 fields,
+  dropping fully attributed responses despite successful playback. Voice
+  receipts now allow 32 scalar fields, with the same content fence. A
+  `model_response` completion with `textCharacters > 0` and no playback
+  evidence is suspicious; `speech_synthesis` or playback failures establish
+  the failing boundary. `audioBytes: 0` on an external text-model completion
+  does not measure the separate TTS audio stream. An `ask_clankie` round trip
+  uses one `deliveryId` for both acknowledgment and answer: never credit the
+  answer with its acknowledgment's playback.
 - **Cutoffs correlate by playback, not just delivery.** New `interrupted`,
   `response`, and `failed` (`speech_synthesis`) receipts carry `playbackId` and
   provider `itemId` when a playback exists. Pre-audio failures have no playback

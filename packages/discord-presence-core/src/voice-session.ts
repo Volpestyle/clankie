@@ -88,12 +88,15 @@ const MIN_UTTERANCE_MS = 350;
  */
 const DEFAULT_NARRATION_MIN_INTERVAL_MS = 12_000;
 /**
- * Silence that closes a capture. Unlike the cascade this no longer gates a
- * response — transcription streams while the speaker is still talking — it
- * only bounds the gateway speaking span used for attribution and the
- * per-capture utterance receipt.
+ * Silence that closes and commits a capture. Audio streams while the speaker
+ * talks, but only a final transcript can trigger a reply. Keep a pause allowance
+ * without adding the old 800ms to every exchange.
  */
-const CAPTURE_END_SILENCE_MS = 800;
+const CAPTURE_END_SILENCE_MS = 500;
+/** Near silence only; deliberately far below the 1,200 RMS interruption gate. */
+const CAPTURE_NOISE_RMS = 80;
+/** Preserve quiet word onsets before the first above-floor frame (200ms). */
+const CAPTURE_PREROLL_BYTES = (REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES) / 5;
 /**
  * Speech-level audio required before a consented speaker is treated as talking
  * over him. Only overlapping audio counts, and a substantive transcript must
@@ -303,6 +306,8 @@ export interface VoiceTranscriptionHandlers {
 export interface VoiceConversationOpenInput {
   readonly instructions: string;
   readonly onAudioDelta: (pcm: Buffer, itemId: string) => void;
+  /** Content-free notification before external synthesis waits for a clause. */
+  readonly onFirstText?: (itemId: string) => void;
   readonly onFunctionCall: (call: RealtimeFunctionCall) => void;
   readonly onResponseDone: (meta: RealtimeResponseMeta) => void;
   readonly onClose: (reason: RealtimeSessionCloseReason) => void;
@@ -418,6 +423,9 @@ interface PendingVoiceResponse {
   /** Set once {@link DiscordVoiceSession.settleOffer} has recorded this turn. */
   offerSettled?: boolean;
   firstAudioAtMs?: number;
+  firstTextAtMs?: number;
+  firstAudioChunkAtMs?: number;
+  readonly inputTiming?: VoiceInputTiming;
   inputTokens?: number;
   outputTokens?: number;
   /** Set when the server finished the response this decision produced. */
@@ -430,7 +438,14 @@ interface PendingVoiceResponse {
   toolCalled?: boolean;
 }
 
+interface VoiceInputTiming {
+  lastAudioAtMs?: number;
+  captureEndedAtMs?: number;
+  transcriptFinalAtMs?: number;
+}
+
 interface RoomTurn {
+  readonly inputTiming?: VoiceInputTiming;
   readonly sourceText?: string;
   readonly userId: string;
   readonly deliveryId: string;
@@ -481,6 +496,9 @@ interface ActiveCapture {
   readonly turn: PendingTranscriptTurn;
   transcription?: VoiceTranscriptionPort;
   audioBytes: number;
+  /** Bounded, private lead-in; wiped on forwarding, filtering, or cancellation. */
+  preroll: Buffer;
+  forwarding: boolean;
 }
 
 const defaultTimers: RealtimeTimers = {
@@ -900,6 +918,7 @@ export class DiscordVoiceSession {
     this.daveProtocolVersion = undefined;
     this.sessionGeneration += 1;
     this.consent.close();
+    for (const capture of this.captures.values()) capture.preroll.fill(0);
     this.captures.clear();
     this.captureEpochs.clear();
     this.transcriptions.clear();
@@ -1276,6 +1295,7 @@ export class DiscordVoiceSession {
       userId,
       deliveryId: randomUUID(),
       startedAtMs: this.clock(),
+      inputTiming: {},
     };
     const capture: ActiveCapture = {
       userId,
@@ -1284,6 +1304,8 @@ export class DiscordVoiceSession {
       generation,
       turn,
       audioBytes: 0,
+      preroll: Buffer.alloc(0),
+      forwarding: false,
     };
     this.captures.set(userId, capture);
     const transcriptTurns = this.transcriptTurns.get(userId) ?? [];
@@ -1361,6 +1383,7 @@ export class DiscordVoiceSession {
     }
     const pcm = Buffer.from(frame.pcm.buffer, frame.pcm.byteOffset, frame.pcm.byteLength);
     capture.audioBytes += pcm.byteLength;
+    if (capture.turn.inputTiming !== undefined) capture.turn.inputTiming.lastAudioAtMs = this.clock();
     const rms = pcmRms(pcm);
     if (rms > (capture.turn.peakRms ?? 0)) capture.turn.peakRms = rms;
     const playback = this.playingJob;
@@ -1371,7 +1394,20 @@ export class DiscordVoiceSession {
       }
       capture.turn.overlapSpeechBytes = (capture.turn.overlapSpeechBytes ?? 0) + pcm.byteLength;
     }
-    this.forwardAudio(capture.transcription, pcm);
+    if (!capture.forwarding && rms < CAPTURE_NOISE_RMS) {
+      const buffered = Buffer.concat([capture.preroll, pcm]);
+      capture.preroll.fill(0);
+      capture.preroll = Buffer.from(buffered.subarray(Math.max(0, buffered.length - CAPTURE_PREROLL_BYTES)));
+      buffered.fill(0);
+    } else {
+      if (!capture.forwarding) {
+        capture.forwarding = true;
+        if (capture.preroll.length > 0) this.forwardAudio(capture.transcription, capture.preroll);
+        capture.preroll.fill(0);
+        capture.preroll = Buffer.alloc(0);
+      }
+      this.forwardAudio(capture.transcription, pcm);
+    }
     frame.pcm.fill(0);
   }
 
@@ -1382,6 +1418,8 @@ export class DiscordVoiceSession {
     if (capture === undefined || capture.captureId !== captureId) return;
     this.captures.delete(userId);
     this.captureEpochs.set(userId, capture.epoch + 1);
+    if (capture.turn.inputTiming !== undefined) capture.turn.inputTiming.captureEndedAtMs = this.clock();
+    capture.preroll.fill(0);
     this.armSpeakerTranscriptionIdle(userId);
     try {
       this.options.vox.unsubscribeUserAudio(userId);
@@ -1408,7 +1446,11 @@ export class DiscordVoiceSession {
       this.flushFinalizedUtterances();
       return;
     }
-    if (capture.audioBytes > 0) {
+    if (!capture.forwarding) {
+      this.removeTranscriptTurn(capture.turn);
+      this.flushFinalizedUtterances();
+    }
+    if (capture.forwarding && capture.audioBytes > 0) {
       try {
         capture.transcription?.commitAudio();
       } catch {
@@ -1427,6 +1469,9 @@ export class DiscordVoiceSession {
       userId,
       deliveryId: capture.turn.deliveryId,
       durationMs,
+      silenceDurationMs: CAPTURE_END_SILENCE_MS,
+      filtered: !capture.forwarding,
+      peakRms: Math.round(capture.turn.peakRms ?? 0),
     });
   }
 
@@ -1434,7 +1479,10 @@ export class DiscordVoiceSession {
     const capture = this.captures.get(userId);
     this.captureEpochs.set(userId, (this.captureEpochs.get(userId) ?? 0) + 1);
     this.captures.delete(userId);
-    if (capture !== undefined) this.removeTranscriptTurn(capture.turn);
+    if (capture !== undefined) {
+      capture.preroll.fill(0);
+      this.removeTranscriptTurn(capture.turn);
+    }
     this.flushFinalizedUtterances();
     try {
       this.options.vox.unsubscribeUserAudio(userId);
@@ -1489,6 +1537,8 @@ export class DiscordVoiceSession {
     const turn = this.transcriptTurns.get(userId)?.shift();
     if (turn === undefined) return;
     const text = event.text.trim();
+    const finalAtMs = this.clock();
+    if (turn.inputTiming !== undefined) turn.inputTiming.transcriptFinalAtMs = finalAtMs;
     const addressed = voiceAddressesCharacter(text, this.options.floor.names);
     void this.emitSafely({
       type: "transcription",
@@ -1498,7 +1548,17 @@ export class DiscordVoiceSession {
       deliveryId: turn.deliveryId,
       outcome: text.length === 0 ? "empty" : "accepted",
       characters: text.length,
-      latencyMs: Math.max(0, Math.round(this.clock() - turn.startedAtMs)),
+      latencyMs: Math.max(0, Math.round(finalAtMs - turn.startedAtMs)),
+      ...(turn.inputTiming?.captureEndedAtMs === undefined
+        ? {}
+        : {
+            captureEndToFinalMs: Math.max(0, Math.round(finalAtMs - turn.inputTiming.captureEndedAtMs)),
+          }),
+      ...(turn.inputTiming?.lastAudioAtMs === undefined
+        ? {}
+        : {
+            lastAudioToFinalMs: Math.max(0, Math.round(finalAtMs - turn.inputTiming.lastAudioAtMs)),
+          }),
       addressed,
       ...(turn.peakRms === undefined ? {} : { peakRms: Math.round(turn.peakRms) }),
     });
@@ -1797,6 +1857,7 @@ export class DiscordVoiceSession {
           fastPath: true,
           trigger: "room",
           speakerId: turn.userId,
+          ...(turn.inputTiming === undefined ? {} : { inputTiming: turn.inputTiming }),
           ...(turn.sourceText === undefined ? {} : { sourceText: turn.sourceText }),
           state: "settled",
           handoffMs: 0,
@@ -1860,6 +1921,13 @@ export class DiscordVoiceSession {
     try {
       port = await this.options.realtime.openConversation({
         instructions: briefing.instructions,
+        onFirstText: (itemId) => {
+          if (generation !== this.sessionGeneration || this.invalidPlaybackItemIds.has(itemId)) return;
+          const pending = this.pendingResponses.find(
+            (candidate) => !candidate.done && candidate.invalidated !== true,
+          );
+          if (pending !== undefined) pending.firstTextAtMs ??= this.clock();
+        },
         onAudioDelta: (pcm, itemId) => {
           if (generation === this.sessionGeneration) this.handleAudioDelta(pcm, itemId);
           else pcm.fill(0);
@@ -2470,6 +2538,7 @@ export class DiscordVoiceSession {
       trigger: "room",
       speakerId: userId,
       turnId: outcome.turnId,
+      ...(exchange?.inputTiming === undefined ? {} : { inputTiming: exchange.inputTiming }),
       state: outcome.state,
       handoffMs,
       decidedAtMs: this.clock(),
@@ -2506,6 +2575,7 @@ export class DiscordVoiceSession {
             wake: exchange.wake,
             fastPath: true,
             trigger: exchange.trigger,
+            ...(exchange.inputTiming === undefined ? {} : { inputTiming: exchange.inputTiming }),
             ...(exchange.sourceText === undefined ? {} : { sourceText: exchange.sourceText }),
             ...(exchange.speakerId === undefined ? {} : { speakerId: exchange.speakerId }),
             state: "settled" as const,
@@ -2595,6 +2665,7 @@ export class DiscordVoiceSession {
       pcm.fill(0);
       return;
     }
+    pending.firstAudioChunkAtMs ??= this.clock();
     let encoded: string;
     try {
       encoded = pcm.toString("base64");
@@ -2775,11 +2846,27 @@ export class DiscordVoiceSession {
         ),
         handoffMs: Math.round(pending.handoffMs),
         playbackMs: Math.round(playbackMs),
+        ...this.responseLatency(pending),
         ...(pending.inputTokens === undefined ? {} : { inputTokens: pending.inputTokens }),
         ...(pending.outputTokens === undefined ? {} : { outputTokens: pending.outputTokens }),
       });
     }
     this.queueMembershipResponse();
+  }
+
+  private responseLatency(pending: PendingVoiceResponse): Record<string, number> {
+    const fields: Record<string, number> = {};
+    const elapsed = (key: string, from: number | undefined, to: number | undefined): void => {
+      if (from !== undefined && to !== undefined) fields[key] = Math.max(0, Math.round(to - from));
+    };
+    elapsed("lastAudioToFirstAudioMs", pending.inputTiming?.lastAudioAtMs, pending.firstAudioAtMs);
+    elapsed("captureEndToFirstAudioMs", pending.inputTiming?.captureEndedAtMs, pending.firstAudioAtMs);
+    elapsed("transcriptToFirstAudioMs", pending.inputTiming?.transcriptFinalAtMs, pending.firstAudioAtMs);
+    elapsed("transcriptToRequestMs", pending.inputTiming?.transcriptFinalAtMs, pending.decidedAtMs);
+    elapsed("requestToFirstTextMs", pending.decidedAtMs, pending.firstTextAtMs);
+    elapsed("requestToFirstAudioChunkMs", pending.decidedAtMs, pending.firstAudioChunkAtMs);
+    elapsed("firstAudioChunkToPlaybackMs", pending.firstAudioChunkAtMs, pending.firstAudioAtMs);
+    return fields;
   }
 
   private sendPlaybackAudio(job: PlaybackJob, pcmBase64: string): void {
