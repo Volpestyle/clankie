@@ -2,8 +2,8 @@ import { chmodSync, mkdirSync, createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { addressesCharacter, type DiscordTextIngressPort } from "@clankie/discord-presence-core";
-import type { TextBasedChannel } from "discord.js";
+import { type DiscordTextIngress, type DiscordTextIngressPort } from "@clankie/discord-presence-core";
+import type { Message, TextBasedChannel } from "discord.js";
 import {
   CaptainChannelTurnResultSchema,
   DiscordPresenceChannelTurnRequestSchema,
@@ -21,7 +21,7 @@ interface Delivery {
   done: number;
 }
 
-/** Persist delivery, not attention: a completed model turn is not a delivered reply. */
+/** A completed model turn is not a delivered reply. Attention metadata survives restarts too. */
 export class DiscordTextInbox {
   private readonly db: DatabaseSync;
   private readonly running = new Set<string>();
@@ -34,6 +34,7 @@ export class DiscordTextInbox {
       PRAGMA busy_timeout = 2000;
       CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, after_id TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS channel_activity (id TEXT PRIMARY KEY, since_reply INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS deliveries (
         id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, guild_id TEXT,
         request TEXT, result TEXT, reply TEXT, done INTEGER NOT NULL DEFAULT 0
@@ -105,6 +106,29 @@ export class DiscordTextInbox {
     }
     this.db.prepare("INSERT INTO metadata VALUES ('seeded_v2', '1')").run();
   }
+
+  readonly channelActivity = {
+    load: (): { channelId: string; sinceReply: number }[] =>
+      this.db
+        .prepare("SELECT id, since_reply FROM channel_activity ORDER BY rowid")
+        .all()
+        .map((row) => ({
+          channelId: String(row.id),
+          sinceReply: Number(row.since_reply),
+        })),
+    save: (channels: readonly { channelId: string; sinceReply: number }[]): void => {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec("DELETE FROM channel_activity");
+        const insert = this.db.prepare("INSERT INTO channel_activity VALUES (?, ?)");
+        for (const channel of channels) insert.run(channel.channelId, channel.sinceReply);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
 
   after(channelId: string): string {
     const row = this.db.prepare("SELECT after_id FROM channels WHERE id = ?").get(channelId);
@@ -259,27 +283,40 @@ export async function scanDiscordTextChannel(
   inbox: DiscordTextInbox,
   channel: TextBasedChannel,
   botId: string,
-  names: readonly string[],
+  ingress: DiscordTextIngress,
 ): Promise<void> {
   let after = inbox.after(channel.id);
+  // Upgrade/first discovery: a reply just before the cursor still makes this
+  // an active room. Bound the bootstrap to one prior page; later scans persist it.
+  if (!channel.isDMBased() && !ingress.hasSpokenInChannel(channel.id)) {
+    const prior = await channel.messages.fetch({ before: (BigInt(after) + 1n).toString(), limit: 100 });
+    if ([...prior.values()].some((message) => message.author.id === botId))
+      ingress.observeChannelReply(channel.id);
+  }
   for (;;) {
     const page = await channel.messages.fetch({ after, limit: 100 });
     const ordered = [...page.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     for (const message of ordered) {
-      if (message.author.id === botId && message.reference?.messageId)
-        inbox.reconcile(message.reference.messageId, message.content);
-      if (
-        !message.author.bot &&
-        (channel.isDMBased() ||
-          message.mentions.users.has(botId) ||
-          addressesCharacter(message.content, names))
-      ) {
-        inbox.enqueue(message.id, channel.id, message.guildId ?? undefined);
-      } else if (!message.author.bot && message.reference?.messageId) {
-        const referenced = await message.fetchReference().catch(() => undefined);
-        if (referenced?.author.id === botId)
-          inbox.enqueue(message.id, channel.id, message.guildId ?? undefined);
+      if (message.author.id === botId) {
+        // Re-reading an already delivered reply must not reset today's live
+        // attention counter or clear messages that arrived while scanning.
+        if (!ingress.hasSpokenInChannel(channel.id)) ingress.observeChannelReply(channel.id);
+        if (message.reference?.messageId) inbox.reconcile(message.reference.messageId, message.content);
       }
+      if (message.author.bot || message.author.id === botId) continue;
+      const mentionsBot = await mentionsDiscordBot(message, botId);
+      if (
+        ingress.admissionRefusal({
+          id: message.id,
+          channelId: channel.id,
+          ...(message.guildId == null ? {} : { guildId: message.guildId }),
+          authorId: message.author.id,
+          authorIsBot: false,
+          mentionsBot,
+          body: message.content,
+        }) === undefined
+      )
+        inbox.enqueue(message.id, channel.id, message.guildId ?? undefined);
     }
     const last = ordered.at(-1);
     if (last === undefined) break;
@@ -287,4 +324,17 @@ export async function scanDiscordTextChannel(
     inbox.scanned(channel.id, after);
     if (page.size < 100) break;
   }
+}
+
+/** Replies with mention_author disabled still address their referenced author. */
+export async function mentionsDiscordBot(message: Message, botId: string): Promise<boolean> {
+  if (message.mentions.users.has(botId) || message.mentions.repliedUser?.id === botId) return true;
+  if (!message.reference?.messageId) return false;
+  const referenced = await message.fetchReference().catch((error: unknown) => {
+    // A deleted reference is not addressing evidence. Transient failures must
+    // leave the scan cursor in place so the message is reconsidered.
+    if ((error as { code?: number }).code === 10008) return undefined;
+    throw error;
+  });
+  return referenced?.author.id === botId;
 }

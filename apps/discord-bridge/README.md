@@ -169,7 +169,9 @@ satisfy these live gates.
   room's shared floor, so the realtime persona may answer aloud or stay silent
   without a second text reply ([ADR 0124](../../docs/adr/0124-one-self-has-many-local-threads.md)).
   Pending deliveries and accepted turn results persist in the private delivery
-  journal; Discord remains the channel-history source
+  journal, along with channel activity and the live attention counter. Catch-up
+  uses live admission, including unaddressed follow-ups after he has spoken;
+  one prior history page bootstraps activity on upgrade. Discord remains the channel-history source
   ([ADR 0177](../../docs/adr/0177-discord-delivery-survives-a-bridge-restart.md)).
 - Presence actions use a live gateway claim and the configured presence
   allowlists. Reactions and thread actions are grounded in the triggering

@@ -79,7 +79,20 @@ Following controls waking, not collection.
   delivery id to `discord.text.reply` and its `responseMessageId`. The official
   bot keeps unfinished deliveries in `discord-text-inbox.sqlite` beside its
   receipt log; read `deliveries` and `channels` read-only to inspect pending
-  ids and scan cursors. A saved result can await posting after the model finished.
+  ids and scan cursors. `channel_activity` records participation and the
+  messages-since-reply counter; history catch-up uses live admission, including
+  unaddressed follow-ups there. On upgrade, one prior history page can establish
+  participation, but an already-advanced cursor does not rewind. A saved result
+  can await posting after the model finished.
+
+- **A reconnect is not proof of Discord-side failure.** Match `gateway_reconnecting`
+  and READY/RESUMED timestamps with macOS `pmset -g log` sleep/DarkWake entries.
+  A sleeping host cannot receive live messages; Vox audio tick slippage on wake
+  is not proof the separate Node gateway loop stalled. `Discord gateway diagnostic`
+  logs allowlisted close/heartbeat/invalid-session/replay facts, never raw debug
+  or message bodies. `Discord gateway reconnecting` includes maximum Node loop
+  delay since boot or the preceding reconnect. Older logs lack those diagnostics;
+  do not infer a specific close code from a presence phase alone.
 
 - **The TUI is fullscreen** — `herdr pane read` returns only the currently
   rendered screen. The chat transcript is _not_ in terminal scrollback; read
