@@ -193,7 +193,7 @@ export function captainTools(
         personaReference: Type.Optional(
           Type.Boolean({
             description:
-              "Use the owner persona mood board as visual references when depicting yourself. Do not combine with sourceRef.",
+              "Use only the owner appearance/ references when depicting yourself. Vibe references never define your look. Do not combine with sourceRef.",
           }),
         ),
         prompt: Type.String({ minLength: 1, maxLength: 4000 }),

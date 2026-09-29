@@ -1044,7 +1044,7 @@ paths:
       tags: [Operator]
       operationId: getOperatorPersona
       summary: Read the hosted or local owner-authored persona
-      description: Includes persona image diagnostics (files, count, sizes, load errors), never image bytes. Status previews the current folder; the running image snapshot changes on restart.
+      description: Includes persona image diagnostics (files, roles, counts, sizes, video timestamps, load errors), never image bytes. Status previews the current folder; the running image snapshot changes on restart.
       security: [{ operatorBearer: [] }]
       responses:
         "200": { description: Persona settings }
@@ -1053,7 +1053,7 @@ paths:
       tags: [Operator]
       operationId: updateOperatorPersona
       summary: Apply a validated partial persona update
-      description: Accepts imagesDir as a folder on the service host (empty string clears). Returns image status and a restart reminder.
+      description: Accepts imagesDir as a folder on the service host (empty string clears). Top-level images and sampled videos are vibe; appearance/ holds physical character references. Returns image status and a restart reminder.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -2392,7 +2392,7 @@ paths:
       tags: [Media]
       operationId: postGenerateImage
       summary: Generate or edit an image
-      description: Set personaReference true for self-depiction using the owner image set. Mutually exclusive with sourceRef. OpenAI and Google support multiple references; the current Grok adapter supports one.
+      description: Set personaReference true for self-depiction using only owner appearance references, never vibe images or frames. Mutually exclusive with sourceRef. OpenAI and Google support multiple references; the current Grok adapter supports one.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       requestBody:
         required: true

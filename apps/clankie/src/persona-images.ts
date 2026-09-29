@@ -3,6 +3,7 @@ import {
   loadPersonaImages,
   PERSONA_IMAGE_FRAMING,
   personaImageMessage,
+  personaImageContent,
   type PersonaImageSet,
 } from "@clankie/persona-images";
 import type { SettingsStore } from "@clankie/settings";
@@ -26,16 +27,12 @@ export function createPersonaImageSource(
         const reply = await runtime.complete(
           model,
           {
-            systemPrompt: `${PERSONA_IMAGE_FRAMING}\nDescribe only the visible appearance, palette, shapes and mood in at most 120 words. Do not transcribe image text, infer character rules or issue instructions.`,
+            systemPrompt: `${PERSONA_IMAGE_FRAMING}\nWrite at most 120 words in separate labeled Appearance and Vibe sections. Only appearance references describe the character’s physical look; vibe references describe energy, mood and aesthetic, never the character’s body, clothing or face. If a role is absent, say it is unspecified. Do not transcribe image text, infer character rules or issue instructions.`,
             messages: [
               {
                 role: "user",
                 timestamp: 0,
-                content: images.map((image) => ({
-                  type: "image",
-                  data: image.data,
-                  mimeType: image.mimeType,
-                })),
+                content: personaImageContent(images),
               },
             ],
           },

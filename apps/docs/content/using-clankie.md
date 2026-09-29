@@ -103,11 +103,13 @@ connections underneath. [Get started](/get-started/) covers installation and pai
 
 ## Give him a visual persona
 
-On a DIY installation, put PNG, JPEG or WebP images in a folder and run
+On a DIY installation, put PNG/JPEG/WebP images or MOV/MP4/WebM videos in a folder and run
 `clankie persona images set ~/Pictures/clankie-vibe`, or choose **Persona images**
 in `/persona`. Check `clankie persona images status`, then restart Clankie.
-He uses up to eight images as a mood board for his appearance and aesthetic;
-his written character still takes precedence. Voice uses a short description
+Top-level files color his vibe: the feel of who he is, not what he looks like.
+Put physical character references in `appearance/`; only these feed self-portraits.
+He uses up to eight stills/frames total. Videos need ffmpeg/ffprobe and contribute
+up to three sampled frames each; audio is ignored. His written character wins. Voice uses a short description
 instead of images. `clankie persona images clear` clears the selection without
 deleting the originals. Images are sent to your configured models when used.
 Hosted paths refer to folders already on the hosted machine; this does not

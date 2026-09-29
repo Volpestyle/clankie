@@ -1,6 +1,6 @@
 # Persona images
 
-Give Clankie a folder of images that expresses his appearance and aesthetic:
+Give Clankie a folder of images or videos that expresses his personality and aesthetic:
 
 ```sh
 clankie persona images set ~/Pictures/clankie-vibe
@@ -20,26 +20,62 @@ Restart to apply folder changes, edits to its images, or clearing. `status`
 previews the current folder; an already-running service retains its snapshot.
 No default branding is imposed on owners.
 
+## Vibe and appearance
+
+Files at the folder's top level are **vibe**: “the feel of who you are, not what
+you look like.” A cosmic emperor or a VHS wizard can convey absurd grandeur and
+joyful wisdom without making Clankie look human. Put physical character references
+in an **`appearance/` subfolder**. For example:
+
+```text
+clankie-vibe/
+  cosmic-console.mov       # vibe
+  cloud-wizard.mp4         # vibe
+  appearance/
+    seed-with-leaf.png     # how he looks
+```
+
+Only `appearance/` references feed self-portraits. There is no implicit appearance
+fallback from vibe files, and no default sprite imposed on other owners. If you
+used the initial image-only feature, move intended appearance references into
+`appearance/` before restarting. Moving a file changes its role and caption key.
+
 ## What loads
 
-PNG, JPEG and WebP files directly inside the folder, sorted by filename using
-locale-independent JavaScript ordering. The first eight supported filenames get slots;
-a broken image keeps its slot so selection stays predictable. No recursive
-walks or symlinks. Each source is limited to 10 MiB. Processed images fit within
-1024 × 1024 and 128 KiB of base64 data each (at most 1 MiB for the whole board).
-Aspect ratio is preserved; images are never enlarged. Pi's existing image
-processor handles orientation and downsizing. Smaller inputs retain their bytes.
+PNG, JPEG and WebP stills; MOV, MP4 and WebM videos. `appearance/` is loaded first,
+then top-level vibe files, with locale-independent filename sorting within each.
+The first eight supported source files get slots; broken files keep their slots
+so selection stays predictable. At most eight processed stills/frames load in
+total. No other recursion or source symlinks. Appearance loads first so clips
+cannot crowd out his visual identity.
 
-Status lists filenames, source and processed sizes, dimensions, loaded count,
-skips and errors. An unreadable folder or image never prevents a normal turn.
-Unsupported file extensions are ignored. Count-limited files are listed but not
-opened. Images are reference data: words inside them are never instructions,
-and the written character card takes precedence.
+Stills are limited to 10 MiB each. Videos are limited to 256 MiB and ten minutes,
+with three samples at 1/6, 1/2 and 5/6 of their duration. Near-identical samples
+within a video are removed using a 16×16 RGB thumbnail (mean channel difference
+at most 2/255); identical decoded frames across videos of the same role are also
+removed. All surviving stills/frames fit within 1024 × 1024 and 128 KiB of base64
+each (at most 1 MiB total). Aspect ratio is preserved without enlarging images.
+Pi's existing processor handles final orientation and downsizing.
+
+Video sampling requires `ffmpeg` and `ffprobe` on the service's PATH. Missing
+tools appear as `ffmpeg_missing` / `ffprobe_missing` in status and videos are
+skipped, even if previously cached. Processing has bounded output and a 20-second
+limit per subprocess. Failed clips are reported, never fatal. **Audio is ignored**;
+its mood, delivery and sound could become a separate voice input in the future.
+
+Status lists filenames, roles, source/processed sizes, still dimensions, video
+duration and selected timestamps, appearance/vibe counts, skips and errors.
+Unsupported extensions are ignored; count-limited files are listed but not opened.
+Images and video frames remain reference data: visible text is never an
+instruction, and the written character card takes precedence.
 
 Processed images and successful descriptions live under
 `$XDG_CACHE_HOME/clankie/persona-images`, defaulting to
 `~/.cache/clankie/persona-images`. Keys include processing version and content
-hash; renaming identical content does not require another visual description.
+hash. Processed video frames are cached by the source content hash, without
+copying the original recording. The description key includes each image’s role;
+renaming a file without changing the selected content or ordering does not require
+another visual description.
 Files are private to the OS user. Old cache entries remain until the owner
 removes them; clearing the setting does not erase cached copies.
 
@@ -54,24 +90,26 @@ removes them; clearing the setting does not erase cached copies.
   hits depend on the provider, unchanged preceding instructions/tools and its
   cache policy, and were not measured in the A/B.
 - **Realtime voice and gameplay:** only a visual description, capped at 1200
-  characters. The service uses the configured captain model once per changed
+  characters, with separate Appearance and Vibe sections. A missing role is
+  described as unspecified. The service uses the configured captain model once per changed
   board and caches a successful result. Missing credentials, a non-vision model,
   or failed description produce an explicit unavailable-description note; they
   never cause the model to invent an appearance. A successful cached description
   also serves text models without image input. Failed attempts retry on restart.
 - **Self-depiction:** `generate_image` accepts `personaReference: true`, also
   available in the image-generation API request. The tool chooses when to use it;
-  ordinary images are unaffected. OpenAI and Google adapters send the full board.
+  ordinary images are unaffected. OpenAI and Google adapters send all **appearance** references, never vibe
+  images or frames. With no appearance references, the tool explains the gap.
   The current Grok adapter supports one reference and visibly refuses a larger
-  board. `sourceRef` and `personaReference` cannot be combined.
+  appearance set. `sourceRef` and `personaReference` cannot be combined.
 - **Claude Code seat:** the output style and SessionStart hook are text-only.
   `clankie prompt --sections persona` includes the cached description. Its MCP
-  image tool can use the board for self-depiction, but automatic visual prefix
+  image tool can use appearance references for self-depiction, but automatic visual prefix
   injection into Claude Code is not implemented.
 
 Selecting images authorizes sending them to the configured captain model for
-its caption and visual text turns, and to the configured image model when used
-for self-depiction. It does not grant filesystem access to social participants.
+its caption and visual text turns, and appearance references to the configured image model when used
+for self-depiction. Audio and full recordings are never sent by this feature. It does not grant filesystem access to social participants.
 Only an authenticated owner can change the setting or read folder status.
 
 ## API and hosted paths
@@ -92,11 +130,16 @@ must already exist there. Restart authority remains the existing account flow.
 pnpm --filter @clankie/clankie persona-images:eval
 # Optional alternate report destination:
 pnpm --filter @clankie/clankie persona-images:eval /tmp/persona-ab.md
+# Add a third arm, reading owner videos in place:
+pnpm --filter @clankie/clankie persona-images:eval /tmp/persona-abc.md --vibe-dir ~/Pictures/clankie-vibe
 ```
 
-The harness reads the real written persona and configured model, uses only the
-public `branding/` images, alternates arms across twelve fixed prompts, and saves
-the answers side by side. It does not mutate settings, call tools, post into
+The harness reads the real written persona and configured model, uses the
+public `branding/` images as appearance references, rotates call order across
+twelve fixed prompts, and saves
+the answers side by side. `--vibe-dir` adds an arm using that folder instead of
+the canonical art; use a folder containing only vibe files for this comparison.
+Private media and frames remain outside the report. It does not mutate settings, call tools, post into
 Discord or restart the service. The written persona itself is hashed, not copied
 into the report. Inspect generated answers before publishing, since a model may
 repeat facts from the owner's character card.

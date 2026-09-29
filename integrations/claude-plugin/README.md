@@ -202,5 +202,6 @@ The output style and SessionStart hook carry text. When the owner selects a
 [persona image folder](../../docs/persona-images.md), `clankie prompt --sections persona`
 includes its cached visual description. Automatic image prefix injection is
 available in Pi sessions, not in this Claude Code seat. The seat's `generate_image`
-MCP tool still accepts `personaReference: true` to use the owner's board for
-self-depiction. A restart of Clankie applies changes to the board.
+MCP tool still accepts `personaReference: true` to use only the owner's `appearance/` references for
+self-depiction. Top-level images and sampled video frames supply vibe, never
+physical appearance; the caption preserves that distinction. A restart of Clankie applies changes to the board.

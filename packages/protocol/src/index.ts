@@ -5240,7 +5240,7 @@ export type MediaRefusalReason = z.infer<typeof MediaRefusalReasonSchema>;
 
 export const GenerateImageRequestSchema = z
   .object({
-    /** Use the owner-configured persona board for a self-depiction. */
+    /** Use only owner-configured appearance references for self-depiction, never vibe images. */
     personaReference: z.boolean().optional(),
     schemaVersion: z.literal(1),
     prompt: z.string().trim().min(1).max(4_000),

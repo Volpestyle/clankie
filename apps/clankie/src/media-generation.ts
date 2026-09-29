@@ -255,12 +255,13 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
       if (request.personaReference && request.sourceRef)
         throw new MediaRefusal("provider_failed", "Choose personaReference or sourceRef, not both.");
       const board = request.personaReference ? await this.options.personaImages?.() : undefined;
-      if (request.personaReference && !board?.images.length)
+      const appearance = board?.images.filter((image) => image.role === "appearance") ?? [];
+      if (request.personaReference && !appearance.length)
         throw new MediaRefusal(
           "provider_failed",
-          "No persona images loaded. Configure clankie persona images set <folder> and restart.",
+          "No appearance references loaded. Put your character images in appearance/ inside the persona folder and restart. Vibe references cannot be used for self-portraits.",
         );
-      if (model.provider === "grok" && (board?.images.length ?? 0) > 1)
+      if (model.provider === "grok" && appearance.length > 1)
         throw new MediaRefusal(
           "provider_failed",
           "The Grok adapter supports one reference image; use OpenAI or Google for a persona image set.",
@@ -277,7 +278,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
           ? `${PERSONA_IMAGE_FRAMING}\nDepict the character using these visual references.\n${request.prompt}`
           : request.prompt,
         ...(board
-          ? { referenceImages: board.images.map((image) => `data:${image.mimeType};base64,${image.data}`) }
+          ? { referenceImages: appearance.map((image) => `data:${image.mimeType};base64,${image.data}`) }
           : {}),
         provider: model.provider,
         model: model.modelId,

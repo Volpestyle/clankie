@@ -32,8 +32,17 @@ afterEach(async () => {
 const board = {
   hash: "test",
   files: [],
-  images: [{ data: "PERSONA_PIXELS", mimeType: "image/png" as const, width: 1, height: 1 }],
-  description: "A green seed creature with a leaf.",
+  images: [
+    {
+      role: "appearance" as const,
+      data: "PERSONA_PIXELS",
+      mimeType: "image/png" as const,
+      width: 1,
+      height: 1,
+    },
+    { role: "vibe" as const, data: "VIBE_PIXELS", mimeType: "image/png" as const, width: 1, height: 1 },
+  ],
+  description: "Appearance: A green seed creature with a leaf. Vibe: Joyful cosmic grandeur.",
 };
 async function temp() {
   const dir = await mkdtemp(join(tmpdir(), "persona-lanes-"));
@@ -114,7 +123,10 @@ it.each(["operator", "discord_presence", "discord_voice"] as const)(
       expect(calls[0]!.messages[0]).toMatchObject({
         content: [
           { type: "text", text: PERSONA_IMAGE_FRAMING },
+          { type: "text", text: "Appearance reference: how you look." },
           { type: "image", data: "PERSONA_PIXELS" },
+          { type: "text", text: expect.stringContaining("the feel of who you are, not what you look like") },
+          { type: "image", data: "VIBE_PIXELS" },
         ],
       });
       expect(JSON.stringify(session.sessionManager.getEntries())).not.toContain("PERSONA_PIXELS");
@@ -181,11 +193,13 @@ it("sends only the bounded description into Discord and private realtime voice",
     const briefing = await response.text();
     expect(briefing).toContain(board.description);
     expect(briefing).not.toContain("PERSONA_PIXELS");
+    expect(briefing).not.toContain("VIBE_PIXELS");
     lane = "api";
     await clankie.app.request(LOCAL_VOICE_CHAT_PATH);
     expect(open).toHaveBeenCalledOnce();
     expect(open.mock.calls[0]![0].instructions).toContain(board.description);
     expect(JSON.stringify(open.mock.calls[0]![0])).not.toContain("PERSONA_PIXELS");
+    expect(JSON.stringify(open.mock.calls[0]![0])).not.toContain("VIBE_PIXELS");
   } finally {
     clankie.close();
   }

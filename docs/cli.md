@@ -799,13 +799,18 @@ command. Character configuration grants no authority.
 
 ### `persona images status|set <folder>|clear`
 
-Select an owner-authored image folder with `persona images set ~/Pictures/clankie-vibe`.
-`status` previews filenames, count, source/base64 sizes, dimensions, skips and load
+Select an owner-authored image/video folder with `persona images set ~/Pictures/clankie-vibe`.
+`status` previews filenames, roles, counts, source/base64 sizes, dimensions, video
+durations and sampled timestamps, skips and load
 errors; it never emits image bytes. `clear` clears the setting without deleting
 files. Restart Clankie to apply changes (the command prints the reminder).
 
-The first eight filename-sorted PNG/JPEG/WebP files are used, at most 10 MiB
-source and 1024 pixels / 128 KiB base64 each. The TUI `/persona` → Persona images
+Top-level files are vibe; put physical character references in `appearance/`.
+Only appearance references feed self-portraits. PNG/JPEG/WebP sources may be up
+to 10 MiB; MOV/MP4/WebM up to 256 MiB / ten minutes. Videos require ffmpeg and
+ffprobe, sample three frames, deduplicate, and ignore audio. Appearance loads
+first, then vibe, filename-sorted within each: eight source slots and eight
+processed images/frames total, each at most 1024 pixels / 128 KiB base64. The TUI `/persona` → Persona images
 uses the same writer. The authenticated `/v1/operator/persona` API accepts
 `imagesDir`; an empty string clears it. Hosted paths name folders on the body.
 See [persona images](persona-images.md) for caching, voice, model support and A/B evaluation.

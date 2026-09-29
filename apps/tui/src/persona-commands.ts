@@ -103,7 +103,7 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
         const folder =
           action === "set"
             ? await flow.readText({
-                message: "Image folder on Clankie's machine",
+                message: "Persona folder (root = vibe; appearance/ = how you look)",
                 defaultValue: (await services.settings.load()).persona.imagesDir ?? "",
                 allowBack: true,
               })

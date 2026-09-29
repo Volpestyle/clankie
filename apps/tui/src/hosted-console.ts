@@ -321,7 +321,7 @@ export async function runHostedConsole() {
           });
           if (characterNotes === undefined) return;
           const imagesDir = await flow.readText({
-            message: "Persona image folder on the hosted machine (blank clears)",
+            message: "Persona folder on hosted machine (root = vibe; appearance/ = look; blank clears)",
             defaultValue: current.persona.imagesDir ?? "",
           });
           if (imagesDir === undefined) return;
