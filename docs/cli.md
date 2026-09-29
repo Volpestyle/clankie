@@ -797,6 +797,19 @@ TUI `/video-model` command calls the same functions.
 Return the complete owner-authored persona plus `settingsFile` and the restart
 command. Character configuration grants no authority.
 
+### `persona images status|set <folder>|clear`
+
+Select an owner-authored image folder with `persona images set ~/Pictures/clankie-vibe`.
+`status` previews filenames, count, source/base64 sizes, dimensions, skips and load
+errors; it never emits image bytes. `clear` clears the setting without deleting
+files. Restart Clankie to apply changes (the command prints the reminder).
+
+The first eight filename-sorted PNG/JPEG/WebP files are used, at most 10 MiB
+source and 1024 pixels / 128 KiB base64 each. The TUI `/persona` → Persona images
+uses the same writer. The authenticated `/v1/operator/persona` API accepts
+`imagesDir`; an empty string clears it. Hosted paths name folders on the body.
+See [persona images](persona-images.md) for caching, voice, model support and A/B evaluation.
+
 ### `persona set [flags]`
 
 Update one or more persona fields atomically:

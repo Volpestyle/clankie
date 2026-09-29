@@ -12,7 +12,8 @@
     "verify-model": "tsx scripts/verify-model-selection.ts",
     "comparison-run": "tsx scripts/comparison-run.ts",
     "comparison-await-job": "tsx scripts/comparison-await-job.ts",
-    "comparison-check-loop": "tsx scripts/comparison-check-loop.ts"
+    "comparison-check-loop": "tsx scripts/comparison-check-loop.ts",
+    "persona-images:eval": "tsx scripts/persona-images-eval.ts"
   },
   "dependencies": {
     "@clankie/agent-hosts": "workspace:*",
@@ -25,6 +26,7 @@
     "@clankie/model-provider": "workspace:*",
     "@clankie/model-registry": "workspace:*",
     "@clankie/observability": "workspace:*",
+    "@clankie/persona-images": "workspace:*",
     "@clankie/play": "workspace:*",
     "@clankie/play-voice": "workspace:*",
     "@clankie/protocol": "workspace:*",

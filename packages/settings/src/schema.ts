@@ -169,6 +169,8 @@ export const PersonaSettingsSchema = z
      * it belongs to a human — the code carries it, it does not invent it.
      */
     characterNotes: z.string().max(4_000).default(""),
+    /** Owner-selected mood board directory on the service host; restart applies changes. */
+    imagesDir: z.string().trim().max(4096).optional(),
     /** How readily he speaks, and how much room he takes when he does. */
     chattiness: z.enum(["quiet", "balanced", "chatty"]).default("balanced"),
     /** What he perceives in admitted text channels; silence remains his decision. */

@@ -168,6 +168,19 @@ export async function hostedCommand(
     if (action === "set" && value) return transport.request("/v1/model-keys/select", { model: value });
   }
   if (command === "persona") {
+    if (action === "images") {
+      if (value === undefined || value === "status") return transport.request("/v1/operator/persona");
+      if (value === "clear" || (value === "set" && args[3]?.trim())) {
+        const result = await transport.request("/v1/operator/persona", {
+          imagesDir: value === "clear" ? "" : args[3],
+        });
+        return {
+          result,
+          restart: "Restart Clankie to apply persona images. Folder paths refer to the hosted machine.",
+        };
+      }
+      throw new Error("Use persona images status|set <folder>|clear");
+    }
     if (action === undefined || action === "status") return transport.request("/v1/operator/persona");
     if (action === "set") {
       const patch: Record<string, string> = {};

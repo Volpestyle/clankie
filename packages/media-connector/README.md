@@ -55,3 +55,9 @@ let job = await video.start(request); // { requestId, status: "pending" }
 while (job.status === "pending") job = await video.poll(job.requestId);
 const rendered = await video.retrieve(job, request);
 ```
+
+Persona self-depiction can supply up to eight bounded `referenceImages` data URIs.
+OpenAI sends them as multipart `image[]`; Google sends inline data parts. The
+current Grok adapter accepts one and explicitly rejects larger sets. The service
+chooses the owner-configured board via `personaReference`, never arbitrary paths
+from a model. See [persona images](../../docs/persona-images.md).

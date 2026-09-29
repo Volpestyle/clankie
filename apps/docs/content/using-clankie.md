@@ -100,3 +100,15 @@ for the controls and their limits.
 
 Next: [how he works](/how-it-works/) explains the service, memory, models, and
 connections underneath. [Get started](/get-started/) covers installation and pairing.
+
+## Give him a visual persona
+
+On a DIY installation, put PNG, JPEG or WebP images in a folder and run
+`clankie persona images set ~/Pictures/clankie-vibe`, or choose **Persona images**
+in `/persona`. Check `clankie persona images status`, then restart Clankie.
+He uses up to eight images as a mood board for his appearance and aesthetic;
+his written character still takes precedence. Voice uses a short description
+instead of images. `clankie persona images clear` clears the selection without
+deleting the originals. Images are sent to your configured models when used.
+Hosted paths refer to folders already on the hosted machine; this does not
+upload files from your phone or Mac. See the [CLI reference](/cli/).

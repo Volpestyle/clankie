@@ -1,3 +1,5 @@
+import { PERSONA_IMAGE_FRAMING } from "@clankie/persona-images";
+import type { PersonaImageSource } from "./persona-images.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -80,6 +82,7 @@ export interface FinishedRender {
 }
 
 export interface ConfiguredMediaGeneratorOptions {
+  readonly personaImages?: PersonaImageSource;
   readonly credentials: CredentialStore;
   /** Root the Discord attachment resolver serves; media lands in its `generated/` subdirectory. */
   readonly attachmentRoot: string;
@@ -249,6 +252,19 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
   public async generateImage(request: GenerateImageRequest): Promise<GenerateImageResult> {
     try {
       const model = await this.resolveModel("image_model", "image");
+      if (request.personaReference && request.sourceRef)
+        throw new MediaRefusal("provider_failed", "Choose personaReference or sourceRef, not both.");
+      const board = request.personaReference ? await this.options.personaImages?.() : undefined;
+      if (request.personaReference && !board?.images.length)
+        throw new MediaRefusal(
+          "provider_failed",
+          "No persona images loaded. Configure clankie persona images set <folder> and restart.",
+        );
+      if (model.provider === "grok" && (board?.images.length ?? 0) > 1)
+        throw new MediaRefusal(
+          "provider_failed",
+          "The Grok adapter supports one reference image; use OpenAI or Google for a persona image set.",
+        );
       const outputPath = await this.artifactPath(IMAGE_EXTENSION);
       const sourceImage =
         request.sourceRef === undefined
@@ -257,7 +273,12 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
       const generation: ImageGenerationRequest = {
         schemaVersion: MEDIA_GENERATION_SCHEMA_VERSION,
         kind: "image",
-        prompt: request.prompt,
+        prompt: board
+          ? `${PERSONA_IMAGE_FRAMING}\nDepict the character using these visual references.\n${request.prompt}`
+          : request.prompt,
+        ...(board
+          ? { referenceImages: board.images.map((image) => `data:${image.mimeType};base64,${image.data}`) }
+          : {}),
         provider: model.provider,
         model: model.modelId,
         outputPath,

@@ -308,7 +308,7 @@ export async function runHostedConsole() {
         flow.begin("persona");
         try {
           const current = (await transport.request("/v1/operator/persona")) as {
-            persona: { displayName: string; characterNotes: string };
+            persona: { displayName: string; characterNotes: string; imagesDir?: string };
           };
           const displayName = await flow.readText({
             message: "Name",
@@ -320,8 +320,13 @@ export async function runHostedConsole() {
             defaultValue: current.persona.characterNotes,
           });
           if (characterNotes === undefined) return;
-          await transport.request("/v1/operator/persona", { displayName, characterNotes });
-          flow.renderLine("Hosted persona saved.", "success");
+          const imagesDir = await flow.readText({
+            message: "Persona image folder on the hosted machine (blank clears)",
+            defaultValue: current.persona.imagesDir ?? "",
+          });
+          if (imagesDir === undefined) return;
+          await transport.request("/v1/operator/persona", { displayName, characterNotes, imagesDir });
+          flow.renderLine("Hosted persona saved. Restart Clankie to apply persona images.", "success");
         } finally {
           flow.end();
         }

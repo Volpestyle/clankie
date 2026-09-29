@@ -5240,6 +5240,8 @@ export type MediaRefusalReason = z.infer<typeof MediaRefusalReasonSchema>;
 
 export const GenerateImageRequestSchema = z
   .object({
+    /** Use the owner-configured persona board for a self-depiction. */
+    personaReference: z.boolean().optional(),
     schemaVersion: z.literal(1),
     prompt: z.string().trim().min(1).max(4_000),
     /** Provider-neutral shape hint; the provider and model come from operator config. */

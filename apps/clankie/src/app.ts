@@ -1,3 +1,5 @@
+import { loadPersonaImages, personaImageBriefing, personaImageStatus } from "@clankie/persona-images";
+import type { PersonaImageSource } from "./persona-images.ts";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { WorkerHarnessError } from "./herdr-session.ts";
 import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
@@ -414,6 +416,7 @@ export interface ClankieAppDependencies {
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
   memory?: MemoryStores;
+  personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
   settings?: {
     load(): Promise<ClankieSettings>;
@@ -782,7 +785,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const identity = await authenticateOperator(context.req.raw, dependencies);
     if (!identity || identity === "unavailable")
       return context.json({ error: "operator_authentication_required" }, 401);
-    return context.json({ persona: (await settingsSource.load()).persona });
+    const persona = (await settingsSource.load()).persona;
+    return context.json({ persona, images: personaImageStatus(await loadPersonaImages(persona.imagesDir)) });
   });
   app.post("/v1/operator/persona", async (context) => {
     const identity = await authenticateOperator(context.req.raw, dependencies);
@@ -797,7 +801,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...value,
       persona: PersonaSettingsSchema.parse({ ...value.persona, ...patch.data }),
     }));
-    return context.json({ persona: updated.persona });
+    return context.json({
+      persona: updated.persona,
+      restart: "Restart Clankie to apply persona images.",
+      images: personaImageStatus(await loadPersonaImages(updated.persona.imagesDir)),
+    });
   });
 
   const deviceDenialResponse = (context: Context, denial: DeviceAuthDenial) => {
@@ -1458,6 +1466,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const instructions = boundVoiceBriefingText(
       [
         personaInstructions(persona, "social"),
+        dependencies.personaImages ? personaImageBriefing(await dependencies.personaImages()) : "",
         dependencies.captain.voiceLaneInstructions(),
         DISCORD_VOICE_REALTIME_SURFACE_RULES,
       ].join("\n\n"),
@@ -3411,7 +3420,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         realtime: dependencies.localVoiceRealtime,
         captain: dependencies.captain,
         instructions: boundVoiceBriefingText(
-          [personaInstructions(persona, "social"), LOCAL_VOICE_REALTIME_SURFACE_RULES].join("\n\n"),
+          [
+            personaInstructions(persona, "social"),
+            dependencies.personaImages ? personaImageBriefing(await dependencies.personaImages()) : "",
+            LOCAL_VOICE_REALTIME_SURFACE_RULES,
+          ].join("\n\n"),
           DISCORD_VOICE_BRIEFING_MAX_CHARACTERS,
         ),
         briefing: boundVoiceBriefingText(sections.join("\n\n"), DISCORD_VOICE_BRIEFING_MAX_CHARACTERS),

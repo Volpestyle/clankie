@@ -1,3 +1,4 @@
+import { createPersonaImageSource } from "./persona-images.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
@@ -415,7 +416,19 @@ function capacityAware<T>(
 // that serves the bytes back resolves the same directory this wrote them to.
 const attachmentRoot = discordAttachmentRoot(process.env);
 const deliveredFiles = new DeliveredFileStore(attachmentRoot);
+const personaImages = createPersonaImageSource(settingsStore, repoRoot);
+// Snapshot on startup without holding service readiness behind a caption call.
+void personaImages()
+  .then((board) => {
+    if (board.error || board.descriptionError)
+      logger.warn(
+        { detail: board.error ?? board.descriptionError },
+        "Persona image context partially unavailable",
+      );
+  })
+  .catch((error: unknown) => logger.warn({ error }, "Persona image settings unavailable"));
 const mediaGenerator = new ConfiguredMediaGenerator({
+  personaImages,
   credentials: operatorCredentialStore,
   attachmentRoot,
   configCwd: repoRoot,
@@ -738,6 +751,7 @@ const captain = createCaptain(
     stateDir: join(stateRoot, "captain"),
     swarm,
     settings: settingsStore,
+    personaImages,
     linearFollowing,
     deliveredFiles,
     discordEnvironment: captainDiscordEnvironment,
@@ -857,6 +871,7 @@ const clankie = await createClankieApp({
   runtimes,
   memory,
   settings: settingsStore,
+  personaImages,
   mediaGenerator,
   ...(localVoiceRealtime === undefined ? {} : { localVoiceRealtime }),
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),

@@ -195,3 +195,12 @@ differ from the owner-connected account. That connected tracker identity is
 Clankie’s and his whole swarm’s identity. Tracker writes use Clankie’s connected
 tools or a granted worker bridge; a worker lacking access asks the lead to write. Follow Linear wakes the operator conversation
 from that account's actual notifications; stored issue bindings do not route wakes.
+
+### Persona image folders
+
+The output style and SessionStart hook carry text. When the owner selects a
+[persona image folder](../../docs/persona-images.md), `clankie prompt --sections persona`
+includes its cached visual description. Automatic image prefix injection is
+available in Pi sessions, not in this Claude Code seat. The seat's `generate_image`
+MCP tool still accepts `personaReference: true` to use the owner's board for
+self-depiction. A restart of Clankie applies changes to the board.

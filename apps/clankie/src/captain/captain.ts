@@ -1,3 +1,9 @@
+import { personaImageBriefing } from "@clankie/persona-images";
+import {
+  createPersonaImageSource,
+  personaImagesExtension,
+  type PersonaImageSource,
+} from "../persona-images.ts";
 import { trackHostedConversationRunner } from "../hosted-work.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
@@ -493,6 +499,7 @@ export function resolveOperatorPrompt(
 }
 
 export interface CaptainOptions {
+  readonly personaImages?: PersonaImageSource;
   readonly swarm?: SwarmHost;
   /** Repo root: instructions.md lives here, skills are discovered here. */
   readonly repoRoot: string;
@@ -869,6 +876,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return shown;
   };
   const settingsStore = options.settings ?? new SettingsStore();
+  const personaImages = options.personaImages ?? createPersonaImageSource(settingsStore, options.repoRoot);
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
   const seatByPersona = new Map<string, string>();
@@ -992,6 +1000,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const route = { current: await resolveRoute(purpose) };
     const budget = { compactBeforeNextRun: false };
     const selection = route.current.selection;
+    const hasPersonaImages = (await personaImages()).images.length > 0;
     const piSettings = SettingsManager.inMemory();
     const loader = new DefaultResourceLoader({
       cwd,
@@ -999,8 +1008,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
       noExtensions: true,
       extensionFactories: [
-        captainMemoryExtension(deps.memory, lane),
-        captainModelExtension(async () => (await resolveRoute(purpose)).selection),
+        ...(hasPersonaImages
+          ? [
+              personaImagesExtension(personaImages, async () => {
+                const card = await deps.memory.recallEpisodeCard(lane).catch(() => undefined);
+                const selection = await resolveRoute(purpose)
+                  .then((route) => route.selection)
+                  .catch(() => undefined);
+                return [
+                  card === undefined ? "" : renderEpisodeCard(card),
+                  selection === undefined ? "" : modelCard(selection),
+                ]
+                  .filter(Boolean)
+                  .join("\n\n");
+              }),
+            ]
+          : [
+              captainMemoryExtension(deps.memory, lane),
+              captainModelExtension(async () => (await resolveRoute(purpose)).selection),
+            ]),
         captainRequestExtension({
           lane,
           cacheSalt,
@@ -2625,7 +2651,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const selection = sections.includes("model")
         ? await (await runtime()).resolveSelection().catch(() => undefined)
         : undefined;
-      const prompt = assembleLanePrompt(
+      let prompt = assembleLanePrompt(
         lane,
         laneHoldsSystemTools(lane),
         currentSettings,
@@ -2633,6 +2659,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         selection === undefined ? {} : { model: modelCard(selection) },
         laneHoldsSystemTools(lane) && sections.includes("reach") ? await harnessesForPrompt() : [],
       );
+      if (sections.includes("persona")) prompt += "\n\n" + personaImageBriefing(await personaImages());
       if (conversationId === undefined) return prompt;
       const binding = lane === "operator" ? seatContext(conversationId) : undefined;
       if (binding === undefined) throw new Error("Unknown captain conversation");

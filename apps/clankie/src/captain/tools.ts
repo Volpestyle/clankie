@@ -190,6 +190,12 @@ export function captainTools(
         "'no_model_configured' means nobody has picked an image model yet (/image-model), 'credential_unavailable' " +
         "means there is no API key stored for it. A refusal is something to mention, not retry.",
       parameters: Type.Object({
+        personaReference: Type.Optional(
+          Type.Boolean({
+            description:
+              "Use the owner persona mood board as visual references when depicting yourself. Do not combine with sourceRef.",
+          }),
+        ),
         prompt: Type.String({ minLength: 1, maxLength: 4000 }),
         aspectRatio: Type.Optional(
           Type.String({ description: "Shape like 16:9 or 1:1. Omit to let the model choose." }),

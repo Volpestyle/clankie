@@ -21,6 +21,7 @@
     "@clankie/model-provider": "workspace:*",
     "@clankie/model-registry": "workspace:*",
     "@clankie/observability": "workspace:*",
+    "@clankie/persona-images": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/settings": "workspace:*",
     "@earendil-works/pi-ai": "0.84.2",

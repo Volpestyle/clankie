@@ -41,6 +41,7 @@ source setup and checks.
 | Project work tracking             | [Work items](../packages/work-items/README.md)                                                                                                                                |
 | Models                            | [Provider resolution](../packages/model-provider/README.md), [catalog](../packages/model-registry/README.md)                                                                  |
 | Configuration                     | [Settings](../packages/settings/README.md), [credential broker](../packages/credential-broker/README.md)                                                                      |
+| Persona images                    | [Owner image folders](persona-images.md), voice descriptions and self-depiction                                                                                               |
 | Images and video                  | [Media connector](../packages/media-connector/README.md)                                                                                                                      |
 | Game play                         | [Play mind](../packages/play/README.md), [environment runtime](../packages/environment-runtime/README.md), [rendered contract](../packages/interactive-environment/README.md) |
 | Gameplay commentary               | [Play voice](../packages/play-voice/README.md)                                                                                                                                |

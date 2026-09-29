@@ -1,3 +1,5 @@
+import { personaImageBriefing } from "@clankie/persona-images";
+import { createPersonaImageSource } from "./persona-images.ts";
 /**
  * The play-execution composition: journal, activity frames, voice, and the
  * free-play loop, over whatever body the caller joined. Joining and leaving
@@ -118,7 +120,13 @@ export async function resolvePlayMind(options: {
   // One character across every surface (ADR 0051): the Clankie an audience
   // watches play is the one they talk to, in his `gameplay` register — not a
   // second character defined by this file's prompt.
-  const character = personaInstructions((await new SettingsStore().load()).persona, "gameplay");
+  const settings = new SettingsStore();
+  const character = [
+    personaInstructions((await settings.load()).persona, "gameplay"),
+    personaImageBriefing(await createPersonaImageSource(settings, options.repoRoot)()),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const providerOptions = configured.modelOptions?.providerOptions ?? {};
   const requestTimeoutMs = positiveIntegerOr(
     options.env["CLANKIE_PLAY_MODEL_REQUEST_TIMEOUT_MS"],
