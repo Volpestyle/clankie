@@ -844,7 +844,11 @@ same writer.
 Read or set `browser.recordSessions`. When on, each burst of Clankie's browsing
 is saved as a WebM under `~/.clankie/runner/browser/recordings/`: recording
 starts before the burst's first browser call and stops after 60 seconds without
-one; the newest 50 are kept. Off by default, because videos capture every page
+one; the newest 50 are kept. The browser then closes its tabs/windows while
+keeping its private profile and persistent logins, even with recording off.
+Browsing defaults to headless; explicit `headed: true` takeover lasts for that
+burst, and the next burst starts headless. Changing modes saves the previous
+recording before starting another. Off by default, because videos capture every page
 he opens, signed-in ones included. JSON contains `browser.recordSessions`,
 `settingsFile`, and `"appliesTo": "next_browsing_burst"` — no restart is needed.
 The TUI `/browser` command calls this same writer.

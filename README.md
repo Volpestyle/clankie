@@ -46,6 +46,12 @@ pictures, and keep useful memories across conversations. His persona is yours
 to configure. Conversation history, memory, and ongoing goals belong to the
 service, so closing a console does not discard them.
 
+**His own browser.** Clankie browses headlessly with a private profile that keeps
+his logins. An explicit headed request opens a window for sign-in takeover;
+windows and tabs close after 60 seconds without a browser call, and the next
+burst starts headless. `clankie browser record on` saves browsing bursts as WebM
+videos. See the [browser contract](docs/adr/0082-clankie-holds-the-browser.md).
+
 **A coding partner and team lead.** He can work directly or bring in agents
 using supported harnesses such as Claude Code, Codex, and pi. Swarm carries
 messages and task ownership; Herdr supplies visible worker terminals. You can

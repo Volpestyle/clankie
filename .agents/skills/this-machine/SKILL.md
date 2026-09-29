@@ -146,6 +146,25 @@ and Linear OAuth with PKCE, run by the body, tokens only in its broker. Never
 ask for a GitHub or Linear token in chat; send the owner to the app or
 `clankie accounts connect github`.
 
+## His browser
+
+Browser tools use Clankie's service-private profile, never the owner's Chrome.
+Browsing starts headless. `agent_browser_open` with `headed: true` opens a
+visible takeover window for sign-in; that mode lasts through the current burst.
+`headed: false` returns early. After 60 seconds without a browser tool call,
+the host saves any recording and closes the tabs/windows. Human input alone
+does not extend that timer. Ask for another takeover if it closes while signing
+in. The next burst starts headless; the profile and persistent logins survive.
+
+`clankie browser record on|off` controls burst recordings (default off), including
+headless browsing. WebM files live under `~/.clankie/runner/browser/recordings/`;
+the newest 50 are kept. Recording finishes before idle cleanup or a mode change.
+Startup retires the private browser daemon to clear stale headed launch settings.
+Do not share its socket/session with another harness. For diagnosis, inspect
+`browser.burst.closed`, `browser.burst.close_failed`, and `browser.recording.*`
+service events; browser calls remain in the conversation's pi tree. Source
+contract: `{repoRoot}/docs/adr/0082-clankie-holds-the-browser.md`.
+
 ## Launcher control
 
 This skill is the installed agent companion to the canonical launcher command

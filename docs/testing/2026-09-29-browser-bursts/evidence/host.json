@@ -1,0 +1,214 @@
+[
+  {
+    "root": "/tmp/vuh1448-5ykGL0",
+    "seed": "\u2713 Example Domain\n  https://example.com/\n",
+    "stale": [
+      "33936 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=0 --no-first-run --no-default-browser-check --disable-background-networking --disable-backgrounding-occluded-windows --disable-component-update --disable-default-apps --disable-hang-monitor --disable-popup-blocking --disable-prompt-on-repost --disable-sync --disable-features=Translate --enable-features=NetworkService,NetworkServiceInProcess --metrics-recording-only --password-store=basic --use-mock-keychain --user-data-dir=/tmp/vuh1448-5ykGL0/browser/profile"
+    ],
+    "time": "2026-09-29T21:19:03.033Z"
+  },
+  {
+    "event": "browser.host.ready",
+    "command": "agent-browser",
+    "profileDirectory": "/tmp/vuh1448-5ykGL0/browser/profile",
+    "blocked": 0,
+    "time": "2026-09-29T21:19:03.626Z"
+  },
+  {
+    "event": "browser.recording.started",
+    "path": "/tmp/vuh1448-5ykGL0/browser/recordings/2026-09-29T21-19-03-681Z.webm",
+    "time": "2026-09-29T21:19:04.276Z"
+  },
+  {
+    "event": "browser.host.call",
+    "tool": "agent_browser_open",
+    "time": "2026-09-29T21:19:04.565Z"
+  },
+  {
+    "tool": "agent_browser_open",
+    "result": {
+      "outcome": "ok",
+      "tool": "agent_browser_open",
+      "content": "Example Domain",
+      "isError": false,
+      "artifacts": []
+    },
+    "time": "2026-09-29T21:19:04.566Z"
+  },
+  {
+    "headless": [
+      "34045 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=0 --no-first-run --no-default-browser-check --disable-background-networking --disable-backgrounding-occluded-windows --disable-component-update --disable-default-apps --disable-hang-monitor --disable-popup-blocking --disable-prompt-on-repost --disable-sync --disable-features=Translate --enable-features=NetworkService,NetworkServiceInProcess --metrics-recording-only --password-store=basic --use-mock-keychain --headless=new --hide-scrollbars --enable-unsafe-swiftshader --user-data-dir=/tmp/vuh1448-5ykGL0/browser/profile --window-size=1280,720"
+    ],
+    "time": "2026-09-29T21:19:04.613Z"
+  },
+  {
+    "event": "browser.host.call",
+    "tool": "agent_browser_eval",
+    "time": "2026-09-29T21:19:04.682Z"
+  },
+  {
+    "tool": "agent_browser_eval",
+    "result": {
+      "outcome": "ok",
+      "tool": "agent_browser_eval",
+      "content": "{\n  \"cookie\": \"vuh1448=retained\",\n  \"storage\": \"retained\",\n  \"title\": \"Example Domain\",\n  \"ua\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36\"\n}",
+      "isError": false,
+      "artifacts": []
+    },
+    "time": "2026-09-29T21:19:04.682Z"
+  },
+  {
+    "event": "browser.recording.saved",
+    "path": "/tmp/vuh1448-5ykGL0/browser/recordings/2026-09-29T21-19-03-681Z.webm",
+    "time": "2026-09-29T21:19:06.728Z"
+  },
+  {
+    "idleClosed": true,
+    "time": "2026-09-29T21:19:06.946Z"
+  },
+  {
+    "event": "browser.burst.closed",
+    "time": "2026-09-29T21:19:06.987Z"
+  },
+  {
+    "event": "browser.host.call",
+    "tool": "agent_browser_open",
+    "time": "2026-09-29T21:19:07.950Z"
+  },
+  {
+    "tool": "agent_browser_open",
+    "result": {
+      "outcome": "ok",
+      "tool": "agent_browser_open",
+      "content": "Example Domain",
+      "isError": false,
+      "artifacts": []
+    },
+    "time": "2026-09-29T21:19:07.950Z"
+  },
+  {
+    "event": "browser.host.call",
+    "tool": "agent_browser_snapshot",
+    "time": "2026-09-29T21:19:07.973Z"
+  },
+  {
+    "tool": "agent_browser_snapshot",
+    "result": {
+      "outcome": "ok",
+      "tool": "agent_browser_snapshot",
+      "content": "- link \"Learn more\" [ref=e1]",
+      "isError": false,
+      "artifacts": []
+    },
+    "time": "2026-09-29T21:19:07.973Z"
+  },
+  {
+    "takeover": [
+      "34408 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=0 --no-first-run --no-default-browser-check --disable-background-networking --disable-backgrounding-occluded-windows --disable-component-update --disable-default-apps --disable-hang-monitor --disable-popup-blocking --disable-prompt-on-repost --disable-sync --disable-features=Translate --enable-features=NetworkService,NetworkServiceInProcess --metrics-recording-only --password-store=basic --use-mock-keychain --user-data-dir=/tmp/vuh1448-5ykGL0/browser/profile"
+    ],
+    "time": "2026-09-29T21:19:08.063Z"
+  },
+  {
+    "event": "browser.host.call",
+    "tool": "agent_browser_eval",
+    "time": "2026-09-29T21:19:08.088Z"
+  },
+  {
+    "tool": "agent_browser_eval",
+    "result": {
+      "outcome": "ok",
+      "tool": "agent_browser_eval",
+      "content": "{\n  \"cookie\": \"vuh1448=retained\",\n  \"storage\": \"retained\"\n}",
+      "isError": false,
+      "artifacts": []
+    },
+    "time": "2026-09-29T21:19:08.088Z"
+  },
+  {
+    "takeoverIdleClosed": true,
+    "time": "2026-09-29T21:19:10.262Z"
+  },
+  {
+    "event": "browser.burst.closed",
+    "time": "2026-09-29T21:19:10.352Z"
+  },
+  {
+    "event": "browser.recording.started",
+    "path": "/tmp/vuh1448-5ykGL0/browser/recordings/2026-09-29T21-19-10-352Z.webm",
+    "time": "2026-09-29T21:19:12.220Z"
+  },
+  {
+    "event": "browser.host.call",
+    "tool": "agent_browser_open",
+    "time": "2026-09-29T21:19:12.247Z"
+  },
+  {
+    "tool": "agent_browser_open",
+    "result": {
+      "outcome": "ok",
+      "tool": "agent_browser_open",
+      "content": "Example Domain",
+      "isError": false,
+      "artifacts": []
+    },
+    "time": "2026-09-29T21:19:12.247Z"
+  },
+  {
+    "returnedHeadless": [
+      "34718 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=0 --no-first-run --no-default-browser-check --disable-background-networking --disable-backgrounding-occluded-windows --disable-component-update --disable-default-apps --disable-hang-monitor --disable-popup-blocking --disable-prompt-on-repost --disable-sync --disable-features=Translate --enable-features=NetworkService,NetworkServiceInProcess --metrics-recording-only --password-store=basic --use-mock-keychain --headless=new --hide-scrollbars --enable-unsafe-swiftshader --user-data-dir=/tmp/vuh1448-5ykGL0/browser/profile --window-size=1280,720"
+    ],
+    "time": "2026-09-29T21:19:12.378Z"
+  },
+  {
+    "event": "browser.recording.saved",
+    "path": "/tmp/vuh1448-5ykGL0/browser/recordings/2026-09-29T21-19-10-352Z.webm",
+    "time": "2026-09-29T21:19:14.308Z"
+  },
+  {
+    "recording": "/tmp/vuh1448-5ykGL0/browser/recordings/2026-09-29T21-19-03-681Z.webm",
+    "probe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "vp8",
+          "width": 1280,
+          "height": 634
+        }
+      ],
+      "format": {
+        "duration": "2.500000",
+        "size": "22573"
+      }
+    },
+    "time": "2026-09-29T21:19:14.539Z"
+  },
+  {
+    "recording": "/tmp/vuh1448-5ykGL0/browser/recordings/2026-09-29T21-19-10-352Z.webm",
+    "probe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "vp8",
+          "width": 1280,
+          "height": 634
+        }
+      ],
+      "format": {
+        "duration": "2.700000",
+        "size": "21004"
+      }
+    },
+    "time": "2026-09-29T21:19:14.557Z"
+  },
+  {
+    "passed": true,
+    "liveDaemon": "untouched",
+    "time": "2026-09-29T21:19:14.557Z"
+  },
+  {
+    "event": "browser.burst.closed",
+    "time": "2026-09-29T21:19:14.566Z"
+  }
+]

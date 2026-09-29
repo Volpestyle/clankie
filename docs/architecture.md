@@ -303,8 +303,11 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   The persistent profile holds his own accounts, signed up for by hand: the
   catalog's `headed` argument relaunches the browser visible on the operator's
   screen, so he can hand over the window for a signup, a CAPTCHA, or a phone
-  check rather than grinding at it. A headed session is exempt from the
-  browser's idle timeout ([ADR 0127](adr/0127-his-accounts-are-his.md)).
+  check rather than grinding at it ([ADR 0127](adr/0127-his-accounts-are-his.md)).
+  Browsing defaults to headless. After 60 seconds without a browser call, the
+  host saves any recording and closes the burst's tabs/windows, including a
+  takeover window. Persistent logins remain; the next burst starts headless.
+  Startup retires the private daemon so stale headed settings cannot carry over.
   Hard work in the owner's own apps and Chrome goes to a hired computer-use
   harness where one is ready; the service detects them and the reach card
   lists them on machine-access lanes

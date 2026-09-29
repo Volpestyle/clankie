@@ -1,0 +1,8 @@
+pnpm check — exit 0
+2026-09-29; final browser implementation
+herdr skill, formatting, lint/clippy, knip, docs, infra, typecheck: passed
+Test Files  360 passed (360)
+Tests  3069 passed | 2 skipped (3071)
+Duration  198.16s (transform 2.65s, setup 0ms, import 74.45s, tests 101.69s, environment 12ms)
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox
