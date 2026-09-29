@@ -1,0 +1,31 @@
+Persona images verification
+Implementation commit: a1dbfee570df3c299dbed07083aedd9c798d345d
+Command: pnpm check
+Exit status: 0
+
+Selected original output (routine test fixture logs omitted):
+Checked 419 markdown files; local links resolve.
+Checked 10 public docs pages; links and anchors resolve.
+ Tasks:    28 successful, 28 total
+ Test Files  356 passed (356)
+      Tests  2987 passed | 2 skipped (2989)
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox
+
+Live CLI set and clear (isolated temporary settings; canonical public branding):
+{"ok":true,"persona":{"displayName":"Clankie","aliases":[],"characterNotes":"","imagesDir":"/Users/james/dev/clankie/branding","chattiness":"balanced","replyPolicy":"all","liveMessageWindow":5},"settingsFile":"/tmp/clankie-persona-cli.v3hQtI/settings.json","restart":"Restart Clankie to apply persona images: clankie restart captain","images":{"hash":"d7d44bf24ea86f6a4f8731afdec4ff51eb3b7fd1ebeb9e97fd5dc28f67e309ad","files":[{"name":"clankie-banner.png","status":"loaded","bytes":12200,"encodedBytes":16268,"width":886,"height":440},{"name":"clankie-logo-512-alpha.png","status":"loaded","bytes":2443,"encodedBytes":3260,"width":512,"height":512},{"name":"clankie-logo-512.png","status":"loaded","bytes":4355,"encodedBytes":5808,"width":512,"height":512}],"directory":"/Users/james/dev/clankie/branding","count":3,"encodedBytes":25336,"limits":{"count":8,"sourceBytes":10485760,"edge":1024,"encodedBytes":131072}}}
+{"ok":true,"persona":{"displayName":"Clankie","aliases":[],"characterNotes":"","imagesDir":"","chattiness":"balanced","replyPolicy":"all","liveMessageWindow":5},"settingsFile":"/tmp/clankie-persona-cli.v3hQtI/settings.json","restart":"Restart Clankie to apply persona images: clankie restart captain","images":{"hash":"","files":[],"count":0,"encodedBytes":0,"limits":{"count":8,"sourceBytes":10485760,"edge":1024,"encodedBytes":131072}}}
+
+Live caption:
+{
+  "hash": "d7d44bf24ea86f6a4f8731afdec4ff51eb3b7fd1ebeb9e97fd5dc28f67e309ad",
+  "count": 3,
+  "description": "A small pixel-art figure has an oversized, square cream face framed in layered brown and tan blocks. Dark square eyes and pink cheeks give it a gentle, endearing expression. A brown stem rises from its head, branching into two broad lime-green leaves. Its compact pale body features a green geometric chest detail, tiny arms, and short blocky legs. The palette blends warm beige, earthy brown, muted olive, and bright yellow-green against black or charcoal backgrounds dotted with white star-like pixels. The overall mood is cozy, playful, botanical, and retro-digital.",
+  "sameSnapshot": true,
+  "elapsedMs": 6242
+}
+
+The preceding full-check attempt failed the newly added concurrent-caption assertion (two calls). That test was added while the run was active; it passed in a fresh focused run and the clean final full run above. No failures are omitted from the final run.
+
+TUI choices were exercised headlessly; no visual screenshot or interactive UI inspection is claimed.
+No push or live service restart.
