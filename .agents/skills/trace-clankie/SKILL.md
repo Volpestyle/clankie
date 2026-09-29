@@ -246,8 +246,9 @@ Following controls waking, not collection.
   brief status beat after 1.2 seconds. Explicit stop bypasses the normal
   loudness gate once transcribed; `speech_stopped` means its late result was
   retained silently. OpenAI output has a token cap and every Discord response
-  has a six-second PCM ceiling; a cutoff at that boundary is the backstop,
-  not evidence of Vox overflow.
+  has a 45-second PCM ceiling; a cutoff at that boundary is the runaway
+  backstop, not evidence of Vox overflow. Most turns should be short, but an
+  earned 20–30 second story, opinion, bit, or answer is within the voice register.
 - **A Vox buffer overflow cuts off an already audible answer.**
   `discord.voice.failed` with stage `playback` and code `tts_buffer_overflow`
   means Vox discarded that playback after its PCM queue exceeded the cap.

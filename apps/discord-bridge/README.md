@@ -214,7 +214,9 @@ let playback continue; “wait” and “hold on” remain valid interruptions. 
 “stop talking” cuts playback on its final transcript even below the overlap
 loudness gate, discards queued speech, and keeps late handoff results silent.
 New speech also replaces unheard replies during ordinary conversation; voice
-uses brief gists with a six-second audio backstop.
+matches the length to the moment, usually short with room for earned longer
+answers and character. A 45-second audio backstop catches runaways without
+clipping a deliberate 20–30 second riff.
 `interrupted`, completed `response`, and synthesis `failed` receipts include
 playback and provider item ids when available, alongside the delivery id.
 Intentional TTS teardown does not emit a synthesis failure for late socket errors.

@@ -791,8 +791,9 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               type: "realtime",
               model,
               output_modalities: [outputModality],
+              // Runaway backstops with room for a deliberate 20–30 second riff.
               // Audio tokens also consume this budget; text feeds an external mouth.
-              max_output_tokens: outputModality === "audio" ? 160 : 80,
+              max_output_tokens: outputModality === "audio" ? 4_096 : 1_024,
               instructions,
               audio: {
                 input: {

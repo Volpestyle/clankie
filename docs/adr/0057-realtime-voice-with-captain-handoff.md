@@ -137,15 +137,21 @@ The dated diagram export above predates this amendment. Synthetic multi-speaker
 checks do not pass ADR 0045's three-human live gate; audible naming, crosstalk
 behavior, and queue delay still need that ceremony.
 
-### A call is brief and absorbs bursts (2026-09-29)
+### A call matches the moment and absorbs bursts (2026-09-29)
 
-Clankie is a friend in the call: usually one short sentence, sometimes a few
-words, rarely more than two sentences. No lists, request restatements, menus,
-or assistant-speak. Text stays thorough. Spoken handoff results get the gist;
-he can offer to drop details in text. OpenAI realtime sessions cap output at
-160 tokens for native audio or 80 for text feeding an external mouth. Every
-Discord mouth also caps each response at six seconds of PCM, including xAI;
-this is a runaway backstop, not a target duration.
+Clankie is a friend in the call: match the length to the moment; most turns
+are short, sometimes just a few words. Stories, strong opinions, invested bits,
+and questions that need real answers can earn more room. James's calibration
+replaces the initial sentence-level brevity target: remove assistant padding
+and constant performing, not personality. No lists, request restatements, or
+menus. Text stays thorough. Spoken handoff results follow the same proportion:
+give the gist, expand when warranted, and offer details in text when useful.
+
+OpenAI realtime sessions cap output at 4096 tokens for native audio or 1024
+for text feeding an external mouth. Every Discord mouth also caps each response
+at 45 seconds of PCM, including xAI. These generous runaway backstops leave
+headroom for an earned 20–30 second riff; the register makes ordinary turns
+snappy. They replace the initial 160/80-token and six-second limits.
 
 Every admitted utterance stays in room context, but newer room speech replaces
 responses that have not become audible. Bursts during session opening collapse

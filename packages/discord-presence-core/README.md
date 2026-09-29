@@ -116,7 +116,7 @@ Voice ingress keeps different speakers' asks in separate handoffs, one active
 speaker per room. The active speaker's refinements can steer their live run;
 other speakers wait for their own answer. The realtime conversation and local
 voice tools keep running while that work waits. Tool results carry their
-recipient, and the mouth gives that person the gist briefly. Responses serialize through
+recipient, and the mouth gives that person the gist, expanding when warranted. Responses serialize through
 provider completion and, for external voices, TTS drain.
 
 The floor retains up to five recently engaged speakers for 60 seconds each.
@@ -140,8 +140,10 @@ speech, and keeps late handoff results silent.
 Repeated identical asks from the same person join pending work. For paraphrases,
 `ask_clankie.join_call_id` joins only that authenticated speaker's handoff;
 changed requests remain refinements. Slow work offers one brief acknowledgment
-after 1.2 seconds, canceled if the room moves on or work finishes. Voice usually
-uses one short sentence and offers detailed results in text. OpenAI output is
-bounded to 160 audio / 80 text tokens per response, and all Discord mouths have
-a six-second PCM ceiling. These are backstops; live taste and transcription
-latency still require a call.
+after 1.2 seconds, canceled if the room moves on or work finishes. Voice matches
+the length to the moment: most turns are short, while stories, strong opinions,
+invested bits, and fuller answers have room. Handoff results follow the same
+proportion, with details available in text. OpenAI output is bounded to 4096
+audio / 1024 text tokens per response, and all Discord mouths have a 45-second
+PCM ceiling. These runaway backstops leave room for deliberate 20–30 second
+riffs; live taste and transcription latency still require a call.

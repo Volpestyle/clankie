@@ -7,8 +7,8 @@ Lint (oxlint and clippy): passed
 Dependency/dead-code check: passed
 Documentation/public docs links: passed
 Infrastructure check: passed
-Workspace typechecks: 29 successful
-Vitest: 358 test files passed; 3029 tests passed, 2 skipped
+Workspace typechecks: 28 successful
+Vitest: 358 test files passed; 3031 tests passed, 2 skipped
 Vox Rust: 123 passed, 0 failed
 Vox IPC smoke: passed
 

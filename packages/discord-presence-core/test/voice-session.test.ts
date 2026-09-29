@@ -2105,10 +2105,35 @@ describe("fast path responses", () => {
     expect(conversation.responseCreates).toBe(responseCount + 1);
   });
 
-  it("caps runaway speech at six seconds while preserving paced playback", async () => {
+  it.each([20, 30])("preserves an earned %i-second riff intact with paced playback", async (seconds) => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
-    const original = Buffer.alloc(24_000 * 2 * 25, 7);
+    const original = Buffer.alloc(48_000 * seconds, 7);
+    conversation.input.onAudioDelta(Buffer.from(original), "item_earned_riff");
+    conversation.input.onResponseDone({
+      responseId: "riff",
+      status: "completed",
+      audioBytes: original.length,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.vox.finishes).toHaveLength(0);
+    for (let tick = 0; tick < (seconds - 1) * 10; tick += 1) {
+      harness.clock.now += 100;
+      harness.timers.fire(100);
+    }
+    await flush();
+    expect(Buffer.concat(harness.vox.audio.map((chunk) => chunk.pcm))).toEqual(original);
+    expect(conversation.truncations).toEqual([]);
+    expect(harness.vox.finishes).toHaveLength(1);
+    expect(harness.ofType("response")).toHaveLength(1);
+    expect(harness.ofType("failed")).toHaveLength(0);
+  });
+
+  it("caps runaway speech at 45 seconds while preserving paced playback", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    const original = Buffer.alloc(24_000 * 2 * 60, 7);
     const incoming = Buffer.from(original);
     conversation.input.onAudioDelta(incoming, "item_long_answer");
     conversation.input.onResponseDone({
@@ -2122,16 +2147,16 @@ describe("fast path responses", () => {
     expect(harness.vox.finishes).toHaveLength(0);
     const sentBytes = () => harness.vox.audio.reduce((sum, chunk) => sum + chunk.pcm.length, 0);
     expect(sentBytes()).toBe(48_000);
-    for (let tick = 0; tick < 50; tick += 1) {
+    for (let tick = 0; tick < 440; tick += 1) {
       harness.clock.now += 100;
       harness.timers.fire(100);
       expect(sentBytes()).toBeLessThanOrEqual(48_000 + (tick + 1) * 4_800);
     }
     await flush();
     expect(Buffer.concat(harness.vox.audio.map((chunk) => chunk.pcm))).toEqual(
-      original.subarray(0, 48_000 * 6),
+      original.subarray(0, 48_000 * 45),
     );
-    expect(conversation.truncations).toEqual([{ itemId: "item_long_answer", audioEndMs: 6_000 }]);
+    expect(conversation.truncations).toEqual([{ itemId: "item_long_answer", audioEndMs: 45_000 }]);
     const late = pcmDelta(480);
     conversation.input.onAudioDelta(late, "item_long_answer");
     expect(late.every((value) => value === 0)).toBe(true);
@@ -4069,7 +4094,9 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
   await flush();
   expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, ALICE, BOB]);
   expect(conversation.functionResults[0]?.output).toContain('"displayName":"Alice"');
-  expect(conversation.functionResults[0]?.output).toContain("Give this person the gist briefly");
+  expect(conversation.functionResults[0]?.output).toContain(
+    "Give this person the gist and match the length to the moment",
+  );
   conversation.input.onAudioDelta(pcmDelta(480), "alice-answer");
   done();
   await flush();
@@ -4238,7 +4265,7 @@ describe("snappy conversation absorption", () => {
     expect(harness.timers.pending().some((timer) => timer.delayMs === 1_200)).toBe(false);
     resolveCaptain(settledResult("linear", "Long detailed result"));
     await flush();
-    expect(conversation.functionResults[0]?.output).toContain("gist briefly");
+    expect(conversation.functionResults[0]?.output).toContain("match the length to the moment");
     conversation.input.onAudioDelta(pcmDelta(480), "result");
     done(conversation);
     await flush();
@@ -4319,12 +4346,12 @@ describe("snappy conversation absorption", () => {
   });
 });
 
-it("keeps capped generation correlated after its six seconds have already drained", async () => {
+it("keeps capped generation correlated after its 45 seconds have already drained", async () => {
   const harness = await engagedHarness();
   const conversation = harness.conversation();
-  conversation.input.onAudioDelta(pcmDelta(48_000 * 7), "long");
+  conversation.input.onAudioDelta(pcmDelta(48_000 * 46), "long");
   await flush();
-  for (let tick = 0; tick < 50; tick += 1) {
+  for (let tick = 0; tick < 440; tick += 1) {
     harness.clock.now += 100;
     harness.timers.fire(100);
   }
