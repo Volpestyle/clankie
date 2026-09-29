@@ -492,7 +492,9 @@ export class SwarmHost {
     const current = this.sessions.get(key);
     if (current) {
       const session = await current;
-      if (session.signature === external?.signature) return session;
+      // A closed MCP transport must not poison every future bank for this lane.
+      // Reopen on the next request; never replay a possibly mutating tool call.
+      if (session.signature === external?.signature && session.client.transport !== undefined) return session;
       if (this.sessions.get(key) === current) this.sessions.delete(key);
       await session.close();
       return this.get(binding);

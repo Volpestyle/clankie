@@ -2707,9 +2707,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         hireSeat,
         messageSeat,
         lane === "operator" && options.swarm !== undefined
-          ? await options.swarm.tools({
-              ...seatContext(conversationId)!,
-            })
+          ? await options.swarm
+              .tools({
+                ...seatContext(conversationId)!,
+              })
+              .catch((error: unknown) => {
+                console.warn("Swarm tools unavailable; continuing with the local lane tool bank", error);
+                return [];
+              })
           : [],
       );
     },

@@ -9,6 +9,10 @@ processing. Social conversations have no Swarm connection.
 the inbox after a turn; `close` closes clients. The coordinator retains durable
 state under `CLANKIE_STATE/swarm` and outlives individual host clients.
 
+A disconnected Swarm MCP transport is reopened on the next tool-bank request.
+If Swarm cannot supply its tools, the operator lane logs the failure and still
+serves its local tools. Mutating Swarm calls are never automatically replayed.
+
 `tools` supplies the same registrations to Pi and the operator MCP bank. The
 native Claude seat uses its explicitly selected service conversation (the default
 global conversation when omitted) through

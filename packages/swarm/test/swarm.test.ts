@@ -1,3 +1,4 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm, readdir, readFile, writeFile, mkdir, realpath } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -40,7 +41,10 @@ afterEach(async () => {
       /* Already stopped. */
     }
   }
-  await Promise.all(completedRoots.map((root) => rm(root, { recursive: true, force: true })));
+  // Coordinators can finish a final write while SIGTERM is taking effect.
+  await Promise.all(
+    completedRoots.map((root) => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+  );
 });
 
 test("real MCP delivers isolated inboxes, explicit acknowledgment and stable identity after host restart", async () => {
@@ -956,4 +960,29 @@ test("managed harness routes retain separate identities and never silently subst
   expect((await readdir(dirname(configPath))).filter((name) => /^herdr-.*[.]json$/u.test(name))).toHaveLength(
     0,
   );
+});
+
+test("reopens a disconnected lane MCP transport on the next tool-bank request", async () => {
+  const root = await mkdtemp("/tmp/clankie-swarm-reconnect-");
+  roots.push(root);
+  const host = new SwarmHost({ stateDirectory: root, canDispatch: () => false, warn: vi.fn() });
+  hosts.push(host);
+  const clients: Client[] = [];
+  const listTools = Client.prototype.listTools;
+  const listing = vi.spyOn(Client.prototype, "listTools").mockImplementation(function (
+    this: Client,
+    ...args
+  ) {
+    clients.push(this);
+    return listTools.apply(this, args);
+  });
+  const binding = { conversationId: "reconnect", cwd: root };
+  const first = await host.tools(binding);
+  const original = clients[0]!;
+  await original.close();
+  expect(original.transport).toBeUndefined();
+  const next = await host.tools(binding);
+  expect(clients.at(-1)).not.toBe(original);
+  expect(next.map((tool) => tool.name)).toEqual(first.map((tool) => tool.name));
+  listing.mockRestore();
 });
