@@ -53,6 +53,11 @@ const execFileAsync = promisify(execFileCallback);
 const MCP_USAGE =
   "Usage: clankie mcp [--lane operator [--conversation ID] | --seat | --grant FILE | --swarm-grant ID | --swarm]";
 const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
+const OPERATOR_CHANNEL_ENTRIES = [
+  "plugin:clankie@inline",
+  "plugin:clankie@clankie",
+  "server:clankie",
+] as const;
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
 const OUTBOX_POLL_WAIT_MS = 25_000;
@@ -587,9 +592,9 @@ export async function runMcpCommand(
     throw new Error(MCP_USAGE);
   const stderr = options.stderr ?? process.stderr;
   const parentArgv = await (options.readParentArgv ?? defaultReadParentArgv)().catch(() => undefined);
-  const channel =
-    parentArgvLoadsChannel(parentArgv, "plugin:clankie@clankie") ||
-    parentArgvLoadsChannel(parentArgv, "server:clankie");
+  // `clankie seat` loads the projected plugin as the session-only
+  // `clankie@inline`; an installed marketplace copy is `clankie@clankie`.
+  const channel = OPERATOR_CHANNEL_ENTRIES.some((entry) => parentArgvLoadsChannel(parentArgv, entry));
   const upstream = await (options.connectUpstream ?? defaultUpstream)({
     lane,
     ...(conversationId === undefined ? {} : { conversationId }),

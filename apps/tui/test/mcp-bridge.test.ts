@@ -356,30 +356,33 @@ describe("clankie mcp", () => {
   });
 });
 
-it("polls the selected operator conversation only when its plugin channel is loaded", async () => {
-  const upstream = fakeUpstream({ events: [[{ ...wakeEvent(), conversationId: "project-a" }]] });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const running = runMcpCommand(["--lane", "operator"], {
-    env: { CLANKIE_CONVERSATION_ID: "project-a" },
-    connectUpstream: async (input) => {
-      expect(input).toEqual({ lane: "operator", conversationId: "project-a" });
-      return upstream;
-    },
-    readParentArgv: async () => "claude --dangerously-load-development-channels plugin:clankie@clankie",
-    transport: serverTransport,
-    stderr: { write: () => undefined },
-  });
-  const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
-  const received = new Promise<string>((resolve) =>
-    client.setNotificationHandler(ChannelEventSchema, (event) => {
-      resolve(event.params.meta.conversation!);
-    }),
-  );
-  await client.connect(clientTransport);
-  expect(await received).toBe("project-a");
-  await client.close();
-  await expect(running).resolves.toBe(0);
-});
+it.each(["plugin:clankie@inline", "plugin:clankie@clankie"])(
+  "polls the selected operator conversation when %s is loaded as its channel",
+  async (entry) => {
+    const upstream = fakeUpstream({ events: [[{ ...wakeEvent(), conversationId: "project-a" }]] });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const running = runMcpCommand(["--lane", "operator"], {
+      env: { CLANKIE_CONVERSATION_ID: "project-a" },
+      connectUpstream: async (input) => {
+        expect(input).toEqual({ lane: "operator", conversationId: "project-a" });
+        return upstream;
+      },
+      readParentArgv: async () => `claude --dangerously-load-development-channels ${entry}`,
+      transport: serverTransport,
+      stderr: { write: () => undefined },
+    });
+    const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
+    const received = new Promise<string>((resolve) =>
+      client.setNotificationHandler(ChannelEventSchema, (event) => {
+        resolve(event.params.meta.conversation!);
+      }),
+    );
+    await client.connect(clientTransport);
+    expect(await received).toBe("project-a");
+    await client.close();
+    await expect(running).resolves.toBe(0);
+  },
+);
 
 it.each(["--print", "-p"])("keeps operator mail with the service in Claude %s mode", async (print) => {
   const upstream = fakeUpstream();
