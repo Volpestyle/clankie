@@ -5580,6 +5580,7 @@ export const DiscordVoiceFloorDecisionReasonSchema = z.enum([
   "mentioned",
   "holder",
   "reply_policy_all",
+  "transcript",
   "volition",
   "explicit",
   "decay",

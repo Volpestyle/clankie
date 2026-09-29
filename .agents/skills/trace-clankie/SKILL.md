@@ -229,6 +229,13 @@ Following controls waking, not collection.
   A `left` reason of `self_decided` follows the realtime `voice_leave` tool.
   There is no empty-room leave timer. Membership observations carry no human
   authority; they do not become privileged captain requests.
+- **Hearing and answering are separate evidence.** An accepted transcription
+  with `floor_decision: listen` means the old floor withheld a model turn, not
+  a bad microphone. Finalized consented speech now always receives an offer
+  (including reason `transcript`); a completed silent model response is his
+  decision. Typed room text retains its existing reply policy. When an
+  interruption seems ineffective, join playback IDs: stopping one reply is
+  insufficient if an older queued reply begins immediately afterward.
 - **A Vox buffer overflow cuts off an already audible answer.**
   `discord.voice.failed` with stage `playback` and code `tts_buffer_overflow`
   means Vox discarded that playback after its PCM queue exceeded the cap.

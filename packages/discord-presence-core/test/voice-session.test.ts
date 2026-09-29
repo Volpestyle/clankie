@@ -1545,14 +1545,18 @@ describe("floor decisions", () => {
     expect(harness.ofType("model_response").some((event) => event.outcome === "silent")).toBe(true);
   });
 
-  it("another speaker's undirected talk is injected into the open session without a response", async () => {
+  it("another speaker's undirected talk gets a model response opportunity", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
     await harness.consent(BOB);
     await harness.say(BOB, "so anyway the meeting moved");
-    expect(conversation.responseCreates).toBe(1);
-    expect(at(conversation.textItems, -1)).toContain("so anyway the meeting moved");
-    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "listen", userId: BOB });
+    expect(conversation.responseCreates).toBe(2);
+    expect(conversation.textItems.join("\n")).toContain("so anyway the meeting moved");
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({
+      action: "offer",
+      reason: "transcript",
+      userId: BOB,
+    });
   });
 
   it("labels room speech with the occupant's display name", async () => {
@@ -1599,16 +1603,16 @@ describe("floor decisions", () => {
     expect(seed).toContain("hey clankie you there");
     expect(seed).toContain("yeah that tracks");
     expect(seed.indexOf("hey clankie you there")).toBeLessThan(seed.indexOf("yeah that tracks"));
-    expect(harness.conversation().responseCreates).toBe(1);
+    expect(harness.conversation().responseCreates).toBe(2);
   });
 
-  // Required mission evidence: no response path exists without a floor
-  // decision — dormant crosstalk opens nothing and creates nothing.
-  it("dormant crosstalk with volition off never opens a session and never creates a response", async () => {
+  it("dormant speech gets a response opportunity even with volition off", async () => {
     const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
     await harness.consent(BOB);
     await harness.say(BOB, "nice weather this weekend maybe");
-    expect(harness.conversations).toHaveLength(0);
+    expect(harness.conversations).toHaveLength(1);
+    expect(harness.conversation().responseCreates).toBe(1);
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "offer", reason: "transcript" });
     expect(harness.ofType("volition")).toHaveLength(0);
     expect(harness.ofType("floor")).toHaveLength(0);
   });
@@ -1649,6 +1653,26 @@ describe("floor decisions", () => {
     expect(at(harness.ofType("floor"), -1)).toMatchObject({ state: "engaged", reason: "addressed" });
   });
 
+  it("offers a nameless music request after floor decay and session hold expire", async () => {
+    const harness = await engagedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
+    harness.clock.now = 61_000;
+    harness.timers.fire(ENGAGED_TICK_MS);
+    await flush();
+    harness.clock.now += ENGAGED_HOLD_MS;
+    harness.timers.fire(ENGAGED_HOLD_MS);
+    await flush();
+    expect(harness.conversation().isOpen).toBe(false);
+    await harness.say(ALICE, "Can you play me some music?");
+    expect(harness.conversations).toHaveLength(2);
+    expect(harness.conversation().responseCreates).toBe(1);
+    expect(harness.conversation().responseContexts[0]).toContain("Can you play me some music?");
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "offer", reason: "transcript" });
+    expect(harness.session.status().floorState).toBe("dormant");
+    harness.conversation().input.onAudioDelta(pcmDelta(480), "music-answer");
+    await flush();
+    expect(harness.session.status().floorState).toBe("engaged");
+  });
+
   it("decay fires from the timer tick with no phrase at all", async () => {
     const harness = await engagedHarness();
     expect(harness.timers.pending().map((timer) => timer.delayMs)).toContain(ENGAGED_TICK_MS);
@@ -1667,7 +1691,14 @@ describe("unprompted turns", () => {
   async function offeredHarness() {
     const harness = await joinedHarness();
     await harness.consent(BOB);
-    await harness.say(BOB, "the garden bot has been quiet");
+    harness.session.receiveRoomText({
+      guildId: GUILD,
+      channelId: CHANNEL,
+      userId: BOB,
+      deliveryId: "text-offer",
+      text: "the garden bot has been quiet",
+    });
+    await flush();
     return harness;
   }
 
@@ -1679,7 +1710,7 @@ describe("unprompted turns", () => {
     const conversation = harness.conversation();
     expect(conversation.responseCreates).toBe(1);
     expect(at(conversation.textItems, 0)).toContain(
-      JSON.stringify({ speakerId: BOB, text: "the garden bot has been quiet", source: "speech" }),
+      JSON.stringify({ speakerId: BOB, text: "the garden bot has been quiet", source: "text" }),
     );
     expect(at(conversation.textItems, -1)).toBe(UNPROMPTED_TURN_ITEM);
     // Nothing is decided until he answers: the floor has not moved yet.
@@ -2869,6 +2900,145 @@ describe("ability path", () => {
 });
 
 describe("barge-in", () => {
+  const completed = (responseId: string) => ({
+    responseId,
+    status: "completed" as const,
+    audioBytes: 0,
+    textCharacters: 0,
+  });
+
+  it("drops queued ordinary replies for the interrupting speaker but preserves another speaker", async () => {
+    const harness = await engagedHarness();
+    await harness.consent(BOB);
+    await harness.say(ALICE, "one more thing");
+    await harness.say(BOB, "what about my question");
+    const conversation = harness.conversation();
+    expect(conversation.responseCreates).toBe(3);
+    conversation.input.onAudioDelta(pcmDelta(48_000 * 2, 3), "first");
+    conversation.input.onResponseDone(completed("first"));
+    await flush();
+    conversation.input.onAudioDelta(pcmDelta(480, 7), "stale");
+    conversation.input.onResponseDone(completed("stale"));
+    conversation.input.onAudioDelta(pcmDelta(480, 9), "bob");
+    conversation.input.onResponseDone(completed("bob"));
+    await flush();
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.transcribe(ALICE, "stop");
+    await flush();
+    expect(conversation.truncations).toHaveLength(1);
+    expect(harness.vox.audio.some((chunk) => chunk.pcm.equals(Buffer.alloc(480, 7)))).toBe(false);
+    expect(at(harness.vox.audio, -1).pcm).toEqual(Buffer.alloc(480, 9));
+    expect(harness.ofType("response")).toMatchObject([{ userId: BOB }]);
+    expect(
+      conversation.textItems.some((text) =>
+        text.includes("Do not assume the room heard those queued replies"),
+      ),
+    ).toBe(true);
+  });
+
+  it("settles stale queued tool calls without running them or stealing the new response slot", async () => {
+    const harness = await engagedHarness();
+    await harness.say(ALICE, "check something else");
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(48_000 * 2), "first");
+    conversation.input.onResponseDone(completed("first"));
+    await flush();
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.transcribe(ALICE, "stop");
+    await flush();
+    conversation.input.onFunctionCall({
+      callId: "stale-tool",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"old request"}',
+    });
+    conversation.input.onResponseDone(completed("stale-tool"));
+    await flush();
+    expect(harness.submitCalls).toHaveLength(0);
+    expect(conversation.functionResults).toMatchObject([
+      { callId: "stale-tool", output: expect.stringContaining("not run") },
+    ]);
+    conversation.input.onAudioDelta(pcmDelta(480, 9), "new");
+    conversation.input.onResponseDone(completed("new"));
+    await flush();
+    const sent = harness.vox.audio.length;
+    conversation.input.onAudioDelta(pcmDelta(480, 7), "stale-tool-followup");
+    conversation.input.onResponseDone(completed("stale-tool-followup"));
+    await flush();
+    expect(harness.vox.audio).toHaveLength(sent);
+    expect(harness.ofType("response")).toMatchObject([
+      { deliveryId: at(harness.ofType("transcription"), -1).deliveryId },
+    ]);
+  });
+
+  it("retains superseded response slots until late PCM and done arrive", async () => {
+    const harness = await engagedHarness();
+    await harness.say(ALICE, "another thought");
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(48_000 * 2, 3), "first");
+    conversation.input.onResponseDone(completed("first"));
+    await flush();
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.transcribe(ALICE, "stop");
+    await flush();
+    expect(conversation.responseCreates).toBe(3);
+    const beforeLateAudio = harness.vox.audio.length;
+    const stale = pcmDelta(480, 7);
+    conversation.input.onFirstText?.("stale");
+    conversation.input.onAudioDelta(stale, "stale");
+    conversation.input.onResponseDone(completed("stale"));
+    await flush();
+    expect(stale.every((value) => value === 0)).toBe(true);
+    expect(harness.vox.audio).toHaveLength(beforeLateAudio);
+    conversation.input.onAudioDelta(pcmDelta(480, 9), "new");
+    conversation.input.onResponseDone(completed("new"));
+    await flush();
+    expect(harness.ofType("response")).toMatchObject([
+      { deliveryId: at(harness.ofType("transcription"), -1).deliveryId, userId: ALICE },
+    ]);
+    expect(at(harness.vox.audio, -1).pcm).toEqual(Buffer.alloc(480, 9));
+  });
+
+  it("keeps captain result context but drops its already queued speech when its speaker interrupts", async () => {
+    let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
+    const harness = await engagedHarness({
+      captain: () =>
+        new Promise((resolve) => {
+          resolveCaptain = resolve;
+        }),
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall({
+      callId: "lookup",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"check Linear"}',
+    });
+    conversation.input.onAudioDelta(pcmDelta(48_000 * 2, 3), "ack");
+    conversation.input.onResponseDone(completed("ack"));
+    await flush();
+    resolveCaptain(settledResult("captain-result", "Found it."));
+    await flush();
+    conversation.input.onAudioDelta(pcmDelta(480, 9), "result");
+    conversation.input.onResponseDone(completed("result"));
+    await flush();
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.transcribe(ALICE, "stop");
+    await flush();
+    expect(harness.submitCalls).toHaveLength(1);
+    expect(conversation.functionResults).toMatchObject([
+      { callId: "lookup", output: expect.stringContaining("Found it.") },
+    ]);
+    expect(harness.ofType("response")).toHaveLength(0);
+    expect(harness.vox.audio.some((chunk) => chunk.pcm.equals(Buffer.alloc(480, 9)))).toBe(false);
+  });
+
   async function playingHarness() {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
@@ -2926,6 +3096,26 @@ describe("barge-in", () => {
     harness.transcribe(ALICE, "wait a second");
     await flush();
     expect(conversation.truncations).toHaveLength(0);
+  });
+
+  it("counts sustained overlapping speech across consecutive playback jobs", async () => {
+    const harness = await engagedHarness();
+    await harness.say(ALICE, "another question");
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "first");
+    await flush();
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES / 2));
+    await flush();
+    conversation.input.onResponseDone(completed("first"));
+    await flush();
+    conversation.input.onAudioDelta(pcmDelta(480), "second");
+    await flush();
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES / 2));
+    await flush();
+    harness.transcribe(ALICE, "stop");
+    await flush();
+    expect(conversation.truncations).toMatchObject([{ itemId: "second" }]);
   });
 
   it("sustained speech from the floor holder truncates deliberately at the played offset", async () => {
@@ -3059,7 +3249,7 @@ describe("barge-in", () => {
     expect(conversation.truncations).toHaveLength(0);
     expect(harness.ofType("interrupted")).toHaveLength(0);
     expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
-    expect(conversation.responseCreates).toBe(1);
+    expect(conversation.responseCreates).toBe(2);
   });
 });
 
@@ -3185,7 +3375,14 @@ describe("transcript ring", () => {
     const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
     await harness.consent(ALICE);
     for (let line = 0; line < 35; line += 1) {
-      await harness.say(ALICE, `line-${line.toString()} of idle chatter`);
+      harness.session.receiveRoomText({
+        guildId: GUILD,
+        channelId: CHANNEL,
+        userId: ALICE,
+        deliveryId: `line-${line}`,
+        text: `line-${line.toString()} of idle chatter`,
+      });
+      await flush();
     }
     await harness.say(ALICE, "hey clankie summarize that");
     const seed = at(harness.conversation().textItems, 0);
@@ -3818,10 +4015,12 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
   await flush();
   expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, ALICE]);
 
-  // Unengaged crosstalk is heard without spending a response.
+  // Every spoken turn is considered; the model may stay silent for crosstalk.
   const beforeCrosstalk = conversation.responseCreates;
   await harness.say(MALLORY, "pass the chips please");
-  expect(conversation.responseCreates).toBe(beforeCrosstalk);
+  expect(conversation.responseCreates).toBe(beforeCrosstalk + 1);
+  done();
+  await flush();
   expect(conversation.textItems.some((text) => text.includes("pass the chips please"))).toBe(true);
   await harness.say(MALLORY, "hey clankie that boss fight was ridiculous");
   expect(conversation.responseCreates).toBeGreaterThan(beforeCrosstalk);
@@ -3867,6 +4066,7 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
     expect.stringContaining(`"speakerId":"${ALICE}"`),
     expect.stringContaining(`"speakerId":"${BOB}"`),
     expect.stringContaining(`"speakerId":"${ALICE}"`),
+    expect.stringContaining(`"speakerId":"${MALLORY}"`),
     expect.stringContaining(`"speakerId":"${MALLORY}"`),
   ]);
 });

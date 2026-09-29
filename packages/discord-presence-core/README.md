@@ -58,8 +58,9 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
 - **Voice identity stays attached to a gateway stream.** Speakers use separate
   transcription inputs. Only attributed JSON transcript items converge into
   the shared engaged conversation; overlapping raw audio is never interleaved
-  and guessed after the fact. An open session hears consented speech; the floor
-  decides who gets a spoken turn
+  and guessed after the fact. Every finalized consented speech transcript gets
+  a contextual model decision, including nameless requests after a pause. The
+  model may stay silent; engagement controls interruption eligibility, not hearing
   ([ADR 0119](../../docs/adr/0119-the-room-is-heard-the-floor-is-who-he-answers.md)).
 - **Speaker listeners are bounded.** An inactive per-speaker transcription
   session closes after two minutes and reopens on demand. At 25 retained
@@ -120,11 +121,17 @@ provider completion and, for external voices, TTS drain.
 
 The floor retains up to five recently engaged speakers for 60 seconds each.
 Their unnamed follow-ups are offers Clankie may decline; unrelated chatter is
-still heard without forcing a response. Volition caps, consent, and machine
-grants are unchanged. See ADRs [0091](../../docs/adr/0091-a-mid-turn-message-steers-the-turn.md)
+offered for contextual judgment without forcing a response. Typed-input
+volition caps, consent, and machine grants are unchanged. See ADRs [0091](../../docs/adr/0091-a-mid-turn-message-steers-the-turn.md)
 and [0119](../../docs/adr/0119-the-room-is-heard-the-floor-is-who-he-answers.md).
 
 Voice playback paces synthesized PCM in 100ms chunks with at most one second
 of real-time lead before sending it to Vox. Provider completion waits for the
 local queue to empty before `finish_tts_playback`; stop, failure, leave, and
 timeout discard queued audio. Vox retains its fail-closed 15-second buffer cap.
+
+Barge-in discards older speech queued for the interrupting speaker, including
+already-queued spoken tool answers. Other speakers keep their replies; captain
+work and result data retain their attribution. Unfinished discarded
+responses stay correlated until provider completion so late audio cannot become
+the next answer. Spoken turns favor one short thought and room for a reply.

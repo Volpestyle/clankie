@@ -210,12 +210,11 @@ export const UNPROMPTED_TURN_ITEM =
   "your own if you actually have something worth saying to these people right now. If you do not, " +
   "produce no output at all — staying quiet is a normal, correct answer, and most of these are.";
 /**
- * Offered when a recently engaged speaker keeps talking without naming him. The line is
- * already in the session; this is permission to stay silent if they turned to
- * someone else, or to answer if it is a follow-up to him.
+ * Every room utterance is available for his judgment. The line is already in
+ * the session; he may stay silent for crosstalk or answer a contextual request.
  */
 export const ENGAGED_OFFER_TURN_ITEM =
-  "System note, not spoken by anyone in the room: nobody named you in that line. " +
+  "System note, not spoken by anyone in the room: this room utterance is an opportunity to respond. " +
   "Decide from the attributed conversation whether it is directed to you or worth answering anyway. " +
   "If it is clearly for someone else, produce no output at all. Silence is the correct answer then.";
 /**
@@ -436,6 +435,8 @@ interface PendingVoiceResponse {
   done: boolean;
   /** Playback failed before response.done; late media must not bind to this decision. */
   invalidated?: boolean;
+  /** A newer interruption replaced this reply; retain its FIFO slot until done. */
+  superseded?: boolean;
   responseMeta?: RealtimeResponseMeta;
   modelResponseEmitted?: boolean;
   /** Set synchronously when this response chose a function instead of speech. */
@@ -569,6 +570,7 @@ export class DiscordVoiceSession {
   private staySpokenCount = 0;
   private stayNarrationSuppressed = 0;
   private pendingResponses: PendingVoiceResponse[] = [];
+  private readonly speakerResponseEpochs = new Map<string, number>();
   private readonly invalidPlaybackItemIds = new Set<string>();
   /** The job whose stream still receives deltas. */
   private openPlayback: PlaybackJob | undefined;
@@ -943,6 +945,7 @@ export class DiscordVoiceSession {
     this.lastRoomUserId = undefined;
     this.roomTextDeliveryIds.clear();
     this.pendingResponses = [];
+    this.speakerResponseEpochs.clear();
     this.invalidPlaybackItemIds.clear();
     this.openPlayback = undefined;
     this.playingJob = undefined;
@@ -1398,7 +1401,6 @@ export class DiscordVoiceSession {
     if (playback !== undefined && this.isPlaying() && rms >= BARGE_IN_SPEECH_RMS) {
       if (capture.turn.overlapPlaybackId !== playback.playbackId) {
         capture.turn.overlapPlaybackId = playback.playbackId;
-        capture.turn.overlapSpeechBytes = 0;
       }
       capture.turn.overlapSpeechBytes = (capture.turn.overlapSpeechBytes ?? 0) + pcm.byteLength;
     }
@@ -1650,7 +1652,12 @@ export class DiscordVoiceSession {
     this.lastRoomUserId = turn.userId;
     this.rememberRoomLine(turn, text, source);
     this.hearIfOpen(turn, text, source);
-    const decision = this.floor.observeTranscript({ speakerId: turn.userId, text, atMs: this.clock() });
+    const decision = this.floor.observeTranscript({
+      speakerId: turn.userId,
+      text,
+      source,
+      atMs: this.clock(),
+    });
     void this.emitSafely({
       type: "floor_decision",
       guildId,
@@ -1842,11 +1849,16 @@ export class DiscordVoiceSession {
     offer?: "volition" | "engaged" | "addressed",
   ): void {
     const generation = this.sessionGeneration;
+    const responseEpoch = this.speakerResponseEpochs.get(turn.userId) ?? 0;
     this.cancelHold();
     this.armTick();
     this.conversationOps = this.conversationOps
       .then(async () => {
-        if (generation !== this.sessionGeneration) return;
+        if (
+          generation !== this.sessionGeneration ||
+          responseEpoch !== (this.speakerResponseEpochs.get(turn.userId) ?? 0)
+        )
+          return;
         let wake: DiscordVoiceWake = "continuing";
         if (this.conversation === undefined) {
           wake = "waking";
@@ -1858,6 +1870,7 @@ export class DiscordVoiceSession {
             return;
           }
         }
+        if (responseEpoch !== (this.speakerResponseEpochs.get(turn.userId) ?? 0)) return;
         if (offer !== undefined) this.createOfferTurnItem(this.conversation, offer);
         this.pendingResponses.push({
           deliveryId: turn.deliveryId,
@@ -1937,10 +1950,9 @@ export class DiscordVoiceSession {
         instructions: briefing.instructions,
         onFirstText: (itemId) => {
           if (generation !== this.sessionGeneration || this.invalidPlaybackItemIds.has(itemId)) return;
-          const pending = this.pendingResponses.find(
-            (candidate) => !candidate.done && candidate.invalidated !== true,
-          );
-          if (pending !== undefined) pending.firstTextAtMs ??= this.clock();
+          const pending = this.pendingResponses.find((candidate) => !candidate.done);
+          if (pending !== undefined && !pending.superseded && !pending.invalidated)
+            pending.firstTextAtMs ??= this.clock();
         },
         onAudioDelta: (pcm, itemId) => {
           if (generation === this.sessionGeneration) this.handleAudioDelta(pcm, itemId);
@@ -2154,6 +2166,17 @@ export class DiscordVoiceSession {
     const exchange = this.pendingResponses.find((candidate) => !candidate.done);
     if (exchange !== undefined) exchange.toolCalled = true;
     this.emitRealtimeTool(call, exchange, "called", guildId, channelId);
+    if (exchange?.superseded) {
+      this.submitLocalFunctionResult(
+        call.callId,
+        "This reply was superseded by the speaker's newer turn; this stale tool request was not run.",
+        exchange,
+        guildId,
+        channelId,
+      );
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "response_superseded");
+      return;
+    }
     if (call.name === VOICE_LEAVE_TOOL_NAME) {
       if (exchange === undefined) {
         this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "no_active_response");
@@ -2608,6 +2631,7 @@ export class DiscordVoiceSession {
             deliveryId: exchange.deliveryId,
             wake: exchange.wake,
             fastPath: true,
+            ...(exchange.superseded ? { superseded: true } : {}),
             trigger: exchange.trigger,
             ...(exchange.inputTiming === undefined ? {} : { inputTiming: exchange.inputTiming }),
             ...(exchange.sourceText === undefined ? {} : { sourceText: exchange.sourceText }),
@@ -2691,10 +2715,8 @@ export class DiscordVoiceSession {
     }
     // Server responses run one at a time, so audio belongs to the oldest
     // decision the server has not finished yet.
-    const pending = this.pendingResponses.find(
-      (candidate) => !candidate.done && candidate.invalidated !== true,
-    );
-    if (pending === undefined) {
+    const pending = this.pendingResponses.find((candidate) => !candidate.done);
+    if (pending === undefined || pending.superseded || pending.invalidated) {
       // Audio with no outstanding decision is stale; zero and drop.
       pcm.fill(0);
       return;
@@ -2740,12 +2762,17 @@ export class DiscordVoiceSession {
     if (meta !== undefined) settled.responseMeta = meta;
     if (meta?.inputTokens !== undefined) settled.inputTokens = meta.inputTokens;
     if (meta?.outputTokens !== undefined) settled.outputTokens = meta.outputTokens;
-    const playbackPending = job !== undefined && settled.firstAudioAtMs === undefined;
+    const playbackPending = job !== undefined && settled.firstAudioAtMs === undefined && !settled.superseded;
     if (settled.offer !== undefined && (!playbackPending || settled.toolCalled === true)) {
       this.settleOffer(settled, settled.firstAudioAtMs !== undefined || settled.toolCalled === true);
     }
-    if (!playbackPending || settled.invalidated === true) this.emitModelResponseCompletion(settled);
-    if (settled.invalidated === true || (job === undefined && settled.firstAudioAtMs === undefined)) {
+    if (!playbackPending || settled.invalidated === true || settled.superseded)
+      this.emitModelResponseCompletion(settled);
+    if (
+      settled.invalidated === true ||
+      settled.superseded ||
+      (job === undefined && settled.firstAudioAtMs === undefined)
+    ) {
       // The response spoke nothing: a function-call round trip (whose
       // follow-up response carries the speech) or a model that chose
       // silence. No audio, nothing to receipt. Tokens still landed.
@@ -2786,6 +2813,18 @@ export class DiscordVoiceSession {
     if (job.generation !== this.sessionGeneration || guildId === undefined || channelId === undefined) {
       job.encodedChunks.length = 0;
       this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== job.pending);
+      return;
+    }
+    if (job.pending.superseded) {
+      job.encodedChunks.length = 0;
+      job.stopping = true;
+      this.settlePlayback(job, "stopped");
+      if (job.pending.done) {
+        this.settleOffer(job.pending, false);
+        this.emitModelResponseCompletion(job.pending);
+        if (this.pendingResponses.includes(job.pending)) this.addStayTokens(job.pending);
+        this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== job.pending);
+      }
       return;
     }
     this.playingJob = job;
@@ -3034,13 +3073,33 @@ export class DiscordVoiceSession {
     if (job === undefined || guildId === undefined || channelId === undefined) return;
     if (job.stopping || job.outcome !== undefined) return;
     const playedMs = Math.max(0, Math.round(this.clock() - (job.startedAtMs ?? this.clock())));
+    this.speakerResponseEpochs.set(userId, (this.speakerResponseEpochs.get(userId) ?? 0) + 1);
+    let supersededBacklog = false;
+    for (const pending of this.pendingResponses) {
+      if (pending.speakerId === userId) {
+        if (pending !== job.pending && !pending.superseded) supersededBacklog = true;
+        pending.superseded = true;
+      }
+    }
+    // Truncation may synchronously release a held response.done and start the next request.
+    job.stopping = true;
+    this.settlePlayback(job, "stopped");
+    if (supersededBacklog) {
+      try {
+        this.conversation?.createTextItem(
+          `System note: pending speech for authenticated speakerId ${JSON.stringify(userId)} was ` +
+            "superseded by that speaker's interruption. Do not assume the room heard those queued replies. " +
+            "Tool results remain available as context.",
+        );
+      } catch {
+        // A closed conversation must not prevent local playback from stopping.
+      }
+    }
     try {
       this.conversation?.truncate(job.itemId, playedMs);
     } catch {
       // The session may have closed; stopping playback still matters.
     }
-    job.stopping = true;
-    this.settlePlayback(job, "stopped");
     try {
       this.options.vox.stopTtsPlayback(job.playbackId);
     } catch (error) {

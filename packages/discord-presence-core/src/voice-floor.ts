@@ -7,11 +7,11 @@
  * repository owns. Engagement is not a permission that conversation grants and
  * revokes — it is downstream of one question asked continuously over the
  * transcript stream: *does he have a reason to say something right now?*
- * Being addressed answers it trivially and for free. When nobody addressed
- * him, this machine answers only the mechanical half — *may an unprompted turn
- * be offered at all right now?* — and the realtime Clankie session answers the
- * part that needs a personality. Release is the absence of an answer: the decay
- * window, and only the decay window. No phrase releases the floor, because
+ * Every finalized speech transcript reaches his judgment, whether or not it
+ * names him. Address and recent participation track engagement and barge-in;
+ * they do not decide which speech he may consider. Typed room messages retain
+ * their reply policy and unprompted-turn cap. Release is the absence of an
+ * answer: the decay window, and only the decay window. No phrase releases the floor, because
  * "thanks, clankie" is someone speaking to him and he gets to answer it.
  *
  * Pure by construction: no I/O, no timers, no Date.now. Time arrives as
@@ -29,7 +29,7 @@ export type FloorState = "dormant" | "engaged";
 export interface VoiceFloorOptions {
   /** `characterNames(persona)`: displayName + aliases, lowercased. */
   readonly names: readonly string[];
-  /** Same setting, same meaning as the text plane: `all` offers every utterance. */
+  /** Typed room input policy; finalized speech always reaches model judgment. */
   readonly replyPolicy: "addressed" | "all";
   /** Sets the unprompted-turn rate-cap defaults; ADR 0051 reserved it for exactly this. */
   readonly chattiness: "quiet" | "balanced" | "chatty";
@@ -47,6 +47,8 @@ export interface VoiceTranscriptEvent {
   readonly speakerId: string;
   readonly text: string;
   readonly atMs: number;
+  /** Finalized voice speech is always offered; typed room input retains its reply policy. */
+  readonly source?: "speech" | "text";
 }
 
 export type FloorDecision =
@@ -56,11 +58,12 @@ export type FloorDecision =
   /**
    * A turn whose correct answer may be silence: an engaged speaker kept talking
    * without naming him, his name came up without a clean hail, or the owner
-   * configured every dormant utterance to reach him.
+   * configured every dormant utterance to reach him. Finalized speech always
+   * reaches this judgment, including dormant follow-ups and other speakers.
    */
-  | { readonly action: "offer"; readonly reason?: "mentioned" | "holder" | "reply_policy_all" }
+  | { readonly action: "offer"; readonly reason?: "mentioned" | "holder" | "reply_policy_all" | "transcript" }
   /**
-   * A speaker outside the recent set spoke without addressing him. Inject it; do not spend a turn.
+   * A typed message from outside the recent set did not address him. Inject it without a turn.
    * Does not refresh decay.
    */
   | { readonly action: "listen" }
@@ -101,11 +104,9 @@ export interface VolitionRateCap {
 }
 
 /**
- * The rate cap is load-bearing, not protective tuning: it is the only thing
- * standing between phonetic tolerance tuned toward false positives and a bot
- * that interjects into human conversation. Numbers err conservative — these
- * cap how often he is *offered* an unprompted turn; he passes on most of them,
- * so actual speech runs well under them.
+ * Typed room messages retain conservative unprompted-turn caps. Finalized
+ * voice speech bypasses these caps so he can judge every utterance in context;
+ * an offer remains a choice to speak or stay silent.
  */
 export const VOLITION_DEFAULTS: Readonly<Record<VoiceFloorOptions["chattiness"], VolitionRateCap>> = {
   quiet: { minIntervalMs: 600_000, maxPerHour: 2 },
@@ -134,9 +135,9 @@ interface PendingOffer {
  *   he answers it rather than being cut off mid-goodbye by a word list.
  * - Decay is evaluated before anything else touches an engaged floor: an event
  *   arriving after the window belongs to whatever conversation comes next, so
- *   it is judged under dormant rules and, if it wakes nothing, surfaces the
- *   overdue `release(decay)`.
- * - The volition gate opens only from dormant, only on new transcript — never
+ *   it is judged under dormant rules. Speech is still offered; typed input
+ *   that wakes nothing surfaces the overdue `release(decay)`.
+ * - The typed-message volition gate opens only from dormant on new input — never
  *   a timer, so an empty room costs nothing and silence stays free.
  */
 export class VoiceFloor {
@@ -216,9 +217,9 @@ export class VoiceFloor {
       if (!this.decayed(event.atMs)) return this.observeEngaged(event);
       // The engagement already ended before this event arrived; the event
       // belongs to whatever comes next. If it wakes him the release is
-      // subsumed — the wake tells the caller to re-seed anyway. If it does
-      // not, the overdue release is the decision, and the volition gate waits
-      // for the next transcript rather than piggybacking on this one.
+      // subsumed — the wake tells the caller to re-seed anyway. Speech is
+      // still offered after decay, so a nameless follow-up cannot disappear
+      // into the release transition. Typed input retains its dormant policy.
       this.drop();
       return this.wakeFor(event) ?? { action: "release", reason: "decay" };
     }
@@ -314,7 +315,7 @@ export class VoiceFloor {
       return { action: "offer", reason: "mentioned" };
     }
     if (this.isEngagedSpeaker(event.speakerId, event.atMs)) return { action: "offer", reason: "holder" };
-    return { action: "listen" };
+    return event.source !== "text" ? { action: "offer", reason: "transcript" } : { action: "listen" };
   }
 
   /** Dormant judgment of one transcript; only a real address mutates immediately. */
@@ -331,6 +332,7 @@ export class VoiceFloor {
     if (this.replyPolicy === "all") {
       return { action: "offer", reason: "reply_policy_all" };
     }
+    if (event.source !== "text") return { action: "offer", reason: "transcript" };
     return undefined;
   }
 
