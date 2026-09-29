@@ -1,0 +1,25 @@
+Persona contact sheets verification, 2026-09-28 (America/Chicago)
+Implementation: 4c63869a38fba81d7bf70f895bfe6cc65d017acf
+
+Command: pnpm check
+Exit code: 0
+Checked 423 markdown files; local links resolve.
+Built public docs: 10 pages, 35 network routes, 110 API operations, 52 slash commands.
+Checked 10 public docs pages; links and anchors resolve.
+ Tasks:    28 successful, 28 total
+ Test Files  358 passed (358)
+      Tests  3013 passed | 2 skipped (3015)
+   Duration  193.42s (transform 2.65s, setup 0ms, import 75.37s, tests 95.79s, environment 12ms)
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox
+
+Focused: 5 files, 38 tests passed; no skips.
+Synthetic 1 s and 20 s timelines verify all ten tiles chronologically, including the ending.
+Actual CLI set/status/clear against isolated settings: two readable sheet paths, ten tiles each.
+Real video output: 1500x330 / 108276 base64 bytes and 2000x442 / 110296 bytes.
+36/36 live A/B/C model calls completed. See contact-sheet-abc-report.md.
+Live role-aware sequence caption: contact-sheet-caption.json.
+Private source filenames and absolute paths are omitted from public metadata.
+No private videos or contact sheets committed, no actual owner-setting changes, no service restart, no push.
+
+First full run hit two tests in a sibling's in-progress voice changes. After that owner's fixes, the voice file passed 142 tests and the complete pnpm check above passed. Sibling edits were preserved.

@@ -2,7 +2,8 @@
 
 [Work item VUH-1444](https://linear.app/vuhlp/issue/VUH-1444/owner-authored-persona-image-folders)
 
-Latest: [video support and vibe/appearance evaluation](video-verification.md).
+Latest: [chronological video contact sheets](contact-sheet-verification.md).
+The [separate-frame video evaluation](video-verification.md) is also retained.
 The original image-only evidence below is retained as history.
 
 ## A/B result
