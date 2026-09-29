@@ -29,12 +29,16 @@ describe("clankie claude plugin", () => {
       command: "clankie",
       args: ["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"],
     });
-    expect(hooks.hooks.UserPromptSubmit?.[0]?.hooks[0]).toMatchObject({
-      type: "command",
-      command: "clankie",
-      args: ["memory-card", "--lane", "operator"],
-      timeout: 60,
-    });
+    // The card injects once per session and on change; SessionStart re-arms it.
+    for (const event of ["SessionStart", "UserPromptSubmit"]) {
+      expect(hooks.hooks[event]?.[0]?.hooks).toContainEqual(
+        expect.objectContaining({
+          command: "clankie",
+          args: ["memory-card", "--lane", "operator", "--hook"],
+          timeout: 60,
+        }),
+      );
+    }
     for (const event of [
       "SessionStart",
       "UserPromptSubmit",

@@ -29,7 +29,7 @@ plugin can uniquely declare. Everything else lives in the service and the
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Output style `Clankie`                                                                                                                                                                                                             | `output-styles/clankie.md` | His identity in place of the coding assistant's; forced on while the plugin is enabled. Generated from `instructions.md`.    |
 | `SessionStart` hook                                                                                                                                                                                                                | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card |
-| `UserPromptSubmit` hook                                                                                                                                                                                                            | `hooks/hooks.json`         | `clankie memory-card --lane operator`: the newest memory card, every turn                                                    |
+| `UserPromptSubmit` hook                                                                                                                                                                                                            | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card, once per session and again when it changes             |
 | MCP server `clankie`                                                                                                                                                                                                               | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file               |
 | Skills `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:swarm-lead`, `/clankie:herdr-lead`, `/clankie:swarm-mcp`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                            |
 
@@ -166,6 +166,18 @@ and redacts on the Claude host, while the service deduplicates retries and pins
 the native session to one conversation. Ordinary plugin use without the launcher
 session binding does not publish. See [CLI sync contract](../../docs/cli.md#native-seat-transcript-sync)
 and [Claude hook input](https://code.claude.com/docs/en/hooks#common-input-fields).
+
+### Memory card injection
+
+Claude Code keeps every hook injection in the conversation, so an unchanged
+card printed each turn would only pile up copies. With `--hook`, `clankie
+memory-card` reads the hook's `session_id` from stdin and prints the card on the
+session's first prompt, then again only when its content changes (a new or
+corrected episode). A sha256 of the last card each session saw lives in
+`$TMPDIR/clankie-memory-card/`. `SessionStart` (startup, resume, `/clear`,
+compact) clears that record so the next prompt injects the card again; this
+covers compaction summarizing the earlier copy away. Input without a usable
+`session_id` gets the card every turn, as before.
 
 ### Hook latency
 

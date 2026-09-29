@@ -1442,11 +1442,18 @@ No transcript, tool argument, tool output, or credential appears in the output.
 }
 ```
 
-### `memory-card [--lane LANE]`
+### `memory-card [--lane LANE] [--hook]`
 
 The memory card that lane's next run injects, printed verbatim as plain text.
 The intended consumer is a per-turn hook, so a seat in another harness carries
 the same recent past his own sessions do.
+
+`--hook` reads Claude hook JSON on stdin. On `UserPromptSubmit` it prints the
+card only when that `session_id` has not seen this exact card yet, so unchanged
+turns add nothing to the conversation. `SessionStart` prints nothing and re-arms
+the session, so the prompt after startup, resume, `/clear`, or compaction
+injects it again. Input without a usable `session_id` prints the card every
+time.
 
 Filtered by lane exactly as the session's own injection is: operator-private
 episodes reach only the operator lane. Empty output means the lane has recalled

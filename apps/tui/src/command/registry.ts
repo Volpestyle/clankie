@@ -254,7 +254,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["memory-card"],
     lines: [
-      "  memory-card [--lane LANE]",
+      "  memory-card [--lane LANE] [--hook]",
       "                           The memory card that lane's next run injects (plain text)",
     ],
   },

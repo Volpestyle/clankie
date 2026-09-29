@@ -13,6 +13,12 @@
           {
             "type": "command",
             "command": "clankie",
+            "args": ["memory-card", "--lane", "operator", "--hook"],
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "clankie",
             "args": ["seat-sync"],
             "timeout": 60
           }
@@ -25,7 +31,7 @@
           {
             "type": "command",
             "command": "clankie",
-            "args": ["memory-card", "--lane", "operator"],
+            "args": ["memory-card", "--lane", "operator", "--hook"],
             "timeout": 60
           },
           {

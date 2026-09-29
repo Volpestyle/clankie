@@ -88,7 +88,8 @@ flowchart LR
   plugin can uniquely declare. That is the output style holding his identity
   (forced on while the plugin is enabled, coding instructions left out), a
   `SessionStart` hook that injects persona, reach, fleet preferences, address, and the service
-  model card, a `UserPromptSubmit` hook that injects the newest memory card, one
+  model card, a `UserPromptSubmit` hook that injects the newest memory card (once
+  per session and again when it changes; see Consequences), one
   stdio MCP entry (`clankie mcp`, a bridge to `/v1/mcp` that reads the operator
   bearer from the broker so no secret lands in a config file), and his product
   skills linked from `.agents/skills`. `clankie seat` is the launcher: it checks
@@ -169,3 +170,7 @@ flowchart LR
   preview ends.
 - The app's Clankie thread shows the seat's settled turns; live drafts do not
   cross, because a Claude Code transcript holds settled turns only.
+- Claude Code keeps every hook injection in the conversation, so the memory
+  card hook (`clankie memory-card --hook`, amended 2026-09-28) prints the card
+  on a session's first prompt and then only when it changes, keyed by the
+  hook's `session_id`; `SessionStart`, including after compaction, re-arms it.
