@@ -1,0 +1,19 @@
+{
+  "sessionKey": "herdr:claude:id:280ce486-5e32-4e1a-bf2f-ad1397597ef0",
+  "entries": [
+    {
+      "type": "message",
+      "id": "claude:d3e5f40d-9199-4efa-87d8-c823350e67ed",
+      "role": "operator",
+      "text": "synthetic brief transport data abcdefghijklmnopqrstuvwxyz 0123456789.\nRow 051: synthetic brief transport data abcdefghijklmnopqrstuvwxyz 0123456789.\nRow 052: synthetic brief transport data abcdefghijklmnopqrstuvwxyz 0123456789.\nRow 053: synthetic brief transport data abcdefghijklmnopqrstuvwxyz 0123456789.\nRow 054: synthetic brief transport data abcdefghijklmnopqrstuvwxyz 0123456789.\nVUH1450_END",
+      "occurredAt": "2026-09-29T23:03:56.265Z"
+    },
+    {
+      "type": "message",
+      "id": "claude:ccffcfb9-8606-488e-ad8f-0f99035fcb29",
+      "role": "agent",
+      "text": "Your message contains only filler rows (\"synthetic brief transport data\", rows 051\u2013054, then `VUH1450_END`). It has no task or question, and the start of the brief looks cut off.\n\nWhat would you like me to do in `/private/tmp/vuh1450-XTN2bQ`? It isn't a git repo. If the full brief was meant to arrive, please resend it.",
+      "occurredAt": "2026-09-29T23:03:58.844Z"
+    }
+  ]
+}

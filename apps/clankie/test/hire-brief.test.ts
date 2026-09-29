@@ -42,12 +42,17 @@ if (group === "tab" && command === "create") {
 } else if (group === "agent" && command === "prompt") {
   const pane = find(args[2]);
   pane.agent_status = "working";
+  const text = args[3];
+  const record = pane.agent === "codex"
+    ? { type: "response_item", payload: { type: "message", role: "user", content: [{type:"input_text",text}], internal_chat_message_metadata_passthrough: {content_item_kinds:["user.text"]} } }
+    : { type: pane.agent === "claude" ? "user" : "message", uuid: "prompt-1", id: "prompt-1", message: { role: "user", content: text } };
+  fs.appendFileSync(process.env.FAKE_HERDR_SESSION, JSON.stringify(record) + "\\n");
   const delay = Number(process.env.FAKE_HERDR_FIRST_TURN_DELAY_MS ?? 0);
   if (delay > 0) {
     // The turn has started but is still connecting MCP servers.
     pane.session_at = Date.now() + delay;
   } else {
-    pane.agent_session = { source: "herdr:" + pane.agent, kind: "id", value: "first-turn-session" };
+    pane.agent_session = { source: "herdr:" + pane.agent, kind: "path", value: process.env.FAKE_HERDR_SESSION };
   }
   save();
   out({ agent: pane });
@@ -58,7 +63,7 @@ if (group === "tab" && command === "create") {
     process.exit(1);
   }
   if (pane.session_at !== undefined && Date.now() >= pane.session_at) {
-    pane.agent_session = { source: "herdr:" + pane.agent, kind: "id", value: "first-turn-session" };
+    pane.agent_session = { source: "herdr:" + pane.agent, kind: "path", value: process.env.FAKE_HERDR_SESSION };
     delete pane.session_at;
     save();
   }
@@ -99,12 +104,14 @@ async function fixture() {
   const bin = join(root, "bin");
   await import("node:fs/promises").then(async (fs) => {
     await fs.mkdir(bin);
+    await fs.mkdir(join(root, "integrations/worker-skills"), { recursive: true });
     await fs.mkdir(join(root, ".agents/skills"), { recursive: true });
     await fs.mkdir(join(root, "codex/skills"), { recursive: true });
   });
   process.env.CODEX_HOME = join(root, "codex");
   await writeFile(join(bin, "herdr"), FAKE_HERDR);
   await chmod(join(bin, "herdr"), 0o755);
+  await writeFile(join(bin, "claude"), "#!/usr/bin/env node\nprocess.exit(0);\n", { mode: 0o755 });
   process.env.PATH = `${bin}:${path}`;
   process.env.FAKE_HERDR_STATE = join(root, "herdr-state.json");
   process.env.FAKE_HERDR_LOG = join(root, "herdr.log");
@@ -139,52 +146,65 @@ async function call(bank: LaneToolBank, name: string, args: Record<string, unkno
   return JSON.parse(text?.type === "text" ? text.text : "null") as Record<string, unknown>;
 }
 
-test("the captain's brief reaches a freshly hired pi seat and starts its turn", async () => {
-  const { root, captain, commands } = await fixture();
-  try {
-    const bank = await captain.laneToolBank("operator", "global-default");
-    const brief = "BRIEF-7f3a: implement slugify from SPEC.md and report the tests you ran.";
-    const hired = await call(bank, "hire_agent", {
-      harness: "pi",
-      title: "slugify worker",
-      workingDirectory: root,
-      brief,
-    });
-    expect(hired).toMatchObject({
-      outcome: "spawned",
-      seat: { seatId: "term_0a1b2c" },
-      brief: { outcome: "delivered", seatId: "term_0a1b2c", status: "working" },
-    });
-    // The brief was typed into the hired pane and submitted — the same lane an
-    // operator DM takes — not left in a Swarm inbox nothing reads.
-    const sent = (await commands()).filter((args) => args[0] === "pane" && args[2] === "w1:p1");
-    expect(sent).toContainEqual(["pane", "send-text", "w1:p1", brief]);
-    const text = sent.findIndex((args) => args[1] === "send-text");
-    expect(sent.slice(text + 1)).toContainEqual(["pane", "send-keys", "w1:p1", "Enter"]);
-
-    // The seatId the hire returned is what the captain watches it by.
-    const watch = await call(bank, "herdr_watch", { agent: "term_0a1b2c", reason: "harvest slugify" });
-    expect(watch).toMatchObject({ outcome: "watching", paneId: "w1:p1", terminalId: "term_0a1b2c" });
-
-    // And every id the hire handed back reaches the seat for a follow-up.
-    const seat = hired.seat as { personaId: string; conversationId: string };
-    for (const target of [seat.conversationId, seat.personaId]) {
-      expect(
-        await call(bank, "message_seat", { seat: target, message: `follow-up via ${target}` }),
-      ).toMatchObject({
-        outcome: "delivered",
-        seatId: "term_0a1b2c",
+test.each(["pi", "claude"])(
+  "the captain's long brief reaches a freshly hired %s seat and starts its turn",
+  async (harness) => {
+    const { root, captain, commands } = await fixture();
+    try {
+      const bank = await captain.laneToolBank("operator", "global-default");
+      const brief =
+        "BRIEF-7f3a: implement slugify from SPEC.md and report the tests you ran.\n" +
+        "Synthetic assignment context.\n".repeat(120) +
+        "BRIEF-END";
+      const hired = await call(bank, "hire_agent", {
+        harness,
+        title: "slugify worker",
+        workingDirectory: root,
+        brief,
       });
-      expect(await commands()).toContainEqual(["pane", "send-text", "w1:p1", `follow-up via ${target}`]);
+      expect(hired, JSON.stringify(hired)).toMatchObject({
+        outcome: "spawned",
+        seat: { seatId: "term_0a1b2c" },
+        brief: { outcome: "delivered", seatId: "term_0a1b2c", status: "working" },
+      });
+      // Submitted once through the paste-aware agent surface, then checked in
+      // the native transcript before the hire reports delivered.
+      const sent = await commands();
+      expect(sent.filter((args) => args.includes(brief))).toHaveLength(1);
+      expect(sent.find((args) => args.includes(brief))?.slice(0, 4)).toEqual([
+        "agent",
+        "prompt",
+        "w1:p1",
+        brief,
+      ]);
+      expect(sent.some((args) => args[1] === "send-text")).toBe(false);
+
+      // The seatId the hire returned is what the captain watches it by.
+      const watch = await call(bank, "herdr_watch", { agent: "term_0a1b2c", reason: "harvest slugify" });
+      expect(watch).toMatchObject({ outcome: "watching", paneId: "w1:p1", terminalId: "term_0a1b2c" });
+
+      // And every id the hire handed back reaches the seat for a follow-up.
+      const seat = hired.seat as { personaId: string; conversationId: string };
+      for (const target of [seat.conversationId, seat.personaId]) {
+        expect(
+          await call(bank, "message_seat", { seat: target, message: `follow-up via ${target}` }),
+        ).toMatchObject({
+          outcome: "delivered",
+          seatId: "term_0a1b2c",
+        });
+        expect(await commands()).toContainEqual(
+          expect.arrayContaining(["agent", "prompt", "w1:p1", `follow-up via ${target}`]),
+        );
+      }
+      expect(await call(bank, "message_seat", { seat: "agent-nobody", message: "hello" })).toEqual({
+        outcome: "unknown_seat",
+        seat: "agent-nobody",
+      });
+    } finally {
+      await captain.close();
     }
-    expect(await call(bank, "message_seat", { seat: "agent-nobody", message: "hello" })).toEqual({
-      outcome: "unknown_seat",
-      seat: "agent-nobody",
-    });
-  } finally {
-    await captain.close();
-  }
-});
+  },
+);
 
 test("a codex hire runs off the shared daemon and its brief is the first turn that reports its session", async () => {
   const { root, captain, commands } = await fixture();
@@ -197,7 +217,7 @@ test("a codex hire runs off the shared daemon and its brief is the first turn th
       workingDirectory: root,
       brief,
     });
-    expect(hired).toMatchObject({
+    expect(hired, JSON.stringify(hired)).toMatchObject({
       outcome: "spawned",
       seat: { seatId: "term_0a1b2c", harness: "codex" },
       brief: { outcome: "delivered", seatId: "term_0a1b2c", status: "working" },
@@ -237,7 +257,10 @@ test("a codex hire waits past the old 10 s limit for a first turn still connecti
       workingDirectory: root,
       brief: "BRIEF-7f31: reply with just ok.",
     });
-    expect(hired).toMatchObject({ outcome: "spawned", seat: { seatId: "term_0a1b2c", harness: "codex" } });
+    expect(hired, JSON.stringify(hired)).toMatchObject({
+      outcome: "spawned",
+      seat: { seatId: "term_0a1b2c", harness: "codex" },
+    });
   } finally {
     await captain.close();
   }

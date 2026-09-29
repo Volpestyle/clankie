@@ -64,10 +64,11 @@ does not know the terminal id the hire returns as its seatId. In model evals
 every pi hire came up idle and stayed idle: the only lane into it, the seat's
 conversation, was reachable from the operator's surfaces and not from his tools.
 
-- `hire_agent` takes an optional `brief`, delivered as the seat's first prompt
-  down that lane (the seat mailbox when a bridge is polling, else the pane),
-  and reports whether it landed and whether the seat picked it up.
-- `message_seat` sends a follow-up the same way, by seatId, personaId or
+- `hire_agent` takes an optional `brief`, submitted after startup readiness
+  through Herdr's agent prompt, and verifies the complete native transcript
+  receipt before reporting delivery (VUH-1450 amendment below).
+- `message_seat` sends a follow-up down the conversation lane (mailbox when
+  polling, else the pane), by seatId, personaId or
   conversationId — the third named exception above, for the same reason: a raw
   pane send skips the mailbox and the seat ledger, and nothing points him at it.
 - `herdr_watch` accepts the seatId a hire returns.
@@ -88,3 +89,15 @@ reported identity, not the existence of a transcript file: pi writes the file
 when its first turn starts. A startup timeout or missing session remains the
 protocol's typed `failed` / `not_ready` outcome with diagnostic detail, and closes
 only the pane created by that hire. There is no second launch or blind retry.
+
+### Verified briefs (VUH-1450, 2026-09-29)
+
+All initial briefs now use Herdr's paste-aware `agent prompt` after startup
+readiness. The raw `pane send-text` fallback lost the beginning of a 4,486-byte
+Claude brief even in a ready seat. A hire reports delivery only after matching
+the complete operator prompt in the native transcript, allowing Claude's paste
+envelope. A missing or partial receipt fails as `not_ready` with
+`brief_delivery_unverified`; the new pane is closed. Transcript display limits
+and redaction can prevent verification; a brief file with a short pointer avoids
+those limits. Follow-up pane delivery also uses `agent prompt`; mailbox and
+Codex queue delivery remain available.

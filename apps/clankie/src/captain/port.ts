@@ -46,14 +46,15 @@ export interface LaneTool {
  * A hire with the captain's wiring around it: persona adoption, conversation
  * binding, and a watch from the first breath (ADR 0187) — never a bare
  * `herdr agent start`, which lands a stranger the roster has to notice. The
- * brief is taken only by a harness whose first turn starts its session.
+ * brief is submitted after startup readiness and verified against the native
+ * transcript before the hire succeeds; an unverifiable receipt fails typed.
  */
 export type HireSeat = (seat: SpawnOperatorSeat, brief?: string) => Promise<OperatorSeatSpawnResult>;
 
 /**
  * The captain's own message into a hired seat, down the same lane an operator
  * DM takes (mailbox, else the pane). A herdr seat is not a Swarm actor, so this
- * is the only way his brief reaches one (VUH-1373). `seat` is the seatId,
+ * is how he follows up with one (VUH-1373). `seat` is the seatId,
  * personaId, or conversationId `hire_agent` returned.
  */
 export type MessageSeat = (seat: string, message: string) => Promise<SeatMessageResult>;

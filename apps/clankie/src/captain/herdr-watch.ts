@@ -804,11 +804,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const current = await this.runner.resolveTerminal(seatId);
       if (!isMessageableSeat(current)) return false;
       if (current.agent === "codex" && (await this.deliverCodexQueue(current, text))) return true;
-      if (this.runner.sendText === undefined || this.runner.pressEnter === undefined) return false;
-      await this.runner.sendText(current.paneId, text);
-      const submitted = await this.runner.resolveTerminal(seatId);
-      if (!isMessageableSeat(submitted)) return false;
-      await this.runner.pressEnter(submitted.paneId);
+      if (this.runner.promptAgent === undefined) return false;
+      // Raw pane send-text has no bracketed-paste framing. Claude can lose
+      // earlier PTY chunks even after startup is ready (VUH-1450).
+      await this.runner.promptAgent(current.paneId, text);
       return true;
     } catch {
       return false;
@@ -1010,8 +1009,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw caught;
         }
       }
-      if (fleetSeatBriefStartsSession(input.harness) && brief !== undefined) {
+      if (brief !== undefined) {
         if (this.runner.promptAgent === undefined) throw new Error("Herdr cannot submit a first prompt");
+        // Herdr 0.9.1 can report Codex ready while its folder-trust screen is
+        // visible. Sending a brief there consumes Enter as trust, losing the
+        // assignment. Leave that decision to the operator, never the prompt.
+        if (input.harness === "codex") {
+          const visible = await this.runner.read?.(paneId, input.harness, "visible");
+          if (visible?.includes("Trust this folder?") && visible.includes("Trust and continue")) {
+            throw new Error("agent_not_ready: Codex is waiting for folder trust");
+          }
+        }
         await this.runner.promptAgent(paneId, brief);
       }
       const agent = await this.agentWithSession(
@@ -1025,6 +1033,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             : "Herdr started an agent without a durable session identity",
         );
       }
+      if (brief !== undefined) await this.verifyBrief(agent, brief);
       return {
         outcome: "spawned",
         ...(skillCondition === undefined ? {} : { skills: skillCondition }),
@@ -1044,6 +1053,35 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const detail = reasonDetail(caught);
       return { outcome: "failed", reason: spawnFailureReason(detail), detail };
     }
+  }
+
+  /** A successful PTY write or working status is not a receipt (VUH-1450). */
+  private async verifyBrief(agent: HerdrAgentSnapshot, brief: string): Promise<void> {
+    // Compare the entire message, never a prefix or the tail that survived a
+    // dropped chunk. Transcript projection normalizes CRLF and outer whitespace.
+    const expected = brief.replace(/\r\n?/gu, "\n").trim();
+    const deadline = Date.now() + SPAWN_SESSION_WAIT_MS;
+    while (!this.closed) {
+      const transcript = await this.runner.transcript?.(agent);
+      if (
+        transcript?.entries.some((entry) => {
+          if (entry.type !== "message" || entry.role !== "operator") return false;
+          if (entry.text === expected) return true;
+          // Claude stores a long bracketed paste inside its own envelope.
+          // Match the whole payload, including its end, not a substring.
+          return (
+            agent.agent === "claude" &&
+            /^<pasted_content id="([^"]+)">\n([\s\S]*)\n<\/pasted_content id="\1">$/u.exec(
+              entry.text,
+            )?.[2] === expected
+          );
+        })
+      )
+        return;
+      if (Date.now() >= deadline) break;
+      await delay(SPAWN_SESSION_POLL_MS);
+    }
+    throw new Error("brief_delivery_unverified: the complete brief was not observed in the seat transcript");
   }
 
   /** Persist `clankie-seat` at user scope so `server:` can bind it on launch. */

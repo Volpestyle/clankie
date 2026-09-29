@@ -51,6 +51,13 @@ Turning guidance off leaves Clankie able to lead using his own instructions,
 `"bundled"` for a single hire; its result records the condition. Global/project
 skills discovered independently by a harness are outside Clankie's bundle switch.
 
+A `hire_agent` brief is submitted after harness readiness through Herdr's
+paste-aware agent prompt. `brief.outcome: "delivered"` requires the complete
+brief in the native transcript. `not_ready` with `brief_delivery_unverified`
+means the receipt could not be verified; the new pane is closed. A turn may have
+started, so inspect its work before retrying. If the transcript is unavailable,
+redacted, or exceeds its display limit, use a brief file and a short pointer.
+
 ## Cross-device agent conversations
 
 Messages includes seats from registered execution fleets. Opening a remote seat

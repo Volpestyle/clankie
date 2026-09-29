@@ -237,7 +237,7 @@ describe("HerdrWatchStore", () => {
     );
     let current = working;
     const changed = deferred<HerdrAgentSnapshot>();
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const closePane = vi.fn((_target: string) => Promise.resolve());
     const read = vi.fn((_target: string, _harness: string, source: string) =>
@@ -254,7 +254,7 @@ describe("HerdrWatchStore", () => {
               signal.addEventListener("abort", () => reject(new Error("aborted"))),
             ),
       read,
-      sendText,
+      promptAgent,
       pressEnter,
       closePane,
     };
@@ -274,8 +274,8 @@ describe("HerdrWatchStore", () => {
       expect(project).toHaveBeenCalledWith("term-potato", { kind: "summary", text: "Initial" }),
     );
     await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(true);
-    expect(sendText).toHaveBeenCalledWith("w18:p1", "hello");
-    expect(pressEnter).toHaveBeenCalledWith("w18:p1");
+    expect(promptAgent).toHaveBeenCalledWith("w18:p1", "hello");
+    expect(pressEnter).not.toHaveBeenCalled();
     await expect(store.closeSeat("term-potato")).resolves.toBe(true);
     expect(closePane).toHaveBeenCalledWith("w18:p1");
 
@@ -318,7 +318,7 @@ describe("HerdrWatchStore", () => {
       ),
     );
     const codexQueue = vi.fn(() => Promise.resolve(true));
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
@@ -328,7 +328,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        sendText,
+        promptAgent,
         pressEnter,
       },
     });
@@ -337,7 +337,7 @@ describe("HerdrWatchStore", () => {
     expect(paneProcesses).toHaveBeenCalledWith("w18:p2");
     expect(openFiles).toHaveBeenCalledWith(21290);
     expect(codexQueue).toHaveBeenCalledWith("01a0740e-ea76-7aa2-8795-524c00368e71", "please ship it");
-    expect(sendText).not.toHaveBeenCalled();
+    expect(promptAgent).not.toHaveBeenCalled();
     expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
@@ -355,7 +355,7 @@ describe("HerdrWatchStore", () => {
     const paneProcesses = vi.fn(() => Promise.resolve([{ pid: 21290, name: "codex", argv0: "codex" }]));
     const openFiles = vi.fn(() => Promise.resolve("p21290\nfcwd\nn/Users/james\n"));
     const codexQueue = vi.fn(() => Promise.resolve(true));
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
@@ -365,15 +365,15 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        sendText,
+        promptAgent,
         pressEnter,
       },
     });
 
     await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(true);
     expect(codexQueue).not.toHaveBeenCalled();
-    expect(sendText).toHaveBeenCalledWith("w18:p2", "hello");
-    expect(pressEnter).toHaveBeenCalledWith("w18:p2");
+    expect(promptAgent).toHaveBeenCalledWith("w18:p2", "hello");
+    expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
 
@@ -387,7 +387,7 @@ describe("HerdrWatchStore", () => {
       status: "idle",
       title: "Codex seat",
     };
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
@@ -400,14 +400,14 @@ describe("HerdrWatchStore", () => {
             "n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-01a0740e-ea76-7aa2-8795-524c00368e71.jsonl\n",
           ),
         codexQueue: vi.fn(() => Promise.resolve(false)),
-        sendText,
+        promptAgent,
         pressEnter,
       },
     });
 
     await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(true);
-    expect(sendText).toHaveBeenCalledWith("w18:p2", "hello");
-    expect(pressEnter).toHaveBeenCalledWith("w18:p2");
+    expect(promptAgent).toHaveBeenCalledWith("w18:p2", "hello");
+    expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
 
@@ -417,7 +417,7 @@ describe("HerdrWatchStore", () => {
     const paneProcesses = vi.fn(() => Promise.resolve([]));
     const openFiles = vi.fn(() => Promise.resolve(""));
     const codexQueue = vi.fn(() => Promise.resolve(true));
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
@@ -427,7 +427,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        sendText,
+        promptAgent,
         pressEnter,
       },
     });
@@ -436,8 +436,8 @@ describe("HerdrWatchStore", () => {
     expect(paneProcesses).not.toHaveBeenCalled();
     expect(openFiles).not.toHaveBeenCalled();
     expect(codexQueue).not.toHaveBeenCalled();
-    expect(sendText).toHaveBeenCalledWith("w18:p1", "hello");
-    expect(pressEnter).toHaveBeenCalledWith("w18:p1");
+    expect(promptAgent).toHaveBeenCalledWith("w18:p1", "hello");
+    expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
 

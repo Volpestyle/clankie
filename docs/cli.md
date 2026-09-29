@@ -1511,6 +1511,14 @@ cannot honor an explicit override and refuse it. Independent global or project
 skills can still be discovered by Claude/Codex; this switch does not rewrite
 owner-global selection. See [the full bundle and A/B limits](bundled-skills.md).
 
+A supplied `hire_agent` brief uses Herdr's paste-aware `agent prompt` after
+startup readiness, for Claude as well as Codex. Delivery is reported only when
+the complete brief appears in the native transcript. An unverifiable receipt
+returns `not_ready` with `brief_delivery_unverified` and closes the new pane;
+the turn may already have started, so inspect its work before retrying. For a
+brief that exceeds the transcript display limit (16,384 characters), is redacted,
+or has no readable native transcript, use a brief file with a short pointer.
+
 <a id="seat-commands"></a>
 
 ### `seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
