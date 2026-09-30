@@ -51,11 +51,30 @@ nothing there until searched. The 35-skill catalog (~1.1k) is unchanged
 
 ## Gate
 
-**Codex was not run.** James asked for the gate on Codex. The eval's Codex account
-(`~/.codex`, pro) reported its weekly window at 91% (resets 2026-10-04 21:00 CDT),
-so the usage guard stopped the campaign after one call
-([report](clankie-suite-codex-stopped.json)). The guard was not raised, and
-`~/.codex-jamescvolpe` is not signed in.
+**Codex (the gate).** `pre-1456` (the prompt before the cut, which `current`
+meant until this change) against `trimmed`, on codex-cli 0.159.1 with
+`gpt-6-astra`, all 16 cases (incidents, social, held-out) × 3 reps, split into
+two halves run in parallel on the main account (`~/.codex`) after James reset
+it: 96 calls, no errors, default usage guard. Halves:
+[A](clankie-suite-codex-a.json), [B](clankie-suite-codex-b.json),
+[summary](clankie-suite-codex-summary.md).
+
+| Arm        | Pass rate    | 95% CI      | Tokens/trial (95% CI) | Wall/trial |
+| ---------- | ------------ | ----------- | --------------------- | ---------- |
+| `pre-1456` | 48/48 (100%) | 93% to 100% | 64k (57k to 70k)      | 26 s       |
+| `trimmed`  | 48/48 (100%) | 93% to 100% | 47k (42k to 52k)      | 25 s       |
+
+Paired by case: pass rate +0 (within noise, every slice); tokens −17k per trial
+(−27k to −11k), outside noise. Every incident case and `voice-interruption`
+passed 3/3 in both arms; `voice-interruption` fell from 112k to 31k per trial.
+
+A first three-arm Codex run (`bare,pre-1456,trimmed`, 5 reps) was stopped at 56
+trials as too slow; all 56 passed, `bare` averaging 36k, `pre-1456` 67k and
+`trimmed` 48k ([report](clankie-suite-codex-3arm-stopped.json)). On Codex even
+`bare` passed `voice-interruption`, so there the suite is at ceiling on every case.
+Earlier attempts stopped at the usage guard after one call each: `~/.codex` at 91%
+weekly before its reset ([report](clankie-suite-codex-stopped.json)) and
+`~/.codex-jamescvolpe` at 92% weekly (resets 2026-10-03 12:03 CDT). No guard was raised.
 
 **Claude, small, partial.** Following James's fallback, `current` against `trimmed`
 on Claude Code 2.1.285 with `claude-sonnet-5-5`, planned as 16 cases × 2 reps.
@@ -76,9 +95,8 @@ about 7k per trial where the old one cost 27k. All five incident regressions and
 `voice-interruption` passed in `trimmed` (it answered `clankie metrics`, the case
 `bare` failed 0/5 in the baseline).
 
-This is a weak gate. The suite is at ceiling for Sonnet 5.5, one repetition per
-case cannot show a pass-rate difference, and the held-out slice is missing. It
-shows that the cut does not break the known cases and that it cuts tokens; it
+This is a weak gate. The suite is at ceiling for both models, and three
+repetitions (one on Claude) cannot show a small pass-rate difference. It shows that the cut does not break the known cases and that it cuts tokens; it
 cannot show that nothing was lost. The seat and lead evals (VUH-1473, VUH-1474)
 are the real gates.
 
