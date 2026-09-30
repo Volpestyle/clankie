@@ -9,6 +9,8 @@ import {
   type PairingOfferStatus,
 } from "../../bin/pairing-offer.ts";
 import { createServiceOptions, startOne, type CreateServiceOptionsInput } from "../../bin/services.ts";
+import { nextStepLine } from "../next-step.ts";
+import { probeDoorway } from "./gateway.ts";
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
 /** One deadline for the whole command: starting the relay counts against it. */
@@ -98,6 +100,27 @@ function routeLines(offer: PairingOffer): string[] {
         ]
       : []),
   ];
+}
+
+/**
+ * A code without the gateway route while remote access is signed out works only
+ * on the direct route. Say so, and name the fix, rather than let it read as
+ * remote access being fine. A failed probe says nothing: it is advisory.
+ */
+async function probeSignedOut(
+  options: PairCommandOptions & { readonly env: NodeJS.ProcessEnv },
+): Promise<{ readonly since: string } | undefined> {
+  const doorway = await probeDoorway({
+    env: options.env,
+    ...(options.host === undefined ? {} : { host: options.host }),
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  return doorway.state === "sign_in_required" ? { since: doorway.since } : undefined;
+}
+
+function signedOutNote(offer: PairingOffer, signedOut: { readonly since: string } | undefined) {
+  if (signedOut === undefined || offer.gateway === true) return undefined;
+  return `Remote access is signed out, so this code will not work away from the direct route. ${nextStepLine({ doorway: { state: "sign_in_required", since: signedOut.since }, remoteAccessConfigured: true, directRouteConfigured: true })}`;
 }
 
 /** The routes an agent reads back beside the offer; absent means this Mac only. */
@@ -218,6 +241,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
   const deadline = Date.now() + timeoutMs;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const offers: PairingOffer[] = [];
+  let signedOut: { readonly since: string } | undefined;
   try {
     // Authenticate before any side effect: an unauthenticated caller must not
     // be able to start a service, so this precedes the relay guarantee.
@@ -229,6 +253,10 @@ export async function runPairCommand(args: readonly string[], options: PairComma
       { ...options, env },
       { controlPlaneUrl, timeoutMs: Math.max(1, deadline - Date.now()) },
     );
+    // Before the mint, so the offer stays the last request. It only decides
+    // whether the finished code gets a sign-in note; a failed probe says nothing.
+    if (review === undefined && !controller.signal.aborted)
+      signedOut = await probeSignedOut({ ...options, env, host: controlPlaneUrl });
     // Review mode mints a small set of independent single-use offers, so a
     // second reviewer attempt takes the next code instead of failing `consumed`.
     for (let index = 0; index < (review?.count ?? 1); index += 1) {
@@ -310,6 +338,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
 
   const offer = offers[0];
   if (offer === undefined) throw new Error("No pairing offer was minted.");
+  const signedOutNoteText = signedOutNote(offer, signedOut);
   if (json) {
     outputJson(stdout, {
       ok: true,
@@ -317,6 +346,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
       deepLink: offer.deepLink,
       expiresAt: offer.expiresAt,
       ...routeJson(offer),
+      ...(signedOutNoteText === undefined ? {} : { nextStep: signedOutNoteText }),
     });
     return 0;
   }
@@ -332,6 +362,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
       offer.deepLink,
       `Expires ${offer.expiresAt} · single use — run \`clankie pair\` again for a new offer.`,
       ...routeLines(offer),
+      ...(signedOutNoteText === undefined ? [] : [signedOutNoteText]),
       "",
     ].join("\n"),
   );

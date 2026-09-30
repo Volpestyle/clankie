@@ -38,6 +38,7 @@ import { buildFleetCommands } from "./fleet-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
 import { buildMemoryCommands } from "./memory-commands.ts";
 import { buildPairCommands } from "./pair-commands.ts";
+import { buildDevicesCommands } from "./devices-commands.ts";
 import { buildGatewayCommands } from "./gateway-commands.ts";
 import {
   createCaptainRouteClient,
@@ -68,6 +69,7 @@ import {
 import { PresencePoller } from "./observation/presence.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
+import { runAwakeCommand } from "./command/awake.ts";
 import { doctorCommand } from "./command/doctor.ts";
 import { createServiceOptions, restartTarget } from "../bin/services.ts";
 import { clankieStateHome } from "./state-home.ts";
@@ -418,6 +420,8 @@ const commands = [
         stderr: { write: () => undefined },
       }),
     commandDoctor: () => doctorCommand({ repoRoot, env: process.env }),
+    commandAwake: (args) =>
+      runAwakeCommand(args, { repoRoot, env: process.env, stderr: { write: () => undefined } }),
     conversations: conversationsContext,
     laneTrace,
     presence: () => presence.snapshot,
@@ -442,6 +446,7 @@ const commands = [
   }),
   ...buildProviderCommands(services),
   ...buildPairCommands({ repoRoot, env: process.env, host: serviceUrl }),
+  ...buildDevicesCommands({ env: process.env, host: serviceUrl }),
   ...buildGatewayCommands({
     settings: settingsStore,
     credentials: services.store,

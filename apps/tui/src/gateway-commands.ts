@@ -36,7 +36,16 @@ export function buildGatewayCommands(services: {
           await showStatus(shell, services);
           return;
         }
-        await runWizard(shell, services);
+        await runWizard(shell, services, "menu");
+      },
+    },
+    {
+      name: "login",
+      aliases: [],
+      description: "Sign in with your Clankie account (this Mac's remote access, or a hosted Clankie)",
+      takesArgument: false,
+      async run(_argument, shell): Promise<void> {
+        await runWizard(shell, services, "sign-in");
       },
     },
   ];
@@ -97,6 +106,8 @@ async function runWizard(
     readonly restartGateway?: () => Promise<void>;
     readonly fetchImpl?: typeof fetch;
   },
+  /** `/login` skips the menu: signing in is the one thing it does. */
+  entry: "menu" | "sign-in",
 ): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin("gateway");
@@ -114,24 +125,30 @@ async function runWizard(
               hint: "email + one-time code",
             };
     const status: MenuOption = { value: "status", label: "Show status" };
-    const action = await flow.readSelect({
-      message:
-        signedOutSince === undefined
-          ? "Remote access for this Mac"
-          : `Remote access for this Mac — signed out since ${signedOutSince}`,
-      options: [
-        ...(current.enabled && signedOutSince === undefined ? [status, signIn] : [signIn, status]),
-        { value: "direct", label: "Configure direct fallback", hint: "private network endpoints" },
-        {
-          value: "rotate",
-          label: "Rotate encryption key",
-          hint: "re-pair devices after restarting the captain",
-        },
-        ...(current.publicGateway.url === undefined
-          ? []
-          : [{ value: "disable", label: "Sign out and disable" }]),
-      ],
-    });
+    if (entry === "sign-in" && signedOutSince !== undefined) {
+      flow.renderLine(`This Mac has been signed out since ${signedOutSince}. Signing it back in.`, "info");
+    }
+    const action =
+      entry === "sign-in"
+        ? "configure"
+        : await flow.readSelect({
+            message:
+              signedOutSince === undefined
+                ? "Remote access for this Mac"
+                : `Remote access for this Mac — signed out since ${signedOutSince}`,
+            options: [
+              ...(current.enabled && signedOutSince === undefined ? [status, signIn] : [signIn, status]),
+              { value: "direct", label: "Configure direct fallback", hint: "private network endpoints" },
+              {
+                value: "rotate",
+                label: "Rotate encryption key",
+                hint: "re-pair devices after restarting the captain",
+              },
+              ...(current.publicGateway.url === undefined
+                ? []
+                : [{ value: "disable", label: "Sign out and disable" }]),
+            ],
+          });
     if (action === "status") {
       await showStatus(shell, services);
       return;

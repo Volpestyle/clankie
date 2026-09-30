@@ -288,6 +288,10 @@ If `clankie pair` exits with "No pairing code was made", this Mac is signed out 
 remote access: sign it back in (`/remote-access` → "Sign this Mac back in", or
 `clankie remote-access on --email EMAIL --code-stdin`), restart the captain, and
 pair again. `clankie doctor`/`clankie gateway status` show `doorway: signed out since …`.
+`clankie status` also reports `connection` (what `whoami` says), the live `doorway` and
+a `nextStep` line; `doctor` carries the same `nextStep`. Console: `/login` signs in,
+`/devices` lists/revokes phones. A pair code that lacks the gateway route while remote
+access is signed out carries a sign-in note (`nextStep` in `--json`).
 `clankie pair` and `/pair` start or reuse the local relay before minting a code;
 run pairing on the host that owns the relay. Public pairing requires the secure
 QR or full link; its fragment is secret-bearing. Never paste it into logs or

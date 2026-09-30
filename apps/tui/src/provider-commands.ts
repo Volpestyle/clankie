@@ -233,7 +233,7 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
   return [
     {
       name: "auth",
-      aliases: ["login"],
+      aliases: [],
       description: "Manage API keys, subscription OAuth, and harness logins",
       argumentHint: "[status]",
       takesArgument: true,

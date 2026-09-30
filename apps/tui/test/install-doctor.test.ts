@@ -276,8 +276,10 @@ describe("install doctor", () => {
 
     expect(signedOut.doorway).toMatchObject({ state: "sign_in_required" });
     expect(signedOut.remediations).toContain(
-      "This Mac has been signed out of the public doorway since 2026-09-14T10:11:40.689Z; no app reaches him until you sign it back in with /gateway.",
+      "This Mac has been signed out of the public doorway since 2026-09-14T10:11:40.689Z; no app reaches him until you sign it back in with /remote-access.",
     );
+    expect(signedOut.nextStep).toContain("Sign this Mac back in");
+    expect(open.nextStep).toContain("clankie pair");
     expect(open.doorway).toEqual({ state: "connected" });
     expect(open.remediations.join(" ")).not.toContain("doorway");
   });

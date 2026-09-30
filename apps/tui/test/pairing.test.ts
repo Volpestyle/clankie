@@ -243,6 +243,34 @@ describe("clankie pair — success", () => {
     expect(stdout.text().split("\n").length).toBeGreaterThan(10);
   });
 
+  it("says a gatewayless code needs the sign-in when remote access is signed out", async () => {
+    const offer = validOffer();
+    const doorway = { state: "sign_in_required", since: "2026-09-29T13:27:00Z" };
+    const fetchImpl = (async (input: unknown) =>
+      requestUrl(input).endsWith("/health")
+        ? Response.json({ ok: true, doorway })
+        : Response.json({ ...offer, direct: "https://mac.tailnet.ts.net" })) as typeof fetch;
+    const stdout = outputBuffer();
+    expect(await runPair([], { fetchImpl, stdout: stdout.stream })).toBe(0);
+    expect(stdout.text()).toContain("Remote access is signed out");
+    expect(stdout.text()).toContain('"Sign this Mac back in"');
+
+    const json = outputBuffer();
+    expect(await runPair(["--json"], { fetchImpl, stdout: json.stream })).toBe(0);
+    expect(JSON.parse(json.text()).nextStep).toContain("Sign this Mac back in");
+  });
+
+  it("adds no sign-in note when the code carries the gateway", async () => {
+    const offer = validOffer();
+    const fetchImpl = (async (input: unknown) =>
+      requestUrl(input).endsWith("/health")
+        ? Response.json({ ok: true, doorway: { state: "sign_in_required", since: "x" } })
+        : Response.json({ ...offer, gateway: true })) as typeof fetch;
+    const stdout = outputBuffer();
+    expect(await runPair([], { fetchImpl, stdout: stdout.stream })).toBe(0);
+    expect(stdout.text()).not.toContain("signed out");
+  });
+
   it("emits strict ANSI-free JSON whose deep link matches the encoded one", async () => {
     const offer = validOffer();
     const stdout = outputBuffer();

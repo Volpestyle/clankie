@@ -2142,6 +2142,14 @@ first setup. Headless: `clankie remote-access [status]`, `on [--email EMAIL
 and `direct --control-plane-url URL --relay-url URL`; `gateway` and the older
 `disable` / `rotate-encryption-key` spellings still work.
 
+`clankie status` also carries what `whoami` reports (`connection`), the live
+`doorway`, and one `nextStep` line for phone access; `clankie doctor` carries the
+same `nextStep`. `whoami` keeps working. In the console, `/login` is the account
+sign-in (it skips the `/remote-access` menu; the model-provider `/auth` no longer
+answers to `/login`), `/pair` adds a sign-in note when a code lacks the gateway
+route because remote access is signed out, and `/devices` lists or revokes
+paired devices and opens an empty list on `/pair`.
+
 `clankie pair` never prints a code the doorway cannot carry. When the service
 refuses an offer because remote access is signed out, it exits 1 with "No pairing
 code was made" and names `/remote-access` → **Sign this Mac back in** as the fix

@@ -153,4 +153,20 @@ describe("/remote-access", () => {
     expect(view.lines.join("\n")).toContain("Remote access is ready");
     expect((await remote.credentials.get("clankie-account"))?.type).toBe("oauth");
   });
+
+  it("/login skips the menu and says why when the Mac is signed out", async () => {
+    const view = fixture({ doorway: undefined, signedIn: true }, { text: [] });
+    const directory = await mkdtemp(join(tmpdir(), "clankie-login-command-"));
+    directories.push(directory);
+    const [, login] = buildGatewayCommands({
+      settings: new SettingsStore(join(directory, "settings.json")),
+      credentials: new FileCredentialStore(join(directory, "credentials.json")),
+      fetchImpl: health({ state: "sign_in_required", since: "2026-09-29T13:27:00Z" }),
+    });
+    expect(login?.name).toBe("login");
+    await login!.run("", view.shell);
+
+    expect(view.selects).toEqual([]);
+    expect(view.lines.join("\n")).toContain("signed out since 2026-09-29T13:27:00Z");
+  });
 });

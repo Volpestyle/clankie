@@ -45,7 +45,7 @@ function parseDevicesArgs(args: readonly string[]): DevicesCliOptions {
 }
 
 function formatDevicesTable(devices: readonly DeviceListItem[]): string {
-  if (devices.length === 0) return "No paired devices.";
+  if (devices.length === 0) return "No paired devices. Pair one with `clankie pair` (or /pair).";
   const header = ["DEVICE", "NAME", "PLATFORM", "STATUS", "SOURCE", "GRANTS", "PUSH", "PAIRED"] as const;
   const rows = devices.map((device) => [
     device.deviceId,
