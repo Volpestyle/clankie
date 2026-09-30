@@ -46,6 +46,19 @@ jobs: they consume provider/agent budgets and external services. Record model,
 revision, inputs, usage and artifacts when running them; never turn missing
 live evidence into a green score.
 
+## Current live-eval budget
+
+James paused large live-model eval campaigns on 2026-09-30 after they exhausted
+Claude usage. Continue delivery from completed evidence; do not automatically
+resume a campaign when an account window resets. Full benchmarks and broad
+multi-repetition campaigns remain on hold until James changes that direction.
+
+If an actual change leaves a specific uncertainty, use only a few targeted cases,
+starting with one repetition. Harvesting finished results needs no new trial.
+Preserve completed trials and reports when stopping an identified producer, and
+keep missing cells marked incomplete. Do not change graders to recover a pass.
+Ordinary deterministic checks, including `pnpm check`, remain required.
+
 ## Failure handling
 
 Reproduce the named failing suite first. To investigate flakiness, run the same

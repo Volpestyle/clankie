@@ -1,0 +1,28 @@
+Revision: 2f7335ecc107dbc1aafc75b8242a9158132ad01b
+Command: pnpm check
+Exit code: 0
+Clean detached checkout; offline frozen-lockfile install; no seat-worker changes.
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ node scripts/herdr-skill.mjs --check
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+$ node scripts/check-doc-links.mjs && pnpm docs:public:check
+$ pnpm --filter @clankie/docs check
+$ node scripts/check.mjs
+$ infra/aws/public-docs/check.sh
+$ turbo run typecheck
+ Tasks:    27 successful, 27 total
+$ vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug
+ Test Files  384 passed (384)
+      Tests  3249 passed | 2 skipped (3251)
+$ cargo test --locked --all-features && cargo build --locked
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+$ node test/ipc-smoke.ts debug
+Vox IPC ready: /private/tmp/clankie-integration-2f7335ec-20260930/apps/vox/target/debug/clankvox
+
+Both Claude and Codex plugin build.mjs --check: exit 0
+Full log SHA-256: fc55744a2405c475048c130dda1b20d29f038de3399e8aa0d025869f5df21eb4
