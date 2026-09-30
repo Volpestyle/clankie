@@ -299,17 +299,20 @@ function git(root, args) {
   return result.stdout.trim();
 }
 
-export function prepare(root, test, config) {
+export function prepare(root, test, config, { boundary: framing, repoRoot = repo } = {}) {
   const seed = join(root, "seed");
   mkdirSync(seed, { recursive: true });
   // `bare` is the harness alone: no Clankie instructions and no skills.
-  const instructions = config.instructions ? readFileSync(join(repo, config.instructions), "utf8") : "";
+  // A campaign may pin the text it started with, so a concurrent edit cannot mix arms.
+  const instructions =
+    config.instructionsText ??
+    (config.instructions ? readFileSync(join(repo, config.instructions), "utf8") : "");
   // Same classifier as `clankie skills opinionated on|off` and hire_agent's
   // bundled/plain override; unlike workerSkills, copy files and never link state.
   const catalog =
     config.skills === "none"
       ? []
-      : bundledSkills(repo, { opinionated: config.skills === "bundled", exclude: [] }).filter(
+      : bundledSkills(repoRoot, { opinionated: config.skills === "bundled", exclude: [] }).filter(
           (s) => s.included,
         );
   const skills = catalog.map((skill) => {
@@ -318,6 +321,7 @@ export function prepare(root, test, config) {
     return { name: skill.name, class: skill.class, sha256: hash(readFileSync(join(path, "SKILL.md"))) };
   });
   const boundary =
+    framing ??
     "This is an offline evaluation fixture. Only this worktree is your project. Do not access any live service, tracker, personal state or other process. Do not delegate. Only finish the requested fixture; no commits, service startup, or external writes. Run local checks if useful.\n";
   const skillCatalog = skills.map((s) => `- ${s.name}: .agents/skills/${s.name}/SKILL.md`).join("\n");
   const guidance = [
@@ -328,7 +332,10 @@ export function prepare(root, test, config) {
   writeFileSync(join(seed, "AGENTS.md"), guidance);
   // Claude receives this exact text explicitly, avoiding automatic discovery differences.
   writeFileSync(join(seed, ".eval-instructions.md"), guidance);
-  for (const [name, content] of Object.entries(test.files)) writeFileSync(join(seed, name), content);
+  for (const [name, content] of Object.entries(test.files)) {
+    mkdirSync(dirname(join(seed, name)), { recursive: true });
+    writeFileSync(join(seed, name), content);
+  }
   if (test.image) cpSync(join(repo, "scripts/evals/image.png"), join(seed, "image.png"));
   git(seed, ["init", "-q"]);
   git(seed, ["add", "."]);
@@ -349,7 +356,7 @@ export function prepare(root, test, config) {
   };
 }
 
-function invocation(harness, model, root, test, capabilities) {
+export function invocation(harness, model, root, test, capabilities) {
   if (harness === "claude")
     return [
       "-p",

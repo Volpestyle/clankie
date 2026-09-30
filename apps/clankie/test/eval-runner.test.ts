@@ -22,6 +22,13 @@ import { summarize } from "../../../scripts/evals/report.mjs";
 // @ts-expect-error -- checkout eval tooling is plain ESM.
 import { pairedDifference, wilson } from "../../../scripts/evals/stats.mjs";
 // @ts-expect-error -- checkout eval tooling is plain ESM.
+import { channelText, FLEET, seatCases, wakeContent } from "../../../scripts/evals/seat-cases.mjs";
+// @ts-expect-error -- checkout eval tooling is plain ESM.
+import { observe, plan as seatPlan } from "../../../scripts/evals/seat.mjs";
+// @ts-expect-error -- checkout eval tooling is plain ESM.
+import { writeFleet } from "../../../scripts/evals/seat-service.mjs";
+import { spawnSync } from "node:child_process";
+// @ts-expect-error -- checkout eval tooling is plain ESM.
 import { cleanEnv, executeSandbox, installAuth, removeAuth } from "../../../scripts/evals/isolation.mjs";
 
 const roots: string[] = [];
@@ -225,6 +232,151 @@ it("never inherits provider keys, live sockets or owner state", () => {
   expect(Object.keys(env)).not.toContain("ANTHROPIC_API_KEY");
   expect(Object.keys(env)).not.toContain("OPENAI_API_KEY");
   expect(Object.keys(env)).not.toContain("CLANKIE_OPERATOR_TOKEN");
+});
+
+// Every seat grader must accept what a correct seat leaves behind and reject
+// what an arm without Clankie leaves behind (VUH-1473: "checked in both directions").
+interface SeatObservation {
+  answer: { answer: string } | null;
+  result: string;
+  workItems: Record<string, string>;
+  replies: { ok: boolean; text: string }[];
+  tools: string[];
+  discord: { method: string; path: string; body: unknown }[];
+  herdr: string[][];
+}
+const blank: SeatObservation = {
+  answer: null,
+  result: "",
+  workItems: {},
+  replies: [],
+  tools: [],
+  discord: [],
+  herdr: [],
+};
+const passing: Record<string, Partial<SeatObservation>> = {
+  "seat-recall-decision": { answer: { answer: "We moved the relay to port 47113." } },
+  "seat-observe-room": { answer: { answer: "Ari wants PR #88 reviewed before Friday." } },
+  "seat-stuck-worker": { answer: { answer: "relay-worker (VUH-1501) is blocked waiting on you." } },
+  "seat-hire-brief": {
+    herdr: [
+      ["agent", "start", "eval-hire", "--pane", "w1:p13", "--kind", "claude"],
+      ["agent", "prompt", "w1:p13", "Add the CHANGELOG entry.\nOwner: VUH-1503"],
+    ],
+  },
+  "seat-work-item": {
+    workItems: { "WI-1-rotate.md": "title: Rotate the relay key\n- [ ] The old key is rejected\n" },
+  },
+  "seat-escalation": { replies: [{ ok: true, text: "Not yet: VUH-1501 is blocked waiting on James." }] },
+  "seat-wake": { result: "VUH-1501 is still blocked on you." },
+  "seat-voice-summary": {
+    discord: [{ method: "POST", path: "/voice/join", body: {} }],
+    answer: { answer: "The demo moved to Thursday and Bea is bringing sprites." },
+  },
+  "seat-post-room": {
+    discord: [{ method: "POST", path: "/captain-action", body: { text: "Standup moves to 3pm today" } }],
+  },
+  "seat-where-things-live": {
+    answer: { answer: "The person-memory command; recall_episodes searches older notes." },
+  },
+  "seat-baseline": { result: "OK" },
+};
+
+it("grades every seat case both ways", () => {
+  expect(Object.keys(passing).sort()).toEqual(seatCases.map((c: { id: string }) => c.id).sort());
+  for (const test of seatCases) {
+    expect(test.grade({ ...blank, ...passing[test.id] }), `${test.id} passes`).toBe(true);
+    expect(test.grade(blank), `${test.id} fails without evidence`).toBe(false);
+  }
+  const wrong = seatCases.find((c: { id: string }) => c.id === "seat-escalation");
+  expect(wrong.grade({ ...blank, replies: [{ ok: false, text: "VUH-1501 is blocked" }] })).toBe(false);
+  expect(wrong.grade({ ...blank, replies: [{ ok: true, text: "It's done, tell her yes" }] })).toBe(false);
+  const wake = seatCases.find((c: { id: string }) => c.id === "seat-wake");
+  expect(
+    wake.grade({
+      ...blank,
+      result: "I couldn't verify whether VUH-1501 is still blocked: clankie is unavailable.",
+    }),
+  ).toBe(false);
+  const stuck = seatCases.find((c: { id: string }) => c.id === "seat-stuck-worker");
+  expect(
+    stuck.grade({
+      ...blank,
+      answer: { answer: "relay-worker is blocked on VUH-1501. I could not verify the exact input it needs." },
+    }),
+  ).toBe(true);
+  const voice = seatCases.find((c: { id: string }) => c.id === "seat-voice-summary");
+  expect(voice.grade({ ...blank, answer: passing["seat-voice-summary"]!.answer })).toBe(false);
+});
+
+it("reads the seat's reply door and plans the arms each harness can run", () => {
+  const stdout = [
+    {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "mcp__plugin_clankie_clankie__reply",
+            input: { event_id: "e", text: "blocked" },
+          },
+        ],
+      },
+    },
+    {
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "sent" }] }],
+      },
+    },
+    { type: "result", result: "done" },
+  ]
+    .map((event) => JSON.stringify(event))
+    .join("\n");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "eval-seat-")));
+  roots.push(root);
+  const seen = observe({ worktree: root, stdout, discord: [], herdr: [] });
+  expect(seen.replies).toEqual([{ text: "blocked", ok: true }]);
+  expect(seen.result).toBe("done");
+  expect(() => seatPlan(["--reps", "1"])).toThrow("raise --max-runs");
+  expect(seatPlan(["--cases", "coverage", "--configs", "seat", "--reps", "1"]).matrix).toHaveLength(5);
+  expect(() => seatPlan(["--harness", "codex", "--configs", "seat"])).toThrow("only on Claude");
+  expect(
+    seatPlan(["--harness", "codex", "--configs", "bare", "--cases", "seat-baseline"]).matrix,
+  ).toHaveLength(5);
+});
+
+it("renders a channel event the way Claude Code does, and the service's wake wording", () => {
+  expect(
+    channelText({
+      kind: "wake",
+      conversationId: "c",
+      source: "service",
+      id: "e",
+      createdAt: "t",
+      content: "hi",
+    }),
+  ).toBe(
+    '<channel source="clankie" kind="wake" conversation="c" source="service" event_id="e" created_at="t">\nhi\n</channel>',
+  );
+  expect(wakeContent("check")).toContain("Reason you recorded: check");
+});
+
+it("gives every arm the same fake fleet, with its paths out of the environment", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "eval-fleet-")));
+  roots.push(root);
+  const fleet = writeFleet(root, FLEET);
+  const listed = spawnSync(join(fleet.bin, "herdr"), ["agent", "list"], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH },
+  });
+  const agents = JSON.parse(listed.stdout).result.agents;
+  expect(agents.find((a: { agent_status: string }) => a.agent_status === "blocked").title).toContain(
+    "VUH-1501",
+  );
+  expect(fleet.calls()).toEqual([["agent", "list"]]);
+  expect(fleet).not.toHaveProperty("env");
 });
 
 describe.skipIf(process.platform !== "darwin")("OS isolation", () => {

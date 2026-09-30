@@ -131,7 +131,11 @@ export function installAuth(root, harness, auth) {
 }
 
 const quote = (value) => JSON.stringify(value);
-function sandboxProfile(root, binary, { network = true, extraRead = [] } = {}) {
+function sandboxProfile(
+  root,
+  binary,
+  { network = true, extraRead = [], readTrees = [], denyRead = [], loopbackPorts = [] } = {},
+) {
   if (process.platform !== "darwin")
     throw Error("Eval isolation currently requires macOS sandbox-exec; refusing an unsandboxed run");
   // Default deny reads/writes. Only system runtimes and this attempt are visible.
@@ -150,10 +154,20 @@ function sandboxProfile(root, binary, { network = true, extraRead = [] } = {}) {
 (allow user-preference-read (preference-domain "com.openai.codex") (preference-domain "com.anthropic.claudecode") (preference-domain ".GlobalPreferences"))
 (allow ipc-posix-shm-read* (ipc-posix-name "apple.cfprefs.daemonv1") (ipc-posix-name "apple.cfprefs.${process.getuid()}v1"))
 (allow file-read-metadata)
-(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/opt/homebrew") (subpath "/Library/Apple") (subpath "/Library/Managed Preferences") (subpath "/Library/Preferences") (subpath "/private/etc") (subpath "/private/var/db/timezone") (subpath "/dev") (subpath ${quote(root)}) (subpath ${quote(dirname(binary))}) ${extraRead.map((p) => `(literal ${quote(p)})`).join(" ")})
+(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/opt/homebrew") (subpath "/Library/Apple") (subpath "/Library/Managed Preferences") (subpath "/Library/Preferences") (subpath "/private/etc") (subpath "/private/var/db/timezone") (subpath "/dev") (subpath ${quote(root)}) (subpath ${quote(dirname(binary))}) ${extraRead.map((p) => `(literal ${quote(p)})`).join(" ")} ${readTrees.map((p) => `(subpath ${quote(p)})`).join(" ")})
+${denyRead.length ? `(deny file-read* ${denyRead.map((p) => `(subpath ${quote(p)})`).join(" ")})` : ""}
 (allow file-write* ${["worktree", "home", "tmp", "seed"].map((name) => `(subpath ${quote(join(root, name))})`).join(" ")} (literal "/dev/null") (literal "/dev/tty"))
 (deny file-write-unlink ${["worktree", "home", "tmp", "seed"].map((name) => `(literal ${quote(join(root, name))})`).join(" ")})
 ${network ? '(allow network-outbound (remote tcp "*:443") (literal "/private/var/run/mDNSResponder"))\n(deny network-outbound (remote ip "localhost:*"))' : ""}
+${
+  // The seat arm alone: loopback to its own throwaway service, and the unix
+  // sockets its TypeScript CLI opens inside the attempt. Later rules win.
+  loopbackPorts.length
+    ? `${loopbackPorts.map((port) => `(allow network-outbound (remote ip "localhost:${port}"))`).join("\n")}
+(allow network-bind network-inbound (local unix-socket (subpath ${quote(root)})))
+(allow network-outbound (remote unix-socket (subpath ${quote(root)})))`
+    : ""
+}
 `;
 }
 
@@ -165,14 +179,21 @@ export async function executeSandbox({
   timeoutMs = 120000,
   network = true,
   extraRead = [],
+  readTrees = [],
+  denyRead = [],
+  loopbackPorts = [],
+  env = {},
 }) {
   const profile = join(root, network ? "model.sb" : "check.sb");
-  writeFileSync(profile, sandboxProfile(root, binary, { network, extraRead }));
+  writeFileSync(
+    profile,
+    sandboxProfile(root, binary, { network, extraRead, readTrees, denyRead, loopbackPorts }),
+  );
   const started = Date.now();
   return await new Promise((resolve) => {
     const child = spawn("/usr/bin/sandbox-exec", ["-f", profile, binary, ...args], {
       cwd: join(root, "worktree"),
-      env: cleanEnv(root),
+      env: { ...cleanEnv(root), ...env },
       stdio: ["pipe", "pipe", "pipe"],
       detached: true,
     });

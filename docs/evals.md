@@ -12,6 +12,10 @@ subscriptions:
   UI and research fixtures derived from September 2026 commits, a regression case
   for each 2026-09-29/30 incident, synthetic Discord and voice scenarios with
   explicit rubrics, and a private held-out slice.
+- **The seat suite** ([`seat.mjs`](../scripts/evals/seat.mjs)): the real Claude
+  Code seat plugin against a throwaway Clankie service, on work that needs his
+  presence and integrations (memory, rooms, voice, the fleet, escalations and
+  wakes).
 
 Every case records its source, task, fixture and executable check. No private
 Discord messages or live conversation records are inputs. Results are trials, not
@@ -161,6 +165,99 @@ overshoot. `--timeout` (default 120 seconds per call) kills the owned process gr
 and Claude additionally gets eight turns. Effort is low in Codex and in Claude
 versions that expose `--effort`. Pin `--model` across arms.
 
+## The seat suite
+
+The two suites above give the model Clankie's words (instructions and skills) and
+nothing else. The seat suite measures the seat itself: presence and integrations
+that bare Claude Code does not have. Its three arms share one machine:
+
+| Arm       | What runs                                                                          |
+| --------- | ---------------------------------------------------------------------------------- |
+| `bare`    | The harness alone                                                                  |
+| `current` | The harness with the current instructions and bundled skills, as in `run.mjs`      |
+| `seat`    | The real plugin from `clankie seat --dry-run`, against a throwaway Clankie service |
+
+Every arm has the same fake herdr fleet on `PATH`, because a machine has herdr with
+or without Clankie; the owner's real herdr is unreadable to all of them. Only the
+seat arm has a service to talk to.
+
+**The throwaway service** ([`seat-service.mjs`](../scripts/evals/seat-service.mjs))
+is the real `apps/clankie` service in its own macOS sandbox, one per attempt. Its
+state, config, credentials file and `HOME` are temporary; its network is loopback
+only, so it cannot reach model providers, the live service, the Keychain or any
+account. Both Discord body control ports point at a fake that records every call
+and answers voice joins. Herdr is the fake fleet on a real socket. Memory is seeded
+through the service's own episode endpoint and rooms through its lane logs.
+
+**The seat** launches with the dry-run plan's arguments (plugin directory, seat
+settings, development channel) plus `-p`, `bypassPermissions` inside the sandbox,
+and the same boundary text every arm gets. Its hooks and MCP bridge reach the
+service through `CLANKIE_CONTROL_PLANE_URL` and `CLANKIE_OPERATOR_TOKEN`, over
+loopback to that one port. It cannot read the service's files; it uses its doors.
+
+**Pinning.** Each campaign creates a clean detached worktree of `HEAD` with an
+offline install. The service, the `clankie` CLI the plugin calls, the plugin, the
+skills and the instructions all come from it, so a sibling's uncommitted edit
+cannot break or change a run. The report records the commit and the plugin hash.
+
+**Wakes and escalations.** Headless `claude -p` cannot receive channel pushes: the
+bridge pumps only under an interactive development-channel launch, whose warning a
+person must accept. The driver therefore plays the bridge's long-poll. It schedules
+a real wake, or sends a real message into the head conversation, takes the event
+the service puts in the seat outbox, and hands it to the seat exactly as Claude
+Code renders a channel event. The seat answers through the bridge's real `reply`
+tool, which the service must accept. Claude Code's own channel rendering is the
+one step not exercised; the bridge's pump has its own tests. Other arms get the
+same tag and words with no service behind them.
+
+[`seat-cases.mjs`](../scripts/evals/seat-cases.mjs) holds the fixture and eleven
+cases. Graders read what happened (the fake Discord body, the fake fleet, tracker
+files, accepted replies) as well as the answer, and each is tested against a
+passing and a failing observation. Five cases form the **coverage set**: tasks
+bare Claude Code should not be able to do at all, reported as coverage (worked at
+least once) and reliability (pass rate), with anything between 0 and 5 of 5
+flagged as flaky.
+
+| Case                     | Coverage task                        | Evidence the grader reads                 |
+| ------------------------ | ------------------------------------ | ----------------------------------------- |
+| `seat-recall-decision`   | Recall a decision from last week     | The port only memory holds                |
+| `seat-stuck-worker`      | Report which hired worker is stuck   | The blocked worker's task                 |
+| `seat-voice-summary`     | Join voice and summarize (fake body) | A voice join on the body, and the summary |
+| `seat-post-room`         | Post to a Discord room               | A post on the body                        |
+| `seat-escalation`        | Act on a room escalation             | A reply the service accepted              |
+| `seat-observe-room`      |                                      | What was asked in a room                  |
+| `seat-hire-brief`        |                                      | The fleet start and delivered brief       |
+| `seat-work-item`         |                                      | The tracker item's file                   |
+| `seat-wake`              |                                      | The report the wake prompted              |
+| `seat-where-things-live` |                                      | Two facts from his instructions           |
+| `seat-baseline`          |                                      | None: it measures startup cost            |
+
+The report's `startupContext` measures what the seat carries before any work: the
+output style, the SessionStart prompt sections, the memory card, the MCP tool
+catalog and the skill index, in characters and approximate tokens. `seat-baseline`
+("reply OK") measures the same overhead in reported tokens for every arm.
+
+```sh
+# The seat arm on Claude, and bare/current on Codex, where budget requires it.
+node scripts/evals/seat.mjs --configs seat --model claude-sonnet-5-5 --max-runs 55
+node scripts/evals/seat.mjs --harness codex --model gpt-6-astra --configs bare,current --max-runs 110
+# A model-matched startup-cost control on Claude.
+node scripts/evals/seat.mjs --configs bare,current --cases seat-baseline --model claude-sonnet-5-5 --max-runs 10
+```
+
+The seat arm is Claude only. When `bare` and `current` run on another harness,
+their pass rates still answer "can a plain agent do this at all", but token
+comparisons are valid only within one harness and model.
+
+**Status (2026-09-30): the real Claude seat arm is built but unrun.** Big evals
+were on hold before its campaign could start; single development attempts passed
+`seat-wake` and `seat-baseline`, which is smoke, not a result. A partial Codex
+`bare`/`current` campaign (106 of 110 calls) is preserved in
+[the seat-eval record](testing/2026-09-30-seat-eval/README.md) and is
+inconclusive: it has no seat arm to compare with, and `current − bare` is within
+noise. That record also lists what building the harness showed about the seat's
+integrations.
+
 ## Statistics
 
 `node scripts/evals/report.mjs [--markdown] REPORT.json ...` groups trials by
@@ -257,7 +354,9 @@ credentials, private homes, provider sessions or held-out case content.
 
 Baselines: [VUH-1454](testing/2026-09-30-clankie-evals/README.md) (single trials,
 current arm only) and [VUH-1467](testing/2026-09-30-eval-baseline/README.md)
-(repeated bare against current on both suites).
+(repeated bare against current on both suites); VUH-1473's
+[seat-eval record](testing/2026-09-30-seat-eval/README.md) (harness built, seat arm
+unrun).
 
 ### Codex account selection
 
