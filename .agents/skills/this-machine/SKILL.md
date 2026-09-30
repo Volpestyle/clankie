@@ -55,7 +55,8 @@ Extra Codex accounts are registered homes: `clankie accounts codex add HOME
 --label LABEL`, `list`, and `remove LABEL` (also `/accounts codex` in the TUI).
 The owner signs in and trusts hooks in that home; never copy credentials or
 approve hook trust for them. Local Codex hires choose the most headroom across
-the five-hour and weekly rollout windows. Missing or stale usage is unknown,
+the windows returned by Codex’s read-only quota API, including weekly-only plans.
+Recent rollout usage is the fallback if that query fails. Missing or stale usage is unknown,
 not an empty plan. `hire_agent` can pin `account: "LABEL"`; the hire and roster
 report the chosen account. Registration changes apply to new hires only.
 

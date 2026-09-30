@@ -2,7 +2,7 @@ import {
   registerCodexAccount,
   removeCodexAccount,
   codexAccounts,
-  codexAccountStatus,
+  readCodexAccountStatus,
   defaultSettingsPath,
   SettingsStore,
 } from "@clankie/settings";
@@ -23,7 +23,7 @@ export async function runCodexAccountsCommand(
   }
   return {
     ok: true,
-    accounts: codexAccounts(await store.load(), env).map((account) => codexAccountStatus(account)),
+    accounts: await Promise.all(codexAccounts(await store.load(), env).map(readCodexAccountStatus)),
     settingsFile: store.path,
   };
 }

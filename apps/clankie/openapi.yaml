@@ -252,7 +252,7 @@ paths:
       operationId: listCodexAccounts
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       summary: List registered local Codex homes and observed headroom
-      description: Owner-authorized. Reports credential-file presence, never credential contents. Missing or stale rollout usage is unknown.
+      description: Owner-authorized. Reports credential-file presence, never credential contents. Queries current quota without a model turn, with recent rollouts as fallback. Missing or stale usage is unknown.
       responses:
         "200":
           description: Default and registered account labels, paths, rate windows and headroom

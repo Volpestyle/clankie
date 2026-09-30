@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   codexAccounts,
-  codexAccountStatus,
+  readCodexAccountStatus,
   registerCodexAccount,
   removeCodexAccount,
   SettingsStore,
@@ -68,7 +68,7 @@ export function createAccountRoutes(
   app.get("/v1/accounts/codex", async (context) =>
     context.json({
       ok: true,
-      accounts: codexAccounts(await settings.load()).map((account) => codexAccountStatus(account)),
+      accounts: await Promise.all(codexAccounts(await settings.load()).map(readCodexAccountStatus)),
     }),
   );
   app.post("/v1/accounts/codex", async (context) => {

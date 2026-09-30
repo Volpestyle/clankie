@@ -1,9 +1,11 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import {
   codexAccountStatus,
+  readCodexAccountStatus,
+  selectLiveCodexAccount,
   codexRateLimit,
   selectCodexAccount,
   registerCodexAccount,
@@ -88,4 +90,49 @@ test("the eval parser tolerates partial records and maps the two Codex windows",
     limited: false,
   });
   expect(codexRateLimit("not JSON")).toBeNull();
+});
+
+vi.mock("../src/codex-rate-limits.ts", () => ({ readCodexRateLimits: vi.fn(async () => null) }));
+import { readCodexRateLimits } from "../src/codex-rate-limits.ts";
+
+function weekly(used: number, reset = Date.now() / 1000 + 3600, limited = false) {
+  return JSON.stringify({
+    payload: {
+      rate_limits: {
+        primary: { used_percent: used, window_minutes: 10080, resets_at: reset },
+        secondary: null,
+        rate_limit_reached_type: limited ? "weekly" : null,
+      },
+    },
+  });
+}
+
+test("live weekly-only quota selects by current home, even without rollouts, and override pins", async () => {
+  const a = account("default", [1, 1]);
+  const b = account("second");
+  vi.mocked(readCodexRateLimits).mockImplementation(async (home) => weekly(home === a.home ? 92 : 2));
+  try {
+    expect((await readCodexAccountStatus(a)).headroom).toBeCloseTo(0.08);
+    expect((await selectLiveCodexAccount([a, b])).label).toBe("second");
+    expect((await selectLiveCodexAccount([a, b], "default")).label).toBe("default");
+    vi.mocked(readCodexRateLimits).mockImplementation(async (home) => weekly(home === a.home ? 2 : 92));
+    expect((await selectLiveCodexAccount([a, b])).label).toBe("default");
+  } finally {
+    vi.mocked(readCodexRateLimits).mockResolvedValue(null);
+  }
+});
+
+test("unavailable live quota falls back to rollout observations", async () => {
+  const a = account("saved", [60, 70]);
+  vi.mocked(readCodexRateLimits).mockRejectedValueOnce(new Error("unavailable"));
+  expect((await readCodexAccountStatus(a)).headroom).toBeCloseTo(0.3);
+  expect((await readCodexAccountStatus(account("unknown"))).headroom).toBeNull();
+});
+
+test("a limited weekly-only window recovers only when its reset passes", async () => {
+  const a = account("weekly");
+  vi.mocked(readCodexRateLimits).mockResolvedValueOnce(weekly(100, Date.now() / 1000 + 3600, true));
+  expect((await readCodexAccountStatus(a)).headroom).toBe(0);
+  vi.mocked(readCodexRateLimits).mockResolvedValueOnce(weekly(100, Date.now() / 1000 - 1, true));
+  expect((await readCodexAccountStatus(a)).headroom).toBe(1);
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
-import { codexAccounts, selectCodexAccount } from "../../packages/settings/src/codex-accounts.ts";
+import { codexAccounts, selectLiveCodexAccount } from "../../packages/settings/src/codex-accounts.ts";
 import { plan, run, usageGate } from "./run.mjs";
 
 /** One account per campaign, including retries and guard waits. Never rotate after a stop. */
@@ -16,7 +16,7 @@ export async function codexCampaign(args, runCampaign = run) {
   const options = plan(["--harness", "codex", ...flags]);
   if (options.harness !== "codex") throw Error("This entry point runs Codex campaigns only");
   if (options.dryRun) return { ...options, account: label ?? "auto" };
-  const selected = selectCodexAccount(codexAccounts(), label);
+  const selected = await selectLiveCodexAccount(codexAccounts(), label);
   const age = selected.observedAt === null ? Infinity : Date.now() - Date.parse(selected.observedAt);
   const rate = age >= -60_000 && age <= 24 * 3600_000 ? structuredClone(selected.rateLimits) : null;
   if (rate) {

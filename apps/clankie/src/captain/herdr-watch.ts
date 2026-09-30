@@ -2,7 +2,7 @@ import type { HarnessSeatAdapter, SeatControl, SeatEvent } from "@clankie/agent-
 import {
   bundledSkills,
   codexAccounts,
-  selectCodexAccount,
+  selectLiveCodexAccount,
   type CodexAccount,
   type SkillsSettings,
 } from "@clankie/settings";
@@ -1001,7 +1001,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     if (remote === undefined && input.harness === "codex") {
       try {
-        const selected = selectCodexAccount(await this.accounts(), input.account);
+        const selected = await selectLiveCodexAccount(await this.accounts(), input.account);
         account = { label: selected.label, home: selected.home };
       } catch (error) {
         return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };

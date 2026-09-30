@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
+import { readCodexRateLimits } from "../../../packages/settings/src/codex-rate-limits.ts";
 import { SettingsStore } from "@clankie/settings";
 // @ts-expect-error -- checkout eval tooling is plain ESM.
 import { codexCampaign } from "../../../scripts/evals/codex.mjs";
@@ -74,6 +75,19 @@ test("evals pin one registry-selected home for the campaign and restore the call
     }),
   ).rejects.toThrow("fixture failure");
   expect(process.env.CODEX_HOME).toBe(first);
+  // Live weekly-only quota overrides an older, less-used rollout before a campaign starts.
+  vi.mocked(readCodexRateLimits).mockResolvedValueOnce(
+    JSON.stringify({
+      payload: {
+        rate_limits: {
+          primary: { used_percent: 92, window_minutes: 10080, resets_at: Date.now() / 1000 + 86400 },
+        },
+      },
+    }),
+  );
+  runner.mockClear();
+  await expect(codexCampaign([...args, "--account", "second"], runner)).rejects.toThrow("usage guard");
+  expect(runner).not.toHaveBeenCalled();
 });
 
 test("a Codex dry run neither loads credentials nor starts the runner", async () => {
@@ -86,3 +100,7 @@ test("a Codex dry run neither loads credentials nor starts the runner", async ()
   expect(runner).not.toHaveBeenCalled();
   await expect(codexCampaign([...args, "--account"], runner)).rejects.toThrow("registered label");
 });
+
+vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexRateLimits: vi.fn(async () => null),
+}));

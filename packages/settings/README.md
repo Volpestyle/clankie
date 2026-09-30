@@ -135,6 +135,10 @@ See [runtime commands](../../docs/cli.md#connections-and-runtime).
 
 `codexAccounts` stores extra `{label, home}` records only. `default` remains implicit
 from `CODEX_HOME` or `~/.codex`. The CLI/TUI and owner API register canonical paths;
-Codex owns authentication and hook consent. `codexAccounts`, `codexAccountStatus`
-and `selectCodexAccount` supply the same registry and rollout-based headroom to
-hires, session discovery and the eval runner. Unknown telemetry is not zero use.
+Codex owns authentication and hook consent. `codexAccounts` and `codexAccountStatus`
+supply the registry and saved rollout status. `readCodexAccountStatus` and
+`selectLiveCodexAccount` query current quota through an owned Codex app-server
+(no login or model turn), falling back to rollouts after a bounded failure.
+Selection uses the minimum remaining fraction across reported windows, including
+weekly-only plans. Hires and evals share that selector; session discovery uses
+the registry. Unknown telemetry is not zero use.

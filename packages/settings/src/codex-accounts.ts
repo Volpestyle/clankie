@@ -3,6 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { ClankieSettingsSchema, dropRetiredSettings, type ClankieSettings } from "./schema.ts";
+import { readCodexRateLimits } from "./codex-rate-limits.ts";
 import { defaultSettingsPath, SettingsStore } from "./store.ts";
 
 export interface CodexAccount {
@@ -129,6 +130,15 @@ export function codexAccountStatus(account: CodexAccount, now = Date.now()) {
       if (fd !== undefined) closeSync(fd);
     }
   }
+  return accountStatus(account, rateLimits, observedAt, now);
+}
+
+function accountStatus(
+  account: CodexAccount,
+  rateLimits: CodexRateLimit | null,
+  observedAt: string | null,
+  now: number,
+) {
   const fresh =
     observedAt !== null &&
     Number.isFinite(Date.parse(observedAt)) &&
@@ -145,8 +155,11 @@ export function codexAccountStatus(account: CodexAccount, now = Date.now()) {
   const limited =
     fresh &&
     rateLimits?.limited &&
-    !Object.values(rateLimits.resets).every((reset) => reset !== null && reset * 1000 <= now);
-  const headroom = limited ? 0 : remaining.length === 2 ? Math.min(...remaining) : null;
+    (remaining.length === 0 ||
+      !(["five_hour", "seven_day"] as const)
+        .filter((key) => rateLimits[key] !== null)
+        .every((key) => rateLimits.resets[key] !== null && rateLimits.resets[key]! * 1000 <= now));
+  const headroom = limited ? 0 : remaining.length > 0 ? Math.min(...remaining) : null;
   return {
     ...account,
     authPresent: existsSync(join(account.home, "auth.json")),
@@ -157,7 +170,37 @@ export function codexAccountStatus(account: CodexAccount, now = Date.now()) {
 }
 
 export function selectCodexAccount(accounts: readonly CodexAccount[], label?: string) {
-  const statuses = accounts.map((account) => codexAccountStatus(account));
+  return chooseAccount(
+    accounts.map((account) => codexAccountStatus(account)),
+    label,
+  );
+}
+
+/** Prefer current account quota, including homes with no rollout yet. */
+export async function readCodexAccountStatus(account: CodexAccount) {
+  if (existsSync(join(account.home, "auth.json"))) {
+    const text = await readCodexRateLimits(account.home).catch(() => null);
+    const limits = text === null ? null : codexRateLimit(text);
+    if (limits && (limits.five_hour !== null || limits.seven_day !== null || limits.limited))
+      return accountStatus(account, limits, new Date().toISOString(), Date.now());
+  }
+  return codexAccountStatus(account);
+}
+
+export async function selectLiveCodexAccount(accounts: readonly CodexAccount[], label?: string) {
+  if (label !== undefined && !accounts.some((account) => account.label === label))
+    throw new Error(`Unknown Codex account: ${label}`);
+  return chooseAccount(
+    await Promise.all(
+      accounts
+        .filter((account) => label === undefined || account.label === label)
+        .map(readCodexAccountStatus),
+    ),
+    label,
+  );
+}
+
+function chooseAccount(statuses: ReturnType<typeof codexAccountStatus>[], label?: string) {
   if (label !== undefined) {
     const selected = statuses.find((account) => account.label === label);
     if (!selected) throw new Error(`Unknown Codex account: ${label}`);

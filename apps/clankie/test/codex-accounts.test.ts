@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
+import { readCodexRateLimits } from "../../../packages/settings/src/codex-rate-limits.ts";
 import { SettingsStore } from "@clankie/settings";
 import { createAccountRoutes } from "../src/account-routes.ts";
 import { runAccountsCommand } from "../../tui/src/command/accounts.ts";
@@ -42,8 +43,13 @@ test("CLI and owner-authorized API register the same path-only accounts without 
   await runAccountsCommand(["codex", "remove", "second"], { settings });
   expect((await settings.load()).codexAccounts).toEqual([]);
   await runAccountsCommand(["codex", "add", home, "--label", "restored"], { settings });
+  vi.mocked(readCodexRateLimits).mockResolvedValueOnce(
+    JSON.stringify({ payload: { rate_limits: { primary: { used_percent: 92, window_minutes: 10080 } } } }),
+  );
   const response = await app.request("/v1/accounts/codex", { headers: { authorization: "owner" } });
-  expect(await response.json()).toMatchObject({ accounts: [{ label: "default" }, { label: "restored" }] });
+  expect(await response.json()).toMatchObject({
+    accounts: [{ label: "default" }, { label: "restored", headroom: expect.closeTo(0.08) }],
+  });
 });
 
 test("session-id transcript lookup searches the registered account home", async () => {
@@ -75,3 +81,7 @@ test("session-id transcript lookup searches the registered account home", async 
     expect.objectContaining({ type: "message", role: "operator", text: "Second account receipt" }),
   );
 });
+
+vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexRateLimits: vi.fn(async () => null),
+}));

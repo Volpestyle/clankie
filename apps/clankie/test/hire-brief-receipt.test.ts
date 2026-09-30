@@ -1,6 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   HerdrWatchStore,
   type HerdrAgentSnapshot,
@@ -15,7 +16,21 @@ const request = {
   workingDirectory: tmpdir(),
 };
 
-afterEach(() => vi.useRealTimers());
+let accountHome: string;
+beforeEach(() => {
+  accountHome = mkdtempSync(join(tmpdir(), "hire-receipt-account-"));
+  writeFileSync(join(accountHome, "auth.json"), "synthetic presence only");
+  vi.stubEnv("CODEX_HOME", accountHome);
+  vi.stubEnv("CLANKIE_SETTINGS_FILE", join(accountHome, "settings.json"));
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  rmSync(accountHome, { recursive: true, force: true });
+});
+vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexRateLimits: vi.fn(async () => null),
+}));
 
 function fixture(harness = "claude") {
   const agent: HerdrAgentSnapshot = {

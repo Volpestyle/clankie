@@ -557,8 +557,10 @@ the login is valid. `default` is implicit (`CODEX_HOME`, otherwise `~/.codex`).
 Removing a registration never deletes its home or credentials.
 
 Local Codex hires choose the greatest minimum remaining fraction across the
-five-hour and weekly windows from recent rollout `rate_limits`. Usage older than
-24 hours, missing windows and unreadable telemetry are unknown, not free quota.
+windows Codex reports (some plans report only a weekly window). The read-only
+`account/rateLimits/read` query uses each home without starting a model turn.
+If unavailable after ten seconds, recent rollout `rate_limits` provide a fallback.
+Missing usage or fallback observations older than 24 hours are unknown, not free quota.
 Known positive headroom wins over unknown; unknown wins over exhausted accounts;
 registration order breaks ties. Passed reset times restore the corresponding
 window. If all accounts are exhausted the least constrained one is returned;

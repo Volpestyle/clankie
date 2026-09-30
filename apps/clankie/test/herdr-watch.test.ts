@@ -2134,3 +2134,7 @@ it("keeps channel delivery prompts internal while allowing an explicit reply wat
   );
   store.close();
 });
+
+vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexRateLimits: vi.fn(async () => null),
+}));

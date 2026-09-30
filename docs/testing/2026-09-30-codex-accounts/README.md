@@ -17,9 +17,11 @@ GET/POST `/v1/accounts/codex` exposes registration and quota metadata. Settings
 store canonical paths and labels only. `default` is implicit from `CODEX_HOME`
 or `~/.codex`; removing a registration does not remove files.
 
-Hires choose the greatest minimum remaining percentage across both rollout
-windows. Recent means no more than 24 hours old; expired resets replenish their
-window. Known positive headroom ranks before unknown, then exhausted; registry
+Hires query Codex’s read-only `account/rateLimits/read` per registered home and
+choose the greatest minimum remaining percentage across reported windows,
+including weekly-only plans. The quota request starts no login or model turn.
+If unavailable within ten seconds, recent rollout observations are the fallback.
+Recent means no more than 24 hours old; expired resets replenish their window. Known positive headroom ranks before unknown, then exhausted; registry
 order breaks ties. Homes without credential-file presence are skipped.
 `account: "LABEL"` pins a registered account. Codex remains responsible for
 validating authentication and enforcing quota. This is observed usage, not a
@@ -46,8 +48,9 @@ belong on an API key with an explicit spend budget.
 [Focused test output](focused-tests.txt), [eval dry-run](eval-dry-run.json),
 [eval guard tests](eval-tests.txt), and [full-check blocker](check-blocked.txt) retain the decisive output.
 
-All account, quota and launch tests use synthetic temporary homes and fake
-worker processes; they do not spend either live subscription.
+Automated account, quota and launch tests use synthetic temporary homes and fake
+worker processes. The additional live quota check below uses both supplied homes
+without starting a model turn.
 
 | Check                                                                 | Result                                                                                                                                                                                                                       |
 | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -65,11 +68,42 @@ The app label change is committed on app `main` as `30c2332`. Device rendering
 was not re-tested for this metadata-text addition; existing adaptive iPhone/iPad
 layout tests passed. Deployment is held for the lead.
 
-A read-only metadata check of the supplied second home returned
-`{ "authPresent": true, "headroom": null, "observedAt": null }`.
-This proves credential-file presence only. It does not validate the login;
-there is no recorded usage sample yet. Pin that label explicitly for its first
-hire if another account has known positive headroom.
+## Live account follow-up
+
+At 2026-09-30 15:59 UTC, the native quota API returned the opposite home ordering
+from the reported 91% default-account usage:
+
+| Home                                   | Weekly usage | Headroom |
+| -------------------------------------- | -----------: | -------: |
+| `~/.codex` (`default`)                 |           2% |      98% |
+| `~/.codex-jamescvolpe` (`jamescvolpe`) |          92% |       8% |
+
+Both returned a single weekly window. The second home had no saved rollout.
+This exposed two gaps in the initial implementation: requiring two windows and
+using saved rollouts alone. The follow-up queries live quota first and treats
+one valid reported window as sufficient. Account identity was not inspected;
+these results describe the credentials Codex used under each explicit home.
+
+The actual updated selector chose `default`; an explicit override chose
+`jamescvolpe`. [Sanitized live output](live-selection.json) includes only quota,
+labels, and observation times. No credentials, account identity, credits,
+transcript messages, or model output are retained. No real `auth.json` contents
+were read by the verifier, no login command was run, and no service was restarted.
+Codex itself handles authentication for the quota RPC. Registration was not changed.
+
+[Follow-up focused tests](live-tests.txt): 76 tests passed, including reversed
+weekly-only account ordering, no-rollout status, explicit overrides, RPC cleanup
+and timeout, unavailable-query fallback, reset recovery, API quota, and the eval
+guard rejecting live 92% usage over a lower saved sample. Typecheck (27 tasks),
+changed-file lint, and docs checks passed. The broader run passed 382 files
+(3,246 tests, two skipped) and exposed two fixture problems: a missing mock import
+and a receipt test using the real default home under fake timers. Both were
+fixed; the final rerun of those two files passed all 15 tests. The final focused
+and hire runs therefore cover 91 passing tests. The full suite was not repeated
+after those fixture-only fixes. `pnpm check` was rerun and remains
+blocked by the other worker’s `scripts/evals/isolation.mjs` formatting;
+[output](live-check-blocked.txt). The separate dead-code check still reports only
+the other worker’s three unfinished seat-eval entry files.
 
 The instruction worker's `43e3a994` commit included the shared `docs/cli.md`
 account documentation while it was being edited. The implementation commit

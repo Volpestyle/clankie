@@ -6,7 +6,7 @@
 import { chmod, mkdir, mkdtemp, readFile, readlink, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
@@ -327,3 +327,7 @@ test.each([undefined, "default"])(
     }
   },
 );
+
+vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexRateLimits: vi.fn(async () => null),
+}));
