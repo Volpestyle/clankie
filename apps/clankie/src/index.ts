@@ -626,12 +626,12 @@ const captain = createCaptain(
     ...(tldrawHost === undefined ? {} : { diagrams: tldrawHost }),
     embodiment: {
       submitIntent: (intent) => boundApp().embodiment.submit(intent),
-      getSession: (sessionId) => Promise.resolve(boundApp().embodiment.getSession(sessionId)),
-      getLiveSession: () => Promise.resolve(boundApp().embodiment.liveSession()),
+      getSession: (sessionId) => boundApp().embodiment.observe(sessionId),
+      getLiveSession: () => boundApp().embodiment.observe(),
     },
     activity: {
       current: async () => {
-        const live = boundApp().embodiment.liveSession();
+        const live = await boundApp().embodiment.observe();
         if (live === undefined) return { schemaVersion: 1 as const, outcome: "not_playing" as const };
         const snapshot = await activityObservations.current();
         return snapshot === undefined
@@ -647,8 +647,14 @@ const captain = createCaptain(
       },
     },
     playSight: {
-      still: () => Promise.resolve(playSight.still()),
-      story: () => Promise.resolve(playSight.story()),
+      still: async () => {
+        await boundApp().embodiment.observe();
+        return playSight.still();
+      },
+      story: async () => {
+        await boundApp().embodiment.observe();
+        return playSight.story();
+      },
     },
     hostedWorld: {
       inspect: () => hostedWorld.inspect(),
@@ -876,6 +882,7 @@ const clankie = await createClankieApp({
     current: (_signal) => Promise.resolve(activityObservations.current()),
   },
   playSight,
+  startPlayHost: () => playHost.start(playAbort.signal),
   rivals,
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   hostPower: () => hostPower.report(),
@@ -953,17 +960,10 @@ const embodimentClient: EmbodimentClientPort = {
 const playHost = new PlayHost({
   client: embodimentClient,
   environmentIds: ["pokemon-firered", "pokemon-emerald"],
-  execute: createConfiguredPlayExecution(),
+  execute: (...args) => createConfiguredPlayExecution()(...args),
   logger,
 });
 const playAbort = new AbortController();
-void playHost.runForever(playAbort.signal).catch((error: unknown) => {
-  logger.error(
-    { err: error instanceof Error ? error.message : String(error) },
-    "embodiment play host stopped unexpectedly",
-  );
-});
-logger.info({ environmentIds: ["pokemon-firered", "pokemon-emerald"] }, "embodiment play host started");
 
 const listenHost = "127.0.0.1";
 const webSocketServer = new WebSocketServer({

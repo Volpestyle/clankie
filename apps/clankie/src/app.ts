@@ -418,6 +418,8 @@ export interface ClankieAppDependencies {
   discordPresenceRuntime?: DiscordPresenceRuntimePort;
   discordUserPresenceRuntime?: DiscordPresenceRuntimePort;
   activityObservations?: ActivityObservationReadPort;
+  /** Activated by the first play join or authorized observation, never by boot. */
+  startPlayHost?: () => Promise<void>;
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
@@ -636,6 +638,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   >();
 
   const embodiment = new EmbodimentManager({
+    ...(dependencies.startPlayHost === undefined ? {} : { startHost: dependencies.startPlayHost }),
     clock,
     idFactory: () => `embodiment-${idFactory()}`,
     emit: (type, sessionId, data) => {
@@ -2373,7 +2376,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.get("/v1/embodiment/sessions/live", async (context) => {
     const authorization = await authenticateCaptainOrOperator(context);
     if ("denial" in authorization) return authorization.denial;
-    return context.json({ session: embodiment.liveSession() ?? null });
+    return context.json({ session: (await embodiment.observe()) ?? null });
   });
 
   /** Present-tense self-observation, read straight from the in-process projection. */
@@ -2390,7 +2393,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (!operator) return context.json({ error: "activity_observation_authentication_required" }, 401);
     }
 
-    const live = embodiment.liveSession();
+    const live = await embodiment.observe();
     if (live === undefined) {
       return context.json(ActivityObservationReadSchema.parse({ schemaVersion: 1, outcome: "not_playing" }));
     }
@@ -2455,7 +2458,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (dependencies.playSight === undefined) {
       return context.json({ schemaVersion: 1, outcome: "not_playing" });
     }
-    const live = embodiment.liveSession();
+    const live = await embodiment.observe();
     const sight = dependencies.playSight.still();
     if (live === undefined) {
       return context.json({ schemaVersion: 1, outcome: "not_playing" });
@@ -2484,7 +2487,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (dependencies.playSight === undefined) {
       return context.json({ schemaVersion: 1, outcome: "not_playing" });
     }
-    const live = embodiment.liveSession();
+    const live = await embodiment.observe();
     const sight = dependencies.playSight.story();
     if (live === undefined) {
       return context.json({ schemaVersion: 1, outcome: "not_playing" });
@@ -2630,7 +2633,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "captain_authentication_unavailable" }, 503);
     }
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-    const session = embodiment.getSession(context.req.param("id"));
+    const session = await embodiment.observe(context.req.param("id"));
     if (session === undefined) return context.json({ error: "embodiment_session_not_found" }, 404);
     return context.json({ session });
   });

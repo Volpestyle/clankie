@@ -1,0 +1,32 @@
+{
+  "source": "~/.local/state/clankie/discord-live-receipts.jsonl",
+  "sampledAt": "2026-09-30",
+  "receiptCount": 421,
+  "attachedCountZero": 421,
+  "deliveredCountZero": 421,
+  "first": {
+    "schemaVersion": 1,
+    "id": "f82f9393-a797-4cb2-8373-d82379cd379a",
+    "occurredAt": "2026-08-25T21:47:28.071Z",
+    "type": "discord.voice.play_transcript_delivery",
+    "data": {
+      "type": "play_transcript_delivery",
+      "deliveryId": "b8c1b87a-3630-4068-9f18-df2547236152",
+      "attachedCount": 0,
+      "deliveredCount": 0
+    }
+  },
+  "last": {
+    "schemaVersion": 1,
+    "id": "dce127cc-0027-4d90-9bc9-60c465846e4f",
+    "occurredAt": "2026-09-30T15:40:36.092Z",
+    "type": "discord.voice.play_transcript_delivery",
+    "data": {
+      "type": "play_transcript_delivery",
+      "deliveryId": "79e3c81f-99ec-4102-a785-8df820eda19d",
+      "attachedCount": 0,
+      "deliveredCount": 0
+    }
+  },
+  "overlapWithRecordedRunningOrStoppingSessions": 0
+}

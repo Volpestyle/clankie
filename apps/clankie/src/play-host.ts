@@ -99,6 +99,7 @@ export class PlayHost {
   private readonly clock: () => Date;
   private readonly forcedReportGraceMs: number;
   private active: ActivePlay | undefined;
+  private started: Promise<void> | undefined;
   /** Last logged claim-failure signature; undefined while the poll is healthy. */
   private claimFailure: string | undefined;
 
@@ -210,9 +211,26 @@ export class PlayHost {
     return true;
   }
 
+  /** Start once on demand; reconciliation finishes before a caller submits work. */
+  public start(signal: AbortSignal): Promise<void> {
+    this.started ??= this.reconcile().then(() => {
+      if (signal.aborted) return;
+      this.options.logger.info(
+        { environmentIds: this.options.environmentIds },
+        "embodiment play host started",
+      );
+      void this.run(signal).catch((error: unknown) => {
+        this.options.logger.error(
+          { err: error instanceof Error ? error.message : String(error) },
+          "embodiment play host stopped unexpectedly",
+        );
+      });
+    });
+    return this.started;
+  }
+
   /** Poll until aborted; an active session keeps polling so stops can land. */
-  public async runForever(signal: AbortSignal, pollIntervalMs = 1_000): Promise<void> {
-    await this.reconcile();
+  private async run(signal: AbortSignal, pollIntervalMs = 1_000): Promise<void> {
     while (!signal.aborted) {
       const claimed = await this.poll();
       if (!claimed) await abortableDelay(pollIntervalMs, signal);

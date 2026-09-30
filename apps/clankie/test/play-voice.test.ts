@@ -6,12 +6,15 @@ import type { EmbodimentSession } from "@clankie/protocol";
 import {
   createPlayVoiceClient,
   createPlayVoiceListener,
+  startPlayVoiceListener,
   type PlayVoiceClient,
   type PlayVoiceListenerEvidence,
 } from "@clankie/play-voice";
 import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { parseFreePlayJournal } from "@clankie/play";
 import { describe, expect, it, vi } from "vitest";
+import { createClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
 import { createWorldPlayExecution } from "../src/play-execution-world.ts";
 import { fakeWorldBody } from "./world-body-fake.ts";
 import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
@@ -188,6 +191,132 @@ async function play(options: {
 }
 
 describe("asked play voice", () => {
+  it.each([false, true])(
+    "delivers fixture room input after a lazy HTTP join (observe first: %s)",
+    async (observeFirst) => {
+      const evidence: PlayVoiceListenerEvidence[] = [];
+      let transcript!: (line: string) => void;
+      const { listener, stopTranscript, port } = await startPlayVoiceListener({
+        token: "fixture-play-token",
+        port: 0,
+        narrate: async () => undefined,
+        subscribeTranscript: (onLine) => {
+          transcript = onLine;
+          return () => undefined;
+        },
+        emit: (event) => {
+          evidence.push(event);
+        },
+      });
+      const abort = new AbortController();
+      let host!: PlayHost;
+      const start = vi.fn(() => host.start(abort.signal));
+      const clankie = await createClankieApp({
+        captain: createStubCaptain(),
+        startPlayHost: start,
+        authenticateCaptain: async (request) =>
+          request.headers.get("authorization") === "Bearer fixture" ? { captainId: "fixture" } : undefined,
+      });
+      const mind = talkingMind(null);
+      const env = await playEnv();
+      const joinWorld = vi.fn(async () => ({ outcome: "joined" as const, body: fakeWorldBody() }));
+      let delivered!: Promise<void>;
+      let voice: PlayVoiceClient | undefined;
+      host = new PlayHost({
+        client: {
+          claimEmbodiment: (ids) => clankie.embodiment.claim(ids),
+          getLiveEmbodimentSession: async () => clankie.embodiment.liveSession(),
+          reportEmbodiment: async (report) => {
+            const result = await clankie.embodiment.report(report);
+            if (report.state === "running") {
+              transcript("fixture viewer: check the path above you");
+              await delivered;
+            }
+            return result;
+          },
+        },
+        environmentIds: ["pokemon-firered"],
+        logger: silentLogger,
+        execute: createWorldPlayExecution({
+          logger: silentLogger,
+          env,
+          joinWorld,
+          createMind: mind.create as () => Promise<never>,
+          createVoice: async () => {
+            voice = createPlayVoiceClient({
+              url: `ws://127.0.0.1:${port}/play`,
+              token: "fixture-play-token",
+            });
+            delivered = new Promise<void>((resolve) => {
+              voice?.subscribe(() => resolve());
+            });
+            await vi.waitFor(() => expect(voice?.connected).toBe(true));
+            return voice;
+          },
+        }),
+      });
+      try {
+        transcript("fixture viewer: ordinary room input while play is idle");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(evidence).toEqual([]);
+        expect(start).not.toHaveBeenCalled();
+        expect(joinWorld).not.toHaveBeenCalled();
+        expect((await clankie.app.request("/v1/embodiment/sessions/live")).status).toBe(401);
+        expect(start).not.toHaveBeenCalled();
+        const headers = { authorization: "Bearer fixture", "content-type": "application/json" };
+        if (observeFirst) {
+          const observed = await clankie.app.request("/v1/embodiment/sessions/live", { headers });
+          expect(await observed.json()).toEqual({ session: null });
+          expect(start).toHaveBeenCalledOnce();
+          expect(joinWorld).not.toHaveBeenCalled();
+        }
+        const response = await clankie.app.request("/v1/embodiment/intents", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            schemaVersion: 1,
+            kind: "start",
+            intentId: "fixture-join",
+            originLane: "operator",
+            requestedBy: "fixture",
+            requestedAt: new Date().toISOString(),
+            environmentId: "pokemon-firered",
+            budget: { maxTurns: 1, maxDurationMs: 5_000 },
+          }),
+        });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ outcome: "accepted" });
+        await vi.waitFor(() => expect(mind.heard).toEqual(["fixture viewer: check the path above you"]), {
+          timeout: 5_000,
+        });
+        await host.settled();
+        const journalDir = env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
+        const journalFile = readdirSync(journalDir).find((name) => name.endsWith(".jsonl")) as string;
+        const journal = parseFreePlayJournal(readFileSync(join(journalDir, journalFile), "utf8"));
+        expect(journal[1]).toMatchObject({
+          turn: { interjection: "fixture viewer: check the path above you" },
+        });
+        expect(joinWorld).toHaveBeenCalledOnce();
+        expect(clankie.embodiment.liveSession()).toBeUndefined();
+        expect(evidence).toContainEqual(
+          expect.objectContaining({
+            type: "play_transcript_delivery",
+            attachedCount: 1,
+            deliveredCount: 1,
+          }),
+        );
+        expect(JSON.stringify(evidence)).not.toContain("fixture viewer");
+      } finally {
+        abort.abort();
+        await host.stopAndWait({ deadlineMs: 1_000 });
+        voice?.close();
+        stopTranscript();
+        await listener.close();
+        clankie.close();
+      }
+    },
+  );
+
   it("reports what happened, and never a sentence to say", async () => {
     const voice = fakeVoice();
     const mind = talkingMind("this desk has beaten me twice now");

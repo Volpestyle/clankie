@@ -1,5 +1,5 @@
 import type { EmbodimentSession } from "@clankie/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   PlayHost,
   type EmbodimentAssignment,
@@ -65,6 +65,31 @@ function host(client: ReturnType<typeof fakeClient>, execute: PlayExecution) {
 }
 
 describe("PlayHost", () => {
+  it("starts once on demand and reconciles a stale session before returning", async () => {
+    const client = fakeClient({ live: session({ state: "running" }) });
+    const read = vi.spyOn(client, "getLiveEmbodimentSession");
+    const execute = vi.fn<PlayExecution>();
+    const subject = host(client, execute);
+    const abort = new AbortController();
+    expect(read).not.toHaveBeenCalled();
+    expect(client.claims).toEqual([]);
+    try {
+      await Promise.all([subject.start(abort.signal), subject.start(abort.signal)]);
+      expect(read).toHaveBeenCalledOnce();
+      expect(client.reports).toEqual([
+        expect.objectContaining({
+          state: "failed",
+          receipt: expect.objectContaining({ outcome: "lease_lapsed" }),
+        }),
+      ]);
+      expect(execute).not.toHaveBeenCalled();
+      expect(client.claims).toHaveLength(1);
+    } finally {
+      abort.abort();
+      await subject.stopAndWait();
+    }
+  });
+
   it("claims a start, reports running, then stopped with the receipt", async () => {
     const client = fakeClient({ assignments: [{ kind: "start", session: session() }] });
     const subject = host(client, async (_session, _control, onRunning) => {

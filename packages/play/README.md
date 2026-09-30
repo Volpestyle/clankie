@@ -46,7 +46,10 @@ after readiness. The host, cartridges, and his own credentialed seat remain
 separate prerequisites; joining alone does not start the world.
 
 The captain is the parent of a sitting; this package is the driver. The
-service's play host joins the world and hands the seat to the loop here. To
+service's play host starts on the first join or explicit play observation,
+reconciles any stale session, and joins the world when asked. Service boot does
+not start its polling loop; observing alone does not join a world. The host
+hands the joined seat to the loop here. To
 watch a playthrough without a Discord ask, start
 [`@clankie/discord-activity`](../../apps/discord-activity/README.md), point
 `WORLD_ADDRESS` at a running world, and run:

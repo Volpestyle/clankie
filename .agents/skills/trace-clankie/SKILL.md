@@ -100,6 +100,13 @@ Following controls waking, not collection.
 - **Conversation metadata is not a liveness clock.** `meta.json.updatedAt` may
   stay at turn acceptance while activity and tools keep appending. Judge a live
   turn by the newest `events.jsonl` event and its accepted/completed pair.
+- **An empty play transcript receipt does not prove a broken wire.** Older
+  `play_transcript_delivery` receipts include idle room input with
+  `attachedCount: 0, deliveredCount: 0`. The play consumer connects only during
+  a session; current listeners discard idle input without a delivery receipt.
+  Positive delivered counts prove socket writes, not consumption by the mind:
+  join those to the play journal’s interjection. The play host now starts on
+  the first join or explicit observation, not service boot.
 - **A play journal does not prove which code revision ran.** Its header has no
   source revision, and service logs carry the package version rather than the
   commit. Compare process/restart and commit times, then use fields actually
