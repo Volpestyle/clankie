@@ -5,7 +5,7 @@ import { bundledSkills } from "../../packages/settings/src/bundled-skills.ts";
 /** Ship the selected bundle, independent of the build machine's owner settings. */
 export async function copySkillAssets(repoRoot, targetRoot) {
   const skills = bundledSkills(repoRoot);
-  for (const plugin of ["claude-plugin", "worker-skills"]) {
+  for (const plugin of ["claude-plugin", "codex-plugin", "worker-skills"]) {
     const source = join(repoRoot, "integrations", plugin);
     await cp(source, join(targetRoot, "integrations", plugin), {
       recursive: true,
@@ -16,6 +16,7 @@ export async function copySkillAssets(repoRoot, targetRoot) {
   for (const directory of [
     ".agents/skills",
     "integrations/claude-plugin/skills",
+    "integrations/codex-plugin/skills",
     "integrations/worker-skills/skills",
   ]) {
     await mkdir(join(targetRoot, directory), { recursive: true });

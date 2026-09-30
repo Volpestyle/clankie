@@ -1,0 +1,10 @@
+{
+  "name": "clankie",
+  "version": "0.1.0",
+  "description": "Clankie's operator seat: identity, memory, tools and conversation transcript in the native Codex TUI.",
+  "author": { "name": "James Volpe" },
+  "license": "Apache-2.0",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/"
+}

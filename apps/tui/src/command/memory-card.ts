@@ -15,7 +15,7 @@ const MEMORY_CARD_USAGE = [
   `Usage: clankie memory-card [--lane <${CaptainSessionLaneV2Schema.options.join("|")}>] [--hook]`,
   "",
   "Prints the memory card that lane's next run injects. Default lane: operator.",
-  "--hook reads Claude hook JSON on stdin and prints the card only when this",
+  "--hook reads native seat hook JSON on stdin and prints the card only when this",
   "session has not seen it yet; SessionStart re-arms it.",
 ].join("\n");
 

@@ -132,13 +132,21 @@ persisting a second world projection
 
 ### Native operator seats
 
+`clankie seat --harness codex` selects the [Codex plugin](../integrations/codex-plugin/README.md).
+Its trusted native hooks add the shared identity, service context and memory card,
+and sync redacted transcript entries to the selected conversation. The real Codex
+TUI creates a thread on its owned app-server; the launcher reuses the same Codex
+seat driver as fleet hires and the existing outbox pump for wakes, watches and
+escalations. Hook trust is an owner step in `/hooks`. Until those hooks run, the
+launcher does not bind the outbox. Claude remains the default harness.
+
 The operator seat is a place any harness can sit
 ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)). `clankie seat`
 opens Claude Code, on the owner's own plan, as Clankie: the plugin at
 [`integrations/claude-plugin`](../integrations/claude-plugin/README.md) forces
 his identity as the output style, injects the owner persona, reach, address,
 and service model card at session start (`clankie prompt`) and the newest
-memory card on every turn (`clankie memory-card`), and names one stdio MCP
+memory card once per session and again when it changes (`clankie memory-card --hook`), and names one stdio MCP
 server, `clankie mcp`, that bridges to the service's lane tool bank at
 `/v1/mcp` with the operator bearer read from the broker. The bank is the same
 authored registry the pi session is built from, wrapped once at runtime and

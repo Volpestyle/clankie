@@ -20,7 +20,8 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const execFileAsync = promisify(execFileCallback);
-const SEAT_USAGE = "Usage: clankie seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
+const SEAT_USAGE =
+  "Usage: clankie seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -87,6 +88,7 @@ export interface SeatCommandOptions {
 }
 
 interface SeatFlags {
+  readonly harness?: "claude" | "codex";
   readonly conversationId?: string;
   readonly resume: boolean;
   readonly dryRun: boolean;
@@ -94,13 +96,18 @@ interface SeatFlags {
 }
 
 export function parseSeatArgs(args: readonly string[]): SeatFlags {
+  let harness: SeatFlags["harness"];
   let conversationId: string | undefined;
   let resume = false;
   let dryRun = false;
   let pluginDir: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--resume") resume = true;
+    if (arg === "--harness") {
+      const value = args[++index];
+      if (value !== "claude" && value !== "codex") throw new Error(SEAT_USAGE);
+      harness = value;
+    } else if (arg === "--resume") resume = true;
     else if (arg === "--dry-run") dryRun = true;
     else if (arg === "--conversation") {
       const value = args[++index]?.trim();
@@ -114,6 +121,7 @@ export function parseSeatArgs(args: readonly string[]): SeatFlags {
     } else throw new Error(SEAT_USAGE);
   }
   return {
+    ...(harness === undefined ? {} : { harness }),
     resume,
     dryRun,
     ...(conversationId === undefined ? {} : { conversationId }),
@@ -185,6 +193,10 @@ function herdrFailureText(caught: unknown): string {
 }
 
 export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): Promise<SeatPlan> {
+  if (flags.harness === "codex") {
+    const { planCodexSeat } = await import("./codex-seat.ts");
+    return planCodexSeat(flags, options);
+  }
   const env = options.env ?? process.env;
   const execFile = options.execFileImpl ?? defaultExecFile;
   try {
@@ -319,6 +331,10 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const flags = parseSeatArgs(args);
+  if (flags.harness === "codex") {
+    const { runCodexSeat } = await import("./codex-seat.ts");
+    return runCodexSeat(flags, options);
+  }
   const plan = await planSeat(flags, options);
   if (flags.dryRun) {
     outputJson(stdout, { ok: true, ...plan });
@@ -339,6 +355,8 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const seatEnv = { ...env };
   for (const key of Object.keys(seatEnv)) if (key.startsWith("SWARM_")) delete seatEnv[key];
   delete seatEnv.CLANKIE_CONVERSATION_ID;
+  delete seatEnv.CLANKIE_CODEX_SEAT_BINDING;
+  seatEnv.CLANKIE_SEAT_HARNESS = "claude";
   seatEnv.CLANKIE_SEAT_SESSION_ID = plan.sessionId;
   if (plan.conversationId !== undefined) seatEnv.CLANKIE_CONVERSATION_ID = plan.conversationId;
   const running = (options.spawnImpl ?? defaultSpawn)(

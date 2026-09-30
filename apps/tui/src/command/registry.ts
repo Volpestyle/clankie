@@ -30,7 +30,7 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["seat-sync"],
-    lines: ["  seat-sync                Project the launched Claude seat transcript (hook stdin)"],
+    lines: ["  seat-sync                Project the launched native seat transcript (hook stdin)"],
   },
   {
     nouns: ["seat-hook"],
@@ -300,8 +300,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["seat"],
     lines: [
-      "  seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
-      "                           Sit in Claude Code as Clankie (TTY); --dry-run prints the launch plan (JSON)",
+      "  seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
+      "                           Sit in Claude Code or Codex as Clankie (TTY); --dry-run prints the launch plan (JSON)",
     ],
   },
   {

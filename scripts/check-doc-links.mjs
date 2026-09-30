@@ -8,6 +8,8 @@ for await (const path of glob("**/*.md", {
   exclude: [
     "**/node_modules/**",
     "vendor/opinionated-skills/**",
+    // Installation snapshot; validate the authored skill sources instead.
+    "integrations/codex-plugin/skills/**",
     "**/target/**",
     "**/.git/**",
     "**/.turbo/**",

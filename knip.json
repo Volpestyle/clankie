@@ -4,7 +4,8 @@
     "docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs",
     "docs/testing/2026-09-26-hosted-connections/flows/serve.mts",
     "docs/testing/2026-09-26-work-items/flows/serve.mts",
-    "vendor/opinionated-skills/**"
+    "vendor/opinionated-skills/**",
+    "integrations/codex-plugin/skills/**"
   ],
   "workspaces": {
     ".": {
@@ -24,6 +25,7 @@
         "docs/testing/2026-09-20-delivered-files-live/flows/run-isolated-proof.mjs",
         "docs/testing/2026-09-30-claude-worker-seat/live-hire.mts",
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
+        "integrations/codex-plugin/hooks/run.mjs",
         "integrations/claude-plugin/worker/bin/seat-hook.mjs"
       ],
       "paths": {

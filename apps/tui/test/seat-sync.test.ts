@@ -6,6 +6,80 @@ import { Readable } from "node:stream";
 import { expect, test, vi } from "vitest";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 
+test("Codex hooks project only their bound native rollout and redact tools", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-seat-sync-"));
+  const sessionId = randomUUID();
+  const path = join(root, `rollout-2026-09-30T00-00-00-${sessionId}.jsonl`);
+  const token = "clankie_op_" + "a".repeat(43);
+  const requests: Array<Record<string, unknown>> = [];
+  try {
+    await writeFile(
+      path,
+      [
+        {
+          type: "response_item",
+          payload: {
+            id: "u1",
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Hello seat" }],
+            internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] },
+          },
+        },
+        {
+          type: "response_item",
+          payload: {
+            id: "a1",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Hello operator" }],
+          },
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            call_id: "tool1",
+            name: "exec_command",
+            arguments: JSON.stringify({ command: `Authorization: Bearer ${token}` }),
+          },
+        },
+      ]
+        .map((item) => JSON.stringify(item))
+        .join("\n") + "\n",
+    );
+    await runSeatSyncCommand([], {
+      env: {
+        CLANKIE_SEAT_HARNESS: "codex",
+        CLANKIE_SEAT_SESSION_ID: sessionId,
+        CLANKIE_CONVERSATION_ID: "scratch",
+        CLANKIE_OPERATOR_TOKEN: token,
+      },
+      stdin: Readable.from([
+        JSON.stringify({ session_id: sessionId, transcript_path: path, hook_event_name: "Stop" }),
+      ]),
+      fetchImpl: async (url, init) => {
+        expect(String(url)).toContain("conversationId=scratch");
+        expect(String(init?.body)).not.toContain(token);
+        requests.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true });
+      },
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      sessionId,
+      activity: "waiting",
+      entries: [
+        { type: "message", text: "Hello seat" },
+        { type: "message", text: "Hello operator" },
+        { type: "tool" },
+      ],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("seat hook uploads redacted native records to its selected conversation and never a child session", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-sync-"));
   const sessionId = randomUUID(),

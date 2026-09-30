@@ -23,6 +23,7 @@ it("assembles only selected skills in all release projections, with no checkout 
   for (const directory of [
     ".agents/skills",
     "integrations/claude-plugin/skills",
+    "integrations/codex-plugin/skills",
     "integrations/worker-skills/skills",
   ]) {
     const entries = await readdir(join(release, directory), { withFileTypes: true });

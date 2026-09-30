@@ -144,6 +144,8 @@ describe("clankie seat", () => {
       HERDR_SOCKET_PATH: "/tmp/fleet.sock",
       SWARM_SESSION_CAPABILITY: "inherited-worker",
       SWARM_COORDINATOR_ENDPOINT: "/tmp/other-coordinator.sock",
+      CLANKIE_SEAT_HARNESS: "codex",
+      CLANKIE_CODEX_SEAT_BINDING: "/another/seat.json",
     });
     const calls: string[][] = [];
     const spawned: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv | undefined }[] = [];
@@ -163,6 +165,8 @@ describe("clankie seat", () => {
     });
     expect(exit).toBe(0);
     expect(calls).toContainEqual(["herdr", "agent", "rename", "w1:p2", "clankie"]);
+    expect(spawned[0]!.env?.CLANKIE_SEAT_HARNESS).toBe("claude");
+    expect(spawned[0]!.env?.CLANKIE_CODEX_SEAT_BINDING).toBeUndefined();
     expect(calls.at(-1)).toEqual(["herdr", "agent", "rename", "w1:p2", "--clear"]);
     expect(stderr.text()).toContain("this seat is his head");
     const record = JSON.parse(await readFile(join(env.XDG_STATE_HOME!, "clankie", "seat.json"), "utf8")) as {

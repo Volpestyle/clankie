@@ -1620,7 +1620,7 @@ or has no readable native transcript, use a brief file with a short pointer.
 
 <a id="seat-commands"></a>
 
-### `seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
+### `seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
 
 Sit in Claude Code as Clankie ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
 Needs a TTY and `claude` on `PATH`. The launcher projects the bundled plugin
@@ -1678,6 +1678,15 @@ Selected project seats do not rename themselves as the global Herdr head.
 `plugin.source` is `plugin-dir`; the projected skill catalog is also in the plan.
 The [plugin README](../integrations/claude-plugin/README.md) describes the component
 source and session-only channel identity.
+
+`--harness codex` opens the real Codex TUI on its own app-server thread.
+Install the [Codex seat plugin](../integrations/codex-plugin/README.md) first.
+The launch plan includes a typed `hook_trust_required` owner step: review the
+plugin in Codex's `/hooks`, then exit and launch the seat again. The launcher never
+bypasses hook trust. Wakes bind only after trusted session hooks succeed.
+`--resume` retains the last Codex thread and conversation independently of the
+Claude seat. Both harnesses use the same service prompt, memory card, tool bank,
+redacted transcript endpoint and conversation outbox.
 
 ### `mcp [--lane operator] [--conversation ID]`
 
@@ -1893,7 +1902,7 @@ that pane; anywhere else the command does nothing.
 
 ### Native seat transcript sync
 
-`clankie seat-sync` consumes Claude hook JSON on stdin. The `clankie seat` launcher
+`clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The `clankie seat` launcher
 sets `CLANKIE_SEAT_SESSION_ID` and its selected `CLANKIE_CONVERSATION_ID`; unlaunched
 plugin use and hooks for another session are ignored. The plugin invokes sync at
 session start/end, prompt submission, stop/failure and before compaction.
@@ -1908,7 +1917,7 @@ compaction leaves activity unchanged. Empty transcripts still carry lifecycle
 activity. These are display signals, not service-run completion or ownership. Reset retires that
 conversation's native sessions; launch a new seat afterward so old history cannot
 repopulate the cleared conversation. Sync failures never
-instruct Claude to continue or block a stop. The current 9,000-entry display tail
+instruct the harness to continue or block a stop. The current 9,000-entry display tail
 is the replay bound. Image files use `clankie file publish` separately.
 
 <a id="swarm-commands"></a>

@@ -25,6 +25,7 @@
 !packages/swarm/README.md
 !integrations/herdr-plugin/**
 !integrations/claude-plugin/**
+!integrations/codex-plugin/**
 !integrations/worker-skills/**
 !.agents/skills/**
 !docs/cli.md
