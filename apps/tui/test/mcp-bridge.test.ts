@@ -117,6 +117,18 @@ describe("clankie mcp", () => {
       ),
     ).toBe(false);
     expect(parentArgvLoadsFleetChannel("claude --channels server:clankie-seat")).toBe(false);
+    // A hired seat's approved worker plugin channel (VUH-1458).
+    expect(
+      parentArgvLoadsFleetChannel(
+        'claude --settings {"enabledPlugins":{"clankie-worker@clankie":true}} --channels plugin:clankie-worker@clankie --model sonnet',
+      ),
+    ).toBe(true);
+    expect(
+      parentArgvLoadsFleetChannel("claude --channels=plugin:other@x,plugin:clankie-worker@clankie"),
+    ).toBe(true);
+    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie-worker@clankie -p")).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie@clankie")).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude --model plugin:clankie-worker@clankie")).toBe(false);
     for (const print of ["--print", "-p"]) {
       expect(
         parentArgvLoadsFleetChannel(

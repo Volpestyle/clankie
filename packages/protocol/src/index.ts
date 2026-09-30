@@ -2126,6 +2126,32 @@ export function fleetSeatEventsPath(paneId: string): string {
 }
 /** The MCP server name a fleet seat's harness loads the channel from (`server:` form of the channels flag). */
 export const FLEET_SEAT_MCP_SERVER = "clankie-seat";
+/**
+ * The Claude worker plugin a hired seat is driven through (VUH-1458): its
+ * channel carries the seat's mailbox, and its hooks report each settled turn.
+ * The owner approves this exact installed identity in managed policy once.
+ */
+export const CLAUDE_WORKER_PLUGIN = { plugin: "clankie-worker", marketplace: "clankie" } as const;
+export const CLAUDE_WORKER_PLUGIN_ID = `${CLAUDE_WORKER_PLUGIN.plugin}@${CLAUDE_WORKER_PLUGIN.marketplace}`;
+/**
+ * One lifecycle hook from a hired seat's worker plugin, reported by
+ * `clankie seat-hook` from inside its pane. `lastMessage` is the harness's own
+ * final text for a settled turn; `error` names a StopFailure.
+ */
+export const FleetSeatHookSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    event: z.enum(["SessionStart", "UserPromptSubmit", "Stop", "StopFailure"]),
+    sessionId: z.string().min(1).max(200),
+    lastMessage: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX).optional(),
+    error: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+  })
+  .strict();
+export type FleetSeatHook = z.infer<typeof FleetSeatHookSchema>;
+export const FLEET_SEAT_HOOK_PATH = "/v1/fleet/seats/:paneId/hook";
+export function fleetSeatHookPath(paneId: string): string {
+  return `/v1/fleet/seats/${encodeURIComponent(paneId)}/hook`;
+}
 
 /** The seat's answer to one escalation; it lands in the conversation as his reply. */
 export const OperatorSeatReplySchema = z

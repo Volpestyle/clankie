@@ -105,7 +105,7 @@ describe("clankie-worker claude plugin", () => {
       child.stdin.end(input);
     });
 
-  it("declares one swarm server and no hooks, seat identity, or credential", async () => {
+  it("declares one server, seat-lifecycle hooks, and no seat identity or credential", async () => {
     const manifest = JSON.parse(
       await readFile(join(workerRoot, ".claude-plugin", "plugin.json"), "utf8"),
     ) as {
@@ -121,9 +121,54 @@ describe("clankie-worker claude plugin", () => {
         },
       },
     });
-    expect(await readdir(workerRoot)).toEqual(
-      expect.not.arrayContaining(["hooks", "output-styles", "skills"]),
+    expect(await readdir(workerRoot)).toEqual(expect.not.arrayContaining(["output-styles", "skills"]));
+    // Its hooks report a Clankie hire's settled turns (VUH-1458), through one no-op-elsewhere script.
+    const hooks = JSON.parse(await readFile(join(workerRoot, "hooks", "hooks.json"), "utf8")) as {
+      hooks: Record<string, { hooks: { command: string }[] }[]>;
+    };
+    expect(Object.keys(hooks.hooks).sort()).toEqual([
+      "SessionStart",
+      "Stop",
+      "StopFailure",
+      "UserPromptSubmit",
+    ]);
+    for (const entries of Object.values(hooks.hooks))
+      expect(entries[0]?.hooks[0]?.command).toBe('node "${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs"');
+  });
+
+  it("serves a Clankie hire's mailbox through clankie mcp --seat, with Claude's argv handed over", async () => {
+    const bin = await mkdtemp(join(tmpdir(), "clankie-worker-bin-"));
+    await writeFile(
+      join(bin, "clankie"),
+      `#!/bin/sh\nprintf '%s|%s|%s' "$*" "$CLANKIE_SEAT_PARENT_ARGV" "$HERDR_PANE_ID"\n`,
+      { mode: 0o755 },
     );
+    const served = await run({ PATH: `${bin}:${process.env.PATH ?? ""}`, HERDR_PANE_ID: "w1:p1" });
+    expect(served.code).toBe(0);
+    const [args, parent, pane] = served.stdout.split("|");
+    expect(args).toBe("mcp --seat");
+    // The test runner is this wrapper's parent here, as Claude is in a real launch.
+    expect(parent).toContain("node");
+    expect(pane).toBe("w1:p1");
+  });
+
+  it("reports hooks only from a Clankie hire's pane", async () => {
+    const hook = join(workerRoot, "bin", "seat-hook.mjs");
+    const bin = await mkdtemp(join(tmpdir(), "clankie-worker-hook-"));
+    await writeFile(join(bin, "clankie"), `#!/bin/sh\nprintf '%s:' "$*"; cat\n`, { mode: 0o755 });
+    const call = (env: NodeJS.ProcessEnv) =>
+      new Promise<string>((resolve) => {
+        const child = spawn(process.execPath, [hook], {
+          env: { PATH: `${bin}:${process.env.PATH ?? ""}`, ...env },
+        });
+        let stdout = "";
+        child.stdout.on("data", (chunk: Buffer) => (stdout += String(chunk)));
+        child.on("exit", () => resolve(stdout));
+        child.stdin.end('{"hook_event_name":"Stop"}');
+      });
+    expect(await call({ HERDR_PANE_ID: "w1:p1" })).toBe('seat-hook:{"hook_event_name":"Stop"}');
+    expect(await call({})).toBe("");
+    expect(await call({ HERDR_PANE_ID: "w1:p1", SWARM_WORKER_LAUNCH: "/tmp/launch.json" })).toBe("");
   });
 
   it("serves only inside a Swarm-dispatched interactive launch", async () => {

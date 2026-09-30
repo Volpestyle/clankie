@@ -10,6 +10,7 @@ import type {
   DiscordChannelProjectionMessage,
   DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
+  FleetSeatHook,
   ObservableCaptainLane,
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
@@ -154,6 +155,11 @@ export interface CaptainPort {
     waitMs: number,
     signal?: AbortSignal,
   ): Promise<readonly OperatorSeatEvent[] | undefined>;
+  /**
+   * One lifecycle hook from a hired seat's worker plugin (VUH-1458). False
+   * when the pane holds no seat with that session.
+   */
+  recordSeatHook(paneId: string, hook: FleetSeatHook): Promise<boolean>;
   /** The seat's answer to an escalation; false when nothing waits on that id. */
   replySeatEvent(eventId: string, text: string, conversationId?: string): Promise<boolean>;
   /**
@@ -229,6 +235,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     laneMemoryCard: async () => "",
     pollSeatEvents: async () => [],
     pollFleetSeatEvents: async () => undefined,
+    recordSeatHook: async () => false,
     replySeatEvent: async () => false,
     laneToolBank: async (lane) => ({ lane, tools: [] }),
     // A stub writes no transcripts, so it has nothing to announce. A test that

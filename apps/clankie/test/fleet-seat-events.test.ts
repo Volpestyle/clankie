@@ -1,4 +1,4 @@
-import { fleetSeatEventsPath, type OperatorSeatEvent } from "@clankie/protocol";
+import { fleetSeatEventsPath, fleetSeatHookPath, type OperatorSeatEvent } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -65,6 +65,47 @@ describe("fleet seat mailbox routes", () => {
     expect(social.status).toBe(403);
     const anonymous = await clankie.app.request(fleetSeatEventsPath(paneId));
     expect(anonymous.status).toBe(401);
+    clankie.close();
+  });
+});
+
+describe("fleet seat hook route", () => {
+  it("records the operator's hook for the pane it names, and refuses anything else", async () => {
+    const recorded: unknown[] = [];
+    const clankie = await createClankieApp({
+      captain: createStubCaptain({
+        recordSeatHook: async (requestedPaneId, hook) => {
+          recorded.push({ requestedPaneId, hook });
+          return requestedPaneId === paneId;
+        },
+      }),
+      authenticateOperator: (request) =>
+        Promise.resolve(
+          request.headers.get("authorization") === "Bearer operator"
+            ? { operatorId: "local-operator", steerSourceLane: "tui" as const }
+            : undefined,
+        ),
+      authenticateCaptain: (request) =>
+        Promise.resolve(
+          request.headers.get("authorization") === "Bearer discord"
+            ? { captainId: "discord-bridge", steerSourceLane: "discord_text" as const }
+            : undefined,
+        ),
+    });
+    const hook = { schemaVersion: 1, event: "Stop", sessionId: "s-1", lastMessage: "done" };
+    const post = (target: string, body: unknown, bearer = "operator") =>
+      clankie.app.request(fleetSeatHookPath(target), {
+        method: "POST",
+        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const ok = await post(paneId, hook);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ schemaVersion: 1, recorded: true });
+    expect(recorded).toEqual([{ requestedPaneId: paneId, hook }]);
+    expect((await post("gone", hook)).status).toBe(404);
+    expect((await post(paneId, { ...hook, event: "Notification" })).status).toBe(400);
+    expect((await post(paneId, hook, "discord")).status).toBe(403);
     clankie.close();
   });
 });

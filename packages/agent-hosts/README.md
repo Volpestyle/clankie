@@ -59,10 +59,11 @@ remote termination. The service must retain the session reservation in that case
 ## Seat adapters
 
 `seat.ts` is the harness-adapter seam (ADR 0187 amendment, VUH-1458). A
-`HarnessSeatAdapter` starts a hired seat through its harness's programmatic
-interface and returns a `SeatControl`: structured `send` with a harness
-acknowledgment, `settled` completion, `interrupt`, and `close`. The herdr pane
-it is handed (`SeatView`) is only the owner's view and takeover seat. `attach`
-reattaches by the harness's own session id after a service restart. Failures
-are typed outcomes, so the hire path falls back to terminal delivery and says
-why.
+`HarnessSeatAdapter` starts a hired seat in its herdr pane (`SeatView`) as the
+real interactive harness, and controls it through the harness's own extension
+points: a `SeatControl` with `send` acknowledged by the harness, `settled`
+completion, `interrupt`, and `close`. `attach` reattaches by the harness's own
+session id after a service restart. Failures are typed outcomes; `blocked`
+names an owner decision (such as approving a channel), and the hire path then
+falls back to terminal delivery and says why. The Claude adapter lives in the
+service (`apps/clankie/src/captain/claude-worker-seat.ts`), as does Codex's.

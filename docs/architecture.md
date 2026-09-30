@@ -152,8 +152,13 @@ lanes never sit in the seat: the owner's plan carries only the owner. Every
 fleet seat has a mailbox of its own, and a Claude Code seat launched with the
 channel runs `clankie mcp --seat`, a channel-only bridge that polls it: a DM or
 room turn then lands as a channel event instead of keystrokes typed into the
-pane's pty, and a Codex seat takes it through `codex queue`, so nothing the
-operator is drafting there is touched
+pane's pty. Local briefed Codex hires use a dedicated app-server: the native TUI
+creates the session, `turn/start` and `turn/steer` deliver messages, and
+`turn/completed` supplies completion. A native Codex TUI in Herdr connects to
+that same server and thread for viewing and owner takeover. The adapter reports
+the thread ID explicitly, so the fleet census does not depend on shared-daemon
+hooks. Existing unmanaged Codex seats retain `codex queue` and terminal fallback,
+so programmatic messages leave the owner's draft alone
 ([ADR 0161](adr/0161-a-fleet-seat-reads-its-mail-instead-of-its-keyboard.md)).
 
 ### Conversation selection and retention

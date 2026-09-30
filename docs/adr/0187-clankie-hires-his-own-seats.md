@@ -101,3 +101,42 @@ envelope. A missing or partial receipt fails as `not_ready` with
 and redaction can prevent verification; a brief file with a short pointer avoids
 those limits. Follow-up pane delivery also uses `agent prompt`; mailbox and
 Codex queue delivery remain available.
+
+## Amendment: seats are driven through their harness (VUH-1458, 2026-09-30)
+
+Following the [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md)
+amendment, a hire is controlled through the harness's own extension points,
+and the worker stays the real interactive harness in its herdr pane, where the
+owner can type into it at any time. It is never a headless process with herdr
+as a mere view (an earlier headless stream-json design was built, then
+withdrawn at James's direction before it landed).
+
+- **One seam.** `HarnessSeatAdapter` in `@clankie/agent-hosts` starts a seat in
+  its pane under its persona name (`herdr agent start`) and returns a
+  `SeatControl`: `send` acknowledged by the harness, `settled`, `interrupt`,
+  `close`, and `attach` after a restart. `HerdrWatchStore` routes a briefed
+  local hire, its messages, completion watches and closing through the adapter
+  for that harness while it holds the seat; the adapter's status outranks the
+  terminal's. Codex implements it over its app-server (VUH-1459).
+- **Claude uses the `clankie-worker@clankie` plugin**, enabled for that session
+  only and loaded with `--channels`. The brief and messages are channel
+  notifications from the plugin's server, which serves the seat mailbox
+  (`clankie mcp --seat`). A message counts as delivered only once it appears
+  whole in the native transcript. The plugin's Stop and StopFailure hooks,
+  forwarded by `clankie seat-hook`, settle the turn with Claude's own final
+  text; a watch wake quotes that text as data, never as instructions.
+- **Consent belongs to the owner.** Claude honors a custom channel unattended
+  only when the plugin is installed and managed policy approves it. Nothing
+  accepts the development-channel warning on the owner's behalf. Without that
+  approval the adapter returns `blocked` (`consent_required`) before launching
+  anything, and the hire continues on the terminal lane in the same pane. The
+  hire tool's result names the missing step (`control.mode: "terminal"`, with
+  `fix`); the compose page's protocol result is unchanged.
+- **Terminal typing is the fallback only**, with the VUH-1450 paste-and-verify
+  receipt and its typed `brief_delivery_unverified` failure. An adapter failure
+  after launch closes the pane and returns its typed outcome; it is never
+  retried on the terminal.
+
+Interactive Claude has no programmatic interrupt; the owner presses Esc in the
+pane. The terminal fallback still launches Claude with the older
+`server:clankie-seat` development channel.

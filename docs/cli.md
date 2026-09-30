@@ -1588,8 +1588,24 @@ cannot honor an explicit override and refuse it. Independent global or project
 skills can still be discovered by Claude/Codex; this switch does not rewrite
 owner-global selection. See [the full bundle and A/B limits](bundled-skills.md).
 
-A supplied `hire_agent` brief uses Herdr's paste-aware `agent prompt` after
-startup readiness, for Claude as well as Codex. Delivery is reported only when
+A supplied `hire_agent` brief goes through the harness's own interface when a
+seat adapter drives that harness locally ([ADR 0187](adr/0187-clankie-hires-his-own-seats.md),
+VUH-1458). A Claude hire starts the real interactive TUI with the
+`clankie-worker@clankie` plugin enabled for that session: the brief and later
+`message_seat` messages arrive as channel notifications, a message counts as
+delivered only once it appears whole in the native transcript, and the plugin's
+Stop and StopFailure hooks settle `herdr_watch` with Claude's own final text.
+The worker is never swapped for a headless process; the owner can type into its
+pane at any time. This needs the owner's one-time consent: the plugin installed
+and disabled, and its channel approved in managed settings (see the
+[plugin README](../integrations/claude-plugin/README.md#worker-channel-plugin-clankie-worker)).
+Until then the hire result carries
+`control: { mode: "terminal", reason: "consent_required", fix }` and the brief
+takes the terminal fallback below; nothing accepts the development-channel
+warning on the owner's behalf.
+
+On the terminal fallback, the brief uses Herdr's paste-aware `agent prompt` after
+startup readiness. Delivery is reported only when
 the complete brief appears in the native transcript. An unverifiable receipt
 returns `not_ready` with `brief_delivery_unverified` and closes the new pane;
 the turn may already have started, so inspect its work before retrying. For a
@@ -1857,6 +1873,17 @@ excerpts are bounded to 512 KiB and declare truncation; native projections retai
 their existing bounded entries. Gameplay journals are not separate triggers.
 Raw evidence remains local; findings carry redacted excerpts to Linear. See
 [the evaluator decision](adr/0178-the-evaluator-has-its-own-seat.md) for scope and limits.
+
+### Hired seat lifecycle hooks
+
+`clankie seat-hook` is the `clankie-worker` plugin's hook (VUH-1458). Inside a
+pane Clankie hired (`HERDR_PANE_ID` set, no `SWARM_WORKER_LAUNCH`), it reads
+Claude's `SessionStart`, `UserPromptSubmit`, `Stop` or `StopFailure` JSON on
+stdin and posts `{ event, sessionId, lastMessage?, error? }` to
+`/v1/fleet/seats/{paneId}/hook` with the operator credential. The final text is
+the hook's `last_assistant_message`, or the transcript's last reply when the hook
+omits it. The service records it only when herdr reports that Claude session in
+that pane; anywhere else the command does nothing.
 
 ### Native seat transcript sync
 

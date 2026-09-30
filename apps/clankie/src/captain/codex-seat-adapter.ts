@@ -65,7 +65,13 @@ export function createCodexSeatAdapter(
         const messageId = typeof turn.id === "string" ? turn.id : undefined;
         let settlement: SeatEvent | undefined;
         if (event.method === "turn/started") state = "working";
-        else if (event.method === "turn/completed") {
+        else if (event.method === "thread/status/changed" && object(event.params.status).type === "active") {
+          const flags = object(event.params.status).activeFlags;
+          if (Array.isArray(flags) && flags.length > 0) {
+            state = "blocked";
+            settlement = { type: "blocked", at, reason: flags.join(", ") };
+          } else state = "working";
+        } else if (event.method === "turn/completed") {
           state = "idle";
           const text = Array.isArray(turn.items)
             ? turn.items
@@ -117,11 +123,11 @@ export function createCodexSeatAdapter(
           ...(launch.model ? { model: launch.model } : {}),
           ...(launch.effort ? { effort: launch.effort } : {}),
           ...(launch.env ? { env: launch.env } : {}),
+          startView: (args) => (view.start ? view.start("codex", args) : view.run(["codex", ...args])),
           onEvent: observe,
         });
         signal?.throwIfAborted();
         ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
-        await view.run(["codex", ...seat.viewArgs]);
         report();
         await reporting;
         const control: SeatControl = {

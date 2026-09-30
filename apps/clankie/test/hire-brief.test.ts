@@ -128,6 +128,8 @@ async function fixture() {
       repoRoot: root,
       stateDir: join(root, "state"),
       settings: new SettingsStore(join(root, "settings.json")),
+      // These cases exercise the legacy terminal fallback with a fake Herdr.
+      seatAdapters: [],
     },
   );
   const commands = async () =>

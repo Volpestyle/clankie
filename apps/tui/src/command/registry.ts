@@ -33,6 +33,10 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  seat-sync                Project the launched Claude seat transcript (hook stdin)"],
   },
   {
+    nouns: ["seat-hook"],
+    lines: ["  seat-hook                Report a hired seat's settled turn (worker plugin hook stdin)"],
+  },
+  {
     nouns: ["access"],
     lines: [
       "  access list | issue REQUEST.json (--out GRANT.json | --deliver swarm) | revoke ID | linear [verify]",

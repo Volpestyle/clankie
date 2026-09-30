@@ -1971,6 +1971,39 @@ paths:
         "404":
           description: No messageable agent in that pane
 
+  /v1/fleet/seats/{paneId}/hook:
+    post:
+      tags: [Captain, Operator]
+      operationId: recordFleetSeatHook
+      summary: Report a hired seat's lifecycle hook
+      description: |
+        The clankie-worker plugin's hooks, forwarded by `clankie seat-hook`
+        from inside the seat's pane (VUH-1458). A Stop or StopFailure settles
+        the seat's turn for its adapter and any completion watch, with the
+        harness's own final text as `lastMessage`. The session must be the
+        Claude session herdr reports in that pane. Operator bearer only.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              { schemaVersion: 1, event: Stop, sessionId: "10000000-0000-4000-8000-000000000001", lastMessage: "Tests pass." }
+      responses:
+        "200":
+          description: Recorded
+        "400":
+          description: Not a seat hook
+        "403":
+          description: Not the operator lane
+        "404":
+          description: That pane holds no Claude seat with this session
+
   /v1/memory:
     get:
       tags: [Memory, Operator]

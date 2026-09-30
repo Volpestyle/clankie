@@ -8,6 +8,7 @@ import {
   HOSTED_LOCAL_ONLY,
 } from "../src/command/hosted.ts";
 import { runRuntimeCommand } from "../src/command/runtime.ts";
+import { runSeatHookCommand } from "../src/command/seat-hook.ts";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 import { runSwarmCommand } from "../src/command/swarm.ts";
 import { runAgentsCommand } from "../src/command/agents.ts";
@@ -332,6 +333,7 @@ export async function runHeadlessCaptainCommand(
     // The seat: Claude Code as Clankie (ADR 0152). `mcp` is its stdio side and
     // speaks JSON-RPC on stdout, so it never goes through outputJson.
     if (command === "seat-sync") return await runSeatSyncCommand(rest, options);
+    if (command === "seat-hook") return await runSeatHookCommand(rest, options);
     if (command === "seat") {
       return await runSeatCommand(rest, {
         repoRoot: options.repoRoot,

@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
 import {
@@ -859,11 +859,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
    */
   private async seatControl(agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> {
     const adapter = this.seatAdapters.get(agent.agent);
-    if (adapter === undefined || agent.session?.kind !== "id") return undefined;
+    const session = agent.session;
+    if (adapter === undefined || session === undefined) return undefined;
     if (splitFleetQualified(agent.paneId) !== undefined) return undefined;
+    // A transcript path names its session in the file name (Claude's `<uuid>.jsonl`).
+    const sessionId = session.kind === "id" ? session.value : basename(session.value, ".jsonl");
     return adapter
-      .attach({ harness: adapter.harness, sessionId: agent.session.value, paneId: agent.paneId })
+      .attach({ harness: adapter.harness, sessionId, paneId: agent.paneId })
       .catch(() => undefined);
+  }
+
+  /** Whether an adapter drives this seat now, so a message should go through it. */
+  public async holdsSeat(seatId: string): Promise<boolean> {
+    if (this.closed) return false;
+    const current = await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    return current !== undefined && (await this.seatControl(current)) !== undefined;
   }
 
   /** The herdr status an adapter-held seat's own status reads as; undefined when no adapter holds it. */

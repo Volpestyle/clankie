@@ -606,9 +606,11 @@ function hireAgentTool(
       "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
       "spelling or never came up), herdr_unreachable, at_capacity (this body already runs as many hired agents " +
       "as its plan allows; close or reuse one). A hired seat is not a Swarm peer: pass brief to hand it " +
-      "its first prompt through Herdr’s paste-aware agent prompt (the result says whether it was delivered; codex needs one, " +
-      "since its session starts with its first turn). A brief is delivered only after its complete native transcript receipt; " +
-      "not_ready with brief_delivery_unverified means receipt could not be confirmed and the new pane was closed. " +
+      "its first prompt (codex needs one, since its session starts with its first turn). A briefed local seat is " +
+      "driven through its harness when possible (claude: the clankie-worker plugin's channel and Stop hooks) and " +
+      "stays interactive in its pane. control.mode says how: terminal means the brief was pasted instead, and " +
+      "control.fix is the owner's one-time step. A brief is delivered only after its complete native transcript " +
+      "receipt; not_ready with brief_delivery_unverified means receipt could not be confirmed and the new pane was closed. " +
       "Use a brief file and a short pointer when transcript limits or redaction prevent verification. Follow up " +
       "with message_seat, and watch it with herdr_watch on the returned seatId.",
     parameters: Type.Object({

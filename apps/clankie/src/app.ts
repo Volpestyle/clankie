@@ -74,6 +74,8 @@ import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   FLEET_SEAT_EVENTS_PATH,
+  FLEET_SEAT_HOOK_PATH,
+  FleetSeatHookSchema,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorConversationServiceRequestSchema,
@@ -1377,6 +1379,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (events === undefined) return context.json({ error: "unknown_seat" }, 404);
     const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
     return context.json(page);
+  });
+
+  // A hired seat's worker plugin reports each settled turn (VUH-1458), from
+  // inside the pane it names. Same door as its mailbox: operator lane only.
+  app.post(FLEET_SEAT_HOOK_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const parsed = FleetSeatHookSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const recorded = await dependencies.captain.recordSeatHook(context.req.param("paneId"), parsed.data);
+    return recorded
+      ? context.json({ schemaVersion: 1 as const, recorded: true as const })
+      : context.json({ error: "unknown_seat" }, 404);
   });
 
   app.get("/v1/captain/memory-card", async (context) => {

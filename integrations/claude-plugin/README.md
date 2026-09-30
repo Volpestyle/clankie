@@ -115,13 +115,23 @@ loads his install skill, and `clankie model status` runs without a prompt.
 [`worker/`](worker/) is a second plugin in the same marketplace,
 `clankie-worker@clankie`, for Swarm-dispatched **interactive** workers
 ([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
-It is not the seat and carries none of the seat's identity, hooks, skills or
-operator MCP. Its one MCP server, `swarm`, runs the Swarm MCP that the Herdr
-launcher names in `SWARM_WORKER_MCP`, in channel mode, with the worker's own
-enrolled capability; it refuses to start outside such a launch. The worker
-launch enables it for that session only (`enabledPlugins`) and starts Claude
-Code with `--channels plugin:clankie-worker@clankie`, so the worker's leased
-Swarm mail arrives as channel events.
+It is not the seat and carries none of the seat's identity, skills or operator
+MCP. Its one MCP server, `swarm`, has two launches:
+
+- **Swarm-dispatched worker**: runs the Swarm MCP that the Herdr launcher names
+  in `SWARM_WORKER_MCP`, in channel mode, with the worker's own enrolled
+  capability, so its leased Swarm mail arrives as channel events.
+- **Seat Clankie hired** (VUH-1458): inside the hire's herdr pane it runs
+  `clankie mcp --seat`, so the seat's mailbox (brief, `message_seat`, DMs)
+  arrives as channel events. The bridge polls only when the Claude session that
+  launched it loaded `plugin:clankie-worker@clankie` under `--channels`.
+
+Either launch enables the plugin for that session only (`enabledPlugins`) and
+starts Claude Code with `--channels plugin:clankie-worker@clankie`. Outside
+both it refuses to start. Its hooks (`SessionStart`, `UserPromptSubmit`,
+`Stop`, `StopFailure`) call `clankie seat-hook` only in a Clankie hire's pane, so
+Clankie learns each settled turn and its final text; for a Swarm worker they do
+nothing.
 
 Claude Code only runs a non-official channel plugin unattended when the owner's
 managed settings allow it. That is the owner's action, never the dispatcher's:
@@ -134,7 +144,11 @@ claude plugin install clankie-worker@clankie
 claude plugin disable clankie-worker@clankie
 ```
 
-Select the mode per runtime with `clankie runtime mode ID interactive|stream`;
+Until both steps are done, a Claude hire reports `consent_required` with the
+missing step and takes the terminal lane (typed brief, verified in the
+transcript) instead.
+
+Select the Swarm mode per runtime with `clankie runtime mode ID interactive|stream`;
 stream stays the default. An interactive startup that blocks stays visibly
 blocked in its pane and never falls back to stream.
 

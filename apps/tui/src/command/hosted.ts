@@ -193,6 +193,7 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "operator-credential",
   "seat",
   "seat-sync",
+  "seat-hook",
   "mcp",
   "telemetry",
   "workdir",

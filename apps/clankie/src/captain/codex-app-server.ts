@@ -114,7 +114,12 @@ export async function startCodexAppServerSeat(options: {
   cwd: string;
   model?: string;
   effort?: string;
+  /** Native TOML key=value overrides, applied to server and interactive client. */
+  config?: readonly string[];
+  resumeThreadId?: string;
   env?: Readonly<Record<string, string>>;
+  /** Start the native TUI on this server before sending any model input. */
+  startView: (args: readonly string[]) => Promise<void>;
   onEvent?: (event: CodexSeatEvent) => void;
 }): Promise<CodexAppServerSeat> {
   const directory = await mkdtemp(join(tmpdir(), "clankie-codex-"));
@@ -125,7 +130,8 @@ export async function startCodexAppServerSeat(options: {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
   );
-  const child = spawn("codex", ["app-server", "--listen", endpoint], {
+  const configArgs = (options.config ?? []).flatMap((value) => ["-c", value]);
+  const child = spawn("codex", [...configArgs, "app-server", "--listen", endpoint], {
     cwd: options.cwd,
     env: { ...env, ...options.env },
     stdio: ["ignore", "ignore", "pipe"],
@@ -180,32 +186,86 @@ export async function startCodexAppServerSeat(options: {
     }
     let activeTurn: string | undefined;
     let threadId: string | undefined;
-    client = new CodexAppServerClient(socket, (event) => {
+    const observe = (event: CodexSeatEvent) => {
       if (event.params.threadId === threadId) {
         const turn = record(event.params.turn);
         if (event.method === "turn/started" && typeof turn.id === "string") activeTurn = turn.id;
         if (event.method === "turn/completed" && turn.id === activeTurn) activeTurn = undefined;
       }
       options.onEvent?.(event);
-    });
+    };
+    client = new CodexAppServerClient(socket, observe);
     await client.initialize();
-    const result = record(
-      await client.request("thread/start", {
-        cwd: options.cwd,
-        ...(options.model ? { model: options.model } : {}),
-        ...(options.effort ? { config: { model_reasoning_effort: options.effort } } : {}),
-      }),
-    );
+    const viewArgs = [
+      ...configArgs,
+      "--remote",
+      endpoint,
+      ...(options.model ? ["--model", options.model] : []),
+      ...(options.effort ? ["-c", `model_reasoning_effort=${JSON.stringify(options.effort)}`] : []),
+      ...(options.resumeThreadId ? ["resume", options.resumeThreadId] : []),
+    ];
+    // An empty app-server-created thread has no rollout, so `codex resume`
+    // cannot bootstrap it. Let the real TUI create its own thread. Only one
+    // native root can exist before we send the first brief.
+    await options.startView(viewArgs);
+    const threadDeadline = Date.now() + 15_000;
+    while (!threadId) {
+      const loaded = record(await client.request("thread/loaded/list", {}));
+      const ids = Array.isArray(loaded.data) ? loaded.data : [];
+      if (ids.length > 1) throw new Error("Codex seat has more than one initial native thread");
+      if (typeof ids[0] === "string") {
+        if (options.resumeThreadId && ids[0] !== options.resumeThreadId)
+          throw new Error("Codex TUI resumed a different thread");
+        threadId = ids[0];
+      } else {
+        if (Date.now() >= threadDeadline) throw new Error("Codex TUI did not create its thread");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    const result = record(await client.request("thread/read", { threadId, includeTurns: false }));
     const thread = record(result.thread);
     if (typeof thread.id !== "string") throw new Error("Codex app-server returned no thread identity");
     threadId = thread.id;
+    let subscribed = false;
+    const subscribe = async (waitForRollout = true) => {
+      if (subscribed) return;
+      // The TUI owns the initial subscription. Its new thread becomes
+      // resumable once the first turn persists; resume adds this client
+      // as an observer without replaying input. Hydrate the last turn in
+      // case it completed before the subscription was established.
+      const deadline = Date.now() + 5_000;
+      let resumed: RecordValue;
+      for (;;) {
+        try {
+          resumed = record(await client!.request("thread/resume", { threadId }));
+          break;
+        } catch (error) {
+          if (!String(error).includes("no rollout found")) throw error;
+          if (!waitForRollout) return;
+          if (Date.now() >= deadline) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+      subscribed = true;
+      const turns = record(resumed.thread).turns;
+      const turn = Array.isArray(turns) ? record(turns.at(-1)) : {};
+      if (typeof turn.id === "string")
+        observe({
+          method: turn.status === "inProgress" ? "turn/started" : "turn/completed",
+          params: { threadId, turn },
+        });
+    };
+    if (options.resumeThreadId) await subscribe();
     let sending: Promise<unknown> = Promise.resolve();
     return {
       threadId,
       ...(typeof thread.path === "string" ? { transcriptPath: thread.path } : {}),
-      viewArgs: ["--remote", endpoint, "resume", threadId],
+      viewArgs,
       send(message) {
         const send = async () => {
+          // The owner may have started a native turn before the first delivery.
+          // Subscribe first when its rollout exists so we steer that turn.
+          await subscribe(false);
           const input = [{ type: "text", text: message, text_elements: [] }];
           // Serialize dispatch so simultaneous messages cannot start two turns.
           // A failed steer is not retried: only the server knows if it applied.
@@ -220,6 +280,7 @@ export async function startCodexAppServerSeat(options: {
           const turnId = steering ? response.turnId : record(response.turn).id;
           if (typeof turnId !== "string")
             throw new Error("Codex did not confirm the turn identity; delivery is uncertain");
+          await subscribe();
           return { turnId, state: steering ? ("queued" as const) : ("started" as const) };
         };
         const next = sending.then(send);

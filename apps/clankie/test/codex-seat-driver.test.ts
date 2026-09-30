@@ -1,0 +1,112 @@
+import { EventEmitter } from "node:events";
+import { createServer } from "node:http";
+import { PassThrough } from "node:stream";
+import { afterEach, expect, it, vi } from "vitest";
+import { WebSocketServer } from "ws";
+import { startCodexAppServerSeat } from "../src/captain/codex-app-server.ts";
+
+const { spawn } = vi.hoisted(() => ({ spawn: vi.fn() }));
+vi.mock("node:child_process", () => ({ spawn }));
+const cleanup: (() => Promise<void>)[] = [];
+afterEach(async () => {
+  for (const close of cleanup.splice(0).reverse()) await close();
+  spawn.mockReset();
+});
+
+function fixture(persisted = false) {
+  const requests: { method: string; params: Record<string, unknown> }[] = [];
+  let nativeLoaded = false;
+  const id = "native-thread";
+  spawn.mockImplementation((_command: string, args: string[]) => {
+    const endpoint = args[args.indexOf("--listen") + 1]!;
+    const http = createServer();
+    const server = new WebSocketServer({ noServer: true });
+    http.on("upgrade", (request, socket, head) => {
+      server.handleUpgrade(request, socket, head, (socket) => server.emit("connection", socket));
+    });
+    http.listen(endpoint.slice("unix://".length));
+    server.on("connection", (socket) =>
+      socket.on("message", (bytes) => {
+        const message = JSON.parse(bytes.toString());
+        requests.push(message);
+        if (message.id === undefined) return;
+        let result: unknown = {};
+        const turn = { id: "turn-one", status: "inProgress", items: [] };
+        if (message.method === "thread/loaded/list") result = { data: nativeLoaded ? [id] : [] };
+        if (message.method === "thread/read") result = { thread: { id } };
+        if (message.method === "thread/resume") {
+          if (!persisted) {
+            socket.send(JSON.stringify({ id: message.id, error: { message: "no rollout found" } }));
+            return;
+          }
+          result = { thread: { id, turns: [turn] } };
+        }
+        if (message.method === "turn/start") {
+          persisted = true;
+          result = { turn };
+        }
+        if (message.method === "turn/steer") result = { turnId: turn.id };
+        socket.send(JSON.stringify({ id: message.id, result }));
+      }),
+    );
+    const child = Object.assign(new EventEmitter(), {
+      stderr: new PassThrough(),
+      pid: 12345,
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(() => {
+        queueMicrotask(() => child.emit("exit", 0));
+        return true;
+      }),
+    });
+    cleanup.push(async () => {
+      for (const socket of server.clients) socket.terminate();
+      server.close();
+      await new Promise<void>((resolve) => http.close(() => resolve()));
+    });
+    return child;
+  });
+  return {
+    requests,
+    id,
+    startView: async () => {
+      nativeLoaded = true;
+    },
+  };
+}
+
+it("lets the native TUI create a fresh thread before input and subscribes after persistence", async () => {
+  const f = fixture();
+  const seat = await startCodexAppServerSeat({ cwd: "/tmp", startView: f.startView });
+  cleanup.push(seat.close);
+  expect(seat.threadId).toBe(f.id);
+  expect(f.requests.some((r) => r.method === "thread/start")).toBe(false);
+  expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
+  await expect(seat.send("first brief")).resolves.toEqual({ state: "started", turnId: "turn-one" });
+  await expect(seat.send("follow-up")).resolves.toEqual({ state: "queued", turnId: "turn-one" });
+  expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
+  expect(f.requests.find((r) => r.method === "turn/steer")?.params).toMatchObject({
+    expectedTurnId: "turn-one",
+    threadId: f.id,
+  });
+  await expect(seat.interrupt()).resolves.toBe(true);
+});
+
+it("resumes the selected native thread and applies config to both clients without replay", async () => {
+  const f = fixture(true);
+  const config = ['plugins."clankie@clankie-seat".enabled=true'];
+  const startView = vi.fn(async (_args: readonly string[]) => f.startView());
+  const seat = await startCodexAppServerSeat({ cwd: "/tmp", config, resumeThreadId: f.id, startView });
+  cleanup.push(seat.close);
+  expect(spawn.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(["-c", config[0]]));
+  expect(startView.mock.calls[0]?.[0]).toEqual(expect.arrayContaining(["-c", config[0], "resume", f.id]));
+  expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
+  await expect(seat.send("operator event")).resolves.toEqual({ state: "queued", turnId: "turn-one" });
+});
+
+it("refuses a native view that resumes a different thread", async () => {
+  const f = fixture(true);
+  await expect(
+    startCodexAppServerSeat({ cwd: "/tmp", resumeThreadId: "wrong", startView: f.startView }),
+  ).rejects.toThrow("different thread");
+});

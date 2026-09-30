@@ -14,6 +14,7 @@ function fixture() {
   const herdr = vi.fn(async () => undefined);
   const start = vi.fn(async (options) => {
     event = options.onEvent;
+    await options.startView(["--remote", "unix:///owned/socket"]);
     return {
       threadId: "thread-1",
       viewArgs: ["--remote", "unix:///owned/socket", "resume", "thread-1"],
@@ -53,13 +54,7 @@ describe("Codex harness seat adapter", () => {
         }),
       );
       expect(f.send).toHaveBeenCalledWith("full\nbrief");
-      expect(f.view.run).toHaveBeenCalledWith([
-        "codex",
-        "--remote",
-        "unix:///owned/socket",
-        "resume",
-        "thread-1",
-      ]);
+      expect(f.view.run).toHaveBeenCalledWith(["codex", "--remote", "unix:///owned/socket"]);
       expect(f.herdr).toHaveBeenCalledWith(
         expect.arrayContaining(["report-agent", "--agent-session-id", "thread-1"]),
       );
@@ -110,6 +105,8 @@ describe("Codex harness seat adapter", () => {
     f.emit("item/commandExecution/requestApproval");
     expect(await started.control.status()).toBe("blocked");
     expect(await started.control.settled()).toMatchObject({ type: "blocked" });
+    f.emit("thread/status/changed", { status: { type: "active", activeFlags: [] } });
+    expect(await started.control.status()).toBe("working");
     await started.control.close();
   });
 
@@ -124,5 +121,35 @@ describe("Codex harness seat adapter", () => {
     });
     expect(f.send).toHaveBeenCalledTimes(1);
     expect(f.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not confuse a subagent's completion with its own turn", async () => {
+    const f = fixture();
+    const started = await f.adapter.start({ harness: "codex", cwd: "/scratch", brief: "hello" }, f.view);
+    if (started.outcome !== "started") throw new Error(started.detail);
+    f.emit("turn/completed", { threadId: "child-thread", turn: { id: "child-turn", status: "completed" } });
+    expect(await started.control.status()).toBe("working");
+    f.emit("connection/closed");
+    expect(await started.control.status()).toBe("offline");
+    expect(await started.control.settled()).toMatchObject({ type: "exited" });
+    expect(await started.control.send("do not replay")).toMatchObject({ outcome: "offline" });
+    expect(f.send).toHaveBeenCalledTimes(1);
+    await started.control.close();
+  });
+
+  it("closes the app-server when its owned Herdr pane disappears", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const started = await f.adapter.start({ harness: "codex", cwd: "/scratch", brief: "hello" }, f.view);
+    if (started.outcome !== "started") throw new Error(started.detail);
+    try {
+      f.herdr.mockRejectedValue(new Error("pane_not_found"));
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(f.close).toHaveBeenCalledTimes(1);
+      expect(await f.adapter.attach(started.control.ref)).toBeUndefined();
+    } finally {
+      await started.control.close();
+      vi.useRealTimers();
+    }
   });
 });

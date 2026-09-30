@@ -76,7 +76,17 @@ import { createStanceStore } from "./stances.ts";
 import { assignmentSkills } from "./assignment-skills.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
-import { HerdrWatchStore, createHerdrWatchRunner, type DiscordWatchOrigin } from "./herdr-watch.ts";
+import {
+  HerdrWatchStore,
+  createHerdrWatchRunner,
+  type DiscordWatchOrigin,
+  type HerdrAgentSnapshot,
+} from "./herdr-watch.ts";
+import {
+  SeatHookLog,
+  claudeWorkerChannelConsent,
+  createClaudeWorkerSeatAdapter,
+} from "./claude-worker-seat.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import {
@@ -800,18 +810,40 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     host: fleet.ssh.host,
     run: (args) => deps.fleets!.run(fleet)(args),
   }));
+  const herdrRunner = routeHerdrFleets(
+    createHerdrWatchRunner(deps.herdrAvailable),
+    new Map(remoteFleets.map((fleet) => [fleet.id, createRemoteHerdrRunner(fleet, deps.fleets!.run(fleet))])),
+  );
+  // Claude seats stay interactive in their pane and are driven through the
+  // clankie-worker plugin: its channel carries the mailbox, its hooks report
+  // each settled turn (VUH-1458).
+  const seatHooks = new SeatHookLog(join(options.stateDir, "claude-worker-hooks.json"));
+  const claudeWorkerSeats = createClaudeWorkerSeatAdapter({
+    consent: () => claudeWorkerChannelConsent(),
+    hooks: seatHooks,
+    agent: (paneId) => herdrRunner.get(paneId),
+    transcript: async (agent) => herdrRunner.transcript?.(agent as HerdrAgentSnapshot),
+    mailbox: {
+      bound: (seatId) => fleetMailboxes.get(seatId)?.bound() === true,
+      deliver: async (seatId, text) =>
+        (
+          await fleetSeatMailbox(fleetMailboxes, seatId).deliver({
+            kind: "message",
+            conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
+            source: "captain",
+            content: text,
+            wantsReply: false,
+          })
+        ).outcome === "delivered",
+    },
+  });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     skillBundle: {
       repoRoot: options.repoRoot,
       stateDir: options.stateDir,
       settings: async () => (await settings()).skills,
     },
-    runner: routeHerdrFleets(
-      createHerdrWatchRunner(deps.herdrAvailable),
-      new Map(
-        remoteFleets.map((fleet) => [fleet.id, createRemoteHerdrRunner(fleet, deps.fleets!.run(fleet))]),
-      ),
-    ),
+    runner: herdrRunner,
     ...(deps.fleets === undefined
       ? {}
       : {
@@ -820,6 +852,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }),
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
+    seatAdapters: [claudeWorkerSeats],
   });
   const evaluator = new Evaluator(
     join(options.stateDir, "evaluator"),
@@ -1532,14 +1565,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     message: string,
     context: FleetSeatMessageContext,
   ): Promise<boolean> {
-    const deliver = () =>
-      deliverFleetSeatMessage(
-        fleetMailboxes,
-        (id, text) => herdrWatches.sendToSeat(id, text),
-        seatId,
-        message,
-        context,
-      );
+    // An adapter-driven seat takes its message through the adapter, which
+    // waits for the harness's own receipt; any other seat, its mailbox or pane.
+    const deliver = async () =>
+      (await herdrWatches.holdsSeat(seatId))
+        ? herdrWatches.sendToSeat(seatId, message)
+        : deliverFleetSeatMessage(
+            fleetMailboxes,
+            (id, text) => herdrWatches.sendToSeat(id, text),
+            seatId,
+            message,
+            context,
+          );
     const sent =
       context.source === "room"
         ? await herdrWatches.sendAndWatchReply(seatId, message, deliver)
@@ -2728,6 +2765,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const events = seatOutbox(binding.conversationId).poll(waitMs, signal);
       options.swarm?.settled(binding.conversationId);
       return events;
+    },
+
+    async recordSeatHook(paneId, hook) {
+      if (deps.herdrAvailable?.() === false) return false;
+      // Only the Claude session herdr says sits in that pane may report for it.
+      const agent = await herdrRunner.get(paneId).catch(() => undefined);
+      const session = agent?.session;
+      const sessionId =
+        session === undefined
+          ? undefined
+          : session.kind === "id"
+            ? session.value
+            : basename(session.value, ".jsonl");
+      if (agent?.agent !== "claude" || sessionId !== hook.sessionId) return false;
+      seatHooks.record(paneId, hook);
+      return true;
     },
 
     async pollFleetSeatEvents(paneId, waitMs, signal) {
