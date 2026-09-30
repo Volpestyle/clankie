@@ -184,7 +184,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["linear"],
     lines: [
       "  linear [status] | follow on|off | inbox [read | ack CURSOR]  Linear awareness and unread activity",
-      "  linear work list | bind ORG ISSUE CONVERSATION [--from ID] | unbind ORG ISSUE CONVERSATION",
+      "  linear work list",
     ],
   },
   {

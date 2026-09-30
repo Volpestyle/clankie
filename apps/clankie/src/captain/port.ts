@@ -176,7 +176,6 @@ export interface CaptainPort {
   readLinearInbox(options?: LinearInboxReadOptions): LinearInboxPage;
   acknowledgeLinearInbox(cursor: string, conversationId?: string): boolean;
   linearWorkOwners(): readonly LinearWorkOwner[];
-  setLinearWorkOwner(owner: LinearWorkOwner, expectedConversationId?: string, remove?: boolean): void;
   resumeLinearActivity(): void;
   /** Store verified context in the Linear inbox and optionally queue a model turn. */
   receiveLinearActivity(activity: LinearActivityEvent, following: boolean): boolean | void;
@@ -248,7 +247,6 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     acknowledgeLinearInbox: () => false,
     receiveLinearActivity: () => true,
     linearWorkOwners: () => [],
-    setLinearWorkOwner: () => {},
     resumeLinearActivity: () => {},
     close: async () => {},
     ...overrides,

@@ -13,7 +13,7 @@ import {
 } from "@clankie/settings";
 
 const LINEAR_USAGE =
-  "Usage: clankie linear [status] | follow on|off | webhook set --url URL | webhook clear | inbox [read [--limit N] [--before CURSOR] [--headlines] | ack CURSOR [--conversation ID]] | work [list | bind ORG ISSUE CONVERSATION [--from ID] | unbind ORG ISSUE CONVERSATION]";
+  "Usage: clankie linear [status] | follow on|off | webhook set --url URL | webhook clear | inbox [read [--limit N] [--before CURSOR] [--headlines] | ack CURSOR [--conversation ID]] | work [list]";
 
 /** The query string for `inbox read` flags; `undefined` when a flag is malformed. */
 export function parseInboxRead(flags: readonly string[]): string | undefined {
@@ -61,16 +61,8 @@ export async function runLinearCommand(
   };
   if (args[0] === "work") {
     if (args.length === 1 || (args.length === 2 && args[1] === "list")) return request("/v1/linear/work");
-    if (
-      (args[1] === "bind" && (args.length === 5 || (args.length === 7 && args[5] === "--from"))) ||
-      (args[1] === "unbind" && args.length === 5)
-    )
-      return request("/v1/linear/work", args[1] === "unbind" ? "DELETE" : "PUT", {
-        organizationId: args[2],
-        issueId: args[3],
-        conversationId: args[4],
-        ...(args[6] ? { expectedConversationId: args[6] } : {}),
-      });
+    if (args[1] === "bind" || args[1] === "unbind")
+      throw new Error("Linear issue bindings are retired. Use clankie linear work list to read old records.");
     throw new Error(LINEAR_USAGE);
   }
   const ack =

@@ -2820,8 +2820,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     acknowledgeLinearInbox: (cursor, conversationId) =>
       conversations.acknowledgeLinearInbox(cursor, conversationId),
     linearWorkOwners: () => conversations.linearWorkOwners(),
-    setLinearWorkOwner: (owner, expected, remove) =>
-      conversations.setLinearWorkOwner(owner, expected, remove),
     resumeLinearActivity: () => conversations.resumeLinearActivity(),
     receiveLinearActivity: (activity, following) => conversations.receiveLinearActivity(activity, following),
 

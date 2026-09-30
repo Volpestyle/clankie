@@ -80,7 +80,7 @@ describe("clankie workdir", () => {
 });
 
 describe("clankie linear", () => {
-  it("uses authenticated service routes for issue ownership and scoped inbox reads", async () => {
+  it("reads legacy bindings and scoped inboxes without sending retired mutations", async () => {
     const calls: Array<{ path: string; method: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture");
@@ -93,31 +93,22 @@ describe("clankie linear", () => {
     });
     const options = { env: { CLANKIE_OPERATOR_TOKEN: "fixture" } };
     try {
-      await runLinearCommand(["work", "bind", "org", "issue", "project", "--from", "previous"], options);
+      await runLinearCommand(["work", "list"], options);
       await runLinearCommand(["inbox", "read", "--conversation", "project"], options);
       await runLinearCommand(["inbox", "ack", "000000000042", "--conversation", "project"], options);
-      await runLinearCommand(["work", "unbind", "org", "issue", "project"], options);
+      await expect(
+        runLinearCommand(["work", "bind", "org", "issue", "project", "--from", "previous"], options),
+      ).rejects.toThrow("bindings are retired");
+      await expect(runLinearCommand(["work", "unbind", "org", "issue", "project"], options)).rejects.toThrow(
+        "bindings are retired",
+      );
       expect(calls).toEqual([
-        {
-          path: "/v1/linear/work",
-          method: "PUT",
-          body: {
-            organizationId: "org",
-            issueId: "issue",
-            conversationId: "project",
-            expectedConversationId: "previous",
-          },
-        },
+        { path: "/v1/linear/work", method: "GET", body: undefined },
         { path: "/v1/linear/inbox?conversationId=project", method: "GET", body: undefined },
         {
           path: "/v1/linear/inbox",
           method: "POST",
           body: { ackCursor: "000000000042", conversationId: "project" },
-        },
-        {
-          path: "/v1/linear/work",
-          method: "DELETE",
-          body: { organizationId: "org", issueId: "issue", conversationId: "project" },
         },
       ]);
     } finally {

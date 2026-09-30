@@ -849,35 +849,6 @@ export class ConversationStore {
     return this.linearOwners;
   }
 
-  public setLinearWorkOwner(owner: LinearWorkOwner, expectedConversationId?: string, remove = false): void {
-    owner = LinearWorkOwnerSchema.parse(owner);
-    owner.organizationId = owner.organizationId.toLowerCase();
-    owner.issueId = owner.issueId.toLowerCase();
-    const current = this.linearOwners.find(
-      (entry) => entry.organizationId === owner.organizationId && entry.issueId === owner.issueId,
-    );
-    if (expectedConversationId && current?.conversationId !== expectedConversationId)
-      throw new Error("Issue owner changed; refresh before rebinding");
-    if (
-      current &&
-      current.conversationId !== owner.conversationId &&
-      current.conversationId !== expectedConversationId
-    )
-      throw new Error("Issue already belongs to another conversation; provide its expected owner");
-    if (remove && current?.conversationId !== owner.conversationId) throw new Error("Issue owner changed");
-    const meta = this.metas.get(owner.conversationId);
-    if (!remove && (!meta || meta.parentConversationId || !["global", "workspace"].includes(meta.scope.kind)))
-      throw new Error("Issue owner must be an existing Clankie conversation");
-    const next = this.linearOwners.filter(
-      (entry) => entry.organizationId !== owner.organizationId || entry.issueId !== owner.issueId,
-    );
-    if (!remove) next.push(owner);
-    const path = join(this.root, "linear-work.json");
-    writeFileSync(path + ".tmp", JSON.stringify(next), { mode: 0o600 });
-    renameSync(path + ".tmp", path);
-    this.linearOwners = next;
-  }
-
   public receiveLinearActivity(input: string | LinearActivityEvent, following: boolean): boolean {
     const message = typeof input === "string" ? input : linearActivityPrompt(input);
     const id = this.linearInboxConversationId();
@@ -2755,7 +2726,6 @@ export class ConversationStore {
           (meta) =>
             !meta.isDefault &&
             meta.conversationId !== LINEAR_INBOX_CONVERSATION_ID &&
-            !this.linearOwners.some((owner) => owner.conversationId === meta.conversationId) &&
             meta.sessionState !== "active" &&
             !this.seatSends.has(meta.conversationId) &&
             !sideParents.has(meta.conversationId) &&
@@ -2878,7 +2848,6 @@ export class ConversationStore {
       meta === undefined ||
       meta.isDefault ||
       meta.scope.kind === "room" ||
-      this.linearOwners.some((owner) => owner.conversationId === conversationId) ||
       this.seatSends.has(conversationId) ||
       [...this.metas.values()].some((candidate) => candidate.parentConversationId === conversationId)
     ) {

@@ -429,7 +429,6 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
       conversationId: a,
     };
-    captain.setLinearWorkOwner(owner);
     const activity = {
       eventId: "a".repeat(64),
       notification: true,

@@ -519,11 +519,11 @@ events Linear sends; the owner configures that subscription in Linear.
 #### Issue ownership
 
 Issue bindings are legacy metadata and no longer route events or notifications.
-`clankie linear work list` and `GET /v1/linear/work` still show them. The existing
-`work bind` / `work unbind` commands and authenticated API remain compatible,
-including expected-owner checks, but changing a binding has no wake effect.
-Bindings still retain their conversations until explicitly unbound; existing
-bindings are not deleted by this change. Notifications always wake `global-default`.
+`clankie linear work list` and `GET /v1/linear/work` still show existing records.
+`work bind` and `work unbind` are retired; authenticated `PUT` and `DELETE`
+requests return `410` with `linear_work_bindings_retired`. Existing records are
+not rewritten or deleted and no longer pin conversations against retention or
+explicit deletion. Notifications always wake `global-default`.
 Use `clankie linear inbox read --conversation global-default` and retain the
 same conversation on `inbox ack`. Omit the conversation to inspect all history.
 Never acknowledge truncated output or a cursor offered to another conversation.

@@ -3,6 +3,16 @@
 Status: accepted (James, 2026-09-08, operator conversation). Amended by
 [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
 
+## Amendment — 2026-09-30
+
+Legacy issue binding mutations are retired. The CLI rejects `work bind` and
+`work unbind`; authenticated PUT/DELETE on `/v1/linear/work` return 410. The
+existing `linear-work.json` remains readable through `work list` and GET, without
+rewriting it. Inert bindings no longer pin conversations against normal retention
+or explicit deletion. This removes a second ownership control surface after
+notifications moved to the operator conversation; notification routing and inbox
+acknowledgment are unchanged.
+
 ## Amendment — the connected account's inbox, 2026-09-27
 
 The owner-connected tracker identity is the identity of Clankie and his whole

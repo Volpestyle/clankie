@@ -182,12 +182,7 @@ import {
   mintDeviceSessionClaims,
 } from "./device-session.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
-import {
-  LinearWorkOwnerSchema,
-  type LinearWriteReceipts,
-  classifyLinearDelivery,
-  linearReplyTo,
-} from "./linear-webhook.ts";
+import { type LinearWriteReceipts, classifyLinearDelivery, linearReplyTo } from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
@@ -2733,25 +2728,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (context.req.method === "GET")
       return context.json({ owners: dependencies.captain.linearWorkOwners() });
-    const input = LinearWorkOwnerSchema.extend({
-      expectedConversationId: z.string().min(1).max(256).optional(),
-    }).safeParse(await readJson(context.req.raw));
-    if (!input.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
-    const { expectedConversationId, ...owner } = input.data;
-    owner.organizationId = owner.organizationId.toLowerCase();
-    owner.issueId = owner.issueId.toLowerCase();
-    try {
-      dependencies.captain.setLinearWorkOwner(owner, expectedConversationId, context.req.method === "DELETE");
-      return context.json({ owners: dependencies.captain.linearWorkOwners() });
-    } catch (error) {
-      return context.json(
-        {
-          error: "linear_work_owner_refused",
-          detail: error instanceof Error ? error.message : "Unavailable",
-        },
-        409,
-      );
-    }
+    return context.json({ error: "linear_work_bindings_retired" }, 410);
   });
 
   // Local operator control, independent of the publicly reachable signed webhook.

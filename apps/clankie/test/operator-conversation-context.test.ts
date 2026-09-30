@@ -53,7 +53,7 @@ describe("operator conversation context", () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-linear-owners-"));
     const snapshot = await mkdtemp(join(tmpdir(), "clankie-linear-restart-"));
     roots.push(root, snapshot);
-    const store = new ConversationStore(root, async () => {});
+    let store = new ConversationStore(root, async () => {});
     const created = await store.serve({
       op: "create",
       schemaVersion: 1,
@@ -67,10 +67,10 @@ describe("operator conversation context", () => {
       issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
       conversationId: project,
     };
-    store.setLinearWorkOwner(owner);
-    expect(() => store.setLinearWorkOwner({ ...owner, conversationId: "global-default" })).toThrow(
-      "expected owner",
-    );
+    const bindingFile = JSON.stringify([owner]);
+    await writeFile(join(root, "linear-work.json"), bindingFile);
+    await store.close();
+    store = new ConversationStore(root, async () => {});
     const activity = (n: number): LinearActivityEvent => ({
       eventId: n.toString(16).padStart(64, "0"),
       notification: true,
@@ -104,8 +104,6 @@ describe("operator conversation context", () => {
       { owner: "global-default", prompt: expect.stringContaining("1 new event") },
     ]);
     expect(reopened.receiveLinearActivity(activity(2), true)).toBe(false);
-    reopened.setLinearWorkOwner({ ...owner, conversationId: "global-default" }, project);
-    expect(reopened.receiveLinearActivity(activity(2), true)).toBe(false); // A rebind does not move an admitted event.
     reopened.receiveLinearActivity(activity(3), true);
     reopened.receiveLinearActivity({ ...activity(4), organizationId: "another-workspace" }, true);
     await reopened.close();
@@ -115,7 +113,7 @@ describe("operator conversation context", () => {
     expect(reopened.readLinearInbox({ conversationId: project }).unreadCount).toBe(0);
     expect(reopened.acknowledgeLinearInbox(page.ackCursor!, project)).toBe(false);
     expect(reopened.acknowledgeLinearInbox(page.ackCursor!, "global-default")).toBe(true);
-    expect(() => reopened.setLinearWorkOwner(owner, project)).toThrow("changed");
+    expect(await readFile(join(snapshot, "linear-work.json"), "utf8")).toBe(bindingFile);
     // A completed turn already in the log wins over a stale checkpoint after a crash.
     const metaPath = join(snapshot, "global-default", "meta.json");
     const meta = JSON.parse(await readFile(metaPath, "utf8"));
@@ -135,6 +133,12 @@ describe("operator conversation context", () => {
       finalWakes.push(id);
     });
     settled.resumeLinearActivity();
+    expect(await settled.serve({ op: "close", schemaVersion: 1, conversationId: project })).toMatchObject({
+      op: "close",
+      closed: true,
+    });
+    expect(settled.linearWorkOwners()).toEqual([owner]);
+    expect(await readFile(join(snapshot, "linear-work.json"), "utf8")).toBe(bindingFile);
     await settled.close();
     expect(finalWakes).toEqual([]);
   });

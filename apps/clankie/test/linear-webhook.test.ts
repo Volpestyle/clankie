@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProviderAccount } from "@clankie/credential-broker";
 import { ClankieSettingsSchema, type ClankieSettings } from "@clankie/settings";
@@ -551,47 +551,42 @@ describe("linear activity ingress", () => {
   });
 });
 
-it("requires operator authority and an expected owner to rebind Linear work", async () => {
-  const fixture = await hookApp(false);
-  const store = fixture.store;
-  store.linearInboxConversationId();
-  const app = await createClankieApp({
-    captain: createStubCaptain({
-      linearWorkOwners: () => store.linearWorkOwners(),
-      setLinearWorkOwner: (owner, expected, remove) => store.setLinearWorkOwner(owner, expected, remove),
-    }),
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
-  });
+it("keeps legacy bindings readable while authenticated mutations are retired", async () => {
+  const root = await mkdtemp("/tmp/clankie-linear-bindings-");
   const binding = {
     organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
     issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
     conversationId: "global-default",
   };
-  const request = (body: unknown, method = "PUT", token = "owner") =>
+  const stored = JSON.stringify([binding]);
+  const path = join(root, "linear-work.json");
+  await writeFile(path, stored);
+  const fixture = await hookApp(false, undefined, root);
+  const store = fixture.store;
+  const app = await createClankieApp({
+    captain: createStubCaptain({
+      linearWorkOwners: () => store.linearWorkOwners(),
+    }),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+  });
+  const request = (method: string, token = "owner") =>
     app.app.request("/v1/linear/work", {
       method,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
+      ...(method === "GET" ? {} : { body: JSON.stringify(binding) }),
     });
   try {
-    expect((await request(binding, "PUT", "social")).status).toBe(401);
-    expect((await request({ ...binding, issueId: "VUH-123" })).status).toBe(400);
-    expect((await request({ ...binding, conversationId: "missing" })).status).toBe(409);
-    expect((await request(binding)).status).toBe(200);
-    expect((await request({ ...binding, conversationId: "linear-inbox" })).status).toBe(409);
-    expect(
-      (
-        await request({
-          ...binding,
-          conversationId: "linear-inbox",
-          expectedConversationId: "global-default",
-        })
-      ).status,
-    ).toBe(200);
-    expect((await request(binding, "DELETE")).status).toBe(409);
-    expect((await request({ ...binding, conversationId: "linear-inbox" }, "DELETE")).status).toBe(200);
-    expect(store.linearWorkOwners()).toEqual([]);
+    for (const method of ["GET", "PUT", "DELETE"]) expect((await request(method, "social")).status).toBe(401);
+    for (const method of ["PUT", "DELETE"]) {
+      const response = await request(method);
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({ error: "linear_work_bindings_retired" });
+    }
+    const response = await request("GET");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ owners: [binding] });
+    expect(await readFile(path, "utf8")).toBe(stored);
   } finally {
     app.close();
   }

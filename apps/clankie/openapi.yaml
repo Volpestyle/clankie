@@ -650,7 +650,7 @@ paths:
     get:
       tags: [Operator]
       operationId: listLinearWorkOwners
-      summary: List explicit organization and issue ownership
+      summary: Read legacy organization and issue bindings
       security: [{ operatorBearer: [] }]
       responses:
         "200": { description: Owners in an owners array }
@@ -658,34 +658,21 @@ paths:
     put:
       tags: [Operator]
       operationId: bindLinearWorkOwner
-      summary: Store a legacy issue binding (no wake routing effect)
-      description: Retained for compatibility. Rebinding requires the expected current conversation. Bot notifications always wake the operator conversation.
+      summary: Retired issue binding mutation
+      deprecated: true
       security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/LinearWorkOwnerRequest" }
       responses:
-        "200": { description: Updated owners array }
-        "400": { description: Invalid UUIDs or request shape }
         "401": { description: Operator authentication required }
-        "409": { description: Unknown conversation or ownership conflict }
+        "410": { description: Issue binding mutations are retired; existing records remain readable }
     delete:
       tags: [Operator]
       operationId: unbindLinearWorkOwner
-      summary: Remove a legacy issue binding
+      summary: Retired issue binding mutation
+      deprecated: true
       security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/LinearWorkOwnerRequest" }
       responses:
-        "200": { description: Updated owners array }
-        "400": { description: Invalid request }
         "401": { description: Operator authentication required }
-        "409": { description: Current owner does not match }
+        "410": { description: Issue binding mutations are retired; existing records remain readable }
   /v1/linear/inbox:
     get:
       tags: [Operator]
@@ -2870,15 +2857,6 @@ components:
                   validation_timeout,
                   unavailable,
                 ]
-    LinearWorkOwnerRequest:
-      type: object
-      additionalProperties: false
-      required: [organizationId, issueId, conversationId]
-      properties:
-        organizationId: { type: string, format: uuid }
-        issueId: { type: string, format: uuid }
-        conversationId: { type: string, maxLength: 256, pattern: "^[a-zA-Z0-9_-]+$" }
-        expectedConversationId: { type: string, minLength: 1, maxLength: 256 }
   parameters:
     guildId:
       in: path
