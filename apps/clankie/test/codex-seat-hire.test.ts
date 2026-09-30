@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -13,6 +13,8 @@ afterEach(async () => {
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "codex-hire-test-"));
+  // The controller is a fixture; never depend on or probe the developer's sign-in.
+  await writeFile(join(root, "auth.json"), "fixture presence only");
   let event: (event: CodexSeatEvent) => void = () => undefined;
   const emit = (method: string, turn: Record<string, unknown>) =>
     event({ method, params: { threadId: "thread", turn } });
@@ -50,6 +52,7 @@ async function fixture() {
   const wake = vi.fn(async () => undefined);
   const store = new HerdrWatchStore(join(root, "watches.json"), {
     seatAdapters: [adapter],
+    codexAccounts: async () => [{ label: "fixture", home: root }],
     runner: {
       createTab: async () => agent.paneId,
       startAgent,
@@ -73,7 +76,7 @@ async function fixture() {
     undefined,
     "first brief",
   );
-  expect(hired.outcome).toBe("spawned");
+  expect(hired).toMatchObject({ outcome: "spawned" });
   return { store, agent, emit, close, send, promptAgent, runInPane, startAgent, wake };
 }
 
@@ -108,3 +111,7 @@ it("closing a hired pane also closes its protocol controller", async () => {
   expect(await f.store.closeSeat(f.agent.terminalId)).toBe(true);
   expect(f.close).toHaveBeenCalledTimes(1);
 });
+
+vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexRateLimits: vi.fn(async () => null),
+}));

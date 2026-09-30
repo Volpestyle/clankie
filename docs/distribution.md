@@ -21,7 +21,7 @@ each version immutably under `~/.local/share/clankie/releases/`. It updates
 Install a specific release with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh -s -- --version v0.3.1
+curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh -s -- --version v0.3.2
 ```
 
 The release binaries are ad-hoc signed. The command-line installer uses
@@ -33,8 +33,8 @@ browser-downloaded package.
 
 ```text
 ~/.local/share/clankie/
-├── current -> releases/v0.3.1
-└── releases/v0.3.1/
+├── current -> releases/v0.3.2
+└── releases/v0.3.2/
     ├── bin/clankie
     ├── libexec/node
     ├── bin/clankie-herdr      # attach-only viewer shortcut
@@ -132,6 +132,6 @@ Swarm/Herdr worker and relay image; `pnpm hosted:smoke` checks isolated executio
 and persistence. The [hosted deployment guide](../infra/hosted/README.md) owns
 setup, supported capabilities and remaining managed-hosting requirements.
 
-Pushing a version tag matching `package.json` (for example `v0.3.1`) runs the
+Pushing a version tag matching `package.json` (for example `v0.3.2`) runs the
 full repository check, builds and smoke-tests the archive on an Apple silicon
 GitHub runner, and uploads both assets to the matching GitHub Release.
