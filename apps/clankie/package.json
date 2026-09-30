@@ -21,7 +21,6 @@
     "@clankie/agent-transcript": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/discord-presence-core": "workspace:*",
-    "@clankie/environment-runtime": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/media-connector": "workspace:*",
     "@clankie/model-provider": "workspace:*",

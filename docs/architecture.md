@@ -361,9 +361,9 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   own credentialed seat, as the same parent-plus-driver sitting (MCP Task,
   host subagent, or CLI loop; PokeAgents ADR 0023), with no control over
   Clankie, Activity publication, play voice, or room input.
-  `EnvironmentRuntime` leases remain internal
-  action/session fences within the owning runtime; they are not cross-process
-  possession.
+  PokeAgents owns player leases and action/session fencing. Clankie's play
+  package retains typed body-action refusals beside its driver interface;
+  the retired local environment lifecycle engine has no role in hosted play.
 - **Spider-Man.** Rivals Agent owns tactical decisions and the guarded real-time
   pad loop. Clankie's `rivals` tool and operator API manage bounded sittings,
   objectives, fresh observations, and read-only sharing; the existing Go Live

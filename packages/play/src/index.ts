@@ -4,7 +4,7 @@
  * hosted PokeAgents world, reached through `@clankie/play`'s consumer
  * ([ADR 0145](../../../docs/adr/0145-the-world-is-the-only-body.md)).
  */
-export type { GbaDriverIo, GbaDriverView } from "./body-seam.ts";
+export { EnvironmentAdapterActionError, type GbaDriverIo, type GbaDriverView } from "./body-seam.ts";
 export { canonicalJson, sha256 } from "./digest.ts";
 export {
   FREE_PLAY_HARD_FAILURE_LIMIT,

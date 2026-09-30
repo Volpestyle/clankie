@@ -14,6 +14,19 @@ import type {
   GbaEmulatorObservationKind,
 } from "@clankie/interactive-environment";
 
+/** A body's typed action refusal, including whether retrying can be safe. */
+export class EnvironmentAdapterActionError extends Error {
+  public readonly errorCode: string;
+  public readonly retryable: boolean;
+
+  public constructor(errorCode: string, message: string, retryable = false) {
+    super(message);
+    this.name = "EnvironmentAdapterActionError";
+    this.errorCode = errorCode;
+    this.retryable = retryable;
+  }
+}
+
 export interface GbaDriverIo {
   observe(kind: GbaEmulatorObservationKind): GbaEmulatorObservation;
   act(action: GbaEmulatorAction): Promise<EnvironmentActionResult>;

@@ -13,7 +13,6 @@
     "gameplay:evaluate-journal": "tsx scripts/evaluate-free-play-journal.ts"
   },
   "dependencies": {
-    "@clankie/environment-runtime": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "ai": "^7.0.19",

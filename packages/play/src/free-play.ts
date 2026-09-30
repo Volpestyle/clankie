@@ -6,7 +6,7 @@ import {
   type GbaEmulatorObservation,
   type GbaEmulatorObservationKind,
 } from "@clankie/interactive-environment";
-import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
+import { EnvironmentAdapterActionError } from "./body-seam.ts";
 import { z } from "zod";
 import {
   FREE_PLAY_INTENT_MAX,

@@ -34,26 +34,26 @@ This directory and the module READMEs hold the technical references.
 sessions, and connections in the TUI. [Contributing](../CONTRIBUTING.md) owns the
 source setup and checks.
 
-| Area                              | Owning reference                                                                                                                                                              |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Service HTTP contract             | [OpenAPI](../apps/clankie/openapi.yaml), rendered as the [API docs](https://docs.clankie.bot/api/)                                                                            |
-| Public wire contracts             | [`packages/protocol`](../packages/protocol/README.md)                                                                                                                         |
-| Coordination and worker routes    | [Swarm host](../packages/swarm/README.md)                                                                                                                                     |
-| Harness discovery and transcripts | [Agent hosts](../packages/agent-hosts/README.md), [transcripts](../packages/agent-transcript/README.md)                                                                       |
-| Project work tracking             | [Work items](../packages/work-items/README.md)                                                                                                                                |
-| Models                            | [Provider resolution](../packages/model-provider/README.md), [catalog](../packages/model-registry/README.md)                                                                  |
-| Configuration                     | [Settings](../packages/settings/README.md), [credential broker](../packages/credential-broker/README.md)                                                                      |
-| Persona images                    | [Owner image folders](persona-images.md), voice descriptions and self-depiction                                                                                               |
-| Images and video                  | [Media connector](../packages/media-connector/README.md)                                                                                                                      |
-| Game play                         | [Play mind](../packages/play/README.md), [environment runtime](../packages/environment-runtime/README.md), [rendered contract](../packages/interactive-environment/README.md) |
-| Gameplay commentary               | [Play voice](../packages/play-voice/README.md)                                                                                                                                |
-| Discord                           | [Official bot](../apps/discord-bridge/README.md), [shared behavior](../packages/discord-presence-core/README.md), [lab body](../apps/discord-user-session/README.md)          |
-| Native Discord media              | [Vox](../apps/vox/README.md), [client boundary](../packages/vox-client/README.md)                                                                                             |
-| Game watch surface                | [Discord Activity](../apps/discord-activity/README.md)                                                                                                                        |
-| Remote device access              | [Relay](../apps/relay/README.md), [public network](https://docs.clankie.bot/network/)                                                                                         |
-| Optional terminal integrations    | [Herdr plugin](../integrations/herdr-plugin/README.md), [Claude seat](../integrations/claude-plugin/README.md)                                                                |
-| Documentation and branding        | [Docs site](../apps/docs/README.md), [public marks](../branding/README.md)                                                                                                    |
-| Public deployment                 | [AWS boundary](../infra/aws/README.md), [docs hosting](../infra/aws/public-docs/README.md)                                                                                    |
+| Area                              | Owning reference                                                                                                                                                     |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Service HTTP contract             | [OpenAPI](../apps/clankie/openapi.yaml), rendered as the [API docs](https://docs.clankie.bot/api/)                                                                   |
+| Public wire contracts             | [`packages/protocol`](../packages/protocol/README.md)                                                                                                                |
+| Coordination and worker routes    | [Swarm host](../packages/swarm/README.md)                                                                                                                            |
+| Harness discovery and transcripts | [Agent hosts](../packages/agent-hosts/README.md), [transcripts](../packages/agent-transcript/README.md)                                                              |
+| Project work tracking             | [Work items](../packages/work-items/README.md)                                                                                                                       |
+| Models                            | [Provider resolution](../packages/model-provider/README.md), [catalog](../packages/model-registry/README.md)                                                         |
+| Configuration                     | [Settings](../packages/settings/README.md), [credential broker](../packages/credential-broker/README.md)                                                             |
+| Persona images                    | [Owner image folders](persona-images.md), voice descriptions and self-depiction                                                                                      |
+| Images and video                  | [Media connector](../packages/media-connector/README.md)                                                                                                             |
+| Game play                         | [Play mind](../packages/play/README.md), [rendered contract](../packages/interactive-environment/README.md)                                                          |
+| Gameplay commentary               | [Play voice](../packages/play-voice/README.md)                                                                                                                       |
+| Discord                           | [Official bot](../apps/discord-bridge/README.md), [shared behavior](../packages/discord-presence-core/README.md), [lab body](../apps/discord-user-session/README.md) |
+| Native Discord media              | [Vox](../apps/vox/README.md), [client boundary](../packages/vox-client/README.md)                                                                                    |
+| Game watch surface                | [Discord Activity](../apps/discord-activity/README.md)                                                                                                               |
+| Remote device access              | [Relay](../apps/relay/README.md), [public network](https://docs.clankie.bot/network/)                                                                                |
+| Optional terminal integrations    | [Herdr plugin](../integrations/herdr-plugin/README.md), [Claude seat](../integrations/claude-plugin/README.md)                                                       |
+| Documentation and branding        | [Docs site](../apps/docs/README.md), [public marks](../branding/README.md)                                                                                           |
+| Public deployment                 | [AWS boundary](../infra/aws/README.md), [docs hosting](../infra/aws/public-docs/README.md)                                                                           |
 
 ## Proposals, decisions, and evidence
 

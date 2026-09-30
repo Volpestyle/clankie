@@ -89,6 +89,11 @@ flowchart LR
 
 ## Consequences
 
+The unused local `EnvironmentRuntime` was removed on 2026-09-30. Its typed
+`EnvironmentAdapterActionError` remains in `packages/play` beside `GbaDriverIo`,
+preserving action refusal codes, retryability and journal evidence. Hosted play
+continues to use PokeAgents' own player/session authority.
+
 - Play needs a reachable world. A local one is `pokeagents start` plus a seat
   from `pokeagents invite`; `WORLD_ADDRESS` defaults to that world's unix
   socket. With no world, `pokeagent_join_mmo` refuses `world_unreachable` and
