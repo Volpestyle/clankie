@@ -320,10 +320,10 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   lists them on machine-access lanes
   ([ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
 - **Leading agents.** Swarm MCP owns cross-session messages and task ownership,
-  guided by `lead` and `swarm-lead`. The per-conversation host and supported
+  guided by `lead`. The per-conversation host and supported
   worker delivery paths live in [the Swarm package](../packages/swarm/README.md).
   Herdr supplies terminals and process control for the built-in worker route;
-  `herdr-lead` is the explicit fallback for unenrolled agents. The service's
+  The Herdr section of `lead` is the explicit fallback for unenrolled agents. The service's
   selected runtime supplies every console's fleet view. Current binding and
   fallback behavior live in [the CLI reference](cli.md#herdr-statusopencreate--herdr-use-name).
   Native Herdr events wake fleet readers across workspaces
@@ -436,7 +436,7 @@ models, sessions, tools, skills, and compaction. The agent runtime, HTTP surface
 play host share one service
 ([ADR 0101](adr/0101-pi-owns-the-captain-model-runtime.md)).
 Swarm owns cross-session task coordination and messages. Herdr exposes the
-current built-in workers as visible panes through its CLI; `herdr-lead` supplies
+current built-in workers as visible panes through its CLI; `lead` supplies
 the fallback for unenrolled agents. Untrusted input stays fenced, secrets stay in the credential
 broker, and every report describes observed outcomes rather than intentions.
 

@@ -3,6 +3,9 @@ import { bundledSkills } from "./bundled-skills.ts";
 import type { SkillsSettings } from "./schema.ts";
 import { join } from "node:path";
 
+// Retired leadership names must not reappear through owner/workspace copies.
+export const mergedLeadershipSkills = ["swarm-lead", "herdr-lead"] as const;
+
 /**
  * Where Clankie looks for skills: one rule for the list he is offered and the
  * list he can actually load.
@@ -12,15 +15,15 @@ import { join } from "node:path";
  * two that ship in this repo — so every personal skill autocompleted, and the
  * message submitted, and `resolveOperatorPrompt` found no such skill and
  * passed the text through as an ordinary prompt. No skill, no error. The same
- * gap kept his own instructions hedging "load `herdr-lead` … when that skill
+ * gap kept his own instructions hedging "load `lead` … when that skill
  * is present": it is present on disk, and it was never on his path.
  *
  * Order is precedence: `loadSkills` keeps the first skill of a given name and
  * reports the rest as collisions, so the skills that ship with this body win
  * over a personal skill that happens to share a name.
  *
- * With exclusions, expand roots into selected entries so disabled names cannot
- * return via a second root. Without exclusions, callers handle missing roots.
+ * Expand existing roots into selected entries so disabled or merged names cannot
+ * return via a second root. Callers handle missing roots.
  */
 export function clankieSkillRoots(input: {
   /** The checkout or installed release: the skills shipped with this body. */
@@ -45,12 +48,12 @@ export function clankieSkillRoots(input: {
     join(input.agentDir, "skills"),
     join(input.home, ".agents", "skills"),
   ];
-  const excluded = new Set(
-    bundledSkills(input.repoRoot, input.skills)
+  const excluded = new Set<string>([
+    ...mergedLeadershipSkills,
+    ...bundledSkills(input.repoRoot, input.skills)
       .filter((skill) => !skill.included)
       .map((skill) => skill.name),
-  );
-  if (excluded.size === 0) return roots;
+  ]);
   // Enumerate each root so a disabled bundled name cannot sneak back through a
   // workspace/global copy. Other owner skills remain available and untouched.
   return [...new Set(roots)].flatMap((root) =>
@@ -58,6 +61,6 @@ export function clankieSkillRoots(input: {
       ? readdirSync(root)
           .filter((name) => !excluded.has(name.replace(/\.md$/u, "")))
           .map((name) => join(root, name))
-      : [],
+      : [root],
   );
 }

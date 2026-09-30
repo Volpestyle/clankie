@@ -998,7 +998,7 @@ to. `set` takes any combination of the three flags; what is left out keeps its
 value. `clear` returns all three to their defaults.
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
-lead skills (`lead`, `swarm-lead`, `herdr-lead`) and his prompt use them to aim.
+leadership skill (`lead`) and his prompt use them to aim.
 An owner who wants a thousand agents picks `max` or says so in the notes.
 
 | `--size`        | Fits                                                               | Aims for                                                                                                                                     |
@@ -1989,8 +1989,8 @@ that channel; processing still requires `swarm_inbox` acknowledgment. The projec
 plugin uses its `clankie@inline` channel identity. See the [seat plugin](../integrations/claude-plugin/README.md)
 for context, resume and native-workspace requirements.
 
-When included, use `swarm-lead` for the default leadership workflow, `lead` for
-shared judgment, and `herdr-lead` for the explicit fallback. `swarm-mcp` always
+When included, use `lead` for shared judgment, Swarm-first leadership,
+and the explicit Herdr fallback. `swarm-mcp` always
 remains available for peer participation; turning opinionated skills off retains
 the captain's own leadership instructions.
 Through `clankie mcp`, Pi or the Claude seat, `swarm_assign` accepts optional

@@ -8,9 +8,8 @@ repository and user's authorization still govern their use.
 The authoring source for reusable process skills is
 [Volpestyle/skills](https://github.com/Volpestyle/skills). The pinned revision and
 selected directories are in [the manifest](../vendor/opinionated-skills.json).
-The snapshot retains its MIT license; edit upstream and refresh the snapshot.
-Leadership guidance is exported from the same revision as the other opinionated
-skills. Clankie's own product skills remain authored in `.agents/skills`.
+The snapshot retains its MIT license. The manifest records the local VUH-1457
+leadership merge on top of that revision; preserve it when refreshing upstream. Clankie's own product skills remain authored in `.agents/skills`.
 
 ## Two classes, one switch
 
@@ -29,20 +28,27 @@ and every other skill authored in this repo (including `comparison-shopping`,
 by the CLI and ignored by loaders if present in an older settings file.
 
 Everything selected from `vendor/opinionated-skills/` is opinionated, including
-`lead`, `swarm-lead` and `herdr-lead`:
+`lead`:
 
 | Area            | Opinionated skills                                                                       |
 | --------------- | ---------------------------------------------------------------------------------------- |
-| Leadership      | lead, swarm-lead, herdr-lead, co-w, herdr-handoff, shared-checkout                       |
+| Leadership      | lead, co-w, herdr-handoff, shared-checkout                                               |
 | Work tracking   | linear-issues, linear-orient, linear-plan, linear-grind                                  |
 | Review          | reflect, blast-radius, robust-review, interrogate, conventions, perf-review, docs-review |
 | Delivery        | c, p, pr-description, testing-archive                                                    |
 | Working methods | solution-space                                                                           |
 
-Turning guidance off does not disable leading. The captain prompt makes these
-skill references conditional; its ownership, dispatch, review and delivery
-instructions remain, with the always-on `swarm-mcp` and `herdr` tool references.
-A disabled skill is not silently loaded from another copy by Clankie's Pi loader.
+The catalog contains **33 skills: 20 opinionated and 13 product/tool skills**.
+VUH-1457 merged the three leadership entries into `lead`, with shared judgment,
+Swarm-first coordination and an explicit Herdr fallback. Its Herdr references
+use the native CLI; the vendored dashboard plugin and board-specific references
+were removed per cut audit C23. Other opinionated-skill evaluations remain on hold.
+
+Turning guidance off does not disable leading. `swarm-mcp` and `herdr` remain
+available as tool references. Disabled names and the merged `swarm-lead` and
+`herdr-lead` names are filtered from Clankie's Pi roots and Codex worker overlays,
+so an older workspace/global copy cannot restore them through those loaders.
+Owner-global files are untouched.
 
 The selection applies to new sessions and local hires. Existing sessions keep
 context they already loaded: start a fresh seat, reset a service conversation,
@@ -63,11 +69,10 @@ excluded from releases. They require the sibling skills checkout.
   triage policy is now in `work-items`; tracker selection is already there and
   in the captain instructions.
 
-`reflect` stays. The captain carries a light end-of-substantial-task reminder to
-improve and clean up skills and docs when there is a durable lesson. The pinned
+`reflect` stays. The pinned
 upstream text is heavier: four steps, a lesson/evidence/route ledger and a
-proposal/approval phase. That is a candidate for an upstream simplification;
-Clankie does not fork the vendored prose or require the ritual. No upstream skill
+proposal/approval phase. That is a candidate for an upstream simplification.
+This merge does not change that skill or require its ritual. No upstream skill
 or owner-global dotfiles selection is removed by these cuts.
 
 Herdr is both a bundled tool skill and an independently selectable global skill.
@@ -141,7 +146,9 @@ Read `vendor/opinionated-skills.json`, check out its full revision in the skills
 repository, and export the listed directories plus `LICENSE` with `git archive`.
 Preserve the source-relative paths under `vendor/opinionated-skills/` and the
 relative links from `.agents/skills` and the Claude plugin. Never snapshot an
-uncommitted working tree. Update the manifest revision in the same change and
+uncommitted working tree. Reapply the manifest's recorded local changes, including
+the consolidated leadership skill and removal of the dashboard, before replacing
+the shipped snapshot. Update the manifest revision in the same change and
 review the export for personal accounts, private material and out-of-root links.
 Release assembly dereferences these links, including the worker plugin, so an
 installed body needs no sibling checkout. The vendored prose is excluded from

@@ -43,7 +43,7 @@ can terminate owned work even when MCP is unavailable. Legacy launches retain
 uncertain capacity until stop proof exists. [The original incident](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
 records the failure that led to these safeguards.
 
-The opinionated leadership skills are `lead`, `swarm-lead`, and `herdr-lead`;
+The opinionated leadership skill is `lead`, with Swarm-first and Herdr fallback sections;
 `swarm-mcp` is the always-on tool/protocol reference. `clankie skills opinionated
 off` disables leadership guidance while retaining the captain's own leadership
 instructions and tool references.

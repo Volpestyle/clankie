@@ -1,10 +1,10 @@
 import { test, expect } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-test("relocated release includes executable Swarm dependencies and skill sources", async () => {
+test("relocated release includes executable Swarm dependencies without the legacy skill archive", async () => {
   const root = await mkdtemp("/tmp/clankie-swarm-release-test-");
   const repo = fileURLToPath(new URL("../../../", import.meta.url));
   const helper = new URL("../../../scripts/release/swarm-runtime.mjs", import.meta.url).href;
@@ -13,13 +13,15 @@ test("relocated release includes executable Swarm dependencies and skill sources
     // child deadline focused on enrollment/bootstrap even on a busy build host.
     const { copySwarmRuntime } = await import(helper);
     await copySwarmRuntime(repo, root);
+    await expect(access(`${root}/node_modules/@volpestyle/lead-skills`)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     const result = await promisify(execFile)(
       process.execPath,
       [
         "--input-type=module",
         "--eval",
         `
-      import { readFile } from 'node:fs/promises';
       import { dirname, join } from 'node:path';
       import { createRequire } from 'node:module';
       const require = createRequire(join(process.cwd(), 'package.json'));
@@ -35,8 +37,6 @@ test("relocated release includes executable Swarm dependencies and skill sources
       try {
         const client = await runtime.CoordinationClient.connect(enrolled.environment.SWARM_COORDINATOR_ENDPOINT, enrolled.environment.SWARM_SESSION_CAPABILITY);
         try { await client.request({op:'bootstrap'}); } finally { client.close(); }
-        for(const skill of ['lead','swarm-lead','herdr-lead']) await readFile(join(process.cwd(), 'node_modules/@volpestyle/lead-skills',skill,'SKILL.md'));
-        await readFile(join(process.cwd(), 'node_modules/@volpestyle/lead-skills/LICENSE'));
         console.log('release runtime ready');
       } finally { enrolled.launchedOwner?.kill(); }
     `,

@@ -186,7 +186,7 @@ async function inside() {
       clientInfo: { name: "hosted-proof", version: "1" },
     });
     assert.equal((await fetch("http://127.0.0.1:4310/v1/mcp", { method: "POST" })).status, 401);
-    for (const skill of ["lead", "swarm-lead", "herdr-lead", "swarm-mcp"])
+    for (const skill of ["lead", "swarm-mcp"])
       assert.ok((await readFile(`/opt/clankie/.agents/skills/${skill}/SKILL.md`, "utf8")).length > 0);
     assert.ok(JSON.parse(await readFile("/opt/clankie/SBOM.cdx.json", "utf8")).components.length > 0);
     const tools = await rpc("tools/list", {});

@@ -101,7 +101,7 @@ This repository is public. Both neighbors are private and consume
   where volition would do. The only limits are the trust and safety
   boundaries above, never timidity.
 - Agents prefer swarm-mcp for cross-session assignments, messages and handoffs.
-  Load `swarm-lead` for leadership and `swarm-mcp` for participation; `lead` owns
-  shared judgment. Use the selected runtime for terminals and process control;
-  `herdr-lead` is the explicit Herdr fallback for unenrolled agents. Never
+  Load `lead` for leadership and `swarm-mcp` for participation. `lead` includes
+  the explicit Herdr fallback for unenrolled agents. Use the selected runtime
+  for terminals and process control. Never
   duplicate uncertain dispatch.

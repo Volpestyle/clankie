@@ -163,7 +163,7 @@ If everything closed, say the lane is empty.
 - **Re-running is fine** — the queue is rebuilt from live status each run, so
   closed tickets simply drop out. Don't keep a local list across runs.
 - **One issue at a time in one worktree.** Parallel fan-out across panes is
-  `herdr-lead`'s job, not this skill's.
+  `lead`'s job, not this skill's.
 - **Every reported outcome points at inspected evidence** — a fresh tool result
   or an explicitly attributed retained proof whose relevant inputs still match.
   Verify current delivery and status; report missing steps honestly.

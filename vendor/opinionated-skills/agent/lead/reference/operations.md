@@ -5,145 +5,10 @@ Read the sections needed for the operation; the lead workflow stays in
 
 ## Census
 
-One call gets the whole session. Do not loop `workspace list` / `tab list` /
-`pane list` — `api snapshot` already contains all of it plus focus and layout.
-
-```bash
-herdr-lead roster
-```
-
-That renders the snapshot as a compact roster (13 panes ≈ 20 lines) with a
-collection timestamp, status summary, shared-cwd warnings, and your own pane marked.
-The timestamp dates the snapshot, not task completion; `done` and `blocked`
-require inspection before harvest or escalation. Raw
-`herdr api snapshot` is several hundred lines of JSON per dozen panes — only
-reach for it (`herdr-lead roster --json`) when you need a field the roster drops.
-
-Useful filters: `--agents-only` (skip plain shells), `--status done`.
-
-When the board is up and a lane's outcome, owner, or blocker changes, update
-`summaries.json` — see **Agent summaries**. Do not rewrite unchanged summaries
-after every read, or write them with no board open.
-
-### Open the live board
-
-**Only when asked.** The board is opt-in: open it when the invocation carries
-`board` (`/herdr-lead board`, `$herdr-lead board`) or the user asks for the
-board/dashboard in words. Otherwise skip it and go straight to the text census —
-an unasked-for pane rearranges the user's screen. Prefer the split:
-
-```bash
-herdr-lead split
-```
-
-`~/.local/bin/herdr-lead`, symlinked to `plugin/cli.ts`. `herdr-lead split`
-puts the board in a pane beside the target (the pane that invoked it when
-one did; otherwise the focused pane) and records that pane as the peer
-`ctrl+b shift+L` / `herdr-lead focus` returns to. `herdr-lead state` is the
-digest below.
-
-**Never run bare `herdr-lead` from a tool call or a service.** It paints the
-TUI into the calling process — from an agent's Bash tool that means a TUI in
-captured stdout, which hangs or wastes the call and shows the user nothing.
-Only a human typed into a shell should run it that way; use `herdr-lead split`.
-
-**One board per session.** Both forms are idempotent: if a pane labelled `Herd
-Lead` is already up, they print its pane id and open nothing. So a second lead
-agent invoking this skill never spawns a duplicate board — it inherits the one
-the user is already looking at. Tell the user where it is rather than trying to
-open another.
-
-One-time install and the `prefix+shift+l` keybinding: [install.md](install.md).
-Board views, keys, scan roots, env vars, and what `r`/`R`/`p`/`P` do:
-[board.md](board.md) — the board is the user's view and `?` inside it prints
-the keymap, so you never recite it. Two things the board does *not* do: call
-Datadog or Linear (you write those caches — next section) or prompt an
-existing agent (dispatch stays yours, within the authorization in the lead skill).
-
-### The two agent-written caches
-
-The board never calls Datadog or Linear — it has no credentials. The `datadog`
-view (key `6`) and the header's `+K no branch` ticket count both render caches
-**you** write, in `~/.local/state/herdr/plugins/herd-lead/`. `R` rereads them
-from disk; nothing but you ever rewrites them.
-
-The view opens with a LINKS section — whatever dashboards and explorer urls are
-configured — and `enter` opens one in the browser. Links work with no cache at
-all; set them with `c` → datadog quick links, or
-`HERD_LEAD_DD_DASHBOARDS="label=url label=url"` (URL-encode spaces — the list splits
-on whitespace), or a `"dashboards"` array in the cache.
-
-Refresh them during a census when prod or ticket state matters, and whenever the
-board shows them stale (the roll-up turns yellow past 30 minutes). Say the age
-whenever you report from either — a clear board that is four hours old says
-nothing about now.
-
-**Before writing either file, read [board-caches.md](board-caches.md)**:
-exact JSON schema for both, which MCP calls fill them, and the traps —
-`No Data` is a resting state not a fault, a metric with no series means zero not
-missing, and linear.json must be a superset or the board's join has nothing to
-work with.
-
-### Agent summaries
-
-The board's `i` on an agent row shows the summary **you** wrote. Update it on
-meaningful state changes, alongside the harvest rather than in a separate
-reporting pass.
-
-`~/.local/state/herdr/plugins/herd-lead/summaries.json`:
-
-```json
-{
-  "at": "<ISO 8601 now>",
-  "agents": {
-    "w15:p8": {
-      "summary": "Inspecting the herdr census so seated turns carry the fleet.",
-      "next": "Show those summaries on i.",
-      "at": "<ISO 8601 now>"
-    }
-  }
-}
-```
-
-One line for `summary`, optional `next`. Your words, not a pasted title or
-a raw `※ recap:`. Merge by pane id — read the file first, update the panes
-you know about, leave the rest. Do not drop siblings. `r` / `R` reread the
-file. A missing entry shows as `no summary yet`. The recap the board mines
-from a Claude pane is a fallback, not the summary.
-
-### Read the board's exact state
-
-The board publishes the data it renders, so you can know exactly what the user
-is looking at instead of re-deriving it:
-
-```bash
-node ~/.claude/skills/herdr-lead/plugin/digest.ts
-```
-
-A compact digest: agents with their correlated worktrees, open editors, every
-worktree with branch / dirty / ahead / behind / MR / attached panes, and the
-skill library. `--json` for the full structure, `--fresh` to force a rescan,
-`--all` to stop eliding.
-
-**The text digest lists only worktrees that are doing something** — dirty,
-ahead, behind, with an MR, or with a pane attached — and ends the section with
-`… N clean/idle worktrees not listed`. Never conclude a repo is missing from
-that output; it is almost certainly just clean. `--all` and `--json` are
-complete. It reads the same config as the board (settings.json, then
-`HERD_LEAD_*` env), so it works headless too.
-
-It reads the board's live snapshot when the board is running (rewritten on every
-refresh) and otherwise computes the same thing itself, so it works either way.
-Prefer it over `roster.ts` whenever worktree or MR state matters; `roster.ts` is
-still the cheaper call when you only need pane status.
-
-Two caveats before you report anything from it. Git state compares against local
-remote-tracking refs; the worktree detail labels them cached and shows the last
-fetch time. Refresh the selected repo from its menu before relying on origin
-state. Library `vcs` state never fetches, so a skill merged upstream since the
-last fetch can still read as off-main. And a branch whose prefix is not in the
-configured linear team keys (`c` on the board, or `HERD_LEAD_LINEAR_TEAMS` —
-there is no default) gets no branch ticket at all, never a wrong one.
+Use `herdr api snapshot` for the whole session, including focus and layout,
+or `herdr agent list` for agents only. Read only the relevant lanes when
+ownership is already clear. The vendored dashboard and its helpers are no
+longer bundled; these operations use the Herdr CLI directly.
 
 ## Triage before reading panes
 
@@ -187,8 +52,7 @@ which turn.
 
 **Check for unsubmitted input too.** Text typed into an agent's box but never
 sent leaves the pane `idle` with a pending prompt one keystroke from running.
-No metadata field exposes it. `roster.ts --recaps` flags it as
-`!! UNSUBMITTED INPUT`.
+No metadata field exposes it; inspect the visible composer directly.
 
 Claude Code's dim suggested follow-up can trip that flag too. Inspect the
 pane's ANSI styling when the distinction matters: an automatically suggested
@@ -214,23 +78,6 @@ elapsed delay is not proof that the operator has finished typing. This check
 reduces collisions; it is not an atomic reservation against the next keystroke.
 
 ## Enrich and read
-
-Claude's TUI emits a `※ recap: <goal>. Next: <action>.` line — precisely what a
-lead needs, in one line instead of a transcript. Get every agent's recap plus an
-unsubmitted-input check in one call:
-
-```bash
-herdr-lead roster --recaps
-```
-
-This is one `herdr agent read` per agent pane, but it returns ~1 line each
-rather than ~30. Reach for it before any manual reading. Best effort, not a
-guarantee: recaps are a Claude-TUI feature, users can disable them, and other
-agent kinds (codex, gemini) have no equivalent — an agent with no recap needs a
-real read.
-
-Recaps also go stale. They describe the pane's last turn, which may be from
-hours ago; verify against a fresh read before acting on anything consequential.
 
 Deep-read only the shortlist that survives:
 
@@ -285,25 +132,6 @@ Two more `--wait` hazards, both from `agent prompt --help`: waiting from a
 non-working state needs an observed state change within 5000ms or it returns
 `agent_prompt_stalled`, and **the wait does not track turns** — if the agent was
 already working, that pre-existing turn's completion satisfies your wait.
-
-**Swarm first for enrolled seats.** When workers were launched through the swarm
-launchers (`swarm-claude`/`swarm-codex`), put the substance of every assignment,
-answer and decision in `swarm_send` (durable, threaded, leased and acknowledged)
-and use herdr only to wake or inspect the pane:
-
-- Address the recipient by **actor UUID** from `swarm_find kind=peers`, never by
-  pane or lane name; an unknown recipient string is accepted and silently strands.
-- Claude seats receive through launcher hooks at turn boundaries (the lead's own
-  replies arrive that way too, so a manual `swarm_inbox fetch` can come back empty
-  while the hook holds the lease). Codex seats have native MCP but **no autonomous
-  delivery**: after `swarm_send`, wake the pane with a one-line `herdr agent prompt`
-  that carries no content ("Swarm inbox: thread <id>; fetch, ack and reply").
-- A Codex seat whose swarm calls fail with `Transport closed` has lost its MCP
-  child for good; Codex does not restart it. Repair when idle: `/quit` in the pane,
-  then rerun `swarm-codex ... -- <model flags> resume <codex-thread-id>` (the id
-  Codex prints on quit). The conversation survives, but the seat re-enrols as a
-  **new actor**: look it up again with `swarm_find` before sending. A probe
-  (fetch, ack, reply) confirms the repair.
 
 **A fresh agent** — create its own named tab without taking focus;
 `agent start` waits for real interactive readiness:
@@ -443,12 +271,6 @@ it is (`!764 short code UI`, `aurora migration`), never a default number.
 
 | Need | Command |
 |---|---|
-| Live board, in this pane (human only) | `herdr-lead` |
-| Live board, split beside the target (only if asked) | `herdr-lead split` |
-| Board state (agents + worktrees + editors + library) | `herdr-lead state` |
-| Same, full structure | `herdr-lead state --json` |
-| Whole session, compact | `herdr-lead roster` |
-| Goals + next steps + stranded input | `herdr-lead roster --recaps` |
 | Whole session, raw | `herdr api snapshot` |
 | Agents only | `herdr agent list` |
 | One agent | `herdr agent get <pane>` |

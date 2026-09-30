@@ -9,7 +9,6 @@
     "conventions": "review/conventions",
     "docs-review": "review/docs-review",
     "herdr-handoff": "agent/herdr-handoff",
-    "herdr-lead": "agent/herdr-lead",
     "interrogate": "review/interrogate",
     "lead": "agent/lead",
     "linear-grind": "agent/linear-grind",
@@ -23,7 +22,9 @@
     "robust-review": "review/robust-review",
     "shared-checkout": "agent/shared-checkout",
     "solution-space": "agent/solution-space",
-    "swarm-lead": "agent/swarm-lead",
     "testing-archive": "review/testing-archive"
-  }
+  },
+  "localChanges": [
+    "VUH-1457: merge leadership into agent/lead (including Herdr references); remove the vendored dashboard and update linear-grind leadership reference."
+  ]
 }

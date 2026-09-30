@@ -18,7 +18,9 @@ it("defaults on, validates selection, and classifies leadership as optional", ()
   expect(() => SkillsSettingsSchema.parse({ exclude: ["../lead"] })).toThrow();
   const catalog = bundledSkills(repo);
   expect(catalog.every((skill) => skill.included)).toBe(true);
-  for (const name of ["lead", "swarm-lead", "herdr-lead", "reflect"])
+  expect(catalog.map((skill) => skill.name)).not.toContain("swarm-lead");
+  expect(catalog.map((skill) => skill.name)).not.toContain("herdr-lead");
+  for (const name of ["lead", "reflect"])
     expect(catalog.find((skill) => skill.name === name)?.class).toBe("opinionated");
   for (const name of [
     "this-machine",
@@ -52,10 +54,10 @@ it.each([
   expect(await readFile(join(plugin, ".mcp.json"), "utf8")).toContain('"clankie"');
 });
 
-it("filtered Pi roots cannot recover a disabled name from another root", async () => {
+it.each([true, false])("Pi roots exclude merged names with opinionated=%s", async (opinionated) => {
   const home = await mkdtemp(join(tmpdir(), "skill-roots-"));
   roots.push(home);
-  for (const name of ["lead", "personal-tool"]) {
+  for (const name of ["lead", "swarm-lead", "herdr-lead", "personal-tool"]) {
     await mkdir(join(home, ".agents/skills", name), { recursive: true });
     await writeFile(join(home, ".agents/skills", name, "SKILL.md"), "test");
   }
@@ -64,9 +66,12 @@ it("filtered Pi roots cannot recover a disabled name from another root", async (
     agentDir: join(home, ".pi"),
     home,
     cwd: repo,
-    skills: { opinionated: false, exclude: [] },
+    skills: { opinionated, exclude: [] },
   });
   expect(paths).toContain(join(home, ".agents/skills/personal-tool"));
-  expect(paths.some((path) => path.endsWith("/lead") || path === join(repo, ".agents/skills"))).toBe(false);
+  expect(paths.includes(join(repo, ".agents/skills/lead"))).toBe(opinionated);
+  expect(paths.includes(join(home, ".agents/skills/lead"))).toBe(opinionated);
+  expect(paths.some((path) => /\/(swarm-lead|herdr-lead)$/u.test(path))).toBe(false);
+  expect(paths).not.toContain(join(home, ".agents/skills"));
   expect(paths).toContain(join(repo, ".agents/skills/this-machine"));
 });

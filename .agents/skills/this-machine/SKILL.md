@@ -424,7 +424,7 @@ stays unavailable until restart; no replacement fleet is silently created.
 service liveness. `/v1/herdr` returns 503 without an active binding.
 Doctor's `commands.herdr` probes the selected CLI. `commands.herdr-lead` and
 `herdrPlugin` describe the optional dashboard integration.
-Load `herdr-lead` only when that skill is present. Never run `herdr-lead`
+Load `lead` for the Herdr fallback. The optional dashboard CLI is installed separately. Never run `herdr-lead`
 bare or with `--version` — that starts a TUI and hangs the shell. `herdr-lead
 state` and `herdr-lead split` are the headless verbs. If the plugin is
 bundled and not linked, doctor's `remediations` already has the link command.
@@ -534,8 +534,7 @@ session. Every `swarm_*` call accepts
 `connection: "name"`; omit for embedded. Incoming wakes name their connection.
 Keep it on replies, evidence reads and retries. External grants use
 `swarm.connectionId`; enrolled worker bridges set `CLANKIE_SWARM_CONNECTION`.
-Load `swarm-lead` to lead
-enrolled peers; `lead` holds shared judgment and `herdr-lead` is the fallback.
+Load `lead` for Swarm-first leadership and the explicit Herdr fallback.
 Assignments pin owner preferences and agent instructions from the selected
 conversation as `contract.instructions` artifacts. Select the project conversation
 before assigning; a task worktree alone does not change the instruction source.

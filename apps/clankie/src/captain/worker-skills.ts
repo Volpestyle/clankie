@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { bundledSkills, clankieSkillRoots, projectSkillPlugin, type SkillsSettings } from "@clankie/settings";
+import {
+  bundledSkills,
+  clankieSkillRoots,
+  mergedLeadershipSkills,
+  projectSkillPlugin,
+  type SkillsSettings,
+} from "@clankie/settings";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -67,7 +73,7 @@ export async function workerSkills(
     }
   }
   // Keep personal tool skills (and system skills), with bundle names winning.
-  const bundled = catalog.map((skill) => skill.name);
+  const bundled: readonly string[] = [...catalog.map((skill) => skill.name), ...mergedLeadershipSkills];
   for (const skill of catalog) {
     if (skill.included) await symlink(skill.path, join(overlay, "skills", skill.name));
   }

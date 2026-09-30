@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Lead authorized agent work through ownership, review, integration and delivery. Shared judgment for swarm-lead and herdr-lead; a status question alone does not authorize dispatch.
+description: Lead authorized agent work through ownership, review, integration and delivery. Swarm first, with an explicit Herdr fallback; a status question alone does not authorize dispatch.
 ---
 
 # Lead
@@ -62,7 +62,7 @@ use what the user said. With neither, assume `max` and `optimal`.
 - **`optimal`:** the strongest model and the effort each job needs; cost is not a
   reason to downgrade.
 - **`efficient`:** the smallest model and lowest effort that still meet the job's acceptance.
-  The consequential boundaries in [roles and effort](../herdr-lead/reference/roles.md)
+  The consequential boundaries in [roles and effort](reference/roles.md)
   keep the top model.
 
 Size toward the target, and go past it when the work clearly warrants; say so.
@@ -102,7 +102,7 @@ focused follow-up, creating one only when needed. Keep known failures explicit.
 
 ## Dispatch an owned result
 
-Use the selected coordination skill for launch, delivery and waits. Verify the
+Use the transport sections below for launch, delivery and waits. Verify the
 worker's actual capability and effort against the responsibility before dispatch.
 Consequential security, concurrency and integration work needs a top-capability
 model at high effort unless the user explicitly chooses otherwise.
@@ -210,3 +210,68 @@ the recipient needs to act on that pane.
   Carry the artifact and exact question. Verify vendor facts against first-party
   sources before using them to justify an architectural gate.
 - Open optional dashboards or rearrange terminals only when requested.
+
+## Swarm first
+
+Load `swarm-mcp` for the installed protocol. Discover the available tools and
+sync the current scope before dispatch.
+
+Use Swarm for assignments, questions, blockers, decisions and completion notices.
+Every participating worker loads `swarm-mcp`; leadership alone cannot establish a
+shared protocol. Address stable actor IDs, not pane IDs or role labels. Keep the
+message thread when replying. The configured work tracker holds deliverables and
+evidence; no tracker is required for coordination. Execution runtimes such as
+Herdr own terminals and processes. Use Swarm for communication even inside Herdr.
+User-started agents can participate in the same reachable, authorized coordinator
+scope; installing the same MCP alone does not connect separate coordinators.
+
+Persist the objective, worktree, acceptance criteria, expected artifacts and
+constraints in the task contract. Use `swarm_assign` with a configured route;
+missing capability or uncertain dispatch is a condition to resolve under the same
+intent, never permission to spawn again through a shell. Keep stable command IDs
+on retries. Shared files require explicit ownership; workers preserve others' work.
+
+Read the actual completion evidence and carry accepted work to its destination.
+A task finish, processing acknowledgment, accepted review and integrated delivery
+are different facts. Use runtime inbox delivery or bounded waits to receive work;
+no model polling loop. Acknowledge a leased envelope only after processing it,
+and deduplicate effects when the runtime redelivers it. After accepting a terminal
+dispatched result, release its allocation through `swarm_task` cancel with its
+original `intentId` and `taskId`; the provider verifies the fenced outcome. A
+completed task alone does not release dispatch capacity.
+
+Native children remain useful for private bounded work that fits their host and
+lifetime. Cross-session ownership and handoffs use Swarm. Do not manufacture a
+second task or relay every private child message through the lead.
+
+If Swarm is unavailable, state the limitation and use the Herdr fallback only
+under the conditions below.
+
+## Herdr fallback
+
+Use this workflow when explicitly selected or the relevant agents lack Swarm
+integration; name that fallback once. Never duplicate an uncertain assignment
+across transports.
+
+Load `herdr` for the CLI; prefer `herdr --skill` from the running binary. A
+socket-attached lead uses its configured socket and explicit pane identity, never
+the UI-focused pane. Use `herdr-handoff` for a real context transfer.
+
+### Dispatch and receive
+
+Create a worker in its own named tab in the lead's workspace by default, preserving
+the working directory and the user's focus. Reuse existing owners where they are.
+Before an assignment or scope change, use [roles and effort](reference/roles.md)
+to verify the actual model and effort. Set both on launch; changing `/model` in a
+running pane can rewrite the user's global default.
+
+Read the receiving pane's full visible composer immediately before every send.
+Idle/done does not establish an empty composer. Preserve drafts, questions, menus
+and history views; wait for the operator to finish, then read again. Never clear or
+submit their input. Use [dispatch and waits](reference/operations.md#dispatch-and-waits)
+and confirm pickup once.
+
+One harvest owner holds the completion watcher. Use the
+[watch sequence](reference/operations.md#watch-dispatched-work); Clankie's service
+uses its own `herdr_watch` wake path. Completion is a cue to inspect the artifact,
+not acceptance. Do not read pane output on a timer.

@@ -54,6 +54,9 @@ to enroll through the shared coordinator relay; this adds no private PC owner.
 
 ## Opinionated process bundle
 
-`opinionated-skills/` is an immutable MIT-licensed export from Volpestyle/skills.
-`opinionated-skills.json` pins its full revision and selected source paths.
+`opinionated-skills/` is an MIT-licensed export from Volpestyle/skills.
+`opinionated-skills.json` pins its base revision, selected source paths and local
+changes. VUH-1457 consolidates leadership in `lead` and removes the vendored
+dashboard; the legacy npm archive above is retained as historical provenance,
+not the current skill catalog.
 See [the bundle guide](../docs/bundled-skills.md) for inventory and refresh steps.

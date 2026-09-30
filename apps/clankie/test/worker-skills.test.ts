@@ -53,7 +53,8 @@ describe("hired worker skill discovery", () => {
     const state = await realpath(await mkdtemp(join(tmpdir(), "worker-skills-")));
     roots.push(state);
     const home = join(state, "codex");
-    await mkdir(join(home, "skills/lead"), { recursive: true });
+    for (const name of ["lead", "swarm-lead", "herdr-lead"])
+      await mkdir(join(home, "skills", name), { recursive: true });
     for (const harness of ["claude", "pi", "codex"]) {
       const launch = await workerSkills(harness, repo, state, home, selection, repo);
       let names: string[];
@@ -77,6 +78,8 @@ describe("hired worker skill discovery", () => {
       expect(names.includes("lead"), harness).toBe(selection.lead);
       expect(names.includes("reflect"), harness).toBe(selection.reflect);
       expect(names, harness).toContain("this-machine");
+      expect(names, harness).not.toContain("swarm-lead");
+      expect(names, harness).not.toContain("herdr-lead");
       for (const skill of bundledSkills(repo, selection)) {
         expect(names.includes(skill.name), `${harness}: ${skill.name}`).toBe(skill.included);
       }
