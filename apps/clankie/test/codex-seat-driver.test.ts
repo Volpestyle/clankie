@@ -110,3 +110,28 @@ it("refuses a native view that resumes a different thread", async () => {
     startCodexAppServerSeat({ cwd: "/tmp", resumeThreadId: "wrong", startView: f.startView }),
   ).rejects.toThrow("different thread");
 });
+
+it("allows operator hook review to abort before the native thread exists", async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  await expect(
+    startCodexAppServerSeat({
+      cwd: "/tmp",
+      threadStartTimeoutMs: 600_000,
+      signal: controller.signal,
+      startView: async () => {
+        setTimeout(() => controller.abort(new Error("native TUI exited")), 80);
+      },
+    }),
+  ).rejects.toThrow("native TUI exited");
+  expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
+  expect(spawn.mock.results[0]?.value.kill).toHaveBeenCalledWith("SIGTERM");
+});
+
+it("honors a caller's native thread discovery deadline and cleans up", async () => {
+  fixture();
+  await expect(
+    startCodexAppServerSeat({ cwd: "/tmp", threadStartTimeoutMs: 0, startView: async () => {} }),
+  ).rejects.toThrow("did not create its thread");
+  expect(spawn.mock.results[0]?.value.kill).toHaveBeenCalledWith("SIGTERM");
+});

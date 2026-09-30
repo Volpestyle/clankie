@@ -1,4 +1,4 @@
-/** Opt-in real hire: pnpm --filter @clankie/clankie exec tsx scripts/verify-codex-seat.ts OUT.json */
+/** Opt-in real hire: pnpm --filter @clankie/clankie verify-codex-seat OUT.json */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, realpath, writeFile } from "node:fs/promises";

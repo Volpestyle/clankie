@@ -117,11 +117,15 @@ export async function startCodexAppServerSeat(options: {
   /** Native TOML key=value overrides, applied to server and interactive client. */
   config?: readonly string[];
   resumeThreadId?: string;
+  /** Operator seats may need time for native hook trust before thread creation. */
+  threadStartTimeoutMs?: number;
+  signal?: AbortSignal;
   env?: Readonly<Record<string, string>>;
   /** Start the native TUI on this server before sending any model input. */
   startView: (args: readonly string[]) => Promise<void>;
   onEvent?: (event: CodexSeatEvent) => void;
 }): Promise<CodexAppServerSeat> {
+  options.signal?.throwIfAborted();
   const directory = await mkdtemp(join(tmpdir(), "clankie-codex-"));
   const socketPath = join(directory, "rpc.sock");
   const endpoint = `unix://${socketPath}`;
@@ -172,6 +176,7 @@ export async function startCodexAppServerSeat(options: {
     const deadline = Date.now() + 15_000;
     let socket: WebSocket | undefined;
     while (!socket) {
+      options.signal?.throwIfAborted();
       if (failure) throw failure;
       if (Date.now() >= deadline) throw new Error(`Codex app-server did not open its socket: ${stderr}`);
       socket = await new Promise<WebSocket | undefined>((resolve) => {
@@ -207,9 +212,11 @@ export async function startCodexAppServerSeat(options: {
     // An empty app-server-created thread has no rollout, so `codex resume`
     // cannot bootstrap it. Let the real TUI create its own thread. Only one
     // native root can exist before we send the first brief.
+    options.signal?.throwIfAborted();
     await options.startView(viewArgs);
-    const threadDeadline = Date.now() + 15_000;
+    const threadDeadline = Date.now() + (options.threadStartTimeoutMs ?? 15_000);
     while (!threadId) {
+      options.signal?.throwIfAborted();
       const loaded = record(await client.request("thread/loaded/list", {}));
       const ids = Array.isArray(loaded.data) ? loaded.data : [];
       if (ids.length > 1) throw new Error("Codex seat has more than one initial native thread");
@@ -222,6 +229,7 @@ export async function startCodexAppServerSeat(options: {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
+    options.signal?.throwIfAborted();
     const result = record(await client.request("thread/read", { threadId, includeTurns: false }));
     const thread = record(result.thread);
     if (typeof thread.id !== "string") throw new Error("Codex app-server returned no thread identity");
