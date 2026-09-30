@@ -1993,7 +1993,12 @@ paths:
         content:
           application/json:
             example:
-              { schemaVersion: 1, event: Stop, sessionId: "10000000-0000-4000-8000-000000000001", lastMessage: "Tests pass." }
+              {
+                schemaVersion: 1,
+                event: Stop,
+                sessionId: "10000000-0000-4000-8000-000000000001",
+                lastMessage: "Tests pass.",
+              }
       responses:
         "200":
           description: Recorded
