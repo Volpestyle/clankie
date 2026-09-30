@@ -2,7 +2,7 @@ import type { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import {
   assertRemoteHerdrArgs,
@@ -16,6 +16,7 @@ import {
 import { createRemoteHerdrRunner, routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import {
   HerdrWatchStore,
+  HerdrAgentResponseError,
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
@@ -237,17 +238,47 @@ describe("fleet routing", () => {
     expect(await runner.transcript!({ paneId: "pc/w2:p1J" } as HerdrAgentSnapshot)).toBeUndefined();
   });
 
-  it("rejects an unidentified remote pane and retries after its response is corrected", async () => {
-    let malformed = true;
-    const runner = createRemoteHerdrRunner(pc, async () =>
-      JSON.stringify({
-        result: { panes: [malformed ? { pane_id: "w2:p1J" } : pane("w2:p1J", "term_abc", "idle")] },
-      }),
-    );
-    await expect(runner.get("w2:p1J")).rejects.toThrow("did not identify the agent pane");
-    malformed = false;
-    expect(await runner.get("w2:p1J")).toMatchObject({ terminalId: "term_abc", status: "idle" });
-  });
+  it.each([
+    { missing: "terminal_id", malformed: { pane_id: "w2:pBad" } },
+    { missing: "pane_id", malformed: { terminal_id: "term_bad" } },
+  ])(
+    "keeps remote peers visible when one pane lacks $missing and rejects its direct lookup",
+    async ({ malformed }) => {
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const run = vi.fn<HerdrFleetRun>(async (args) => {
+        if (args[0] === "pane" && args[1] === "list")
+          return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", "idle"), malformed] } });
+        if (args[0] === "agent" && args[1] === "get" && args[2] === "w2:pBad")
+          return JSON.stringify({ result: { agent: malformed } });
+        throw new Error(`unexpected ${args.join(" ")}`);
+      });
+      const runner = routeHerdrFleets(localRunner(), new Map([["pc", createRemoteHerdrRunner(pc, run)]]));
+      try {
+        expect(await runner.get("pc/w2:p1J")).toMatchObject({
+          paneId: "pc/w2:p1J",
+          terminalId: "pc/term_abc",
+        });
+        expect(await runner.resolveTerminal("pc/term_abc")).toMatchObject({ status: "idle" });
+        expect(warning).toHaveBeenCalledOnce();
+        expect(warning).toHaveBeenCalledWith(
+          "Skipping malformed Herdr pane",
+          expect.objectContaining({
+            index: 1,
+            code: "invalid_herdr_agent_response",
+            detail: "Herdr response did not identify the agent pane",
+          }),
+        );
+        await expect(runner.get("pc/w2:pBad")).rejects.toBeInstanceOf(HerdrAgentResponseError);
+        await expect(runner.get("pc/w2:pBad")).rejects.toMatchObject({
+          code: "invalid_herdr_agent_response",
+        });
+        expect(run.mock.calls.map(([args]) => args)).toContainEqual(["agent", "get", "w2:pBad"]);
+        expect(await runner.get("pc/w2:p1J")).toMatchObject({ status: "idle" });
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
 });
 
 describe("watches and hires on a remote fleet", () => {

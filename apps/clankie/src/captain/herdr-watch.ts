@@ -245,12 +245,21 @@ function titleOf(agent: Record<string, unknown>): string {
   return "";
 }
 
+export class HerdrAgentResponseError extends Error {
+  public readonly code = "invalid_herdr_agent_response";
+
+  public constructor(message: string) {
+    super(message);
+    this.name = "HerdrAgentResponseError";
+  }
+}
+
 function snapshotOf(value: unknown): HerdrAgentSnapshot {
-  if (!isRecord(value)) throw new Error("Herdr response did not include an agent");
+  if (!isRecord(value)) throw new HerdrAgentResponseError("Herdr response did not include an agent");
   const paneId = value.pane_id;
   const terminalId = value.terminal_id;
   if (typeof paneId !== "string" || typeof terminalId !== "string") {
-    throw new Error("Herdr response did not identify the agent pane");
+    throw new HerdrAgentResponseError("Herdr response did not identify the agent pane");
   }
   const rawSession = isRecord(value.agent_session) ? value.agent_session : undefined;
   const session: HerdrAgentSession | undefined =
@@ -288,10 +297,25 @@ export function parseHerdrForegroundProcessId(stdout: string): number | undefine
   return process !== undefined && typeof process.pid === "number" ? process.pid : undefined;
 }
 
+/** Bad rows do not hide valid peers; a direct agent lookup still validates strictly. */
 export function parseHerdrPaneList(stdout: string): HerdrAgentSnapshot[] {
   const parsed = JSON.parse(stdout) as { result?: { panes?: unknown } };
   const panes = Array.isArray(parsed.result?.panes) ? parsed.result.panes : [];
-  return panes.map(snapshotOf);
+  return panes.flatMap((pane, index) => {
+    try {
+      return [snapshotOf(pane)];
+    } catch (error) {
+      if (!(error instanceof HerdrAgentResponseError)) throw error;
+      console.warn("Skipping malformed Herdr pane", {
+        index,
+        ...(isRecord(pane) && typeof pane.pane_id === "string" ? { paneId: pane.pane_id } : {}),
+        ...(isRecord(pane) && typeof pane.terminal_id === "string" ? { terminalId: pane.terminal_id } : {}),
+        code: error.code,
+        detail: error.message,
+      });
+      return [];
+    }
+  });
 }
 
 function execHerdr(
