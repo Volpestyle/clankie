@@ -1922,13 +1922,18 @@ authority 401/503, and conflicting commands 409. The status includes `enabled`,
 50 recent `jobs`. An enabled evaluator can report an operational error (missing
 harness, blocked startup, unavailable Herdr); inspect `error` and the pane.
 
-The evaluator defaults off and captures only Clankie’s Pi turns and native
-head-seat replies while enabled. Other Herdr agents do not trigger assessments.
+The evaluator is a developer diagnostic, not a user feature. It defaults off and
+captures only Clankie’s Pi turns and native head-seat replies while enabled; the
+console footer shows `evaluator on · HARNESS` for as long as it is. Other Herdr agents do not trigger assessments.
 Enabling creates its own pane and starts a harness;
 new work uses fresh agent context. Captures coalesce for a quiet minute, with
 fifteen-minute checkpoints for continuing activity. Only a schema-valid report
 from a settled agent completes an assessment. Restart resumes inspection of the
-existing assignment; uncertain failures require explicit retry. The service
+existing assignment; uncertain failures require explicit retry. A busy evaluator
+pane keeps new work queued rather than failing it. The pane is recognized by its
+Herdr name, or by its terminal plus harness session or process once a harness
+clears that name; a pane it can no longer prove is its own is left open and a
+fresh one is started. The service
 interrupts assessments after thirty minutes. Disable stops new capture and
 dispatch; in-flight work finishes. It does not change Linear following, merge
 changes or close review panes.

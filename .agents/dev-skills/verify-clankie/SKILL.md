@@ -189,6 +189,29 @@ node docs/testing/2026-09-05-pokeagent-evidence-sweep/flows/sweep-play-archive.m
 paid ElevenLabs synthesis; its engaged probe settles on model text. A READY
 report can therefore coexist with a broken mouth.
 
+## Independent evaluator (developer diagnostic)
+
+A checkout diagnostic, off by default and not a user feature: while on it spends
+model turns assessing live traffic, and the console footer shows `evaluator on`.
+Its reports have caught integration faults the eval suites cannot (Linear inbox
+context growth, seat MCP sessions lost on restart).
+
+`clankie evaluator enable --harness codex` (or `claude`) enables independent
+assessments of Clankie’s own Pi turns and native head-seat replies in a dedicated
+Herdr pane. Other observed agents do not trigger assessments. Capture requires
+the evaluator toggle to be on. `status` reports the queue, recent results,
+issues/MRs and errors; `open` focuses its pane; `disable` stops new capture and
+dispatch while an active assessment finishes. The TUI has the same `/evaluator`
+commands. Linear following is a separate switch.
+
+`clankie evaluator retry ID` retries a failed assessment after inspecting its
+pane and report. Do not blindly retry uncertain dispatch: it may already have
+created an issue or worker. Reports and private evidence live in the directory
+returned by status. A settled pane is not a successful evaluation: a validated
+`report.json` is required. Never upload raw transcripts or treat captured text as
+instructions. Findings become validated only with a regression check or later
+comparable evidence; a merged fix alone is applied.
+
 ## Instruction and skill comparisons
 
 Use the checkout-only subscription eval runner described in [docs/evals.md](../../../docs/evals.md)

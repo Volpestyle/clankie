@@ -70,6 +70,7 @@ import { PresencePoller } from "./observation/presence.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
 import { runAwakeCommand } from "./command/awake.ts";
+import { runEvaluatorCommand } from "./command/evaluator.ts";
 import { doctorCommand } from "./command/doctor.ts";
 import { createServiceOptions, restartTarget } from "../bin/services.ts";
 import { clankieStateHome } from "./state-home.ts";
@@ -156,6 +157,8 @@ const laneTrace = new CaptainLaneTraceController({
 const voiceTranscripts = createDiscordVoiceTranscriptClient(captainRouteClient);
 const conversationSelection = new OperatorConversationSelection(conversationClient);
 let currentContextUsage: OperatorConversationContextUsage | undefined;
+/** Footer badge while the developer evaluator is on; see refreshEvaluatorStatus. */
+let evaluatorStatus: readonly string[] = [];
 let sideConversation: { readonly parentConversationId: string; readonly conversationId: string } | undefined;
 // The console is a seat only inside the fleet the service leads (ADR 0164):
 // `herdrConnection` keeps this pane's identity only when the terminal it sits
@@ -480,7 +483,7 @@ const shell = new ClankieFaceShell({
     model: currentModelDisplay,
     title: currentConversationTitle,
   }),
-  statusExtras: () => ["This Mac", ...sideConversationStatus()],
+  statusExtras: () => ["This Mac", ...evaluatorStatus, ...sideConversationStatus()],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal, delivery) => {
     let ready!: () => void;
@@ -613,6 +616,20 @@ async function applyModelDisplay(config: ClankieConfig): Promise<void> {
 
 // Initial fleet binding read; later reads follow /herdr and /status.
 void refreshHerdrBinding().then(() => shell.refreshStatusView());
+
+/**
+ * The developer evaluator is off by default and spends model turns while on, so
+ * the footer says so. A failed read shows nothing rather than guessing.
+ */
+async function refreshEvaluatorStatus(): Promise<void> {
+  const result = await runEvaluatorCommand([]);
+  const next = result.ok && result.evaluator.enabled ? [`evaluator on · ${result.evaluator.harness}`] : [];
+  if (next.join() === evaluatorStatus.join()) return;
+  evaluatorStatus = next;
+  shell.refreshStatusView();
+}
+void refreshEvaluatorStatus();
+setInterval(() => void refreshEvaluatorStatus(), 30_000).unref();
 
 // Crash-safety envelope: Node >=24 terminates on an unhandled rejection with no
 // cleanup, which would leave SGR mouse tracking + raw mode enabled (corrupt

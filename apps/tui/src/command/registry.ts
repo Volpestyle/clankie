@@ -66,7 +66,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["evaluator"],
     lines: [
       "  evaluator [status|enable [--harness codex|claude]|disable|open|retry ID]",
-      "                           Independent task assessments in Herdr (JSON)",
+      "                           Developer diagnostic: independent assessments in Herdr (JSON)",
     ],
   },
   {

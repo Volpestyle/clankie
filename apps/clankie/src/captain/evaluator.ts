@@ -44,6 +44,8 @@ const PersistedSchema = z
         used: z.boolean().default(false),
         processId: z.number().int().positive().optional(),
         terminalId: z.string().optional(),
+        /** The harness's own session id, which survives the managed name being cleared. */
+        session: z.string().optional(),
       })
       .strict()
       .optional(),
@@ -337,9 +339,13 @@ export class Evaluator {
             Date.now() - Date.parse(job.createdAt) >= 15 * 60_000),
       );
       if (next === undefined && !open) return;
-      starting = next;
       if (next === undefined) {
         await this.newPane();
+        return;
+      }
+      // Pane trouble leaves the job queued: it is retried on a later tick, never failed.
+      if ((await this.releasePane(true)) === "busy") {
+        this.recordError(new Error("Evaluator pane is still busy; queued assessments wait for it."));
         return;
       }
       if (!this.state.enabled || this.closed) return;
@@ -351,8 +357,9 @@ export class Evaluator {
       writeFileSync(join(next.directory, "assignment.md"), this.assignment(next), { mode: 0o600 });
       next.status = "running";
       next.startedAt = new Date().toISOString();
+      starting = next;
       this.save(); // persist before dispatch: a restart never blindly resends a side-effecting assignment
-      await this.newPane(
+      await this.startPane(
         `Read ${join(next.directory, "assignment.md")} and carry out this evaluation. Write report.json atomically in that directory when finished.`,
       );
     } catch (error) {
@@ -370,38 +377,59 @@ export class Evaluator {
   private async ownsAgent(agent: HerdrAgentSnapshot): Promise<boolean> {
     const pane = this.state.pane;
     if (pane === undefined || pane.id !== agent.paneId) return false;
-    if (agent.name === pane.name) return true;
-    // Codex's native session report can clear the managed name without replacing the process.
-    if (agent.name !== undefined || pane.processId === undefined || agent.terminalId !== pane.terminalId)
+    if (agent.name === pane.name) {
+      this.rememberIdentity(agent);
+      return true;
+    }
+    // Codex's and Claude Code's native session reports can clear the managed name
+    // without replacing the process; the terminal plus its session or process still match.
+    if (agent.name !== undefined || pane.terminalId === undefined || agent.terminalId !== pane.terminalId)
       return false;
+    if (pane.session !== undefined && agent.session?.value === pane.session) return true;
+    if (pane.processId === undefined) return false;
     const processes = await this.runner.paneProcesses?.(pane.id);
     return processes?.some((process) => process.pid === pane.processId) === true;
   }
 
-  private async newPane(prompt?: string): Promise<void> {
+  /** Keeps the identity that outlives the managed name, which a harness may report late. */
+  private rememberIdentity(agent: HerdrAgentSnapshot): void {
+    const pane = this.state.pane!;
+    const session = agent.session?.value;
+    if (pane.terminalId === agent.terminalId && (session === undefined || pane.session === session)) return;
+    pane.terminalId = agent.terminalId;
+    if (session !== undefined) pane.session = session;
+    this.save();
+  }
+
+  /**
+   * Frees the evaluator's slot. A pane it can no longer prove is its own is left
+   * untouched and forgotten, so a user's agent is never closed and never blocks
+   * the queue.
+   */
+  private async releasePane(dispatch: boolean): Promise<"busy" | "reuse" | "free"> {
     const prior = this.state.pane;
-    if (prior !== undefined) {
-      if (prior.socket !== this.socket)
-        throw new Error(
-          "Evaluator belongs to a different Herdr session; inspect it before changing the binding.",
-        );
-      const agent = await this.runner.get(prior.id).catch(() => undefined);
-      if (agent !== undefined) {
-        if (
-          prompt === undefined &&
-          !prior.used &&
-          (await this.ownsAgent(agent)) &&
-          agent.agent === this.state.harness &&
-          ["idle", "done"].includes(agent.status)
-        )
-          return;
-        if (!(await this.ownsAgent(agent)) || !["idle", "done"].includes(agent.status))
-          throw new Error("Evaluator pane is occupied; inspect it before continuing.");
-        await this.runner.closePane!(prior.id);
-      }
-      delete this.state.pane;
-      this.save();
+    if (prior === undefined) return "free";
+    if (prior.socket !== this.socket)
+      throw new Error(
+        "Evaluator belongs to a different Herdr session; inspect it before changing the binding.",
+      );
+    const agent = await this.runner.get(prior.id).catch(() => undefined);
+    if (agent !== undefined && (await this.ownsAgent(agent))) {
+      if (!["idle", "done"].includes(agent.status)) return "busy";
+      if (!dispatch && !prior.used && agent.agent === this.state.harness) return "reuse";
+      await this.runner.closePane!(prior.id);
     }
+    delete this.state.pane;
+    this.save();
+    return "free";
+  }
+
+  private async newPane(): Promise<void> {
+    if ((await this.releasePane(false)) !== "free") return;
+    await this.startPane();
+  }
+
+  private async startPane(prompt?: string): Promise<void> {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     const id = await this.runner.createTab!({ cwd: this.directory, label: "Clankie evaluator" });
     const name = `clankie-eval-${randomUUID().slice(0, 8)}`;
@@ -425,9 +453,11 @@ export class Evaluator {
       if (prompt === undefined || agent?.name !== name || agent.status !== "working") throw error;
     }
     const agent = await this.runner.get(id);
-    const processes = await this.runner.paneProcesses?.(id);
-    const process = processes?.[0];
     this.state.pane.terminalId = agent.terminalId;
+    if (agent.session !== undefined) this.state.pane.session = agent.session.value;
+    // Best effort: the agent is already dispatched, so a missing process listing is not a failure.
+    const processes = await this.runner.paneProcesses?.(id).catch(() => undefined);
+    const process = processes?.[0];
     if (process !== undefined) this.state.pane.processId = process.pid;
     this.save();
   }
@@ -446,8 +476,9 @@ Write report.json through a temporary file and atomic rename. Include evaluation
   }
 
   private recordError(error: unknown): void {
-    this.error = redactSensitiveText(error instanceof Error ? error.message : String(error));
-    console.error("Evaluator:", this.error);
+    const message = redactSensitiveText(error instanceof Error ? error.message : String(error));
+    if (message !== this.error) console.error("Evaluator:", message);
+    this.error = message;
     try {
       this.save();
     } catch {

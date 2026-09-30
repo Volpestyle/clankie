@@ -182,7 +182,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "evaluator",
       aliases: [],
-      description: "Control the independent evaluator in Herdr",
+      description: "Developer diagnostic: the independent evaluator in Herdr",
       argumentHint: "[status|enable --harness codex|claude|disable|open|retry ID]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
