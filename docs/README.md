@@ -66,6 +66,9 @@ source setup and checks.
 - [Discord surface review](proposals/2026-09-30-discord-surface-review.md) is a
   dated proposal on retiring the Activity and the user-session lab body, awaiting
   a decision.
+- [Ruthless cut audit](proposals/2026-09-30-ruthless-cut-audit.md) is a dated
+  keep, cut or fold proposal for every surface under ADR 0203, awaiting James's
+  line-by-line decision.
 - [Fleet-lead transfer](fleet-lead-handoff.md) is a retained, inactive runbook.
   Normal external-coordinator connection is documented in the Swarm reference.
 
