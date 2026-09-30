@@ -21,7 +21,7 @@ server:clankie-seat`**, so no script accepted the owner's development-channel
 - It **loaded the worker plugin inline** (`--plugin-dir`, hooks only, no
   channel) to prove the Stop hook chain in the real TUI.
 
-## Result ([`live-hire.log`](live-hire.log))
+## Result ([`live-hire.txt`](live-hire.txt))
 
 - **Hire:** `spawned`, with `control: { mode: "terminal", reason:
 "consent_required", detail: "clankie-worker@clankie is not installed.", fix }`.
