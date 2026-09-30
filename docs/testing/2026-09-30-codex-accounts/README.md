@@ -101,7 +101,8 @@ and a receipt test using the real default home under fake timers. Both were
 fixed; the final rerun of those two files passed all 15 tests. The final focused
 and hire runs therefore cover 91 passing tests. The full suite was not repeated
 after those fixture-only fixes. `pnpm check` was rerun and remains
-blocked by the other worker’s `scripts/evals/isolation.mjs` formatting;
+blocked by the other worker’s `scripts/evals/isolation.mjs` and
+`scripts/evals/seat-cases.mjs` formatting;
 [output](live-check-blocked.txt). The separate dead-code check still reports only
 the other worker’s three unfinished seat-eval entry files.
 
@@ -109,3 +110,7 @@ The instruction worker's `43e3a994` commit included the shared `docs/cli.md`
 account documentation while it was being edited. The implementation commit
 retains that documentation and updates `docs/evals.md` to the isolated Codex
 entry point, avoiding edits to the active eval worker's runner files.
+
+Commit verification caught concurrent seat-suite documentation in `docs/evals.md`.
+A corrective follow-up leaves that text intact in the working tree and outside
+the account-selection changes at HEAD, ready for its owner to commit.
