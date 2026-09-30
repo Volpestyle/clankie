@@ -16,7 +16,12 @@ describe("hired worker skill discovery", () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "worker-skills-")));
     roots.push(root);
     const home = join(root, "owner");
-    for (const path of ["owner/skills/tool", "owner/sessions", ".agents/skills/process"])
+    for (const path of [
+      "owner/skills/tool",
+      "owner/sessions",
+      "owner/app-server-control",
+      ".agents/skills/process",
+    ])
       await mkdir(join(root, path), { recursive: true });
     await writeFile(
       join(root, ".agents/skills/process/SKILL.md"),
@@ -27,6 +32,7 @@ describe("hired worker skill discovery", () => {
     await writeFile(join(home, "auth.json"), "test-only");
     const launch = await workerSkills("codex", root, root, home);
     const overlay = launch.env!.CODEX_HOME!;
+    expect(await readdir(overlay)).not.toContain("app-server-control");
     expect(await realpath(join(overlay, "skills/process"))).toBe(join(root, ".agents/skills/process"));
     expect(await realpath(join(overlay, "skills/tool"))).toBe(join(home, "skills/tool"));
     expect(await realpath(join(overlay, "sessions"))).toBe(join(home, "sessions"));

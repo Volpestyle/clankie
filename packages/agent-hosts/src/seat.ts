@@ -27,6 +27,8 @@ export interface SeatLaunch {
   readonly brief: string;
   readonly model?: string;
   readonly effort?: string;
+  /** Per-hire harness environment, such as an isolated Codex skill home. */
+  readonly env?: Readonly<Record<string, string>>;
   /** Extra harness CLI argv that applies in every mode (skill plugin dirs, `--chrome`). */
   readonly harnessArgs?: readonly string[];
   /** Extra argv only for the interactive harness the owner takes over into (the seat channel). */

@@ -43,7 +43,9 @@ export async function workerSkills(
   const overlay = await realpath(await mkdtemp(join(overlays, "seat-")));
   await mkdir(join(overlay, "skills"));
   for (const entry of await readdir(codexHome, { withFileTypes: true })) {
-    if (entry.name === "skills") continue;
+    // App-server rejects symlinked control directories and workers must not
+    // borrow the owner's shared daemon sockets (VUH-1398, VUH-1459).
+    if (entry.name === "skills" || entry.name === "app-server-control") continue;
     const source = join(codexHome, entry.name);
     const destination = join(overlay, entry.name);
     if (entry.name.endsWith(".toml") || entry.name === "hooks.json") {
