@@ -184,7 +184,7 @@ export class PublicGatewayConnector {
     const wire = pairingOfferWire(offer);
     const fragment = new URLSearchParams(credential).toString();
     const deepLink = `${wire.deepLink}#${fragment}`;
-    return { ...wire, deepLink, code: deepLink };
+    return { ...wire, deepLink, code: deepLink, gateway: true };
   }
 
   public start(): void {

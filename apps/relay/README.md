@@ -113,3 +113,26 @@ Open an already-paired app once while its gateway route works to learn it. A dev
 that never learned those addresses cannot recover an unknown route during an outage.
 Gateway encryption and secure QR pairing remain mandatory (ADR 0173). Direct
 requests retain device bearer authorization, expiry, revocation, and grant checks.
+
+## Direct pairing without an account
+
+The same direct route lets the App Store app pair a self-hosted Mac with no
+account (ADR 0204): `clankie pair` puts the control origin in the QR, and the
+app uses it when there is no gateway, or the gateway cannot answer. The store
+build reaches plain HTTP only on the LAN (`.local`, single-label or private IP
+addresses), so serve a tailnet name over HTTPS.
+
+The service binds loopback, so a phone on the LAN reaches it through the
+opt-in device doorway, which serves only the device routes:
+
+```sh
+# LAN
+CLANKIE_DEVICE_HOST=0.0.0.0 CLANKIE_RELAY_HOST=0.0.0.0 clankie restart captain  # also restarts the relay
+clankie gateway direct --control-plane-url http://my-mac.local:4311 --relay-url http://my-mac.local:4321
+
+# Tailscale (HTTPS)
+CLANKIE_DEVICE_HOST=127.0.0.1 clankie restart captain
+tailscale serve --bg --https=14311 http://127.0.0.1:4311
+tailscale serve --bg --https=14321 http://127.0.0.1:4321
+clankie gateway direct --control-plane-url https://my-mac.tailnet.ts.net:14311 --relay-url https://my-mac.tailnet.ts.net:14321
+```

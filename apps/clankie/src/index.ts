@@ -3,6 +3,7 @@ import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
+import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
 import { interactiveWorkersSupported, managedWorkersSupported, SwarmHost } from "@clankie/swarm";
@@ -968,6 +969,19 @@ const server = serve({
   hostname: listenHost,
   websocket: { server: webSocketServer as unknown as WebSocketServerLike },
 });
+// ADR 0204: opt-in LAN door for a self-hosted phone, device routes only.
+const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
+const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
+const deviceDoorway = deviceDoorwayHost
+  ? serve({
+      fetch: deviceDoorwayFetch(clankie.app.fetch),
+      port: deviceDoorwayPort,
+      hostname: deviceDoorwayHost,
+    })
+  : undefined;
+if (deviceDoorway !== undefined) {
+  logger.info({ hostname: deviceDoorwayHost, port: deviceDoorwayPort }, "device doorway listening");
+}
 if (publicGatewayConnector !== undefined) {
   if (server.listening) publicGatewayConnector.start();
   else server.once("listening", () => publicGatewayConnector?.start());
@@ -997,6 +1011,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   publicGatewayConnector?.close();
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
+  deviceDoorway?.close();
   server.close();
   hostedDiscord?.close();
   void (async () => {

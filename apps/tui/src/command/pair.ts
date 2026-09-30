@@ -1,4 +1,5 @@
 import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { directOriginTransport } from "@clankie/protocol";
 import QRCode from "qrcode";
 import {
   pairingFailureMessage,
@@ -72,6 +73,44 @@ async function ensureRelayForPairing(
   }
 }
 
+/**
+ * Which routes an offer's link carries (ADR 0204), so the operator knows who it
+ * can pair: the gateway reaches any network, the direct route pairs the App
+ * Store app with no account, and neither pairs only a source build.
+ */
+function routeLines(offer: PairingOffer): string[] {
+  const direct = offer.direct;
+  const routes = [
+    ...(offer.gateway ? ["remote access (gateway)"] : []),
+    ...(direct === undefined ? [] : [`direct (${direct})`]),
+  ];
+  if (routes.length === 0) {
+    return [
+      "Route: this Mac only — pairs a source build pointed here, not the App Store app.",
+      "Configure a direct route with `clankie gateway direct` to pair the App Store app with no account.",
+    ];
+  }
+  return [
+    `Routes: ${routes.join(" + ")}`,
+    ...(direct !== undefined && directOriginTransport(direct) === "blocked"
+      ? [
+          `The App Store app cannot reach ${direct}: plain HTTP works only for LAN addresses. Serve it over HTTPS (e.g. \`tailscale serve --https\`).`,
+        ]
+      : []),
+  ];
+}
+
+/** The routes an agent reads back beside the offer; absent means this Mac only. */
+function routeJson(offer: PairingOffer): { routes?: { gateway: boolean; direct?: string } } {
+  if (offer.gateway !== true && offer.direct === undefined) return {};
+  return {
+    routes: {
+      gateway: offer.gateway === true,
+      ...(offer.direct === undefined ? {} : { direct: offer.direct }),
+    },
+  };
+}
+
 /** QR + code + link per offer; the one place secret display data is rendered. */
 async function offerBlocks(offers: readonly PairingOffer[]): Promise<string[]> {
   const lines: string[] = [];
@@ -81,6 +120,7 @@ async function offerBlocks(offers: readonly PairingOffer[]): Promise<string[]> {
       `Code ${index + 1}: ${offer.code}`,
       offer.deepLink,
       `Expires ${offer.expiresAt}`,
+      ...routeLines(offer),
       "",
     );
   }
@@ -93,6 +133,7 @@ function offerJson(offers: readonly PairingOffer[]): unknown[] {
     code: offer.code,
     deepLink: offer.deepLink,
     expiresAt: offer.expiresAt,
+    ...routeJson(offer),
   }));
 }
 
@@ -270,7 +311,13 @@ export async function runPairCommand(args: readonly string[], options: PairComma
   const offer = offers[0];
   if (offer === undefined) throw new Error("No pairing offer was minted.");
   if (json) {
-    outputJson(stdout, { ok: true, code: offer.code, deepLink: offer.deepLink, expiresAt: offer.expiresAt });
+    outputJson(stdout, {
+      ok: true,
+      code: offer.code,
+      deepLink: offer.deepLink,
+      expiresAt: offer.expiresAt,
+      ...routeJson(offer),
+    });
     return 0;
   }
 
@@ -284,6 +331,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
       "Or open this link on the device:",
       offer.deepLink,
       `Expires ${offer.expiresAt} · single use — run \`clankie pair\` again for a new offer.`,
+      ...routeLines(offer),
       "",
     ].join("\n"),
   );

@@ -4428,8 +4428,55 @@ export const PairingOfferWireSchema = z.object({
   expiresAt: z.string().datetime(),
   /** Present on long-lived review offers so the operator's output can say so. */
   review: z.literal(true).optional(),
+  /** The link carries the gateway's encrypted route in its fragment (ADR 0151). */
+  gateway: z.literal(true).optional(),
+  /** The Mac's direct control origin the link carries (ADR 0204). */
+  direct: z.string().min(1).max(2_048).optional(),
 });
 export type PairingOfferWire = z.infer<typeof PairingOfferWireSchema>;
+
+/** Query parameter naming the Mac's direct control origin in a pairing link (ADR 0204). */
+export const PAIRING_DIRECT_PARAM = "direct";
+
+export type DirectOriginTransport = "https" | "local" | "blocked";
+
+function privateIpLiteral(hostname: string): boolean {
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/u.exec(hostname);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    );
+  }
+  if (!hostname.startsWith("[")) return false;
+  const v6 = hostname.slice(1, -1).toLowerCase();
+  return v6 === "::1" || /^f[cd][0-9a-f]{0,2}:/u.test(v6) || /^fe[89ab][0-9a-f]?:/u.test(v6);
+}
+
+/**
+ * How an App Store build may reach a direct origin under ATS (ADR 0204): HTTPS
+ * anywhere; plain HTTP only where `NSAllowsLocalNetworking` applies and the
+ * address is on the LAN — `.local`, single-label names, and private, link-local
+ * or loopback IP literals. A tailnet or public name over HTTP is blocked, as is
+ * a tailnet IP: serve it over HTTPS (`tailscale serve --https`) instead.
+ */
+export function directOriginTransport(value: string): DirectOriginTransport {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "blocked";
+  }
+  if (url.protocol === "https:") return "https";
+  if (url.protocol !== "http:") return "blocked";
+  const hostname = url.hostname.toLowerCase().replace(/\.$/u, "");
+  if (hostname.endsWith(".local") || privateIpLiteral(hostname)) return "local";
+  return /^[a-z0-9-]+$/u.test(hostname) && !/^\d+$/u.test(hostname) ? "local" : "blocked";
+}
 
 /** Host identity shown on the device's access-review screen. */
 export const PairingHostSchema = z.object({ name: z.string().min(1) });

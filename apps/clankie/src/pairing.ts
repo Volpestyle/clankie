@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { type DomainEvent, type PairingOfferWire } from "@clankie/protocol";
+import { PAIRING_DIRECT_PARAM, type DomainEvent, type PairingOfferWire } from "@clankie/protocol";
 import { z } from "zod";
 
 // Device pairing-offer minting and single-use redemption for the service.
@@ -120,6 +120,25 @@ export function pairingOfferWire(offer: StoredPairingOffer): PairingOfferWire {
     code: offer.code,
     expiresAt: offer.expiresAt,
     ...(offer.review === undefined ? {} : { review: true as const }),
+  };
+}
+
+/**
+ * Add the Mac's direct control origin to a pairing link (ADR 0204), beside the
+ * gateway's fragment when there is one, so one QR carries every route. The
+ * origin is not a secret: the single-use offer secret stays the capability.
+ */
+export function withDirectPairingRoute(wire: PairingOfferWire, controlPlaneUrl: string): PairingOfferWire {
+  const hash = wire.deepLink.indexOf("#");
+  const [base, fragment] =
+    hash < 0 ? [wire.deepLink, ""] : [wire.deepLink.slice(0, hash), wire.deepLink.slice(hash)];
+  const deepLink = `${base}&${PAIRING_DIRECT_PARAM}=${encodeURIComponent(controlPlaneUrl)}${fragment}`;
+  // A gateway offer's only code is its full link; keep them the same string.
+  return {
+    ...wire,
+    deepLink,
+    ...(wire.code === wire.deepLink ? { code: deepLink } : {}),
+    direct: controlPlaneUrl,
   };
 }
 

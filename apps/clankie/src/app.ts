@@ -164,6 +164,7 @@ import {
   mintPairingOffer,
   pairingOfferRecord,
   pairingOfferWire,
+  withDirectPairingRoute,
   PairingOfferStore,
   replayReviewOffers,
   type PairingOfferRecord,
@@ -2904,9 +2905,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     // A configured doorway wins (ADR 0151), so an offer it cannot carry is a code
     // that can never be redeemed. Refusing beats printing a QR that fails on the
     // phone as "not recognized" with nothing on this Mac to say why.
+    // Every offer carries the configured direct route too, so it still pairs
+    // when the doorway cannot (ADR 0204). A review offer does not: App Review
+    // reaches this Mac only through the gateway, and needs no private address.
+    const direct =
+      parsed.data.review === undefined ? advertisedDirectRoute().directRoute?.controlPlaneUrl : undefined;
+    const directFallback = direct !== undefined;
     const doorway = dependencies.publicGatewayDoorway?.();
     if (dependencies.pairingOfferPublisher === undefined && doorway !== undefined) {
-      if (doorway.state !== "disabled") {
+      if (doorway.state !== "disabled" && !directFallback) {
         logger.warn({ doorway: doorway.state }, "pairing offer refused: the doorway carries nothing");
         return context.json({ error: "public_gateway_unavailable" }, 503);
       }
@@ -2919,15 +2926,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       idFactory,
       ...(parsed.data.review === undefined ? {} : { review: parsed.data.review }),
     });
-    if (dependencies.pairingOfferPublisher !== undefined) {
+    let publisher = dependencies.pairingOfferPublisher;
+    if (publisher !== undefined) {
       try {
-        await dependencies.pairingOfferPublisher.publishPairingOffer(offer);
+        await publisher.publishPairingOffer(offer);
       } catch (error) {
         logger.warn(
-          { offerId: offer.offerId, error: error instanceof Error ? error.name : "UnknownError" },
+          {
+            offerId: offer.offerId,
+            error: error instanceof Error ? error.name : "UnknownError",
+            directFallback,
+          },
           "pairing offer could not reach the public gateway",
         );
-        return context.json({ error: "public_gateway_unavailable" }, 503);
+        if (!directFallback) return context.json({ error: "public_gateway_unavailable" }, 503);
+        publisher = undefined;
       }
     }
     const record = pairingOfferRecord(offer);
@@ -2946,9 +2959,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       { offerId: offer.offerId, operatorId: operator.operatorId, expiresAt: offer.expiresAt },
       "pairing offer minted",
     );
-    return context.json(
-      dependencies.pairingOfferPublisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer),
-    );
+    const wire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    return context.json(direct === undefined ? wire : withDirectPairingRoute(wire, direct));
   });
 
   // Redeem an offer secret or typed code (the secret IS the capability, so the
