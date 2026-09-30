@@ -78,8 +78,7 @@ clankie voice model set eleven_v4_turbo
 active calls. Provider and voice-ID selection still need `/voice`; there is no
 headless setter for them.
 
-Use the same voice setup for the [Mac menu-bar app](https://github.com/Volpestyle/clankie/blob/main/apps/menu-bar/README.md)
-or a [Discord voice room](#discord). The [voice operating guide](https://github.com/Volpestyle/clankie/blob/main/apps/discord-bridge/README.md)
+Use this voice setup for a [Discord voice room](#discord). The [voice operating guide](https://github.com/Volpestyle/clankie/blob/main/apps/discord-bridge/README.md)
 has setup and troubleshooting details.
 
 ## Preferences

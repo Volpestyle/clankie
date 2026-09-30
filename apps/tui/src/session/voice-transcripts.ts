@@ -3,7 +3,7 @@
  *
  * Exact consented speech is a private captain-authenticated page, not a lane
  * log and not a receipt. The console is a subscriber: it pages
- * `/v1/discord/voice-transcripts` the same way the menu bar does, and never
+ * `/v1/discord/voice-transcripts` and never
  * reads the JSONL from disk.
  */
 import {

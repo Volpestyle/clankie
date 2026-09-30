@@ -278,8 +278,6 @@ importers:
         specifier: 2.9.0
         version: 2.9.0
 
-  apps/menu-bar: {}
-
   apps/relay:
     dependencies:
       '@clankie/credential-broker':

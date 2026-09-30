@@ -87,7 +87,7 @@ to the mode-0600 `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-voice-transc
 Assistant entries include provider/playback ids and outcomes: played, interrupted,
 suppressed, failed, or truncated. After a cutoff, text may include an unheard
 ending; no raw audio or word alignment is saved. Read with
-`clankie discord transcripts`, `/vt`, or the menu bar. Receipts remain content-free.
+`clankie discord transcripts` or `/vt`. Receipts remain content-free.
 
 ## Start And Verify
 

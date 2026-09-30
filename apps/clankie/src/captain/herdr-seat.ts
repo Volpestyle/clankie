@@ -3,7 +3,7 @@ import type { HerdrSessionCensus } from "./herdr-census.ts";
 /**
  * Every operator turn is a chance to lead the pinned herdr session (ADR 0149).
  * When the operator console is a herdr pane, the turn is a join: that pane is
- * him. From any other surface — the phone, the menu bar, a socket console — he
+ * him. From any other surface — the phone or a socket console — he
  * leads the same session without a pane, so long as it is actually up; a turn
  * with no live session carries no herdr preamble at all. The shell runs in the
  * service either way, so the seat and census ride the prompt, not process env.

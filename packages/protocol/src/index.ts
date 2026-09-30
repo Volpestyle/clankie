@@ -2133,43 +2133,6 @@ export const OperatorSeatReplySchema = z
   .strict();
 export type OperatorSeatReply = z.infer<typeof OperatorSeatReplySchema>;
 
-/** Private loopback voice chat used by authenticated local operator surfaces. */
-export const LOCAL_VOICE_CHAT_PATH = "/operator/v1/voice-chat";
-
-export const LocalVoiceChatClientEventSchema = z
-  .object({ schemaVersion: z.literal(1), type: z.literal("commit") })
-  .strict();
-export type LocalVoiceChatClientEvent = z.infer<typeof LocalVoiceChatClientEventSchema>;
-
-export const LocalVoiceChatServerEventSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      schemaVersion: z.literal(1),
-      type: z.literal("status"),
-      state: z.enum(["listening", "thinking", "speaking"]),
-    })
-    .strict(),
-  z
-    .object({
-      schemaVersion: z.literal(1),
-      type: z.literal("transcript"),
-      speaker: z.enum(["operator", "clankie"]),
-      text: z.string().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
-      final: z.boolean(),
-      occurredAt: z.string().datetime(),
-    })
-    .strict(),
-  z.object({ schemaVersion: z.literal(1), type: z.literal("response_done") }).strict(),
-  z
-    .object({
-      schemaVersion: z.literal(1),
-      type: z.literal("error"),
-      message: z.string().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
-    })
-    .strict(),
-]);
-export type LocalVoiceChatServerEvent = z.infer<typeof LocalVoiceChatServerEventSchema>;
-
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   z
     .object({

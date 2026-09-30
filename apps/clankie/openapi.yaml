@@ -1538,28 +1538,6 @@ paths:
         "200":
           description: Discriminated result
 
-  /operator/v1/voice-chat:
-    get:
-      tags: [Operator]
-      operationId: openOperatorVoiceChat
-      summary: Open a private local voice chat
-      description: |
-        Upgrades to a WebSocket for captain bearers whose source lane is `api`.
-        Binary client frames are 24 kHz mono signed 16-bit little-endian PCM;
-        `{"schemaVersion":1,"type":"commit"}` ends one utterance. Binary
-        server frames use the same PCM format. JSON server frames report
-        `status`, attributed `transcript`, `response_done`, or `error` events.
-        Raw audio is not retained. The realtime room can call the captain through
-        the shared operator-conversation service when work is required.
-      security: [{ captainBearer: [] }]
-      responses:
-        "101":
-          description: WebSocket opened
-        "403":
-          description: Bearer is not an operator API captain
-        "503":
-          description: Local realtime voice is unavailable
-
   /captain/v1/lanes:
     get:
       tags: [Captain]

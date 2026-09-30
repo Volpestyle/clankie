@@ -63,7 +63,7 @@ describe("seat outbox", () => {
     const delivery = outbox.deliver({
       kind: "escalation",
       conversationId: "global-default",
-      source: "clankie-menu-bar-voice",
+      source: "clankie-app",
       content: "can you check the build?",
       wantsReply: true,
     });
@@ -81,7 +81,7 @@ describe("seat outbox", () => {
     const delivery = outbox.deliver({
       kind: "escalation",
       conversationId: "global-default",
-      source: "clankie-menu-bar-voice",
+      source: "clankie-app",
       content: "hello?",
       wantsReply: true,
     });

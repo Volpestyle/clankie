@@ -8,7 +8,7 @@ const event: OperatorSeatEvent = {
   id: "seat-1",
   kind: "escalation",
   conversationId: "global-default",
-  source: "clankie-menu-bar-voice",
+  source: "clankie-app",
   content: "can you check the build?",
   createdAt: "2026-09-01T20:00:00.000Z",
 };

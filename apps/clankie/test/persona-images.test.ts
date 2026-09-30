@@ -17,13 +17,11 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { SettingsStore, emptySettings } from "@clankie/settings";
-import { LOCAL_VOICE_CHAT_PATH } from "@clankie/protocol";
 import { PERSONA_IMAGE_FRAMING } from "@clankie/persona-images";
 import { personaImagesExtension } from "../src/persona-images.ts";
 import { assembleLanePrompt } from "../src/captain/captain.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
-import { LocalVoiceChatSession } from "../src/local-voice-chat.ts";
 const roots: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -181,17 +179,12 @@ it("protects persona API writes and status behind owner authentication", async (
     clankie.close();
   }
 });
-it("sends only the bounded description into Discord and private realtime voice", async () => {
-  let lane: "discord_voice" | "api" = "discord_voice";
-  const open = vi.spyOn(LocalVoiceChatSession, "open").mockRejectedValue(new Error("stop before websocket"));
+it("sends only the bounded description into Discord realtime voice", async () => {
   const clankie = await createClankieApp({
     captain: createStubCaptain(),
     settings: { load: async () => emptySettings() },
     personaImages: async () => board,
-    authenticateCaptain: async () => ({ captainId: "test", steerSourceLane: lane }),
-    localVoiceRealtime: {} as NonNullable<
-      NonNullable<Parameters<typeof createClankieApp>[0]>["localVoiceRealtime"]
-    >,
+    authenticateCaptain: async () => ({ captainId: "test", steerSourceLane: "discord_voice" }),
   });
   try {
     const response = await clankie.app.request("/v1/discord/voice-briefing", {
@@ -204,12 +197,6 @@ it("sends only the bounded description into Discord and private realtime voice",
     expect(briefing).toContain(board.description);
     expect(briefing).not.toContain("PERSONA_PIXELS");
     expect(briefing).not.toContain("VIBE_PIXELS");
-    lane = "api";
-    await clankie.app.request(LOCAL_VOICE_CHAT_PATH);
-    expect(open).toHaveBeenCalledOnce();
-    expect(open.mock.calls[0]![0].instructions).toContain(board.description);
-    expect(JSON.stringify(open.mock.calls[0]![0])).not.toContain("PERSONA_PIXELS");
-    expect(JSON.stringify(open.mock.calls[0]![0])).not.toContain("VIBE_PIXELS");
   } finally {
     clankie.close();
   }

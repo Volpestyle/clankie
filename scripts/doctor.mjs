@@ -27,7 +27,6 @@ for (const check of [
   ["git", true, ["--version"], "Install Git."],
   ["cargo", true, ["--version"], "Install the Rust 1.88+ toolchain to build @clankie/vox.", "1.88"],
   ["cmake", true, ["--version"], "Install CMake to build Vox's bundled native codecs."],
-  ["swift", true, ["--version"], "Install Swift to build @clankie/menu-bar."],
   ["ffmpeg", false, ["-version"], "Required for Vox URL/video playback and VP8 decode."],
   ["yt-dlp", false, ["--version"], "Required for Vox playback from indirect media URLs."],
   ["herdr", false, ["--version"], "Optional: install Herdr as an external pane host."],

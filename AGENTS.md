@@ -25,8 +25,6 @@ This repository is public. Both neighbors are private and consume
 - `apps/clankie` — the service: pi-based captain (sessions, tools, persona),
   HTTP API, game body, browser host, media generation, presence, memory.
 - `apps/tui` — the operator console (`clankie` launcher lives here).
-- `apps/menu-bar` — native macOS menu bar: private local voice and operator
-  conversation tails.
 - `apps/discord-bridge`, `apps/discord-user-session` — his Discord bodies
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.

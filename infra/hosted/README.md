@@ -113,7 +113,7 @@ isolation remain deployment work.
 ## Scope and verification
 
 This is the headless coding bundle. Browser/tldraw hosts are disabled by default;
-Vox, screen capture, local voice and media binaries are not included. Discord body
+Vox, screen capture and media binaries are not included. Discord body
 processes require their own configured deployment; the image retains compiled
 entrypoints but the base Compose file starts captain and relay only. Additional
 capabilities need their actual executables and platform support.

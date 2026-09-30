@@ -8,12 +8,12 @@ memory, tools, and access in either case.
 You can use him without knowing the pieces below. They become useful when you
 want to customize him, connect a team, or understand where your work goes.
 
-<div class="diagram" role="img" aria-label="The app and console, plus optional Discord and Mac voice, reach Clankie's persistent service. The service stores conversations and memory and uses configured models, tools, and agent connections. Capabilities depend on the host.">
+<div class="diagram" role="img" aria-label="The app and console, plus optional Discord text and voice, reach Clankie's persistent service. The service stores conversations and memory and uses configured models, tools, and agent connections. Capabilities depend on the host.">
   <div class="diagram-col">
     <h4>Talk to him</h4>
     <div class="dnode"><strong>The app</strong><span>Messages · Commons · Terminal</span></div>
     <div class="dnode"><strong>The console</strong><span>local or hosted connection</span></div>
-    <div class="dnode"><strong>Optional rooms</strong><span>Discord · private Mac voice</span></div>
+    <div class="dnode"><strong>Optional rooms</strong><span>Discord text · voice</span></div>
   </div>
   <div class="diagram-col diagram-center">
     <h4>His home</h4>

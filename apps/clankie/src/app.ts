@@ -35,11 +35,7 @@ import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@cla
 import { linearFollowStatus } from "@clankie/settings";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
-import { upgradeWebSocket } from "@hono/node-server";
-import {
-  DiscordVoiceTranscriptStore,
-  type TranscriptVoiceRealtimePorts,
-} from "@clankie/discord-presence-core";
+import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
 import { createLogger } from "@clankie/observability";
 import {
   DISCORD_PRESENCE_LIVE_PHASE_HEADER,
@@ -75,7 +71,6 @@ import {
   DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX,
   DISCORD_VOICE_TRANSCRIPTS_PATH,
   DiscordVoiceTranscriptCursorSchema,
-  LOCAL_VOICE_CHAT_PATH,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   FLEET_SEAT_EVENTS_PATH,
@@ -190,7 +185,6 @@ import {
 } from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
-import { LocalVoiceChatSession } from "./local-voice-chat.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 import type { DeliveredFileStore } from "./delivered-files.ts";
@@ -244,15 +238,6 @@ const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
   "- An interruption changes the conversation: respond to the latest intent instead of resuming an older speech. When someone asks for quiet, silence is a complete response; you need not explain that you will stop.",
   "- Every room utterance arrives as structured text with an authenticated Discord `speakerId`. Keep track of each person separately, address the person who spoke, and treat that id as ground truth; never infer identity from voice characteristics.",
   "- Follow the whole room conversation and decide whether each utterance calls for you. Your name is a clue, not a requirement: a direct request or contextual follow-up can be for you without it, even after a pause. Fragments, acknowledgments, and side conversations often need no reply. You may stay silent. Use display names when they help make the recipient clear; speakerId keeps people distinct. Never infer identity from how they sound.",
-].join("\n");
-
-const LOCAL_VOICE_REALTIME_SURFACE_RULES = [
-  "# This surface",
-  "You are in a private voice conversation with your operator on this Mac.",
-  "- Speak naturally and briefly. No markdown, lists, links, file paths, or anything that only makes sense on a screen.",
-  "- Conversation stays in the realtime voice session. Use ask_clankie for tools, memory, files, or any other action.",
-  REALTIME_MEMORY_AGENCY_RULE,
-  "- Voice never approves privileged actions. If a tool needs typed input or approval, send the operator to the authenticated operator console.",
 ].join("\n");
 
 /**
@@ -436,8 +421,6 @@ export interface ClankieAppDependencies {
   computerUseHarnesses?: { refresh(): Promise<readonly ComputerUseHarness[]> };
   rivals?: RivalsClient;
   mediaGenerator?: MediaGeneratorPort;
-  /** Shared realtime voice provider composition; the app owns only loopback media transport. */
-  localVoiceRealtime?: TranscriptVoiceRealtimePorts;
   /** Private exact Discord transcript log, injected by tests when needed. */
   voiceTranscriptStore?: DiscordVoiceTranscriptStore;
   authenticateCaptain?: CaptainAuthenticator;
@@ -3387,81 +3370,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return context.json({ error: "refused", message: error.message }, 409);
       throw error;
     }
-  });
-
-  app.get(LOCAL_VOICE_CHAT_PATH, async (context) => {
-    const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
-    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-    if (captain.steerSourceLane !== "api")
-      return context.json({ error: "operator_voice_authority_required" }, 403);
-    if (dependencies.localVoiceRealtime === undefined) {
-      return context.json({ error: "local_voice_unavailable" }, 503);
-    }
-    let persona: ClankieSettings["persona"];
-    try {
-      persona = (await settingsSource.load()).persona;
-    } catch {
-      return context.json({ error: "local_voice_persona_unavailable" }, 503);
-    }
-    const sections = [
-      renderVoiceBriefingSelfState(
-        captainPresence.snapshot(),
-        discordPresenceSessions.list(),
-        discordStreamWatch.current(),
-      ),
-    ];
-    const embodimentCard = renderVoiceBriefingEmbodiment(embodiment.liveSession());
-    if (embodimentCard !== undefined) sections.push(embodimentCard);
-    const episodeCard = dependencies.memory?.episodeRecallCard({ lane: "operator" }) ?? "";
-    if (episodeCard.length > 0) sections.push(episodeCard);
-    let session: LocalVoiceChatSession;
-    try {
-      session = await LocalVoiceChatSession.open({
-        realtime: dependencies.localVoiceRealtime,
-        captain: dependencies.captain,
-        instructions: boundVoiceBriefingText(
-          [
-            personaInstructions(persona, "social"),
-            dependencies.personaImages ? personaImageBriefing(await dependencies.personaImages()) : "",
-            LOCAL_VOICE_REALTIME_SURFACE_RULES,
-          ].join("\n\n"),
-          DISCORD_VOICE_BRIEFING_MAX_CHARACTERS,
-        ),
-        briefing: boundVoiceBriefingText(sections.join("\n\n"), DISCORD_VOICE_BRIEFING_MAX_CHARACTERS),
-      });
-    } catch {
-      return context.json({ error: "local_voice_upstream_unavailable" }, 503);
-    }
-    return upgradeWebSocket(context, {
-      onOpen(_event, ws) {
-        session.attach({
-          get bufferedAmount() {
-            const raw = ws.raw as { readonly bufferedAmount?: unknown } | undefined;
-            return typeof raw?.bufferedAmount === "number" ? raw.bufferedAmount : 0;
-          },
-          send: (data) => ws.send(data),
-          close: (code, reason) => ws.close(code, reason),
-        });
-      },
-      onMessage(event, ws) {
-        if (typeof event.data === "string") {
-          session.receiveText(event.data);
-          return;
-        }
-        if (event.data instanceof ArrayBuffer) {
-          session.receiveAudio(new Uint8Array(event.data));
-          return;
-        }
-        ws.close(1003, "unsupported_voice_frame");
-      },
-      onClose() {
-        session.close();
-      },
-      onError() {
-        session.close();
-      },
-    });
   });
 
   app.get(CAPTAIN_LANE_OBSERVATION_PATH, async (context) => {

@@ -18,7 +18,6 @@ flowchart LR
   Console["Console / CLI"] --> Service
   Native["Optional native operator seat"] -->|"MCP + transcript bridge"| Service
   Discord["Configured Discord body"] --> Service
-  MacVoice["Private Mac voice"] --> Service
   Service --> State["Host-owned state<br/>memory · files · credential broker"]
   Service --> Models["Configured models and services"]
   Service <--> Swarm["Swarm coordinators<br/>messages · tasks · ownership"]
@@ -31,7 +30,7 @@ flowchart LR
 ```
 
 Capabilities are configured per host. A managed Linux deployment does not
-implicitly provide Mac voice, desktop input, Discord media, or a game world.
+implicitly provide desktop input, Discord media, or a game world.
 The [Linux guide](../infra/hosted/README.md) owns that deployment's capability
 set; [Swarm](../packages/swarm/README.md#support-at-a-glance) owns worker-route
 support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
@@ -238,14 +237,9 @@ task boundaries to the evaluator. Evaluator descendants are excluded from captur
 following remains independent. See [ADR 0178](adr/0178-the-evaluator-has-its-own-seat.md)
 for scheduling, restart recovery and evidence limits.
 
-The native macOS menu-bar app uses that same contract to list continuing Pi
-sessions and tail expanded transcripts. Its microphone opens a private local
-realtime room over an authenticated loopback WebSocket; social speech stays in
-the room, while `ask_clankie` sends actionable work through the operator
-conversation service. Raw PCM remains in memory. Exact Discord speech is a
-separate, bounded captain read that returns content only while owner-controlled
-transcript retention is enabled
-([ADR 0125](adr/0125-the-menu-bar-is-a-private-local-voice-room.md)).
+Exact Discord speech is available through a bounded captain read that returns
+content only while owner-controlled transcript retention is enabled. The TUI
+and `clankie discord transcripts` use this shared transcript store.
 
 Operator input can invoke an exact loaded skill as `/name task` or
 `/skill:name task`. The service rewrites that verified invocation to Pi's native

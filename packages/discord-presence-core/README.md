@@ -25,7 +25,7 @@ what lets both bodies be one character
 | `voice-music`                | Shared bounded queue and transport controls                                                           |
 | `voice-ingress`              | Routes one `ask_clankie` handoff to the continuing `discord_voice` captain lane                       |
 | `voice-consent`              | Ephemeral consent under explicit or owner-selected presence policy; opt-out always wins               |
-| `voice-audio`                | Shared provider/local-voice PCM helpers and content-free RMS measurement                              |
+| `voice-audio`                | Shared voice-provider PCM helpers and content-free RMS measurement                                    |
 | `receipt-store`              | Append-only, content-free receipts for both planes                                                    |
 
 Voice receipts use the `discord.voice.*` vocabulary — `joined`, `consent`,

@@ -1,6 +1,9 @@
 # ADR 0125: The menu bar is a private local voice room
 
-Status: accepted (James, 2026-08-18). Extends
+Status: superseded by [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md)
+(James, 2026-09-30). The private local voice surface is retired.
+
+Originally accepted (James, 2026-08-18). Extends
 [ADR 0057](0057-realtime-voice-with-captain-handoff.md) (realtime voice owns
 conversation), [ADR 0111](0111-a-console-process-starts-one-conversation.md)
 (operator surfaces share one callable contract), and
