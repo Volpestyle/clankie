@@ -2,16 +2,17 @@
 // with the Claude worker adapter and this Mac's real consent state.
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import {
   HerdrWatchStore,
   createHerdrWatchRunner,
   type HerdrWatchRunner,
-} from "/Users/james/dev/clankie/apps/clankie/src/captain/herdr-watch.ts";
+} from "../../../apps/clankie/src/captain/herdr-watch.ts";
 import {
   SeatHookLog,
   claudeWorkerChannelConsent,
   createClaudeWorkerSeatAdapter,
-} from "/Users/james/dev/clankie/apps/clankie/src/captain/claude-worker-seat.ts";
+} from "../../../apps/clankie/src/captain/claude-worker-seat.ts";
 
 const S = process.argv[2]!; // a private scratch directory
 const log = (label: string, value: unknown) =>
@@ -57,7 +58,7 @@ const runner: HerdrWatchRunner = {
     if (flag >= 0) args.splice(flag, 2);
     args.push(
       "--plugin-dir",
-      "/Users/james/dev/clankie/integrations/claude-plugin/worker",
+      fileURLToPath(new URL("../../../integrations/claude-plugin/worker", import.meta.url)),
       "--model",
       "haiku",
     );
@@ -88,7 +89,7 @@ const hired = await store.spawnSeat(
     schemaVersion: 1,
     harness: "claude",
     title: "vuh-1458 live check",
-    workingDirectory: "/Users/james/dev/clankie/.data/vuh-1458-live",
+    workingDirectory: fileURLToPath(new URL("../../../.data/vuh-1458-live", import.meta.url)),
   },
   undefined,
   brief,
@@ -131,7 +132,9 @@ log(
 log("SESSION", agent?.session);
 log(
   "FILE",
-  await readFile("/Users/james/dev/clankie/.data/vuh-1458-live/hello.txt", "utf8").catch(() => "missing"),
+  await readFile(new URL("../../../.data/vuh-1458-live/hello.txt", import.meta.url), "utf8").catch(
+    () => "missing",
+  ),
 );
 await new Promise((resolve) => setTimeout(resolve, 3000));
 log(
