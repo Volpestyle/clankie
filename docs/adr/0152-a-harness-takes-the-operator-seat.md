@@ -86,7 +86,8 @@ flowchart LR
 - **The seat ships as a Claude Code plugin** at `integrations/claude-plugin`,
   beside the herdr plugin and under its rule: a plugin carries only what a
   plugin can uniquely declare. That is the output style holding his identity
-  (forced on while the plugin is enabled, coding instructions left out), a
+  (forced on while the plugin is enabled; amended 2026-09-30 to keep Claude
+  Code's own engineering instructions, so the seat only adds), a
   `SessionStart` hook that injects persona, reach, fleet preferences, address, and the service
   model card, a `UserPromptSubmit` hook that injects the newest memory card (once
   per session and again when it changes; see Consequences), one

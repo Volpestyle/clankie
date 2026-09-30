@@ -50,7 +50,8 @@
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 60
+            "timeout": 60,
+            "async": true
           }
         ]
       }
@@ -62,7 +63,8 @@
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 60
+            "timeout": 60,
+            "async": true
           }
         ]
       }
@@ -86,7 +88,8 @@
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 60
+            "timeout": 60,
+            "async": true
           }
         ]
       }

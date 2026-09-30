@@ -15,7 +15,8 @@ describe("clankie claude plugin", () => {
     const style = await readFile(join(pluginRoot, "output-styles", "clankie.md"), "utf8");
     expect(style.startsWith("---\nname: Clankie\n")).toBe(true);
     expect(style).toContain("force-for-plugin: true");
-    expect(style).not.toContain("keep-coding-instructions");
+    // The seat adds identity; it never strips Claude Code's own engineering instructions.
+    expect(style).toContain("keep-coding-instructions: true");
     expect(style).toContain("# Identity");
     expect(style).toContain("# This seat");
   });
@@ -49,6 +50,12 @@ describe("clankie claude plugin", () => {
     ]) {
       expect(hooks.hooks[event]?.[0]?.hooks).toContainEqual(
         expect.objectContaining({ command: "clankie", args: ["seat-sync"], timeout: 60 }),
+      );
+    }
+    // Projection injects nothing, so turn-end and pre-compact syncs never block the seat.
+    for (const event of ["Stop", "StopFailure", "PreCompact"]) {
+      expect(hooks.hooks[event]?.[0]?.hooks).toContainEqual(
+        expect.objectContaining({ args: ["seat-sync"], async: true }),
       );
     }
     const mcp = JSON.parse(await readFile(join(pluginRoot, ".mcp.json"), "utf8")) as {
