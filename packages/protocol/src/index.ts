@@ -1002,11 +1002,24 @@ export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;
  * ready. Those are outcomes to render, not exceptions to crash a surface on —
  * the same call the send lane makes with `undelivered`.
  */
+const SeatControlModeSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.enum(["channel", "adapter"]) }).strict(),
+  z
+    .object({
+      mode: z.literal("terminal"),
+      reason: z.string(),
+      detail: z.string(),
+      fix: z.string().optional(),
+    })
+    .strict(),
+]);
+
 export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("spawned"),
       seat: OperatorFleetSeatSchema,
+      control: SeatControlModeSchema.optional(),
       skills: z
         .object({
           mode: z.enum(["bundled", "plain"]),
@@ -1027,10 +1040,12 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
         "unknown_directory",
         "harness_unavailable",
         "not_ready",
+        "trust_required",
         "herdr_unreachable",
         "at_capacity",
       ]),
       detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+      control: SeatControlModeSchema.optional(),
     })
     .strict(),
 ]);
@@ -1067,9 +1082,11 @@ export const OperatorSeatMoveResultSchema = z.discriminatedUnion("outcome", [
         "unknown_directory",
         "harness_unavailable",
         "not_ready",
+        "trust_required",
         "herdr_unreachable",
       ]),
       detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+      control: SeatControlModeSchema.optional(),
     })
     .strict(),
 ]);

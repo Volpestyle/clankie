@@ -131,7 +131,11 @@ withdrawn at James's direction before it landed).
   approval the adapter returns `blocked` (`consent_required`) before launching
   anything, and the hire continues on the terminal lane in the same pane. The
   hire tool's result names the missing step (`control.mode: "terminal"`, with
-  `fix`); the compose page's protocol result is unchanged.
+  `fix`). VUH-1478 also exposes control in the compose/API result: `channel` for
+  Claude, `adapter` for Codex, and `terminal` with a reason for every fallback.
+  Fleet routing preserves the local runner's adapter capabilities. Every hire
+  logs its lane and reason; a visible folder-trust prompt returns `trust_required`
+  before the failed pane is closed.
 - **Terminal typing is the fallback only**, with the VUH-1450 paste-and-verify
   receipt and its typed `brief_delivery_unverified` failure. An adapter failure
   after launch closes the pane and returns its typed outcome; it is never

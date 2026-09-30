@@ -1314,6 +1314,7 @@ describe("hiring a seat", () => {
 
     expect(result).toEqual({
       outcome: "spawned",
+      control: { mode: "terminal", reason: "no_brief", detail: "No harness adapter selected: no_brief." },
       seat: {
         account: { label: "default", home: codexHome },
         seatId: "term-hired",
@@ -1853,7 +1854,7 @@ describe("hiring a seat", () => {
     store.close();
   });
 
-  it("leaves a different blocked dialog as a failed hire and closes the pane", async () => {
+  it("reports a folder trust blocker as a typed failure and closes the pane", async () => {
     const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
     const read = vi.fn(() => Promise.resolve("Do you trust the files in this folder?"));
     const sendKeys = vi.fn(() => Promise.resolve());
@@ -1877,7 +1878,7 @@ describe("hiring a seat", () => {
       workingDirectory: tmpdir(),
     });
 
-    expect(result).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
     expect(sendKeys).not.toHaveBeenCalled();
     expect(closePane).toHaveBeenCalledWith("w1C:p9");
     store.close();

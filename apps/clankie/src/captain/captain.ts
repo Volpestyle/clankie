@@ -2506,9 +2506,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
       if (request.op === "spawn_seat") {
-        // How the seat is controlled is for the captain's own hire tool; the
-        // compose page's protocol result stays exactly its schema.
-        const { control: _control, ...result } = await hireSeat(request.seat);
+        const result = await hireSeat(request.seat);
         return { op: "spawn_seat", schemaVersion: 1, result };
       }
       if (request.op === "move_seat") {

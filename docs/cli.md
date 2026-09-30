@@ -1646,6 +1646,14 @@ Until then the hire result carries
 takes the terminal fallback below; nothing accepts the development-channel
 warning on the owner's behalf.
 
+Every hire logs its selected lane and reason. The result carries `control.mode`:
+`channel` for the Claude worker channel, `adapter` for Codex, or `terminal` with
+`control.reason` explaining the fallback (including a remote fleet, absent brief,
+unavailable adapter or pane capability). Registered remote fleets do not change
+the control lane of a local hire. A visible folder-trust prompt returns
+`trust_required` and closes the new pane without accepting trust; review the
+prompt yourself in that directory before retrying.
+
 On the terminal fallback, the brief uses Herdr's paste-aware `agent prompt` after
 startup readiness. Delivery is reported only when
 the complete brief appears in the native transcript. An unverifiable receipt

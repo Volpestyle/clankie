@@ -68,6 +68,13 @@ requires the complete brief in the native transcript. An unverified delivery
 closes the new pane; a turn may have started, so inspect its work before retrying.
 Never replay an uncertain protocol send through terminal typing.
 
+Briefed local Claude hires use the approved `clankie-worker` channel and report
+`control.mode: "channel"`; Codex reports `adapter`. Every terminal fallback names
+`control.reason` (and `control.fix` when owner action is needed). Each hire logs
+its lane. `trust_required` means a visible folder-trust prompt blocked startup;
+the new pane is closed without accepting it. The owner reviews trust in that
+directory before a retry.
+
 ## Cross-device agent conversations
 
 Messages includes seats from registered execution fleets. Opening a remote seat

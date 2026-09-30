@@ -148,6 +148,12 @@ Until both steps are done, a Claude hire reports `consent_required` with the
 missing step and takes the terminal lane (typed brief, verified in the
 transcript) instead.
 
+With consent approved, a briefed local Claude hire reports `control.mode: "channel"`,
+including when other execution fleets are registered. Every hire logs its lane;
+terminal results include `control.reason`. A folder-trust prompt fails with
+`trust_required` and closes the new pane. Review trust yourself in that directory
+before retrying.
+
 Select the Swarm mode per runtime with `clankie runtime mode ID interactive|stream`;
 stream stays the default. An interactive startup that blocks stays visibly
 blocked in its pane and never falls back to stream.

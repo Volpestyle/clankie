@@ -32,6 +32,18 @@ const channel = (text: string) =>
   `<channel source="swarm" kind="message" conversation="conv-1" source="captain" event_id="seat-1">\n${text}\n</channel>`;
 
 describe("consent", () => {
+  it("reports a failed plugin inspection instead of claiming the plugin is missing", async () => {
+    expect(
+      await claudeWorkerChannelConsent({
+        listPlugins: async () => {
+          throw new Error("inspection timed out");
+        },
+      }),
+    ).toMatchObject({
+      approved: false,
+      detail: "Could not inspect installed Claude plugins: inspection timed out",
+    });
+  });
   it("needs the installed plugin and an owner-approved channel, and names the fix for each", async () => {
     const root = await scratch();
     const policy = join(root, "managed-settings.json");

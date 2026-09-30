@@ -579,19 +579,14 @@ export function herdrAgentName(title: string, suffix: string = randomUUID().slic
 }
 
 /**
- * How a hire is controlled (VUH-1458): through its harness adapter, or on the
- * terminal lane because the adapter was blocked on an owner decision. Hires
- * with no adapter for their harness carry nothing.
+ * Every launched hire names its lane, including why it selected terminal input.
  */
-export type SeatControlMode =
-  | { readonly mode: "adapter" }
-  | { readonly mode: "terminal"; readonly reason: string; readonly detail: string; readonly fix: string };
+type SeatControlMode = NonNullable<OperatorSeatSpawnResult["control"]>;
 
 export type HerdrSeatSpawnResult =
   | Exclude<OperatorSeatSpawnResult, { readonly outcome: "spawned" }>
   | (Omit<Extract<OperatorSeatSpawnResult, { outcome: "spawned" }>, "seat"> & {
       readonly seat: ObservedFleetSeat;
-      readonly control?: SeatControlMode;
     });
 
 type HerdrSeatSpawnFailure = Extract<HerdrSeatSpawnResult, { readonly outcome: "failed" }>;
@@ -931,6 +926,33 @@ export class HerdrWatchStore implements HerdrWatchPort {
     subjectOverride?: string,
     brief?: string,
   ): Promise<HerdrSeatSpawnResult> {
+    const result = await this.startSeat(input, subjectOverride, brief);
+    console.info(
+      "hire_agent:",
+      JSON.stringify({
+        harness: input.harness,
+        fleet: input.fleet ?? "local",
+        outcome: result.outcome,
+        control: result.control ?? {
+          mode: "none",
+          reason: result.outcome === "failed" ? result.reason : "unselected",
+        },
+        ...(result.outcome === "spawned"
+          ? {
+              seatId: result.seat.seatId,
+              reason: result.control?.mode === "terminal" ? result.control.reason : "adapter_started",
+            }
+          : { reason: result.reason, detail: redactSensitiveText(result.detail ?? "") }),
+      }),
+    );
+    return result;
+  }
+
+  private async startSeat(
+    input: SpawnOperatorSeat,
+    subjectOverride?: string,
+    brief?: string,
+  ): Promise<HerdrSeatSpawnResult> {
     const { createTab, startAgent } = this.runner;
     if (this.closed || createTab === undefined || startAgent === undefined) {
       return { outcome: "failed", reason: "herdr_unreachable" };
@@ -1032,6 +1054,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch (caught) {
       return { outcome: "failed", reason: "herdr_unreachable", detail: reasonDetail(caught) };
     }
+    let control: SeatControlMode | undefined;
     try {
       // A pi seat's durable identity is the session its herdr extension
       // reports; make sure the extension is there before starting one.
@@ -1052,8 +1075,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
         remote === undefined && brief !== undefined && this.runner.runInPane !== undefined
           ? this.seatAdapters.get(input.harness)
           : undefined;
-      // Why this hire types into its pane, when an adapter could have driven it.
-      let terminal: SeatControlMode | undefined;
+      const terminalReason =
+        remote !== undefined
+          ? "remote_fleet"
+          : brief === undefined
+            ? "no_brief"
+            : this.runner.runInPane === undefined
+              ? "pane_run_unavailable"
+              : "adapter_unavailable";
+      control =
+        adapter === undefined
+          ? {
+              mode: "terminal",
+              reason: terminalReason,
+              detail: `No harness adapter selected: ${terminalReason}.`,
+            }
+          : { mode: input.harness === "claude" ? "channel" : "adapter" };
       if (adapter !== undefined && brief !== undefined) {
         const runInPane = this.runner.runInPane!;
         const started = await adapter.start(
@@ -1080,8 +1117,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           },
         );
         if (started.outcome === "failed") {
+          const failure = await this.startupFailure(paneId, input.harness, started.detail, started.reason);
           await this.runner.closePane?.(paneId).catch(() => undefined);
-          return { outcome: "failed", reason: started.reason, detail: started.detail };
+          return { ...failure, control };
         }
         if (started.outcome === "started") {
           const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
@@ -1089,12 +1127,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
             throw new Error("The seat started without reporting its session to herdr");
           return {
             ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
-            control: { mode: "adapter" },
+            control,
           };
         }
         // Blocked on the owner: nothing launched, so the terminal lane below
         // starts it in this same pane and says why.
-        terminal = { mode: "terminal", reason: started.reason, detail: started.detail, fix: started.fix };
+        control = { mode: "terminal", reason: started.reason, detail: started.detail, fix: started.fix };
       }
       const args = [
         ...skillLaunch.args,
@@ -1103,20 +1141,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...effortArgs,
         ...chromeArgs,
       ];
-      try {
-        await startAgent({
-          name: subject,
-          kind: input.harness,
-          paneId,
-          ...(args.length === 0 ? {} : { args }),
-        });
-      } catch (caught) {
-        // Accepting Claude's development-channel warning is the owner's
-        // consent (ADR 0194); the service never presses it, and names the fix.
-        if (input.harness === "claude" && (await this.showsClaudeChannelWarning(paneId)))
-          throw new Error(CLAUDE_CHANNEL_CONSENT_REQUIRED);
-        throw caught;
-      }
+      await startAgent({
+        name: subject,
+        kind: input.harness,
+        paneId,
+        ...(args.length === 0 ? {} : { args }),
+      });
       if (brief !== undefined) {
         if (this.runner.promptAgent === undefined) throw new Error("Herdr cannot submit a first prompt");
         // Herdr 0.9.1 can report Codex ready while its folder-trust screen is
@@ -1144,12 +1174,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (brief !== undefined) await this.verifyBrief(agent, brief);
       return {
         ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
-        ...(terminal === undefined ? {} : { control: terminal }),
+        control,
       };
     } catch (caught) {
+      const failure = await this.startupFailure(paneId, input.harness, reasonDetail(caught));
       await this.runner.closePane?.(paneId).catch(() => undefined);
-      const detail = reasonDetail(caught);
-      return { outcome: "failed", reason: spawnFailureReason(detail), detail };
+      return { ...failure, ...(control === undefined ? {} : { control }) };
     }
   }
 
@@ -1182,10 +1212,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
     throw new Error("brief_delivery_unverified: the complete brief was not observed in the seat transcript");
   }
 
-  /** Whether the pane is stopped at Claude's development-channel warning. */
-  private async showsClaudeChannelWarning(paneId: string): Promise<boolean> {
-    const visible = await this.runner.read?.(paneId, "claude", "visible").catch(() => undefined);
-    return visible !== undefined && visible.includes(CHANNEL_DIALOG_MARKER);
+  /** Inspect before closing the failed pane; trust and channel consent belong to the owner. */
+  private async startupFailure(
+    paneId: string,
+    harness: string,
+    detail: string,
+    reason: HerdrSeatSpawnFailure["reason"] = spawnFailureReason(detail),
+  ): Promise<HerdrSeatSpawnFailure> {
+    const visible = await this.runner.read?.(paneId, harness, "visible").catch(() => undefined);
+    if (
+      (harness === "claude" && visible?.includes("Do you trust the files in this folder?")) ||
+      (harness === "codex" && visible?.includes("Trust this folder?"))
+    )
+      return {
+        outcome: "failed",
+        reason: "trust_required",
+        detail: `${harness} is waiting for folder trust. Open it in this working directory and review the trust prompt yourself, then retry the hire. The new pane was closed; no trust was accepted.`,
+      };
+    if (harness === "claude" && visible?.includes(CHANNEL_DIALOG_MARKER))
+      return { outcome: "failed", reason: "not_ready", detail: CLAUDE_CHANNEL_CONSENT_REQUIRED };
+    return { outcome: "failed", reason, detail };
   }
 
   /**

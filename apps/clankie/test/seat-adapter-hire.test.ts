@@ -8,6 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { HarnessSeatAdapter, SeatControl, SeatEvent, SeatStartResult } from "@clankie/agent-hosts";
+import { OperatorSeatSpawnResultSchema } from "@clankie/protocol";
+import { createClaudeWorkerSeatAdapter, SeatHookLog } from "../src/captain/claude-worker-seat.ts";
+import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import {
   HerdrWatchStore,
   type HerdrAgentSnapshot,
@@ -80,7 +83,7 @@ async function fixture(
       undefined,
       brief,
     );
-  return { store, runner, adapter, agent, control, settled, send, hire };
+  return { root, store, runner, adapter, agent, control, settled, send, hire };
 }
 
 it("a briefed hire starts through the adapter under its agent name, and nothing types the brief", async () => {
@@ -91,7 +94,7 @@ it("a briefed hire starts through the adapter under its agent name, and nothing 
   const result = await hire("the brief");
   expect(result).toMatchObject({
     outcome: "spawned",
-    control: { mode: "adapter" },
+    control: { mode: "channel" },
     seat: { seatId: "term_0a1b2c" },
   });
   expect(adapter.start).toHaveBeenCalledWith(
@@ -110,7 +113,10 @@ it("a briefed hire starts through the adapter under its agent name, and nothing 
 
 it("a hire without a brief never reaches the adapter", async () => {
   const { adapter, hire } = await fixture(async () => ({ outcome: "started", control: {} as SeatControl }));
-  expect(await hire()).toMatchObject({ outcome: "spawned" });
+  expect(await hire()).toMatchObject({
+    outcome: "spawned",
+    control: { mode: "terminal", reason: "no_brief" },
+  });
   expect(adapter.start).not.toHaveBeenCalled();
 });
 
@@ -146,9 +152,112 @@ it("an adapter that fails closes the pane and returns its typed outcome, with no
     outcome: "failed",
     reason: "not_ready",
     detail: "brief_delivery_unverified: no transcript receipt",
+    control: { mode: "channel" },
   });
   expect(runner.closePane).toHaveBeenCalledWith("w1:p1");
   expect(runner.promptAgent).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+  "a local Claude hire uses the real channel adapter with a registered remote fleet (trust blocked: %s)",
+  async (blocked) => {
+    const { root, runner, agent } = await fixture(async () => ({
+      outcome: "started",
+      control: {} as SeatControl,
+    }));
+    const remote = { ...runner, runInPane: vi.fn(async () => undefined) };
+    const routed = routeHerdrFleets(runner, new Map([["pc", remote]]));
+    // The wrapper must preserve this capability and dispatch to the right machine.
+    expect(routed.runInPane).toBeDefined();
+    await routed.runInPane!("w1:p1", ["echo", "local"]);
+    await routed.runInPane!("pc/w2:p2", ["echo", "remote"]);
+    expect(runner.runInPane).toHaveBeenCalledWith("w1:p1", ["echo", "local"]);
+    expect(remote.runInPane).toHaveBeenCalledWith("w2:p2", ["echo", "remote"]);
+    runner.transcript.mockResolvedValue({ sessionKey: "k", entries: [] });
+    const consent = vi.fn(async () => ({ approved: true as const }));
+    const deliver = vi.fn(async (_seatId: string, text: string) => {
+      runner.transcript.mockResolvedValue({
+        sessionKey: "k",
+        entries: [
+          {
+            type: "message",
+            id: "channel-receipt",
+            role: "operator",
+            text: `<channel source="clankie-worker">\n${text}\n</channel>`,
+          },
+        ],
+      });
+      return true;
+    });
+    const read = vi.fn(async () => (blocked ? "Do you trust the files in this folder?" : "ready"));
+    if (blocked) runner.startAgent.mockRejectedValue(new Error("agent_not_ready: blocked during startup"));
+    const adapter = createClaudeWorkerSeatAdapter({
+      consent,
+      hooks: new SeatHookLog(join(root, "hooks.json")),
+      agent: (id) => routed.get(id),
+      transcript: (current) => routed.transcript!(current as HerdrAgentSnapshot),
+      mailbox: { bound: () => true, deliver },
+      timing: { readyMs: 10, receiptMs: 10, pollMs: 1 },
+    });
+    const store = new HerdrWatchStore(join(root, "routed.json"), {
+      runner: { ...routed, read },
+      seatAdapters: [adapter],
+    });
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const result = await store.spawnSeat(
+        { schemaVersion: 1, harness: "claude", title: "probe", workingDirectory: root, model: "haiku" },
+        undefined,
+        "the brief",
+      );
+      expect(consent).toHaveBeenCalledOnce();
+      expect(runner.startAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          args: expect.arrayContaining(["--channels", "plugin:clankie-worker@clankie", "--model", "haiku"]),
+        }),
+      );
+      expect(runner.promptAgent).not.toHaveBeenCalled();
+      expect(result.control).toEqual({ mode: "channel" });
+      if (blocked) {
+        expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
+        expect(deliver).not.toHaveBeenCalled();
+        expect(runner.closePane).toHaveBeenCalledWith(agent.paneId);
+        expect(read.mock.invocationCallOrder[0]).toBeLessThan(runner.closePane.mock.invocationCallOrder[0]!);
+        expect(OperatorSeatSpawnResultSchema.parse(result).control).toEqual({ mode: "channel" });
+      } else {
+        expect(result.outcome).toBe("spawned");
+        expect(deliver).toHaveBeenCalledWith(agent.terminalId, "the brief");
+        expect(runner.closePane).not.toHaveBeenCalled();
+      }
+      expect(JSON.parse(log.mock.calls.at(-1)![1] as string)).toMatchObject({
+        harness: "claude",
+        control: { mode: "channel" },
+        reason: blocked ? "trust_required" : "adapter_started",
+      });
+    } finally {
+      log.mockRestore();
+      store.close();
+    }
+  },
+);
+
+it("missing runner capability and missing adapters report distinct terminal reasons", async () => {
+  const { root, runner } = await fixture(async () => ({ outcome: "started", control: {} as SeatControl }));
+  const { runInPane: _run, ...withoutRun } = runner;
+  for (const [runtime, reason] of [
+    [runner, "adapter_unavailable"],
+    [withoutRun, "pane_run_unavailable"],
+  ] as const) {
+    const store = new HerdrWatchStore(join(root, `${reason}.json`), { runner: runtime });
+    expect(
+      await store.spawnSeat(
+        { schemaVersion: 1, harness: "claude", title: "worker", workingDirectory: root },
+        undefined,
+        "the brief",
+      ),
+    ).toMatchObject({ outcome: "spawned", control: { mode: "terminal", reason } });
+    store.close();
+  }
 });
 
 it("messages go through the adapter while it holds the seat, and the pane lane when it lets go", async () => {

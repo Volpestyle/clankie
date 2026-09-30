@@ -1,0 +1,26 @@
+RUN  v4.1.10 /Users/james/dev/clankie
+
+ ❯ apps/clankie/test/seat-adapter-hire.test.ts (9 tests | 2 failed | 7 skipped) 5ms
+   × a local Claude hire uses the real channel adapter with a registered remote fleet (trust blocked: false) 4ms
+   × a local Claude hire uses the real channel adapter with a registered remote fleet (trust blocked: true) 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/seat-adapter-hire.test.ts > a local Claude hire uses the real channel adapter with a registered remote fleet (trust blocked: false)
+ FAIL  apps/clankie/test/seat-adapter-hire.test.ts > a local Claude hire uses the real channel adapter with a registered remote fleet (trust blocked: true)
+AssertionError: expected undefined to be defined
+ ❯ apps/clankie/test/seat-adapter-hire.test.ts:171:30
+    169|     const routed = routeHerdrFleets(runner, new Map([["pc", remote]]));
+    170|     // The wrapper must preserve this capability and dispatch to the r…
+    171|     expect(routed.runInPane).toBeDefined();
+       |                              ^
+    172|     await routed.runInPane!("w1:p1", ["echo", "local"]);
+    173|     await routed.runInPane!("pc/w2:p2", ["echo", "remote"]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 7 skipped (9)
+   Start at  13:49:25
+   Duration  607ms (transform 152ms, setup 0ms, import 535ms, tests 5ms, environment 0ms)

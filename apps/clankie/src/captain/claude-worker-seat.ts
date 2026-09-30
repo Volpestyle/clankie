@@ -250,8 +250,12 @@ export async function claudeWorkerChannelConsent(
     installed =
       Array.isArray(plugins) &&
       plugins.some((entry) => (entry as { id?: unknown })?.id === CLAUDE_WORKER_PLUGIN_ID);
-  } catch {
-    installed = false;
+  } catch (error) {
+    return {
+      approved: false,
+      detail: `Could not inspect installed Claude plugins: ${error instanceof Error ? error.message : String(error)}`,
+      fix: `Run claude plugin list --json in the service environment and resolve its error. ${INSTALL_FIX}`,
+    };
   }
   if (!installed)
     return {

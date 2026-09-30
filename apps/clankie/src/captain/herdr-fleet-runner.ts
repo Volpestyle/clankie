@@ -257,6 +257,15 @@ export function routeHerdrFleets(
       if (runner.startAgent === undefined) throw new Error("Herdr agent start is unavailable");
       await runner.startAgent({ ...options, paneId: id });
     },
+    ...(local.runInPane === undefined
+      ? {}
+      : {
+          runInPane: async (target: string, argv: readonly string[]) => {
+            const { runner, id } = route(target);
+            if (runner.runInPane === undefined) throw new Error("Herdr pane run is unavailable");
+            await runner.runInPane(id, argv);
+          },
+        }),
     ...(local.installPiIntegration === undefined ? {} : { installPiIntegration: local.installPiIntegration }),
     ...(local.configurePiProvider === undefined ? {} : { configurePiProvider: local.configurePiProvider }),
   };

@@ -1,0 +1,393 @@
+Command: pnpm check
+Exit code: 1
+Unit-test JSON service event lines omitted; remaining output retained.
+The Codex trust assertion was subsequently corrected and all 9 tests in that file passed (focused.txt).
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.1 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 685ms on 1446 files using 18 threads.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+Configuration hints (2)
+vendor/opinionated-skills/**           knip.json  Remove from ignore
+integrations/codex-plugin/skills/**    knip.json  Remove from ignore
+$ node scripts/check-doc-links.mjs && pnpm docs:public:check
+Checked 309 markdown files; local links resolve.
+$ pnpm --filter @clankie/docs check
+$ node scripts/check.mjs
+Built public docs: 10 pages, 35 network routes, 112 API operations, 56 slash commands.
+Checked 10 public docs pages; links and anchors resolve.
+$ infra/aws/public-docs/check.sh
+$ turbo run typecheck
+• turbo 2.10.4
+
+   • Packages in scope: @clankie/agent-hosts, @clankie/agent-transcript, @clankie/api-client, @clankie/clankie, @clankie/credential-broker, @clankie/discord-activity, @clankie/discord-bridge, @clankie/discord-presence-core, @clankie/discord-user-session, @clankie/docs, @clankie/environment-runtime, @clankie/interactive-environment, @clankie/media-connector, @clankie/model-provider, @clankie/model-registry, @clankie/observability, @clankie/persona-images, @clankie/play, @clankie/play-voice, @clankie/protocol, @clankie/relay, @clankie/rendered-surface-client, @clankie/settings, @clankie/swarm, @clankie/tui, @clankie/vox, @clankie/vox-client, @clankie/work-items
+   • Running typecheck in 28 packages
+   • Remote caching disabled
+
+@clankie/persona-images:typecheck: cache hit, replaying logs fed08ab7074008fc
+@clankie/persona-images:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/vox-client:typecheck: cache hit, replaying logs e9007a753229d324
+@clankie/vox-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/settings:typecheck: cache hit, replaying logs d1c10e483850ea96
+@clankie/settings:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/vox:typecheck: cache hit, replaying logs 4b1ce02dc66d012f
+@clankie/model-registry:typecheck: cache hit, replaying logs 090cf92513b56e2f
+@clankie/vox:typecheck: $ cargo check --locked --all-targets --all-features
+@clankie/vox:typecheck:     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+@clankie/model-registry:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/media-connector:typecheck: cache hit, replaying logs 8a2ad0a41dcb2d5f
+@clankie/media-connector:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/observability:typecheck: cache hit, replaying logs f92d5e7fe1a5b249
+@clankie/observability:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-hosts:typecheck: cache hit, replaying logs d692149216fdf27a
+@clankie/agent-hosts:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/protocol:typecheck: cache miss, executing c9f999d1588b1d93
+@clankie/protocol:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-transcript:typecheck: cache miss, executing f6b4d189d3cc625d
+@clankie/interactive-environment:typecheck: cache miss, executing d4acb9b4755a50d2
+@clankie/work-items:typecheck: cache miss, executing 57929065f0627342
+@clankie/credential-broker:typecheck: cache miss, executing 16de65ae6460dfc5
+@clankie/work-items:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/credential-broker:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/interactive-environment:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-transcript:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/api-client:typecheck: cache miss, executing fc7f530ab9ec3f3b
+@clankie/discord-presence-core:typecheck: cache miss, executing f2441bb94fce5e6f
+@clankie/environment-runtime:typecheck: cache miss, executing 34f89268c1fb50a9
+@clankie/relay:typecheck: cache miss, executing a06abaac57850538
+@clankie/swarm:typecheck: cache miss, executing 0a9a5f0310269131
+@clankie/play-voice:typecheck: cache miss, executing cfde0a9efdd94b37
+@clankie/discord-activity:typecheck: cache miss, executing ae47410c67fd9f57
+@clankie/rendered-surface-client:typecheck: cache miss, executing 319a2847cc212836
+@clankie/model-provider:typecheck: cache miss, executing c2a4898be76f0e9a
+@clankie/environment-runtime:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-presence-core:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/api-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/rendered-surface-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play-voice:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-activity:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/relay:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/model-provider:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/swarm:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play:typecheck: cache miss, executing ab3eb4289d4d8909
+@clankie/play:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-bridge:typecheck: cache miss, executing 34b8af47a876ecc9
+@clankie/discord-user-session:typecheck: cache miss, executing 69561710b26b4008
+@clankie/discord-user-session:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-bridge:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/tui:typecheck: cache miss, executing 9b4f9b482c42176d
+@clankie/tui:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/clankie:typecheck: cache miss, executing 67d49109c1974326
+@clankie/clankie:typecheck: $ tsc --noEmit -p tsconfig.json
+
+ Tasks:    27 successful, 27 total
+Cached:    8 cached, 27 total
+  Time:    15.594s
+
+$ vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+ ❯ apps/clankie/test/play-voice.test.ts (13 tests | 2 failed) 2573ms
+     × delivers fixture room input after a lazy HTTP join (observe first: false) 1142ms
+     × delivers fixture room input after a lazy HTTP join (observe first: true) 1124ms
+stdout | apps/clankie/test/hire-brief-receipt.test.ts > Codex's folder-trust screen is not input readiness even when Herdr calls it ready
+hire_agent: {"harness":"codex","fleet":"local","outcome":"failed","control":{"mode":"terminal","reason":"pane_run_unavailable","detail":"No harness adapter selected: pane_run_unavailable."},"reason":"trust_required","detail":"codex is waiting for folder trust. Open it in this working directory and review the trust prompt yourself, then retry the hire. The new pane was closed; no trust was accepted."}
+
+ ❯ apps/clankie/test/hire-brief-receipt.test.ts (9 tests | 1 failed) 19ms
+   × Codex's folder-trust screen is not input readiness even when Herdr calls it ready 3ms
+(node:3692) Warning: AI SDK Warning (openrouter.chat / openai/gpt-6-luna): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:3692) Warning: AI SDK Warning (openrouter.chat / openai/gpt-6-luna): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/hire-brief-receipt.test.ts > Codex's folder-trust screen is not input readiness even when Herdr calls it ready
+AssertionError: expected { outcome: 'failed', …(3) } to match object { outcome: 'failed', …(2) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "detail": "codex is waiting for folder trust. Open it in this working directory and review the trust prompt yourself, then retry the hire. The new pane was closed; no trust was accepted.",
+    "outcome": "failed",
+-   "reason": "not_ready",
++   "reason": "trust_required",
+  }
+
+ ❯ apps/clankie/test/hire-brief-receipt.test.ts:170:87
+    168|   runner.read = vi.fn(async () => "Trust this folder?\n› 1. Trust and …
+    169|   try {
+    170|     expect(await store.spawnSeat({ ...request, harness: "codex" }, und…
+       |                                                                                       ^
+    171|       outcome: "failed",
+    172|       reason: "trust_required",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  apps/clankie/test/play-voice.test.ts > asked play voice > delivers fixture room input after a lazy HTTP join (observe first: false)
+AssertionError: expected { Object (kind, schemaVersion, ...) } to match object { Object (interjection) }
+(31 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
++   "at": "2026-09-30T18:53:17.179Z",
++   "evidence": {
++     "actionResult": {
++       "result": {
++         "acceptedGoalVersion": 1,
++         "actionId": "act-1",
++         "outcome": {},
++         "schemaVersion": 1,
++         "sessionId": "env-1",
++         "status": "completed",
++         "updatedAt": "2026-07-26T12:00:00.000Z",
++       },
++       "source": "environment",
++     },
++     "decision": {
++       "observations": [],
++       "provenance": {
++         "adapterVersion": 2,
++         "body": "world",
++         "bodyGeneration": 1,
++         "sessionId": "world-session-1",
++         "worldId": "kanto",
++       },
++     },
++     "immediatePreAction": {
++       "observations": [],
++       "provenance": {
++         "adapterVersion": 2,
++         "body": "world",
++         "bodyGeneration": 1,
++         "sessionId": "world-session-1",
++         "worldId": "kanto",
++       },
++     },
++     "postAction": {
++       "observations": [],
++       "provenance": {
++         "adapterVersion": 2,
++         "body": "world",
++         "bodyGeneration": 1,
++         "sessionId": "world-session-1",
++         "worldId": "kanto",
++       },
++     },
++     "progressAfter": {
++       "actionsPerNewTile": null,
++       "distinctTiles": 0,
++       "maps": [],
++       "turnsSinceNewTile": 1,
++     },
++     "progressBefore": {
++       "actionsPerNewTile": null,
++       "distinctTiles": 0,
++       "maps": [],
++       "turnsSinceNewTile": 0,
++     },
++     "signals": {
++       "decisionPreemptions": 0,
++       "knownHardFailures": [],
++       "localeForTurns": null,
++       "objectiveForTurns": null,
++       "objectiveRecovery": false,
++       "previousNotes": null,
++       "previousObjective": null,
++       "recurringForTurns": null,
++       "refusedHere": [],
++       "repeatingForTurns": null,
++       "retiredObjective": null,
++       "stalledForTurns": null,
++       "verifiedInteractions": [],
++     },
++     "timing": {
++       "actionSettledAt": "2026-09-30T18:53:17.177Z",
++       "actionStartedAt": "2026-09-30T18:53:17.176Z",
++       "decisionSettledAt": "2026-09-30T18:53:17.176Z",
++       "decisionStartedAt": "2026-09-30T18:53:17.176Z",
++     },
++   },
++   "kind": "turn",
++   "schemaVersion": 2,
++   "turn": {
++     "action": {
++       "button": "a",
++       "holdFrames": 2,
++       "kind": "button_press",
++     },
++     "detail": "{}",
++     "effect": "no visible change — the frame is identical",
++     "effectAdvice": null,
++     "framebufferSha256": "0f4636c78f65d3639ece5a064b5ae753e3408614a14fb18ab4d7540d2c248543",
++     "intent": "press a",
+      "interjection": "fixture viewer: check the path above you",
++     "monologue": "still going",
++     "notes": null,
++     "objective": "get out of the house",
++     "objectiveRetired": null,
++     "observationSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
++     "outcome": "accepted",
++     "reply": "you said fixture viewer: check the path above you",
++     "speak": null,
++     "speakSuppressed": false,
++     "speakWanted": false,
++     "turn": 0,
++   },
+  }
+
+ ❯ apps/clankie/test/play-voice.test.ts:296:28
+    294|         const journalFile = readdirSync(journalDir).find((name) => nam…
+    295|         const journal = parseFreePlayJournal(readFileSync(join(journal…
+    296|         expect(journal[1]).toMatchObject({
+       |                            ^
+    297|           turn: { interjection: "fixture viewer: check the path above …
+    298|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  apps/clankie/test/play-voice.test.ts > asked play voice > delivers fixture room input after a lazy HTTP join (observe first: true)
+AssertionError: expected { Object (kind, schemaVersion, ...) } to match object { Object (interjection) }
+(31 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
++   "at": "2026-09-30T18:53:18.300Z",
++   "evidence": {
++     "actionResult": {
++       "result": {
++         "acceptedGoalVersion": 1,
++         "actionId": "act-1",
++         "outcome": {},
++         "schemaVersion": 1,
++         "sessionId": "env-1",
++         "status": "completed",
++         "updatedAt": "2026-07-26T12:00:00.000Z",
++       },
++       "source": "environment",
++     },
++     "decision": {
++       "observations": [],
++       "provenance": {
++         "adapterVersion": 2,
++         "body": "world",
++         "bodyGeneration": 1,
++         "sessionId": "world-session-1",
++         "worldId": "kanto",
++       },
++     },
++     "immediatePreAction": {
++       "observations": [],
++       "provenance": {
++         "adapterVersion": 2,
++         "body": "world",
++         "bodyGeneration": 1,
++         "sessionId": "world-session-1",
++         "worldId": "kanto",
++       },
++     },
++     "postAction": {
++       "observations": [],
++       "provenance": {
++         "adapterVersion": 2,
++         "body": "world",
++         "bodyGeneration": 1,
++         "sessionId": "world-session-1",
++         "worldId": "kanto",
++       },
++     },
++     "progressAfter": {
++       "actionsPerNewTile": null,
++       "distinctTiles": 0,
++       "maps": [],
++       "turnsSinceNewTile": 1,
++     },
++     "progressBefore": {
++       "actionsPerNewTile": null,
++       "distinctTiles": 0,
++       "maps": [],
++       "turnsSinceNewTile": 0,
++     },
++     "signals": {
++       "decisionPreemptions": 0,
++       "knownHardFailures": [],
++       "localeForTurns": null,
++       "objectiveForTurns": null,
++       "objectiveRecovery": false,
++       "previousNotes": null,
++       "previousObjective": null,
++       "recurringForTurns": null,
++       "refusedHere": [],
++       "repeatingForTurns": null,
++       "retiredObjective": null,
++       "stalledForTurns": null,
++       "verifiedInteractions": [],
++     },
++     "timing": {
++       "actionSettledAt": "2026-09-30T18:53:18.300Z",
++       "actionStartedAt": "2026-09-30T18:53:18.300Z",
++       "decisionSettledAt": "2026-09-30T18:53:18.300Z",
++       "decisionStartedAt": "2026-09-30T18:53:18.300Z",
++     },
++   },
++   "kind": "turn",
++   "schemaVersion": 2,
++   "turn": {
++     "action": {
++       "button": "a",
++       "holdFrames": 2,
++       "kind": "button_press",
++     },
++     "detail": "{}",
++     "effect": "no visible change — the frame is identical",
++     "effectAdvice": null,
++     "framebufferSha256": "0f4636c78f65d3639ece5a064b5ae753e3408614a14fb18ab4d7540d2c248543",
++     "intent": "press a",
+      "interjection": "fixture viewer: check the path above you",
++     "monologue": "still going",
++     "notes": null,
++     "objective": "get out of the house",
++     "objectiveRetired": null,
++     "observationSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
++     "outcome": "accepted",
++     "reply": "you said fixture viewer: check the path above you",
++     "speak": null,
++     "speakSuppressed": false,
++     "speakWanted": false,
++     "turn": 0,
++   },
+  }
+
+ ❯ apps/clankie/test/play-voice.test.ts:296:28
+    294|         const journalFile = readdirSync(journalDir).find((name) => nam…
+    295|         const journal = parseFreePlayJournal(readFileSync(join(journal…
+    296|         expect(journal[1]).toMatchObject({
+       |                            ^
+    297|           turn: { interjection: "fixture viewer: check the path above …
+    298|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 383 passed (385)
+      Tests  3 failed | 3263 passed | 2 skipped (3268)
+   Start at  13:51:47
+   Duration  254.18s (transform 3.80s, setup 0ms, import 100.99s, tests 124.04s, environment 16ms)
+
+[ELIFECYCLE] Test failed. See above for more details.
+[ELIFECYCLE] Command failed with exit code 1.

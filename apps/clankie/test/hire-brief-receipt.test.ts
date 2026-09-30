@@ -169,7 +169,7 @@ test("Codex's folder-trust screen is not input readiness even when Herdr calls i
   try {
     expect(await store.spawnSeat({ ...request, harness: "codex" }, undefined, brief)).toMatchObject({
       outcome: "failed",
-      reason: "not_ready",
+      reason: "trust_required",
       detail: expect.stringContaining("folder trust"),
     });
     expect(runner.promptAgent).not.toHaveBeenCalled();

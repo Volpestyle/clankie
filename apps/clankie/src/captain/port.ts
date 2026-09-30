@@ -20,7 +20,6 @@ import type {
 } from "@clankie/protocol";
 import type { DurableMessageNotice, LinearInboxPage, LinearInboxReadOptions } from "./conversations.ts";
 import type { LinearActivityEvent, LinearWorkOwner } from "../linear-webhook.ts";
-import type { SeatControlMode } from "./herdr-watch.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -51,10 +50,7 @@ export interface LaneTool {
  * brief is submitted after startup readiness and verified against the native
  * transcript before the hire succeeds; an unverifiable receipt fails typed.
  */
-export type HireSeat = (
-  seat: SpawnOperatorSeat,
-  brief?: string,
-) => Promise<OperatorSeatSpawnResult & { readonly control?: SeatControlMode }>;
+export type HireSeat = (seat: SpawnOperatorSeat, brief?: string) => Promise<OperatorSeatSpawnResult>;
 
 /**
  * The captain's own message into a hired seat, down the same lane an operator
