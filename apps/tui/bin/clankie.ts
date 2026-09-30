@@ -13,7 +13,7 @@ import {
   runHeadlessCaptainCommand,
   unknownLauncherCommand,
 } from "./headless-captain.ts";
-import { startOne } from "./services.ts";
+import { KEEP_AWAKE_ENV, startOne } from "./services.ts";
 import { parseDirectConversation } from "../src/session/operator-conversations.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
@@ -61,7 +61,8 @@ async function applyLauncherDiscordEnvironment(): Promise<void> {
   // active-body switches and activity tunnel, so project just those for commands
   // that inspect or change the process graph. Config commands read the store
   // directly; projecting first would falsely report stored values as env overrides.
-  const configured = discordSettingsToEnvironment((await new SettingsStore().load()).discord);
+  const stored = await new SettingsStore().load();
+  const configured = discordSettingsToEnvironment(stored.discord);
   for (const name of [
     "DISCORD_ACTIVE_BODY",
     "DISCORD_USER_SESSION_ENABLED",
@@ -70,6 +71,10 @@ async function applyLauncherDiscordEnvironment(): Promise<void> {
   ] as const) {
     const value = configured[name];
     if ((process.env[name]?.length ?? 0) === 0 && value !== undefined) process.env[name] = value;
+  }
+  // The owner's always-on opt-in decides whether the launcher runs `caffeinate`.
+  if ((process.env[KEEP_AWAKE_ENV]?.length ?? 0) === 0 && stored.host.keepAwake) {
+    process.env[KEEP_AWAKE_ENV] = "1";
   }
 }
 

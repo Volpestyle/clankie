@@ -127,6 +127,7 @@ import {
   type PairingRedeemResponse,
 } from "@clankie/protocol";
 import { LINEAR_WEBHOOK_PATH, type PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway";
+import type { HostPowerReport } from "@clankie/protocol/host-power";
 import {
   AgentHostConnectionSchema,
   PersonaSettingsSchema,
@@ -399,6 +400,8 @@ export interface ClankieAppDependencies {
   herdrBinding?: () => HerdrBinding | undefined;
   /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */
   publicGatewayDoorway?: () => PublicGatewayDoorwayState;
+  /** Whether this host may sleep, and when it last did, so the app can say why he went quiet. */
+  hostPower?: () => HostPowerReport;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
@@ -1249,11 +1252,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "hosted_security_unavailable" }, 503);
     const herdr = dependencies.herdrRuntime?.();
     const doorway = dependencies.publicGatewayDoorway?.();
+    const power = dependencies.hostPower?.();
     return context.json({
       ok: true,
       service: "clankie",
       ...(herdr === undefined ? {} : { herdr }),
       ...(doorway === undefined ? {} : { doorway }),
+      ...(power === undefined ? {} : { power }),
     });
   });
 

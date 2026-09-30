@@ -19,9 +19,10 @@ import {
 } from "@clankie/model-provider";
 import { bundledSkills, SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
 import { commandHost } from "./command/io.ts";
-import { probeDoorway, type GatewayDoorwayReport } from "./command/gateway.ts";
+import { probeHealth, type GatewayDoorwayReport } from "./command/gateway.ts";
 import { nextStepLine } from "./next-step.ts";
 import { DeviceDirectRouteSchema } from "@clankie/protocol";
+import { probeHostPower, type HostPowerReport } from "@clankie/protocol/host-power";
 
 const execFileAsync = promisify(execFileCallback);
 const PROBE_TIMEOUT_MS = 5_000;
@@ -98,6 +99,8 @@ export interface InstallDoctorReport {
   readonly laneTools: { readonly url: string; readonly reachable: boolean };
   /** The live public doorway (ADR 0151): whether the phone can reach him at all. */
   readonly doorway: GatewayDoorwayReport;
+  /** Whether this Mac may sleep, and the owner's always-on opt-in (VUH-1461, ADR 0203). */
+  readonly power: HostPowerReport;
   /** One line: the next thing to do for phone access, shared with `status` and the console. */
   readonly nextStep: string;
   readonly selectedModel: SelectedModelReport | null;
@@ -193,9 +196,14 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     pluginBundle,
   );
   const laneTools = await inspectLaneTools(commandHost({ env }), options.fetchImpl ?? fetch);
-  const doorway = await probeDoorway({
+  const { doorway, lastSleep } = await probeHealth({
     env,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  const power = await probeHostPower({
+    exec: execute,
+    keepAwakeRequested: settings.host.keepAwake,
+    ...(lastSleep === undefined ? {} : { lastSleep }),
   });
   const model = unsetToNull(config.config.model);
   const credentialIds = new Set(credentials.map((entry) => entry.id));
@@ -215,6 +223,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     herdrPlugin,
     selectedModel,
     doorway,
+    power,
   });
 
   return {
@@ -253,6 +262,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     herdrPlugin,
     laneTools,
     doorway,
+    power,
     nextStep: nextStepLine({
       doorway,
       remoteAccessConfigured: settings.publicGateway.url !== undefined,
@@ -438,6 +448,7 @@ function collectRemediations(input: {
   readonly herdrPlugin: HerdrPluginReport;
   readonly selectedModel: SelectedModelReport | null;
   readonly doorway: GatewayDoorwayReport;
+  readonly power: HostPowerReport;
 }): string[] {
   const remediations: string[] = [];
   if (input.model === null) {
@@ -489,6 +500,7 @@ function collectRemediations(input: {
       "The public doorway is configured but this Clankie holds no connection to it, so no app reaches him and pairing refuses; read his log, then `clankie restart captain`.",
     );
   }
+  if (input.power.advice !== undefined) remediations.push(input.power.advice);
   if (
     input.commands.herdr?.present === true &&
     input.herdrPlugin.bundled &&

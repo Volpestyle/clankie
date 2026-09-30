@@ -9,6 +9,7 @@ import {
   type CredentialStore,
   type ProviderCredential,
 } from "@clankie/credential-broker";
+import { HostPowerReportSchema, type HostPowerReport } from "@clankie/protocol/host-power";
 import {
   PublicGatewayDoorwayStateSchema,
   type PublicGatewayDoorwayState,
@@ -112,6 +113,17 @@ async function result(options: GatewayCommandOptions): Promise<GatewayCommandRes
  * credential's word for it.
  */
 export async function probeDoorway(options: GatewayCommandOptions = {}): Promise<GatewayDoorwayReport> {
+  return (await probeHealth(options)).doorway;
+}
+
+/**
+ * One read of the captain's `/health`: the doorway, and the last time the host
+ * slept underneath him (which only he can notice). Either is absent when he is
+ * down or older than the field.
+ */
+export async function probeHealth(
+  options: GatewayCommandOptions = {},
+): Promise<{ readonly doorway: GatewayDoorwayReport; readonly lastSleep?: HostPowerReport["lastSleep"] }> {
   const env = options.env ?? process.env;
   const url = `${commandHost({ ...options, env }).replace(/\/+$/u, "")}/health`;
   try {
@@ -119,9 +131,14 @@ export async function probeDoorway(options: GatewayCommandOptions = {}): Promise
       signal: AbortSignal.timeout(DOORWAY_PROBE_TIMEOUT_MS),
     });
     const body = HealthSchema.safeParse(await response.json());
-    return body.success && body.data.doorway !== undefined ? body.data.doorway : { state: "unreachable" };
+    if (!body.success || body.data.doorway === undefined) return { doorway: { state: "unreachable" } };
+    const power = HostPowerReportSchema.safeParse(body.data.power);
+    return {
+      doorway: body.data.doorway,
+      ...(power.success && power.data.lastSleep !== undefined ? { lastSleep: power.data.lastSleep } : {}),
+    };
   } catch {
-    return { state: "unreachable" };
+    return { doorway: { state: "unreachable" } };
   }
 }
 

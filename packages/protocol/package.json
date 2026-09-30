@@ -10,6 +10,7 @@
     "./hosted-credits": "./src/hosted-credits.ts",
     "./accounts": "./src/accounts.ts",
     "./wake": "./src/wake.ts",
+    "./host-power": "./src/host-power.ts",
     "./work-items": "./src/work-items.ts",
     "./app-telemetry": "./src/app-telemetry.ts",
     "./discord-ingress": "./src/discord-ingress.ts",

@@ -48,7 +48,15 @@ const report: InstallDoctorReport = {
   herdrPlugin: { bundled: false },
   laneTools: { url: "http://127.0.0.1:4310/v1/mcp", reachable: true },
   doorway: { state: "disabled" },
+  power: {
+    state: "always_on",
+    source: "ac",
+    sleepAfterMinutes: 0,
+    heldAwakeBy: [],
+    keepAwakeRequested: false,
+  },
   selectedModel: null,
+  nextStep: "Pair a phone or tablet: run `clankie pair` (or /pair).",
   remediations: [],
 };
 
@@ -56,7 +64,6 @@ async function fixture(options: {
   readonly model?: string;
   readonly credentials?: readonly string[];
   readonly canTalk?: boolean;
-  nextStep: "Pair a phone or tablet: run `clankie pair` (or /pair).",
 }): Promise<{
   readonly services: SetupCommandServices;
   readonly opened: string[];

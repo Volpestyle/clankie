@@ -53,7 +53,7 @@ the token is never an argument, settings value, or printed result.
 
 | Command                                                                                                      | stdout                                                                                       |
 | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`                                               | JSON                                                                                         |
+| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`, `awake`                                      | JSON                                                                                         |
 | `model …`, `effort …`, `image-model …`, `video-model …`                                                      | JSON                                                                                         |
 | `linear …`, `persona …`, `games …`, `browser …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                                                                | JSON                                                                                         |
@@ -77,7 +77,7 @@ Do not edit `~/.config/clankie/clankie.json`,
 | Task                                                   | Commands                                        |
 | ------------------------------------------------------ | ----------------------------------------------- |
 | [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                    |
-| [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`                  |
+| [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`         |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                    |
 | [Connect accounts and track work](#account-setup)      | `accounts`, `work`                              |
 | [Choose working skills](#skill-setup)                  | `skills`                                        |
@@ -117,7 +117,9 @@ the clankie row has them. The payload never includes fingerprints or secret
 values.
 
 Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
-`discord-user-session`, `activity`, `tunnel`.
+`discord-user-session`, `activity`, `tunnel`, `awake`. `awake` is the owner's
+keep-awake ([`awake`](#awake)); it reads healthy and "off" until
+they opt in.
 
 ### `doctor`
 
@@ -153,6 +155,14 @@ tools are facts in `remediations`, not failures.
   "herdrPlugin": { "bundled": true, "bundlePath": "…/integrations/herdr-plugin" },
   "laneTools": { "url": "http://127.0.0.1:4310/v1/mcp", "reachable": true },
   "doorway": { "state": "connected" },
+  "power": {
+    "state": "sleep_allowed",
+    "source": "battery",
+    "sleepAfterMinutes": 1,
+    "heldAwakeBy": [],
+    "keepAwakeRequested": false,
+    "advice": "On battery this Mac sleeps after 1 min idle, so Discord and the app go quiet. Plug in and run `clankie awake on` to keep it awake while plugged in, or use a hosted Clankie."
+  },
   "remediations": ["Pick a captain model with `clankie model set provider/model` or `/setup`."]
 }
 ```
@@ -173,6 +183,15 @@ and wants a lane bearer. `doorway` is the live public doorway
 ([ADR 0151](adr/0151-the-public-doorway-routes-home.md)) in the states
 `clankie gateway status` reports; `sign_in_required` and `unavailable` each earn
 a remediation, because until they clear no app reaches him at all.
+`power` says whether this Mac may sleep, which drops Discord and the app while
+it is down ([always-on guide](always-on.md)). `state` is `always_on` (power
+settings never sleep, or something holds a sleep assertion), `sleep_allowed`
+(with `advice`, which is also a remediation), or `unknown` (no `pmset`, as on a
+hosted Linux body; no warning). `source` is `ac` or `battery`,
+`sleepAfterMinutes` is the `pmset` idle sleep for that source (`0` never), and
+`heldAwakeBy` names processes holding a sleep assertion that applies on that
+source. `lastSleep` appears once the running service has noticed the host sleep
+underneath it. The same object is on the service's `/health` as `power`.
 
 <a id="service-lifecycle"></a>
 
@@ -247,6 +266,41 @@ changing them. `enable` is idempotent (a loaded agent is booted out first) and
 `status` is `enabled`, `disabled`, or `stale` (the agent file and launchd
 disagree; run `enable`). The job's own output lands in `log`; the services keep
 their usual per-process logs.
+
+<a id="awake"></a>
+
+### `awake [status|on|off]`
+
+Keep this Mac awake while it is plugged in, so Discord and the app stay reachable
+([always-on guide](always-on.md), [ADR 0203](adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
+`on` stores the opt-in (`host.keepAwake` in settings) and starts a
+launcher-supervised `caffeinate -s` now; `off` clears it and stops that process.
+macOS holds a `-s` assertion only on AC power, so unplugging lets the Mac sleep as
+its own settings say. The opt-in survives a restart: the launcher restarts
+`awake` with the clankie service, so [`autostart`](#service-lifecycle)
+brings it back at login. It never runs `pmset` with anything but `-g` and never
+changes a power setting. Local only; hosted mode and non-macOS hosts refuse
+`on`. The console has the same command as `/awake [on|off]`.
+
+```json
+{
+  "ok": true,
+  "keepAwake": true,
+  "service": { "state": "healthy", "detail": "holding this Mac awake while plugged in", "pid": 4242 },
+  "power": {
+    "state": "always_on",
+    "source": "ac",
+    "sleepAfterMinutes": 10,
+    "heldAwakeBy": ["caffeinate"],
+    "keepAwakeRequested": true
+  },
+  "note": "Keeps this Mac awake only while it is plugged in; …"
+}
+```
+
+`service.state` is `healthy` when off or holding, and `unreachable` when
+requested with no `caffeinate` running (`clankie restart awake`). A `caffeinate`
+you started yourself is never touched and never counted as the launcher's.
 
 <a id="device-setup"></a>
 
@@ -1984,6 +2038,7 @@ See [Swarm architecture](adr/0180-swarm-is-the-coordination-layer.md).
 | `user-session`  | personal-lab Discord body            | `discord-user-session`, `lab`                                          |
 | `activity`      | watch-me-play surface                | `watch`, `viewer`                                                      |
 | `tunnel`        | cloudflared in front of the activity | `cloudflared`                                                          |
+| `awake`         | owner's keep-awake (`caffeinate -s`) | `keep-awake`, `caffeinate`                                             |
 
 Unknown names fail closed without signalling any process.
 

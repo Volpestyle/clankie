@@ -114,6 +114,12 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["awake"],
+    lines: [
+      "  awake [status|on|off]    Keep this Mac awake while plugged in (launcher-supervised caffeinate; JSON)",
+    ],
+  },
+  {
     nouns: ["pair"],
     lines: [
       "  pair [--json] [--timeout SEC]",

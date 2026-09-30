@@ -261,6 +261,19 @@ export const RelaySettingsSchema = z
   .strict();
 export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
 
+/**
+ * This host's own behavior. `keepAwake` is the owner's opt-in to an always-on
+ * Mac (VUH-1461): the launcher supervises `caffeinate -s`, which macOS holds
+ * only while the Mac is plugged in. Off by default; sleep stays a normal
+ * condition to recover from.
+ */
+export const HostSettingsSchema = z
+  .object({
+    keepAwake: z.boolean().default(false),
+  })
+  .strict();
+export type HostSettings = z.infer<typeof HostSettingsSchema>;
+
 /** Public AWS doorway used by App Store builds; the host bearer stays in Keychain. */
 export const PublicGatewaySettingsSchema = z
   .object({
@@ -779,6 +792,7 @@ export const ClankieSettingsSchema = z
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
+    host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
     agentHosts: z
       .object({ connections: z.array(AgentHostConnectionSchema).max(15).default([]) })

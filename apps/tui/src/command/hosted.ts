@@ -185,6 +185,7 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "remote-access",
   "down",
   "autostart",
+  "awake",
   "herdr",
   "discord",
   "voice",

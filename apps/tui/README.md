@@ -208,6 +208,8 @@ credential holder.
 - `/status` renders `clankie status`, then adds console presence, conversation,
   workspace, model context, activity availability, and the Herdr pane roster.
   `/doctor` renders the same install report as `clankie doctor`.
+- `/awake [on|off]` is `clankie awake`: the launcher's keep-awake while plugged in,
+  with the Mac's current power state ([always on](../../docs/always-on.md)).
 - `/herdr` offers **Use an existing Herdr session** or **Create a session for
   Clankie**, followed by **Restart now** or **Later**. `/herdr use NAME` and
   `/herdr create` are the direct equivalents. Clankie’s own session tracks

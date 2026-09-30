@@ -59,6 +59,9 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
   viewer: "activity",
   tunnel: "tunnel",
   cloudflared: "tunnel",
+  awake: "awake",
+  "keep-awake": "awake",
+  caffeinate: "awake",
   "discord-bridge": "discord-bridge",
   bridge: "discord-bridge",
   "user-session": "discord-user-session",
@@ -108,7 +111,7 @@ export function parseServiceTarget(raw: string | undefined): ServiceTarget {
   const target = TARGET_ALIASES[raw.toLowerCase()];
   if (target === undefined) {
     throw new Error(
-      `Unknown service "${raw}". Expected one of: all, clankie, relay, discord, user-session, activity, tunnel (aliases: captain, eve, cp, control-plane, app-relay, phone, bridge, lab, watch, viewer, cloudflared).`,
+      `Unknown service "${raw}". Expected one of: all, clankie, relay, discord, user-session, activity, tunnel, awake (aliases: captain, eve, cp, control-plane, app-relay, phone, bridge, lab, watch, viewer, cloudflared, keep-awake, caffeinate).`,
     );
   }
   return target;
@@ -465,6 +468,39 @@ const TUNNEL: ManagedService = {
   },
 };
 
+/** Set to 1 by the launcher when the owner opted in (`clankie awake on`); macOS only. */
+export const KEEP_AWAKE_ENV = "CLANKIE_KEEP_AWAKE";
+
+/**
+ * The owner's always-on Mac (VUH-1461): `caffeinate -s` under the launcher.
+ * macOS holds a `-s` assertion only while the Mac is on AC power, so unplugging
+ * lets it sleep like any laptop and nothing here has to watch the charger.
+ * Opt-in and off by default; the sleep-and-wake recovery elsewhere stays the
+ * baseline either way.
+ *
+ * It restarts with the clankie service, so the login-time autostart
+ * (`restart clankie`) brings it back after a reboot. A `caffeinate -s` the owner
+ * started themselves never conflicts with it, and is never mistaken for it.
+ */
+const AWAKE: ManagedService = {
+  id: "awake",
+  label: "Keep-awake",
+  command: "caffeinate",
+  spawnArgs: ["-s"],
+  enabled: (env) => env[KEEP_AWAKE_ENV] === "1" && process.platform === "darwin",
+  commandMatches: (command) => /(?:^|\/)caffeinate\s+-s\s*$/u.test(command),
+  conflictingPids: () => [],
+  restartsWith: ["clankie"],
+  probe: async ({ env, record, matchingPids }) => {
+    if (env[KEEP_AWAKE_ENV] !== "1")
+      return { state: "healthy", detail: "off; the Mac sleeps as it is set to" };
+    if (process.platform !== "darwin") return { state: "healthy", detail: "not applicable off macOS" };
+    return record !== undefined && matchingPids.includes(record.pid)
+      ? { state: "healthy", detail: "holding this Mac awake while plugged in" }
+      : { state: "unreachable", detail: "requested, but no caffeinate is running; `clankie restart awake`" };
+  },
+};
+
 /**
  * A deployment's service loadout: a comma-separated list of service ids. Unset,
  * every service runs as its own configuration says. Set — a hosted body runs
@@ -494,6 +530,7 @@ const SERVICES: Readonly<Record<ServiceId, ManagedService>> = {
   "discord-user-session": withLoadout(DISCORD_USER_SESSION),
   activity: withLoadout(ACTIVITY),
   tunnel: withLoadout(TUNNEL),
+  awake: withLoadout(AWAKE),
 };
 
 export function managedService(id: ServiceId): ManagedService {

@@ -79,7 +79,15 @@ describe("canonical owner command layer", () => {
       herdrPlugin: { bundled: false },
       laneTools: { url: "http://127.0.0.1:4310/v1/mcp", reachable: true },
       doorway: { state: "connected" },
+      power: {
+        state: "always_on",
+        source: "ac",
+        sleepAfterMinutes: 0,
+        heldAwakeBy: [] as string[],
+        keepAwakeRequested: false,
+      },
       selectedModel: null,
+      nextStep: "Pair a phone or tablet: run `clankie pair` (or /pair).",
       remediations: [],
     } as const;
     const results: Array<{ command: string; text: string }> = [];
@@ -87,7 +95,6 @@ describe("canonical owner command layer", () => {
     const shell = {
       theme: {
         ansi: {
-      nextStep: "Pair a phone or tablet: run `clankie pair` (or /pair).",
           bold: identity,
           cyan: identity,
           dim: identity,

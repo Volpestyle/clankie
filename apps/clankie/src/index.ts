@@ -1,4 +1,5 @@
 import { createPersonaImageSource } from "./persona-images.ts";
+import { createHostPowerMonitor } from "./host-power.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
@@ -221,6 +222,11 @@ const updateHostedWorkers = () =>
 let publicGatewayConnector: PublicGatewayConnector | undefined;
 /** Set when the account credential is rejected before a connector can even exist. */
 let publicGatewaySignInRequiredSince: string | undefined;
+// A sleeping host is a normal condition (ADR 0203): report it, never treat it as a fault.
+const hostPower = createHostPowerMonitor({
+  keepAwakeRequested: async () => (await settingsStore.load()).host.keepAwake,
+  onSleep: (sleep) => logger.info({ event: "host.slept", ...sleep }, "the host slept underneath the service"),
+});
 if (hostedBody !== undefined) {
   publicGatewayConnector = new PublicGatewayConnector({
     encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
@@ -872,6 +878,7 @@ const clankie = await createClankieApp({
   playSight,
   rivals,
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
+  hostPower: () => hostPower.report(),
   publicGatewayDoorway: () => {
     if (publicGatewayConnector !== undefined) return publicGatewayConnector.doorway;
     if (publicGatewaySignInRequiredSince !== undefined) {
@@ -1006,6 +1013,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
+  hostPower.stop();
   hostedHeartbeat?.close();
   stopHostedWork?.();
   publicGatewayConnector?.close();

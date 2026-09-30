@@ -32,6 +32,7 @@ export {
   McpSettingsSchema,
   PersonaSettingsSchema,
   PublicGatewaySettingsSchema,
+  HostSettingsSchema,
   RelaySettingsSchema,
   SETTINGS_SCHEMA_VERSION,
   VoiceSettingsSchema,
@@ -54,6 +55,7 @@ export {
   type McpSettings,
   type PersonaSettings,
   type PublicGatewaySettings,
+  type HostSettings,
   type RelaySettings,
   type VoiceSettings,
 } from "./schema.ts";

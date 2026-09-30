@@ -1072,14 +1072,26 @@ paths:
       tags: [Health]
       operationId: getHealth
       summary: Public liveness
-      description: Optional Herdr or gateway failures are reported separately and do not change service liveness.
+      description: Optional Herdr, gateway or host-power findings are reported separately and do not change service liveness. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md).
       security: []
       responses:
         "200":
           description: Service is up
           content:
             application/json:
-              example: { ok: true, service: clankie }
+              example:
+                {
+                  ok: true,
+                  service: clankie,
+                  power:
+                    {
+                      state: sleep_allowed,
+                      source: battery,
+                      sleepAfterMinutes: 1,
+                      heldAwakeBy: [],
+                      keepAwakeRequested: false,
+                    },
+                }
 
   /v1/herdr:
     get:

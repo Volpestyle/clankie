@@ -305,6 +305,14 @@ After sleep, an account doorway stays `connecting` while its network probe fails
 lost refresh replies get bounded retries inside rotation grace. `sign_in_required`
 in `clankie gateway status` or `doctor` means the owner must use the sign-in wizard.
 
+Host sleep is a normal condition (ADR 0203). `doctor` reports `power` (`always_on`,
+`sleep_allowed`, `unknown`) and the same object is on `/health`; `sleep_allowed`
+carries advice, and `lastSleep` is what the service noticed on waking. The owner's
+always-on Mac is `clankie awake on|off|status` (`/awake`): a launcher-supervised
+`caffeinate -s`, AC power only, opt-in, never a `pmset` write. Do not run
+`caffeinate` or change power settings for them; suggest `awake` or a hosted body
+(`docs/always-on.md`).
+
 `clankie send --conversation ID "message"` steers Clankie's active Pi turn;
 add `--delivery queue` for a separate follow-up. Use `--stdin` instead of a
 quoted message to read a pipe while preserving interior newlines. Either starts

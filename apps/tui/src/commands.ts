@@ -60,6 +60,7 @@ import { runRivalsCommand } from "./command/rivals.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
+import type { AwakeCommandResult } from "./command/awake.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
@@ -76,6 +77,8 @@ export interface ConsoleCommandContext {
   readonly restartCaptain?: () => Promise<void>;
   readonly commandStatus?: () => Promise<StatusCommandResult>;
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
+  /** `clankie awake`: the launcher-supervised keep-awake, and the power state it answers to. */
+  readonly commandAwake?: (args: readonly string[]) => Promise<AwakeCommandResult>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -1200,6 +1203,34 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "awake",
+      aliases: [],
+      description: "Keep this Mac awake while plugged in, so Discord and the app stay reachable",
+      argumentHint: "[on|off]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (context.commandAwake === undefined) {
+          shell.insertCommandResult("/awake", "Keep-awake is unavailable.", "error");
+          return;
+        }
+        const words = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+        if (words.length > 1 || (words[0] !== undefined && !["status", "on", "off"].includes(words[0]))) {
+          shell.insertCommandResult("/awake", "Usage: /awake [on|off]", "error");
+          return;
+        }
+        try {
+          const result = await context.commandAwake(words);
+          shell.insertCommandResult("/awake", formatAwake(result), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/awake",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
       name: "doctor",
       aliases: [],
       description: "Show this install's canonical doctor report",
@@ -1544,4 +1575,16 @@ function herdrActiveLine(status: HerdrCommandResult): string {
     : status.active
       ? `Active: ${describeHerdrBinding(status.active)}`
       : (status.unavailable ?? "Active session unavailable");
+}
+
+function formatAwake(result: AwakeCommandResult): string {
+  const { power } = result;
+  const lines = [
+    `keep-awake: ${result.keepAwake ? "on" : "off"} · ${result.service.state}${result.service.detail === undefined ? "" : ` · ${result.service.detail}`}`,
+    `power: ${power.state.replace("_", " ")} · ${power.source}${power.sleepAfterMinutes === null ? "" : power.sleepAfterMinutes === 0 ? " · never sleeps" : ` · sleeps after ${String(power.sleepAfterMinutes)} min`}`,
+  ];
+  if (power.heldAwakeBy.length > 0) lines.push(`held awake by: ${power.heldAwakeBy.join(", ")}`);
+  if (power.advice !== undefined) lines.push(power.advice);
+  lines.push(result.note);
+  return lines.join("\n");
 }
