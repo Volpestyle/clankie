@@ -1,0 +1,23 @@
+VUH-1454 validation, 2026-09-30
+
+PASS: six eval-runner Vitest tests, including actual macOS sandbox boundary tests.
+PASS: oxlint --deny-warnings scripts/evals apps/clankie/test/eval-runner.test.ts.
+PASS: oxfmt on all owned source, test, configuration and documentation files.
+PASS: dry-run plans current/plain/trimmed without authentication or model calls.
+
+An earlier complete pnpm check passed (local /tmp/vuh-1454-check.log), including
+123 Rust tests and the Vox IPC smoke check. This preceded final runner hardening.
+A subsequent full gate reached 3,093 passing TypeScript tests and one unrelated
+lane-mcp.test.ts cleanup failure (ENOTEMPTY). A targeted rerun of lane-mcp plus
+eval-runner passed all 14 tests.
+
+The handoff pnpm check (/tmp/vuh-1454-check-handoff.log) stopped at formatting in
+eight concurrently edited pairing/device-doorway files. No eval file appeared
+in the formatting failure. Those unrelated files were left untouched. The lead
+must rerun the full shared gate after the pairing work is formatted.
+
+Final narrow checks: docs:check and deadcode passed. A repeated combined
+lane-mcp/eval-runner invocation reproduced the unrelated ENOTEMPTY cleanup
+failure: 13 passed, 1 failed; all six eval-runner tests passed. This remains an
+integration limitation, not a clean full-gate claim. The final pnpm check repeat
+(/tmp/vuh-1454-check-last.log) still stopped at the same eight formatting files.

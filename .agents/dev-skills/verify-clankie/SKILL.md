@@ -188,3 +188,14 @@ node docs/testing/2026-09-05-pokeagent-evidence-sweep/flows/sweep-play-archive.m
 `pnpm discord:voice-readiness` checks the selected TTS credential but skips
 paid ElevenLabs synthesis; its engaged probe settles on model text. A READY
 report can therefore coexist with a broken mouth.
+
+## Instruction and skill comparisons
+
+Use the checkout-only subscription eval runner described in [docs/evals.md](../../../docs/evals.md)
+before cutting standing instructions or bundled skills (ADR 0203). Preview with
+`node scripts/evals/run.mjs --dry-run`; default execution is up to three Claude calls,
+with no retries. Keep Codex sampling small while its weekly budget is low.
+Compare matched cases under `current`, `plain`, and `trimmed`, and retain failed
+attempts, token counts and rework. This runner owns isolated fixture worktrees
+and state; never turn a fixture into a live service probe or toggle owner settings.
+A small passing sample establishes runner function, not an instruction-quality winner.

@@ -1,0 +1,8 @@
+const seen = new Map();
+export function shouldInject(session, hash, reset = false) {
+  const key = session ? `${session}:${hash}` : Symbol();
+  if (reset && session) { seen.delete(key); return true; }
+  if (seen.has(key)) return false;
+  if (session) seen.set(key, true);
+  return true;
+}

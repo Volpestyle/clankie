@@ -1,0 +1,3 @@
+Research the supplied evidence only. Write answer.json {winner:string|null,reason:string,nextStep:string}. Evidence: bundled 2/2 passes, 14000 tokens; plain 2/2 passes, 9000 tokens; runs used different task sets and one trial each. Decide whether this establishes a quality winner and propose the next comparison. No web access is needed.
+
+Edit the deliverable files in this worktree. Keep the result small. 
