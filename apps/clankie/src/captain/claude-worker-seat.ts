@@ -62,7 +62,7 @@ const READY_MS = 30_000;
 const RECEIPT_MS = 15_000;
 const POLL_MS = 250;
 const SESSION_LIMIT = 256;
-export const CLAUDE_MANAGED_SETTINGS = "/Library/Application Support/ClaudeCode/managed-settings.json";
+const CLAUDE_MANAGED_SETTINGS = "/Library/Application Support/ClaudeCode/managed-settings.json";
 
 /** The argv a worker launch adds to `claude`: its plugin for this session only, and its approved channel. */
 export function claudeWorkerLaunchArgs(launch: SeatLaunch): string[] {
@@ -78,7 +78,7 @@ export function claudeWorkerLaunchArgs(launch: SeatLaunch): string[] {
 }
 
 /** A hook as the seam's event: Stop settles a turn, StopFailure settles it with an error. */
-export function seatEventForHook(hook: FleetSeatHook, at: string): SeatEvent | undefined {
+function seatEventForHook(hook: FleetSeatHook, at: string): SeatEvent | undefined {
   switch (hook.event) {
     case "Stop":
       return {

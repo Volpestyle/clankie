@@ -22,7 +22,8 @@
         "docs/testing/2026-09-20-delivered-files-live/flows/build-presentation.mjs",
         "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs",
         "docs/testing/2026-09-20-delivered-files-live/flows/run-isolated-proof.mjs",
-        "integrations/claude-plugin/worker/bin/swarm-mcp.mjs"
+        "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
+        "integrations/claude-plugin/worker/bin/seat-hook.mjs"
       ],
       "paths": {
         "/clankie/*": ["./*"]
