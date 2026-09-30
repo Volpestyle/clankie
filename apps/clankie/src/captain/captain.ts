@@ -1,4 +1,6 @@
 import { personaImageBriefing } from "@clankie/persona-images";
+import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
+import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import {
   createPersonaImageSource,
   personaImagesExtension,
@@ -509,6 +511,8 @@ export function resolveOperatorPrompt(
 }
 
 export interface CaptainOptions {
+  /** Override local harness control adapters (including deterministic test adapters). */
+  readonly seatAdapters?: readonly HarnessSeatAdapter[];
   readonly personaImages?: PersonaImageSource;
   readonly swarm?: SwarmHost;
   /** Repo root: instructions.md lives here, skills are discovered here. */
@@ -852,7 +856,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }),
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
-    seatAdapters: [claudeWorkerSeats],
+    seatAdapters: options.seatAdapters ?? [createCodexSeatAdapter(), claudeWorkerSeats],
   });
   const evaluator = new Evaluator(
     join(options.stateDir, "evaluator"),

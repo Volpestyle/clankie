@@ -51,12 +51,13 @@ Turning guidance off leaves Clankie able to lead using his own instructions,
 `"bundled"` for a single hire; its result records the condition. Global/project
 skills discovered independently by a harness are outside Clankie's bundle switch.
 
-A `hire_agent` brief is submitted after harness readiness through Herdr's
-paste-aware agent prompt. `brief.outcome: "delivered"` requires the complete
-brief in the native transcript. `not_ready` with `brief_delivery_unverified`
-means the receipt could not be verified; the new pane is closed. A turn may have
-started, so inspect its work before retrying. If the transcript is unavailable,
-redacted, or exceeds its display limit, use a brief file and a short pointer.
+Local briefed Codex hires use a private app-server and remain native interactive
+Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
+comes from turn events, and the owner can type into the same session. Other
+routes use their harness adapter or Herdr's paste-aware prompt fallback, which
+requires the complete brief in the native transcript. An unverified delivery
+closes the new pane; a turn may have started, so inspect its work before retrying.
+Never replay an uncertain protocol send through terminal typing.
 
 ## Cross-device agent conversations
 

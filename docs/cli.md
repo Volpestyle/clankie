@@ -1588,6 +1588,12 @@ cannot honor an explicit override and refuse it. Independent global or project
 skills can still be discovered by Claude/Codex; this switch does not rewrite
 owner-global selection. See [the full bundle and A/B limits](bundled-skills.md).
 
+Local briefed Codex hires use a dedicated app-server with a native Codex TUI in
+Herdr. Briefs and `message_seat` use protocol receipts; completion comes from turn
+events. The owner can type into the same session, whose identity and transcript
+stay visible. Existing unmanaged seats retain queue/terminal fallback. An
+uncertain protocol send is never replayed through terminal typing.
+
 A supplied `hire_agent` brief goes through the harness's own interface when a
 seat adapter drives that harness locally ([ADR 0187](adr/0187-clankie-hires-his-own-seats.md),
 VUH-1458). A Claude hire starts the real interactive TUI with the
