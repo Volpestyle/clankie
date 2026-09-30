@@ -37,9 +37,11 @@ mean every room receives everything said elsewhere.
 
 His built-in agent uses [pi](https://pi.dev) for models, sessions, tools, skills,
 and compaction. Clankie adds durable identity, memory, the connections around
-him, and the authority each caller carries. The optional [Claude operator seat](https://github.com/Volpestyle/clankie/blob/main/integrations/claude-plugin/README.md)
-can use the same service through a different harness; its delivery and
-continuation limits are documented separately.
+him, and the authority each caller carries. Optional
+[Claude](https://github.com/Volpestyle/clankie/blob/main/integrations/claude-plugin/README.md)
+and [Codex operator seats](https://github.com/Volpestyle/clankie/blob/main/integrations/codex-plugin/README.md)
+use the same service through their native harnesses. Their setup, hook trust,
+delivery, and continuation limits are documented separately.
 
 ## History, memory, and goals
 
@@ -103,7 +105,8 @@ defines the TUI terms. Other clients may organize navigation differently.
 ## Where the service and data live
 
 In local mode, the launcher keeps Clankie's service running after the console
-closes. Your Mac must remain awake and online. In hosted mode, the console and
+closes. Your Mac must remain awake and online; [`clankie awake on`](/cli/#awake)
+can keep it awake while plugged in. In hosted mode, the console and
 app connect to a remote service; closing those clients leaves the remote work
 running, subject to the host's lifecycle and limits.
 
@@ -120,6 +123,11 @@ sizes, and timing. Accounts, model providers, and optional push delivery have
 separate data flows. The [network reference](/network/) explains the transport
 boundary; the [privacy notice](https://clankie.bot/privacy/) covers the product's
 data handling.
+
+A self-hosted Mac can also advertise a direct device route on a reachable
+network. Direct pairing does not require a Clankie account and retains the
+host's pairing and device-grant checks. See [pairing](/cli/#pair-json-timeout-sec-review-days-n-count-n)
+for supported routes and recovery.
 
 ## Go deeper
 

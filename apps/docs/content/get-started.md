@@ -59,17 +59,22 @@ experienced operators can use the [Linux deployment](https://github.com/Volpesty
 
 ## Bring your Mac's Clankie into the app
 
-1. In the console, open `/remote-access` and choose **Enable remote access**.
-   Sign in with your Clankie account using the emailed code. If your account
-   cannot enroll a machine, use [support](https://clankie.bot/support/).
+1. Choose a route to your Mac. For account-based remote access, open
+   `/remote-access` and sign in with the emailed code. For a direct connection
+   on your own network, configure a device-reachable direct route with
+   `clankie gateway direct`; this path does not require a Clankie account.
+   The [pairing reference](/cli/#pair-json-timeout-sec-review-days-n-count-n)
+   explains the device doorway and supported addresses.
 2. Run `clankie autostart enable` if you want him to start when you log in.
-   Leave the Mac awake and online while you want to reach it.
+   Leave the Mac awake and online while you want to reach it. Optionally run
+   [`clankie awake on`](/cli/#awake) to keep it awake while plugged in.
 3. Install the app through the [official app link](https://clankie.bot/#app).
 4. Run `clankie pair`. Scan the secure QR or paste the **complete secure link**
    into the app, review the offered access, and connect.
 
-Pairing offers are single-use. Short codes are for direct private connections;
-internet pairing needs the QR or complete link. `clankie devices` lists paired
+Pairing offers are single-use. The QR or complete link carries the configured
+gateway and direct routes; the app prefers the gateway when both are available.
+Short codes are for direct private connections. `clankie devices` lists paired
 devices and lets you revoke them. The [pairing reference](/cli/#pair-json-timeout-sec-review-days-n-count-n) covers
 options and recovery.
 
@@ -89,13 +94,13 @@ his team, or [customize Clankie](/diy/) with models, skills, and connections.
 
 ## If you cannot reach him
 
-| What you see                              | Where to start                                                                   |
-| ----------------------------------------- | -------------------------------------------------------------------------------- |
-| Local console cannot answer               | Run `clankie doctor` and `clankie status`; `/setup` handles missing model setup. |
-| App cannot reach your Mac                 | Check that the Mac is awake, online, and signed in for remote access.            |
-| Pairing offer expired or was already used | Create a new offer; use its full secure link or QR.                              |
-| Hosted connection or account problem      | Check your account, then use [support](https://clankie.bot/support/).            |
-| A particular feature is unavailable       | Ask Clankie what is configured, or consult [the reference index](/reference/).   |
+| What you see                              | Where to start                                                                                           |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Local console cannot answer               | Run `clankie doctor` and `clankie status`; `/setup` handles missing model setup.                         |
+| App cannot reach your Mac                 | Check that the Mac is awake and online, then check remote-access sign-in or the configured direct route. |
+| Pairing offer expired or was already used | Create a new offer; use its full secure link or QR.                                                      |
+| Hosted connection or account problem      | Check your account, then use [support](https://clankie.bot/support/).                                    |
+| A particular feature is unavailable       | Ask Clankie what is configured, or consult [the reference index](/reference/).                           |
 
 Share error messages and versions with support, never pairing links, keys, or
 sign-in codes.

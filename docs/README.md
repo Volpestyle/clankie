@@ -51,7 +51,7 @@ source setup and checks.
 | Native Discord media              | [Vox](../apps/vox/README.md), [client boundary](../packages/vox-client/README.md)                                                                                    |
 | Game watch surface                | [Discord Activity](../apps/discord-activity/README.md)                                                                                                               |
 | Remote device access              | [Relay](../apps/relay/README.md), [public network](https://docs.clankie.bot/network/)                                                                                |
-| Optional terminal integrations    | [Herdr plugin](../integrations/herdr-plugin/README.md), [Claude seat](../integrations/claude-plugin/README.md)                                                       |
+| Optional terminal integrations    | [Herdr plugin](../integrations/herdr-plugin/README.md), [Claude seat](../integrations/claude-plugin/README.md), [Codex seat](../integrations/codex-plugin/README.md) |
 | Documentation and branding        | [Docs site](../apps/docs/README.md), [public marks](../branding/README.md)                                                                                           |
 | Public deployment                 | [AWS boundary](../infra/aws/README.md), [docs hosting](../infra/aws/public-docs/README.md)                                                                           |
 

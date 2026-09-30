@@ -14,6 +14,7 @@ and cross-component request flows. Historical diagrams remain in the ADR archive
 ```mermaid
 flowchart LR
   App["iPhone / iPad app"] <-->|"encrypted device exchanges"| Gateway["Public gateway"]
+  App <-->|"optional direct device route"| Service
   Gateway <-->|"authenticated outbound connection"| Service["Clankie's service<br/>pi · conversations · goals · tools"]
   Console["Console / CLI"] --> Service
   Native["Optional native operator seat"] -->|"MCP + transcript bridge"| Service
@@ -42,6 +43,10 @@ The host issues pairing offers and device sessions and decides every grant.
 The public gateway carries bounded exchanges to an authenticated host over its
 outbound connection. A paired device follows the returned host-scoped route;
 its encrypted application payload stays between that device and the host.
+Self-hosted Macs can also advertise an explicitly configured direct device
+route. One pairing offer carries the available routes; direct pairing does
+not require an account, and device grants remain host-enforced
+([ADR 0204](adr/0204-a-self-hosted-mac-pairs-the-app-directly.md)).
 Optional push delivery has a separate metadata store and authorization contract.
 The [network reference](https://docs.clankie.bot/network/) owns the public
 host-route table and transport boundary.
@@ -364,8 +369,10 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   PokeAgents owns player leases and action/session fencing. Clankie's play
   package retains typed body-action refusals beside its driver interface;
   the retired local environment lifecycle engine has no role in hosted play.
-- **Spider-Man.** Rivals Agent owns tactical decisions and the guarded real-time
-  pad loop. Clankie's `rivals` tool and operator API manage bounded sittings,
+- **Spider-Man (disabled bridge).** The integration is not currently available
+  for live play; [setup](rivals.md) records the re-enablement requirements.
+  Its interface delegates tactical decisions and the guarded real-time
+  pad loop to Rivals Agent. Clankie's `rivals` tool and operator API manage bounded sittings,
   objectives, fresh observations, and read-only sharing; the existing Go Live
   PNG publisher carries its video. The Pokémon seam remains unchanged in scope.
   See [ADR 0175](adr/0175-rivals-agent-is-a-gameplay-skill.md) and [setup](rivals.md).
