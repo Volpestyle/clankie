@@ -817,7 +817,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return device.grants.terminalControl ? true : "forbidden";
   };
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
-  app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets));
+  app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   /**
    * Owner operator or any active paired device: account data that is not a
    * secret and needs no terminal grant, such as the hosted credit balance.

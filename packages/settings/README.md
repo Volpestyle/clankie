@@ -130,3 +130,11 @@ default fleet keeps its existing `herdr` settings. Configure through the operato
 API or `clankie runtime`; `/runtime` exposes the same commands. Connection IDs
 cannot redirect retained work, and disconnect never stops the external runtime.
 See [runtime commands](../../docs/cli.md#connections-and-runtime).
+
+## Codex account homes
+
+`codexAccounts` stores extra `{label, home}` records only. `default` remains implicit
+from `CODEX_HOME` or `~/.codex`. The CLI/TUI and owner API register canonical paths;
+Codex owns authentication and hook consent. `codexAccounts`, `codexAccountStatus`
+and `selectCodexAccount` supply the same registry and rollout-based headroom to
+hires, session discovery and the eval runner. Unknown telemetry is not zero use.

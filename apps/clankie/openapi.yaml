@@ -246,6 +246,53 @@ paths:
         "403": { description: forbidden — terminalControl required }
         "413": { description: malformed — body exceeds 16 KiB }
         "503": { description: unavailable }
+  /v1/accounts/codex:
+    get:
+      tags: [Operator]
+      operationId: listCodexAccounts
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      summary: List registered local Codex homes and observed headroom
+      description: Owner-authorized. Reports credential-file presence, never credential contents. Missing or stale rollout usage is unknown.
+      responses:
+        "200":
+          description: Default and registered account labels, paths, rate windows and headroom
+        "401":
+          description: Authentication required
+        "403":
+          description: Owner authority required
+    post:
+      tags: [Operator]
+      operationId: updateCodexAccounts
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      summary: Register or remove an owner's local Codex home
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [op, home, label]
+                  additionalProperties: false
+                  properties:
+                    op: { type: string, enum: [add] }
+                    home: { type: string }
+                    label: { type: string }
+                - type: object
+                  required: [op, label]
+                  additionalProperties: false
+                  properties:
+                    op: { type: string, enum: [remove] }
+                    label: { type: string }
+      responses:
+        "200":
+          description: Registration updated; credentials and home are unchanged
+        "400":
+          description: Invalid or duplicate account
+        "401":
+          description: Authentication required
+        "403":
+          description: Owner authority required
   /v1/accounts:
     get:
       tags: [Operator]

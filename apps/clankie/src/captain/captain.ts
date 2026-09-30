@@ -19,6 +19,7 @@ import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import {
   clankieSkillRoots,
+  codexAccounts,
   FLEET_MODEL_GUIDANCE,
   FLEET_SIZE_GUIDANCE,
   personaInstructions,
@@ -853,6 +854,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
   });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    codexAccounts: async () => codexAccounts(await settings()),
     skillBundle: {
       repoRoot: options.repoRoot,
       stateDir: options.stateDir,

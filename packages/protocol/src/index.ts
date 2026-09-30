@@ -746,8 +746,13 @@ export const OperatorHerdrPlacementSchema = z
   .strict();
 export type OperatorHerdrPlacement = z.infer<typeof OperatorHerdrPlacementSchema>;
 
+export const OperatorCodexAccountSchema = z
+  .object({ label: z.string().min(1).max(64), home: z.string().min(1).max(4096) })
+  .strict();
+
 export const OperatorFleetSeatSchema = z
   .object({
+    account: OperatorCodexAccountSchema.optional(),
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     /** Harness-session identity; stable when the same agent moves panes. */
     occupantId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
@@ -950,6 +955,10 @@ export const SpawnOperatorSeatSchema = z
   .object({
     schemaVersion: z.literal(1),
     harness: z.enum(OPERATOR_SEAT_HARNESSES),
+    account: z
+      .string()
+      .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
+      .optional(),
     /** What the roster calls it; herdr's own agent name is derived from this. */
     title: OperatorAgentNameSchema,
     /** Absolute path it starts in — the district it joins (ADR 0022). */

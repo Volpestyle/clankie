@@ -1,3 +1,4 @@
+import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
 import { runSwarmCommand } from "./command/swarm.ts";
@@ -829,6 +830,20 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       availableInSideConversation: true,
       run(argument, shell): void {
         runLayoutCommand(shell, argument);
+      },
+    },
+    {
+      name: "accounts",
+      aliases: [],
+      description: "Register and inspect local Codex accounts and headroom",
+      argumentHint: "codex [list | add HOME --label LABEL | remove LABEL]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const words = argument.trim().split(/\s+/u).filter(Boolean);
+        if (words[0] !== "codex")
+          throw new Error("Use /accounts codex [list | add HOME --label LABEL | remove LABEL]");
+        const result = await runCodexAccountsCommand(words.slice(1), settings ? { settings } : {});
+        shell.insertCommandResult("/accounts", JSON.stringify(result, null, 2), "success");
       },
     },
     {

@@ -3,7 +3,7 @@
  * to reach it down the seat's own conversation lane. A real captain drives a
  * fake `herdr` on PATH that records every command it is given.
  */
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readlink, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -109,6 +109,7 @@ async function fixture() {
     await fs.mkdir(join(root, "codex/skills"), { recursive: true });
   });
   process.env.CODEX_HOME = join(root, "codex");
+  await writeFile(join(root, "codex/auth.json"), "synthetic credential presence; never read");
   await writeFile(join(bin, "herdr"), FAKE_HERDR);
   await chmod(join(bin, "herdr"), 0o755);
   await writeFile(join(bin, "claude"), "#!/usr/bin/env node\nprocess.exit(0);\n", { mode: 0o755 });
@@ -267,3 +268,62 @@ test("a codex hire waits past the old 10 s limit for a first turn still connecti
     await captain.close();
   }
 }, 30_000);
+
+test.each([undefined, "default"])(
+  "Codex hires select headroom and honor the account override %s",
+  async (override) => {
+    const { root, captain } = await fixture();
+    try {
+      const second = join(root, "second-codex");
+      await mkdir(join(second, "sessions"), { recursive: true });
+      await mkdir(join(root, "codex", "sessions"), { recursive: true });
+      await writeFile(join(second, "auth.json"), "synthetic presence only");
+      for (const [home, used] of [
+        [join(root, "codex"), 90],
+        [second, 10],
+      ] as const) {
+        await writeFile(
+          join(home, "sessions", "usage.jsonl"),
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            payload: {
+              rate_limits: {
+                primary: { used_percent: used, window_minutes: 300, resets_at: Date.now() / 1000 + 3600 },
+                secondary: {
+                  used_percent: used,
+                  window_minutes: 10080,
+                  resets_at: Date.now() / 1000 + 86400,
+                },
+              },
+            },
+          }) + "\n",
+        );
+      }
+      const settings = new SettingsStore(join(root, "settings.json"));
+      await settings.update((current) => ({
+        ...current,
+        codexAccounts: [{ label: "second", home: second }],
+      }));
+      const bank = await captain.laneToolBank("operator", "global-default");
+      const account = { label: override ?? "second", home: override ? join(root, "codex") : second };
+      const result = await call(bank, "hire_agent", {
+        harness: "codex",
+        title: "Account worker",
+        workingDirectory: root,
+        brief: "Reply with OK.",
+        ...(override ? { account: override } : {}),
+      });
+      expect(result).toMatchObject({ outcome: "spawned", seat: { account } });
+      const overlays = await readdir(join(root, "state", "worker-codex"));
+      expect(await readlink(join(root, "state", "worker-codex", overlays[0]!, "auth.json"))).toBe(
+        join(account.home, "auth.json"),
+      );
+      const roster = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+      expect(
+        roster.op === "fleet" && roster.snapshot.seats.find((seat) => seat.seatId === "term_0a1b2c")?.account,
+      ).toEqual(account);
+    } finally {
+      await captain.close();
+    }
+  },
+);

@@ -619,6 +619,12 @@ function hireAgentTool(
       "with message_seat, and watch it with herdr_watch on the returned seatId.",
     parameters: Type.Object({
       harness: StringEnum(OPERATOR_SEAT_HARNESSES),
+      account: Type.Optional(
+        Type.String({
+          pattern: "^[a-z][a-z0-9_-]{0,63}$",
+          description: "Registered local Codex account label; omit to choose by headroom.",
+        }),
+      ),
       title: Type.String({ minLength: 1, maxLength: 80, description: "What the roster calls it." }),
       workingDirectory: Type.String({
         minLength: 1,

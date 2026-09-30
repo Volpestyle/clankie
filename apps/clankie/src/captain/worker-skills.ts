@@ -42,6 +42,8 @@ export async function workerSkills(
   await mkdir(overlays, { recursive: true, mode: 0o700 });
   const overlay = await realpath(await mkdtemp(join(overlays, "seat-")));
   await mkdir(join(overlay, "skills"));
+  // Even a newly signed-in account writes rollouts back into its own home.
+  await mkdir(join(codexHome, "sessions"), { recursive: true, mode: 0o700 });
   for (const entry of await readdir(codexHome, { withFileTypes: true })) {
     // App-server rejects symlinked control directories and workers must not
     // borrow the owner's shared daemon sockets (VUH-1398, VUH-1459).

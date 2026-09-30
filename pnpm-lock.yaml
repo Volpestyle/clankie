@@ -364,6 +364,10 @@ importers:
   apps/vox: {}
 
   packages/agent-hosts:
+    dependencies:
+      '@clankie/settings':
+        specifier: workspace:*
+        version: link:../settings
     devDependencies:
       '@types/node':
         specifier: 24.12.4
@@ -380,6 +384,9 @@ importers:
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@clankie/settings':
+        specifier: workspace:*
+        version: link:../settings
       zod:
         specifier: 4.4.3
         version: 4.4.3

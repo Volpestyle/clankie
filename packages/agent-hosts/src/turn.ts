@@ -23,6 +23,7 @@ export interface AgentTurnResult {
 export interface TurnOptions {
   spawn?: typeof nodeSpawn;
   timeoutMs?: number;
+  codexHome?: string;
 }
 const MAX_OUTPUT = 1024 * 1024;
 const MAX_TIMEOUT = 10 * 60 * 1000;
@@ -90,7 +91,7 @@ async function capture(
   return new Promise((resolve) => {
     const child = (options.spawn ?? nodeSpawn)(command, args, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
-      env: launchEnvironment(),
+      env: { ...launchEnvironment(), ...(options.codexHome ? { CODEX_HOME: options.codexHome } : {}) },
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });

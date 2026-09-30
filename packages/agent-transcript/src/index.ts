@@ -1,3 +1,4 @@
+import { codexAccounts } from "@clankie/settings";
 import { z } from "zod";
 import {
   closeSync,
@@ -296,23 +297,29 @@ function transcriptPath(agent: string, session: HerdrAgentSession): string | und
     return globSync(join(homedir(), ".grok/sessions/*", session.value, "chat_history.jsonl"))[0];
   }
   if (agent !== "codex") return undefined;
-  const compact = session.value.replaceAll("-", "");
-  const millis = Number.parseInt(compact.slice(0, 12), 16);
-  if (Number.isFinite(millis)) {
-    const date = new Date(millis);
-    const directory = join(
-      homedir(),
-      ".codex/sessions",
-      String(date.getUTCFullYear()),
-      String(date.getUTCMonth() + 1).padStart(2, "0"),
-      String(date.getUTCDate()).padStart(2, "0"),
-    );
-    const path = existsSync(directory)
-      ? readdirSync(directory).find((name) => name.includes(session.value) && name.endsWith(".jsonl"))
-      : undefined;
-    if (path !== undefined) return join(directory, path);
+  for (const account of codexAccounts()) {
+    const compact = session.value.replaceAll("-", "");
+    const millis = Number.parseInt(compact.slice(0, 12), 16);
+    if (Number.isFinite(millis)) {
+      const date = new Date(millis);
+      const directory = join(
+        account.home,
+        "sessions",
+        String(date.getUTCFullYear()),
+        String(date.getUTCMonth() + 1).padStart(2, "0"),
+        String(date.getUTCDate()).padStart(2, "0"),
+      );
+      const path = existsSync(directory)
+        ? readdirSync(directory).find((name) => name.includes(session.value) && name.endsWith(".jsonl"))
+        : undefined;
+      if (path !== undefined) return join(directory, path);
+    }
+    const fallback = globSync("**/*.jsonl", { cwd: join(account.home, "sessions") })
+      .map((name) => join(account.home, "sessions", name))
+      .find((path) => path.includes(session.value));
+    if (fallback) return fallback;
   }
-  return globSync(join(homedir(), ".codex/sessions/**/*.jsonl")).find((path) => path.includes(session.value));
+  return undefined;
 }
 
 function grokSessionForProcess(processId: number | undefined): HerdrAgentSession | undefined {

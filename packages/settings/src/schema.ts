@@ -794,6 +794,29 @@ export const ClankieSettingsSchema = z
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
+    codexAccounts: z
+      .array(
+        z
+          .object({
+            label: z
+              .string()
+              .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
+              .refine((value) => value !== "default", "default is reserved"),
+            home: z
+              .string()
+              .min(1)
+              .refine((value) => value.startsWith("/"), "Codex home must be absolute"),
+          })
+          .strict(),
+      )
+      .max(15)
+      .refine(
+        (accounts) =>
+          new Set(accounts.map((a) => a.label)).size === accounts.length &&
+          new Set(accounts.map((a) => a.home)).size === accounts.length,
+        "Codex accounts need unique labels and homes",
+      )
+      .default([]),
     agentHosts: z
       .object({ connections: z.array(AgentHostConnectionSchema).max(15).default([]) })
       .strict()

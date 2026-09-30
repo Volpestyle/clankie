@@ -191,6 +191,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["accounts"],
     lines: [
       "  accounts [list] | connect github | disconnect github|linear   Owner's GitHub and Linear connections (JSON)",
+      "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
       "  accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]",
     ],
   },

@@ -1,5 +1,11 @@
 import type { HarnessSeatAdapter, SeatControl, SeatEvent } from "@clankie/agent-hosts";
-import { bundledSkills, type SkillsSettings } from "@clankie/settings";
+import {
+  bundledSkills,
+  codexAccounts,
+  selectCodexAccount,
+  type CodexAccount,
+  type SkillsSettings,
+} from "@clankie/settings";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -26,6 +32,7 @@ import {
   codexProcess,
   parseHerdrForegroundProcesses,
   resolveCodexSessionId,
+  resolveCodexHome,
   type HerdrForegroundProcess,
 } from "./codex-seat.ts";
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
@@ -117,7 +124,7 @@ export interface HerdrWatchRunner {
    * `codex queue --thread <id> --message <text>`. False on a non-zero exit or
    * "No active session".
    */
-  codexQueue?(sessionId: string, text: string): Promise<boolean>;
+  codexQueue?(sessionId: string, text: string, codexHome?: string): Promise<boolean>;
   closePane?(target: string): Promise<void>;
   /** Open a tab in a working directory; resolves with its root pane id. */
   createTab?(options: {
@@ -323,12 +330,13 @@ function execHerdr(
 function runExecFile(
   command: string,
   args: readonly string[],
+  env?: NodeJS.ProcessEnv,
 ): Promise<{ readonly status: number; readonly stdout: string; readonly stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(
       command,
       [...args],
-      { maxBuffer: 1024 * 1024, timeout: HERDR_COMMAND_TIMEOUT_MS },
+      { maxBuffer: 1024 * 1024, timeout: HERDR_COMMAND_TIMEOUT_MS, ...(env ? { env } : {}) },
       (error, stdout, stderr) => {
         if (error !== null && error.code === "ENOENT") {
           reject(new Error(`${command}: command not found`));
@@ -420,8 +428,12 @@ export function createHerdrWatchRunner(
       }
       return result.stdout;
     },
-    codexQueue: async (sessionId, text) => {
-      const result = await runExecFile("codex", ["queue", "--thread", sessionId, "--message", text]);
+    codexQueue: async (sessionId, text, codexHome) => {
+      const result = await runExecFile(
+        "codex",
+        ["queue", "--thread", sessionId, "--message", text],
+        codexHome ? { ...process.env, CODEX_HOME: codexHome } : undefined,
+      );
       if (result.status !== 0) return false;
       return !/no active session/iu.test(`${result.stdout}\n${result.stderr}`);
     },
@@ -630,10 +642,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private watchingSummaries = false;
   private stateUnreadable = false;
   private closed = false;
+  private readonly accounts: () => Promise<readonly CodexAccount[]>;
 
   public constructor(
     path: string,
     options: {
+      readonly codexAccounts?: () => Promise<readonly CodexAccount[]>;
       readonly skillBundle?: {
         readonly repoRoot: string;
         readonly stateDir: string;
@@ -667,6 +681,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ) {
     this.path = path;
     this.skillBundle = options.skillBundle;
+    this.accounts = options.codexAccounts ?? (async () => codexAccounts());
     this.remoteWorkspace = options.remoteWorkspace;
     this.piSeatModel = options.piSeatModel;
     this.hireCapacity = options.hireCapacity;
@@ -874,9 +889,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const processes = await paneProcesses(agent.paneId);
       const process = codexProcess(processes);
       if (process === undefined) return false;
-      const sessionId = resolveCodexSessionId(processes, await openFiles(process.pid));
+      const files = await openFiles(process.pid);
+      const sessionId = resolveCodexSessionId(processes, files);
       if (sessionId === undefined) return false;
-      return await codexQueue(sessionId, text);
+      return await codexQueue(sessionId, text, resolveCodexHome(files, sessionId));
     } catch {
       return false;
     }
@@ -975,15 +991,34 @@ export class HerdrWatchStore implements HerdrWatchPort {
             included: catalog.filter((skill) => skill.included).map((skill) => skill.name),
             excluded: catalog.filter((skill) => !skill.included).map((skill) => skill.name),
           };
+    let account: CodexAccount | undefined;
+    if (input.account !== undefined && (remote !== undefined || input.harness !== "codex")) {
+      return {
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail: "Account overrides require a local Codex hire.",
+      };
+    }
+    if (remote === undefined && input.harness === "codex") {
+      try {
+        const selected = selectCodexAccount(await this.accounts(), input.account);
+        account = { label: selected.label, home: selected.home };
+      } catch (error) {
+        return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };
+      }
+    }
     let paneId: string;
-    let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = { args: [] };
+    let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = {
+      args: [],
+      ...(account ? { env: { CODEX_HOME: account.home } } : {}),
+    };
     try {
       if (remote === undefined && this.skillBundle !== undefined) {
         skillLaunch = await workerSkills(
           input.harness,
           this.skillBundle.repoRoot,
           this.skillBundle.stateDir,
-          undefined,
+          account?.home,
           selectedSkills,
           input.workingDirectory,
         );
@@ -1053,7 +1088,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           if (agent.session === undefined)
             throw new Error("The seat started without reporting its session to herdr");
           return {
-            ...spawnedSeat(agent, paneId, subject, input, skillCondition),
+            ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
             control: { mode: "adapter" },
           };
         }
@@ -1108,7 +1143,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       if (brief !== undefined) await this.verifyBrief(agent, brief);
       return {
-        ...spawnedSeat(agent, paneId, subject, input, skillCondition),
+        ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
         ...(terminal === undefined ? {} : { control: terminal }),
       };
     } catch (caught) {
@@ -1658,11 +1693,13 @@ function spawnedSeat(
   subject: string,
   input: SpawnOperatorSeat,
   skills: Extract<OperatorSeatSpawnResult, { outcome: "spawned" }>["skills"],
+  account?: CodexAccount,
 ): Extract<HerdrSeatSpawnResult, { outcome: "spawned" }> {
   return {
     outcome: "spawned",
     ...(skills === undefined ? {} : { skills }),
     seat: {
+      ...(account ? { account } : {}),
       seatId: agent.terminalId,
       paneId,
       subject,

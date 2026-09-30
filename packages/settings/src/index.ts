@@ -89,3 +89,13 @@ export function parsePositiveInt(raw: string | undefined, fallback: number): num
   const parsed = Number.parseInt(raw, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
+
+export {
+  registerCodexAccount,
+  removeCodexAccount,
+  codexAccounts,
+  codexAccountStatus,
+  selectCodexAccount,
+  codexRateLimit,
+  type CodexAccount,
+} from "./codex-accounts.ts";

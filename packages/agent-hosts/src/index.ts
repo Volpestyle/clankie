@@ -1,3 +1,4 @@
+import { codexAccounts } from "@clankie/settings";
 import {
   runLocalAgentTurn,
   runSshAgentTurn,
@@ -49,17 +50,34 @@ function within(root: string, path: string) {
     !isAbsolute(rel)
   );
 }
-export function createLocalAgentHost(options: { home?: string } & TurnOptions = {}): AgentHost {
+export function createLocalAgentHost(
+  options: { home?: string; codexHomes?: readonly string[] } & TurnOptions = {},
+): AgentHost {
   const home = options.home ?? homedir();
   const roots = [
     { harness: "claude" as const, path: join(home, ".claude", "projects") },
-    { harness: "codex" as const, path: join(home, ".codex", "sessions") },
+    ...(
+      options.codexHomes ??
+      (options.home ? [join(home, ".codex")] : codexAccounts().map((account) => account.home))
+    ).map((codexHome) => ({ harness: "codex" as const, path: join(codexHome, "sessions") })),
     { harness: "grok" as const, path: join(home, ".grok", "sessions") },
     { harness: "pi" as const, path: join(home, ".pi", "agent", "sessions") },
   ];
   return {
     id: "local",
-    runAgentTurn: (input, signal) => runLocalAgentTurn(input, signal, options),
+    runAgentTurn: async (input, signal) => {
+      if (input.harness !== "codex" || !input.sessionPath) return runLocalAgentTurn(input, signal, options);
+      const actual = await realpath(input.sessionPath);
+      for (const root of roots.filter((entry) => entry.harness === "codex")) {
+        const canonical = await realpath(root.path).catch(() => root.path);
+        if (within(canonical, actual))
+          return runLocalAgentTurn(input, signal, {
+            ...options,
+            codexHome: root.path.slice(0, -"/sessions".length),
+          });
+      }
+      throw new Error("Codex transcript outside registered homes");
+    },
     async list(opts) {
       const count = limit(opts?.limit);
       const files: AgentSessionFile[] = [];

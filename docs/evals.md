@@ -261,10 +261,13 @@ current arm only) and [VUH-1467](testing/2026-09-30-eval-baseline/README.md)
 
 ### Codex account selection
 
-`node scripts/evals/run.mjs --harness codex --account LABEL ...` pins one registered
+`node scripts/evals/codex.mjs --account LABEL ...` pins one registered
 Codex account for the entire campaign. Without `--account`, it uses the same
 headroom selector as local hires (`clankie accounts codex list`). The report
 records the label and home. The usage guard starts with that home's known
 windows and then reads the isolated trial rollouts; it never switches accounts
-to continue after a guard stop. Big sweeps belong on an API key with an explicit
+to continue after a guard stop. An initial guard stop or wait refuses the campaign
+before credentials are loaded; start again after the reset. All regular
+`run.mjs` arguments apply, except the harness is fixed to Codex.
+Big sweeps belong on an API key with an explicit
 spend budget, not rotated subscription accounts.

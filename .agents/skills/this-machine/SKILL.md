@@ -51,6 +51,14 @@ Turning guidance off leaves Clankie able to lead using his own instructions,
 `"bundled"` for a single hire; its result records the condition. Global/project
 skills discovered independently by a harness are outside Clankie's bundle switch.
 
+Extra Codex accounts are registered homes: `clankie accounts codex add HOME
+--label LABEL`, `list`, and `remove LABEL` (also `/accounts codex` in the TUI).
+The owner signs in and trusts hooks in that home; never copy credentials or
+approve hook trust for them. Local Codex hires choose the most headroom across
+the five-hour and weekly rollout windows. Missing or stale usage is unknown,
+not an empty plan. `hire_agent` can pin `account: "LABEL"`; the hire and roster
+report the chosen account. Registration changes apply to new hires only.
+
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
 comes from turn events, and the owner can type into the same session. Other

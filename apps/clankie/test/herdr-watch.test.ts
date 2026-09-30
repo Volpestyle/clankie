@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OPERATOR_CONVERSATION_TEXT_MAX, OPERATOR_CONVERSATION_TOOL_DETAIL_MAX } from "@clankie/protocol";
 import { parseHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
@@ -336,7 +336,11 @@ describe("HerdrWatchStore", () => {
     await expect(store.sendToSeat("term-codex", "please ship it")).resolves.toBe(true);
     expect(paneProcesses).toHaveBeenCalledWith("w18:p2");
     expect(openFiles).toHaveBeenCalledWith(21290);
-    expect(codexQueue).toHaveBeenCalledWith("01a0740e-ea76-7aa2-8795-524c00368e71", "please ship it");
+    expect(codexQueue).toHaveBeenCalledWith(
+      "01a0740e-ea76-7aa2-8795-524c00368e71",
+      "please ship it",
+      "/Users/james/.codex",
+    );
     expect(promptAgent).not.toHaveBeenCalled();
     expect(pressEnter).not.toHaveBeenCalled();
     store.close();
@@ -1210,6 +1214,15 @@ it("parses Herdr's foreground agent process", () => {
 });
 
 describe("hiring a seat", () => {
+  let codexHome: string;
+  beforeEach(async () => {
+    codexHome = await mkdtemp(join(tmpdir(), "clankie-hire-account-"));
+    roots.push(codexHome);
+    await writeFile(join(codexHome, "auth.json"), "fixture presence only");
+    vi.stubEnv("CODEX_HOME", codexHome);
+    vi.stubEnv("CLANKIE_SETTINGS_FILE", join(codexHome, "settings.json"));
+  });
+  afterEach(() => vi.unstubAllEnvs());
   const hired: HerdrAgentSnapshot = {
     paneId: "w1C:p9",
     terminalId: "term-hired",
@@ -1302,6 +1315,7 @@ describe("hiring a seat", () => {
     expect(result).toEqual({
       outcome: "spawned",
       seat: {
+        account: { label: "default", home: codexHome },
         seatId: "term-hired",
         paneId: "w1C:p9",
         subject: expect.stringMatching(/^release-prep-[a-f0-9]{4}$/u),
@@ -1312,7 +1326,11 @@ describe("hiring a seat", () => {
         workingDirectory: tmpdir(),
       },
     });
-    expect(createTab).toHaveBeenCalledWith({ cwd: tmpdir(), label: "Release prep" });
+    expect(createTab).toHaveBeenCalledWith({
+      cwd: tmpdir(),
+      label: "Release prep",
+      env: { CODEX_HOME: codexHome },
+    });
     expect(startAgent.mock.calls[0]?.[0]).toMatchObject({ kind: "codex", paneId: "w1C:p9" });
     if (result.outcome === "spawned") {
       expect(startAgent.mock.calls[0]?.[0].name).toBe(result.seat.subject);
@@ -1350,7 +1368,11 @@ describe("hiring a seat", () => {
 
     // The old chair goes first, so a hire that fails leaves one seat, not two.
     expect(closePane).toHaveBeenCalledWith("w1C:p9");
-    expect(createTab).toHaveBeenCalledWith({ cwd: tmpdir(), label: "Release prep" });
+    expect(createTab).toHaveBeenCalledWith({
+      cwd: tmpdir(),
+      label: "Release prep",
+      env: { CODEX_HOME: codexHome },
+    });
     // Hired under the name it already had: that name is the persona's binding
     // key, so the same character sits down in the new district.
     expect(startAgent.mock.calls[0]?.[0]).toMatchObject({

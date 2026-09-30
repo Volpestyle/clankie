@@ -1,3 +1,11 @@
+import { z } from "zod";
+import {
+  codexAccounts,
+  codexAccountStatus,
+  registerCodexAccount,
+  removeCodexAccount,
+  SettingsStore,
+} from "@clankie/settings";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
@@ -23,9 +31,11 @@ import type { AccountsPort } from "./accounts.ts";
 export function createAccountRoutes(
   accounts: AccountsPort | undefined,
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
+  settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">> = new SettingsStore(),
 ): Hono {
   const app = new Hono();
   const paths = [
+    "/v1/accounts/codex",
     ACCOUNTS_PATH,
     ACCOUNT_GITHUB_START_PATH,
     ACCOUNT_GITHUB_POLL_PATH,
@@ -40,7 +50,8 @@ export function createAccountRoutes(
         const authority = await authorize(context.req.raw);
         if (authority !== true)
           return context.json({ ok: false, error: authority }, authority === "forbidden" ? 403 : 401);
-        if (accounts === undefined) return context.json({ ok: false, error: "unavailable" }, 503);
+        if (accounts === undefined && path !== "/v1/accounts/codex")
+          return context.json({ ok: false, error: "unavailable" }, 503);
         await next();
       } catch {
         return context.json({ ok: false, error: "unavailable" }, 503);
@@ -54,6 +65,36 @@ export function createAccountRoutes(
       }),
     );
   }
+  app.get("/v1/accounts/codex", async (context) =>
+    context.json({
+      ok: true,
+      accounts: codexAccounts(await settings.load()).map((account) => codexAccountStatus(account)),
+    }),
+  );
+  app.post("/v1/accounts/codex", async (context) => {
+    if (!settings.update) return context.json({ ok: false, error: "unavailable" }, 503);
+    const writable = { load: () => settings.load(), update: settings.update.bind(settings) };
+    const parsed = z
+      .discriminatedUnion("op", [
+        z
+          .object({
+            op: z.literal("add"),
+            home: z.string().min(1),
+            label: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u),
+          })
+          .strict(),
+        z.object({ op: z.literal("remove"), label: z.string().min(1) }).strict(),
+      ])
+      .safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
+    try {
+      if (parsed.data.op === "add") await registerCodexAccount(writable, parsed.data);
+      else await removeCodexAccount(writable, parsed.data.label);
+      return context.json({ ok: true });
+    } catch {
+      return context.json({ ok: false, error: "invalid_account" }, 400);
+    }
+  });
   app.get(ACCOUNTS_PATH, async (context) => {
     try {
       return context.json(AccountsResponseSchema.parse(await accounts!.list()));

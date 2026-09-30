@@ -1,3 +1,4 @@
+import { runCodexAccountsCommand } from "./codex-accounts.ts";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { OauthAppsSettingsSchema, SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { commandHost } from "./io.ts";
@@ -26,6 +27,10 @@ export async function runAccountsCommand(
     readonly request?: (path: string, body?: unknown) => Promise<Record<string, unknown>>;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "codex") {
+    if (options.request) throw new Error("Codex homes are managed on the local machine");
+    return runCodexAccountsCommand(args.slice(1), options);
+  }
   const env = options.env ?? process.env;
   const request =
     options.request ??

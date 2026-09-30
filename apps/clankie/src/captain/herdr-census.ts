@@ -123,6 +123,7 @@ function subjectForHerdrName(name: string): string | undefined {
 }
 
 export interface ObservedFleetSeat {
+  readonly account?: { label: string; home: string };
   readonly seatId: string;
   /**
    * The Herdr pane holding this seat, and the pane that started it. Herdr keys

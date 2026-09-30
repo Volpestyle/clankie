@@ -185,6 +185,9 @@ credential holder.
 - `/skills` opens the working-skill picker (also in `/setup`). Opinionated skills
   default on; product/tool skills always stay on. `/skills opinionated off` and
   `/skills exclude NAME` apply to new sessions and local hires.
+- `/accounts codex list` shows local Codex homes and observed quota headroom.
+  `/accounts codex add HOME --label LABEL` registers an owner-signed-in home;
+  `/accounts codex remove LABEL` forgets it without deleting credentials.
 - `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
   disable it. `/games on|off` remains available for direct use. Restart Clankie
   to apply a change. Saves live with the world server, not here.

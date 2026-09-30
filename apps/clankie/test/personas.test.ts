@@ -46,6 +46,17 @@ describe("PersonaStore", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
+  it("retains the hired account across roster refresh and restart, but not a replacement occupant", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-account-"));
+    roots.push(root);
+    const account = { label: "second", home: "/owner/codex-second" };
+    const seat = observed("term-1");
+    expect(new PersonaStore(root).adoptSpawn({ ...seat, account }, "Worker").account).toEqual(account);
+    const restarted = new PersonaStore(root);
+    expect(restarted.reconcile([seat])[0]?.account).toEqual(account);
+    expect(restarted.reconcile([{ ...seat, occupantId: OCCUPANT_TWO }])[0]?.account).toBeUndefined();
+  });
+
   it("carries the character across a Herdr rename instead of minting a stranger", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
     roots.push(root);

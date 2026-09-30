@@ -141,3 +141,26 @@ test("resume rejects ambiguous IDs and invalid messages before launching", async
   await expect(host.runAgentTurn({ ...f.input, cwd: "relative" })).rejects.toThrow("absolute");
   await expect(host.runAgentTurn({ ...f.input, message: "x".repeat(32769) })).rejects.toThrow("32768");
 });
+
+test("resuming a registered Codex transcript uses that home's credentials and session database", async () => {
+  const f = await fixture();
+  const codexHome = join(f.root, "second-codex");
+  await mkdir(join(codexHome, "sessions"), { recursive: true });
+  const sessionPath = join(codexHome, "sessions", `rollout-${sessionId}.jsonl`);
+  await writeFile(sessionPath, "{}\n");
+  let launchedHome: string | undefined;
+  const launch = ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+    launchedHome = options?.env?.CODEX_HOME;
+    return spawn(process.execPath, [f.file, command, ...args], options);
+  }) as typeof spawn;
+  const host = createLocalAgentHost({ home: f.root, codexHomes: [codexHome], spawn: launch });
+  expect((await host.list()).some((file) => file.path === sessionPath && file.harness === "codex")).toBe(
+    true,
+  );
+  expect((await host.readBytes(sessionPath, 0, 20)).bytes.toString()).toBe("{}\n");
+  expect((await host.runAgentTurn({ ...f.input, harness: "codex", sessionPath })).exitCode).toBe(0);
+  expect(launchedHome).toBe(codexHome);
+  await expect(host.runAgentTurn({ ...f.input, harness: "codex", sessionPath: f.file })).rejects.toThrow(
+    "outside registered homes",
+  );
+});
