@@ -293,6 +293,10 @@ selection/expiry checks. `clankie gateway rotate-encryption-key` changes the
 broker wrapping key; coordinate a captain restart separately and re-pair every
 device afterward. It never restarts the service itself.
 
+After sleep, an account doorway stays `connecting` while its network probe fails;
+lost refresh replies get bounded retries inside rotation grace. `sign_in_required`
+in `clankie gateway status` or `doctor` means the owner must use the sign-in wizard.
+
 `clankie send --conversation ID "message"` steers Clankie's active Pi turn;
 add `--delivery queue` for a separate follow-up. Use `--stdin` instead of a
 quoted message to read a pipe while preserving interior newlines. Either starts

@@ -303,7 +303,13 @@ export class PublicGatewayConnector {
   }
 
   private connect(): void {
-    if (!this.started || this.socket !== undefined || this.connecting) return;
+    if (
+      !this.started ||
+      this.socket !== undefined ||
+      this.connecting ||
+      this.signInRequiredSince !== undefined
+    )
+      return;
     this.connecting = true;
     void this.openSocket().finally(() => {
       this.connecting = false;
@@ -316,6 +322,7 @@ export class PublicGatewayConnector {
       credential =
         this.resolveHostToken === undefined ? { token: this.hostToken ?? "" } : await this.resolveHostToken();
     } catch (error) {
+      if (!this.started) return;
       if (this.tokenErrorIsTerminal(error)) {
         // A rejected account credential outlives every retry, so the loop stops
         // here and says so once. `clankie gateway status` and `doctor` read it.

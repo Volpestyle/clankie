@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   beginClankieAccountLogin,
@@ -8,6 +8,7 @@ import {
   derivePublicGatewayHostId,
   generatePublicGatewayInstallationId,
   redactCredential,
+  refreshClankieAccountCredential,
   type CredentialStore,
   type ProviderCredential,
   type RedactedCredential,
@@ -24,6 +25,8 @@ const accountConfig = {
     selfSignUpEnabled: false,
   },
 } as const;
+
+afterEach(() => vi.useRealTimers());
 
 describe("Clankie account credential", () => {
   it("signs an invited user in with one email OTP and derives a per-installation host", async () => {
@@ -79,6 +82,7 @@ describe("Clankie account credential", () => {
     let refreshes = 0;
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       if (String(input).endsWith("/gateway/v1/config")) return Response.json(accountConfig);
+      if (init?.method === "HEAD") return new Response(null, { status: 400 });
       refreshes += 1;
       expect(new Headers(init?.headers).get("x-amz-target")).toBe(
         "AWSCognitoIdentityProviderService.GetTokensFromRefreshToken",
@@ -94,6 +98,99 @@ describe("Clankie account credential", () => {
     expect(first.accountId).toBe("account-1");
     expect(refreshes).toBe(1);
     expect(await store.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({ refresh: "refresh-2" });
+  });
+
+  it.each(["transport", "body"])(
+    "recovers a lost %s reply inside rotation grace and keeps concurrent callers signed in",
+    async (loss) => {
+      vi.useFakeTimers();
+      const store = new MemoryStore();
+      await store.set(CLANKIE_ACCOUNT_PROVIDER_ID, expiredCredential);
+      const refreshTimes: number[] = [];
+      const tokens: string[] = [];
+      const access = jwt({ sub: "account-1", client_id: "client123", token_use: "access" });
+      const fetchImpl: typeof fetch = async (input, init) => {
+        if (String(input).endsWith("/gateway/v1/config")) return Response.json(accountConfig);
+        if (init?.method === "HEAD") return new Response(null, { status: 400 });
+        tokens.push((JSON.parse(String(init?.body)) as { RefreshToken: string }).RefreshToken);
+        refreshTimes.push(Date.now());
+        if (refreshTimes.length === 1) {
+          // The server spends refresh-1, but neither headers nor body make it home.
+          await new Promise((resolve) => setTimeout(resolve, 10_000));
+          if (loss === "transport") throw new TypeError("reply lost after rotation");
+          const response = Response.json({});
+          vi.spyOn(response, "json").mockRejectedValue(new TypeError("body disconnected"));
+          return response;
+        }
+        if (Date.now() - refreshTimes[0]! >= 60_000) {
+          return Response.json({ __type: "RefreshTokenReuseException" }, { status: 400 });
+        }
+        return Response.json({ AuthenticationResult: { AccessToken: access, RefreshToken: "refresh-3" } });
+      };
+      const token = createClankieAccountTokenProvider({ gatewayUrl: gateway, store, fetchImpl });
+      const result = Promise.all([token(), token()]);
+      await vi.runAllTimersAsync();
+      const [first, second] = await result;
+      expect(first).toEqual(second);
+      expect(first.accountId).toBe("account-1");
+      expect(tokens).toEqual(["refresh-1", "refresh-1"]);
+      expect(refreshTimes[1]! - refreshTimes[0]!).toBe(10_250);
+      expect(await store.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({ access, refresh: "refresh-3" });
+      await token();
+      expect(tokens).toHaveLength(2);
+    },
+  );
+
+  it("does not spend a refresh token while the account endpoint is unreachable after wake", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("network asleep"));
+    await expect(
+      refreshClankieAccountCredential(expiredCredential, accountConfig, fetchImpl),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({ method: "HEAD" });
+  });
+
+  it.each(["transport", "untyped 503"])(
+    "bounds %s recovery and preserves the credential for reconnect",
+    async (failure) => {
+      vi.useFakeTimers();
+      const store = new MemoryStore();
+      await store.set(CLANKIE_ACCOUNT_PROVIDER_ID, expiredCredential);
+      let attempts = 0;
+      const token = createClankieAccountTokenProvider({
+        gatewayUrl: gateway,
+        store,
+        fetchImpl: async (input, init) => {
+          if (String(input).endsWith("/gateway/v1/config")) return Response.json(accountConfig);
+          if (init?.method === "HEAD") return new Response(null);
+          attempts += 1;
+          if (failure === "transport") throw new TypeError("offline");
+          return new Response("Service unavailable", { status: 503 });
+        },
+      });
+      const result = token().catch((error: unknown) => error);
+      await vi.runAllTimersAsync();
+      const error = await result;
+      expect(error).toMatchObject({ code: "service_unavailable" });
+      expect(clankieAccountSignInRequired(error)).toBe(false);
+      expect(attempts).toBe(4);
+      expect(await store.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toEqual(expiredCredential);
+    },
+  );
+
+  it("does not continue grace recovery after a retry timer slept beyond its deadline", async () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    const result = refreshClankieAccountCredential(expiredCredential, accountConfig, async (_input, init) => {
+      if (init?.method === "HEAD") return new Response(null);
+      attempts += 1;
+      throw new TypeError("reply lost");
+    }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.runAllTimersAsync();
+    expect(await result).toMatchObject({ code: "service_unavailable" });
+    expect(attempts).toBe(1);
   });
 
   it("opens signup with the same email code when the pool permits it", async () => {
@@ -146,8 +243,9 @@ describe("Clankie account credential", () => {
       clientId: "client123",
     });
     let refreshes = 0;
-    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       if (String(input).endsWith("/gateway/v1/config")) return Response.json(accountConfig);
+      if (init?.method === "HEAD") return new Response(null, { status: 400 });
       refreshes += 1;
       return Response.json({
         AuthenticationResult: {
@@ -387,3 +485,12 @@ function jwt(payload: Readonly<Record<string, unknown>>): string {
     "signature",
   ].join(".");
 }
+
+const expiredCredential = {
+  type: "oauth",
+  access: "expired-access",
+  refresh: "refresh-1",
+  expires: 1,
+  accountId: "account-1",
+  clientId: "client123",
+} as const;

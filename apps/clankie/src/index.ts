@@ -22,6 +22,8 @@ import { MAX_REALTIME_AUDIO_APPEND_BYTES } from "@clankie/discord-presence-core"
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
+  CLANKIE_ACCOUNT_PROVIDER_ID,
+  ClankieAccountAuthError,
   LINEAR_WEBHOOK_PROVIDER_ID,
   clankieAccountSignInRequired,
   createClankieAccountTokenProvider,
@@ -288,8 +290,13 @@ if (
       gatewayUrl: startupSettings.publicGateway.url,
       store: operatorCredentialStore,
     });
-    const initial = await resolveAccountToken();
-    const hostId = derivePublicGatewayHostId(initial.accountId, startupSettings.publicGateway.installationId);
+    // Derive the stable route locally. Network/token resolution belongs to the
+    // connector's retry loop, so an offline startup can recover after wake.
+    const stored = await operatorCredentialStore.get(CLANKIE_ACCOUNT_PROVIDER_ID);
+    if (stored?.type !== "oauth" || stored.accountId === undefined) {
+      throw new ClankieAccountAuthError("account_not_invited", "Sign in to your Clankie account first");
+    }
+    const hostId = derivePublicGatewayHostId(stored.accountId, startupSettings.publicGateway.installationId);
     publicGatewayConnector = new PublicGatewayConnector({
       encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
       gatewayUrl: startupSettings.publicGateway.url,

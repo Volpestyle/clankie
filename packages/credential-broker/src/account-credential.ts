@@ -11,6 +11,9 @@ import type { CredentialStore, ProviderCredential } from "./credential-store.ts"
 export const CLANKIE_ACCOUNT_PROVIDER_ID = "clankie-account";
 export { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 
+const COGNITO_REQUEST_TIMEOUT_MS = 10_000;
+const REFRESH_RECOVERY_WINDOW_MS = 50_000; // Leave margin inside Cognito's 60-second rotation grace.
+const REFRESH_RETRY_DELAYS_MS = [250, 500, 1_000];
 const ACCESS_REFRESH_WINDOW_MS = 5 * 60_000;
 const TOKEN_LIFETIME_FALLBACK_SECONDS = 3_600;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
@@ -233,9 +236,9 @@ export async function completeClankieAccountLogin(input: {
 }
 
 /**
- * The pool rotates refresh tokens, so the stored one dies the moment Cognito
- * answers. `persistRotation` writes the replacement before this function can
- * throw on anything else: a malformed access token must cost one retry, not
+ * The pool rotates refresh tokens, with a short grace period for lost replies.
+ * `persistRotation` writes the replacement before this function can throw on
+ * anything else: a malformed access token must cost one retry, not
  * remote access until someone notices and runs the email wizard.
  */
 export async function refreshClankieAccountCredential(
@@ -251,14 +254,21 @@ export async function refreshClankieAccountCredential(
     );
   }
   try {
-    const response = RefreshResponseSchema.parse(
-      await cognitoRequest(
-        config,
-        "GetTokensFromRefreshToken",
-        { ClientId: config.account.clientId, RefreshToken: credential.refresh },
-        fetchImpl,
-      ),
-    );
+    // A harmless request to the same endpoint establishes reachability after
+    // sleep. Failure leaves the token untouched and lets the connector back off.
+    const reachable = await fetchImpl(config.account.endpoint, {
+      method: "HEAD",
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+    // Cognito can reject HEAD with 4xx while still proving the route is up.
+    if (reachable.status === 429) {
+      throw new ClankieAccountAuthError("rate_limited", RATE_LIMITED_MESSAGE);
+    }
+    if (reachable.status >= 500) {
+      throw new ClankieAccountAuthError("service_unavailable", "Clankie account endpoint is unavailable");
+    }
+    const response = RefreshResponseSchema.parse(await recoverRefreshReply(credential, config, fetchImpl));
     const refresh = response.AuthenticationResult.RefreshToken ?? credential.refresh;
     if (refresh !== credential.refresh) await persistRotation?.({ ...credential, refresh });
     return credentialFromAuthentication(
@@ -267,6 +277,36 @@ export async function refreshClankieAccountCredential(
     );
   } catch (error) {
     throw mapRefreshError(error);
+  }
+}
+
+/** Retry uncertain delivery here, before reconnect backoff can outlive rotation grace. */
+async function recoverRefreshReply(
+  credential: OauthCredential,
+  config: PublicGatewayConfig,
+  fetchImpl: typeof fetch,
+): Promise<unknown> {
+  const deadline = Date.now() + REFRESH_RECOVERY_WINDOW_MS;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await cognitoRequest(
+        config,
+        "GetTokensFromRefreshToken",
+        { ClientId: config.account.clientId, RefreshToken: credential.refresh },
+        fetchImpl,
+      );
+    } catch (error) {
+      const mapped = mapRefreshError(error);
+      const delay = REFRESH_RETRY_DELAYS_MS[attempt];
+      // A rate limit is an explicit refusal, not a lost rotation; respect the
+      // connector's backoff. Only uncertain delivery gets this fast retry path.
+      if (mapped.code !== "service_unavailable" || delay === undefined) throw mapped;
+      if (Date.now() + delay + COGNITO_REQUEST_TIMEOUT_MS >= deadline) throw mapped;
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      // Timers may resume minutes later after sleep. Never call that a retry
+      // inside the grace period; return control to the normal reconnect loop.
+      if (Date.now() + COGNITO_REQUEST_TIMEOUT_MS >= deadline) throw mapped;
+    }
   }
 }
 
@@ -408,9 +448,14 @@ async function cognitoRequest(
     },
     body: JSON.stringify(body),
     redirect: "error",
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(COGNITO_REQUEST_TIMEOUT_MS),
   });
-  const raw = (await response.json().catch(() => ({}))) as { __type?: unknown; message?: unknown };
+  // A successful response can lose its body after Cognito has rotated. Let
+  // that read failure reach refresh recovery instead of inventing an empty reply.
+  const raw = (await response.json().catch((error: unknown) => {
+    if (response.ok && operation === "GetTokensFromRefreshToken") throw error;
+    return {};
+  })) as { __type?: unknown; message?: unknown };
   if (response.ok) return raw;
   const headerCode = response.headers.get("x-amzn-errortype")?.split(":", 1)[0];
   const bodyCode = typeof raw.__type === "string" ? raw.__type.split("#").at(-1) : undefined;
@@ -451,17 +496,15 @@ function isRateLimited(error: unknown): boolean {
 }
 
 /**
- * An answer from Cognito is about this Mac's credential, not the weather.
- * Rotation revokes the whole chain when it sees a spent refresh token, so every
- * later attempt presents the same dead one: only a rate limit or Cognito's own
- * failure is worth retrying. A sign-in error class is not enumerated by name
- * here because the pool adds them (`Refresh token reuse detected` arrives with
- * no mapped type and must not read as a passing outage).
+ * Explicit client refusals need sign-in, including an unrecognized token-reuse
+ * error. HTTP 5xx (even a proxy's untyped response) and transport/body failures
+ * say nothing about the credential and must remain retryable.
  */
 function mapRefreshError(error: unknown): ClankieAccountAuthError {
   if (error instanceof ClankieAccountAuthError) return error;
   if (
     isRateLimited(error) ||
+    (error instanceof Error && "status" in error && (error as CognitoError).status >= 500) ||
     isCognitoError(error, "InternalErrorException") ||
     isCognitoError(error, "ServiceUnavailableException")
   ) {

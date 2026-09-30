@@ -10,7 +10,7 @@ interactive forms and navigation
 ([ADR 0012](adr/0012-provider-auth-model-registry.md)).
 
 Live operator work stays on the service HTTP catalog already shared by the TUI,
-phone, relay, and menu bar: chat, play, memory, pairing, and conversations are
+phone and relay: chat, play, memory, pairing, and conversations are
 not separate copies of the service's state. The commands below describe local
 mode unless noted. [Hosted mode](#local-and-hosted-connection-modes) connects to
 an existing remote service with a smaller supported set.
@@ -331,6 +331,14 @@ the captain does not answer. Use the interactive TUI `/gateway` wizard to sign i
 invited email and one-time code; the rotating account credential goes to
 Keychain and the wizard restarts Clankie automatically. `disable` signs this Mac
 out and removes its installation binding.
+
+After sleep or an offline startup, the account connector backs off until the
+account endpoint responds to a harmless reachability probe. Lost refresh replies
+get up to three quick retries with the same token inside the rotation grace
+window. Network failures keep the doorway `connecting`; an explicit credential
+rejection parks it at `sign_in_required`, visible in `/gateway` and `doctor`,
+until the owner signs in again. Sleeping through the entire grace window cannot
+recover a replacement token whose reply was lost.
 
 `set --url URL --host-id ID` remains only for legacy static-bearer migration and
 local verification. It never accepts a secret as a flag.

@@ -9,8 +9,13 @@ import {
   type PublicGatewayResponseChunkFrame,
   type PublicGatewayTunnelFrame,
 } from "@clankie/protocol/public-gateway";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
+import {
+  createClankieAccountTokenProvider,
+  clankieAccountSignInRequired,
+  type ProviderCredential,
+} from "@clankie/credential-broker";
 import { PublicGatewayConnector } from "../src/public-gateway-connector.ts";
 
 const hostId = "mac_james_12345678";
@@ -259,11 +264,103 @@ describe("public gateway Mac connector", () => {
     );
   });
 
+  it("backs off through an offline wake, then recovers a lost rotation and reconnects signed in", async () => {
+    const gateway = await fakeGateway();
+    const access = [
+      "header",
+      Buffer.from(JSON.stringify({ sub: "account-1", client_id: "client123", token_use: "access" })).toString(
+        "base64url",
+      ),
+      "signature",
+    ].join(".");
+    let stored: ProviderCredential = {
+      type: "oauth",
+      access,
+      refresh: "refresh-1",
+      expires: Date.now() + 3_600_000,
+      accountId: "account-1",
+      clientId: "client123",
+    };
+    let online = false;
+    let probes = 0;
+    const spent: Array<{ token: string; at: number }> = [];
+    const transitions: string[] = [];
+    const resolveHostToken = createClankieAccountTokenProvider({
+      gatewayUrl: gateway.origin,
+      store: {
+        get: async () => stored,
+        set: async (_id, credential) => {
+          stored = credential;
+        },
+        delete: async () => false,
+        list: async () => ({}),
+      },
+      fetchImpl: async (input, init) => {
+        if (String(input).endsWith("/gateway/v1/config"))
+          return Response.json({
+            schemaVersion: 1,
+            account: {
+              provider: "cognito_email_otp",
+              endpoint: "https://cognito-idp.us-east-1.amazonaws.com",
+              issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_pool",
+              clientId: "client123",
+              selfSignUpEnabled: false,
+            },
+          });
+        if (init?.method === "HEAD") {
+          probes += 1;
+          if (!online) throw new TypeError("network not ready after wake");
+          return new Response(null, { status: 400 });
+        }
+        spent.push({
+          token: (JSON.parse(String(init?.body)) as { RefreshToken: string }).RefreshToken,
+          at: Date.now(),
+        });
+        if (spent.length === 1) throw new TypeError("server rotated; reply lost");
+        if (Date.now() - spent[0]!.at >= 60_000)
+          return Response.json({ __type: "RefreshTokenReuseException" }, { status: 400 });
+        return Response.json({ AuthenticationResult: { AccessToken: access, RefreshToken: "refresh-3" } });
+      },
+    });
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      installationId: "YWFhYWFhYWFhYWFhYWFhYQ",
+      resolveHostToken,
+      tokenErrorIsTerminal: clankieAccountSignInRequired,
+      controlPlaneUrl: gateway.origin,
+      relayUrl: gateway.origin,
+      reconnectMinimumMs: 5,
+      reconnectMaximumMs: 20,
+      onDoorwayChange: (change) => transitions.push(change.state),
+    });
+    connectors.push(connector);
+    connector.start();
+    const initial = await gateway.nextConnection();
+    await vi.waitFor(() => expect(connector.doorway.state).toBe("connected"));
+    // Sleep expires the token and loses the socket. Gateway discovery can come
+    // back before the separate Cognito route is usable.
+    stored = { ...stored, expires: 1 };
+    initial.socket.close();
+    await vi.waitFor(() => expect(probes).toBeGreaterThanOrEqual(2));
+    expect(spent).toEqual([]);
+    expect(connector.doorway.state).toBe("connecting");
+    online = true;
+    const recovered = await gateway.nextConnection();
+    await vi.waitFor(() => expect(connector.doorway.state).toBe("connected"));
+    expect(recovered.request.headers.authorization).toBe(`Bearer ${access}`);
+    expect(spent.map(({ token }) => token)).toEqual(["refresh-1", "refresh-1"]);
+    expect(spent[1]!.at - spent[0]!.at).toBeLessThan(60_000);
+    expect(stored).toMatchObject({ refresh: "refresh-3" });
+    expect(transitions).not.toContain("sign_in_required");
+  });
+
   it("parks on a credential no retry can fix and says the Mac needs signing in", async () => {
     const target = await listen(createServer((_request, response) => response.end("{}")));
     const gateway = await fakeGateway();
     const logs: Array<{ readonly fields: Readonly<Record<string, unknown>>; readonly message: string }> = [];
     let resolutions = 0;
+    const transitions: string[] = [];
     const connector = new PublicGatewayConnector({
       gatewayUrl: gateway.origin,
       hostId,
@@ -278,6 +375,7 @@ describe("public gateway Mac connector", () => {
         );
       },
       tokenErrorIsTerminal: () => true,
+      onDoorwayChange: (change) => transitions.push(change.state),
       controlPlaneUrl: target,
       relayUrl: target,
       logger: { info: () => undefined, warn: (fields, message) => logs.push({ fields, message }) },
@@ -289,6 +387,7 @@ describe("public gateway Mac connector", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(resolutions).toBe(1);
+    expect(transitions).toEqual(["sign_in_required"]);
     expect(logs.map(({ message }) => message)).toEqual(["public gateway needs this Mac signed in again"]);
     // The code rides along, so the log names which failure parked the doorway.
     expect(logs[0]?.fields).toMatchObject({ error: "ClankieAccountAuthError", code: "refresh_rejected" });
