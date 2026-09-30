@@ -58,8 +58,11 @@ both and is cut. As a check on the second criterion, each part must also pass:
   surfaces nobody uses weekly.
 
 First-class surfaces are the **app**, **Discord text and voice**, and the
-**TUI**. The macOS **menu bar is retired**. The Discord Activity and the
-user-session lab body must justify themselves in the surface review.
+**TUI**. The macOS **menu bar is retired**. Discord has two supported paths,
+and both stay possible: the **official bot** (with the Activity as its
+watch-me-play surface) and the **user-session body** (the only path Discord
+allows for Go Live and watching screen shares). The surface review's proposal to
+retire either is declined (James, 2026-09-30).
 
 "Always on" may be a hosted body or an awake Mac; the owner chooses, and
 Clankie treats host sleep as a normal condition to recover from rather than as
