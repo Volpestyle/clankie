@@ -9,7 +9,7 @@ import {
   type DomainEvent,
 } from "@clankie/protocol";
 import type { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 
@@ -20,6 +20,7 @@ const OPERATOR = { authorization: "Bearer operator-secret" };
 const IOS = { name: "James iPhone", platform: "ios" } as const;
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -199,6 +200,9 @@ describe("control-plane device pairing surface", () => {
 
   it("returns the host-scoped public base through redeem, completion, and refresh", async () => {
     const hostBaseUrl = "https://api.clankie.bot/h/mac_james_12345678";
+    const directRoute = { controlPlaneUrl: "http://mac.tailnet:4310", relayUrl: "http://mac.tailnet:4321" };
+    vi.stubEnv("CLANKIE_DIRECT_CONTROL_PLANE_URL", directRoute.controlPlaneUrl);
+    vi.stubEnv("CLANKIE_RELAY_URL", directRoute.relayUrl);
     const { app } = await makeApp(await makeStore(), {
       deviceSessionKey: DEVICE_KEY,
       publicGatewayHostBaseUrl: hostBaseUrl,
@@ -208,13 +212,17 @@ describe("control-plane device pairing surface", () => {
     expect(await redeemed.clone().json()).toMatchObject({ hostBaseUrl });
     const completionToken = ((await redeemed.json()) as { completionToken: string }).completionToken;
     const completed = await complete(app, { completionToken, acceptedGrants: SUPERVISE_GRANTS });
-    expect(await completed.clone().json()).toMatchObject({ relayUrl: hostBaseUrl });
+    expect(await completed.clone().json()).toMatchObject({ relayUrl: hostBaseUrl, directRoute });
     const token = ((await completed.json()) as { deviceToken: string }).deviceToken;
     expect(
       await devicePost(app, "/v1/devices/self/session/refresh", token).then((response) => response.json()),
     ).toMatchObject({
       relayUrl: hostBaseUrl,
+      directRoute,
     });
+    expect(await deviceGet(app, "/v1/devices/self", token).then((response) => response.json())).toMatchObject(
+      { directRoute },
+    );
   });
 
   it("carries no grants inside the session token", async () => {

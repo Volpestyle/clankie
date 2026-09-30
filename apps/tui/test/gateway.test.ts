@@ -51,6 +51,38 @@ describe("gateway command", () => {
     });
   });
 
+  it("configures explicit direct endpoints without changing gateway pairing", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-direct-command-"));
+    tempDirectories.push(directory);
+    const settings = new SettingsStore(join(directory, "settings.json"));
+    const credentials = new FileCredentialStore(join(directory, "credentials.json"));
+    const options = { settings, credentials, env: {}, fetchImpl: offline };
+    const route = { controlPlaneUrl: "http://mac.tailnet:4310", relayUrl: "http://mac.tailnet:4321" };
+    const result = await runGatewayCommand(
+      ["direct", "--control-plane-url", route.controlPlaneUrl, "--relay-url", route.relayUrl],
+      options,
+    );
+    expect(result.directRoute).toEqual(route);
+    expect((await settings.load()).relay).toEqual({
+      controlPlaneUrl: route.controlPlaneUrl,
+      url: route.relayUrl,
+    });
+    expect(result.publicGateway).toEqual({});
+    await expect(
+      runGatewayCommand(
+        [
+          "direct",
+          "--control-plane-url",
+          "https://api.clankie.bot/h/mac_james_12345678",
+          "--relay-url",
+          route.relayUrl,
+        ],
+        options,
+      ),
+    ).rejects.toThrow();
+    await expect(runGatewayCommand(["direct", "--relay-url", route.relayUrl], options)).rejects.toThrow();
+  });
+
   it("rotates only the encryption wrapping key and leaves restart explicit", async () => {
     const directory = await mkdtemp(join(tmpdir(), "clankie-gateway-rotation-"));
     tempDirectories.push(directory);

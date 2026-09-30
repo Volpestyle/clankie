@@ -7,9 +7,11 @@ import {
   generatePublicGatewayInstallationId,
   type CredentialStore,
 } from "@clankie/credential-broker";
+import { DeviceDirectRouteSchema } from "@clankie/protocol";
 import { PublicGatewaySettingsSchema, SettingsStore } from "@clankie/settings";
 import {
   gatewayConfigure,
+  gatewayConfigureDirect,
   gatewayDisable,
   gatewayStatus,
   runGatewayCommand,
@@ -51,6 +53,8 @@ async function showStatus(
       `doorway: ${doorwayLine(status)}`,
       `url: ${status.publicGateway.url ?? "—"}`,
       `host id: ${status.hostId ?? "—"}`,
+      `direct control: ${status.directRoute?.controlPlaneUrl ?? "not configured"}`,
+      `direct relay: ${status.directRoute?.relayUrl ?? "not configured"}`,
       `host credential: ${status.credentialPresent ? "stored" : "missing"}`,
       `settings file: ${status.settingsFile}`,
     ].join("\n"),
@@ -94,6 +98,7 @@ async function runWizard(
       options: [
         { value: "configure", label: "Enable remote access", hint: "email + one-time code" },
         { value: "status", label: "Show status" },
+        { value: "direct", label: "Configure direct fallback", hint: "private network endpoints" },
         {
           value: "rotate",
           label: "Rotate encryption key",
@@ -106,6 +111,32 @@ async function runWizard(
     });
     if (action === "status") {
       await showStatus(shell, services);
+      return;
+    }
+    if (action === "direct") {
+      const validateOrigin = (value: string) =>
+        DeviceDirectRouteSchema.safeParse({ controlPlaneUrl: value.trim(), relayUrl: value.trim() }).success
+          ? undefined
+          : "Enter a direct http(s) origin without a path, credentials, query, or fragment.";
+      const controlPlaneUrl = await flow.readText({
+        message: "Device-reachable control plane URL (usually port 4310)",
+        validate: validateOrigin,
+      });
+      if (controlPlaneUrl === undefined) return;
+      const relayUrl = await flow.readText({
+        message: "Device-reachable relay URL (usually port 4321)",
+        validate: validateOrigin,
+      });
+      if (relayUrl === undefined) return;
+      await gatewayConfigureDirect(
+        { controlPlaneUrl: controlPlaneUrl.trim(), relayUrl: relayUrl.trim() },
+        services,
+      );
+      await services.restartGateway?.();
+      flow.renderLine(
+        "Direct fallback saved. Open the app once through the gateway to learn these endpoints.",
+        "success",
+      );
       return;
     }
     if (action === "rotate") {

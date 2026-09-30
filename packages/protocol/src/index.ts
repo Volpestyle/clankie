@@ -4492,12 +4492,29 @@ export const PairingCompleteRequestSchema = z.object({
 });
 export type PairingCompleteRequest = z.infer<typeof PairingCompleteRequestSchema>;
 
+const DeviceDirectOriginSchema = DeviceHostBaseUrlSchema.refine((value) => {
+  try {
+    const url = new URL(value);
+    return url.pathname === "/" && url.hostname !== "api.clankie.bot";
+  } catch {
+    return false;
+  }
+}, "expected a direct origin, not a public gateway route");
+
+/** Host-advertised private endpoints; control and relay need not share a port. */
+export const DeviceDirectRouteSchema = z.object({
+  controlPlaneUrl: DeviceDirectOriginSchema,
+  relayUrl: DeviceDirectOriginSchema,
+});
+export type DeviceDirectRoute = z.infer<typeof DeviceDirectRouteSchema>;
+
 export const PairingCompleteResponseSchema = z.object({
   deviceId: z.string().min(1),
   deviceToken: z.string().min(1),
   grants: DeviceGrantSetSchema,
   sessionExpiresAt: z.string().datetime(),
   relayUrl: DeviceHostBaseUrlSchema.optional(),
+  directRoute: DeviceDirectRouteSchema.optional(),
 });
 export type PairingCompleteResponse = z.infer<typeof PairingCompleteResponseSchema>;
 
@@ -4506,6 +4523,7 @@ export const DeviceSessionRefreshResponseSchema = z.object({
   grants: DeviceGrantSetSchema,
   sessionExpiresAt: z.string().datetime(),
   relayUrl: DeviceHostBaseUrlSchema.optional(),
+  directRoute: DeviceDirectRouteSchema.optional(),
 });
 export type DeviceSessionRefreshResponse = z.infer<typeof DeviceSessionRefreshResponseSchema>;
 
@@ -4513,6 +4531,7 @@ export type DeviceSessionRefreshResponse = z.infer<typeof DeviceSessionRefreshRe
 export const DeviceSelfResponseSchema = z.object({
   /** Hosting lifecycle is never granted to a device, including through the legacy relay. */
   controlScope: z.literal("hosted").optional(),
+  directRoute: DeviceDirectRouteSchema.optional(),
   deviceId: z.string().min(1),
   name: z.string().min(1),
   platform: DevicePlatformSchema,

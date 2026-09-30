@@ -114,6 +114,7 @@ import {
   DEVICE_PUSH_PATH,
   type DevicePushBinding,
   type DeviceSelfResponse,
+  DeviceDirectRouteSchema,
   type DeviceSessionRefreshResponse,
   type DiscordPersonIdentity,
   type DiscordPersonMemoryFact,
@@ -2832,9 +2833,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // response and is never logged; events carry only the non-secret offer id.
   // Public gateway wins when configured. Otherwise the existing owner-authored
   // direct LAN/Tailscale relay origin remains the advanced transport.
-  const advertisedRelayUrl = (): { relayUrl: string } | Record<never, never> => {
+  const advertisedDirectRoute = () => {
+    const parsed = DeviceDirectRouteSchema.safeParse({
+      controlPlaneUrl: process.env.CLANKIE_DIRECT_CONTROL_PLANE_URL?.trim(),
+      relayUrl: process.env.CLANKIE_RELAY_URL?.trim(),
+    });
+    return parsed.success ? { directRoute: parsed.data } : {};
+  };
+  const advertisedRelayUrl = () => {
     const raw = dependencies.publicGatewayHostBaseUrl ?? process.env.CLANKIE_RELAY_URL?.trim();
-    return raw === undefined || raw.length === 0 ? {} : { relayUrl: raw };
+    return {
+      ...(raw === undefined || raw.length === 0 ? {} : { relayUrl: raw }),
+      ...advertisedDirectRoute(),
+    };
   };
 
   app.post(HOSTED_PAIR_OFFER_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
@@ -3156,6 +3167,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const record = devices.get(identity.deviceId);
     if (record === undefined) return context.json({ error: "device_authentication_required" }, 401);
     return context.json({
+      ...advertisedDirectRoute(),
       deviceId: record.deviceId,
       name: record.name,
       platform: record.platform,

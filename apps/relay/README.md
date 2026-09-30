@@ -89,3 +89,27 @@ Configuration:
 Structured logs contain bounded, redacted route, operation, device,
 conversation, surface, status, and recovery metadata only. They never include
 message text or either bearer credential.
+
+## Direct fallback for gateway-paired devices
+
+The app can recover from a gateway outage through explicitly configured private
+endpoints. Control and relay are separate services; their ports are never inferred.
+Configure addresses that the device can already reach:
+
+```sh
+clankie gateway direct --control-plane-url http://my-mac.tailnet.ts.net:4310 --relay-url http://my-mac.tailnet.ts.net:4321
+clankie restart captain
+```
+
+The TUI exposes the same settings under `/remote-access` → **Configure direct
+fallback**. These commands save `relay.controlPlaneUrl` and `relay.url`;
+`CLANKIE_DIRECT_CONTROL_PLANE_URL` and `CLANKIE_RELAY_URL` override them.
+Configuration advertises endpoints; it does not create ingress or change binds.
+Both must be direct HTTP(S) origins without credentials, paths, query or fragment.
+
+Completion, session refresh, and device self responses carry the optional
+`directRoute` metadata, including through the authenticated encrypted gateway.
+Open an already-paired app once while its gateway route works to learn it. A device
+that never learned those addresses cannot recover an unknown route during an outage.
+Gateway encryption and secure QR pairing remain mandatory (ADR 0173). Direct
+requests retain device bearer authorization, expiry, revocation, and grant checks.

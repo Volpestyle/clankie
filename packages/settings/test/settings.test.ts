@@ -514,6 +514,20 @@ describe("relay settings", () => {
     expect(resolved.overriddenByEnvironment).toEqual(["CLANKIE_RELAY_URL"]);
   });
 
+  it("projects direct control separately and respects its environment override", async () => {
+    const { applyRelaySettingsToEnvironment, resolveRelaySettings } = await import("../src/index.ts");
+    const stored = { controlPlaneUrl: "http://mac.tailnet:4310", url: "http://mac.tailnet:4321" };
+    const env: NodeJS.ProcessEnv = {};
+    expect(applyRelaySettingsToEnvironment(stored, env)).toEqual([
+      "CLANKIE_RELAY_URL",
+      "CLANKIE_DIRECT_CONTROL_PLANE_URL",
+    ]);
+    expect(env.CLANKIE_DIRECT_CONTROL_PLANE_URL).toBe(stored.controlPlaneUrl);
+    env.CLANKIE_DIRECT_CONTROL_PLANE_URL = "http://override:4310";
+    expect(applyRelaySettingsToEnvironment(stored, env)).toEqual([]);
+    expect(resolveRelaySettings(stored, env).settings.controlPlaneUrl).toBe("http://override:4310");
+  });
+
   it("advertises nothing when unset", async () => {
     const { applyRelaySettingsToEnvironment } = await import("../src/index.ts");
     const env: NodeJS.ProcessEnv = {};

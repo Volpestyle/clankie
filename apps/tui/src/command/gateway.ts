@@ -18,6 +18,7 @@ import {
   type PublicGatewaySettings,
 } from "@clankie/settings";
 import { z } from "zod";
+import { DeviceDirectRouteSchema, type DeviceDirectRoute } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
 const DOORWAY_PROBE_TIMEOUT_MS = 5_000;
@@ -29,6 +30,7 @@ export type GatewayDoorwayReport = PublicGatewayDoorwayState | { readonly state:
 const GATEWAY_USAGE = [
   "Usage: clankie gateway [status]",
   "       clankie gateway set --url URL --host-id ID",
+  "       clankie gateway direct --control-plane-url URL --relay-url URL",
   "       clankie gateway disable",
   "       clankie gateway rotate-encryption-key",
   "Enter the host bearer with the interactive /gateway wizard; secrets are never flags.",
@@ -45,6 +47,7 @@ export interface GatewayCommandOptions {
 export interface GatewayCommandResult {
   readonly ok: true;
   readonly publicGateway: PublicGatewaySettings;
+  readonly directRoute?: DeviceDirectRoute;
   readonly credentialPresent: boolean;
   readonly enabled: boolean;
   readonly hostId?: string;
@@ -67,7 +70,12 @@ function stores(options: GatewayCommandOptions): {
 
 async function result(options: GatewayCommandOptions): Promise<GatewayCommandResult> {
   const { settings, credentials } = stores(options);
-  const publicGateway = (await settings.load()).publicGateway;
+  const stored = await settings.load();
+  const publicGateway = stored.publicGateway;
+  const directRoute = DeviceDirectRouteSchema.safeParse({
+    controlPlaneUrl: stored.relay.controlPlaneUrl,
+    relayUrl: stored.relay.url,
+  });
   const listed = await credentials.list();
   const account = await credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID);
   const accountReady =
@@ -83,6 +91,7 @@ async function result(options: GatewayCommandOptions): Promise<GatewayCommandRes
   return {
     ok: true,
     publicGateway,
+    ...(directRoute.success ? { directRoute: directRoute.data } : {}),
     credentialPresent,
     enabled: publicGateway.url !== undefined && credentialPresent,
     ...(hostId === undefined ? {} : { hostId }),
@@ -121,6 +130,18 @@ export async function gatewayConfigure(
   return await result(options);
 }
 
+export async function gatewayConfigureDirect(
+  route: DeviceDirectRoute,
+  options: GatewayCommandOptions = {},
+): Promise<GatewayCommandResult> {
+  const parsed = DeviceDirectRouteSchema.parse(route);
+  await stores(options).settings.update((current) => ({
+    ...current,
+    relay: { ...current.relay, controlPlaneUrl: parsed.controlPlaneUrl, url: parsed.relayUrl },
+  }));
+  return await result(options);
+}
+
 export async function gatewayDisable(options: GatewayCommandOptions = {}): Promise<GatewayCommandResult> {
   const { settings, credentials } = stores(options);
   await settings.update((current) => ({ ...current, publicGateway: {} }));
@@ -147,6 +168,20 @@ export async function runGatewayCommand(
     return await result(options);
   }
   if (verb === "disable" && args.length === 1) return await gatewayDisable(options);
+  if (verb === "direct" && args.length === 5) {
+    const values = new Map<string, string>();
+    for (let index = 1; index < args.length; index += 2) {
+      const name = args[index];
+      const value = args[index + 1];
+      if (!name || !value || (name !== "--control-plane-url" && name !== "--relay-url") || values.has(name))
+        throw new Error(GATEWAY_USAGE);
+      values.set(name, value);
+    }
+    const controlPlaneUrl = values.get("--control-plane-url");
+    const relayUrl = values.get("--relay-url");
+    if (!controlPlaneUrl || !relayUrl) throw new Error(GATEWAY_USAGE);
+    return await gatewayConfigureDirect({ controlPlaneUrl, relayUrl }, options);
+  }
   if (verb === "set" && args.length === 5) {
     const values = new Map<string, string>();
     for (let index = 1; index < args.length; index += 2) {

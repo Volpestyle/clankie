@@ -254,6 +254,8 @@ export const RelaySettingsSchema = z
      * e.g. `http://my-mac.tailnet.ts.net:4321`. Unset advertises nothing and
      * paired devices keep whatever origin they already hold.
      */
+    /** Explicit device-reachable control origin; never inferred from the relay port. */
+    controlPlaneUrl: z.string().min(1).max(512).optional(),
     url: z.string().min(1).max(512).optional(),
   })
   .strict();
