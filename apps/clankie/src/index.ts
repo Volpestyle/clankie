@@ -18,11 +18,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { serve, type WebSocketServerLike } from "@hono/node-server";
-import {
-  MAX_REALTIME_AUDIO_APPEND_BYTES,
-  createVoiceRealtimePorts,
-  parseVoiceRealtimeEnv,
-} from "@clankie/discord-presence-core";
+import { MAX_REALTIME_AUDIO_APPEND_BYTES } from "@clankie/discord-presence-core";
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
@@ -322,21 +318,6 @@ if (
     );
   }
 }
-const localVoiceConfig = parseVoiceRealtimeEnv(process.env);
-const localVoiceCredential = await operatorCredentialStore.get(localVoiceConfig.realtimeProvider);
-const localVoiceElevenLabsCredential =
-  localVoiceConfig.ttsProvider === "elevenlabs" ? await operatorCredentialStore.get("elevenlabs") : undefined;
-const localVoiceRealtime =
-  localVoiceCredential?.type === "api" &&
-  (localVoiceConfig.ttsProvider !== "elevenlabs" || localVoiceElevenLabsCredential?.type === "api")
-    ? createVoiceRealtimePorts({
-        apiKey: localVoiceCredential.key,
-        ...(localVoiceElevenLabsCredential?.type === "api"
-          ? { elevenLabsApiKey: localVoiceElevenLabsCredential.key }
-          : {}),
-        config: localVoiceConfig,
-      })
-    : undefined;
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,
   store: operatorCredentialStore,
@@ -873,7 +854,6 @@ const clankie = await createClankieApp({
   settings: settingsStore,
   personaImages,
   mediaGenerator,
-  ...(localVoiceRealtime === undefined ? {} : { localVoiceRealtime }),
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
   ...(browserHost === undefined ? {} : { browserTools: browserHost }),
@@ -992,7 +972,6 @@ logger.info(
     eventLogPath,
     memoryDir: defaultMemoryDir(process.env),
     settingsFilledNames,
-    localVoiceAvailable: localVoiceRealtime !== undefined,
   },
   "clankie listening",
 );
