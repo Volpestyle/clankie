@@ -196,7 +196,17 @@ describe("fleet routing", () => {
     const run: HerdrFleetRun = async (args) => {
       calls.push([...args]);
       if (args[0] === "pane" && args[1] === "list")
-        return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", status)] } });
+        return JSON.stringify({
+          result: {
+            panes: [
+              {
+                ...pane("w2:p1J", "term_abc", status),
+                cwd: "C:\\src",
+                agent_session: { source: "herdr:claude", kind: "id", value: "remote-session" },
+              },
+            ],
+          },
+        });
       if (args[0] === "tab") return JSON.stringify({ result: { root_pane: { pane_id: "w2:p9" } } });
       return "{}";
     };
@@ -204,7 +214,12 @@ describe("fleet routing", () => {
       localRunner(),
       new Map([["pc", createRemoteHerdrRunner(pc, run, { pollMs: 5 })]]),
     );
-    expect(await runner.get("pc/w2:p1J")).toMatchObject({ paneId: "pc/w2:p1J", terminalId: "pc/term_abc" });
+    expect(await runner.get("pc/w2:p1J")).toMatchObject({
+      paneId: "pc/w2:p1J",
+      terminalId: "pc/term_abc",
+      workingDirectory: "C:\\src",
+      session: { source: "herdr:claude", kind: "id", value: "remote-session" },
+    });
     expect(await runner.resolveTerminal("pc/term_abc")).toMatchObject({ status: "working" });
     setTimeout(() => {
       status = "idle";
@@ -220,6 +235,18 @@ describe("fleet routing", () => {
     expect(await runner.createTab!({ cwd: "/src", label: "x" })).toBe("w1:p1");
     await expect(runner.get("laptop/w1:p1")).rejects.toThrow(/Unknown Herdr fleet laptop/u);
     expect(await runner.transcript!({ paneId: "pc/w2:p1J" } as HerdrAgentSnapshot)).toBeUndefined();
+  });
+
+  it("rejects an unidentified remote pane and retries after its response is corrected", async () => {
+    let malformed = true;
+    const runner = createRemoteHerdrRunner(pc, async () =>
+      JSON.stringify({
+        result: { panes: [malformed ? { pane_id: "w2:p1J" } : pane("w2:p1J", "term_abc", "idle")] },
+      }),
+    );
+    await expect(runner.get("w2:p1J")).rejects.toThrow("did not identify the agent pane");
+    malformed = false;
+    expect(await runner.get("w2:p1J")).toMatchObject({ terminalId: "term_abc", status: "idle" });
   });
 });
 

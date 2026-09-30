@@ -267,6 +267,7 @@ function snapshotOf(value: unknown): HerdrAgentSnapshot {
     status: typeof value.agent_status === "string" ? value.agent_status : "unknown",
     title: titleOf(value),
     ...(session === undefined ? {} : { session }),
+    ...(typeof value.cwd === "string" ? { workingDirectory: value.cwd } : {}),
   };
 }
 
@@ -287,7 +288,7 @@ export function parseHerdrForegroundProcessId(stdout: string): number | undefine
   return process !== undefined && typeof process.pid === "number" ? process.pid : undefined;
 }
 
-function parseHerdrPaneList(stdout: string): HerdrAgentSnapshot[] {
+export function parseHerdrPaneList(stdout: string): HerdrAgentSnapshot[] {
   const parsed = JSON.parse(stdout) as { result?: { panes?: unknown } };
   const panes = Array.isArray(parsed.result?.panes) ? parsed.result.panes : [];
   return panes.map(snapshotOf);

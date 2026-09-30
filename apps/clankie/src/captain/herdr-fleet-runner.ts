@@ -2,7 +2,12 @@ import { fleetQualified, splitFleetQualified, type HerdrFleet, type HerdrFleetRu
 import { createSshAgentHost } from "@clankie/agent-hosts";
 import type { AgentTranscriptHost } from "@clankie/agent-transcript";
 import { remoteHerdrTranscriptReader } from "./remote-herdr-transcript.ts";
-import { createHerdrWatchRunner, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
+import {
+  createHerdrWatchRunner,
+  parseHerdrPaneList,
+  type HerdrAgentSnapshot,
+  type HerdrWatchRunner,
+} from "./herdr-watch.ts";
 
 const SETTLED = new Set(["idle", "done", "blocked"]);
 const CHANNEL_DIALOG_SETTLED = new Set(["idle", "working", "done"]);
@@ -51,7 +56,7 @@ export function createRemoteHerdrRunner(
   const panes = (): Promise<readonly HerdrAgentSnapshot[]> => {
     const now = Date.now();
     if (cached === undefined || now - cached.at >= pollMs / 2) {
-      const pending = run(["pane", "list"]).then(parsePaneList);
+      const pending = run(["pane", "list"]).then(parseHerdrPaneList);
       cached = { at: now, panes: pending };
       pending.catch(() => {
         if (cached?.panes === pending) cached = undefined;
@@ -108,39 +113,6 @@ export function createRemoteHerdrRunner(
         new Error(`unsupported: pi providers are configured on the fleet's machine by its owner`),
       ),
   };
-}
-
-function parsePaneList(stdout: string): readonly HerdrAgentSnapshot[] {
-  const parsed = JSON.parse(stdout) as { result?: { panes?: unknown } };
-  const panes = Array.isArray(parsed.result?.panes) ? parsed.result.panes : [];
-  return panes.flatMap((pane) => {
-    if (typeof pane !== "object" || pane === null) return [];
-    const entry = pane as Record<string, unknown>;
-    if (typeof entry.pane_id !== "string" || typeof entry.terminal_id !== "string") return [];
-    const session =
-      typeof entry.agent_session === "object" && entry.agent_session !== null
-        ? (entry.agent_session as Record<string, unknown>)
-        : undefined;
-    const title = [entry.title, entry.terminal_title_stripped, entry.terminal_title].find(
-      (value): value is string => typeof value === "string" && value.trim().length > 0,
-    );
-    return [
-      {
-        paneId: entry.pane_id,
-        terminalId: entry.terminal_id,
-        ...(typeof entry.name === "string" && entry.name.length > 0 ? { name: entry.name } : {}),
-        agent: typeof entry.agent === "string" ? entry.agent : "unknown",
-        status: typeof entry.agent_status === "string" ? entry.agent_status : "unknown",
-        title: title?.trim() ?? "",
-        ...(typeof session?.source === "string" &&
-        (session.kind === "id" || session.kind === "path") &&
-        typeof session.value === "string"
-          ? { session: { source: session.source, kind: session.kind, value: session.value } }
-          : {}),
-        ...(typeof entry.cwd === "string" ? { workingDirectory: entry.cwd } : {}),
-      } satisfies HerdrAgentSnapshot,
-    ];
-  });
 }
 
 /**
