@@ -13,7 +13,7 @@ afterEach(async () => {
   spawn.mockReset();
 });
 
-function fixture(persisted = false) {
+function fixture(persisted = false, missingRollout = "no rollout found") {
   const requests: { method: string; params: Record<string, unknown> }[] = [];
   let nativeLoaded = false;
   const id = "native-thread";
@@ -36,7 +36,7 @@ function fixture(persisted = false) {
         if (message.method === "thread/read") result = { thread: { id } };
         if (message.method === "thread/resume") {
           if (!persisted) {
-            socket.send(JSON.stringify({ id: message.id, error: { message: "no rollout found" } }));
+            socket.send(JSON.stringify({ id: message.id, error: { message: missingRollout } }));
             return;
           }
           result = { thread: { id, turns: [turn] } };
@@ -90,6 +90,17 @@ it("lets the native TUI create a fresh thread before input and subscribes after 
     threadId: f.id,
   });
   await expect(seat.interrupt()).resolves.toBe(true);
+});
+
+it("treats Codex 0.159's empty-rollout resume error as not yet persisted", async () => {
+  const f = fixture(
+    false,
+    "failed to read thread: thread-store internal error: failed to read session metadata /tmp/rollout.jsonl: rollout at /tmp/rollout.jsonl is empty",
+  );
+  const seat = await startCodexAppServerSeat({ cwd: "/tmp", startView: f.startView });
+  cleanup.push(seat.close);
+  await expect(seat.send("first brief")).resolves.toEqual({ state: "started", turnId: "turn-one" });
+  expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
 });
 
 it("resumes the selected native thread and applies config to both clients without replay", async () => {

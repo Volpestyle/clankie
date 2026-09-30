@@ -248,7 +248,9 @@ export async function startCodexAppServerSeat(options: {
           resumed = record(await client!.request("thread/resume", { threadId }));
           break;
         } catch (error) {
-          if (!String(error).includes("no rollout found")) throw error;
+          // Codex reports a not-yet-persisted rollout as either "no rollout
+          // found" or, since 0.159, a present-but-empty rollout file.
+          if (!/no rollout found|rollout at .* is empty/u.test(String(error))) throw error;
           if (!waitForRollout) return;
           if (Date.now() >= deadline) throw error;
           await new Promise((resolve) => setTimeout(resolve, 50));
