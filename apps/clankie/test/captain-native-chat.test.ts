@@ -119,7 +119,7 @@ it.each([false, true])("reads native history on demand without importing it (rem
         message: "From the app",
       },
     });
-    expect(send).toHaveBeenCalledWith(seatId, "From the app");
+    expect(send).toHaveBeenCalledWith(seatId, "From the app", expect.any(Function));
     expect(publish).not.toHaveBeenCalled();
     const stored = readFileSync(path, "utf8");
     expect(stored).toContain("From the app");

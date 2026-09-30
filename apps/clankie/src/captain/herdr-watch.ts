@@ -1,4 +1,5 @@
-import type { HarnessSeatAdapter, SeatControl, SeatEvent } from "@clankie/agent-hosts";
+import { createFleetSeatControl, isMessageableSeat } from "./fleet-seat-control.ts";
+import type { HarnessSeatAdapter, SeatEvent } from "@clankie/agent-hosts";
 import {
   bundledSkills,
   codexAccounts,
@@ -28,13 +29,7 @@ import {
   type SpawnOperatorSeat,
 } from "@clankie/protocol";
 import { z } from "zod";
-import {
-  codexProcess,
-  parseHerdrForegroundProcesses,
-  resolveCodexSessionId,
-  resolveCodexHome,
-  type HerdrForegroundProcess,
-} from "./codex-seat.ts";
+import { parseHerdrForegroundProcesses, type HerdrForegroundProcess } from "./codex-seat.ts";
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
 import {
   fleetSeatBriefStartsSession,
@@ -644,6 +639,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly path: string;
   private readonly runner: HerdrWatchRunner;
   private readonly seatAdapters: ReadonlyMap<string, HarnessSeatAdapter>;
+  private readonly seatControl: ReturnType<typeof createFleetSeatControl>;
   private readonly skillBundle:
     | { repoRoot: string; stateDir: string; settings?: () => Promise<SkillsSettings> }
     | undefined;
@@ -708,6 +704,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.hireCapacity = options.hireCapacity;
     this.runner = options.runner ?? createHerdrWatchRunner(options.available);
     this.seatAdapters = new Map((options.seatAdapters ?? []).map((adapter) => [adapter.harness, adapter]));
+    this.seatControl = createFleetSeatControl(this.runner, this.seatAdapters);
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
     this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;
@@ -828,56 +825,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return { agent: live === undefined ? { ...agent, status: "offline" } : agent, transcript };
   }
 
-  public async sendToSeat(seatId: string, text: string): Promise<boolean> {
-    if (this.closed) return false;
-    try {
-      const current = await this.runner.resolveTerminal(seatId);
-      if (!isMessageableSeat(current)) return false;
-      const control = await this.seatControl(current);
-      if (control !== undefined) {
-        const delivery = await control.send(text);
-        // An unconfirmed message may still land, so it is never typed again.
-        if (delivery.outcome === "accepted" || delivery.outcome === "unconfirmed") return true;
-        if (delivery.outcome === "offline") return false;
-        // Released: the owner took over, and the pane lane reaches the interactive harness.
-      }
-      if (current.agent === "codex" && (await this.deliverCodexQueue(current, text))) return true;
-      if (this.runner.promptAgent === undefined) return false;
-      // Raw pane send-text has no bracketed-paste framing. Claude can lose
-      // earlier PTY chunks even after startup is ready (VUH-1450).
-      await this.runner.promptAgent(current.paneId, text);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Programmatic control of a local seat, while its adapter still holds it.
-   * The harness's own session id, as herdr reports it, is the key.
-   */
-  private async seatControl(agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> {
-    const adapter = this.seatAdapters.get(agent.agent);
-    const session = agent.session;
-    if (adapter === undefined || session === undefined) return undefined;
-    if (splitFleetQualified(agent.paneId) !== undefined) return undefined;
-    // A transcript path names its session in the file name (Claude's `<uuid>.jsonl`).
-    const sessionId = session.kind === "id" ? session.value : basename(session.value, ".jsonl");
-    return adapter
-      .attach({ harness: adapter.harness, sessionId, paneId: agent.paneId })
-      .catch(() => undefined);
-  }
-
-  /** Whether an adapter drives this seat now, so a message should go through it. */
-  public async holdsSeat(seatId: string): Promise<boolean> {
-    if (this.closed) return false;
-    const current = await this.runner.resolveTerminal(seatId).catch(() => undefined);
-    return current !== undefined && (await this.seatControl(current)) !== undefined;
+  public async sendToSeat(
+    seatId: string,
+    text: string,
+    uncontrolled?: () => Promise<boolean>,
+  ): Promise<boolean> {
+    if (this.closed) return uncontrolled?.() ?? false;
+    return this.seatControl.sendToSeat(seatId, text, uncontrolled);
   }
 
   /** The herdr status an adapter-held seat's own status reads as; undefined when no adapter holds it. */
   private async adapterStatus(agent: HerdrAgentSnapshot): Promise<string | undefined> {
-    const status = await (await this.seatControl(agent))?.status().catch(() => undefined);
+    const status = await (await this.seatControl.attach(agent))?.status().catch(() => undefined);
     return status === "working" || status === "idle" || status === "blocked" ? status : undefined;
   }
 
@@ -895,28 +854,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
       await delay(SPAWN_SESSION_POLL_MS);
     }
     return status;
-  }
-
-  /**
-   * ponytail: lsof of the open Codex rollout file is the session id; herdr
-   * `report-agent-session` for Codex would replace it.
-   */
-  private async deliverCodexQueue(agent: HerdrAgentSnapshot, text: string): Promise<boolean> {
-    const { paneProcesses, openFiles, codexQueue } = this.runner;
-    if (paneProcesses === undefined || openFiles === undefined || codexQueue === undefined) return false;
-    // `codex queue` and lsof run here; a remote seat takes the pty lane (ADR 0184).
-    if (splitFleetQualified(agent.paneId) !== undefined) return false;
-    try {
-      const processes = await paneProcesses(agent.paneId);
-      const process = codexProcess(processes);
-      if (process === undefined) return false;
-      const files = await openFiles(process.pid);
-      const sessionId = resolveCodexSessionId(processes, files);
-      if (sessionId === undefined) return false;
-      return await codexQueue(sessionId, text, resolveCodexHome(files, sessionId));
-    } catch {
-      return false;
-    }
   }
 
   /**
@@ -1304,7 +1241,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const current = await this.runner.resolveTerminal(seatId);
       if (current === undefined) return false;
       // End programmatic control first, so nothing outlives its pane.
-      await (await this.seatControl(current))?.close().catch(() => undefined);
+      await (await this.seatControl.attach(current))?.close().catch(() => undefined);
       await this.runner.closePane(current.paneId);
       return true;
     } catch {
@@ -1671,7 +1608,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (current === undefined || current.status === "unknown") {
         prompt = watchPrompt(record, current, "The watched pane is gone.");
       } else {
-        const control = await this.seatControl(current);
+        const control = await this.seatControl.attach(current);
         const held = control === undefined ? undefined : await control.status();
         if (control !== undefined && held !== "released" && held !== "offline") {
           // The harness's own completion, not a status read off the terminal.
@@ -1870,10 +1807,6 @@ function piReply(transcript: string): string | undefined {
     .split("\n")
     .map((line) => (line.startsWith(" ") ? line.slice(1) : line))
     .join("\n");
-}
-
-function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
-  return agent !== undefined && agent.agent !== "shell" && agent.agent !== "unknown";
 }
 
 function delay(ms: number): Promise<void> {

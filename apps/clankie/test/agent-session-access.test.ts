@@ -5,6 +5,7 @@ import { captainTools } from "../src/captain/tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
 import type { AgentSessions } from "../src/agent-sessions.ts";
+import { AgentSessionRequestError } from "@clankie/agent-transcript";
 
 function sessionPort() {
   return {
@@ -83,5 +84,82 @@ test("transcript tools follow machine authority, independent of Herdr availabili
     expect(denied).not.toContain("agent_session_read");
     expect(denied).not.toContain("agent_session_send");
     expect(denied).not.toContain("agent_session_run");
+  }
+});
+
+test("transcript routes distinguish unavailable authentication from an unavailable session port", async () => {
+  const sessions = sessionPort();
+  for (const authentication of [false, true]) {
+    const app = await createClankieApp({
+      captain: createStubCaptain(),
+      ...(authentication
+        ? { authenticateOperator: async () => ({ operatorId: "owner" }) }
+        : { agentSessions: sessions }),
+    });
+    try {
+      const response = await app.app.request("/v1/agent-hosts");
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: authentication ? "agent_sessions_unavailable" : "operator_authentication_unavailable",
+      });
+    } finally {
+      app.close();
+    }
+  }
+  for (const operation of Object.values(sessions)) expect(operation).not.toHaveBeenCalled();
+});
+
+test("transcript request limits remain before authentication and never invoke host operations", async () => {
+  const sessions = sessionPort();
+  const authenticate = vi.fn(async () => ({ operatorId: "owner" }));
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    agentSessions: sessions,
+    authenticateOperator: authenticate,
+  });
+  try {
+    for (const [path, size] of [
+      ["/v1/agent-hosts", 4 * 1024],
+      ["/v1/agent-sessions/send", 40 * 1024],
+    ] as const) {
+      const body = "x".repeat(size + 1);
+      const response = await app.app.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json", "content-length": String(body.length) },
+        body,
+      });
+      expect(response.status).toBe(413);
+    }
+    expect(authenticate).not.toHaveBeenCalled();
+    for (const operation of Object.values(sessions)) expect(operation).not.toHaveBeenCalled();
+  } finally {
+    app.close();
+  }
+});
+
+test("transcript routes retain typed refusals and distinguish unknown runs", async () => {
+  const sessions = sessionPort();
+  sessions.send.mockRejectedValue(new AgentSessionRequestError("Session already has a run", 409));
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    agentSessions: sessions,
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+  });
+  try {
+    const response = await app.app.request("/v1/agent-sessions/send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ref: "local:abc", message: "hello" }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "agent_session_send_refused",
+      detail: "Session already has a run",
+    });
+    const unknown = await app.app.request("/v1/agent-sessions/runs/missing");
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toEqual({ error: "unknown_agent_session_run", detail: "unused" });
+  } finally {
+    app.close();
   }
 });

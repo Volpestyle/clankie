@@ -1584,16 +1584,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ): Promise<boolean> {
     // An adapter-driven seat takes its message through the adapter, which
     // waits for the harness's own receipt; any other seat, its mailbox or pane.
-    const deliver = async () =>
-      (await herdrWatches.holdsSeat(seatId))
-        ? herdrWatches.sendToSeat(seatId, message)
-        : deliverFleetSeatMessage(
-            fleetMailboxes,
-            (id, text) => herdrWatches.sendToSeat(id, text),
-            seatId,
-            message,
-            context,
-          );
+    const deliver = () =>
+      herdrWatches.sendToSeat(seatId, message, () =>
+        deliverFleetSeatMessage(
+          fleetMailboxes,
+          (id, text) => herdrWatches.sendToSeat(id, text),
+          seatId,
+          message,
+          context,
+        ),
+      );
     const sent =
       context.source === "room"
         ? await herdrWatches.sendAndWatchReply(seatId, message, deliver)

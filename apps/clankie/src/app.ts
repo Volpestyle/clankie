@@ -1,3 +1,4 @@
+import { createAgentSessionRoutes } from "./agent-session-routes.ts";
 import { loadPersonaImages, personaImageBriefing, personaImageStatus } from "@clankie/persona-images";
 import type { PersonaImageSource } from "./persona-images.ts";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
@@ -131,14 +132,12 @@ import {
 import { LINEAR_WEBHOOK_PATH, type PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway";
 import type { HostPowerReport } from "@clankie/protocol/host-power";
 import {
-  AgentHostConnectionSchema,
   PersonaSettingsSchema,
   personaInstructions,
   SettingsStore,
   type ClankieSettings,
 } from "@clankie/settings";
 import type { AgentSessions } from "./agent-sessions.ts";
-import { AgentSessionRequestError } from "@clankie/agent-transcript";
 import { Hono, type Context } from "hono";
 import { RivalsCommandSchema } from "@clankie/protocol";
 import type { RivalsClient } from "./rivals.ts";
@@ -478,20 +477,6 @@ export interface ClankieApp {
   voiceHistory: (limit: number) => DiscordVoiceStay[];
   recentVoiceSpeech: (limit: number) => Promise<VoiceSpeechSnapshot>;
   close(): void;
-}
-
-const AgentSessionSendSchema = z
-  .object({
-    ref: z.string().min(1).max(200),
-    message: z
-      .string()
-      .min(1)
-      .max(32 * 1024),
-  })
-  .strict();
-
-function errorDetail(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export async function createClankieApp(dependencies: ClankieAppDependencies): Promise<ClankieApp> {
@@ -936,161 +921,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  app.get("/v1/agent-hosts", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    return context.json({ hosts: await dependencies.agentSessions.hosts() });
-  });
-
-  app.post("/v1/agent-hosts", bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    const input = AgentHostConnectionSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!input.success) return context.json({ error: "invalid_agent_host" }, 400);
-    return context.json({ hosts: await dependencies.agentSessions.addHost(input.data) });
-  });
-
-  app.delete("/v1/agent-hosts/:id", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    try {
-      return context.json({ hosts: await dependencies.agentSessions.removeHost(context.req.param("id")) });
-    } catch (error) {
-      return context.json(
-        { error: "unknown_agent_host", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 409,
-      );
-    }
-  });
-
-  app.get("/v1/agent-sessions", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    const host = context.req.query("host");
-    const limit = context.req.query("limit");
-    try {
-      return context.json(
-        await dependencies.agentSessions.list({
-          ...(host ? { host } : {}),
-          ...(limit ? { limit: Number(limit) } : {}),
-        }),
-      );
-    } catch (error) {
-      return context.json(
-        { error: "agent_sessions_failed", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 502,
-      );
-    }
-  });
-
-  app.get("/v1/agent-sessions/read", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    const ref = context.req.query("ref");
-    if (!ref) return context.json({ error: "agent_session_ref_required" }, 400);
-    const tail = context.req.query("tail");
-    const after = context.req.query("after");
-    try {
-      return context.json(
-        await dependencies.agentSessions.read(ref, {
-          ...(tail ? { tail: Number(tail) } : {}),
-          ...(after ? { after } : {}),
-        }),
-      );
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_read_failed", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 502,
-      );
-    }
-  });
-
-  app.post("/v1/agent-sessions/send", bodyLimit({ maxSize: 40 * 1024 }), async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    const input = AgentSessionSendSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!input.success) return context.json({ error: "invalid_agent_session_send" }, 400);
-    try {
-      return context.json(await dependencies.agentSessions.send(input.data.ref, input.data.message), 202);
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_send_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 502,
-      );
-    }
-  });
-
-  app.get("/v1/agent-sessions/runs", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    return context.json({ runs: dependencies.agentSessions.runs() });
-  });
-
-  app.get("/v1/agent-sessions/runs/:id", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    try {
-      return context.json(dependencies.agentSessions.run(context.req.param("id")));
-    } catch (error) {
-      return context.json({ error: "unknown_agent_session_run", detail: errorDetail(error) }, 404);
-    }
-  });
-
-  app.delete("/v1/agent-sessions/runs/:id", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    try {
-      return context.json(dependencies.agentSessions.cancel(context.req.param("id")));
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_cancel_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 409,
-      );
-    }
-  });
-
-  app.post("/v1/agent-sessions/runs/:id/release", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    try {
-      return context.json(dependencies.agentSessions.release(context.req.param("id")));
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_release_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 409,
-      );
-    }
-  });
+  app.route(
+    "/",
+    createAgentSessionRoutes(dependencies.agentSessions, async (request) => {
+      const operator = await authenticateOperator(request, dependencies);
+      return operator === "unavailable" ? operator : Boolean(operator);
+    }),
+  );
 
   app.get("/v1/swarm", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);

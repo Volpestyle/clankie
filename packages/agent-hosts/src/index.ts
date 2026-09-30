@@ -26,6 +26,8 @@ export interface AgentHost {
   list(opts?: { limit?: number }): Promise<AgentSessionFile[]>;
   readBytes(path: string, from: number, maxBytes: number): Promise<{ bytes: Buffer; size: number }>;
 }
+/** Execution is an optional capability of a transcript source. */
+export type AgentTurnRunner = Pick<AgentHost, "runAgentTurn">;
 export interface AgentHostConfig {
   id: string;
   ssh: string;

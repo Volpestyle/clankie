@@ -265,23 +265,79 @@ it("messages go through the adapter while it holds the seat, and the pane lane w
     outcome: "started",
     control: {} as SeatControl,
   }));
-  expect(await store.sendToSeat("term_0a1b2c", "follow-up")).toBe(true);
+  const mailbox = vi.fn(async () => true);
+  expect(await store.sendToSeat("term_0a1b2c", "follow-up", mailbox)).toBe(true);
   expect(send).toHaveBeenCalledWith("follow-up");
+  expect(runner.resolveTerminal).toHaveBeenCalledTimes(1);
+  expect(adapter.attach).toHaveBeenCalledTimes(1);
+  expect(adapter.attach).toHaveBeenCalledWith(control.ref);
   expect(runner.promptAgent).not.toHaveBeenCalled();
 
   send.mockResolvedValueOnce({ outcome: "unconfirmed", messageId: "m2", detail: "late" } as never);
   // May still land, so it is never typed a second time.
-  expect(await store.sendToSeat("term_0a1b2c", "maybe")).toBe(true);
+  expect(await store.sendToSeat("term_0a1b2c", "maybe", mailbox)).toBe(true);
   expect(runner.promptAgent).not.toHaveBeenCalled();
 
   send.mockResolvedValueOnce({ outcome: "released" } as never);
-  expect(await store.sendToSeat("term_0a1b2c", "via pane")).toBe(true);
+  expect(await store.sendToSeat("term_0a1b2c", "via pane", mailbox)).toBe(true);
   expect(runner.promptAgent).toHaveBeenCalledWith("w1:p1", "via pane");
 
+  send.mockResolvedValueOnce({ outcome: "offline", detail: "gone" } as never);
+  expect(await store.sendToSeat("term_0a1b2c", "offline", mailbox)).toBe(false);
+  send.mockRejectedValueOnce(new Error("lost control"));
+  expect(await store.sendToSeat("term_0a1b2c", "uncertain", mailbox)).toBe(false);
+  expect(mailbox).not.toHaveBeenCalled();
+  expect(runner.promptAgent).toHaveBeenCalledTimes(1);
+
   vi.mocked(adapter.attach).mockResolvedValue(undefined);
+  expect(await store.sendToSeat("term_0a1b2c", "via mailbox", mailbox)).toBe(true);
+  expect(mailbox).toHaveBeenCalledOnce();
   expect(await store.sendToSeat("term_0a1b2c", "no adapter")).toBe(true);
   expect(runner.promptAgent).toHaveBeenCalledWith("w1:p1", "no adapter");
   expect(control.ref.paneId).toBe("w1:p1");
+});
+
+it("mailbox fallback works without terminal discovery and retains delivery errors", async () => {
+  const { store, runner, send, adapter } = await fixture(async () => ({
+    outcome: "started",
+    control: {} as SeatControl,
+  }));
+  runner.resolveTerminal.mockRejectedValue(new Error("Herdr unavailable"));
+  const mailbox = vi.fn(async () => true);
+  expect(await store.sendToSeat("term_0a1b2c", "mail", mailbox)).toBe(true);
+  expect(mailbox).toHaveBeenCalledOnce();
+  expect(adapter.attach).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+  expect(runner.promptAgent).not.toHaveBeenCalled();
+  await expect(
+    store.sendToSeat("term_0a1b2c", "mail", async () => {
+      throw new Error("mailbox failed");
+    }),
+  ).rejects.toThrow("mailbox failed");
+  expect(await store.sendToSeat("term_0a1b2c", "no mailbox")).toBe(false);
+  store.close();
+  expect(await store.sendToSeat("term_0a1b2c", "mail", mailbox)).toBe(true);
+  expect(await store.sendToSeat("term_0a1b2c", "no mailbox")).toBe(false);
+});
+
+it("attachment preserves native path identity and never attaches a qualified remote pane", async () => {
+  const { store, adapter, agent, control, runner } = await fixture(async () => ({
+    outcome: "started",
+    control: {} as SeatControl,
+  }));
+  const pathAgent = {
+    ...agent,
+    session: { source: "herdr:claude", kind: "path" as const, value: `/tmp/${control.ref.sessionId}.jsonl` },
+  };
+  runner.resolveTerminal.mockResolvedValue(pathAgent);
+  expect(await store.sendToSeat(agent.terminalId, "local")).toBe(true);
+  expect(adapter.attach).toHaveBeenCalledWith(control.ref);
+  vi.mocked(adapter.attach).mockClear();
+  runner.resolveTerminal.mockResolvedValue({ ...pathAgent, paneId: "pc/w1:p1" });
+  const mailbox = vi.fn(async () => true);
+  expect(await store.sendToSeat(agent.terminalId, "remote", mailbox)).toBe(true);
+  expect(mailbox).toHaveBeenCalledOnce();
+  expect(adapter.attach).not.toHaveBeenCalled();
 });
 
 it("a completion watch wakes on the harness's own settlement and quotes its final message as data", async () => {
