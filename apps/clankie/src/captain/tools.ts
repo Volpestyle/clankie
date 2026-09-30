@@ -246,7 +246,9 @@ export function captainTools(
         "can say out loud (play_session_active means a play session is already active or winding down, " +
         "no_credential means nobody provisioned you a seat, world_unreachable means the host " +
         "is down, world_full means there is no room, region_not_hosted means that game is not up, world_refused " +
-        "means the world said no); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
+        "means the world said no); 'pending' means it is still spinning up — say so, never claim to be playing yet. " +
+        "Joining does not start the host: with machine tools, the pokeagents skill starts an installed local world, " +
+        "then retry — a host-down refusal is a diagnosis, not the end of a request to play.",
       parameters: Type.Object({
         environmentId: Type.Union([Type.Literal("pokemon-firered"), Type.Literal("pokemon-emerald")], {
           default: "pokemon-firered",
@@ -469,7 +471,8 @@ export function captainTools(
       description:
         "Read the recent conversation in one of your other rooms. Entries come marked — 'heard' is what someone " +
         "said to you there, 'said' is your own reply. Say when a room has been quiet rather than inventing " +
-        "activity, and never describe a room you did not actually read. Call with no arguments to list rooms.",
+        "activity, and never describe a room you did not actually read. Call with no arguments to list rooms. " +
+        "On discord_voice it holds only handoffs to you, not the voice conversation; get_self_state covers voice.",
       parameters: Type.Object({
         lane: Type.Optional(
           Type.String({ description: "Room lane, e.g. discord_presence, discord_voice, operator." }),
@@ -506,7 +509,8 @@ export function captainTools(
         "A present-tense card of what you are doing right now: live play session, Discord presence, closed " +
         "voice stays, and recent voice speech scalars (spoken vs suppressed — never words). " +
         "Read it before answering questions about yourself. voiceHistory is closed stays only and is empty " +
-        "while you are still in the channel; recentVoiceSpeech.currentStay is whether you have been talking.",
+        "while you are still in the channel, not proof of silence; recentVoiceSpeech.currentStay is whether you have " +
+        "been talking, and play commentary is trigger 'narration'.",
       parameters: Type.Object({}),
       execute: async () => {
         const [live, sessions, voiceHistory, voiceSpeech, renders, shares, rivals] = await Promise.all([
@@ -1422,7 +1426,8 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
         "'edges' draws the relationships — name the two tables and the exact fields the keys sit on, and label " +
         "each with its cardinality. Tables lay out in columns of three in the order you list them, so put " +
         "related entities next to each other and prefer short hops; a foreign key you draw no edge for still " +
-        "reads fine from its type cell. In a Discord channel the picture attaches to your reply automatically, " +
+        "reads fine from its type cell. Draw only fields and relations you read or were told, and say what you " +
+        "left out. In a Discord channel the picture attaches to your reply automatically, " +
         "so draw it and then talk about it normally. 'refused' with 'canvas_unavailable' means the tldraw app " +
         "is not open on the mac — say so, that is something a human can fix and not something to retry.",
       parameters: Type.Object({
@@ -1473,7 +1478,8 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
         "('client', 'postgres', 'the worker'). 'steps' is the exchange, one per line: '== phase name' rules off " +
         "a section, 'a->b: message' is a call, 'a-->b: message' is a reply, 'a->a: message' is something a " +
         "participant does to itself, and 'note over a,b: text' is an aside spanning those lanes. End a step " +
-        "with '[red]' to mark the failure path. Keep to five or six lanes; past that it reads as a wall. In a " +
+        "with '[red]' to mark the failure path. Keep to five or six lanes; past that it reads as a wall. Draw only " +
+        "exchanges you read or were told. In a " +
         "Discord channel the picture attaches to your reply automatically. 'refused' with 'canvas_unavailable' " +
         "means the tldraw app is not open on the mac — say so rather than retrying.",
       parameters: Type.Object({

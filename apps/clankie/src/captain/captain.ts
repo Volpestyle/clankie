@@ -148,6 +148,12 @@ const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>>
   gameplay: "gameplay",
 };
 
+const DISCORD_LANES: ReadonlySet<CaptainSessionLaneV2> = new Set(["discord_voice", "discord_presence"]);
+const DISCORD_ROOM = [
+  "# In Discord",
+  "A picture, video, diagram or screenshot you make or take attaches itself to the reply you are writing; only the last one of a turn rides. Take it, then talk about what is on it. Never write a markdown image, a `sandbox:` URI or a file path as though it were the attachment. In a room that cannot show pictures, describe it or quote what you read.",
+].join("\n");
+
 const TOOL_DETAIL_TRUNCATED = "\n… truncated";
 const SIDE_CONVERSATION_INSTRUCTIONS = `
 
@@ -324,16 +330,21 @@ export function assembleLanePrompt(
   // (ADR 0199). The owner can take them off the card to save those plans.
   const harnessReach =
     systemTools && currentSettings.browser.harnessDelegation ? renderComputerUseReach(computerUse) : "";
-  const reach = systemTools
+  const machine = systemTools
     ? [
         "# Machine access",
         "You have shell and filesystem tools in this authorized context.",
+        // VUH-1391: a reply has an output limit and a long one is cut off mid-file.
+        "Long code and long documents go in files: put a whole script, module or write-up in one and say where it is rather than pasting it into a reply that can be cut off.",
         ...(harnessReach.length > 0 ? ["", harnessReach] : []),
       ].join("\n")
     : [
         "# This room",
         "You do not have a shell or filesystem tools in this room. If someone asks you to inspect herdr, run a command, or read a file, say you cannot from here. Do not imply you chose not to look.",
       ].join("\n");
+  // How a Discord reply carries media is true only in a Discord room, so the
+  // console and the seats never pay for it (VUH-1456).
+  const reach = DISCORD_LANES.has(lane) ? `${machine}\n\n${DISCORD_ROOM}` : machine;
   // Owner-authored routing preference, and only where a fleet can be reached: a
   // room with no shell cannot dispatch, so the section would be dead weight
   // there. Unset renders nothing rather than an empty heading. Stated as

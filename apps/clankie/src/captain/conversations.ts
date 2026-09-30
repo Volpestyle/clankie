@@ -992,6 +992,7 @@ export class ConversationStore {
         : [
             `Read this work with clankie linear inbox read --conversation ${id}. Check current Swarm task ownership before dispatching or replying.`,
           ]),
+      "Most events need no tool call. The this-machine skill has the inbox read and acknowledgment protocol.",
     ].join("\n");
   }
 

@@ -64,10 +64,12 @@ This repository is public. Both neighbors are private and consume
   `~/dev/clankie-app` follows the same rule for TestFlight (`release-app`).
 - Build every feature API- and CLI-first, expose any settings it needs in the
   TUI, and update the relevant agent-facing skill and human-facing docs.
-- Reusable lessons about how Clankie works belong in
-  `apps/clankie/src/captain/instructions.md` or the relevant shipped skill;
-  regenerate the Claude seat with `node integrations/claude-plugin/build.mjs`
-  after instruction changes. Episode memory preserves experiences, not standing
+- Reusable lessons about how Clankie works belong in the relevant shipped skill
+  or the tool description that needs them. `apps/clankie/src/captain/instructions.md`
+  is re-read on every model call, so it holds only identity, trust boundaries and
+  where things live (ADR 0203); regenerate both seats with
+  `node integrations/claude-plugin/build.mjs` and `node integrations/codex-plugin/build.mjs`
+  after changing it. Episode memory preserves experiences, not standing
   operating instructions. Keep project-specific procedures in that project's repo.
 - Keep the public/private boundary: code that runs only on Clankie's hosted
   service (gateway, accounts, managed-hosting control plane), its deployment,

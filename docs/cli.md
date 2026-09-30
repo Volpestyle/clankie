@@ -540,6 +540,40 @@ The remaining automatic worker-isolation work is specified in
 
 <a id="account-setup"></a>
 
+### `accounts codex [list | add HOME --label LABEL | remove LABEL]`
+
+Register the owner's extra Codex homes, without copying or inspecting credentials:
+
+```sh
+clankie accounts codex add ~/.codex-second --label second
+clankie accounts codex list
+clankie accounts codex remove second
+```
+
+The TUI accepts the same arguments under `/accounts codex`. The owner signs in
+and approves hooks in each home through Codex itself. Registration stores only a
+canonical home path and label; `authPresent` checks file existence, not whether
+the login is valid. `default` is implicit (`CODEX_HOME`, otherwise `~/.codex`).
+Removing a registration never deletes its home or credentials.
+
+Local Codex hires choose the greatest minimum remaining fraction across the
+five-hour and weekly windows from recent rollout `rate_limits`. Usage older than
+24 hours, missing windows and unreadable telemetry are unknown, not free quota.
+Known positive headroom wins over unknown; unknown wins over exhausted accounts;
+registration order breaks ties. Passed reset times restore the corresponding
+window. If all accounts are exhausted the least constrained one is returned;
+Codex still enforces its quota. No credentials present means the hire fails.
+`hire_agent`'s `account: "second"` pins a registered label (including `default`),
+even when it has less headroom. Overrides on remote or non-Codex hires fail.
+The hire result and fleet roster carry `seat.account: {label, home}`; the app
+shows the label. Existing seats keep their account. New registrations apply
+without a service restart.
+
+The owner-authorized API offers `GET /v1/accounts/codex` and
+`POST /v1/accounts/codex` with `{op:"add", home, label}` or `{op:"remove", label}`.
+Local transcript discovery, `clankie agents`, resumed sessions and follow-up
+queue delivery use the account's home; seat-sync uses the hook's transcript path.
+
 ### `accounts [list]` / `accounts connect github` / `accounts disconnect PROVIDER` / `accounts apps`
 
 The owner's own GitHub and Linear accounts, linked to this body
@@ -1446,14 +1480,14 @@ comes from the credential broker, so this reads the operator lane.
 
 Sections default to the five a session is built with, joined by one blank line:
 
-| Section    | What it is                                                                                                                                                    |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `identity` | `instructions.md` — who he is and how he works                                                                                                                |
-| `persona`  | The owner-authored character configuration                                                                                                                    |
-| `reach`    | The machine-access or this-room paragraph for that lane; with machine access, the ready computer-use harnesses (`browser harnesses`) unless delegation is off |
-| `fleet`    | Owner-authored routing preference; shell-holding lanes only, when set                                                                                         |
-| `address`  | His own mailbox, when one is connected                                                                                                                        |
-| `model`    | The card naming the model the service lanes run on (ask for it by name)                                                                                       |
+| Section    | What it is                                                                                                                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity` | `instructions.md` — who he is, his trust boundaries and where things live                                                                                                                                  |
+| `persona`  | The owner-authored character configuration                                                                                                                                                                 |
+| `reach`    | The machine-access or this-room paragraph for that lane; with machine access, the ready computer-use harnesses (`browser harnesses`) unless delegation is off; in Discord lanes, how a reply carries media |
+| `fleet`    | Owner-authored routing preference; shell-holding lanes only, when set                                                                                                                                      |
+| `address`  | His own mailbox, when one is connected                                                                                                                                                                     |
+| `model`    | The card naming the model the service lanes run on (ask for it by name)                                                                                                                                    |
 
 A seat that carries the identity some other way asks for the rest:
 `clankie prompt --sections persona,reach,address`.

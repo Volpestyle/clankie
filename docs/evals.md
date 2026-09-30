@@ -22,16 +22,20 @@ intervals, and a paired comparison that says when a difference is within noise.
 
 [`configurations.json`](../scripts/evals/configurations.json) defines named arms:
 
-| Name      | Instructions                                       | Skills                   |
-| --------- | -------------------------------------------------- | ------------------------ |
-| `bare`    | None: the harness alone                            | None                     |
-| `current` | Current `apps/clankie/src/captain/instructions.md` | Bundled                  |
-| `plain`   | Same current instructions                          | Product/tool skills only |
-| `trimmed` | Versioned experimental `scripts/evals/trimmed.md`  | Bundled                  |
+| Name       | Instructions                                                                                 | Skills                   |
+| ---------- | -------------------------------------------------------------------------------------------- | ------------------------ |
+| `bare`     | None: the harness alone                                                                      | None                     |
+| `current`  | Current `apps/clankie/src/captain/instructions.md`                                           | Bundled                  |
+| `plain`    | Same current instructions                                                                    | Product/tool skills only |
+| `pre-1456` | The instructions before the VUH-1456 cut, frozen in `scripts/evals/instructions-pre-1456.md` | Bundled                  |
+| `trimmed`  | Versioned experimental `scripts/evals/trimmed.md`                                            | Bundled                  |
 
 `bare` against `current` measures the whole Clankie layer; `plain` against
 `current` isolates the opinionated skills (VUH-1457); `trimmed` against `current`
-tests an instruction cut (VUH-1456). The skill selection calls the same
+tests the next instruction cut. `trimmed.md` holds the candidate text; when a cut
+lands, the file matches `current` until the next candidate. `pre-1456` keeps
+comparisons that started before the VUH-1456 cut on the old prompt
+([results](testing/2026-09-30-instruction-trim/README.md)). The skill selection calls the same
 `bundledSkills` selector as `clankie skills opinionated on|off` and `hire_agent`'s
 `skills: bundled|plain`, and never toggles the owner's settings. The current arm
 is the versioned Clankie prompt in a headless harness, not the live service's
@@ -254,3 +258,13 @@ credentials, private homes, provider sessions or held-out case content.
 Baselines: [VUH-1454](testing/2026-09-30-clankie-evals/README.md) (single trials,
 current arm only) and [VUH-1467](testing/2026-09-30-eval-baseline/README.md)
 (repeated bare against current on both suites).
+
+### Codex account selection
+
+`node scripts/evals/run.mjs --harness codex --account LABEL ...` pins one registered
+Codex account for the entire campaign. Without `--account`, it uses the same
+headroom selector as local hires (`clankie accounts codex list`). The report
+records the label and home. The usage guard starts with that home's known
+windows and then reads the isolated trial rollouts; it never switches accounts
+to continue after a guard stop. Big sweeps belong on an API key with an explicit
+spend budget, not rotated subscription accounts.
