@@ -1,0 +1,244 @@
+pnpm check: exit 1 (unrelated docs/README.md formatting).
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.1 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+docs/README.md (12ms)
+
+Format issues found in above 1 files. Run without `--check` to fix.
+Finished in 629ms on 1444 files using 18 threads.
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.
+
+Remaining gates: pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+Exit: 0. Routine JSON service-event lines omitted.
+
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+Configuration hints (2)
+vendor/opinionated-skills/**           knip.json  Remove from ignore
+integrations/codex-plugin/skills/**    knip.json  Remove from ignore
+$ node scripts/check-doc-links.mjs && pnpm docs:public:check
+Checked 311 markdown files; local links resolve.
+$ pnpm --filter @clankie/docs check
+$ node scripts/check.mjs
+Built public docs: 10 pages, 35 network routes, 112 API operations, 56 slash commands.
+Checked 10 public docs pages; links and anchors resolve.
+$ infra/aws/public-docs/check.sh
+$ turbo run typecheck
+• turbo 2.10.4
+
+   • Packages in scope: @clankie/agent-hosts, @clankie/agent-transcript, @clankie/api-client, @clankie/clankie, @clankie/credential-broker, @clankie/discord-activity, @clankie/discord-bridge, @clankie/discord-presence-core, @clankie/discord-user-session, @clankie/docs, @clankie/interactive-environment, @clankie/media-connector, @clankie/model-provider, @clankie/model-registry, @clankie/observability, @clankie/persona-images, @clankie/play, @clankie/play-voice, @clankie/protocol, @clankie/relay, @clankie/rendered-surface-client, @clankie/settings, @clankie/swarm, @clankie/tui, @clankie/vox, @clankie/vox-client, @clankie/work-items
+   • Running typecheck in 27 packages
+   • Remote caching disabled
+
+@clankie/media-connector:typecheck: cache hit, replaying logs 8a2ad0a41dcb2d5f
+@clankie/vox:typecheck: cache hit, replaying logs 4b1ce02dc66d012f
+@clankie/media-connector:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/vox:typecheck: $ cargo check --locked --all-targets --all-features
+@clankie/vox:typecheck:     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+@clankie/model-registry:typecheck: cache hit, replaying logs 090cf92513b56e2f
+@clankie/protocol:typecheck: cache hit, replaying logs c9f999d1588b1d93
+@clankie/vox-client:typecheck: cache hit, replaying logs e9007a753229d324
+@clankie/model-registry:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/settings:typecheck: cache hit, replaying logs 67774ebeb3b21c37
+@clankie/protocol:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/settings:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/vox-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/persona-images:typecheck: cache hit, replaying logs fed08ab7074008fc
+@clankie/observability:typecheck: cache hit, replaying logs f92d5e7fe1a5b249
+@clankie/persona-images:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/observability:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/credential-broker:typecheck: cache hit, replaying logs 16de65ae6460dfc5
+@clankie/credential-broker:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-hosts:typecheck: cache hit, replaying logs 2e3fed82d519065b
+@clankie/agent-transcript:typecheck: cache miss, executing 899b7f7ea59db650
+@clankie/agent-hosts:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/work-items:typecheck: cache hit, replaying logs 57929065f0627342
+@clankie/work-items:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/interactive-environment:typecheck: cache hit, replaying logs d4acb9b4755a50d2
+@clankie/interactive-environment:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/relay:typecheck: cache hit, replaying logs a06abaac57850538
+@clankie/relay:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/model-provider:typecheck: cache hit, replaying logs c2a4898be76f0e9a
+@clankie/model-provider:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/swarm:typecheck: cache hit, replaying logs 9c4d2187f241f3a1
+@clankie/play-voice:typecheck: cache hit, replaying logs cfde0a9efdd94b37
+@clankie/swarm:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play-voice:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play:typecheck: cache miss, executing 4466e5f38f9c1d5f
+@clankie/discord-presence-core:typecheck: cache hit, replaying logs f2441bb94fce5e6f
+@clankie/discord-presence-core:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/rendered-surface-client:typecheck: cache hit, replaying logs 319a2847cc212836
+@clankie/rendered-surface-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/api-client:typecheck: cache hit, replaying logs fc7f530ab9ec3f3b
+@clankie/api-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-activity:typecheck: cache hit, replaying logs ae47410c67fd9f57
+@clankie/discord-activity:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-user-session:typecheck: cache hit, replaying logs a43ec670f447e6ed
+@clankie/discord-user-session:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-bridge:typecheck: cache hit, replaying logs d3fa0e77f7d2d2b2
+@clankie/discord-bridge:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-transcript:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/tui:typecheck: cache miss, executing f733b5c8b83638ba
+@clankie/tui:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/clankie:typecheck: cache miss, executing 1c14c575f6ce929d
+@clankie/clankie:typecheck: $ tsc --noEmit -p tsconfig.json
+
+ Tasks:    26 successful, 26 total
+Cached:    22 cached, 26 total
+  Time:    8.088s
+
+$ vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+(node:60436) Warning: AI SDK Warning (openrouter.chat / openai/gpt-6-luna): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60436) Warning: AI SDK Warning (openrouter.chat / openai/gpt-6-luna): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+
+ Test Files  384 passed (384)
+      Tests  3254 passed | 2 skipped (3256)
+   Start at  14:11:32
+   Duration  242.01s (transform 3.70s, setup 0ms, import 93.81s, tests 121.19s, environment 15ms)
+
+$ cargo test --locked --all-features && cargo build --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.34s
+     Running unittests src/main.rs (target/debug/deps/clankvox-015b79c825095510)
+
+running 123 tests
+test audio_pipeline::tests::llm_sample_rate_validation_rejects_pathological_values ... ok
+test capture_supervisor::tests::rtp_seq_duplicate_detected ... ok
+test capture_supervisor::tests::rtp_seq_first_packet_returns_first ... ok
+test capture_supervisor::tests::rtp_seq_forward_large_gap ... ok
+test capture_supervisor::tests::rtp_seq_forward_loss_across_wraparound ... ok
+test capture_supervisor::tests::rtp_seq_forward_loss_small_gaps ... ok
+test capture_supervisor::tests::rtp_seq_large_backward_near_half_u16_is_stale ... ok
+test capture_supervisor::tests::rtp_seq_large_forward_near_half_u16_is_forward ... ok
+test capture_supervisor::tests::rtp_seq_sequential_packet ... ok
+test capture_supervisor::tests::rtp_seq_sequential_wraps_u16 ... ok
+test capture_supervisor::tests::rtp_seq_stale_across_wraparound ... ok
+test capture_supervisor::tests::rtp_seq_stale_reordered_packet ... ok
+test audio_pipeline::tests::llm_conversion_ignores_invalid_sample_rates ... ok
+test audio_pipeline::tests::clear_music_preserves_tts_buffer ... ok
+test capture_supervisor::tests::waiting_for_first_keyframe_reasserts_sink_wants_until_keyframe_arrives ... ok
+test app_state::tests::stale_events_are_ignored_and_dave_readiness_is_monotonic ... ok
+test app_state::tests::primary_disconnect_does_not_reset_stream_roles ... ok
+test app_state::tests::clear_transport_runtime_state_drops_transport_state_but_keeps_subscriptions ... ok
+test app_state::tests::concurrent_voice_and_watch_video_state_are_role_isolated ... ok
+test audio_pipeline::tests::tts_partial_tail_flushes_after_short_stall ... ok
+test audio_pipeline::tests::music_frames_do_not_bypass_the_tts_prebuffer_started_gate ... ok
+test audio_pipeline::tests::tts_drain_waits_for_pcm_and_all_trailing_frames ... ok
+test audio_pipeline::tests::tts_partial_tail_coalesces_before_flush_threshold ... ok
+test audio_pipeline::tests::tts_prebuffer_gate_holds_output_until_threshold ... ok
+test audio_pipeline::tests::suppressed_music_output_preserves_buffer_until_resumed ... ok
+test audio_pipeline::tests::silent_tts_pcm_does_not_mark_a_frame_audible ... ok
+test audio_pipeline::tests::clear_tts_zeros_pcm_queue_and_mix_scratch ... ok
+test audio_pipeline::tests::tts_prebuffer_releases_short_utterance_after_stall ... ok
+test connection_supervisor::tests::fresh_join_discards_previous_primary_transport_inputs ... ok
+test connection_supervisor::tests::explicit_leave_clears_only_primary_voice_and_never_reconnects ... ok
+test capture_supervisor::tests::update_speaking_state_only_triggers_on_first_packet_of_burst ... ok
+test capture_supervisor::tests::audio_end_disarms_capture_before_an_immediate_follow_up_burst ... ok
+test connection_supervisor::tests::rejoin_ignores_disconnect_from_replaced_connection_generation ... ok
+test ipc::tests::capture_end_stays_behind_pcm_when_the_ordered_lane_is_backpressured ... ok
+test ipc::tests::encode_user_audio_payload_rejects_non_numeric_user_ids ... ok
+test ipc::tests::explicit_leave_gateway_payload_is_op4_with_null_channel ... ok
+test ipc::tests::process_ready_carries_the_mandatory_protocol_version ... ok
+test h264::tests::rewrite_h264_annexb_start_codes_supports_short_variants ... ok
+test h264::tests::h264_video_depacketizer_resets_on_sequence_gap ... ok
+test h264::tests::h264_video_depacketizer_does_not_mark_parameter_sets_only_access_unit_as_keyframe ... ok
+test audio_pipeline::tests::tts_overflow_rejects_the_whole_chunk_without_truncating_pcm ... ok
+test ipc::tests::dropped_native_audio_messages_are_wiped_before_release ... ok
+test dave::tests::ordered_audio_candidate_user_ids_prefers_current_mapping_before_other_known_users ... ok
+test dave::tests::ordered_audio_candidate_user_ids_tries_known_users_when_ssrc_map_is_missing ... ok
+test ipc::tests::correlated_playback_events_serialize_exact_ids ... ok
+test media_sink_wants::tests::media_sink_wants_payload_includes_streams_and_pixel_counts ... ok
+test ipc::tests::transport_errors_and_publish_media_start_serialize_correlation ... ok
+test ipc::tests::transport_stats_serializes_contract_shape ... ok
+test music::tests::direct_music_pipeline_command_skips_ytdlp ... ok
+test music::tests::music_output_drained_when_queue_and_mixer_are_empty ... ok
+test music::tests::music_output_not_drained_while_mixer_buffer_has_music ... ok
+test music::tests::music_output_not_drained_while_pcm_queue_has_chunks ... ok
+test music::tests::pause_and_resume_requests_are_retained_before_process_spawn ... ok
+test music::tests::retry_command_uses_strict_hls_selector_without_direct_fallback ... ok
+test ipc::tests::read_line_capped_treats_unterminated_tail_as_line ... ok
+test ipc::tests::read_line_capped_reads_normal_lines_and_eof ... ok
+test music::tests::retry_is_limited_to_classified_failures_before_first_pcm ... ok
+test music::tests::unresolved_music_pipeline_command_uses_ytdlp ... ok
+test playback_supervisor::tests::duck_before_first_pcm_is_not_overwritten_by_fade_in ... ok
+test ipc::tests::encode_user_audio_payload_serializes_header_fields ... ok
+test playback_supervisor::tests::pause_before_first_pcm_remains_paused_when_pipeline_starts ... ok
+test ipc::tests::invalid_utf8_line_is_skipped_without_killing_the_reader ... ok
+test ipc::tests::voice_state_distinguishes_null_from_omitted_fields ... ok
+test playback_supervisor::tests::policy_approved_music_starts_without_waiting_for_tts ... ok
+test playback_supervisor::tests::stale_music_lifecycle_cannot_advance_current_track ... ok
+test connection_supervisor::tests::null_gateway_fields_clear_stale_primary_credentials ... ok
+test playback_supervisor::tests::resume_before_first_pcm_stays_loading_until_pcm_arrives ... ok
+test ipc::tests::read_line_capped_discards_oversized_line_and_recovers_on_next_line ... ok
+test playback_supervisor::tests::stop_before_first_pcm_prevents_stale_pipeline_start ... ok
+test process_unix::tests::ytdlp_resolved_input_prints_first_resolved_url ... ok
+test playback_supervisor::tests::tts_started_requires_a_transmitted_tts_frame_and_emits_once ... ok
+test process_unix::tests::subprocess_diagnostics_redact_signed_urls ... ok
+test ipc::tests::inbound_command_deserializes_camel_case_contract_fields ... ok
+test rtp::tests::rtp_header_round_trips ... ok
+test rtp::tests::rtp_header_parses_csrc_and_extension_words ... ok
+test rtp::tests::strip_rtp_padding_noop_when_p_bit_clear ... ok
+test playback_supervisor::tests::failed_tts_playback_tombstones_are_bounded_and_reject_late_audio ... ok
+test stream_publish::tests::build_stream_publish_browser_pipeline_command_uses_image2pipe_png_input ... ok
+test stream_publish::tests::media_started_is_once_per_source_and_rejects_stale_source_generations ... ok
+test tests::reconnect_sleep_without_deadline_is_pending ... ok
+test stream_publish::tests::build_stream_publish_pipeline_command_uses_ytdlp ... ok
+test rtp::tests::strip_rtp_padding_handles_single_byte_pad ... ok
+test rtp::tests::strip_rtp_padding_removes_trailing_pad_bytes ... ok
+test tests::tick_slippage_monitor_counts_skipped_ticks_and_rate_limits_reports ... ok
+test stream_publish::tests::drain_h264_access_units_splits_on_aud_boundaries ... ok
+test video::tests::stream_descriptor_serializes_camel_case_contract_fields ... ok
+test video_decode_worker::tests::worker_accepts_frames_and_control_without_blocking_the_caller ... ok
+test ipc::tests::control_frame_has_exact_header_and_json ... ok
+test video_decoder::tests::yuv420_to_rgb_clamps_undersized_chroma_planes ... ok
+test video_decoder::tests::yuv420_to_rgb_handles_odd_dimensions_without_panic ... ok
+test playback_supervisor::tests::wake_word_pause_preserves_buffered_music_tail_when_player_is_dead ... ok
+test video_state::tests::optional_video_state_fields_may_be_absent ... ok
+test video_state::tests::apply_remote_video_state_preserves_existing_streams_when_update_omits_streams ... ok
+test video_state::tests::apply_remote_video_state_clears_bindings_on_explicit_empty_state ... ok
+test voice_conn::protocol::tests::parse_voice_opcode_reads_hello_payload ... ok
+test voice_conn::protocol::tests::optional_session_description_fields_may_be_absent ... ok
+test voice_conn::handshake::tests::recv_session_description_buffers_non_target_text_frames ... ok
+test playback_supervisor::tests::on_audio_tick_caps_music_prefetch_to_live_window ... ok
+test voice_conn::tests::parse_user_id_rejects_non_numeric_values ... ok
+test voice_conn::udp_rx::tests::decrypt_video_frame_candidates_prefers_primary_candidate_without_dave ... ok
+test voice_conn::udp_rx::tests::decrypt_video_frame_candidates_uses_alternate_candidate_without_dave ... ok
+test voice_conn::udp_rx::tests::note_ssrc_packet_dave_requires_every_marked_packet_in_the_access_unit ... ok
+test voice_conn::udp_rx::tests::try_decrypt_rtp_video_payload_is_a_no_op_without_a_dave_session ... ok
+test voice_conn::video_frames::tests::fallback_frame_buffer_resets_on_gap_and_timestamp_change ... ok
+test voice_conn::protocol::tests::parse_voice_opcode_rejects_invalid_secret_key_bytes ... ok
+test voice_conn::video_frames::tests::fallback_frame_buffer_replays_only_distinct_payloads ... ok
+test voice_conn::ws_ops::tests::already_in_group_detection_matches_typed_variant_only ... ok
+test transport_crypto::tests::aes256_gcm_transport_crypto_round_trips ... ok
+test voice_conn::ws_ops::tests::heartbeat_interval_clamp_rejects_pathological_values ... ok
+test transport_crypto::tests::xchacha20_transport_crypto_round_trips ... ok
+test vp8::tests::vp8_video_depacketizer_resets_on_sequence_gap ... ok
+test transport_crypto::tests::rtp_decrypt_uses_correct_aad_when_extension_is_present ... ok
+test rtcp::tests::protected_rtcp_feedback_packets_round_trip ... ok
+test voice_conn::handshake::tests::recv_ready_buffers_non_target_text_frames ... ok
+test playback_supervisor::tests::tts_finish_is_ordered_after_pcm_and_stop_is_playback_scoped ... ok
+test video_decoder::tests::decoder_handles_garbage_input_without_panic ... ok
+test video_decoder::tests::decoder_initializes_successfully ... ok
+test video_decoder::tests::decoder_handles_empty_input_gracefully ... ok
+test dave::tests::transition_zero_is_not_tracked_as_pending ... ok
+test dave::tests::decrypt_failures_are_suppressed_while_transition_is_pending ... ok
+test dave::tests::transition_zero_executes_immediately ... ok
+test dave::tests::pending_downgrade_auto_executes_after_timeout ... ok
+test playback_supervisor::tests::tts_overflow_fails_the_playback_and_clears_all_pcm ... ok
+
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+$ node test/ipc-smoke.ts debug
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox

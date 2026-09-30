@@ -2,7 +2,7 @@
  * VUH-1458: a Claude seat stays the interactive TUI and is driven through the
  * clankie-worker plugin — channel in, transcript receipt, Stop hook out.
  */
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +16,8 @@ import {
   managedPolicyApprovesWorker,
   type WorkerSeatAgent,
 } from "../src/captain/claude-worker-seat.ts";
-import type { HerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
+import { parseHerdrSeatTranscript, type HerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
+import { createHerdrWatchRunner, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -191,6 +192,100 @@ it("a hire starts the interactive TUI, briefs it over the channel, and waits for
     await adapter.attach({ ...started.control.ref, sessionId: "20000000-0000-4000-8000-000000000002" }),
   ).toBeUndefined();
 });
+
+it.each(["string", "blocks"])(
+  "verifies native Claude channel receipts marked as system metadata (%s)",
+  async (contentShape) => {
+    const root = await scratch();
+    const path = join(root, `${SESSION}.jsonl`);
+    const agent: HerdrAgentSnapshot = {
+      paneId: "w1:p1",
+      terminalId: "term_0a1b2c",
+      agent: "claude",
+      status: "idle",
+      title: "probe",
+      session: { source: "herdr:claude", kind: "path", value: path },
+    };
+    // The real probe's user record had both flags. Its following instruction
+    // attachments linked that user record to Claude's visible reply.
+    await writeFile(path, "");
+    let parentUuid: string | null = null;
+    let count = 0;
+    const deliver = vi.fn(async (_seat: string, text: string) => {
+      const uuid = `receipt-${++count}`;
+      const prompt = `<channel source="plugin:clankie-worker:swarm" kind="message" source="captain" event_id="seat-${count}">\n${text}\n</channel>`;
+      const records = [
+        {
+          type: "user",
+          uuid,
+          parentUuid,
+          isMeta: true,
+          promptSource: "system",
+          message: {
+            role: "user",
+            content: contentShape === "string" ? prompt : [{ type: "text", text: prompt }],
+          },
+        },
+        {
+          type: "attachment",
+          uuid: `${uuid}-instructions`,
+          parentUuid: uuid,
+          attachment: { type: "instructions", files: [] },
+        },
+        {
+          type: "user",
+          uuid: `${uuid}-meta`,
+          parentUuid: `${uuid}-instructions`,
+          isMeta: true,
+          promptSource: "system",
+          message: { role: "user", content: "ordinary system metadata stays hidden" },
+        },
+        {
+          type: "assistant",
+          uuid: `${uuid}-reply`,
+          parentUuid: `${uuid}-meta`,
+          message: { role: "assistant", content: [{ type: "text", text: "PROBE OK" }] },
+        },
+      ];
+      await appendFile(path, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+      parentUuid = `${uuid}-reply`;
+      return true;
+    });
+    const runner = createHerdrWatchRunner();
+    const adapter = createClaudeWorkerSeatAdapter({
+      consent: async () => ({ approved: true }),
+      hooks: new SeatHookLog(join(root, "hooks.json")),
+      agent: async () => agent,
+      transcript: () => runner.transcript!(agent),
+      mailbox: { bound: () => true, deliver },
+      timing: { readyMs: 20, receiptMs: 20, pollMs: 1 },
+    });
+    const start = vi.fn(async () => undefined);
+    const view: SeatView = { paneId: agent.paneId, run: vi.fn(async () => undefined), start };
+    const started = await adapter.start(
+      { harness: "claude", cwd: root, model: "haiku", brief: "Reply exactly PROBE OK." },
+      view,
+    );
+    expect(started.outcome).toBe("started");
+    if (started.outcome !== "started") throw new Error(JSON.stringify(started));
+    expect(await started.control.send("Reply exactly PROBE OK.")).toMatchObject({
+      outcome: "accepted",
+      messageId: "claude:receipt-2",
+    });
+    const receipts = (await runner.transcript!(agent))!.entries;
+    expect(receipts.filter((entry) => entry.type === "message" && entry.internal)).toHaveLength(2);
+    expect(
+      receipts.some((entry) => entry.type === "message" && entry.text.includes("ordinary system metadata")),
+    ).toBe(false);
+    expect(
+      parseHerdrSeatTranscript("claude", await readFile(path, "utf8")).map(
+        (entry) => entry.type === "message" && entry.text,
+      ),
+    ).toEqual(["PROBE OK", "PROBE OK"]);
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(view.run).not.toHaveBeenCalled();
+  },
+);
 
 it("without the owner's approval nothing launches and the hire is blocked on the named fix", async () => {
   const { adapter, view, start } = await fixture({ approved: false });

@@ -1,0 +1,31 @@
+{
+  "sessionId": "abcdbf23-568a-43a5-a145-857d69472728",
+  "rawReceipt": {
+    "uuid": "4b47274f-1f53-47d3-bfd5-a264d042f87d",
+    "timestamp": "2026-09-30T19:06:54.494Z",
+    "isMeta": true,
+    "promptSource": "system",
+    "content": "<channel source=\"plugin:clankie-worker:swarm\" kind=\"message\" conversation=\"term_65cb80063b155158\" source=\"captain\" event_id=\"seat-9c4e8a2e-8cf4-45e5-a15a-44b1def66d37\" created_at=\"2026-09-30T19:06:54.477Z\">\nChannel delivery probe. Reply with exactly: PROBE OK. Do not run any commands or edit anything.\n</channel>"
+  },
+  "publicMessages": ["PROBE OK"],
+  "internalReceipts": [
+    {
+      "type": "message",
+      "id": "claude:4b47274f-1f53-47d3-bfd5-a264d042f87d",
+      "role": "operator",
+      "text": "<channel source=\"plugin:clankie-worker:swarm\" kind=\"message\" conversation=\"term_65cb80063b155158\" source=\"captain\" event_id=\"seat-9c4e8a2e-8cf4-45e5-a15a-44b1def66d37\" created_at=\"2026-09-30T19:06:54.477Z\">\nChannel delivery probe. Reply with exactly: PROBE OK. Do not run any commands or edit anything.\n</channel>",
+      "occurredAt": "2026-09-30T19:06:54.494Z",
+      "internal": true
+    }
+  ],
+  "fullBodyMatches": true,
+  "persistedWorkerHook": {
+    "paneId": "w2H:p7B",
+    "last": {
+      "type": "turn_completed",
+      "at": "2026-09-30T19:06:56.987Z",
+      "ok": true,
+      "text": "PROBE OK"
+    }
+  }
+}

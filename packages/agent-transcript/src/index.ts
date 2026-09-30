@@ -473,8 +473,16 @@ function claudeEntries(
   const toolNames = new Map<string, string>();
   return dedupeTools(
     records.flatMap<HerdrTranscriptEntry>((entry, entryIndex) => {
-      if (entry.isMeta === true || entry.promptSource === "system") return [];
       const nativeId = string(entry.uuid) ?? String(entryIndex);
+      // Claude stores channel deliveries as user records with isMeta: true
+      // and promptSource: "system". Keep their opt-in internal receipts before
+      // dropping other metadata; they must never become visible operator chat.
+      if (entry.type === "user") {
+        const text = messageText(record(entry.message)?.content);
+        if (CLAUDE_CHANNEL_PROMPT.test(text.trimStart()))
+          return claudePrompt(`claude:${nativeId}`, text, timestamp(entry), includeChannelPrompts);
+      }
+      if (entry.isMeta === true || entry.promptSource === "system") return [];
       // Mid-turn input rides the active chain as an attachment, stamped when it was sent.
       const queued = queuedCommand(entry);
       if (queued !== undefined) {
