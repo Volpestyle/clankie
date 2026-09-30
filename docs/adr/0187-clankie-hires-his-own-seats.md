@@ -138,5 +138,12 @@ withdrawn at James's direction before it landed).
   retried on the terminal.
 
 Interactive Claude has no programmatic interrupt; the owner presses Esc in the
-pane. The terminal fallback still launches Claude with the older
-`server:clankie-seat` development channel.
+pane.
+
+The terminal fallback launches Claude without any development channel, and the
+service never answers Claude's development-channel warning. It previously
+pressed Enter on it for `server:clankie-seat`, which accepted consent that is
+the owner's to give (ADR 0194). If that warning ever appears, the hire fails
+`not_ready` with detail `consent_required: …` naming the managed-policy fix,
+and closes its pane. Without a channel, fallback seats get their messages
+through Herdr's paste-aware prompt, verified in the transcript.

@@ -1,6 +1,6 @@
 import type { HarnessSeatAdapter, SeatControl, SeatEvent } from "@clankie/agent-hosts";
 import { bundledSkills, type SkillsSettings } from "@clankie/settings";
-import { execFile, type ExecFileException } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -16,7 +16,6 @@ import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
 import {
-  FLEET_SEAT_MCP_SERVER,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
   type OperatorSeatSpawnResult,
@@ -32,13 +31,10 @@ import {
 import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
 import {
   fleetSeatBriefStartsSession,
-  fleetSeatClaudeStartArgs,
   fleetSeatCodexStartArgs,
-  fleetSeatMcpAddSucceeded,
   fleetSeatModelArgs,
   fleetSeatChromeArgs,
   fleetSeatEffortArgs,
-  type ClaudeMcpResult,
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
@@ -144,8 +140,6 @@ export interface HerdrWatchRunner {
    * submit and resolves once the agent is seen working.
    */
   promptAgent?(paneId: string, text: string): Promise<void>;
-  /** `claude mcp add -s user <name> -- clankie mcp --seat`. Already-exists is success. */
-  addClaudeMcp?(name: string): Promise<void>;
   /**
    * `herdr integration install pi`: the pi extension that reports each pi
    * session to herdr. Without it herdr never learns a pi pane's session, so a pi
@@ -225,9 +219,10 @@ const TERMINAL_ID = /^(?:[a-z][a-z0-9-]{0,63}\/)?term_[0-9a-f]+$/u;
 /** How long a delivered message may take to turn an idle seat into a working one. */
 const SEAT_PICKUP_WAIT_MS = 10_000;
 const SPAWN_CHANNEL_DIALOG_WAIT_MS = 30_000;
-const CLAUDE_MCP_TIMEOUT_MS = 10_000;
 const CHANNEL_DIALOG_MARKER = "Loading development channels";
-const CHANNEL_DIALOG_SELECTED = /^\s*❯\s*1\. I am using this for local development\s*$/u;
+const CLAUDE_CHANNEL_CONSENT_REQUIRED =
+  "consent_required: Claude stopped at its development-channel warning, which only the owner may accept. " +
+  "Fix: install clankie-worker@clankie and approve its channel in /Library/Application Support/ClaudeCode/managed-settings.json (channelsEnabled, allowedChannelPlugins).";
 const PI_ZONE_START = "\u001B]133;A\u0007";
 const PI_ZONE_END = "\u001B]133;B\u0007\u001B]133;C\u0007";
 
@@ -289,32 +284,6 @@ function parseHerdrPaneList(stdout: string): HerdrAgentSnapshot[] {
   const parsed = JSON.parse(stdout) as { result?: { panes?: unknown } };
   const panes = Array.isArray(parsed.result?.panes) ? parsed.result.panes : [];
   return panes.map(snapshotOf);
-}
-
-function claudeMcpStatus(error: ExecFileException | null): number {
-  if (error === null) return 0;
-  return typeof error.code === "number" ? error.code : 1;
-}
-
-function runClaude(args: readonly string[]): Promise<ClaudeMcpResult> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "claude",
-      [...args],
-      { maxBuffer: 1024 * 1024, timeout: CLAUDE_MCP_TIMEOUT_MS },
-      (error, stdout, stderr) => {
-        if (error !== null && error.code === "ENOENT") {
-          reject(new Error("claude: command not found"));
-          return;
-        }
-        resolve({
-          status: claudeMcpStatus(error),
-          stdout: String(stdout),
-          stderr: String(stderr),
-        });
-      },
-    );
-  });
 }
 
 function execHerdr(
@@ -489,12 +458,6 @@ export function createHerdrWatchRunner(
       const tmp = `${path}.${randomUUID()}.tmp`;
       writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
       renameSync(tmp, path);
-    },
-    addClaudeMcp: async (name) => {
-      const result = await runClaude(["mcp", "add", "-s", "user", name, "--", "clankie", "mcp", "--seat"]);
-      if (!fleetSeatMcpAddSucceeded(result)) {
-        throw new Error(result.stderr.trim() || `claude mcp add ${name} failed`);
-      }
     },
     createTab: async ({ cwd, label, env }) => {
       const envArgs = Object.entries(env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
@@ -1035,9 +998,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return { outcome: "failed", reason: "herdr_unreachable", detail: reasonDetail(caught) };
     }
     try {
-      // The seat mailbox and pi's integration are this machine's files. A remote
-      // seat takes the pty lane until its mailbox bridge lands (ADR 0184).
-      if (input.harness === "claude" && remote === undefined) await this.ensureClaudeSeatMcp();
       // A pi seat's durable identity is the session its herdr extension
       // reports; make sure the extension is there before starting one.
       if (input.harness === "pi" && remote === undefined) await this.runner.installPiIntegration?.();
@@ -1103,7 +1063,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       const args = [
         ...skillLaunch.args,
-        ...(input.harness === "claude" && remote === undefined ? fleetSeatClaudeStartArgs() : []),
         ...(input.harness === "codex" && remote === undefined ? fleetSeatCodexStartArgs() : []),
         ...modelArgs,
         ...effortArgs,
@@ -1117,13 +1076,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(args.length === 0 ? {} : { args }),
         });
       } catch (caught) {
-        if (
-          input.harness !== "claude" ||
-          spawnFailureReason(reasonDetail(caught)) !== "not_ready" ||
-          !(await this.dismissClaudeChannelDialog(paneId))
-        ) {
-          throw caught;
-        }
+        // Accepting Claude's development-channel warning is the owner's
+        // consent (ADR 0194); the service never presses it, and names the fix.
+        if (input.harness === "claude" && (await this.showsClaudeChannelWarning(paneId)))
+          throw new Error(CLAUDE_CHANNEL_CONSENT_REQUIRED);
+        throw caught;
       }
       if (brief !== undefined) {
         if (this.runner.promptAgent === undefined) throw new Error("Herdr cannot submit a first prompt");
@@ -1190,60 +1147,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     throw new Error("brief_delivery_unverified: the complete brief was not observed in the seat transcript");
   }
 
-  /** Persist `clankie-seat` at user scope so `server:` can bind it on launch. */
-  private async ensureClaudeSeatMcp(): Promise<void> {
-    await this.runner.addClaudeMcp?.(FLEET_SEAT_MCP_SERVER);
-  }
-
-  /**
-   * The development-channels warning blocks `herdr agent start` until option 1
-   * is confirmed. Enter is already on that option; any other blocked dialog is
-   * left for the operator.
-   */
-  private async dismissClaudeChannelDialog(paneId: string): Promise<boolean> {
-    if (this.runner.read === undefined) return false;
-    let visible: string;
-    try {
-      visible = await this.runner.read(paneId, "claude", "visible");
-    } catch {
-      return false;
-    }
-    if (!isClaudeDevelopmentChannelsDialog(visible)) return false;
-    try {
-      if (this.runner.sendKeys !== undefined) {
-        await this.runner.sendKeys(paneId, "enter");
-      } else if (this.runner.pressEnter !== undefined) {
-        await this.runner.pressEnter(paneId);
-      } else {
-        return false;
-      }
-    } catch {
-      return false;
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SPAWN_CHANNEL_DIALOG_WAIT_MS);
-    timer.unref?.();
-    try {
-      // Bare `agent wait` matches blocked too, and the pane is already
-      // blocked on the dialog, so it would return before Enter lands.
-      if (this.runner.waitUntilIdle !== undefined) {
-        await this.runner.waitUntilIdle(paneId, controller.signal);
-      } else if (this.runner.waitForChange !== undefined) {
-        await this.runner.waitForChange(paneId, "blocked", controller.signal);
-      } else {
-        await this.runner.wait(paneId, controller.signal);
-      }
-      return true;
-    } catch {
-      try {
-        const current = await this.runner.get(paneId);
-        return current.agent === "claude" && current.status !== "blocked";
-      } catch {
-        return false;
-      }
-    } finally {
-      clearTimeout(timer);
-    }
+  /** Whether the pane is stopped at Claude's development-channel warning. */
+  private async showsClaudeChannelWarning(paneId: string): Promise<boolean> {
+    const visible = await this.runner.read?.(paneId, "claude", "visible").catch(() => undefined);
+    return visible !== undefined && visible.includes(CHANNEL_DIALOG_MARKER);
   }
 
   /**
@@ -1836,11 +1743,6 @@ function piReply(transcript: string): string | undefined {
 
 function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
   return agent !== undefined && agent.agent !== "shell" && agent.agent !== "unknown";
-}
-
-function isClaudeDevelopmentChannelsDialog(visible: string): boolean {
-  if (!visible.includes(CHANNEL_DIALOG_MARKER)) return false;
-  return visible.split(/\r?\n/u).some((line) => CHANNEL_DIALOG_SELECTED.test(line));
 }
 
 function delay(ms: number): Promise<void> {

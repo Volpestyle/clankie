@@ -79,9 +79,8 @@ export function createRemoteHerdrRunner(
     }
   };
 
-  const { addClaudeMcp: _localOnly, ...remote } = base;
   return {
-    ...remote,
+    ...base,
     get: current,
     resolveTerminal: async (terminalId) => (await panes()).find((pane) => pane.terminalId === terminalId),
     wait: (target, signal) => until(target, signal, (snapshot) => SETTLED.has(snapshot.status)),
@@ -258,7 +257,6 @@ export function routeHerdrFleets(
       if (runner.startAgent === undefined) throw new Error("Herdr agent start is unavailable");
       await runner.startAgent({ ...options, paneId: id });
     },
-    ...(local.addClaudeMcp === undefined ? {} : { addClaudeMcp: local.addClaudeMcp }),
     ...(local.installPiIntegration === undefined ? {} : { installPiIntegration: local.installPiIntegration }),
     ...(local.configurePiProvider === undefined ? {} : { configurePiProvider: local.configurePiProvider }),
   };

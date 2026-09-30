@@ -278,16 +278,12 @@ describe("watches and hires on a remote fleet", () => {
       if (args[0] === "agent" && args[1] === "start") return "{}";
       throw new Error(`unexpected ${args.join(" ")}`);
     };
-    let mcpAdded = false;
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: routeHerdrFleets(
         {
           get: async () => ({}) as HerdrAgentSnapshot,
           resolveTerminal: async () => undefined,
           wait: async () => ({}) as HerdrAgentSnapshot,
-          addClaudeMcp: async () => {
-            mcpAdded = true;
-          },
         },
         new Map([["pc", createRemoteHerdrRunner(pc, run, { pollMs: 5 })]]),
       ),
@@ -314,7 +310,6 @@ describe("watches and hires on a remote fleet", () => {
     expect(start).toContain("w2:p9");
     // The seat channel is this machine's MCP; a remote seat is reached through its pane.
     expect(start).not.toContain("--dangerously-load-development-channels");
-    expect(mcpAdded).toBe(false);
     store.close();
   });
 });

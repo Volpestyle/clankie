@@ -3,21 +3,11 @@
  * a channel event while a `clankie mcp --seat` bridge is polling, and falls
  * back to typing into the pane only when it is not.
  */
-import { FLEET_SEAT_MCP_SERVER } from "@clankie/protocol";
 import { SeatOutbox } from "./seat-outbox.ts";
 
 export interface FleetSeatMessageContext {
   readonly conversationId: string;
   readonly source: string;
-}
-
-/**
- * The extra argv a hired Claude Code pane gets after `herdr agent start … --`.
- * `server:` binds a server already in the persisted harness config, not one
- * passed as `--mcp-config`. Other harnesses get nothing.
- */
-export function fleetSeatClaudeStartArgs(): readonly string[] {
-  return ["--dangerously-load-development-channels", `server:${FLEET_SEAT_MCP_SERVER}`];
 }
 
 /**
@@ -89,22 +79,6 @@ export function fleetSeatChromeArgs(harness: string): readonly string[] | undefi
     default:
       return undefined;
   }
-}
-
-/** `claude mcp add -s user` as the hire path sees it. */
-export interface ClaudeMcpResult {
-  readonly status: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-/**
- * A second `claude mcp add -s user` exits 1 with "already exists in user
- * config" on stderr; that is success, not a failed hire.
- */
-export function fleetSeatMcpAddSucceeded(result: ClaudeMcpResult): boolean {
-  if (result.status === 0) return true;
-  return /already exists in user config/iu.test(`${result.stdout}\n${result.stderr}`);
 }
 
 /** Create the seat's outbox on first poll (or any other first use). */
