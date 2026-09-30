@@ -499,6 +499,7 @@ it("initializes an operator MCP session with local tools while Swarm is disconne
     app.close();
     await captain.close();
     warning.mockRestore();
-    await rm(root, { recursive: true, force: true });
+    // The session store can still be flushing after close; retry ENOTEMPTY.
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
