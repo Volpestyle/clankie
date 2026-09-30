@@ -1,5 +1,6 @@
 import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
 import { runAccountsCommand } from "./accounts.ts";
+import { gatewayEnableWithAccount } from "./gateway.ts";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import {
@@ -9,6 +10,7 @@ import {
 } from "@clankie/credential-broker";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import {
+  accountHasHostedClankie,
   createHostedTransport,
   disconnectHosted,
   hostedOrigin,
@@ -17,10 +19,64 @@ import {
 } from "../hosted-session.ts";
 import { outputJson, type Writable } from "./io.ts";
 
+export const NO_HOSTED_CLANKIE_MESSAGE =
+  "This account has no hosted Clankie. Run `clankie login` to sign this Mac in for remote access to your own Clankie, or add a hosted Clankie from your account page.";
+
+/** The fleet answers a bare `not_found` for an account with no hosted body. */
+function explainNoHostedClankie(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : "";
+  return message === "Hosted account: not_found" || message === "No hosted machine on this account"
+    ? new Error(NO_HOSTED_CLANKIE_MESSAGE)
+    : error;
+}
+
+/** Where a freshly signed-in account goes: a hosted Clankie, or this Mac's own doorway. */
+export async function routeSignedInAccount(input: {
+  readonly target: "auto" | "this-mac" | undefined;
+  readonly gatewayUrl: string;
+  readonly credential: Parameters<typeof gatewayEnableWithAccount>[0]["credential"];
+  readonly env: NodeJS.ProcessEnv;
+  readonly store: ReturnType<typeof createDefaultCredentialStore>;
+  readonly settings: SettingsStore;
+  readonly fetchImpl?: typeof fetch;
+}): Promise<{ readonly kind: "hosted" } | { readonly kind: "this-mac"; readonly output: unknown }> {
+  // The tenant lookup is a convenience. Whatever it says (not_found, a 401 for
+  // this client's token, an outage), it must never lock a self-hosted Mac out of
+  // signing in, so any failure reads as "no hosted Clankie".
+  const hasHosted =
+    input.target === "this-mac"
+      ? false
+      : await accountHasHostedClankie(input.gatewayUrl, input.credential, input.fetchImpl).catch(() => false);
+  if (hasHosted) return { kind: "hosted" };
+  if (input.target === undefined) throw new Error(NO_HOSTED_CLANKIE_MESSAGE);
+  const enabled = await gatewayEnableWithAccount(
+    { gatewayUrl: input.gatewayUrl, credential: input.credential },
+    { env: input.env, settings: input.settings, credentials: input.store },
+  );
+  return {
+    kind: "this-mac",
+    output: {
+      ok: true,
+      mode: "remote-access",
+      hostId: enabled.hostId,
+      message: "Signed this Mac in for remote access. Restart the captain to open the doorway.",
+      restart: enabled.restart,
+    },
+  };
+}
+
+/**
+ * `clankie login` is the one account sign-in (`target: "auto"`): an account with
+ * a hosted Clankie connects this terminal to it, any other signs this Mac in
+ * for remote access (which also re-signs a signed-out Mac). `remote-access on`
+ * is the same sign-in pinned to this Mac (`"this-mac"`). `connect hosted` asks
+ * for a hosted body, so an account without one is an error, not a doorway.
+ */
 export async function connectHostedCli(
   args: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
   stdout: Writable = process.stdout,
+  options: { readonly target?: "auto" | "this-mac" } = {},
 ) {
   const { positionals, values } = parseArgs({
     args: [...args],
@@ -55,6 +111,18 @@ export async function connectHostedCli(
     const credential = await completeClankieAccountLogin({ challenge, code });
     const store = createDefaultCredentialStore({ env }),
       settings = new SettingsStore(defaultSettingsPath(env));
+    const route = await routeSignedInAccount({
+      target: options.target,
+      gatewayUrl,
+      credential,
+      env,
+      store,
+      settings,
+    });
+    if (route.kind === "this-mac") {
+      outputJson(stdout, route.output);
+      return;
+    }
     const session = await pairHostedAccount({
       gatewayUrl,
       credential,
@@ -78,6 +146,8 @@ export async function connectHostedCli(
         if (!chosen) throw new Error("No machine selected");
         return chosen;
       },
+    }).catch((error: unknown) => {
+      throw explainNoHostedClankie(error);
     });
     outputJson(stdout, {
       ok: true,
@@ -91,7 +161,16 @@ export async function connectHostedCli(
   }
 }
 export async function disconnectHostedCli(env: NodeJS.ProcessEnv = process.env) {
-  await disconnectHosted(new SettingsStore(defaultSettingsPath(env)), createDefaultCredentialStore({ env }));
+  const settings = new SettingsStore(defaultSettingsPath(env));
+  if ((await settings.load()).client?.mode !== "hosted") {
+    return {
+      ok: true,
+      mode: "local",
+      message:
+        "This terminal is not connected to a hosted Clankie, so there is nothing to sign out of. To take this Mac off remote access, run `clankie remote-access off`.",
+    };
+  }
+  await disconnectHosted(settings, createDefaultCredentialStore({ env }));
   return {
     ok: true,
     mode: "local",

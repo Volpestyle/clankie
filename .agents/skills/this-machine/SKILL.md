@@ -284,6 +284,10 @@ signing and delivery registrations. Tokens and delivery keys never go to the hos
 <episodeId> --summary "…"` to curate them through the operator API. Retained
 notes survive the recent ring; a full retained store refuses another retain
 until a note is released or forgotten. `/memory` is the console browser.
+If `clankie pair` exits with "No pairing code was made", this Mac is signed out of
+remote access: sign it back in (`/remote-access` → "Sign this Mac back in", or
+`clankie remote-access on --email EMAIL --code-stdin`), restart the captain, and
+pair again. `clankie doctor`/`clankie gateway status` show `doorway: signed out since …`.
 `clankie pair` and `/pair` start or reuse the local relay before minting a code;
 run pairing on the host that owns the relay. Public pairing requires the secure
 QR or full link; its fragment is secret-bearing. Never paste it into logs or
@@ -576,10 +580,13 @@ reads retained threads. Never infer reachability or completion from a saved thre
 
 ## A Mac connected to hosted Clankie
 
-`clankie login` signs in by email code and pairs a revocable hosted device.
+`clankie login` signs in by email code. An account with a hosted Clankie pairs a
+revocable hosted device; one without signs this Mac in for remote access (and
+re-signs a signed-out Mac), so a bare `not_found` no longer means "wrong command".
 Use `--email EMAIL --code-stdin` headlessly; `whoami` reports the machine and
 access state without secrets. `logout` forgets this Mac's session/wake key and
-selects This Mac for the next launch, leaving hosted work running. `connect
+selects This Mac for the next launch, leaving hosted work running; it never
+touches remote access (`clankie remote-access off` does). `connect
 hosted`/`disconnect` remain aliases. `/connection` and `/settings` expose modes.
 Hosted mode never starts a local body; the footer says `Hosted · <machine>`.
 

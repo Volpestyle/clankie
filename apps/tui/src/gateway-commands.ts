@@ -1,28 +1,28 @@
 import { accountHasHostedClankie, pairHostedAccount } from "./hosted-session.ts";
 import {
-  CLANKIE_ACCOUNT_PROVIDER_ID,
-  PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
   beginClankieAccountLogin,
   completeClankieAccountLogin,
-  generatePublicGatewayInstallationId,
   type CredentialStore,
 } from "@clankie/credential-broker";
 import { DeviceDirectRouteSchema } from "@clankie/protocol";
-import { PublicGatewaySettingsSchema, SettingsStore } from "@clankie/settings";
+import type { SettingsStore } from "@clankie/settings";
 import {
-  gatewayConfigure,
   gatewayConfigureDirect,
   gatewayDisable,
+  gatewayEnableWithAccount,
   gatewayStatus,
   runGatewayCommand,
   type GatewayCommandResult,
 } from "./command/gateway.ts";
+import type { MenuOption } from "./shell/setup-flow.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export function buildGatewayCommands(services: {
   readonly settings: SettingsStore;
   readonly credentials: CredentialStore;
   readonly restartGateway?: () => Promise<void>;
+  /** Seam for the doorway probe; defaults to the real captain over loopback. */
+  readonly fetchImpl?: typeof fetch;
 }): FaceShellCommand[] {
   return [
     {
@@ -44,12 +44,17 @@ export function buildGatewayCommands(services: {
 
 async function showStatus(
   shell: ClankieFaceShell,
-  services: { readonly settings: SettingsStore; readonly credentials: CredentialStore },
+  services: {
+    readonly settings: SettingsStore;
+    readonly credentials: CredentialStore;
+    readonly fetchImpl?: typeof fetch;
+  },
 ): Promise<void> {
   const status = await gatewayStatus(services);
   shell.insertCommandResult(
     "/remote-access status",
     [
+      ...(status.doorway.state === "sign_in_required" ? [SIGN_BACK_IN_LEAD, ""] : []),
       `doorway: ${doorwayLine(status)}`,
       `url: ${status.publicGateway.url ?? "—"}`,
       `host id: ${status.hostId ?? "—"}`,
@@ -62,12 +67,15 @@ async function showStatus(
   );
 }
 
+const SIGN_BACK_IN_LABEL = "Sign this Mac back in";
+const SIGN_BACK_IN_LEAD = `This Mac is signed out, so your phone cannot reach it. Run /remote-access and choose "${SIGN_BACK_IN_LABEL}" (email + one-time code).`;
+
 /** Configured is not open: the live state is the one that answers "can my phone reach him". */
 function doorwayLine(status: GatewayCommandResult): string {
   if (!status.enabled) return "disabled";
   switch (status.doorway.state) {
     case "sign_in_required":
-      return `signed out since ${status.doorway.since} — run /remote-access to sign this Mac back in`;
+      return `signed out since ${status.doorway.since} — choose "${SIGN_BACK_IN_LABEL}" in /remote-access`;
     case "connected":
       return "open";
     case "connecting":
@@ -87,17 +95,32 @@ async function runWizard(
     readonly settings: SettingsStore;
     readonly credentials: CredentialStore;
     readonly restartGateway?: () => Promise<void>;
+    readonly fetchImpl?: typeof fetch;
   },
 ): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin("gateway");
   try {
     const current = await gatewayStatus(services);
+    const signedOutSince = current.doorway.state === "sign_in_required" ? current.doorway.since : undefined;
+    const signIn: MenuOption =
+      signedOutSince !== undefined
+        ? { value: "configure", label: SIGN_BACK_IN_LABEL, hint: "email + one-time code" }
+        : current.enabled
+          ? { value: "configure", label: "Sign in with another account", hint: "email + one-time code" }
+          : {
+              value: "configure",
+              label: "Sign this Mac in to enable remote access",
+              hint: "email + one-time code",
+            };
+    const status: MenuOption = { value: "status", label: "Show status" };
     const action = await flow.readSelect({
-      message: "Remote access for this Mac",
+      message:
+        signedOutSince === undefined
+          ? "Remote access for this Mac"
+          : `Remote access for this Mac — signed out since ${signedOutSince}`,
       options: [
-        { value: "configure", label: "Enable remote access", hint: "email + one-time code" },
-        { value: "status", label: "Show status" },
+        ...(current.enabled && signedOutSince === undefined ? [status, signIn] : [signIn, status]),
         { value: "direct", label: "Configure direct fallback", hint: "private network endpoints" },
         {
           value: "rotate",
@@ -172,7 +195,11 @@ async function runWizard(
     flow.setStatus("signing this Mac in…");
     const credential = await completeClankieAccountLogin({ challenge, code });
 
-    if (await accountHasHostedClankie(gatewayUrl, credential)) {
+    // Only a convenience: a failed lookup (401, outage) must not stop this Mac signing in.
+    const hasHosted = await accountHasHostedClankie(gatewayUrl, credential, services.fetchImpl).catch(
+      () => false,
+    );
+    if (hasHosted) {
       const action = await flow.readSelect({
         message: "Your account already has a hosted Clankie",
         options: [
@@ -192,11 +219,7 @@ async function runWizard(
       return;
     }
 
-    const installationId = current.publicGateway.installationId ?? generatePublicGatewayInstallationId();
-    const publicGateway = PublicGatewaySettingsSchema.parse({ url: gatewayUrl, installationId });
-    await services.credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, credential);
-    await services.credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
-    await gatewayConfigure(publicGateway, services);
+    await gatewayEnableWithAccount({ gatewayUrl, credential }, services);
     flow.setStatus("starting remote access…");
     await services.restartGateway?.();
     flow.renderLine("Remote access is ready. Run /pair to connect your phone.", "success");

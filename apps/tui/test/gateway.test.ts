@@ -13,6 +13,7 @@ import { SettingsStore } from "@clankie/settings";
 import {
   gatewayConfigure,
   gatewayDisable,
+  gatewayEnableWithAccount,
   gatewayStatus,
   runGatewayCommand,
 } from "../src/command/gateway.ts";
@@ -99,6 +100,52 @@ describe("gateway command", () => {
     expect(key?.type === "api" && key.key).toMatch(/^[a-f0-9]{64}$/u);
     expect(key?.type === "api" && key.key).not.toBe("a".repeat(64));
     expect(rotated.restart).toBe("clankie restart captain");
+  });
+
+  it("re-signs a signed-out Mac in under its existing installation id and host id", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-gateway-resign-"));
+    tempDirectories.push(directory);
+    const settings = new SettingsStore(join(directory, "settings.json"));
+    const credentials = new FileCredentialStore(join(directory, "credentials.json"));
+    const installationId = "YWFhYWFhYWFhYWFhYWFhYQ";
+    await settings.update((current) => ({
+      ...current,
+      publicGateway: { url: "https://api.clankie.bot", installationId },
+    }));
+    const options = { settings, credentials, env: {}, fetchImpl: offline };
+    const before = await gatewayStatus(options);
+    expect(before.enabled).toBe(false);
+
+    const signedIn = await gatewayEnableWithAccount(
+      {
+        gatewayUrl: "https://api.clankie.bot",
+        credential: {
+          type: "oauth",
+          access: "access",
+          refresh: "refresh",
+          expires: Date.now() + 3_600_000,
+          accountId: "0f892112-c0d9-4221-b57b-38181aa63f4c",
+        },
+      },
+      options,
+    );
+    expect(signedIn).toMatchObject({ enabled: true, credentialPresent: true });
+    expect(signedIn.publicGateway.installationId).toBe(installationId);
+    expect(signedIn.hostId).toBe(
+      derivePublicGatewayHostId("0f892112-c0d9-4221-b57b-38181aa63f4c", installationId),
+    );
+  });
+
+  it("accepts the short on/off/rotate-key verbs as the long ones", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-gateway-verbs-"));
+    tempDirectories.push(directory);
+    const settings = new SettingsStore(join(directory, "settings.json"));
+    const credentials = new FileCredentialStore(join(directory, "credentials.json"));
+    const options = { settings, credentials, env: {}, fetchImpl: offline };
+    await runGatewayCommand(["rotate-key"], options);
+    expect((await credentials.get(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID))?.type).toBe("api");
+    await gatewayConfigure({ url: "https://api.clankie.bot", hostId: "mac_james_12345678" }, options);
+    expect((await runGatewayCommand(["off"], options)).publicGateway).toEqual({});
   });
 
   it("reports an account-derived host identity and removes it on disable", async () => {

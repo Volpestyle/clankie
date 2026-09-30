@@ -98,7 +98,16 @@ export async function runHeadlessCaptainCommand(
   try {
     const env = options.env ?? process.env;
     if (command === "connect" || command === "login") {
-      await connectHostedCli(command === "login" ? ["hosted", ...rest] : rest, env, stdout);
+      await connectHostedCli(
+        command === "login" ? ["hosted", ...rest] : rest,
+        env,
+        stdout,
+        command === "login" ? { target: "auto" } : {},
+      );
+      return 0;
+    }
+    if ((command === "gateway" || command === "remote-access") && rest[0] === "on") {
+      await connectHostedCli(["hosted", ...rest.slice(1)], env, stdout, { target: "this-mac" });
       return 0;
     }
     if (command === "whoami") {

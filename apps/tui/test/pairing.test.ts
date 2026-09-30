@@ -297,6 +297,21 @@ describe("clankie pair — fail closed", () => {
     expect(typeof parsed.error).toBe("string");
   });
 
+  it("names the Mac sign-in when the service says the doorway cannot take the offer", async () => {
+    const stdout = outputBuffer();
+    const stderr = outputBuffer();
+    const exit = await runPair([], {
+      fetchImpl: jsonFetch({ error: "public_gateway_unavailable" }, { status: 503 }),
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+    expect(exit).toBe(1);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain("No pairing code was made");
+    expect(stderr.text()).toContain("/remote-access");
+    expect(stderr.text()).toContain("Sign this Mac back in");
+  });
+
   it("treats an already-expired valid offer as expired", async () => {
     const offer = validOffer({ expiresAt: new Date(Date.now() - 1_000).toISOString() });
     const stdout = outputBuffer();

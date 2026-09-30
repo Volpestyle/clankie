@@ -22,6 +22,14 @@ const PairingOfferSchema = PairingOfferWireSchema;
 export type PairingOffer = PairingOfferWire;
 
 /** Every failure the command must fail closed on (VUH-878 acceptance criteria). */
+/**
+ * The service answers `public_gateway_unavailable` when this Mac's doorway cannot
+ * carry an offer: it is signed out, or the gateway refused the publish. Minting
+ * a code anyway would print something the phone can never redeem.
+ */
+const DOORWAY_CLOSED_PAIRING_MESSAGE =
+  'No pairing code was made: this Mac\'s remote-access doorway cannot take the offer, usually because it is signed out. Run /remote-access in the Clankie console and choose "Sign this Mac back in", then run `clankie pair` again.';
+
 export type PairingOfferStatus = "unavailable" | "unauthorized" | "expired" | "malformed" | "interrupted";
 
 /**
@@ -90,6 +98,11 @@ export async function requestPairingOffer(options: RequestPairingOfferOptions = 
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new PairingOfferError("unauthorized");
+    if (response.status === 503) {
+      const body: unknown = await response.json().catch(() => undefined);
+      if ((body as { error?: unknown } | undefined)?.error === "public_gateway_unavailable")
+        throw new PairingOfferError("unavailable", DOORWAY_CLOSED_PAIRING_MESSAGE);
+    }
     throw new PairingOfferError("unavailable");
   }
 

@@ -5,7 +5,9 @@ import {
   PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID,
   createDefaultCredentialStore,
   derivePublicGatewayHostId,
+  generatePublicGatewayInstallationId,
   type CredentialStore,
+  type ProviderCredential,
 } from "@clankie/credential-broker";
 import {
   PublicGatewayDoorwayStateSchema,
@@ -28,7 +30,10 @@ const HealthSchema = z.object({ doorway: PublicGatewayDoorwayStateSchema.optiona
 export type GatewayDoorwayReport = PublicGatewayDoorwayState | { readonly state: "unreachable" };
 
 const GATEWAY_USAGE = [
-  "Usage: clankie gateway [status]",
+  "Usage: clankie remote-access [status]",
+  "       clankie remote-access on [--email EMAIL --code-stdin]",
+  "       clankie remote-access off | rotate-key",
+  "       clankie gateway [status]",
   "       clankie gateway set --url URL --host-id ID",
   "       clankie gateway direct --control-plane-url URL --relay-url URL",
   "       clankie gateway disable",
@@ -142,6 +147,31 @@ export async function gatewayConfigureDirect(
   return await result(options);
 }
 
+/**
+ * Stores a signed-in Clankie account as this Mac's remote-access credential and
+ * points settings at the gateway. `/remote-access`, `clankie login` and
+ * `clankie remote-access on` all end here, so a signed-out Mac re-signs in
+ * under the same installation id and keeps its host id. The captain still has
+ * to restart to open the doorway.
+ */
+export async function gatewayEnableWithAccount(
+  input: {
+    readonly gatewayUrl: string;
+    readonly credential: Extract<ProviderCredential, { type: "oauth" }>;
+  },
+  options: GatewayCommandOptions = {},
+): Promise<GatewayCommandResult> {
+  const { settings, credentials } = stores(options);
+  const current = (await settings.load()).publicGateway;
+  const publicGateway = PublicGatewaySettingsSchema.parse({
+    url: input.gatewayUrl,
+    installationId: current.installationId ?? generatePublicGatewayInstallationId(),
+  });
+  await credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, input.credential);
+  await credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
+  return await gatewayConfigure(publicGateway, options);
+}
+
 export async function gatewayDisable(options: GatewayCommandOptions = {}): Promise<GatewayCommandResult> {
   const { settings, credentials } = stores(options);
   await settings.update((current) => ({ ...current, publicGateway: {} }));
@@ -160,14 +190,14 @@ export async function runGatewayCommand(
 ): Promise<GatewayCommandResult> {
   const verb = args[0];
   if (verb === undefined || verb === "status") return await gatewayStatus(options);
-  if (verb === "rotate-encryption-key" && args.length === 1) {
+  if ((verb === "rotate-encryption-key" || verb === "rotate-key") && args.length === 1) {
     await stores(options).credentials.set(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID, {
       type: "api",
       key: randomBytes(32).toString("hex"),
     });
     return await result(options);
   }
-  if (verb === "disable" && args.length === 1) return await gatewayDisable(options);
+  if ((verb === "disable" || verb === "off") && args.length === 1) return await gatewayDisable(options);
   if (verb === "direct" && args.length === 5) {
     const values = new Map<string, string>();
     for (let index = 1; index < args.length; index += 2) {

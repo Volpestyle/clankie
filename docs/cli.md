@@ -2073,8 +2073,14 @@ clankie --chat global-default
 clankie logout
 ```
 
-`login` uses an email code, lists the signed-in account's hosted machines, and
-pairs a revocable device. The current fleet model permits one machine per
+`login` is the one account sign-in (email code). If the account has a hosted
+Clankie it lists the account's hosted machines and pairs a revocable device;
+otherwise it signs **this Mac** in for remote access, which is also how a
+signed-out Mac signs back in (restart the captain afterwards; the JSON output
+says so). `connect hosted` asks for a hosted body specifically, so an account
+without one gets an explanation instead of a doorway. `logout` only forgets the
+hosted client; on a Mac that is not a hosted client it changes nothing and
+points at `clankie remote-access off`. The current fleet model permits one machine per
 account, so it is selected automatically. The list contract supports a picker
 if that changes; headless selection uses `--machine ID`. `--url ORIGIN` selects
 a compatible deployment (HTTPS, or loopback HTTP for development). Account
@@ -2113,7 +2119,18 @@ body without wake registration needs account-page wake and a fresh login.
 There is no local fallback.
 
 `/remote-access` means **Remote access for this Mac**, for self-hosted use only;
-`/gateway` remains its alias. The headless command also accepts `remote-access`.
+`/gateway` remains its alias. When the Mac is signed out, its menu opens on
+**Sign this Mac back in** (email + one-time code) and its status text starts with
+that step; the same menu reads **Sign this Mac in to enable remote access** before
+first setup. Headless: `clankie remote-access [status]`, `on [--email EMAIL
+--code-stdin]` (the same sign-in as `login`, pinned to this Mac), `off`, `rotate-key`
+and `direct --control-plane-url URL --relay-url URL`; `gateway` and the older
+`disable` / `rotate-encryption-key` spellings still work.
+
+`clankie pair` never prints a code the doorway cannot carry. When the service
+refuses an offer because remote access is signed out, it exits 1 with "No pairing
+code was made" and names `/remote-access` → **Sign this Mac back in** as the fix
+(JSON `status: "unavailable"`, same text in `error`).
 It detects an existing hosted tenant and offers connection instead of creating
 another doorway. Matching fleet, body and relay deployments plus a real
 Mac/phone rehearsal remain separate from source verification.
