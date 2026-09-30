@@ -1,4 +1,5 @@
 {
+  "bare": { "skills": "none", "instructions": null },
   "current": { "skills": "bundled", "instructions": "apps/clankie/src/captain/instructions.md" },
   "plain": { "skills": "plain", "instructions": "apps/clankie/src/captain/instructions.md" },
   "trimmed": { "skills": "bundled", "instructions": "scripts/evals/trimmed.md" }

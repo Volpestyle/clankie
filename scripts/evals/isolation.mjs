@@ -71,28 +71,38 @@ export function subscriptionAuth(harness) {
   // Read the CLI's own subscription credential; copy only OAuth into the attempt.
   // Keychain access stays in the parent, outside the model sandbox.
   const dir = process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude");
-  let auth;
-  try {
-    auth = JSON.parse(readFileSync(join(dir, ".credentials.json"), "utf8"));
-  } catch {
-    auth = {};
-  }
-  if (!auth.claudeAiOauth?.accessToken) {
-    const credential = spawnSync(
-      "/usr/bin/security",
-      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-      { encoding: "utf8" },
-    );
+  const parse = (read) => {
     try {
-      auth = JSON.parse(credential.stdout);
+      return JSON.parse(read()).claudeAiOauth;
     } catch {
-      throw Error("Claude subscription credential unavailable");
+      return undefined;
     }
+  };
+  // Both stores can hold a record; a leftover file token without an expiry was
+  // rejected with 401 while the Keychain held the live one. Take the freshest
+  // inference credential that outlives a trial, never the first one found.
+  const fresh = [
+    parse(() => readFileSync(join(dir, ".credentials.json"), "utf8")),
+    parse(
+      () =>
+        spawnSync("/usr/bin/security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
+          encoding: "utf8",
+        }).stdout,
+    ),
+  ]
+    .filter(
+      (oauth) =>
+        oauth?.accessToken &&
+        oauth.scopes?.includes("user:inference") &&
+        (oauth.expiresAt ?? 0) > Date.now() + 30 * 60_000,
+    )
+    .sort((a, b) => b.expiresAt - a.expiresAt)[0];
+  if (!fresh) {
+    throw Error(
+      "No Claude subscription inference credential valid for 30 more minutes; use Claude Code once to refresh it",
+    );
   }
-  if (!auth.claudeAiOauth?.accessToken || !auth.claudeAiOauth?.scopes?.includes("user:inference")) {
-    throw Error("Claude subscription inference OAuth credential missing");
-  }
-  return JSON.stringify({ claudeAiOauth: { ...auth.claudeAiOauth, refreshToken: "" } });
+  return JSON.stringify({ claudeAiOauth: { ...fresh, refreshToken: "" } });
 }
 
 export function installAuth(root, harness, auth) {
@@ -127,6 +137,8 @@ function sandboxProfile(root, binary, { network = true, extraRead = [] } = {}) {
   // Default deny reads/writes. Only system runtimes and this attempt are visible.
   // In particular ~/.config/clankie, ~/.clankie, keychains and the source checkout
   // are absent. Local service sockets are denied; HTTPS and the system DNS socket are allowed.
+  // Claude Code after 2.1.0 blocks at startup without the timezone database
+  // that /etc/localtime points into.
   return `(version 1)
 (deny default)
 (allow process-exec process-fork sysctl-read file-map-executable dynamic-code-generation)
@@ -138,7 +150,7 @@ function sandboxProfile(root, binary, { network = true, extraRead = [] } = {}) {
 (allow user-preference-read (preference-domain "com.openai.codex") (preference-domain "com.anthropic.claudecode") (preference-domain ".GlobalPreferences"))
 (allow ipc-posix-shm-read* (ipc-posix-name "apple.cfprefs.daemonv1") (ipc-posix-name "apple.cfprefs.${process.getuid()}v1"))
 (allow file-read-metadata)
-(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/opt/homebrew") (subpath "/Library/Apple") (subpath "/Library/Managed Preferences") (subpath "/Library/Preferences") (subpath "/private/etc") (subpath "/dev") (subpath ${quote(root)}) (subpath ${quote(dirname(binary))}) ${extraRead.map((p) => `(literal ${quote(p)})`).join(" ")})
+(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/opt/homebrew") (subpath "/Library/Apple") (subpath "/Library/Managed Preferences") (subpath "/Library/Preferences") (subpath "/private/etc") (subpath "/private/var/db/timezone") (subpath "/dev") (subpath ${quote(root)}) (subpath ${quote(dirname(binary))}) ${extraRead.map((p) => `(literal ${quote(p)})`).join(" ")})
 (allow file-write* ${["worktree", "home", "tmp", "seed"].map((name) => `(subpath ${quote(join(root, name))})`).join(" ")} (literal "/dev/null") (literal "/dev/tty"))
 (deny file-write-unlink ${["worktree", "home", "tmp", "seed"].map((name) => `(literal ${quote(join(root, name))})`).join(" ")})
 ${network ? '(allow network-outbound (remote tcp "*:443") (literal "/private/var/run/mDNSResponder"))\n(deny network-outbound (remote ip "localhost:*"))' : ""}
