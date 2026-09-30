@@ -18,7 +18,6 @@ export interface ConnectionsMenuServices {
   /** The existing `/herdr` menu, for the runtime Clankie runs his own workers in. */
   readonly openHerdrSettings?: () => Promise<void>;
   /** Injected for tests; how often a reply wait re-checks its run. */
-  readonly pollMs?: number;
   readonly now?: () => number;
 }
 
@@ -661,94 +660,19 @@ async function sessionActions(
   for (;;) {
     const action = await flow.readSelect({
       message: title,
-      options: [
-        { value: "read", label: "Read latest", hint: "last 20 entries" },
-        { value: "send", label: "Send a message…", hint: "resumes it headless" },
-      ],
+      options: [{ value: "read", label: "Read latest", hint: "last 20 entries" }],
       allowBack: true,
     });
     if (action === undefined) return;
-    if (action === "read") {
-      try {
-        const page = record(await services.agents(["read", session.ref, "--tail", "20"]));
-        shell.insertCommandResult(
-          `/agents read ${session.ref}`,
-          formatTranscript(array(page.entries)),
-          "success",
-        );
-      } catch (error) {
-        flow.renderLine(message(error), "error");
-      }
-      continue;
+    try {
+      const page = record(await services.agents(["read", session.ref, "--tail", "20"]));
+      shell.insertCommandResult(
+        `/agents read ${session.ref}`,
+        formatTranscript(array(page.entries)),
+        "success",
+      );
+    } catch (error) {
+      flow.renderLine(message(error), "error");
     }
-    await sendMessage(shell, services, session, title);
-  }
-}
-
-async function sendMessage(
-  shell: ClankieFaceShell,
-  services: ConnectionsMenuServices,
-  session: AgentSession,
-  title: string,
-): Promise<void> {
-  const flow = shell.setupFlow;
-  flow.renderLine(
-    "This starts a new headless turn on the saved history. A tab with this session open will not see it.",
-    "info",
-  );
-  const text = await flow.readText({
-    message: `Message ${title}`,
-    multiline: true,
-    allowBack: true,
-    validate: (value) => (value.trim() ? undefined : "Write a message."),
-  });
-  if (text === undefined) return;
-  let run: Json;
-  try {
-    run = record(await services.agents(["send", session.ref, text.trim()]));
-  } catch (error) {
-    flow.renderLine(message(error), "error");
-    return;
-  }
-  flow.renderLine(`Started run ${String(run.runId)}.`, "success");
-  const next = await flow.readSelect({
-    message: "Wait for the reply?",
-    options: [
-      { value: "wait", label: "Wait here", hint: "/cancel stops waiting, not the run" },
-      { value: "later", label: "Later", hint: "read it from this session any time" },
-    ],
-    allowBack: true,
-  });
-  if (next !== "wait") return;
-  const interrupt = flow.waitForInterrupt();
-  let stopped = false;
-  void interrupt.promise.then(() => (stopped = true));
-  try {
-    let state = run;
-    while (state.state === "running" && !stopped) {
-      flow.setStatus(`${title}: working… (/cancel to stop waiting)`);
-      await new Promise((resolve) => setTimeout(resolve, services.pollMs ?? 2000));
-      if (stopped) break;
-      state = record(await services.agents(["runs", String(run.runId)]));
-    }
-    if (stopped) {
-      flow.renderLine("Stopped waiting. The run continues; read the session later.", "info");
-      return;
-    }
-    flow.renderLine(
-      `Run ${String(state.state)}${state.exitCode === undefined || state.exitCode === null ? "" : ` (exit ${String(state.exitCode)})`}.`,
-      state.state === "finished" ? "success" : "warning",
-    );
-    const page = record(await services.agents(["read", session.ref, "--after", String(run.cursor)]));
-    shell.insertCommandResult(
-      `/agents send ${session.ref}`,
-      formatTranscript(array(page.entries)),
-      "success",
-    );
-    if (state.state !== "finished" && typeof state.output === "string" && state.output.trim())
-      flow.renderLine(state.output.trim().split("\n").at(-1)!, "warning");
-  } finally {
-    interrupt.dispose();
-    flow.setStatus(title);
   }
 }

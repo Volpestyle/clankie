@@ -1,12 +1,4 @@
 import { codexAccounts } from "@clankie/settings";
-import {
-  runLocalAgentTurn,
-  runSshAgentTurn,
-  type AgentTurnInput,
-  type AgentTurnResult,
-  type TurnOptions,
-} from "./turn.ts";
-export type { AgentTurnInput, AgentTurnResult } from "./turn.ts";
 export type * from "./seat.ts";
 import { execFile } from "node:child_process";
 import { open, readdir, realpath, stat } from "node:fs/promises";
@@ -22,12 +14,9 @@ export interface AgentSessionFile {
 }
 export interface AgentHost {
   id: string;
-  runAgentTurn(input: AgentTurnInput, signal?: AbortSignal): Promise<AgentTurnResult>;
   list(opts?: { limit?: number }): Promise<AgentSessionFile[]>;
   readBytes(path: string, from: number, maxBytes: number): Promise<{ bytes: Buffer; size: number }>;
 }
-/** Execution is an optional capability of a transcript source. */
-export type AgentTurnRunner = Pick<AgentHost, "runAgentTurn">;
 export interface AgentHostConfig {
   id: string;
   ssh: string;
@@ -53,7 +42,7 @@ function within(root: string, path: string) {
   );
 }
 export function createLocalAgentHost(
-  options: { home?: string; codexHomes?: readonly string[] } & TurnOptions = {},
+  options: { home?: string; codexHomes?: readonly string[] } = {},
 ): AgentHost {
   const home = options.home ?? homedir();
   const roots = [
@@ -67,19 +56,6 @@ export function createLocalAgentHost(
   ];
   return {
     id: "local",
-    runAgentTurn: async (input, signal) => {
-      if (input.harness !== "codex" || !input.sessionPath) return runLocalAgentTurn(input, signal, options);
-      const actual = await realpath(input.sessionPath);
-      for (const root of roots.filter((entry) => entry.harness === "codex")) {
-        const canonical = await realpath(root.path).catch(() => root.path);
-        if (within(canonical, actual))
-          return runLocalAgentTurn(input, signal, {
-            ...options,
-            codexHome: root.path.slice(0, -"/sessions".length),
-          });
-      }
-      throw new Error("Codex transcript outside registered homes");
-    },
     async list(opts) {
       const count = limit(opts?.limit);
       const files: AgentSessionFile[] = [];
@@ -197,7 +173,7 @@ tail -c +${from + 1} "$p" | head -c ${max} | base64`);
 }
 export function createSshAgentHost(
   config: AgentHostConfig,
-  options: TurnOptions & {
+  options: {
     run?: (command: string, args: string[]) => Promise<string>;
   } = {},
 ): AgentHost {
@@ -220,7 +196,6 @@ export function createSshAgentHost(
     run("ssh", ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", config.ssh, command]);
   return {
     id: config.id,
-    runAgentTurn: (input, signal) => runSshAgentTurn(config, input, signal, options),
     async list(opts) {
       const count = limit(opts?.limit);
       const output = await call(listCommand(config.shell, count));

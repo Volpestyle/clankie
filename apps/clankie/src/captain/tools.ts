@@ -893,51 +893,6 @@ function agentSessionTools(sessions: NonNullable<CaptainDeps["agentSessions"]>):
         return json(await sessions.read(ref, options));
       },
     }),
-    defineTool({
-      name: "agent_session_send",
-      label: "Message agent session",
-      description:
-        "Continue an agent session with a message by starting a new headless turn of that harness " +
-        "(Claude, Codex, Grok or Pi) resumed onto its saved history, in the directory it ran in. This is not " +
-        "delivered into a tab that has the session open: that tab will not see it and may later fork the " +
-        "history. Refused while the transcript was written in the last minute. Returns at once with a runId " +
-        "and a cursor; read the reply with agent_session_read after that cursor, and check the run with " +
-        "agent_session_run. The turn gets the harness's default permissions, so it may decline tools that " +
-        "need approval. Prefer Swarm for agents enrolled in it.",
-      parameters: Type.Object({
-        ref: Type.String({
-          minLength: 1,
-          maxLength: 200,
-          description: "host:sessionId from agent_sessions.",
-        }),
-        message: Type.String({ minLength: 1, maxLength: 32_768 }),
-      }),
-      executionMode: "sequential",
-      execute: async (_id, params) => json(await sessions.send(params.ref, params.message)),
-    }),
-    defineTool({
-      name: "agent_session_run",
-      label: "Check agent session run",
-      description:
-        "State of a turn started with agent_session_send: running, finished, failed, aborted, timeout, or " +
-        "unknown (the connection was lost, so the turn may still be running and the session stays locked), " +
-        "or released. action cancel aborts a running turn. action release unlocks an unknown run once the " +
-        "transcript shows it settled; it does not stop anything.",
-      parameters: Type.Object({
-        runId: Type.String({ minLength: 1, maxLength: 64 }),
-        action: Type.Optional(
-          Type.Union([Type.Literal("status"), Type.Literal("cancel"), Type.Literal("release")]),
-        ),
-      }),
-      execute: async (_id, params) =>
-        json(
-          params.action === "cancel"
-            ? sessions.cancel(params.runId)
-            : params.action === "release"
-              ? sessions.release(params.runId)
-              : sessions.run(params.runId),
-        ),
-    }),
   ];
 }
 

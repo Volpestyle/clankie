@@ -2,24 +2,13 @@ import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AgentHostConnectionSchema } from "@clankie/settings";
 import { AgentSessionRequestError } from "@clankie/agent-transcript";
-import { z } from "zod";
 import type { AgentSessions } from "./agent-sessions.ts";
-
-const AgentSessionSendSchema = z
-  .object({
-    ref: z.string().min(1).max(200),
-    message: z
-      .string()
-      .min(1)
-      .max(32 * 1024),
-  })
-  .strict();
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Operator-only access to independent native transcripts and resumed turns. */
+/** Operator-only access to independent native transcripts. */
 export function createAgentSessionRoutes(
   sessions: AgentSessions | undefined,
   authenticate: (request: Request) => Promise<boolean | "unavailable">,
@@ -98,63 +87,6 @@ export function createAgentSessionRoutes(
       return context.json(
         { error: "agent_session_read_failed", detail: errorDetail(error) },
         error instanceof AgentSessionRequestError ? error.status : 502,
-      );
-    }
-  });
-
-  app.post("/v1/agent-sessions/send", bodyLimit({ maxSize: 40 * 1024 }), async (context) => {
-    const refused = await authorize(context);
-    if (refused) return refused;
-    const input = AgentSessionSendSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!input.success) return context.json({ error: "invalid_agent_session_send" }, 400);
-    try {
-      return context.json(await sessions!.send(input.data.ref, input.data.message), 202);
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_send_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 502,
-      );
-    }
-  });
-
-  app.get("/v1/agent-sessions/runs", async (context) => {
-    const refused = await authorize(context);
-    if (refused) return refused;
-    return context.json({ runs: sessions!.runs() });
-  });
-
-  app.get("/v1/agent-sessions/runs/:id", async (context) => {
-    const refused = await authorize(context);
-    if (refused) return refused;
-    try {
-      return context.json(sessions!.run(context.req.param("id")));
-    } catch (error) {
-      return context.json({ error: "unknown_agent_session_run", detail: errorDetail(error) }, 404);
-    }
-  });
-
-  app.delete("/v1/agent-sessions/runs/:id", async (context) => {
-    const refused = await authorize(context);
-    if (refused) return refused;
-    try {
-      return context.json(sessions!.cancel(context.req.param("id")));
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_cancel_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 409,
-      );
-    }
-  });
-
-  app.post("/v1/agent-sessions/runs/:id/release", async (context) => {
-    const refused = await authorize(context);
-    if (refused) return refused;
-    try {
-      return context.json(sessions!.release(context.req.param("id")));
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_release_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 409,
       );
     }
   });

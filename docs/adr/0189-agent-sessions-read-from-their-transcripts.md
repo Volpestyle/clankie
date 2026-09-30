@@ -1,6 +1,9 @@
 # ADR 0189: Agent sessions read from their transcripts, on any host
 
-Status: proposed (Claude and Codex, 2026-09-25). Extends
+Status: proposed (Claude and Codex, 2026-09-25). Step 2 (resumed turns) retired
+2026-09-30 under [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md):
+it was never used, and a headless process replacing a worker is what ADR 0203
+rules out; reading stays. Extends
 [ADR 0188](0188-native-agent-chats-read-their-own-history.md) and applies
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md).
 

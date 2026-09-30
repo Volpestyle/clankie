@@ -14,19 +14,6 @@ function sessionPort() {
     read: vi.fn(async () => {
       throw new Error("unused");
     }),
-    send: vi.fn(async () => {
-      throw new Error("unused");
-    }),
-    runs: vi.fn(() => []),
-    run: vi.fn(() => {
-      throw new Error("unused");
-    }),
-    release: vi.fn(() => {
-      throw new Error("unused");
-    }),
-    cancel: vi.fn(() => {
-      throw new Error("unused");
-    }),
     addHost: vi.fn(async () => []),
     removeHost: vi.fn(async () => []),
   } satisfies AgentSessions;
@@ -47,11 +34,6 @@ test("transcript API never reaches host operations without operator authenticati
       ["/v1/agent-hosts/pc", "DELETE"],
       ["/v1/agent-sessions", "GET"],
       ["/v1/agent-sessions/read?ref=local:abc", "GET"],
-      ["/v1/agent-sessions/send", "POST"],
-      ["/v1/agent-sessions/runs", "GET"],
-      ["/v1/agent-sessions/runs/test", "GET"],
-      ["/v1/agent-sessions/runs/test", "DELETE"],
-      ["/v1/agent-sessions/runs/test/release", "POST"],
     ]) {
       expect((await app.app.request(path!, { method: method! })).status).toBe(401);
     }
@@ -76,14 +58,10 @@ test("transcript tools follow machine authority, independent of Herdr availabili
   for (const allowed of [names("operator"), names("discord_presence", true)]) {
     expect(allowed).toContain("agent_sessions");
     expect(allowed).toContain("agent_session_read");
-    expect(allowed).toContain("agent_session_send");
-    expect(allowed).toContain("agent_session_run");
   }
   for (const denied of [names("discord_presence"), names("discord_presence", false)]) {
     expect(denied).not.toContain("agent_sessions");
     expect(denied).not.toContain("agent_session_read");
-    expect(denied).not.toContain("agent_session_send");
-    expect(denied).not.toContain("agent_session_run");
   }
 });
 
@@ -118,18 +96,13 @@ test("transcript request limits remain before authentication and never invoke ho
     authenticateOperator: authenticate,
   });
   try {
-    for (const [path, size] of [
-      ["/v1/agent-hosts", 4 * 1024],
-      ["/v1/agent-sessions/send", 40 * 1024],
-    ] as const) {
-      const body = "x".repeat(size + 1);
-      const response = await app.app.request(path, {
-        method: "POST",
-        headers: { "content-type": "application/json", "content-length": String(body.length) },
-        body,
-      });
-      expect(response.status).toBe(413);
-    }
+    const body = "x".repeat(4 * 1024 + 1);
+    const response = await app.app.request("/v1/agent-hosts", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": String(body.length) },
+      body,
+    });
+    expect(response.status).toBe(413);
     expect(authenticate).not.toHaveBeenCalled();
     for (const operation of Object.values(sessions)) expect(operation).not.toHaveBeenCalled();
   } finally {
@@ -137,28 +110,28 @@ test("transcript request limits remain before authentication and never invoke ho
   }
 });
 
-test("transcript routes retain typed refusals and distinguish unknown runs", async () => {
+test("transcript routes retain typed refusals and no longer resume sessions", async () => {
   const sessions = sessionPort();
-  sessions.send.mockRejectedValue(new AgentSessionRequestError("Session already has a run", 409));
+  sessions.read.mockRejectedValue(new AgentSessionRequestError("No session matches abc", 404));
   const app = await createClankieApp({
     captain: createStubCaptain(),
     agentSessions: sessions,
     authenticateOperator: async () => ({ operatorId: "owner" }),
   });
   try {
-    const response = await app.app.request("/v1/agent-sessions/send", {
+    const response = await app.app.request("/v1/agent-sessions/read?ref=local:abc");
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "agent_session_read_failed",
+      detail: "No session matches abc",
+    });
+    // Continuing a session belongs to its seat (ADR 0203); the headless send route is gone.
+    const send = await app.app.request("/v1/agent-sessions/send", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ref: "local:abc", message: "hello" }),
     });
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      error: "agent_session_send_refused",
-      detail: "Session already has a run",
-    });
-    const unknown = await app.app.request("/v1/agent-sessions/runs/missing");
-    expect(unknown.status).toBe(404);
-    expect(await unknown.json()).toEqual({ error: "unknown_agent_session_run", detail: "unused" });
+    expect(send.status).toBe(404);
   } finally {
     app.close();
   }

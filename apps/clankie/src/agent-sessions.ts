@@ -1,9 +1,4 @@
-import { resolveAgentHost, type AgentTurnRunner } from "@clankie/agent-hosts";
-import {
-  createAgentSessionTurns,
-  type AgentSessionTurns,
-  type AgentSessionTurnOptions,
-} from "./agent-session-turns.ts";
+import { resolveAgentHost } from "@clankie/agent-hosts";
 import {
   findAgentSession,
   listAgentSessions,
@@ -17,14 +12,12 @@ import {
 } from "@clankie/agent-transcript";
 import type { AgentHostConnection, ClankieSettings } from "@clankie/settings";
 
-export type { AgentTurnRunner } from "@clankie/agent-hosts";
-
 /**
  * Any Claude, Codex, Grok or Pi session on this machine or an owner-configured SSH host,
  * read from the agent's own transcript. No terminal host is involved: a session
  * is readable whether it runs in Herdr, tmux, or a bare PowerShell tab.
  */
-export interface AgentSessions extends AgentSessionTurns {
+export interface AgentSessions {
   hosts(): Promise<readonly ({ id: "local" } | AgentHostConnection)[]>;
   /** One host, or every configured host when omitted; a host that fails reports its error in place. */
   list(options?: { host?: string; limit?: number }): Promise<{
@@ -44,8 +37,7 @@ export function createAgentSessions(
   resolve: (
     id: string,
     connections: readonly AgentHostConnection[],
-  ) => AgentTranscriptHost & Partial<AgentTurnRunner> = resolveAgentHost,
-  options: AgentSessionTurnOptions = {},
+  ) => AgentTranscriptHost = resolveAgentHost,
 ): AgentSessions {
   // Resolving a session means listing its host; over SSH that is a recursive
   // directory walk, so a ref that already resolved skips it on later pages.
@@ -67,9 +59,7 @@ export function createAgentSessions(
       }))
       .then((next) => next.agentHosts.connections);
   };
-  const turns = createAgentSessionTurns(async (id) => resolveKnown(id, await connections()), options);
   return {
-    ...turns,
     hosts: async () => [{ id: "local" as const }, ...(await connections())],
     async list(options = {}) {
       if (

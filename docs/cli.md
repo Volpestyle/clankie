@@ -1193,28 +1193,6 @@ was appended. A cursor is bound to its session; `reset: true` means the transcri
 was replaced and the page restarted from its tail, and `skippedBytes` means one
 record was too large for a single read and was stepped over.
 
-```sh
-clankie agents send pc:01a0da31 "Where did you leave the migration?"
-clankie agents runs RUN
-clankie agents read pc:01a0da31 --after CURSOR   # the reply
-clankie agents cancel RUN
-```
-
-`send` continues a session by starting a **new headless process** of its harness
-resumed onto the saved history, with the message on stdin or in a private
-prompt file rather than the command line, in the directory the transcript recorded. It is
-not delivered into a tab that has the session open: that tab does not see the turn
-and can later write its own branch. `send` refuses a session written in the last
-60 seconds, which lowers but does not remove that risk; use it on sessions that
-have gone quiet or that Clankie started. The turn gets the harness's default
-permissions, so it may decline tools that need approval.
-
-`send` returns at once with a `runId` and a `cursor`; read the reply with
-`--after` that cursor. One turn runs per session at a time. A run ends `finished`,
-`failed`, `aborted`, `timeout`, or `unknown`: the connection was lost, so the
-remote turn may still be running and the session stays locked until `cancel`
-releases it. Runs live in the service process and are forgotten on restart.
-
 `/sessions` in the TUI takes the same arguments, or opens the saved sessions menu
 with none. `clankie sessions` is also an alias for these CLI commands. Existing
 `/agents` session arguments remain supported, but `/agents` without arguments
@@ -1229,11 +1207,12 @@ thread. See [product vocabulary](product-vocabulary.md).
 
 The operator API for saved sessions is
 GET `/v1/agent-sessions?host=&limit=`, GET `/v1/agent-sessions/read?ref=&tail=|after=`,
-GET/POST `/v1/agent-hosts`, DELETE `/v1/agent-hosts/ID`, POST `/v1/agent-sessions/send`
-`{ref, message}`, and GET/DELETE `/v1/agent-sessions/runs[/ID]`. Clankie's own tools
-are `agent_sessions`, `agent_session_read`, `agent_session_send` and
-`agent_session_run`, available where he has machine access. For agents enrolled in
-Swarm, message them through Swarm instead.
+GET/POST `/v1/agent-hosts`, and DELETE `/v1/agent-hosts/ID`. Clankie's own tools
+are `agent_sessions` and `agent_session_read`, available where he has machine
+access. Reading never starts or resumes a harness: to continue work, message the
+agent's seat (`message_seat`) or, for agents enrolled in Swarm, message them
+through Swarm. Resuming a saved session in a new headless process was retired
+(ADR 0203).
 
 ### `herdr [status|open|create]` / `herdr use NAME`
 

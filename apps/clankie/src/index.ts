@@ -215,10 +215,6 @@ const hostedHeartbeat =
         onError: () =>
           logger.warn({ event: "hosted.heartbeat.unavailable" }, "hosted fleet heartbeat failed"),
       });
-let herdrWorking = false,
-  headlessWorking = false;
-const updateHostedWorkers = () =>
-  hostedHeartbeat?.setExternal("herdr-agent", herdrWorking || headlessWorking);
 let publicGatewayConnector: PublicGatewayConnector | undefined;
 /** Set when the account credential is rejected before a connector can even exist. */
 let publicGatewaySignInRequiredSince: string | undefined;
@@ -539,13 +535,7 @@ const swarm = new SwarmHost({
   },
   warn: (message) => logger.warn({ event: "swarm.unavailable" }, message),
 });
-const agentSessions = createAgentSessions(settingsStore, undefined, {
-  runsPath: join(stateRoot, "agent-session-runs.json"),
-  onWorkingChanged: (working) => {
-    headlessWorking = working;
-    updateHostedWorkers();
-  },
-});
+const agentSessions = createAgentSessions(settingsStore);
 // Work items in each repo's own convention (ADR 0191): Linear rides his
 // connected account, GitHub the owner's GitHub connection or gh login (a
 // hosted body has only the connection, ADR 0196), files the repo itself.
@@ -935,13 +925,9 @@ clankieRef = clankie;
 const stopHostedWork =
   hostedHeartbeat === undefined
     ? undefined
-    : watchHostedHerdrWork(
-        (working) => {
-          herdrWorking = working;
-          updateHostedWorkers();
-        },
-        { available: herdr.available },
-      );
+    : watchHostedHerdrWork((working) => hostedHeartbeat.setExternal("herdr-agent", working), {
+        available: herdr.available,
+      });
 hostedHeartbeat?.start();
 if (await linearFollowing()) captain.resumeLinearActivity();
 linearNotifications.start();

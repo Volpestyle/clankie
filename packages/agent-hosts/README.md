@@ -2,7 +2,7 @@
 
 Discovery and byte-range access to Claude, Codex, Grok and Pi JSONL transcripts,
 independent of terminal placement, Swarm enrollment, and process control.
-`AgentHost` exposes `list`, `readBytes`, and `runAgentTurn`; `@clankie/agent-transcript` owns parsing
+`AgentHost` exposes `list` and `readBytes`; `@clankie/agent-transcript` owns parsing
 and pagination. Modification time describes a file, never proves a live agent.
 
 The local reader uses the current user's `.claude/projects`, `.codex/sessions`,
@@ -34,27 +34,8 @@ and inspect encoded PowerShell commands through a fake SSH runner. The initial
 PowerShell implementation was additionally checked against a live Windows PC:
 discovery, byte-range reads, and outside-root refusal. Tests do not require that PC.
 
-Headless turns require the selected harness CLI already installed and authenticated
-on that host. They resume saved history in a new process, never inject input into
-an existing terminal. Exact session UUIDs and absolute working directories are
-required; Pi uses the discovered transcript path when supplied. Claude/Codex/Pi
-receive literal UTF-8 stdin; Grok uses a private temporary prompt file. No approval
-bypass flags are added. Codex skips its Git-directory prerequisite when resuming
-an existing session, so a session originally started outside Git remains usable.
-Existing harness configuration and project instructions
-still apply. The service owns quiet-time checks and one-run-per-session admission.
-
-Each turn has a ten-minute execution deadline and at most 1 MiB of captured output
-per stream (the tail). Local POSIX cancellation kills the owned process group;
-a deliberately daemonized descendant that leaves that group is not covered.
-SSH POSIX
-runs supervise their child tree; Windows uses an in-memory .NET supervisor and
-`taskkill /T`. Windows also needs its native PowerShell/.NET compilation support;
-no supervisor package is installed. Temporary prompt/control files are removed
-when the supervisor exits. Remote cancellation sends a nonce-scoped request over
-a second SSH connection and waits for the original supervisor's receipt. If that
-receipt is lost, the outcome is `unknown`; disconnecting SSH is never proof of
-remote termination. The service must retain the session reservation in that case.
+Reading never starts or resumes a harness. Continuing a session is the seat's
+job: a hired seat stays the real interactive harness in its Herdr pane (ADR 0203).
 
 ## Seat adapters
 

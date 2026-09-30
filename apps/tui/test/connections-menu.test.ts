@@ -120,7 +120,6 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
       swarm: async () => ({}),
       agents,
       now: () => NOW,
-      pollMs: 1,
       ...overrides,
     } satisfies ConnectionsMenuServices,
   };
@@ -155,22 +154,6 @@ it("drills from the hub to a remote session and shows its latest turns", async (
   ]);
 });
 
-it("sends a message, waits for the run, and shows only the reply", async () => {
-  const { shell, results, lines } = fakeShell(
-    ["host:pc", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "send", "wait", undefined, undefined, undefined],
-    ["are you done?"],
-  );
-  const { services: deps, agentsCalls } = services();
-  await runConnectionsSection("agents", shell, deps);
-  expect(agentsCalls).toContainEqual(["send", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "are you done?"]);
-  expect(agentsCalls).toContainEqual(["read", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "--after", "c0"]);
-  expect(lines).toContain("Run finished (exit 0).");
-  expect(results.at(-1)).toEqual({
-    prompt: "/agents send pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
-    message: "agent: ACK",
-  });
-});
-
 it("adds an SSH host from three answers", async () => {
   const { shell } = fakeShell(["add", "powershell", undefined], ["pc", "volpe@supedupsilly"]);
   const { services: deps, agentsCalls } = services();
@@ -186,19 +169,23 @@ it("adds an SSH host from three answers", async () => {
   ]);
 });
 
-it("reports a refused send in place instead of leaving the modal", async () => {
-  const { shell, lines } = fakeShell(
-    ["host:pc", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "send", undefined, undefined, undefined],
-    ["hi"],
-  );
+it("reports a refused read in place instead of leaving the modal", async () => {
+  const { shell, lines } = fakeShell([
+    "host:pc",
+    "pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
+    "read",
+    undefined,
+    undefined,
+    undefined,
+  ]);
   const { services: deps } = services();
   const agents = deps.agents;
   deps.agents = vi.fn(async (args: readonly string[]) => {
-    if (args[0] === "send") throw new Error("Session was written 12s ago; it may be open and working.");
+    if (args[0] === "read") throw new Error("Transcript path outside allowed roots");
     return agents(args);
   });
   await runConnectionsSection("agents", shell, deps);
-  expect(lines).toContain("Session was written 12s ago; it may be open and working.");
+  expect(lines).toContain("Transcript path outside allowed roots");
 });
 
 it("puts an error that ends the menu into the chat, where it outlives the status line", async () => {
