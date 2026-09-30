@@ -62,6 +62,9 @@ source setup and checks.
   [quality gates](testing/quality-gates.md) define the recurring checks.
 - [Desktop runtime design](desktop-runtime-design.md) is a dated proposal, not an
   implemented replacement for the desktop-control path.
+- [Discord surface review](proposals/2026-09-30-discord-surface-review.md) is a
+  dated proposal on retiring the Activity and the user-session lab body, awaiting
+  a decision.
 - [Fleet-lead transfer](fleet-lead-handoff.md) is a retained, inactive runbook.
   Normal external-coordinator connection is documented in the Swarm reference.
 
