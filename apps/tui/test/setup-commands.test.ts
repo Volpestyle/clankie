@@ -56,6 +56,7 @@ async function fixture(options: {
   readonly model?: string;
   readonly credentials?: readonly string[];
   readonly canTalk?: boolean;
+  nextStep: "Pair a phone or tablet: run `clankie pair` (or /pair).",
 }): Promise<{
   readonly services: SetupCommandServices;
   readonly opened: string[];

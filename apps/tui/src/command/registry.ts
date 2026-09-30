@@ -6,7 +6,7 @@ const HEADLESS_COMMAND_HELP = [
       "  login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]",
       "                           Sign in by email code: connects a hosted Clankie if the account has",
       "                           one, otherwise signs this Mac in for remote access",
-      "  logout | whoami          Hosted sign-out (never touches remote access) or current machine/access status",
+      "  logout | whoami          Hosted sign-out (never touches remote access); whoami is also in `status`",
       "  Hosted restart/reset/deprovision require the account page/control plane.",
       "  fleet | terminal         Hosted fleet/terminal catalog; mutations use --json-stdin",
       "  keys [status|set PROVIDER --key-stdin|remove PROVIDER|validate PROVIDER]",

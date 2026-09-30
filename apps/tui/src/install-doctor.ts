@@ -20,6 +20,8 @@ import {
 import { bundledSkills, SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
 import { commandHost } from "./command/io.ts";
 import { probeDoorway, type GatewayDoorwayReport } from "./command/gateway.ts";
+import { nextStepLine } from "./next-step.ts";
+import { DeviceDirectRouteSchema } from "@clankie/protocol";
 
 const execFileAsync = promisify(execFileCallback);
 const PROBE_TIMEOUT_MS = 5_000;
@@ -96,6 +98,8 @@ export interface InstallDoctorReport {
   readonly laneTools: { readonly url: string; readonly reachable: boolean };
   /** The live public doorway (ADR 0151): whether the phone can reach him at all. */
   readonly doorway: GatewayDoorwayReport;
+  /** One line: the next thing to do for phone access, shared with `status` and the console. */
+  readonly nextStep: string;
   readonly selectedModel: SelectedModelReport | null;
   readonly remediations: readonly string[];
 }
@@ -249,6 +253,14 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     herdrPlugin,
     laneTools,
     doorway,
+    nextStep: nextStepLine({
+      doorway,
+      remoteAccessConfigured: settings.publicGateway.url !== undefined,
+      directRouteConfigured: DeviceDirectRouteSchema.safeParse({
+        controlPlaneUrl: settings.relay.controlPlaneUrl,
+        relayUrl: settings.relay.url,
+      }).success,
+    }),
     selectedModel,
     remediations,
   };
@@ -469,7 +481,7 @@ function collectRemediations(input: {
   }
   if (input.doorway.state === "sign_in_required") {
     remediations.push(
-      `This Mac has been signed out of the public doorway since ${input.doorway.since}; no app reaches him until you sign it back in with /gateway.`,
+      `This Mac has been signed out of the public doorway since ${input.doorway.since}; no app reaches him until you sign it back in with /remote-access.`,
     );
   }
   if (input.doorway.state === "unavailable") {

@@ -6,6 +6,7 @@ import {
   type TurnOptions,
 } from "./turn.ts";
 export type { AgentTurnInput, AgentTurnResult } from "./turn.ts";
+export type * from "./seat.ts";
 import { execFile } from "node:child_process";
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";

@@ -55,3 +55,14 @@ when the supervisor exits. Remote cancellation sends a nonce-scoped request over
 a second SSH connection and waits for the original supervisor's receipt. If that
 receipt is lost, the outcome is `unknown`; disconnecting SSH is never proof of
 remote termination. The service must retain the session reservation in that case.
+
+## Seat adapters
+
+`seat.ts` is the harness-adapter seam (ADR 0187 amendment, VUH-1458). A
+`HarnessSeatAdapter` starts a hired seat through its harness's programmatic
+interface and returns a `SeatControl`: structured `send` with a harness
+acknowledgment, `settled` completion, `interrupt`, and `close`. The herdr pane
+it is handed (`SeatView`) is only the owner's view and takeover seat. `attach`
+reattaches by the harness's own session id after a service restart. Failures
+are typed outcomes, so the hire path falls back to terminal delivery and says
+why.

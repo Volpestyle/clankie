@@ -87,6 +87,7 @@ describe("canonical owner command layer", () => {
     const shell = {
       theme: {
         ansi: {
+      nextStep: "Pair a phone or tablet: run `clankie pair` (or /pair).",
           bold: identity,
           cyan: identity,
           dim: identity,
