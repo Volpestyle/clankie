@@ -75,6 +75,13 @@ its lane. `trust_required` means a visible folder-trust prompt blocked startup;
 the new pane is closed without accepting it. The owner reviews trust in that
 directory before a retry.
 
+For `brief_delivery_unverified`, inspect `hire_agent.receipt_rejected` in the
+service log: it names the session, transcript path (null if no file exists), and
+the rejecting rule. Do not assume the newest matching transcript belongs to the
+failed hire. Claude writes channel receipts as internal `isMeta`/system user
+records. A standalone `clankie-seat` bridge must not poll when only the worker
+plugin's channel is selected, or it can consume mail Claude never receives.
+
 ## Cross-device agent conversations
 
 Messages includes seats from registered execution fleets. Opening a remote seat

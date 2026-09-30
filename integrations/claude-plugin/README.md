@@ -125,6 +125,9 @@ MCP. Its one MCP server, `swarm`, has two launches:
   `clankie mcp --seat`, so the seat's mailbox (brief, `message_seat`, DMs)
   arrives as channel events. The bridge polls only when the Claude session that
   launched it loaded `plugin:clankie-worker@clankie` under `--channels`.
+  The wrapper's `CLANKIE_SEAT_PARENT_ARGV` identifies that plugin bridge. A
+  separately registered `clankie-seat` bridge cannot consume its mailbox just
+  because Claude loaded the plugin; it needs its own selected channel.
 
 Either launch enables the plugin for that session only (`enabledPlugins`) and
 starts Claude Code with `--channels plugin:clankie-worker@clankie`. Outside

@@ -48,6 +48,7 @@ import { splitFleetQualified } from "../herdr-fleet.ts";
 import { workerSkills } from "./worker-skills.ts";
 import {
   readHerdrSeatTranscript,
+  resolveHerdrSeatTranscriptPath,
   type HerdrAgentSession,
   type HerdrSeatTranscript,
 } from "./herdr-transcript.ts";
@@ -1245,18 +1246,40 @@ export class HerdrWatchStore implements HerdrWatchPort {
     reason: HerdrSeatSpawnFailure["reason"] = spawnFailureReason(detail),
   ): Promise<HerdrSeatSpawnFailure> {
     const visible = await this.runner.read?.(paneId, harness, "visible").catch(() => undefined);
+    let failure: HerdrSeatSpawnFailure = { outcome: "failed", reason, detail };
     if (
       (harness === "claude" && visible?.includes("Do you trust the files in this folder?")) ||
       (harness === "codex" && visible?.includes("Trust this folder?"))
     )
-      return {
+      failure = {
         outcome: "failed",
         reason: "trust_required",
         detail: `${harness} is waiting for folder trust. Open it in this working directory and review the trust prompt yourself, then retry the hire. The new pane was closed; no trust was accepted.`,
       };
-    if (harness === "claude" && visible?.includes(CHANNEL_DIALOG_MARKER))
-      return { outcome: "failed", reason: "not_ready", detail: CLAUDE_CHANNEL_CONSENT_REQUIRED };
-    return { outcome: "failed", reason, detail };
+    else if (harness === "claude" && visible?.includes(CHANNEL_DIALOG_MARKER))
+      failure = { outcome: "failed", reason: "not_ready", detail: CLAUDE_CHANNEL_CONSENT_REQUIRED };
+    const agent = await this.runner.get(paneId).catch(() => undefined);
+    const session = agent?.session;
+    console.warn(
+      "hire_agent.startup_failed:",
+      JSON.stringify({
+        harness,
+        paneId,
+        sessionId:
+          session === undefined
+            ? null
+            : session.kind === "id"
+              ? session.value
+              : basename(session.value, ".jsonl"),
+        transcriptPath:
+          session === undefined || splitFleetQualified(paneId) !== undefined
+            ? null
+            : (resolveHerdrSeatTranscriptPath(harness, session) ?? null),
+        rejectingRule: failure.reason,
+        detail: redactSensitiveText(failure.detail ?? ""),
+      }),
+    );
+    return failure;
   }
 
   /**

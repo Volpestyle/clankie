@@ -1654,6 +1654,14 @@ the control lane of a local hire. A visible folder-trust prompt returns
 `trust_required` and closes the new pane without accepting trust; review the
 prompt yourself in that directory before retrying.
 
+Failed startups log `hire_agent.startup_failed` before closing the pane, with its
+session ID, resolved transcript path (null when no file is found), and rejecting
+rule. Claude receipt failures also log `hire_agent.receipt_rejected`, distinguishing
+`transcript_unavailable`, `no_new_operator_message`, `complete_body_mismatch`, and
+`mailbox_not_delivered`, without logging the brief. A mailbox delivery alone is
+not proof that Claude recorded it. Only the selected bridge polls: a globally
+registered `clankie-seat` stays inactive when the worker plugin is selected.
+
 On the terminal fallback, the brief uses Herdr's paste-aware `agent prompt` after
 startup readiness. Delivery is reported only when
 the complete brief appears in the native transcript. An unverifiable receipt

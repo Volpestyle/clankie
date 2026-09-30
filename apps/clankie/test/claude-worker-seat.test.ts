@@ -221,6 +221,9 @@ it.each(["string", "blocks"])(
           parentUuid,
           isMeta: true,
           promptSource: "system",
+          origin: { kind: "channel", server: "plugin:clankie-worker:swarm" },
+          turnOrigin: "peer",
+          queueSkipAttachments: true,
           message: {
             role: "user",
             content: contentShape === "string" ? prompt : [{ type: "text", text: prompt }],
@@ -286,6 +289,68 @@ it.each(["string", "blocks"])(
     expect(view.run).not.toHaveBeenCalled();
   },
 );
+
+it("verifies the recorded 2.1.286 probe and rejects a preexisting receipt or changed body", async () => {
+  const native = JSON.parse(
+    await readFile(new URL("./fixtures/claude-worker-channel.json", import.meta.url), "utf8"),
+  );
+  const brief = channelBody(native.message.content)!;
+  for (const kind of ["new", "preexisting", "mismatch", "missing"] as const) {
+    const root = await scratch();
+    const path = join(root, `${SESSION}.jsonl`);
+    await writeFile(path, kind === "preexisting" ? JSON.stringify(native) : "");
+    const agent: HerdrAgentSnapshot = {
+      paneId: "w1:p1",
+      terminalId: "term_0a1b2c",
+      agent: "claude",
+      status: "idle",
+      title: "probe",
+      session: { source: "herdr:claude", kind: "path", value: path },
+    };
+    const runner = createHerdrWatchRunner();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const adapter = createClaudeWorkerSeatAdapter({
+        consent: async () => ({ approved: true }),
+        hooks: new SeatHookLog(join(root, "hooks.json")),
+        agent: async () => agent,
+        transcript: async () => (kind === "missing" ? undefined : runner.transcript!(agent)),
+        mailbox: {
+          bound: () => true,
+          deliver: async () => {
+            if (kind !== "preexisting") await writeFile(path, JSON.stringify(native));
+            return true;
+          },
+        },
+        timing: { readyMs: 10, receiptMs: 10, pollMs: 1 },
+      });
+      const result = await adapter.start(
+        { harness: "claude", cwd: root, brief: kind === "mismatch" ? brief + " altered" : brief },
+        { paneId: agent.paneId, run: async () => undefined, start: async () => undefined },
+      );
+      expect(result.outcome).toBe(kind === "new" ? "started" : "failed");
+      if (kind === "new") expect(warning).not.toHaveBeenCalled();
+      else {
+        const diagnostic = JSON.parse(warning.mock.calls[0]![1]);
+        expect(diagnostic).toEqual({
+          harness: "claude",
+          paneId: agent.paneId,
+          sessionId: SESSION,
+          transcriptPath: path,
+          rejectingRule:
+            kind === "missing"
+              ? "transcript_unavailable"
+              : kind === "preexisting"
+                ? "no_new_operator_message"
+                : "complete_body_mismatch",
+        });
+        expect(JSON.stringify(diagnostic)).not.toContain(brief);
+      }
+    } finally {
+      warning.mockRestore();
+    }
+  }
+});
 
 it("without the owner's approval nothing launches and the hire is blocked on the named fix", async () => {
   const { adapter, view, start } = await fixture({ approved: false });

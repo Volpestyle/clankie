@@ -171,11 +171,13 @@ export function parseMcpArgs(args: readonly string[]): McpArgs {
  * (or the `=` form of that pair). `--channels` is not a bind: Claude Code
  * rejects `server:` entries under it, so polling there is a black hole.
  */
-export function parentArgvLoadsFleetChannel(argv: string | undefined): boolean {
-  return (
-    parentArgvLoadsChannel(argv, FLEET_CHANNEL_SERVER) ||
-    parentArgvApprovesChannel(argv, WORKER_CHANNEL_PLUGIN)
-  );
+export function parentArgvLoadsFleetChannel(argv: string | undefined, workerPlugin = false): boolean {
+  // A globally registered clankie-seat can run beside the worker plugin.
+  // Only the selected server may consume the mailbox; Claude drops events
+  // from the other connection even though both advertise the capability.
+  return workerPlugin
+    ? parentArgvApprovesChannel(argv, WORKER_CHANNEL_PLUGIN)
+    : parentArgvLoadsChannel(argv, FLEET_CHANNEL_SERVER);
 }
 
 /**
@@ -570,7 +572,7 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   } catch {
     parentArgv = undefined;
   }
-  if (!parentArgvLoadsFleetChannel(parentArgv)) {
+  if (!parentArgvLoadsFleetChannel(parentArgv, env.CLANKIE_SEAT_PARENT_ARGV !== undefined)) {
     await server.connect(transport);
     stderr.write("clankie mcp: channel not loaded for this session; not polling\n");
     await closed;

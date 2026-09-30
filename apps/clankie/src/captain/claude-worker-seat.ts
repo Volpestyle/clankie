@@ -31,7 +31,7 @@ import type {
   SeatStatus,
 } from "@clankie/agent-hosts";
 import { CLAUDE_WORKER_PLUGIN, CLAUDE_WORKER_PLUGIN_ID, type FleetSeatHook } from "@clankie/protocol";
-import type { HerdrSeatTranscript } from "./herdr-transcript.ts";
+import { resolveHerdrSeatTranscriptPath, type HerdrSeatTranscript } from "./herdr-transcript.ts";
 
 /** What the adapter reads of a herdr agent. */
 export interface WorkerSeatAgent {
@@ -319,17 +319,44 @@ async function receipt(
   pollMs: number,
 ): Promise<string | undefined> {
   const expected = text.replace(/\r\n?/gu, "\n").trim();
-  return until(
-    async () =>
-      (await deps.transcript(agent))?.entries.find(
+  let rejectingRule = "transcript_unavailable";
+  const id = await until(
+    async () => {
+      const transcript = await deps.transcript(agent);
+      if (transcript === undefined) {
+        rejectingRule = "transcript_unavailable";
+        return undefined;
+      }
+      const candidates = transcript.entries.filter(
+        (entry) => entry.type === "message" && entry.role === "operator" && !before.has(entry.id),
+      );
+      rejectingRule = candidates.length === 0 ? "no_new_operator_message" : "complete_body_mismatch";
+      return candidates.find(
         (entry) =>
           entry.type === "message" &&
-          entry.role === "operator" &&
-          !before.has(entry.id) &&
           (channelBody(entry.text)?.trim() === expected || entry.text.trim() === expected),
-      )?.id,
+      )?.id;
+    },
     ms,
     pollMs,
+  );
+  if (id === undefined) logReceiptRejection(agent, rejectingRule);
+  return id;
+}
+
+function logReceiptRejection(agent: WorkerSeatAgent, rejectingRule: string): void {
+  console.warn(
+    "hire_agent.receipt_rejected:",
+    JSON.stringify({
+      harness: "claude",
+      paneId: agent.paneId,
+      sessionId: sessionIdOf(agent) ?? null,
+      transcriptPath:
+        agent.session === undefined
+          ? null
+          : (resolveHerdrSeatTranscriptPath("claude", { source: "herdr:claude", ...agent.session }) ?? null),
+      rejectingRule,
+    }),
   );
 }
 
@@ -484,6 +511,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         };
       const before = await transcriptIds(deps, agent);
       const taken = await deps.mailbox.deliver(agent.terminalId, launch.brief);
+      if (!taken) logReceiptRejection(agent, "mailbox_not_delivered");
       const received = taken
         ? await receipt(deps, agent, launch.brief, before, receiptMs, pollMs)
         : undefined;

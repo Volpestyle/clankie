@@ -155,7 +155,7 @@ export function readHerdrSeatTranscript(
 ): HerdrSeatTranscript | undefined {
   const resolvedSession = session ?? (agent === "grok" ? grokSessionForProcess(processId) : undefined);
   if (resolvedSession === undefined) return undefined;
-  const path = transcriptPath(agent, resolvedSession);
+  const path = resolveHerdrSeatTranscriptPath(agent, resolvedSession);
   if (path === undefined) return undefined;
   const stats = statSync(path, { throwIfNoEntry: false });
   if (stats === undefined) return undefined;
@@ -287,7 +287,11 @@ function flatEntries(
   return agent === "codex" ? codexEntries(records, state) : grokEntries(records, state);
 }
 
-function transcriptPath(agent: string, session: HerdrAgentSession): string | undefined {
+/** Native lookup used by the reader and failed-delivery diagnostics. No match means no file yet. */
+export function resolveHerdrSeatTranscriptPath(
+  agent: string,
+  session: HerdrAgentSession,
+): string | undefined {
   if (session.kind === "path")
     return isAbsolute(session.value) && existsSync(session.value) ? session.value : undefined;
   if (agent === "claude") {

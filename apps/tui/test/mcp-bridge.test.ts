@@ -121,12 +121,15 @@ describe("clankie mcp", () => {
     expect(
       parentArgvLoadsFleetChannel(
         'claude --settings {"enabledPlugins":{"clankie-worker@clankie":true}} --channels plugin:clankie-worker@clankie --model sonnet',
+        true,
       ),
     ).toBe(true);
     expect(
-      parentArgvLoadsFleetChannel("claude --channels=plugin:other@x,plugin:clankie-worker@clankie"),
+      parentArgvLoadsFleetChannel("claude --channels=plugin:other@x,plugin:clankie-worker@clankie", true),
     ).toBe(true);
-    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie-worker@clankie -p")).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie-worker@clankie -p", true)).toBe(
+      false,
+    );
     expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie@clankie")).toBe(false);
     expect(parentArgvLoadsFleetChannel("claude --model plugin:clankie-worker@clankie")).toBe(false);
     for (const print of ["--print", "-p"]) {
@@ -334,6 +337,30 @@ describe("clankie mcp", () => {
     expect(polled).toBe(false);
     expect(written).toContain("channel not loaded for this session; not polling");
   });
+
+  it.each([false, true])(
+    "only the worker plugin polls when its channel is selected (plugin: %s)",
+    async (plugin) => {
+      const argv = "claude --channels plugin:clankie-worker@clankie --model haiku";
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      let connected = false;
+      const running = runMcpCommand(["--seat"], {
+        env: { HERDR_PANE_ID: "w1:p9", ...(plugin ? { CLANKIE_SEAT_PARENT_ARGV: argv } : {}) },
+        readParentArgv: async () => argv,
+        connectSeatUpstream: async () => {
+          connected = true;
+          return { pollEvents: async () => [], close: async () => undefined };
+        },
+        transport: serverTransport,
+        stderr: { write: () => undefined },
+      });
+      const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
+      await client.connect(clientTransport);
+      await client.close();
+      await expect(running).resolves.toBe(0);
+      expect(connected).toBe(plugin);
+    },
+  );
 
   it("retries a 404 fleet mailbox without throwing", async () => {
     let polls = 0;
