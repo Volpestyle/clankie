@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FileCredentialStore, KeychainCredentialStore } from "../../src/credential-store.ts";
 
@@ -29,7 +30,11 @@ export function sharedCredentialStore(kind: "file" | "keychain", directory: stri
       } else {
         throw new Error("unexpected security command");
       }
-      await writeFile(path, JSON.stringify(items), { mode: 0o600 });
+      // Keychain reads observe complete items. Model that atomic visibility so
+      // another process cannot parse a partially written JSON document.
+      const temporary = `${path}.${randomUUID()}.tmp`;
+      await writeFile(temporary, JSON.stringify(items), { mode: 0o600 });
+      await rename(temporary, path);
       return { stdout: "", stderr: "" };
     },
   });
