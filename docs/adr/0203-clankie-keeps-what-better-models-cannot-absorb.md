@@ -25,8 +25,23 @@ make results worse once the underlying tools improve.
 
 ## Decision
 
-Each part of Clankie must pass one test: **would it still be needed if Claude
-and Codex were twice as good tomorrow?**
+Clankie is a workspace extension, not a custom agent harness. He bridges the
+tried-and-tested harnesses (Claude Code, Codex and others) into one simple
+system for the owner, and adds what they don't: a living character with rich
+Discord and voice presence, the garden view and art, direct terminal
+connections, and fun on top of productive swarm management. The agents do what
+they do best in their own harnesses; Clankie gives them what they need to
+succeed inside his system.
+
+Every feature and every line of code must justify itself by at least one of:
+
+1. it brings life or character to Clankie; or
+2. it gives the owner something the Claude Code and Codex ecosystems don't.
+
+Custom-harness code, which re-implements what a lab harness already does, fails
+both and is cut. As a check on the second criterion, each part must also pass:
+**would it still be needed if Claude and Codex were twice as good tomorrow?**
+(Amended 2026-09-30 at James's direction: "be ruthless".)
 
 - **Keep and invest:** his identity and memory across rooms; his bodies (Discord
   text and voice, the app, play); communication across vendors and machines
