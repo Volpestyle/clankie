@@ -32,10 +32,13 @@ and Codex were twice as good tomorrow?**
   text and voice, the app, play); communication across vendors and machines
   (Swarm); trust boundaries; one tracker identity.
 - **Make thin:** control of other harnesses and process scaffolding. Clankie
-  hires, briefs, messages and learns completion through each harness's
-  programmatic interface (Claude Agent SDK or headless mode, Codex app-server).
-  Herdr becomes the owner's view and takeover seat, not the control channel;
-  terminal typing remains only a fallback.
+  hires, briefs, messages and learns completion through the harness's own
+  extension points while the worker stays the real interactive harness in its
+  herdr pane: Clankie's Claude Code plugin (channel notifications in, Stop hooks
+  out) and the app-server of the pane's own Codex session. Workers are never
+  replaced by a headless process with herdr as a mere view, so everything the
+  labs ship keeps working and the owner can type into any seat. Terminal typing
+  remains only a fallback. (Amended 2026-09-30 at James's direction.)
 - **Delete:** duplicated instructions, rules written for older models, and
   surfaces nobody uses weekly.
 
