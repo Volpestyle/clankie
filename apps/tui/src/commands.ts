@@ -255,7 +255,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "agents",
       aliases: [],
-      description: "Known agents, their connections, and current availability",
+      description: "Live agents, and past ones that kept a thread",
       takesArgument: true,
       argumentHint: "[contacts | legacy session commands; see /sessions]",
       async run(argument, shell): Promise<void> {
@@ -271,31 +271,51 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         const flow = shell.setupFlow;
         flow.begin("agents");
         try {
+          // Every hire leaves an identity behind, so the directory opens on who is
+          // reachable now. Past agents are only worth listing when a thread
+          // survives them; the rest cannot be opened at all.
           const agents = await conversations.agents();
-          flow.renderLine(
-            "Known identities, not a complete connection history. /sessions browses saved harness sessions.",
-          );
-          if (!agents.length) {
-            flow.renderLine("No known agents.");
+          const live = agents.filter(agentIsLive);
+          const past = agents
+            .filter((agent) => !agentIsLive(agent) && agent.conversationId !== undefined)
+            .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+          if (!live.length && !past.length) {
+            flow.renderLine(
+              "No live agents and no saved agent threads. /sessions browses saved harness sessions.",
+            );
             return;
           }
-          const id = await flow.readSelect({
-            message: "Agents",
-            options: agents.map((agent) => ({
-              value: agent.personaId,
-              label: agent.name,
-              hint: agent.swarm
-                ? `Swarm · ${agent.swarm.connectionId} · ${agent.swarm.available ? "available" : "offline"}`
-                : `Herdr · ${agent.harness} · ${agent.activeSeatId ? "available" : "offline"}`,
-              description: agent.personaId,
-            })),
+          const option = (agent: OperatorAgentPersona) => ({
+            value: agent.personaId,
+            label: agent.name,
+            hint: agent.swarm
+              ? `Swarm · ${agent.swarm.connectionId}${agentIsLive(agent) ? "" : " · offline"}`
+              : `Herdr · ${agent.harness}${agentIsLive(agent) ? "" : " · offline"}`,
+            description: agent.personaId,
           });
+          let id = await flow.readSelect({
+            message: live.length ? `Live agents (${live.length})` : "No live agents",
+            options: [
+              ...live.map(option),
+              ...(past.length
+                ? [
+                    {
+                      value: "past",
+                      label: `Past agents (${past.length})…`,
+                      hint: "offline, with a saved thread",
+                    },
+                  ]
+                : []),
+            ],
+          });
+          if (id === "past")
+            id = await flow.readSelect({
+              message: "Past agents",
+              options: past.map(option),
+              allowBack: true,
+            });
           const agent = agents.find((entry) => entry.personaId === id);
           if (!agent) return;
-          if (!(agent.swarm ? agent.swarm.available : agent.activeSeatId) && !agent.conversationId) {
-            flow.renderLine("This agent is offline and has no saved thread.", "warning");
-            return;
-          }
           const selected = await conversations.openAgent(agent);
           shell.insertCommandResult("/agents", `Opened ${selected.title}.`, "success");
         } finally {
@@ -306,7 +326,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "sessions",
       aliases: [],
-      description: "List, read or resume Claude/Codex/Grok/Pi sessions here or on SSH hosts",
+      description: "List or read Claude/Codex/Grok/Pi sessions here or on SSH hosts",
       takesArgument: true,
       argumentHint:
         "[list [--host ID]|read HOST:SESSION [--tail N]|send HOST:SESSION MESSAGE|runs [RUN]|cancel RUN|release RUN|hosts|hosts add ID --ssh TARGET [--shell powershell]|hosts remove ID]",
@@ -1340,6 +1360,11 @@ function formatBrowserHarnesses(result: BrowserHarnessesResult): string {
 
 function formatGameplaySettings(settings: GameplaySettings): string {
   return `PokeAgent MMO: ${settings.pokeagentMmoEnabled ? "enabled" : "disabled"}`;
+}
+
+/** Reachable now: a live Herdr seat, or an available Swarm contact. */
+function agentIsLive(agent: OperatorAgentPersona): boolean {
+  return agent.swarm ? agent.swarm.available : agent.activeSeatId !== undefined;
 }
 
 /** `/evaluator` with no arguments: the same controls as the CLI, as a menu. */

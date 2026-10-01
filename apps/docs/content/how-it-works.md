@@ -91,7 +91,7 @@ with `--chat`. `/cd` selects a project workspace; tools use the selected
 conversation's directory. The TUI separates the things you can open:
 
 - `/chats`: personal and workspace chats with Clankie.
-- `/agents`: known agent identities and observed availability.
+- `/agents`: agents that are live now, and past ones that kept a thread.
 - `/rooms`: shared channels and read-only Discord inspection.
 - `/history`: all retained threads, including ongoing and offline ones.
 - `/sessions`: saved harness execution records.

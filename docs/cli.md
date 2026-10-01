@@ -1196,8 +1196,9 @@ record was too large for a single read and was stepped over.
 `/sessions` in the TUI takes the same arguments, or opens the saved sessions menu
 with none. `clankie sessions` is also an alias for these CLI commands. Existing
 `/agents` session arguments remain supported, but `/agents` without arguments
-now opens known agent identities with Swarm/Herdr source and availability.
-`clankie agents contacts` returns those identities through the existing fleet API.
+now opens the agents that are live, with offline agents that kept a thread behind
+one "Past agents" entry. `clankie agents contacts` returns every known identity,
+live or not, through the existing fleet API.
 
 The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
 (known identities), `/rooms` (group channels and Discord inspection), and

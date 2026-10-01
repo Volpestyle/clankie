@@ -64,32 +64,54 @@ it("keeps agent threads out of direct chat selection but reachable in history", 
   expect(commands.find((command) => command.name === "chats")!.aliases).toContain("conversation");
 });
 
-it.each([false, true])("only opens offline agents when a saved thread exists: %s", async (saved) => {
-  const agent = {
-    personaId: "offline",
-    name: "Reviewer",
+function persona(personaId: string, extra: Partial<OperatorAgentPersona> = {}): OperatorAgentPersona {
+  return {
+    personaId,
+    name: personaId,
     harness: "codex",
-    ...(saved ? { conversationId: "saved-thread" } : {}),
+    updatedAt: "2026-09-30T12:00:00.000Z",
+    ...extra,
   } as OperatorAgentPersona;
-  const { commands, shell, openAgent, readSelect } = setup([agent], "offline");
+}
+
+it("lists live agents and keeps past agents with a thread behind one entry", async () => {
+  const agents = [
+    persona("live", { activeSeatId: "term_1" }),
+    persona("peer", { harness: "swarm", swarm: { connectionId: "remote", available: true } as never }),
+    persona("older", { conversationId: "older-thread", updatedAt: "2026-09-29T12:00:00.000Z" }),
+    persona("newer", { conversationId: "newer-thread", updatedAt: "2026-09-30T18:00:00.000Z" }),
+    persona("gone"),
+  ];
+  const { commands, shell, openAgent, readSelect } = setup(agents);
+  readSelect.mockResolvedValueOnce("past").mockResolvedValueOnce("older");
   await commands.find((command) => command.name === "agents")!.run("", shell);
-  expect(openAgent).toHaveBeenCalledTimes(saved ? 1 : 0);
-  expect(readSelect).toHaveBeenCalledWith(
-    expect.objectContaining({ options: [expect.objectContaining({ hint: "Herdr · codex · offline" })] }),
-  );
+  const menus = (
+    readSelect.mock.calls as unknown as [{ message: string; options: { value: string }[] }][]
+  ).map(([menu]) => menu);
+  expect(menus[0]!.message).toBe("Live agents (2)");
+  expect(menus[0]!.options.map((option) => option.value)).toEqual(["live", "peer", "past"]);
+  expect(menus[1]!.options.map((option) => option.value)).toEqual(["newer", "older"]);
+  expect(openAgent).toHaveBeenCalledWith(agents[2]);
+});
+
+it("says so instead of listing agents that cannot be opened", async () => {
+  const { commands, shell, readSelect, renderLine, openAgent } = setup([persona("gone")]);
+  await commands.find((command) => command.name === "agents")!.run("", shell);
+  expect(readSelect).not.toHaveBeenCalled();
+  expect(openAgent).not.toHaveBeenCalled();
+  expect(renderLine).toHaveBeenCalledWith(expect.stringContaining("No live agents"));
 });
 
 it("opens available Swarm agents without requiring an existing thread", async () => {
-  const agent = {
-    personaId: "peer",
+  const agent = persona("peer", {
     name: "Reviewer",
     harness: "swarm",
-    swarm: { connectionId: "remote", available: true },
-  } as OperatorAgentPersona;
+    swarm: { connectionId: "remote", available: true } as never,
+  });
   const { commands, shell, openAgent, readSelect } = setup([agent], "peer");
   await commands.find((command) => command.name === "agents")!.run("", shell);
   expect(openAgent).toHaveBeenCalledWith(agent);
   expect(readSelect).toHaveBeenCalledWith(
-    expect.objectContaining({ options: [expect.objectContaining({ hint: "Swarm · remote · available" })] }),
+    expect.objectContaining({ options: [expect.objectContaining({ hint: "Swarm · remote" })] }),
   );
 });
