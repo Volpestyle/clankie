@@ -3,6 +3,23 @@ import { bodyLimit } from "hono/body-limit";
 import { AgentHostConnectionSchema } from "@clankie/settings";
 import { AgentSessionRequestError } from "@clankie/agent-transcript";
 import type { AgentSessions } from "./agent-sessions.ts";
+import type { HireSeat } from "./captain/port.ts";
+import { z } from "zod";
+
+const ResumeSchema = z
+  .object({
+    ref: z.string().trim().min(1).max(128),
+    fleet: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
+    brief: z
+      .string()
+      .min(1)
+      .refine((text) => Buffer.byteLength(text) <= 32 * 1024 && !text.includes("\0"))
+      .optional(),
+  })
+  .strict();
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -12,6 +29,7 @@ function errorDetail(error: unknown): string {
 export function createAgentSessionRoutes(
   sessions: AgentSessions | undefined,
   authenticate: (request: Request) => Promise<boolean | "unavailable">,
+  hire?: HireSeat,
 ): Hono {
   const app = new Hono();
   const authorize = async (context: Context) => {
@@ -22,6 +40,34 @@ export function createAgentSessionRoutes(
     if (!sessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
     return undefined;
   };
+  app.post("/v1/agent-sessions/resume", bodyLimit({ maxSize: 64 * 1024 }), async (context) => {
+    const refused = await authorize(context);
+    if (refused) return refused;
+    const input = ResumeSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!input.success) return context.json({ error: "invalid_agent_session_resume" }, 400);
+    if (hire === undefined) return context.json({ error: "agent_session_hire_unavailable" }, 503);
+    try {
+      const session = await sessions!.resolve(input.data.ref);
+      return context.json(
+        await hire(
+          {
+            schemaVersion: 1,
+            resume: session.ref,
+            harness: session.file.harness,
+            title: `Resume ${session.file.harness}`,
+            workingDirectory: session.workingDirectory,
+            ...(input.data.fleet === undefined ? {} : { fleet: input.data.fleet }),
+          },
+          input.data.brief,
+        ),
+      );
+    } catch (error) {
+      return context.json(
+        { error: "agent_session_resume_failed", detail: errorDetail(error) },
+        error instanceof AgentSessionRequestError ? error.status : 502,
+      );
+    }
+  });
   app.get("/v1/agent-hosts", async (context) => {
     const refused = await authorize(context);
     if (refused) return refused;

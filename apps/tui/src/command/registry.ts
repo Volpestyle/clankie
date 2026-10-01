@@ -49,6 +49,7 @@ const HEADLESS_COMMAND_HELP = [
       "  agents contacts          Known agent identities and availability (JSON)",
       "  sessions                 Alias for agents session commands",
       "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",
+      "  agents resume HOST:SESSION [--fleet ID] [--brief TEXT]",
       "  agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID",
       "                           Read any Claude/Codex/Grok/Pi session, here or over SSH (JSON)",
     ],

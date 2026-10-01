@@ -29,6 +29,28 @@ function fixture() {
 }
 
 describe("Codex harness seat adapter", () => {
+  it("resumes the exact existing thread without creating or prompting a fresh session", async () => {
+    const f = fixture();
+    const started = await f.adapter.start(
+      { harness: "codex", cwd: "/scratch", brief: "", resumeSessionId: "thread-1" },
+      f.view,
+    );
+    expect(started.outcome).toBe("started");
+    expect(f.start).toHaveBeenCalledWith(expect.objectContaining({ resumeThreadId: "thread-1" }));
+    expect(f.send).not.toHaveBeenCalled();
+    if (started.outcome === "started") await started.control.close();
+  });
+
+  it("refuses a different native thread before sending the brief", async () => {
+    const f = fixture();
+    const started = await f.adapter.start(
+      { harness: "codex", cwd: "/scratch", brief: "do not send", resumeSessionId: "other-thread" },
+      f.view,
+    );
+    expect(started).toMatchObject({ outcome: "failed", detail: expect.stringContaining("different thread") });
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.close).toHaveBeenCalledOnce();
+  });
   it("hires and messages through the protocol; reports the exact session to the view", async () => {
     const f = fixture();
     const started = await f.adapter.start(

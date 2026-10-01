@@ -102,8 +102,7 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
     if (args[0] === "read" && args[2] === "--tail")
       return { entries: [{ type: "message", role: "agent", text: "last words" }] };
     if (args[0] === "read") return { entries: [{ type: "message", role: "agent", text: "ACK" }] };
-    if (args[0] === "send") return { runId: "r1", state: "running", cursor: "c0" };
-    if (args[0] === "runs") return { runId: "r1", state: "finished", exitCode: 0, cursor: "c0" };
+    if (args[0] === "resume") return { outcome: "spawned", seat: { seatId: "pc/term_native" } };
     return {};
   });
   return {
@@ -166,6 +165,25 @@ it("adds an SSH host from three answers", async () => {
     "volpe@supedupsilly",
     "--shell",
     "powershell",
+  ]);
+});
+
+it("resumes a saved session through the ordinary native hire endpoint", async () => {
+  const { shell, results } = fakeShell([
+    "host:pc",
+    "pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
+    "resume",
+    undefined,
+    undefined,
+  ]);
+  const { services: deps, agentsCalls } = services();
+  await runConnectionsSection("agents", shell, deps);
+  expect(agentsCalls).toContainEqual(["resume", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d"]);
+  expect(results).toEqual([
+    {
+      prompt: "/agents resume pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
+      message: "Native seat pc/term_native is ready.",
+    },
   ]);
 });
 

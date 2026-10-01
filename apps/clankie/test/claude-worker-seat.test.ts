@@ -112,6 +112,36 @@ it("a worker launch enables its plugin for this session only and asks for the ap
   expect(channelBody("plain prompt")).toBeUndefined();
 });
 
+it.each([true, false])(
+  "resumes the exact Claude session without sending an empty or misrouted brief (matching: %s)",
+  async (matching) => {
+    const root = await scratch();
+    const deliver = vi.fn(async () => true);
+    const start = vi.fn(async () => undefined);
+    const adapter = createClaudeWorkerSeatAdapter({
+      consent: async () => ({ approved: true }),
+      hooks: new SeatHookLog(join(root, "hooks.json")),
+      agent: async () => ({
+        paneId: "w1:p1",
+        terminalId: "term_one",
+        agent: "claude",
+        status: "idle",
+        session: { source: "herdr:claude", kind: "id", value: matching ? SESSION : "other-session" },
+      }),
+      transcript: async () => undefined,
+      mailbox: { bound: () => true, deliver },
+      timing: { readyMs: 10, pollMs: 1 },
+    });
+    const result = await adapter.start(
+      { harness: "claude", cwd: root, brief: matching ? "" : "do not send", resumeSessionId: SESSION },
+      { paneId: "w1:p1", start, run: async () => undefined },
+    );
+    expect(start).toHaveBeenCalledWith("claude", expect.arrayContaining(["--resume", SESSION]));
+    expect(result.outcome).toBe(matching ? "started" : "failed");
+    expect(deliver).not.toHaveBeenCalled();
+  },
+);
+
 it("the hook log settles waiters on Stop, carries StopFailure as an error, and survives a restart", async () => {
   const root = await scratch();
   const path = join(root, "hooks.json");

@@ -1159,9 +1159,9 @@ blocks new launches; it does not redirect or duplicate existing assignments.
 Old owners report `restart-required` until deliberately upgraded; coordinate the
 restart with running work. See [ADR 0193](adr/0193-runtime-workspaces-are-owner-approved.md).
 
-### `agents [list]` / `agents read` / `agents hosts`
+### `agents [list]` / `agents read` / `agents resume` / `agents hosts`
 
-Clankie reads and resumes any Claude Code, Codex, Grok or Pi session from the
+Clankie reads any Claude Code, Codex, Grok or Pi session from the
 agent's own transcript, on this machine or an owner-configured SSH host. No
 terminal host is involved: a session in Herdr, tmux, or a bare PowerShell tab
 reads the same way
@@ -1173,6 +1173,8 @@ clankie agents                          # every host, newest first
 clankie agents list --host pc --limit 5
 clankie agents read pc:01a0da31 --tail 20
 clankie agents read pc:01a0da31 --after CURSOR
+clankie agents resume local:SESSION_ID
+clankie agents resume pc:SESSION_ID --fleet pc --brief "Continue the task"
 clankie agents hosts remove pc
 ```
 
@@ -1206,14 +1208,36 @@ The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
 `/conversations`, and `/chat` alias `/chats`; use `/history ID` for any retained
 thread. See [product vocabulary](product-vocabulary.md).
 
+`resume` continues a saved session as an ordinary hired seat in its native TUI.
+It resolves fresh transcript metadata, reuses the exact live session when found,
+or opens that session in Herdr. A remote resume needs an existing registered
+Herdr fleet with the same SSH target and shell as the transcript source, plus a
+grant for its recorded working directory; matching friendly ids alone are
+insufficient. `--fleet` selects among several matching fleets. A local Codex
+resume uses the original registered account that owns its transcript, rather
+than choosing another account by headroom. The TUI's saved-session actions offer
+**Resume in native TUI**.
+
+An optional `--brief` is sent through native control when reusing a live seat;
+an uncontrolled live seat must be messaged explicitly through its existing
+lane. Incomplete fleet discovery refuses a new start. `delivery_unconfirmed`
+or `start_unconfirmed` means inspect the named pane before retrying: it may
+already have taken the work. A failed resumed start keeps its pane visible.
+The inventory covers configured Herdr servers; it cannot prove that a separate
+unregistered terminal is not holding the same history. Close that terminal before
+resuming. A transcript's age is never used as proof of absence.
+
 The operator API for saved sessions is
 GET `/v1/agent-sessions?host=&limit=`, GET `/v1/agent-sessions/read?ref=&tail=|after=`,
-GET/POST `/v1/agent-hosts`, and DELETE `/v1/agent-hosts/ID`. Clankie's own tools
+POST `/v1/agent-sessions/resume` `{ ref, fleet?, brief? }`, GET/POST `/v1/agent-hosts`,
+and DELETE `/v1/agent-hosts/ID`. The resume route delegates to the existing
+`spawn_seat` service operation; it has no separate runner or run store. Clankie's own tools
 are `agent_sessions` and `agent_session_read`, available where he has machine
-access. Reading never starts or resumes a harness: to continue work, message the
-agent's seat (`message_seat`) or, for agents enrolled in Swarm, message them
-through Swarm. Resuming a saved session in a new headless process was retired
-(ADR 0203).
+access. `hire_agent` accepts `resume: "host:sessionId"` with the recorded harness
+and workingDirectory; follow-ups use `message_seat`. Reading never starts or
+resumes a harness. Enrolled Swarm workers retain their Swarm identity and fenced
+ownership; a native resume does not enroll or replace them. Headless continuation
+remains retired (ADR 0203).
 
 ### `herdr [status|open|create]` / `herdr use NAME`
 

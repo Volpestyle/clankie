@@ -1005,6 +1005,8 @@ export const SpawnOperatorSeatSchema = z
   .object({
     schemaVersion: z.literal(1),
     harness: z.enum(OPERATOR_SEAT_HARNESSES),
+    /** Saved transcript ref (`host:sessionId`); continue it as a normal native seat. */
+    resume: z.string().trim().min(1).max(128).optional(),
     account: z
       .string()
       .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
@@ -1093,6 +1095,9 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
         "trust_required",
         "herdr_unreachable",
         "at_capacity",
+        /** The native message/start may have landed: inspect its pane, never blindly replay. */
+        "delivery_unconfirmed",
+        "start_unconfirmed",
       ]),
       detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
       control: SeatControlModeSchema.optional(),
@@ -2465,6 +2470,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("spawn_seat"),
       schemaVersion: z.literal(1),
       seat: SpawnOperatorSeatSchema,
+      brief: z.string().min(1).max(32_768).optional(),
     })
     .strict(),
   z

@@ -48,3 +48,9 @@ session id after a service restart. Failures are typed outcomes; `blocked`
 names an owner decision (such as approving a channel), and the hire path then
 falls back to terminal delivery and says why. The Claude adapter lives in the
 service (`apps/clankie/src/captain/claude-worker-seat.ts`), as does Codex's.
+
+`SeatLaunch.resumeSessionId` continues an exact session in the native view.
+The normal hire path resolves its transcript, reuses a live seat on that host,
+and confirms native identity before delivering a brief. Transcript hosts remain
+read-only. See [native continuation](../../docs/adr/0189-agent-sessions-read-from-their-transcripts.md#native-continuation)
+for host matching, original Codex account selection, and uncertain-start behavior.

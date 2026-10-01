@@ -261,6 +261,29 @@ describe("agent sessions over a transcript host", () => {
 });
 
 describe("agent sessions service", () => {
+  it("resolves exact native identity and its original cwd without treating recent mtime as process state", async () => {
+    const { host, files } = memoryHost({
+      [CODEX]: {
+        harness: "codex",
+        text: JSON.stringify({ type: "session_meta", payload: { cwd: "C:\\dev\\game" } }) + "\n",
+        mtimeMs: Date.now(),
+      },
+    });
+    const connection = { id: "pc", ssh: "owner@actual", shell: "powershell" as const };
+    const service = createAgentSessions(
+      { load: async () => ({ agentHosts: { connections: [connection] } }) as never },
+      () => host,
+    );
+    expect(await service.resolve("pc:01a0")).toMatchObject({
+      ref: "pc:01a0da31-497a-7d43-9d52-4f16482139aa",
+      host: connection,
+      workingDirectory: "C:\\dev\\game",
+      file: { path: CODEX },
+    });
+    files[CODEX]!.text = JSON.stringify({ payload: { cwd: "relative" } }) + "\n";
+    await expect(service.resolve("pc:01a0")).rejects.toThrow(/absolute working directory/);
+    await expect(service.resolve("other:01a0")).rejects.toThrow(/Unknown agent host/);
+  });
   it("never reads a cached path after a host is retargeted", async () => {
     const hosts: Record<string, ReturnType<typeof memoryHost>> = {
       "old-box": memoryHost({

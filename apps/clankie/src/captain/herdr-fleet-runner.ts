@@ -158,6 +158,12 @@ export function routeHerdrFleets(
     return qualify(fleet, await call(runner, id));
   };
   return {
+    list: async (fleet) => {
+      const runner = fleet === undefined ? local : fleets.get(fleet);
+      if (runner?.list === undefined)
+        throw new Error(`Complete Herdr inventory unavailable for ${fleet ?? "local"}`);
+      return (await runner.list()).map((snapshot) => qualify(fleet, snapshot));
+    },
     get: (target) => onTarget(target, (runner, id) => runner.get(id)),
     resolveTerminal: async (terminalId) => {
       const { runner, id, fleet } = route(terminalId);

@@ -24,6 +24,8 @@ export interface SeatLaunch {
   readonly cwd: string;
   /** The first turn, delivered structurally and confirmed by the harness. */
   readonly brief: string;
+  /** Continue this exact native session in the interactive view, without forking. */
+  readonly resumeSessionId?: string;
   readonly model?: string;
   readonly effort?: string;
   /** Per-hire harness environment, such as an isolated Codex skill home. */

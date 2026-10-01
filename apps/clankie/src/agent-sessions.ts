@@ -9,8 +9,18 @@ import {
   type AgentSessionSummary,
   type AgentTranscriptHost,
   AgentSessionRequestError,
+  sessionIdFromPath,
 } from "@clankie/agent-transcript";
 import type { AgentHostConnection, ClankieSettings } from "@clankie/settings";
+
+/** Fresh, confined transcript metadata for the ordinary native hire path. */
+export interface SavedAgentSession {
+  readonly ref: string;
+  readonly host: "local" | AgentHostConnection;
+  readonly file: AgentSessionFile;
+  readonly sessionId: string;
+  readonly workingDirectory: string;
+}
 
 /**
  * Any Claude, Codex, Grok or Pi session on this machine or an owner-configured SSH host,
@@ -25,6 +35,7 @@ export interface AgentSessions {
     errors: { host: string; error: string }[];
   }>;
   read(ref: string, options?: { tail?: number; after?: string }): Promise<AgentSessionPage>;
+  resolve(ref: string): Promise<SavedAgentSession>;
   addHost(connection: AgentHostConnection): Promise<readonly AgentHostConnection[]>;
   removeHost(id: string): Promise<readonly AgentHostConnection[]>;
 }
@@ -60,6 +71,54 @@ export function createAgentSessions(
       .then((next) => next.agentHosts.connections);
   };
   return {
+    async resolve(ref) {
+      const { host: hostId, session } = parseAgentSessionRef(ref);
+      if (!session || session.includes("\0")) throw new AgentSessionRequestError("Invalid session ref");
+      const configured = await connections();
+      const source = resolveKnown(hostId, configured);
+      // Always resolve afresh: the read cache is not launch authority.
+      const file = await findAgentSession(source, session);
+      const sessionId = sessionIdFromPath(file);
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(sessionId))
+        throw new AgentSessionRequestError(
+          "This transcript has no independently resumable session UUID",
+          409,
+        );
+      const { bytes } = await source.readBytes(file.path, 0, 64 * 1024);
+      let workingDirectory: string | undefined;
+      if (file.harness === "grok") {
+        workingDirectory = decodeURIComponent(file.path.split(/[\\/]/u).at(-3) ?? "");
+      } else {
+        for (const line of bytes.toString("utf8", 0, bytes.lastIndexOf(0x0a) + 1).split("\n")) {
+          try {
+            const row = JSON.parse(line) as { cwd?: unknown; payload?: { cwd?: unknown } };
+            const cwd = row.cwd ?? row.payload?.cwd;
+            if (typeof cwd === "string" && cwd.length > 0) {
+              workingDirectory = cwd;
+              break;
+            }
+          } catch {
+            // A torn or foreign record is not launch metadata.
+          }
+        }
+      }
+      if (
+        !workingDirectory ||
+        !/^(?:\/|[A-Za-z]:[\\/])/u.test(workingDirectory) ||
+        workingDirectory.includes("\0")
+      )
+        throw new AgentSessionRequestError(
+          "The transcript does not record an absolute working directory",
+          409,
+        );
+      return {
+        ref: `${hostId}:${sessionId}`,
+        host: hostId === "local" ? "local" : configured.find((entry) => entry.id === hostId)!,
+        file,
+        sessionId,
+        workingDirectory,
+      };
+    },
     hosts: async () => [{ id: "local" as const }, ...(await connections())],
     async list(options = {}) {
       if (

@@ -4,7 +4,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { captainTools } from "../src/captain/tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
-import type { AgentSessions } from "../src/agent-sessions.ts";
+import type { AgentSessions, SavedAgentSession } from "../src/agent-sessions.ts";
 import { AgentSessionRequestError } from "@clankie/agent-transcript";
 
 function sessionPort() {
@@ -12,6 +12,9 @@ function sessionPort() {
     hosts: vi.fn(async () => [{ id: "local" as const }]),
     list: vi.fn(async () => ({ sessions: [], errors: [] })),
     read: vi.fn(async () => {
+      throw new Error("unused");
+    }),
+    resolve: vi.fn(async (): Promise<SavedAgentSession> => {
       throw new Error("unused");
     }),
     addHost: vi.fn(async () => []),
@@ -34,6 +37,7 @@ test("transcript API never reaches host operations without operator authenticati
       ["/v1/agent-hosts/pc", "DELETE"],
       ["/v1/agent-sessions", "GET"],
       ["/v1/agent-sessions/read?ref=local:abc", "GET"],
+      ["/v1/agent-sessions/resume", "POST"],
     ]) {
       expect((await app.app.request(path!, { method: method! })).status).toBe(401);
     }
@@ -110,7 +114,7 @@ test("transcript request limits remain before authentication and never invoke ho
   }
 });
 
-test("transcript routes retain typed refusals and no longer resume sessions", async () => {
+test("transcript routes retain typed refusals and no headless send route", async () => {
   const sessions = sessionPort();
   sessions.read.mockRejectedValue(new AgentSessionRequestError("No session matches abc", 404));
   const app = await createClankieApp({
@@ -132,6 +136,73 @@ test("transcript routes retain typed refusals and no longer resume sessions", as
       body: JSON.stringify({ ref: "local:abc", message: "hello" }),
     });
     expect(send.status).toBe(404);
+  } finally {
+    app.close();
+  }
+});
+
+test("native resume uses the existing hire service after fresh transcript resolution", async () => {
+  const sessions = sessionPort();
+  const ref = "local:10000000-0000-4000-8000-000000000001";
+  sessions.resolve.mockResolvedValue({
+    ref,
+    host: "local",
+    sessionId: ref.slice(6),
+    workingDirectory: "/work",
+    file: { harness: "claude", path: "/history/session.jsonl", size: 1, mtimeMs: 1 },
+  });
+  const serve = vi.fn(async () => ({
+    op: "spawn_seat" as const,
+    schemaVersion: 1 as const,
+    result: {
+      outcome: "failed" as const,
+      reason: "delivery_unconfirmed" as const,
+      detail: "inspect existing pane; do not resend",
+    },
+  }));
+  const app = await createClankieApp({
+    captain: createStubCaptain({ serveOperatorConversation: serve }),
+    agentSessions: sessions,
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+  });
+  try {
+    const response = await app.app.request("/v1/agent-sessions/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ref: "local:1000", brief: "continue" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
+    expect(sessions.resolve).toHaveBeenCalledWith("local:1000");
+    expect(serve).toHaveBeenCalledOnce();
+    expect(serve).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      op: "spawn_seat",
+      seat: {
+        schemaVersion: 1,
+        harness: "claude",
+        resume: ref,
+        title: "Resume claude",
+        workingDirectory: "/work",
+      },
+      brief: "continue",
+    });
+    for (const body of [
+      { ref, brief: "\0" },
+      { ref, brief: "🙂".repeat(9000) },
+      { ref, message: "legacy runner" },
+    ]) {
+      expect(
+        (
+          await app.app.request("/v1/agent-sessions/resume", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          })
+        ).status,
+      ).toBe(400);
+    }
+    expect(serve).toHaveBeenCalledOnce();
   } finally {
     app.close();
   }

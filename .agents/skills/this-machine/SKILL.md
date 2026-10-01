@@ -612,6 +612,15 @@ still work. Headless: `clankie agents contacts` lists identities and availabilit
 `clankie sessions` browses harness records; `clankie conversations list|show|tail`
 reads retained threads. Never infer reachability or completion from a saved thread.
 
+`clankie agents resume HOST:SESSION [--fleet ID] [--brief TEXT]` reopens a saved
+history as an ordinary native Herdr seat, or reuses its existing seat. The same
+operation is `hire_agent` with `resume: "host:sessionId"`, the saved harness and
+workingDirectory. Remote resumes require the exact matching SSH destination,
+shell and workspace grant; local Codex resumes keep their original account.
+`delivery_unconfirmed` and `start_unconfirmed` may have taken effect: inspect the
+named pane, never dispatch a replacement or replay the brief blindly. A saved
+session in an unregistered terminal must be closed there before resuming.
+
 ## A Mac connected to hosted Clankie
 
 `clankie login` signs in by email code. An account with a hosted Clankie pairs a

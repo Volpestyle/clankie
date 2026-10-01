@@ -660,11 +660,25 @@ async function sessionActions(
   for (;;) {
     const action = await flow.readSelect({
       message: title,
-      options: [{ value: "read", label: "Read latest", hint: "last 20 entries" }],
+      options: [
+        { value: "read", label: "Read latest", hint: "last 20 entries" },
+        { value: "resume", label: "Resume in native TUI", hint: "reuse its live seat or reopen in Herdr" },
+      ],
       allowBack: true,
     });
     if (action === undefined) return;
     try {
+      if (action === "resume") {
+        const result = record(await services.agents(["resume", session.ref]));
+        if (result.outcome !== "spawned")
+          throw new Error(String(result.detail ?? result.reason ?? "Could not resume session"));
+        shell.insertCommandResult(
+          `/agents resume ${session.ref}`,
+          `Native seat ${String(record(result.seat).seatId)} is ready.`,
+          "success",
+        );
+        return;
+      }
       const page = record(await services.agents(["read", session.ref, "--tail", "20"]));
       shell.insertCommandResult(
         `/agents read ${session.ref}`,

@@ -10,6 +10,7 @@ const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
   "       clankie agents [list] [--host ID] [--limit N]\n" +
   "       clankie agents read HOST:SESSION [--tail N | --after CURSOR]\n" +
+  "       clankie agents resume HOST:SESSION [--fleet ID] [--brief TEXT]\n" +
   "       clankie agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID";
 
 /** Read `--flag value` pairs; anything else is a usage error. */
@@ -61,6 +62,15 @@ export async function runAgentsCommand(
     if (values.has("--tail")) query.set("tail", values.get("--tail")!);
     if (values.has("--after")) query.set("after", values.get("--after")!);
     path = `/v1/agent-sessions/read?${query}`;
+  } else if (verb === "resume" && args[1] !== undefined) {
+    const values = flags(args.slice(2), ["--fleet", "--brief"]);
+    path = "/v1/agent-sessions/resume";
+    method = "POST";
+    body = JSON.stringify({
+      ref: args[1],
+      ...(values.has("--fleet") ? { fleet: values.get("--fleet") } : {}),
+      ...(values.has("--brief") ? { brief: values.get("--brief") } : {}),
+    });
   } else if (verb === "hosts" && args.length === 1) {
     path = "/v1/agent-hosts";
   } else if (verb === "hosts" && args[1] === "add" && args[2] !== undefined) {

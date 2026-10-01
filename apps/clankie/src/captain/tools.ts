@@ -619,6 +619,14 @@ function hireAgentTool(
       "with message_seat, and watch it with herdr_watch on the returned seatId.",
     parameters: Type.Object({
       harness: StringEnum(OPERATOR_SEAT_HARNESSES),
+      resume: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 128,
+          description:
+            "Saved transcript ref (host:sessionId). Reuse its live native seat, or reopen the exact session interactively. Harness and workingDirectory must match; remote fleet must point to the same SSH host. Never starts a headless continuation.",
+        }),
+      ),
       account: Type.Optional(
         Type.String({
           pattern: "^[a-z][a-z0-9_-]{0,63}$",

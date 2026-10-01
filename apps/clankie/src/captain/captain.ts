@@ -99,6 +99,7 @@ import {
 } from "./skill-catalog.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import { fleetTasks } from "./fleet-tasks.ts";
+import { savedSessionFleet } from "./native-session-resume.ts";
 import {
   deriveFleetEdges,
   parentSeatIds,
@@ -849,6 +850,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       settings: async () => (await settings()).skills,
     },
     runner: herdrRunner,
+    resumeInventory: async (fleetId) => {
+      if (herdrRunner.list === undefined) throw new Error("Complete Herdr inventory is unavailable");
+      if (fleetId === undefined) return herdrRunner.list();
+      const selected = remoteFleets.find((fleet) => fleet.id === fleetId);
+      if (selected === undefined) throw new Error(`Unknown Herdr fleet ${fleetId}`);
+      const sameHost = remoteFleets.filter(
+        (fleet) => fleet.ssh.host === selected.ssh.host && fleet.ssh.shell === selected.ssh.shell,
+      );
+      return (await Promise.all(sameHost.map((fleet) => herdrRunner.list!(fleet.id)))).flat();
+    },
     ...(deps.fleets === undefined
       ? {}
       : {
@@ -1580,10 +1591,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // persona thread created through `create` is — otherwise its first reply
   // lands in a thread nothing is listening to.
   const hireSeat: HireSeat = async (request, brief) => {
-    const result = await herdrWatches.spawnSeat(request, undefined, brief);
+    if (
+      brief !== undefined &&
+      (!brief.trim() || brief.includes("\0") || Buffer.byteLength(brief) > 32 * 1024)
+    )
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: "brief must be 1 to 32768 UTF-8 bytes with no NUL",
+      };
+    let resume;
+    if (request.resume !== undefined) {
+      try {
+        if (deps.agentSessions?.resolve === undefined)
+          throw new Error("Saved-session resolution is unavailable");
+        resume = await deps.agentSessions.resolve(request.resume);
+        if (request.harness !== resume.file.harness || request.workingDirectory !== resume.workingDirectory)
+          throw new Error("Harness and workingDirectory must match the saved transcript");
+        const fleet = savedSessionFleet(resume, request.fleet, remoteFleets);
+        request = { ...request, ...(fleet === undefined ? {} : { fleet }) };
+      } catch (error) {
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    const result = await herdrWatches.spawnSeat(request, undefined, brief, resume);
     if (result.outcome !== "spawned") return result;
-    const seat = personas.adoptSpawn(result.seat, request.title);
-    conversations.bindPersona(seat.personaId, seat.seatId, request.title);
+    const title = resume === undefined ? request.title : result.seat.title;
+    const seat = personas.adoptSpawn(result.seat, title);
+    conversations.bindPersona(seat.personaId, seat.seatId, title);
     liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
     seatByPersona.set(seat.personaId, seat.seatId);
     herdrWatches.trackSeat(seat.seatId);
@@ -2540,7 +2579,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
       if (request.op === "spawn_seat") {
-        const result = await hireSeat(request.seat);
+        const result = await hireSeat(request.seat, request.brief);
         return { op: "spawn_seat", schemaVersion: 1, result };
       }
       if (request.op === "move_seat") {

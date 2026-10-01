@@ -923,10 +923,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   app.route(
     "/",
-    createAgentSessionRoutes(dependencies.agentSessions, async (request) => {
-      const operator = await authenticateOperator(request, dependencies);
-      return operator === "unavailable" ? operator : Boolean(operator);
-    }),
+    createAgentSessionRoutes(
+      dependencies.agentSessions,
+      async (request) => {
+        const operator = await authenticateOperator(request, dependencies);
+        return operator === "unavailable" ? operator : Boolean(operator);
+      },
+      async (seat, brief) => {
+        const result = await dependencies.captain.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          seat,
+          ...(brief === undefined ? {} : { brief }),
+        });
+        if (result.op !== "spawn_seat") throw new Error("The captain did not return a hire result");
+        return result.result;
+      },
+    ),
   );
 
   app.get("/v1/swarm", async (context) => {

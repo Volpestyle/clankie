@@ -71,6 +71,7 @@ export function claudeWorkerLaunchArgs(launch: SeatLaunch): string[] {
     JSON.stringify({ enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true } }),
     "--channels",
     `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
+    ...(launch.resumeSessionId === undefined ? [] : ["--resume", launch.resumeSessionId]),
     ...(launch.model === undefined ? [] : ["--model", launch.model]),
     ...(launch.effort === undefined ? [] : ["--effort", launch.effort]),
     ...(launch.harnessArgs ?? []),
@@ -499,6 +500,12 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           reason: "not_ready",
           detail: "Claude started without reporting its session to herdr",
         };
+      if (launch.resumeSessionId !== undefined && sessionId !== launch.resumeSessionId)
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: "Claude resumed a different session; no brief was sent",
+        };
       // Readiness is the channel's own poll, never a connected MCP server alone (ADR 0194).
       if (
         (await until(() => (deps.mailbox.bound(agent.terminalId) ? true : undefined), readyMs, pollMs)) ===
@@ -509,18 +516,20 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           reason: "not_ready",
           detail: `channel_unready: the ${CLAUDE_WORKER_PLUGIN_ID} channel never started polling the seat's mailbox`,
         };
-      const before = await transcriptIds(deps, agent);
-      const taken = await deps.mailbox.deliver(agent.terminalId, launch.brief);
-      if (!taken) logReceiptRejection(agent, "mailbox_not_delivered");
-      const received = taken
-        ? await receipt(deps, agent, launch.brief, before, receiptMs, pollMs)
-        : undefined;
-      if (received === undefined)
-        return {
-          outcome: "failed",
-          reason: "not_ready",
-          detail: "brief_delivery_unverified: the complete brief was not observed in the seat transcript",
-        };
+      if (launch.brief.length > 0) {
+        const before = await transcriptIds(deps, agent);
+        const taken = await deps.mailbox.deliver(agent.terminalId, launch.brief);
+        if (!taken) logReceiptRejection(agent, "mailbox_not_delivered");
+        const received = taken
+          ? await receipt(deps, agent, launch.brief, before, receiptMs, pollMs)
+          : undefined;
+        if (received === undefined)
+          return {
+            outcome: "failed",
+            reason: "not_ready",
+            detail: "brief_delivery_unverified: the complete brief was not observed in the seat transcript",
+          };
+      }
       deps.hooks.record(view.paneId, { schemaVersion: 1, event: "SessionStart", sessionId });
       return {
         outcome: "started",

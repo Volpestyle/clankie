@@ -10,7 +10,8 @@ export function createFleetSeatControl(
   adapters: ReadonlyMap<string, HarnessSeatAdapter>,
 ) {
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
-    const adapter = adapters.get(agent.agent);
+    const adapter =
+      adapters.get(agent.agent) ?? adapters.get(agent.session?.source.replace(/^herdr:/u, "") ?? "");
     const session = agent.session;
     if (adapter === undefined || session === undefined) return undefined;
     if (splitFleetQualified(agent.paneId) !== undefined) return undefined;

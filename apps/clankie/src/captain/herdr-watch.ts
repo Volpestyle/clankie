@@ -1,4 +1,12 @@
 import { createFleetSeatControl, isMessageableSeat } from "./fleet-seat-control.ts";
+import {
+  existingNativeSession,
+  nativeResumeArgs,
+  nativeSessionId,
+  resumePaneLabel,
+  savedCodexAccount,
+} from "./native-session-resume.ts";
+import type { SavedAgentSession } from "../agent-sessions.ts";
 import type { HarnessSeatAdapter, SeatEvent } from "@clankie/agent-hosts";
 import {
   bundledSkills,
@@ -99,6 +107,8 @@ export interface HerdrAgentSnapshot {
 }
 
 export interface HerdrWatchRunner {
+  /** Fresh complete inventory of exactly one fleet, for native session reuse. */
+  list?(fleet?: string): Promise<readonly HerdrAgentSnapshot[]>;
   get(target: string): Promise<HerdrAgentSnapshot>;
   resolveTerminal(terminalId: string): Promise<HerdrAgentSnapshot | undefined>;
   wait(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
@@ -294,13 +304,16 @@ export function parseHerdrForegroundProcessId(stdout: string): number | undefine
 }
 
 /** Bad rows do not hide valid peers; a direct agent lookup still validates strictly. */
-export function parseHerdrPaneList(stdout: string): HerdrAgentSnapshot[] {
+export function parseHerdrPaneList(stdout: string, strict = false): HerdrAgentSnapshot[] {
   const parsed = JSON.parse(stdout) as { result?: { panes?: unknown } };
   const panes = Array.isArray(parsed.result?.panes) ? parsed.result.panes : [];
+  if (strict && !Array.isArray(parsed.result?.panes))
+    throw new Error("Herdr did not return a complete pane inventory");
   return panes.flatMap((pane, index) => {
     try {
       return [snapshotOf(pane)];
     } catch (error) {
+      if (strict) throw error;
       if (!(error instanceof HerdrAgentResponseError)) throw error;
       console.warn("Skipping malformed Herdr pane", {
         index,
@@ -383,6 +396,7 @@ export function createHerdrWatchRunner(
       ? Promise.reject(new Error("Herdr execution is unavailable"))
       : exec(args, signal, timeoutMs);
   return {
+    list: async () => parseHerdrPaneList(await runHerdr(["pane", "list"]), true),
     get: async (target) => parseHerdrAgentResult(await runHerdr(["agent", "get", target])),
     resolveTerminal: async (terminalId) =>
       parseHerdrPaneList(await runHerdr(["pane", "list"])).find((pane) => pane.terminalId === terminalId),
@@ -615,7 +629,10 @@ type HerdrSeatSpawnFailure = Extract<HerdrSeatSpawnResult, { readonly outcome: "
 export type HerdrSeatMoveResult =
   | Extract<HerdrSeatSpawnResult, { readonly outcome: "spawned" }>
   | (Omit<HerdrSeatSpawnFailure, "reason"> & {
-      readonly reason: Exclude<HerdrSeatSpawnFailure["reason"], "at_capacity">;
+      readonly reason: Exclude<
+        HerdrSeatSpawnFailure["reason"],
+        "at_capacity" | "delivery_unconfirmed" | "start_unconfirmed"
+      >;
     });
 
 /** Persisted, event-driven one-shot watches that wake an operator conversation when an agent settles. */
@@ -660,6 +677,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private stateUnreadable = false;
   private closed = false;
   private readonly accounts: () => Promise<readonly CodexAccount[]>;
+  private readonly resumeInventory: ((fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>) | undefined;
+  private readonly resumeStarts = new Map<string, Promise<void>>();
 
   public constructor(
     path: string,
@@ -694,6 +713,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * adapter, with herdr as its view; any other hire types into the pane.
        */
       readonly seatAdapters?: readonly HarnessSeatAdapter[];
+      /** Include every configured Herdr server on the same exact SSH destination. */
+      readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;
     } = {},
   ) {
     this.path = path;
@@ -703,6 +724,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.piSeatModel = options.piSeatModel;
     this.hireCapacity = options.hireCapacity;
     this.runner = options.runner ?? createHerdrWatchRunner(options.available);
+    this.resumeInventory = options.resumeInventory;
     this.seatAdapters = new Map((options.seatAdapters ?? []).map((adapter) => [adapter.harness, adapter]));
     this.seatControl = createFleetSeatControl(this.runner, this.seatAdapters);
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
@@ -888,8 +910,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
     input: SpawnOperatorSeat,
     subjectOverride?: string,
     brief?: string,
+    resume?: SavedAgentSession,
   ): Promise<HerdrSeatSpawnResult> {
-    const result = await this.startSeat(input, subjectOverride, brief);
+    if (input.resume !== undefined && resume === undefined)
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: "Saved-session metadata must be resolved before hiring",
+      };
+    const result =
+      resume === undefined
+        ? await this.startSeat(input, subjectOverride, brief)
+        : await this.resumeSeat(input, resume, brief);
     console.info(
       "hire_agent:",
       JSON.stringify({
@@ -911,10 +943,97 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return result;
   }
 
+  private async resumeSeat(
+    input: SpawnOperatorSeat,
+    session: SavedAgentSession,
+    brief?: string,
+  ): Promise<HerdrSeatSpawnResult> {
+    // Serialize starts only inside the existing hire path. Herdr remains the
+    // durable owner of the seat; there is no parallel run/lock store.
+    const key = JSON.stringify([
+      session.host === "local" ? "local" : [session.host.ssh, session.host.shell],
+      session.sessionId.toLowerCase(),
+    ]);
+    const previous = this.resumeStarts.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.resumeStarts.set(key, current);
+    await previous;
+    try {
+      if (this.closed) throw new Error("Native hire service is closed");
+      const inventory = this.resumeInventory ?? this.runner.list?.bind(this.runner);
+      if (inventory === undefined) throw new Error("Complete native seat inventory is unavailable");
+      if (input.fleet !== undefined && !(await this.remoteWorkspace?.(input.fleet, input.workingDirectory)))
+        return {
+          outcome: "failed",
+          reason: "unknown_directory",
+          detail: "The saved session's directory is not granted on this fleet",
+        };
+      if (input.account !== undefined && (input.fleet !== undefined || input.harness !== "codex"))
+        throw new Error("Account overrides require a local Codex seat");
+      const account =
+        input.fleet === undefined && input.harness === "codex"
+          ? await savedCodexAccount(session, await this.accounts(), input.account)
+          : undefined;
+      const live = existingNativeSession(await inventory(input.fleet), session);
+      if (live !== undefined) {
+        if (
+          live.agent === "shell" ||
+          live.agent === "unknown" ||
+          live.status === "unknown" ||
+          live.status === "offline"
+        )
+          throw new Error(`Pane ${live.paneId} has uncertain native identity; inspect it before resuming`);
+        if (
+          input.model !== undefined ||
+          input.effort !== undefined ||
+          input.skills !== undefined ||
+          input.chrome !== undefined
+        )
+          throw new Error(
+            "The saved session is already live; its launch settings cannot be changed by resuming",
+          );
+        // Reuse is allowed even at capacity. Never create another writer, or
+        // turn a generic settlement of its current turn into this message's reply.
+        if (brief !== undefined) {
+          const control = await this.seatControl.attach(live);
+          if (!control)
+            throw new Error(`The session is live in ${live.paneId}; message its existing seat explicitly`);
+          const delivery = await control
+            .send(brief)
+            .catch((error: unknown) => ({ outcome: "unconfirmed" as const, detail: String(error) }));
+          if (delivery.outcome !== "accepted")
+            return {
+              outcome: "failed",
+              reason: delivery.outcome === "unconfirmed" ? "delivery_unconfirmed" : "not_ready",
+              detail: `Existing pane ${live.paneId}: ${JSON.stringify(delivery)}; no new seat was started`,
+            };
+        }
+        return spawnedSeat(
+          live,
+          live.paneId,
+          live.name ?? live.terminalId,
+          { ...input, workingDirectory: live.workingDirectory ?? input.workingDirectory },
+          undefined,
+          account,
+        );
+      }
+      return await this.startSeat(input, undefined, brief, session);
+    } catch (error) {
+      return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
+    } finally {
+      release();
+      if (this.resumeStarts.get(key) === current) this.resumeStarts.delete(key);
+    }
+  }
+
   private async startSeat(
     input: SpawnOperatorSeat,
     subjectOverride?: string,
     brief?: string,
+    resume?: SavedAgentSession,
   ): Promise<HerdrSeatSpawnResult> {
     const { createTab, startAgent } = this.runner;
     if (this.closed || createTab === undefined || startAgent === undefined) {
@@ -986,7 +1105,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     if (remote === undefined && input.harness === "codex") {
       try {
-        const selected = await selectLiveCodexAccount(await this.accounts(), input.account);
+        const accounts = await this.accounts();
+        const selected =
+          resume === undefined
+            ? await selectLiveCodexAccount(accounts, input.account)
+            : await savedCodexAccount(resume, accounts, input.account);
         account = { label: selected.label, home: selected.home };
       } catch (error) {
         return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };
@@ -1010,7 +1133,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       paneId = await createTab({
         cwd: input.workingDirectory,
-        label: input.title,
+        label: resume === undefined ? input.title : resumePaneLabel(resume),
         ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
         ...(remote === undefined ? {} : { fleet: remote }),
       });
@@ -1035,7 +1158,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (chromeArgs === undefined)
         throw new Error(`unsupported: ${input.harness} has no Chrome integration`);
       const adapter =
-        remote === undefined && brief !== undefined && this.runner.runInPane !== undefined
+        remote === undefined &&
+        (brief !== undefined || resume !== undefined) &&
+        this.runner.runInPane !== undefined
           ? this.seatAdapters.get(input.harness)
           : undefined;
       const terminalReason =
@@ -1054,13 +1179,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
               detail: `No harness adapter selected: ${terminalReason}.`,
             }
           : { mode: input.harness === "claude" ? "channel" : "adapter" };
-      if (adapter !== undefined && brief !== undefined) {
+      if (adapter !== undefined && (brief !== undefined || resume !== undefined)) {
         const runInPane = this.runner.runInPane!;
         const started = await adapter.start(
           {
             harness: adapter.harness,
             cwd: input.workingDirectory,
-            brief,
+            brief: brief ?? "",
+            ...(resume === undefined ? {} : { resumeSessionId: resume.sessionId }),
             ...(model === undefined ? {} : { model }),
             ...(input.effort === undefined ? {} : { effort: input.effort }),
             ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
@@ -1081,13 +1207,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
         );
         if (started.outcome === "failed") {
           const failure = await this.startupFailure(paneId, input.harness, started.detail, started.reason);
-          await this.runner.closePane?.(paneId).catch(() => undefined);
+          if (resume === undefined) await this.runner.closePane?.(paneId).catch(() => undefined);
+          else
+            return {
+              ...failure,
+              reason: "start_unconfirmed",
+              control,
+              detail: `${failure.detail ?? started.detail}; inspect pane ${paneId} before retrying`,
+            };
           return { ...failure, control };
         }
         if (started.outcome === "started") {
           const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
           if (agent.session === undefined)
             throw new Error("The seat started without reporting its session to herdr");
+          if (resume !== undefined && nativeSessionId(agent) !== resume.sessionId)
+            throw new Error("The seat reported a different session after resumption");
           return {
             ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
             control,
@@ -1103,6 +1238,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...modelArgs,
         ...effortArgs,
         ...chromeArgs,
+        ...(resume === undefined ? [] : nativeResumeArgs(resume)),
       ];
       await startAgent({
         name: subject,
@@ -1110,6 +1246,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
         paneId,
         ...(args.length === 0 ? {} : { args }),
       });
+      if (resume !== undefined) {
+        const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
+        if (nativeSessionId(agent) !== resume.sessionId)
+          throw new Error("The native seat has not confirmed the saved session identity; no brief was sent");
+      }
+      let previousReceiptIds: ReadonlySet<string> | undefined;
+      if (brief !== undefined && resume !== undefined) {
+        const transcript = await this.runner.transcript?.(await this.runner.get(paneId));
+        if (transcript === undefined)
+          throw new Error("The resumed transcript cannot be read; no brief was sent");
+        previousReceiptIds = new Set(transcript.entries.map((entry) => entry.id));
+      }
       if (brief !== undefined) {
         if (this.runner.promptAgent === undefined) throw new Error("Herdr cannot submit a first prompt");
         // Herdr 0.9.1 can report Codex ready while its folder-trust screen is
@@ -1134,20 +1282,31 @@ export class HerdrWatchStore implements HerdrWatchPort {
             : "Herdr started an agent without a durable session identity",
         );
       }
-      if (brief !== undefined) await this.verifyBrief(agent, brief);
+      if (brief !== undefined) await this.verifyBrief(agent, brief, previousReceiptIds);
       return {
         ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
         control,
       };
     } catch (caught) {
       const failure = await this.startupFailure(paneId, input.harness, reasonDetail(caught));
+      if (resume !== undefined)
+        return {
+          ...failure,
+          reason: "start_unconfirmed",
+          detail: `${failure.detail ?? reasonDetail(caught)}; inspect pane ${paneId} before retrying`,
+          ...(control === undefined ? {} : { control }),
+        };
       await this.runner.closePane?.(paneId).catch(() => undefined);
       return { ...failure, ...(control === undefined ? {} : { control }) };
     }
   }
 
   /** A successful PTY write or working status is not a receipt (VUH-1450). */
-  private async verifyBrief(agent: HerdrAgentSnapshot, brief: string): Promise<void> {
+  private async verifyBrief(
+    agent: HerdrAgentSnapshot,
+    brief: string,
+    previousReceiptIds?: ReadonlySet<string>,
+  ): Promise<void> {
     // Compare the entire message, never a prefix or the tail that survived a
     // dropped chunk. Transcript projection normalizes CRLF and outer whitespace.
     const expected = brief.replace(/\r\n?/gu, "\n").trim();
@@ -1157,6 +1316,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (
         transcript?.entries.some((entry) => {
           if (entry.type !== "message" || entry.role !== "operator") return false;
+          if (previousReceiptIds?.has(entry.id)) return false;
           if (entry.text === expected) return true;
           // Claude stores a long bracketed paste inside its own envelope.
           // Match the whole payload, including its end, not a substring.
@@ -1298,7 +1458,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     // capacity; the guard only keeps the result within the move contract.
     if (result.outcome === "spawned") return result;
     const { reason, ...rest } = result;
-    return { ...rest, reason: reason === "at_capacity" ? "herdr_unreachable" : reason };
+    return {
+      ...rest,
+      reason:
+        reason === "at_capacity"
+          ? "herdr_unreachable"
+          : reason === "delivery_unconfirmed" || reason === "start_unconfirmed"
+            ? "not_ready"
+            : reason,
+    };
   }
 
   public trackSeat(seatId: string, mode: "status" | "head" = "status"): void {

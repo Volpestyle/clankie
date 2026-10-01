@@ -120,6 +120,7 @@ export function createCodexSeatAdapter(
         signal?.throwIfAborted();
         seat = await (options.start ?? startCodexAppServerSeat)({
           cwd: launch.cwd,
+          ...(launch.resumeSessionId ? { resumeThreadId: launch.resumeSessionId } : {}),
           ...(launch.model ? { model: launch.model } : {}),
           ...(launch.effort ? { effort: launch.effort } : {}),
           ...(launch.env ? { env: launch.env } : {}),
@@ -127,6 +128,8 @@ export function createCodexSeatAdapter(
           onEvent: observe,
         });
         signal?.throwIfAborted();
+        if (launch.resumeSessionId !== undefined && seat.threadId !== launch.resumeSessionId)
+          throw new Error("Codex resumed a different thread; no brief was sent");
         ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
         report();
         await reporting;

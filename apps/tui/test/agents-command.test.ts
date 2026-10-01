@@ -20,6 +20,7 @@ it("maps agents verbs onto the operator session and host routes", async () => {
   await runAgentsCommand(["--host", "pc", "--limit", "5"], options);
   await runAgentsCommand(["read", "pc:01a0", "--tail", "10"], options);
   await runAgentsCommand(["read", "pc:01a0", "--after", "abc"], options);
+  await runAgentsCommand(["resume", "pc:01a0", "--fleet", "pc", "--brief", "carry on"], options);
   await runAgentsCommand(
     ["hosts", "add", "pc", "--ssh", "volpe@supedupsilly", "--shell", "powershell"],
     options,
@@ -30,6 +31,11 @@ it("maps agents verbs onto the operator session and host routes", async () => {
     { path: "/v1/agent-sessions?host=pc&limit=5", method: "GET" },
     { path: "/v1/agent-sessions/read?ref=pc%3A01a0&tail=10", method: "GET" },
     { path: "/v1/agent-sessions/read?ref=pc%3A01a0&after=abc", method: "GET" },
+    {
+      path: "/v1/agent-sessions/resume",
+      method: "POST",
+      body: { ref: "pc:01a0", fleet: "pc", brief: "carry on" },
+    },
     {
       path: "/v1/agent-hosts",
       method: "POST",
@@ -49,6 +55,8 @@ it("refuses malformed arguments before any request", async () => {
     ["hosts", "add", "pc"],
     ["list", "--bogus", "1"],
     ["list", "--host"],
+    ["resume"],
+    ["resume", "pc:01a0", "--fleet"],
     // Resuming a saved session headlessly is retired (ADR 0203).
     ["send", "pc:01a0", "hello"],
     ["runs"],
