@@ -46,7 +46,9 @@ This repository is public. Both neighbors are private and consume
   reads the workspace's own `.agents/skills`, Pi's agent directory, and
   `~/.agents/skills`, the roots he shares with every other agent on the
   machine; `clankieSkillRoots` in `@clankie/settings` is the one list, so what
-  the composer offers is what a session can load.
+  the composer offers is what a session can load. Only his own and the
+  workspace's skills are listed each turn; the machine-wide ones are found
+  with `skill_search` (`captain/skill-catalog.ts`).
 - `packages/play` — his play mind above one body seam; the body itself is his
   seat in a hosted PokeAgents world (ADR 0145). No emulator lives in this repo.
 - `packages/` — shared contracts and adapters; `protocol` has no other workspace

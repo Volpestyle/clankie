@@ -120,6 +120,8 @@ Add your own `SKILL.md` in `~/.agents/skills/my-skill/`, or in a project's
 `.agents/skills/my-skill/` for conversations working in that project. He also
 reads his bundled roots and the skills directory under Pi's agent directory
 (normally `~/.pi/agent/skills`). Use a distinct name: bundled names take precedence.
+Skills from those machine-wide folders are not listed on every turn; he finds
+them with `skill_search` when a task calls for one, and `/skill-name` still works.
 
 For the bundled selection, use `/skills` or the [skills CLI](/cli/#skill-setup):
 

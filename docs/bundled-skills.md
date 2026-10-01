@@ -98,6 +98,11 @@ owns its current reference through `herdr --skill`.
   selection. Disabled bundle names are filtered from duplicate workspace/global
   roots as well; native automatic Pi discovery is disabled in favor of these
   explicit roots. Other owner skills remain available.
+- A Pi turn lists only the bundled, checkout and workspace skills. Skills from
+  `~/.agents/skills` and Pi's agent directory stay loaded but unlisted: the
+  owner's `/name` still expands them and `skill_search` finds them by task. On
+  the owner's Mac that keeps about 13k tokens of descriptions (84 skills) out of
+  every machine-lane turn.
 - The Claude operator seat projects the bundled plugin into a fresh private
   `skill-projections/launch-*` directory under Clankie's state home. It links the
   output style, hooks and MCP configuration, and only included skills. This is

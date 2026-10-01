@@ -91,6 +91,12 @@ import {
   createClaudeWorkerSeatAdapter,
 } from "./claude-worker-seat.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
+import {
+  invocableSkills,
+  listedSkillRoots,
+  quietMachineSkills,
+  skillSearchExtension,
+} from "./skill-catalog.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import {
   deriveFleetEdges,
@@ -541,6 +547,8 @@ export interface CaptainOptions {
 interface LaneSession {
   readonly session: AgentSession;
   readonly capture: TurnContext;
+  /** Machine-wide skills left out of the listing; `/name` still expands them. */
+  readonly quietSkills: ReadonlySet<string>;
   readonly purpose: ModelPurpose;
   /** This purpose's route as of the last sync; the routing extension reads it per run. */
   readonly route: { current: RoutedSelection };
@@ -1031,7 +1039,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const selection = route.current.selection;
     const hasPersonaImages = (await personaImages()).images.length > 0;
     const piSettings = SettingsManager.inMemory();
-    const loader = new DefaultResourceLoader({
+    const quietSkills = new Set<string>();
+    const loader: DefaultResourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: getAgentDir(),
       systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
@@ -1069,6 +1078,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }),
         browserExtension(deps, capture),
         mcpExtension(deps, lane),
+        ...(systemTools ? [skillSearchExtension(() => loader.getSkills().skills, quietSkills)] : []),
         ...(lane === "operator" && conversationId !== undefined && options.swarm !== undefined
           ? [options.swarm.extension({ conversationId, cwd })]
           : []),
@@ -1085,6 +1095,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         home: homedir(),
         cwd,
       }).filter((path) => existsSync(path)),
+      skillsOverride: (base) => ({
+        ...base,
+        skills: quietMachineSkills(base.skills, listedSkillRoots(options.repoRoot, cwd), quietSkills),
+      }),
       settingsManager: piSettings,
     });
     await loader.reload();
@@ -1119,6 +1133,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const laneSession: LaneSession = {
       session,
       capture,
+      quietSkills,
       purpose,
       route,
       budget,
@@ -1418,7 +1433,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             : await readHerdrSessionCensus(paneId, { fleets: censusFleets });
         const prompt = resolveOperatorPrompt(
           message,
-          lane.session.resourceLoader.getSkills().skills,
+          invocableSkills(lane.session.resourceLoader.getSkills().skills, lane.quietSkills),
           paneId,
           census,
         );
