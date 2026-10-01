@@ -510,6 +510,8 @@ session and routes observation/input to its pinned runtime. Messages also lists
 enrolled Swarm peers independently of terminal seats. `clankie swarm contacts`,
 `swarm message PERSONA TEXT` and `swarm thread PERSONA` share those persona DMs.
 A replacement generation has a new contact; never redirect an old thread by name.
+`clankie swarm tasks` lists every unfinished task with its lead, owner, state and
+blocker, which answers "who is working on what" without polling panes.
 
 For coordination diagnostics, run `clankie swarm status` or `connections`.
 `swarm connect PRIVATE.json` imports a dedicated externally enrolled Clankie session;

@@ -869,6 +869,51 @@ export type OperatorFleetEdge = z.infer<typeof OperatorFleetEdgeSchema>;
  */
 export const OPERATOR_FLEET_EDGE_MAX = 128;
 
+/** A task's objective and blocker as the board shows them, never the full contract. */
+export const OPERATOR_FLEET_TASK_TEXT_MAX = 1024;
+export const OPERATOR_FLEET_TASK_MAX = 128;
+
+/**
+ * One side of a Swarm task (ADR 0205), named the way the board says it.
+ * `clankie` marks one of his own conversation actors. `personaId` is present
+ * only when that Swarm actor is a messageable contact; the task names an
+ * actor, never a seat, so no surface may place it on a figure by guessing.
+ */
+export const OperatorFleetTaskAgentSchema = z
+  .object({
+    name: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    clankie: z.literal(true).optional(),
+    personaId: OperatorAgentPersonaIdSchema.optional(),
+  })
+  .strict();
+export type OperatorFleetTaskAgent = z.infer<typeof OperatorFleetTaskAgentSchema>;
+
+/**
+ * One unfinished Swarm task, read from its coordinator on every fleet read
+ * (ADR 0205). Finished work is not carried: the board shows what is being
+ * worked on now, and a task's result stays with its coordinator.
+ */
+export const OperatorFleetTaskSchema = z
+  .object({
+    taskId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    status: z.enum(["open", "blocked", "running", "cancel_requested"]),
+    /** Who assigned it: the lead whose branch this task belongs to. */
+    lead: OperatorFleetTaskAgentSchema,
+    /** Who holds it now; absent while nobody has claimed it. */
+    owner: OperatorFleetTaskAgentSchema.optional(),
+    objective: z.string().trim().min(1).max(OPERATOR_FLEET_TASK_TEXT_MAX).optional(),
+    /** The directory the contract names, which is what a commons district is keyed by. */
+    worktree: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    /** Why it is blocked or being cancelled, in the coordinator's words. */
+    reason: z.string().trim().min(1).max(OPERATOR_FLEET_TASK_TEXT_MAX).optional(),
+    /** Running, but its owner's lease lapsed or its progress deadline passed. */
+    stale: z.literal(true).optional(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorFleetTask = z.infer<typeof OperatorFleetTaskSchema>;
+
 /** A full live-fleet read plus the cursor that wakes its next long poll. */
 export const OPERATOR_FLEET_WAIT_MS_MAX = 30_000;
 export const OperatorFleetSnapshotSchema = z
@@ -889,6 +934,11 @@ export const OperatorFleetSnapshotSchema = z
      * a quiet fleet.
      */
     edges: z.array(OperatorFleetEdgeSchema).max(OPERATOR_FLEET_EDGE_MAX).optional(),
+    /**
+     * Unfinished Swarm work across every connected coordinator (ADR 0205).
+     * Absent from a host that does not publish tasks; empty when none is open.
+     */
+    tasks: z.array(OperatorFleetTaskSchema).max(OPERATOR_FLEET_TASK_MAX).optional(),
   })
   .strict();
 export type OperatorFleetSnapshot = z.infer<typeof OperatorFleetSnapshotSchema>;

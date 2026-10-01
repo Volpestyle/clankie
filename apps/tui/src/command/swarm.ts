@@ -16,13 +16,13 @@ export async function runSwarmCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ): Promise<unknown> {
-  if (args[0] === "contacts" || args[0] === "message" || args[0] === "thread") {
+  if (args[0] === "contacts" || args[0] === "tasks" || args[0] === "message" || args[0] === "thread") {
     if (
-      (args[0] === "contacts" && args.length !== 1) ||
+      ((args[0] === "contacts" || args[0] === "tasks") && args.length !== 1) ||
       (args[0] === "thread" && args.length !== 2) ||
       (args[0] === "message" && args.length < 3)
     )
-      throw new Error("Usage: clankie swarm contacts | thread PERSONA | message PERSONA TEXT");
+      throw new Error("Usage: clankie swarm contacts | tasks | thread PERSONA | message PERSONA TEXT");
     const token = await resolveCaptainRouteToken({ env: options.env ?? process.env });
     const client = createCaptainOperatorConversationClient(
       createCaptainRouteClient({
@@ -31,7 +31,10 @@ export async function runSwarmCommand(
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       }),
     );
-    const contacts = (await client.fleet!()).personas.filter((persona) => persona.swarm);
+    const fleet = await client.fleet!();
+    // The same unfinished work, lead and owner the app's bulletin shows (ADR 0205).
+    if (args[0] === "tasks") return fleet.tasks ?? [];
+    const contacts = fleet.personas.filter((persona) => persona.swarm);
     if (args[0] === "contacts") return contacts;
     const persona = contacts.find((entry) => entry.personaId === args[1]);
     if (!persona) throw new Error("Unknown Swarm contact; use clankie swarm contacts");

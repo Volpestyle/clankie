@@ -11,7 +11,7 @@ import { nativeConversationPage } from "./native-conversation.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
-import type { SwarmHost } from "@clankie/swarm";
+import type { SwarmHost, SwarmTaskView } from "@clankie/swarm";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -98,6 +98,7 @@ import {
   skillSearchExtension,
 } from "./skill-catalog.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
+import { fleetTasks } from "./fleet-tasks.ts";
 import {
   deriveFleetEdges,
   parentSeatIds,
@@ -1660,6 +1661,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   let swarmRoster = "";
+  let swarmTasks: readonly SwarmTaskView[] = [];
+  let swarmTaskBoard = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
     const binding = await deps.runtimes?.configuredBinding("default");
     const fleet =
@@ -1674,6 +1677,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const nextSwarmRoster = JSON.stringify(peers);
     if (swarmRoster !== nextSwarmRoster) {
       swarmRoster = nextSwarmRoster;
+      fleetChanges.touch();
+    }
+    // Task state lives in the coordinator, so a board change has to wake the
+    // long poll the same way a roster change does (ADR 0205).
+    swarmTasks = (await options.swarm?.tasks()) ?? [];
+    const nextTaskBoard = JSON.stringify(swarmTasks);
+    if (swarmTaskBoard !== nextTaskBoard) {
+      swarmTaskBoard = nextTaskBoard;
       fleetChanges.touch();
     }
     liveEdgeSeats = fleet.seats.map((observed) => ({
@@ -1726,6 +1737,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const channelsResult = await conversations.serve({ op: "channels", schemaVersion: 1 });
       if (channelsResult.op !== "channels") throw new Error("Fleet channel read returned the wrong result");
       if (cursor !== fleetChanges.current()) continue;
+      const fleetPersonas = [
+        ...personas.all(seats, (personaId) => conversations.conversationForPersona(personaId)),
+      ];
       return {
         op: "fleet",
         schemaVersion: 1,
@@ -1733,12 +1747,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           schemaVersion: 1,
           cursor,
           seats: [...seats],
-          personas: [...personas.all(seats, (personaId) => conversations.conversationForPersona(personaId))],
+          personas: fleetPersonas,
           channels: [...channelsResult.channels],
           // Bounded by the roster it is read against, so the day's counts can
           // never outnumber the seats the snapshot carries.
           tallies: [...seatLedger.tallies(seats.map((seat) => seat.seatId))],
           edges: [...deriveFleetEdges(liveEdgeSeats, promptEdges.recent(), seatMessages.recent())],
+          ...(options.swarm === undefined ? {} : { tasks: fleetTasks(swarmTasks, fleetPersonas) }),
         },
       };
     }

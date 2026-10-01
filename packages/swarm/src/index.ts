@@ -137,6 +137,46 @@ interface Session {
   kick(): void;
   close(): Promise<void>;
 }
+const SwarmPeerPageSchema = z.object({
+  cursor: z.number(),
+  items: z.array(z.object({ agentId: z.string(), label: z.string() })),
+});
+const SwarmTaskPageSchema = z.object({
+  cursor: z.number(),
+  items: z.array(z.object({ id: z.string().min(1), version: z.number().int() })),
+});
+const SwarmTaskDetailSchema = z.object({
+  taskId: z.string().min(1),
+  title: z.string(),
+  creator: z.string().min(1),
+  updatedAt: z.number(),
+  contract: z.object({ objective: z.string(), worktree: z.string() }).nullable(),
+  reason: z.string().nullish(),
+  owner: z
+    .object({ actor: z.string().min(1), active: z.boolean(), progressDeadline: z.number().nullable() })
+    .nullable(),
+});
+/** Bounded like the snapshot that carries it. */
+const SWARM_TASK_VIEW_MAX = 128;
+export interface SwarmTaskAgent {
+  actor: string;
+  name: string;
+  clankie?: true;
+}
+/** One unfinished task, named for a board; the captain resolves actors to contacts. */
+export interface SwarmTaskView {
+  taskId: string;
+  scope: string;
+  title: string;
+  status: "open" | "blocked" | "running" | "cancel_requested";
+  lead: SwarmTaskAgent;
+  owner?: SwarmTaskAgent;
+  objective?: string;
+  worktree?: string;
+  reason?: string;
+  stale?: true;
+  updatedAt: string;
+}
 interface PeerMessage {
   id: string;
   sender: string;
@@ -174,6 +214,10 @@ export class SwarmHost {
   private readonly sessions = new Map<string, Promise<Session>>();
   private bindings: Binding[] = [];
   private readonly incarnation = randomUUID();
+  private readonly taskDetails = new Map<
+    string,
+    { version: number; task: z.infer<typeof SwarmTaskDetailSchema> }
+  >();
   private closed = false;
   private wake?: (conversationId: string, prompt: string) => Promise<void>;
   private ready?: (conversationId: string) => boolean;
@@ -889,6 +933,105 @@ export class SwarmHost {
       }
     }
     return contacts;
+  }
+
+  /**
+   * Unfinished work on every connected coordinator (ADR 0205), read fresh on
+   * each call. A coordinator shared by several conversations is read once.
+   * Details are cached by task version, so a quiet board costs one summary
+   * page per state rather than one detail per task.
+   */
+  async tasks(): Promise<SwarmTaskView[]> {
+    await this.initialized;
+    const tasks: SwarmTaskView[] = [];
+    const seen = new Set<string>();
+    const cached = new Set<string>();
+    const ownActors = new Set<string>();
+    const sessions: Session[] = [];
+    for (const binding of this.bindings) {
+      try {
+        const session = await this.get(binding);
+        ownActors.add(`${session.scope}\n${session.actor}`);
+        sessions.push(session);
+      } catch {
+        // An unreachable coordinator simply has no work on the board.
+      }
+    }
+    const read = new Set<string>();
+    for (const session of sessions) {
+      const coordinator = JSON.stringify([session.endpoint, session.scope]);
+      if (read.has(coordinator)) continue;
+      read.add(coordinator);
+      const start = tasks.length;
+      try {
+        const labels = new Map<string, string>();
+        for (let cursor = 0; ;) {
+          const page = SwarmPeerPageSchema.parse(
+            await session.connection.request({ op: "peers", filter: { cursor, limit: 50 } }),
+          );
+          for (const peer of page.items) labels.set(peer.agentId, peer.label);
+          if (page.items.length < 50 || page.cursor <= cursor) break;
+          cursor = page.cursor;
+        }
+        const name = (actor: string): SwarmTaskAgent => {
+          if (ownActors.has(`${session.scope}\n${actor}`)) return { actor, name: "Clankie", clankie: true };
+          const label = labels.get(actor)?.trim() ?? "";
+          const runtime = /^runtime:(\S+) transport:\S+$/u.exec(label);
+          if (runtime) return { actor, name: `${runtime[1]!} worker` };
+          return { actor, name: label || "Swarm agent" };
+        };
+        for (const status of ["open", "blocked", "running", "cancel_requested"] as const) {
+          for (let cursor = 0; tasks.length < SWARM_TASK_VIEW_MAX;) {
+            const page = SwarmTaskPageSchema.parse(
+              await session.connection.request({ op: "tasks", filter: { status, cursor, limit: 50 } }),
+            );
+            for (const summary of page.items) {
+              const key = JSON.stringify([coordinator, summary.id]);
+              if (seen.has(key) || tasks.length >= SWARM_TASK_VIEW_MAX) continue;
+              seen.add(key);
+              let detail = this.taskDetails.get(key);
+              if (detail?.version !== summary.version) {
+                detail = {
+                  version: summary.version,
+                  task: SwarmTaskDetailSchema.parse(
+                    await session.connection.request({ op: "task_detail", taskId: summary.id }),
+                  ),
+                };
+                this.taskDetails.set(key, detail);
+              }
+              cached.add(key);
+              const task = detail.task;
+              const owner = task.owner ?? undefined;
+              tasks.push({
+                taskId: task.taskId,
+                scope: session.scope,
+                title: task.title,
+                status,
+                lead: name(task.creator),
+                ...(owner ? { owner: name(owner.actor) } : {}),
+                ...(task.contract
+                  ? { objective: task.contract.objective, worktree: task.contract.worktree }
+                  : {}),
+                ...(task.reason ? { reason: task.reason } : {}),
+                ...(status === "running" &&
+                owner &&
+                (!owner.active || (owner.progressDeadline !== null && owner.progressDeadline <= Date.now()))
+                  ? { stale: true as const }
+                  : {}),
+                updatedAt: new Date(task.updatedAt).toISOString(),
+              });
+            }
+            if (page.items.length < 50 || page.cursor <= cursor) break;
+            cursor = page.cursor;
+          }
+        }
+      } catch {
+        // A coordinator that cannot answer takes only its own work off the board.
+        tasks.splice(start);
+      }
+    }
+    for (const key of this.taskDetails.keys()) if (!cached.has(key)) this.taskDetails.delete(key);
+    return tasks;
   }
 
   async sendContact(

@@ -57,7 +57,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["swarm"],
     lines: [
       "  swarm [status|connections] | connect PRIVATE.json | disconnect ID",
-      "  swarm contacts | thread PERSONA | message PERSONA TEXT",
+      "  swarm contacts | tasks | thread PERSONA | message PERSONA TEXT",
       "                           Inspect or connect an authorized Swarm coordinator (JSON)",
     ],
   },

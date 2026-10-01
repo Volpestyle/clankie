@@ -58,7 +58,9 @@ worker availability depends on the service and plan; the [current plans](https:/
 are the source for those limits.
 
 The tiny town in **Commons** shows the team at work. Select a figure to reach
-the agent behind it, see their progress, or ask a follow-up.
+the agent behind it, see their progress, or ask a follow-up. The **Bulletin**
+lists every open task, who assigned it and who holds it, with stuck work first.
+Tap a notice to message whoever holds it.
 
 ## The app
 

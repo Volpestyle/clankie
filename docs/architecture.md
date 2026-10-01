@@ -111,7 +111,9 @@ dropped, duplicate, and backlog catch-up messages do not start typing.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): durable agent personas, their current fleet seats,
-one coherent cursor-long-polled fleet snapshot, revision-fenced sends, cursored replay,
+one coherent cursor-long-polled fleet snapshot (including every unfinished Swarm
+task with its lead and owner, [ADR 0205](adr/0205-the-fleet-carries-its-open-swarm-tasks.md)),
+revision-fenced sends, cursored replay,
 and long-polled tails. A tail carries two things: the durable events, and the
 message the captain is typing right now — a volatile draft held in memory,
 never in the event log, that the settled `message` event replaces in the block

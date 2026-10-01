@@ -1965,7 +1965,10 @@ is the replay bound. Image files use `clankie file publish` separately.
 `GET /v1/swarm` diagnostic view: configured connections, active conversation actors
 and coordinator state. `swarm connections` is the same inventory.
 `clankie swarm contacts` lists discovered Swarm personas, including saved offline
-contacts. `clankie swarm message PERSONA TEXT` opens its DM and submits one message;
+contacts. `clankie swarm tasks` lists every unfinished Swarm task on the connected
+coordinators with its lead, owner, state, worktree and blocker: the same board the
+app shows ([ADR 0205](adr/0205-the-fleet-carries-its-open-swarm-tasks.md)).
+`clankie swarm message PERSONA TEXT` opens its DM and submits one message;
 `clankie swarm thread PERSONA` reads a bounded history page. The same commands work
 under `/swarm` in the TUI. Select the exact persona ID from the catalog. Replaced
 sessions have new contacts; old threads do not redirect. An accepted local turn

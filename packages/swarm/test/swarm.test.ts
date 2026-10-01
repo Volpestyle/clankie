@@ -191,6 +191,21 @@ test("real MCP delivers isolated inboxes, explicit acknowledgment and stable ide
     attemptId: claim.attemptId,
     fence: claim.fence,
   });
+  // Both conversations share one coordinator: the board reads it once, and
+  // names each of Clankie's own actors as him (ADR 0205).
+  expect(await host.tasks()).toEqual([
+    {
+      taskId,
+      scope: enrolled.scope,
+      title: "Review an existing result",
+      status: "running",
+      lead: { actor: a.actor, name: "Clankie", clankie: true },
+      owner: { actor: b.actor, name: "Clankie", clankie: true },
+      objective: "Review",
+      worktree: root,
+      updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u),
+    },
+  ]);
   await expect(host.assignment("bob", taskId, b.actor)).rejects.toThrow("owned by this conversation");
   await expect(host.assignment("alice", taskId, a.actor)).rejects.toThrow("active work");
   await expect(host.assignment("missing", taskId, b.actor)).rejects.toThrow("not connected");
