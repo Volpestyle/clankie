@@ -2,6 +2,13 @@
 
 Status: accepted (James, 2026-09-25, VUH-1362). Amends [ADR 0168](0168-linear-awareness-is-opt-in.md).
 Amended by [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md).
+Amended 2026-09-30 (VUH-1382): the pre-wake compaction below is retired. Pi's
+fixed prompt, tools and skills already exceeded 30k, so every wake spent minutes
+compacting to the same size, and since 2026-09-27 wakes reach the main
+conversation, which the bound never covered. An unseated wake now runs in a
+fresh one-shot session that publishes into that conversation; a bound seat still
+receives it as a wake. Rotation forgets what he was watching; Linear holds that
+history and he reads it on demand.
 
 ## Context
 

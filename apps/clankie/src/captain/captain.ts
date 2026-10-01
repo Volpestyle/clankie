@@ -170,27 +170,6 @@ Everything before this boundary is inherited history from the parent conversatio
 Only messages submitted after this boundary are active operator instructions for this side conversation. If there is no message after the boundary yet, wait for one.`;
 
 /** Pi's native current-leaf clone, with one hidden boundary appended to the child. */
-/** Above this the Linear inbox compacts before a wake, keeping each headline cheap. */
-export const LINEAR_INBOX_CONTEXT_TOKENS = 30_000;
-
-/**
- * The inbox is one durable room woken by one-line headlines; unbounded, every
- * wake would resend its whole history (VUH-1362). Pi compacts it before the
- * wake, so what he tracks carries over as a summary. A failed compaction still
- * wakes him, with the full context.
- */
-export async function boundLinearInboxContext(
-  session: Pick<AgentSession, "getContextUsage" | "compact">,
-  conversationId: string,
-  origin: ConversationTurnContext["origin"],
-): Promise<void> {
-  if (origin !== "hook" || conversationId !== LINEAR_INBOX_CONVERSATION_ID) return;
-  if ((contextTokenCount(session.getContextUsage()) ?? 0) <= LINEAR_INBOX_CONTEXT_TOKENS) return;
-  await session.compact().catch((error: unknown) => {
-    console.warn("Linear inbox compaction failed; waking with the full context", error);
-  });
-}
-
 export function cloneSideConversationSession(
   source: string,
   cwd: string,
@@ -1260,18 +1239,40 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // over. Only a seat that vanished before taking it hands the turn to pi.
         if (delivery.outcome !== "unbound") return;
       }
-      const lane = await durableSession(
-        `operator:${conversationId}`,
-        "operator",
-        join(options.stateDir, "conversations", conversationId, "pi"),
-        true,
-        context.workspace ?? workingDirectory,
-        context.side === true,
-      );
+      // A Linear wake is a one-shot: a fresh session sees only the new
+      // headlines, so it never resends the conversation it reports into
+      // (VUH-1382). It publishes there like any turn, and its own tree stays
+      // on disk as the record of what it ran.
+      // ponytail: one tree per wake, unbounded; prune by mtime if it grows.
+      const oneShot = context.origin === "hook";
+      const cwd = context.workspace ?? workingDirectory;
+      const lane = oneShot
+        ? await buildSession(
+            "operator",
+            SessionManager.create(
+              cwd,
+              join(options.stateDir, "conversations", conversationId, "linear-wakes"),
+            ),
+            true,
+            cwd,
+            false,
+            conversationId,
+          )
+        : await durableSession(
+            `operator:${conversationId}`,
+            "operator",
+            join(options.stateDir, "conversations", conversationId, "pi"),
+            true,
+            cwd,
+            context.side === true,
+          );
       // Operator interrupt: stop the live model turn. Aborting mid-stream makes
       // pi settle the message as aborted; partial text still publishes below so
       // the transcript shows what he had said before the interrupt.
-      if (context.signal.aborted) return;
+      if (context.signal.aborted) {
+        if (oneShot) lane.session.dispose();
+        return;
+      }
       const onInterrupt = (): void => {
         void lane.session.abort().catch(() => undefined);
       };
@@ -1290,7 +1291,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
 
       const live = lane.running !== undefined || lane.session.isStreaming;
-      if (!live) await boundLinearInboxContext(lane.session, conversationId, context.origin);
       const operatorTokensStart = contextTokenCount(lane.session.getContextUsage());
       const metrics = live
         ? undefined
@@ -1367,7 +1367,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               publishActivity("waiting");
             } else if (event.type === "compaction_end") {
               publishActivity("waiting");
-              const usage = lane.session.getContextUsage();
+              const usage = oneShot ? undefined : lane.session.getContextUsage();
               if (usage !== undefined) {
                 publish({
                   type: "context",
@@ -1384,7 +1384,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               const said = assistantText(event.message).trim();
               if (said.length > 0)
                 publish({ type: "message", role: "captain", text: said, streaming: false });
-              const usage = lane.session.getContextUsage();
+              const usage = oneShot ? undefined : lane.session.getContextUsage();
               if (usage !== undefined) {
                 publish({
                   type: "context",
@@ -1410,7 +1410,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // nothing rather than herdr noise. The Linear inbox is a reading room,
         // not a lead room (ADR 0168): no census there.
         const census =
-          live || deps.herdrAvailable?.() === false || conversationId === LINEAR_INBOX_CONVERSATION_ID
+          live ||
+          oneShot ||
+          deps.herdrAvailable?.() === false ||
+          conversationId === LINEAR_INBOX_CONVERSATION_ID
             ? undefined
             : await readHerdrSessionCensus(paneId, { fleets: censusFleets });
         const prompt = resolveOperatorPrompt(
@@ -1468,6 +1471,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           lane.starting = undefined;
         }
         unsubscribe();
+        if (oneShot) lane.session.dispose();
       }
     }, deps.onWorkStarted),
     (conversationId, scope) => {
