@@ -107,3 +107,7 @@ This repository is public. Both neighbors are private and consume
   the explicit Herdr fallback for unenrolled agents. Use the selected runtime
   for terminals and process control. Never
   duplicate uncertain dispatch.
+- No headless agents ([ADR 0203](docs/adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
+  Every worker, hired or Swarm-dispatched, runs its harness's native TUI in a
+  Herdr pane the owner can watch and type into. Swarm stream mode violates
+  this until interactive workers replace it; prefer `hire_agent` meanwhile.
