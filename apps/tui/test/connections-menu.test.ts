@@ -242,7 +242,7 @@ it("shows each runtime's worker mode and changes it through the runtime command"
   // An ssh fleet's peers enroll themselves: no worker mode to show or change.
   expect(list.options[1]!.hint).toBe("healthy");
   expect(values(readSelect.mock.calls[1]!)).toContain("mode");
-  expect(values(readSelect.mock.calls[2]!)).toEqual(["stream", "interactive"]);
+  expect(values(readSelect.mock.calls[2]!)).toEqual(["interactive"]);
   expect(calls).toContainEqual(["mode", "named", "interactive"]);
   expect(lines).toContain("named runs interactive workers.");
 });

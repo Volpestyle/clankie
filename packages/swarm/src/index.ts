@@ -38,7 +38,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 /** The owner-approved installed worker plugin that carries Swarm mail to an interactive worker (ADR 0194). */
 const INTERACTIVE_WORKER_CHANNEL_PLUGIN = "clankie-worker@clankie";
 
-let interactiveWorkers: Promise<boolean> | undefined;
+const interactiveWorkers = new Map<string, Promise<boolean>>();
 /**
  * Whether the installed swarm-mcp accepts an interactive worker route
  * (ADR 0194). An older owner parses routes strictly and would reject the
@@ -46,8 +46,10 @@ let interactiveWorkers: Promise<boolean> | undefined;
  * throwaway owner config carrying one interactive route either reads back or
  * it does not. Answered once per process, the lifetime of the loaded runtime.
  */
-export function interactiveWorkersSupported(): Promise<boolean> {
-  interactiveWorkers ??= (async () => {
+export function interactiveWorkersSupported(harness: "claude" | "codex" | "pi" = "claude"): Promise<boolean> {
+  const prior = interactiveWorkers.get(harness);
+  if (prior) return prior;
+  const probe = (async () => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "clankie-swarm-probe-")));
     try {
       const absolute = join(directory, "probe");
@@ -66,26 +68,30 @@ export function interactiveWorkersSupported(): Promise<boolean> {
               profile: "probe",
               socketPath: absolute,
               herdrPath: absolute,
-              claudePath: absolute,
+              ...(harness === "claude"
+                ? { claudePath: absolute, channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
+                : { harness, harnessPath: absolute }),
               nodePath: absolute,
               workerPath: absolute,
               capabilities: [],
               workerMode: "interactive",
-              channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN,
             },
           },
         }),
         { mode: 0o600 },
       );
-      const route = (await ownerState(directory)).dispatch?.herdr as { workerMode?: unknown } | undefined;
-      return route?.workerMode === "interactive";
+      const route = (await ownerState(directory)).dispatch?.herdr as
+        | { workerMode?: unknown; harness?: unknown }
+        | undefined;
+      return route?.workerMode === "interactive" && (harness === "claude" || route.harness === harness);
     } catch {
       return false;
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   })();
-  return interactiveWorkers;
+  interactiveWorkers.set(harness, probe);
+  return probe;
 }
 /** Feature discovery uses the installed runtime, without enrolling or changing a live owner. */
 export async function managedWorkersSupported(): Promise<boolean> {
@@ -201,7 +207,7 @@ interface Options {
       capacity: number | null;
       capabilities: string[];
       workspaces?: { kind: "repository" | "directory"; path: string }[] | undefined;
-      /** Omitted or stream keeps the route unattended; interactive needs {@link interactiveWorkersSupported}. */
+      /** Native interactive by default; stream is retained legacy metadata and cannot launch. */
       workerMode?: "stream" | "interactive" | undefined;
       workerHarness?: "claude" | "codex" | "pi" | undefined;
     }[]
@@ -1283,6 +1289,10 @@ async function prepareOwner(cwd: string, options: Options) {
           peers: [],
           herdr: {
             id: "herdr-claude",
+            enabled: await interactiveWorkersSupported(),
+            ...((await interactiveWorkersSupported())
+              ? { workerMode: "interactive", channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
+              : {}),
             stateDirectory,
             profile: "clankie",
             socketPath: options.socketPath,
@@ -1312,6 +1322,14 @@ async function prepareOwner(cwd: string, options: Options) {
       ["herdr", "claude", "codex", "pi"].map((name) => which(name).catch(() => undefined)),
     );
     const supported = await managedWorkersSupported();
+    const native = Object.fromEntries(
+      await Promise.all(
+        (["claude", "codex", "pi"] as const).map(async (harness) => [
+          harness,
+          await interactiveWorkersSupported(harness),
+        ]),
+      ),
+    );
     const harnessPath = (harness: "claude" | "codex" | "pi") =>
       ({ claude: claudePath, codex: codexPath, pi: piPath })[harness];
     runtimes = runtimes.map((entry) => {
@@ -1321,22 +1339,13 @@ async function prepareOwner(cwd: string, options: Options) {
           ? "harness_unavailable"
           : harness !== "claude" && !supported
             ? "harness_unsupported"
-            : harness !== "claude" && entry.workerMode === "interactive"
+            : entry.workerMode === "stream"
               ? "harness_mode_unsupported"
-              : entry.state;
+              : !native[harness]
+                ? "harness_mode_unsupported"
+                : entry.state;
       return { ...entry, state };
     });
-    // An interactive route the installed owner cannot parse would void every
-    // route; that runtime stays unavailable instead of silently running stream.
-    if (
-      runtimes.some((entry) => entry.workerMode === "interactive") &&
-      !(await interactiveWorkersSupported())
-    )
-      runtimes = runtimes.map((entry) =>
-        entry.workerMode === "interactive"
-          ? { ...entry, state: "unavailable", workerMode: undefined }
-          : entry,
-      );
     const desired = runtimes
       .filter((entry) => entry.socketPath)
       .map((entry) => ({
@@ -1359,9 +1368,15 @@ async function prepareOwner(cwd: string, options: Options) {
         capacity: entry.capacity,
         ...(entry.workspaces ? { workspaces: entry.workspaces } : {}),
         ...(options.workerMcp ? { mcpServers: { clankie_worker: options.workerMcp } } : {}),
-        // Stream writes neither field, the route an older owner already accepts.
-        ...(entry.workerMode === "interactive" && (entry.workerHarness ?? "claude") === "claude"
-          ? { workerMode: "interactive" as const, channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
+        // Never enable a headless route. An old strict parser sees only disabled
+        // legacy fields; retained routes still carry stop authority for old tokens.
+        ...(native[entry.workerHarness ?? "claude"]
+          ? {
+              workerMode: "interactive" as const,
+              ...((entry.workerHarness ?? "claude") === "claude"
+                ? { channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
+                : {}),
+            }
           : {}),
       }));
     // Retain old routes for their receipts; disabled routes cannot acquire new work.

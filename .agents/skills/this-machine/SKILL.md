@@ -490,7 +490,11 @@ select execution; `connection` selects the separate Swarm coordinator. Never
 change either on a retry. For local managed workers, `clankie runtime harness ID
 claude|codex|pi` selects the harness through the operator API and TUI Connections
 menu. Codex uses `gpt-6-astra`; pi uses its native model preference. Codex/pi need
-the managed-adapter Swarm build and stream mode. `swarm_assign harness` explicitly
+native-interactive support in the installed Swarm build. Native is the default;
+legacy stream settings remain readable but disable new managed dispatch. The
+integrated upstream source requires a coordinated package rollout before those
+routes become available; never swap the active artifact while workers run.
+`swarm_assign harness` explicitly
 constrains the runtime choice; unsupported or unavailable routes refuse without
 falling back to Claude. Retain the original harness and payload on uncertain
 retries. Every managed worker has its own launch-local Swarm enrollment. Disconnect leaves workers alive. Managed Herdr launch
@@ -561,7 +565,7 @@ access ends when the attempt completes, is cancelled, expires or changes owner.
 Set `renewable: true` for automatic renewal during that same active assignment.
 The worker bridge persists fresh short-lived tokens; revocation still targets the
 original grant ID. An expired bearer cannot renew; `--swarm-grant` can authenticate
-the enrolled session again for renewable, still-active work. The owned Claude stream host renews live task leases independently of model
+the enrolled session again for renewable, still-active work. The owned managed host renews live task leases independently of model
 turns; external hosts must renew their own attempts. Verification identifies the
 connected user; it does not switch to the intended automation account. Read `docs/worker-access.md`
 under `repoRoot` for the contract.

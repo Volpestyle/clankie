@@ -346,7 +346,7 @@ it("only the operator can approve repositories and exact directories through run
   }
 });
 
-it("selects each runtime's worker mode through CLI/API, keeps stream unwritten, and never selects interactive without Swarm support", async () => {
+it("uses native interactive workers, refuses headless selection, and requires installed support for new worker selection", async () => {
   const { manageConnections } = await import("../src/connections.ts");
   const root = await mkdtemp("/tmp/clankie-worker-mode-");
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -375,19 +375,19 @@ it("selects each runtime's worker mode through CLI/API, keeps stream unwritten, 
   try {
     await runRuntimeCommand(["connect", "named", "--socket", "/tmp/named.sock"], cli);
     expect((await runRuntimeCommand(["list"], cli)).connections).toMatchObject([
-      { id: "default", workerMode: "stream" },
-      { id: "named", workerMode: "stream" },
+      { id: "default", workerMode: "interactive" },
+      { id: "named", workerMode: "interactive" },
     ]);
-    expect(await named()).not.toHaveProperty("workerMode");
+    expect(await named()).toMatchObject({ workerMode: "interactive" });
     await expect(runRuntimeCommand(["mode", "named", "sideways"], cli)).rejects.toThrow(/mode ID/u);
     // The vendored owner would reject the route, and with it every route.
     await expect(runRuntimeCommand(["mode", "named", "interactive"], cli)).rejects.toThrow(
       /upgraded Swarm runtime/u,
     );
     await expect(
-      runtimes.connect({ id: "named", socketPath: "/tmp/named.sock", workerMode: "interactive" }),
+      runtimes.connect({ id: "unsupported", socketPath: "/tmp/named.sock", workerMode: "interactive" }),
     ).rejects.toThrow(/upgraded Swarm runtime/u);
-    expect(await named()).not.toHaveProperty("workerMode");
+    expect(await named()).toMatchObject({ workerMode: "interactive" });
     supported = true;
     expect(await runRuntimeCommand(["mode", "named", "interactive"], cli)).toEqual({
       id: "named",
@@ -402,7 +402,7 @@ it("selects each runtime's worker mode through CLI/API, keeps stream unwritten, 
       { action: "reconnect_runtime", id: "named" },
     );
     expect(inventory.runtimes).toMatchObject([
-      { id: "default", workerMode: "stream" },
+      { id: "default", workerMode: "interactive" },
       { id: "named", enabled: true, workerMode: "interactive" },
     ]);
     // A paired device sets a session's capacity; the default stays unwritten until then.
@@ -429,12 +429,60 @@ it("selects each runtime's worker mode through CLI/API, keeps stream unwritten, 
     await expect(
       manageConnections({ runtimes, swarm }, { action: "set_runtime_capacity", id: "missing", capacity: 4 }),
     ).rejects.toThrow(/Unknown/u);
-    await runRuntimeCommand(["mode", "named", "stream"], cli);
-    expect(await named()).not.toHaveProperty("workerMode");
+    await expect(runRuntimeCommand(["mode", "named", "stream"], cli)).rejects.toThrow(/Headless/u);
+    expect(await named()).toMatchObject({ workerMode: "interactive" });
     await runRuntimeCommand(["mode", "default", "interactive"], cli);
     expect((await settings.load()).execution.workerMode).toBe("interactive");
-    await runRuntimeCommand(["mode", "default", "stream"], cli);
-    expect((await settings.load()).execution).not.toHaveProperty("workerMode");
+    await expect(runRuntimeCommand(["mode", "default", "stream"], cli)).rejects.toThrow(/Headless/u);
+    expect((await settings.load()).execution.workerMode).toBe("interactive");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("reconnects retained native and legacy worker choices without requiring a new adapter or changing the harness", async () => {
+  const { manageConnections } = await import("../src/connections.ts");
+  const root = await mkdtemp("/tmp/clankie-retained-worker-choice-");
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const runtimes = new ExecutionConnections({
+    settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+    run: async () => ({ stdout: JSON.stringify({ result: { snapshot: { workspaces: [] } } }) }),
+    managedWorkers: async () => false,
+    interactiveWorkers: async () => false,
+  });
+  try {
+    for (const workerMode of ["interactive", "stream"] as const) {
+      await settings.update((current) => ({
+        ...current,
+        execution: {
+          ...current.execution,
+          connections: [
+            {
+              id: "retained",
+              kind: "herdr",
+              capabilities: [],
+              socketPath: "/tmp/retained.sock",
+              session: "retained",
+              enabled: false,
+              workerHarness: "codex",
+              workerMode,
+            },
+          ],
+        },
+      }));
+      await runtimes.connect({ id: "retained", socketPath: "/tmp/retained.sock" });
+      await runtimes.disconnect("retained");
+      await manageConnections({ runtimes }, { action: "reconnect_runtime", id: "retained" });
+      expect((await settings.load()).execution.connections[0]).toMatchObject({
+        enabled: true,
+        workerHarness: "codex",
+        workerMode,
+      });
+    }
+    await expect(
+      runtimes.connect({ id: "new", socketPath: "/tmp/new.sock", workerMode: "stream" }),
+    ).rejects.toMatchObject({ code: "harness_mode_unsupported" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -448,7 +496,10 @@ it("selects managed harnesses through API/CLI and rejects unsupported harness-mo
     settings,
     primary: { binding: () => undefined, status: () => "disabled" },
     managedWorkers: async () => supported,
-    interactiveWorkers: async () => true,
+    interactiveWorkers: async (harness) => {
+      expect(["claude", "codex", "pi"]).toContain(harness);
+      return true;
+    },
   });
   const app = await createClankieApp({
     captain: createStubCaptain(),
@@ -478,13 +529,14 @@ it("selects managed harnesses through API/CLI and rejects unsupported harness-mo
       expect((await settings.load()).execution.workerHarness).toBe(harness);
     }
     await runRuntimeCommand(["harness", "default", "codex"], cli);
-    await expect(runRuntimeCommand(["mode", "default", "interactive"], cli)).rejects.toThrow(
-      /require stream/u,
-    );
+    await expect(runRuntimeCommand(["mode", "default", "interactive"], cli)).resolves.toEqual({
+      id: "default",
+      workerMode: "interactive",
+    });
     expect((await settings.load()).execution).toMatchObject({ workerHarness: "codex" });
     await expect(runRuntimeCommand(["harness", "default", "unknown"], cli)).rejects.toThrow(/harness ID/u);
     expect((await runRuntimeCommand(["list"], cli)).connections).toMatchObject([
-      { id: "default", workerHarness: "codex", workerMode: "stream" },
+      { id: "default", workerHarness: "codex", workerMode: "interactive" },
     ]);
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -382,8 +382,9 @@ export const HerdrSshTransportSchema = z
 export type HerdrSshTransport = z.infer<typeof HerdrSshTransportSchema>;
 
 /**
- * How Swarm runs a dispatched worker in a runtime (ADR 0194). Unset is stream,
- * the unattended default; only an owner's explicit interactive choice is stored.
+ * How Swarm runs a dispatched worker in a runtime (ADR 0194/0203). Unset is
+ * native interactive. Stream remains readable for legacy settings; new writes
+ * and local dispatch refuse it, preserving retained receipts for reconciliation.
  */
 export const ExecutionWorkerHarnessSchema = z.enum(["claude", "codex", "pi"]);
 export type ExecutionWorkerHarness = z.infer<typeof ExecutionWorkerHarnessSchema>;

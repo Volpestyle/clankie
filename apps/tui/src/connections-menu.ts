@@ -448,9 +448,9 @@ async function runtimeDetail(
       const harness = await flow.readSelect({
         message: `Worker harness in ${runtime.id}`,
         options: [
-          { value: "codex", label: "Codex", hint: "gpt-6-astra; stream workers" },
-          { value: "pi", label: "pi", hint: "native model preference; stream workers" },
-          { value: "claude", label: "Claude", hint: "stream or supported interactive workers" },
+          { value: "codex", label: "Codex", hint: "gpt-6-astra; native terminal" },
+          { value: "pi", label: "pi", hint: "native model preference; native terminal" },
+          { value: "claude", label: "Claude", hint: "native terminal; approved worker channel" },
         ],
         allowBack: true,
       });
@@ -469,11 +469,10 @@ async function runtimeDetail(
       const mode = await flow.readSelect({
         message: `How Swarm runs workers in ${runtime.id}`,
         options: [
-          { value: "stream", label: "Stream", hint: "unattended; the default" },
           {
             value: "interactive",
             label: "Interactive",
-            hint: "Claude in the pane; needs the clankie-worker plugin",
+            hint: "native terminal; requires a supported Swarm runtime",
           },
         ],
         allowBack: true,

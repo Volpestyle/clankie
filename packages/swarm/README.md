@@ -32,12 +32,12 @@ the coordinator's diagnostics. If Herdr or the selected harness executable is un
 communication still works and provisioning reports unavailable. A native Claude
 seat with the plugin channel enabled receives Swarm envelopes through the service's
 existing seat outbox. Opening the channel rechecks pending inbox messages, including
-before the first Pi turn. Owned stream workers also wake when idle. Owners and workers require a deliberate restart to load a
+before the first Pi turn. Native managed workers also wake when idle when the installed runtime supports them. Owners and workers require a deliberate restart to load a
 new runtime package; replacing files does not upgrade running processes. Do not
 replace the installed Swarm artifact while its dispatched workers may still run:
 fresh MCP/hook subprocesses can load a different build from the owner in memory.
 Hold dispatch through the coordinated upgrade and verify worker MCP readiness
-afterward. The bundled stream wrapper requires an authenticated harness MCP call and fenced
+afterward. The managed wrapper requires an authenticated harness MCP call and fenced
 claim before binding. It reports MCP loss independently, and its POSIX stop latch
 can terminate owned work even when MCP is unavailable. Legacy launches retain
 uncertain capacity until stop proof exists. [The original incident](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
@@ -75,9 +75,13 @@ leased inbox delivery and explicit ack, progress monitoring, renewal, cancellati
 and release. An actual model call
 to Swarm commits the fenced claim; process startup or tool enumeration cannot do
 so. Codex's MCP configuration and pi's extension are supplied only at launch.
-Codex/pi currently support stream mode. Interactive Claude remains the separate
-[ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)
-workstream. Remote PC peers continue to enroll through the shared-coordinator
+The integrated upstream source runs all three in their native TUI: Claude through
+its channel, Codex through a private app-server paired with its native UI, and Pi
+through native extension follow-up turns. Clankie probes the installed owner's
+parser for the selected harness and disables unsupported native routes. The old
+vendored build is not upgraded by these source edits; the package requires a
+coordinated drain and rollout ([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
+Remote PC peers continue to enroll through the shared-coordinator
 relay; this does not add remote managed spawning.
 
 ## Connection contract status
@@ -123,16 +127,16 @@ policy changes. Existing owners must advertise `executionWorkspaces` before rout
 configuration is updated. [ADR 0193](../../docs/adr/0193-runtime-workspaces-are-owner-approved.md)
 records authority and recovery semantics.
 
-Each local runtime also has a worker mode (`clankie runtime mode ID
-stream|interactive`). Stream, the default, runs workers unattended and writes no
-mode into the owner's route. Interactive runs Claude Code's TUI in the Herdr pane
-with Swarm mail on a Claude channel; its route carries `workerMode` and
-`channelPlugin: "clankie-worker@clankie"`, the owner-approved plugin Claude Code's
+Each local runtime defaults to native interactive workers (`clankie runtime mode
+ID interactive`). The selected harness runs its TUI in the Herdr pane; its route
+carries `workerMode`. Claude also carries `channelPlugin: "clankie-worker@clankie"`, the owner-approved plugin Claude Code's
 managed settings must allow ([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
-Clankie selects interactive only when the installed swarm-mcp parses such a route;
+Clankie enables native dispatch only when the installed swarm-mcp parses that harness's route;
 an older owner would reject the whole dispatch configuration. A saved interactive
-runtime whose Swarm cannot run it becomes unavailable, and an interactive start
-that blocks stays blocked. Neither falls back to stream.
+runtime whose Swarm cannot run it has a disabled worker route, and a blocked or
+uncertain native start stays retained. Old stream settings remain readable for
+recovery but cannot launch workers. New stream settings are rejected. Runtime
+connections and existing peers remain available independently of native dispatch.
 
 ## Named external coordinators
 

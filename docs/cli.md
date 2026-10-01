@@ -1113,24 +1113,28 @@ for the default or a named local runtime. The operator API accepts
 `POST /v1/runtime-connections` with `{ "action": "harness", "id": "default", "harness": "codex" }`;
 `runtime list` reports `workerHarness`. The TUI Connections → Runtimes → Worker
 harness menu uses the same command. Codex defaults to `gpt-6-astra`; pi uses its
-native model preference. Codex/pi require the managed-adapter Swarm build and
-stream mode. Unsupported selections return `harness_unsupported` or
+native model preference. All three require native-interactive support in the
+installed Swarm build. Unsupported selections return `harness_unsupported` or
 `harness_mode_unsupported`; unavailable executables block dispatch without a
 Claude fallback. New routed assignments inherit the selected runtime's harness;
 `swarm_assign harness: "claude" | "codex" | "pi"` explicitly constrains it.
 The intent and launch receipt retain the selected harness. Keep the original
 payload when reconciling an uncertain dispatch.
 
-`clankie runtime mode ID stream|interactive` sets how Swarm runs the workers it
+`clankie runtime mode ID interactive` sets how Swarm runs the workers it
 dispatches into the default or a named local runtime; `runtime list` reports it as
-`workerMode`. Stream, the default, runs each worker unattended. Interactive runs
-Claude Code's TUI in the Herdr pane and delivers Swarm mail over a Claude channel,
-so a person can watch and step in. It needs the owner-approved
+`workerMode`. Interactive is the default and runs each selected harness's native
+TUI in the Herdr pane. Codex's native UI owns its private app-server thread and
+approvals; Pi receives native follow-up turns through its worker extension.
+Claude receives Swarm mail over a channel and needs the owner-approved
 `clankie-worker@clankie` plugin in Claude Code's managed settings
 ([ADR 0194](adr/0194-interactive-swarm-workers-receive-leased-channel-events.md))
-and a Swarm runtime that accepts interactive routes: Clankie refuses the selection
-while the installed swarm-mcp does not. An interactive start that blocks stays
-blocked and is reported; it never falls back to stream. An ssh fleet has no worker
+and a Swarm runtime that accepts that harness's interactive route: Clankie refuses
+the selection while the installed swarm-mcp does not. A saved stream setting stays
+readable for recovery, but its launch route is disabled; new stream settings are
+refused. A blocked or uncertain native start never falls back to headless execution.
+Connecting or reconnecting a runtime remains possible for its existing peers.
+An ssh fleet has no worker
 mode, because its peers enroll themselves.
 
 Each call **replaces** that runtime's extra approvals; `--clear` restores the

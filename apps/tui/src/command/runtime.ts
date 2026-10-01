@@ -59,7 +59,7 @@ export async function runRuntimeCommand(
     body = JSON.stringify({ action: "harness", id: args[1], harness: args[2] });
   } else if (args[0] === "mode" && args.length === 3) {
     // How Swarm runs the workers it dispatches here (ADR 0194).
-    if (!["interactive", "stream"].includes(args[2]!)) throw new Error("Use mode ID interactive|stream");
+    if (args[2] !== "interactive") throw new Error("Headless workers are retired; use mode ID interactive");
     method = "POST";
     body = JSON.stringify({ action: "mode", id: args[1], mode: args[2] });
   } else if (args[0] === "workspaces" && args.length >= 3) {
@@ -81,7 +81,7 @@ export async function runRuntimeCommand(
     path += `/${encodeURIComponent(args[1]!)}`;
   } else if (args.length > 1 || (args[0] && !["list", "status"].includes(args[0]))) {
     throw new Error(
-      "Usage: clankie runtime [list|status] | connect ID (--session NAME | --socket PATH) | connect ID --ssh HOST --session NAME [--shell posix|powershell] | disconnect ID | workspaces ID (--repo PATH | --dir PATH)... | workspaces ID --clear | capacity ID N|--clear | budget N|--clear (limits count per coordinator scope) | mode ID interactive|stream | harness ID claude|codex|pi",
+      "Usage: clankie runtime [list|status] | connect ID (--session NAME | --socket PATH) | connect ID --ssh HOST --session NAME [--shell posix|powershell] | disconnect ID | workspaces ID (--repo PATH | --dir PATH)... | workspaces ID --clear | capacity ID N|--clear | budget N|--clear (limits count per coordinator scope) | mode ID interactive | harness ID claude|codex|pi",
     );
   }
   const credential = await resolveOperatorCredential({

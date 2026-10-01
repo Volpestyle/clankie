@@ -9,17 +9,18 @@ interactive workers start through an **owner-managed approval of the exact
 installed worker plugin `clankie-worker@clankie`** in Claude Code managed
 settings (`allowedChannelPlugins`), not through the development-channel flag.
 James applies that policy himself as this Mac's administrator; no dispatch,
-runtime setting or agent installs or edits managed policy. Stream remains the
-default until the owner opts a runtime into interactive and the worker passes
+runtime setting or agent installs or edits managed policy. Native-only source
+now defaults to interactive; an unsupported installed runtime disables dispatch
+instead of starting headless workers. Claude still requires
 the two-fresh-session consent probe and a live interactive dispatch. The
 seat-preservation checks in [managed consent](../testing/2026-09-26-interactive-swarm-workers/managed-consent.md)
 still apply when the policy is adopted.
 
 ## Implementation status
 
-- Swarm (`vuh-1380-interactive-workers`, upstream `4f8079b`, not yet vendored):
+- Swarm (`vuh-1380-interactive-workers`, integrated with main `a72a2d3`, not yet vendored):
   owner-selected Herdr route `workerMode` (`interactive` | `stream`) and
-  `channelPlugin`; the resolved mode is stored in the intent row (schema 15),
+  `channelPlugin`; the resolved mode is stored in the intent row (schema 16),
   dispatch result and launch receipt, and an explicit `execution.mode` joins the
   intent fingerprint. Interactive launches the TUI on inherited terminal stdio;
   the wrapper keeps the launch token, lease renewal and MCP health; the worker's
@@ -30,19 +31,27 @@ still apply when the policy is adopted.
 - Clankie: the `clankie-worker@clankie` plugin
   ([integrations/claude-plugin/worker](../../integrations/claude-plugin/worker/)) and
   the per-runtime mode in settings, API, CLI and TUI.
+- Native Codex runs a private Unix app-server and its native remote TUI. The UI
+  creates the thread and handles approvals; the wrapper verifies its exact
+  ID/workspace and submits a single protocol turn. Pi runs its native CLI with
+  an extension that consumes its one leased inbox and submits native follow-ups.
+  Both preserve their own enrollment, MCP readiness and fenced claims.
+- Local Herdr is interactive-only. Stream settings/intents/receipts are retained
+  for recovery, never used for new launches. Installed capability probes gate
+  each harness without a headless fallback. No active artifact swap or restart
+  is included in this source integration; live acceptance below remains open.
 - Not implemented here: model/effort selection (step 6), task-title labels
   (step 7), install locks and immutable runtime generations.
 
 ## Harness axis amendment — VUH-1407 (2026-09-27)
 
-Managed harness selection (`claude`, `codex`, `pi`) is independent of this mode
-choice. Codex app-server and pi RPC implement the shared unattended lifecycle;
-they reject interactive mode explicitly. Claude's interactive plugin and consent
-requirements are unchanged. Integrating the upstream branches requires combining
-the stream/interactive wrapper split with the extracted stream harness driver.
-Both branches independently added schema 15: this branch stores mode; VUH-1407
-stores harness. Sequence both migrations under distinct versions before combining
-builds; never treat those schema-15 databases as interchangeable.
+Managed harness selection (`claude`, `codex`, `pi`) remains independent of identity.
+The native-only amendment on 2026-09-30 replaces Codex/Pi headless I/O with native
+UI delivery while retaining their managed lifecycle. Claude's plugin and consent
+requirements are unchanged. Schema 16 combines both schema-15 lineages: main's
+`harness` and the interactive branch's `execution_mode`. It inspects and fills
+the missing column in one SQLite writer transaction, with atomic rollback and
+no reset of actors, tasks, claims or fingerprints.
 
 ## Current stream-worker implementation
 
