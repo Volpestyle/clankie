@@ -4,6 +4,7 @@ import {
   patchCriteria,
   touchesCriteria,
   WorkItemNotFoundError,
+  workItemLabels,
   type WorkBackend,
   type WorkItemPatch,
 } from "../backend.ts";
@@ -27,6 +28,18 @@ interface LinearIssue {
   readonly statusType?: string;
   readonly url?: string;
   readonly updatedAt?: string;
+  /** Linear's MCP returns names; the GraphQL shape nests them. */
+  readonly labels?:
+    | readonly (string | { readonly name?: string })[]
+    | { readonly nodes?: readonly { readonly name?: string }[] };
+}
+
+function linearLabelNames(issue: LinearIssue): unknown[] {
+  const labels = issue.labels;
+  const list = Array.isArray(labels) ? labels : ((labels as { nodes?: unknown[] } | undefined)?.nodes ?? []);
+  return list.map((label) =>
+    typeof label === "string" ? label : (label as { name?: unknown } | null)?.name,
+  );
 }
 
 interface LinearStatus {
@@ -34,7 +47,7 @@ interface LinearStatus {
   readonly type: string;
 }
 
-const FIELDS = ["title", "description", "status", "statusType", "url", "updatedAt"];
+const FIELDS = ["title", "description", "status", "statusType", "url", "updatedAt", "labels"];
 const PAGE_SIZE = 50;
 
 class LinearPaginationError extends Error {
@@ -128,6 +141,7 @@ export function createLinearBackend(options: {
       evidence: parsed.evidence,
       location: issue.url ?? "",
       ...(issue.updatedAt === undefined ? {} : { updatedAt: issue.updatedAt }),
+      ...workItemLabels(linearLabelNames(issue)),
     });
   };
 

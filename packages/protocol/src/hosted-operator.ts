@@ -27,6 +27,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "channels",
         "personas",
         "update_persona",
+        "set_persona_role",
         "discord_rooms",
         "work_repos",
         "work_items",

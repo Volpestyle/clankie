@@ -1,5 +1,11 @@
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
+  OPERATOR_AGENT_ROLES,
+  OperatorAgentRoleSchema,
+  type OperatorAgentPersona,
+  type OperatorAgentRole,
+} from "@clankie/protocol";
+import {
   createCaptainOperatorConversationClient,
   createCaptainRouteClient,
   resolveCaptainRouteToken,
@@ -8,6 +14,7 @@ import { commandHost } from "./io.ts";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
+  `       clankie agents role NAME|PERSONA_ID ${OPERATOR_AGENT_ROLES.join("|")}|none\n` +
   "       clankie agents [list] [--host ID] [--limit N]\n" +
   "       clankie agents read HOST:SESSION [--tail N | --after CURSOR]\n" +
   "       clankie agents resume HOST:SESSION [--fleet ID] [--brief TEXT]\n" +
@@ -25,6 +32,26 @@ function flags(args: readonly string[], allowed: readonly string[]): Map<string,
   return values;
 }
 
+function parseRole(value: string): OperatorAgentRole | null {
+  if (value.toLowerCase() === "none") return null;
+  const role = OperatorAgentRoleSchema.safeParse(value.toLowerCase());
+  if (!role.success) throw new Error(`Unknown role ${value}; use ${OPERATOR_AGENT_ROLES.join(", ")} or none`);
+  return role.data;
+}
+
+/** A persona id, or a name that names exactly one agent (case-insensitive). */
+function resolvePersona(personas: readonly OperatorAgentPersona[], target: string): string {
+  const byId = personas.find((persona) => persona.personaId === target);
+  if (byId) return byId.personaId;
+  const named = personas.filter((persona) => persona.name.toLowerCase() === target.toLowerCase());
+  if (named.length === 1) return named[0]!.personaId;
+  throw new Error(
+    named.length === 0
+      ? `No agent named ${target}; clankie agents contacts lists them`
+      : `${String(named.length)} agents are named ${target}; pass the persona id`,
+  );
+}
+
 export async function runAgentsCommand(
   args: readonly string[],
   options: {
@@ -34,7 +61,7 @@ export async function runAgentsCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ): Promise<unknown> {
-  if (args[0] === "contacts" && args.length === 1) {
+  if ((args[0] === "contacts" && args.length === 1) || (args[0] === "role" && args.length >= 3)) {
     const token = await resolveCaptainRouteToken({ env: options.env ?? process.env });
     const client = createCaptainOperatorConversationClient(
       createCaptainRouteClient({
@@ -43,7 +70,12 @@ export async function runAgentsCommand(
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       }),
     );
-    return (await client.fleet!()).personas;
+    const personas = (await client.fleet!()).personas;
+    if (args[0] === "contacts") return personas;
+    return client.setPersonaRole!(
+      resolvePersona(personas, args.slice(1, -1).join(" ")),
+      parseRole(args.at(-1)!),
+    );
   }
   let path: string,
     method = "GET",

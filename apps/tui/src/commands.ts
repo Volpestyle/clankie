@@ -257,7 +257,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       aliases: [],
       description: "Live agents, and past ones that kept a thread",
       takesArgument: true,
-      argumentHint: "[contacts | legacy session commands; see /sessions]",
+      argumentHint: "[contacts | role NAME ROLE|none | legacy session commands; see /sessions]",
       async run(argument, shell): Promise<void> {
         if (argument.trim()) {
           const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
@@ -290,7 +290,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             label: agent.name,
             hint: agent.swarm
               ? `Swarm · ${agent.swarm.connectionId}${agentIsLive(agent) ? "" : " · offline"}`
-              : `Herdr · ${agent.harness}${agentIsLive(agent) ? "" : " · offline"}`,
+              : `Herdr · ${agent.harness}${agent.role ? ` · ${agent.role}` : ""}${agentIsLive(agent) ? "" : " · offline"}`,
             description: agent.personaId,
           });
           let id = await flow.readSelect({

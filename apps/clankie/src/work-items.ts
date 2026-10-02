@@ -58,6 +58,7 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       repo: z.string().min(1).max(4096),
       status: z.array(WorkItemStatusSchema).max(5).optional(),
       owner: z.string().min(1).max(128).optional(),
+      label: z.string().trim().min(1).max(64).optional(),
       limit: z.number().int().min(1).max(250).optional(),
     })
     .strict(),
@@ -359,6 +360,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             items: await backend.list({
               ...(request.status === undefined ? {} : { status: request.status }),
               ...(request.owner === undefined ? {} : { owner: request.owner }),
+              ...(request.label === undefined ? {} : { label: request.label }),
               limit: request.limit ?? 250,
             }),
           };

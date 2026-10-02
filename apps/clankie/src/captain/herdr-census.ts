@@ -155,6 +155,12 @@ export interface ObservedFleetSeat {
   readonly fleet?: string;
   readonly machine?: string;
   readonly herdrSession?: string;
+  /**
+   * The local harness session, so a seat the host already has an address for
+   * can read its own transcript (ADR 0188). Internal like the pane ids; the
+   * wire never carries it. Absent on remote fleets.
+   */
+  readonly session?: { readonly source: string; readonly kind: "id" | "path"; readonly value: string };
 }
 
 function defaultRunner(
@@ -567,6 +573,7 @@ async function readLocalFleet(
           ...(placement === undefined ? {} : { placement }),
           machine: bounded(hostname(), 200),
           ...(options.herdrSession ? { herdrSession: bounded(options.herdrSession, 200) } : {}),
+          session: entry.session,
         };
       });
     return head === undefined ? { seats } : { seats, head };

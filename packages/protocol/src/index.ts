@@ -7,6 +7,7 @@ import {
 export * from "./connections.ts";
 import { DevicePushRequestSchema } from "./device-push.ts";
 import {
+  WorkItemLabelSchema,
   WorkItemsResultSchema,
   WorkRepoSchema,
   WorkReposResultSchema,
@@ -318,6 +319,21 @@ export const OperatorAgentAppearanceSchema = z
   })
   .strict();
 export type OperatorAgentAppearance = z.infer<typeof OperatorAgentAppearanceSchema>;
+/**
+ * What an agent is for on the team (ADR 0208). Semantic, unlike the cosmetic
+ * `appearance.accessory`: a surface places the agent at its role's station and
+ * reads that role's backlog. Absent means unassigned.
+ */
+export const OPERATOR_AGENT_ROLES = [
+  "planner",
+  "designer",
+  "builder",
+  "tester",
+  "reviewer",
+  "researcher",
+] as const;
+export const OperatorAgentRoleSchema = z.enum(OPERATOR_AGENT_ROLES);
+export type OperatorAgentRole = z.infer<typeof OperatorAgentRoleSchema>;
 /** Shared full-tuple default; six tints alone cannot identify a real fleet. */
 export function defaultOperatorAgentAppearance(
   harness: string,
@@ -365,6 +381,8 @@ export const OperatorAgentPersonaSchema = z
     personaId: OperatorAgentPersonaIdSchema,
     name: OperatorAgentNameSchema,
     appearance: OperatorAgentAppearanceSchema,
+    /** The team role the owner (or the hire) assigned; absent means unassigned (ADR 0208). */
+    role: OperatorAgentRoleSchema.optional(),
     /** Last known harness, retained while the persona has no live seat. */
     harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     /** Present while this character occupies a live Herdr seat. */
@@ -409,6 +427,16 @@ export const UpdateOperatorAgentPersonaSchema = z
   })
   .strict();
 export type UpdateOperatorAgentPersona = z.infer<typeof UpdateOperatorAgentPersonaSchema>;
+
+/** Assign or clear one persona's role (ADR 0208); `null` clears it. */
+export const SetOperatorAgentPersonaRoleSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    personaId: OperatorAgentPersonaIdSchema,
+    role: OperatorAgentRoleSchema.nullable(),
+  })
+  .strict();
+export type SetOperatorAgentPersonaRole = z.infer<typeof SetOperatorAgentPersonaRoleSchema>;
 
 export const OperatorConversationScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("global") }).strict(),
@@ -750,6 +778,17 @@ export const OperatorCodexAccountSchema = z
   .object({ label: z.string().min(1).max(64), home: z.string().min(1).max(4096) })
   .strict();
 
+export const OPERATOR_SEAT_SUBAGENTS_RECENT_MAX = 8;
+export const OperatorSeatSubagentsSchema = z
+  .object({
+    running: z.number().int().min(0),
+    recent: z
+      .array(z.object({ label: z.string().max(120), status: z.enum(["running", "done"]) }).strict())
+      .max(OPERATOR_SEAT_SUBAGENTS_RECENT_MAX),
+  })
+  .strict();
+export type OperatorSeatSubagents = z.infer<typeof OperatorSeatSubagentsSchema>;
+
 export const OperatorFleetSeatSchema = z
   .object({
     account: OperatorCodexAccountSchema.optional(),
@@ -809,6 +848,14 @@ export const OperatorFleetSeatSchema = z
      * the roster simply stops carrying one (ADR 0163).
      */
     parentSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    /**
+     * Native subagents the occupying harness started inside its own TUI
+     * (Claude Code's Agent/Task tool), newest first (ADR 0208). Present only
+     * for a local Claude seat the host already has an address for — hired, or
+     * a chat the owner opened (ADR 0188) — so discovery alone never reads a
+     * transcript. Absent means unknown, not none.
+     */
+    subagents: OperatorSeatSubagentsSchema.optional(),
   })
   .strict();
 export type OperatorFleetSeat = z.infer<typeof OperatorFleetSeatSchema>;
@@ -1044,6 +1091,8 @@ export const SpawnOperatorSeatSchema = z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
       .optional(),
+    /** The hired persona's team role (ADR 0208); absent leaves it as it was. */
+    role: OperatorAgentRoleSchema.optional(),
   })
   .strict();
 export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;
@@ -2368,6 +2417,14 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       persona: UpdateOperatorAgentPersonaSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("set_persona_role"),
+      schemaVersion: z.literal(1),
+      personaId: OperatorAgentPersonaIdSchema,
+      role: OperatorAgentRoleSchema.nullable(),
+    })
+    .strict(),
   /**
    * The swarm home's rooms, so choosing where a channel is projected is a pick
    * rather than a snowflake typed from memory. Empty where no Discord runtime
@@ -2394,6 +2451,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("work_items"),
       schemaVersion: z.literal(1),
       repoId: WorkRepoSchema.shape.id,
+      /** Only items carrying this label, case-insensitively (a role station's backlog). */
+      label: WorkItemLabelSchema.optional(),
     })
     .strict(),
   // `react` is the operator's own reaction only. An agent reacts through the
@@ -2648,6 +2707,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("set_persona_role"),
+      schemaVersion: z.literal(1),
+      persona: OperatorAgentPersonaSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("discord_rooms"),
       schemaVersion: z.literal(1),
       rooms: z.array(DiscordGuildRoomSchema).max(DISCORD_GUILD_ROOM_MAX),
@@ -2837,6 +2903,8 @@ export interface OperatorConversationServiceClient {
   personas?(): Promise<readonly OperatorAgentPersona[]>;
   /** Rename or restyle one character for every surface, including Discord. */
   updatePersona?(input: UpdateOperatorAgentPersona): Promise<OperatorAgentPersona>;
+  /** Assign or clear a persona's team role (ADR 0208). */
+  setPersonaRole?(personaId: string, role: OperatorAgentRole | null): Promise<OperatorAgentPersona>;
   /** Observable terminals in Herdr's native hierarchy; absent on older injected clients. */
   terminalCatalog?(): Promise<readonly OperatorTerminalSession[]>;
   /** Acquire, renew, or release the exclusive input lease on one terminal; absent on older injected clients. */
@@ -2879,7 +2947,7 @@ export interface OperatorConversationServiceClient {
   /** Repos registered for work tracking on this machine (ADR 0191). */
   workRepos?(): Promise<readonly WorkRepo[]>;
   /** One repo's work items, or why they cannot be read yet. */
-  workItems?(repoId: string): Promise<OperatorWorkItemsOutcome>;
+  workItems?(repoId: string, options?: { readonly label?: string }): Promise<OperatorWorkItemsOutcome>;
   /**
    * Put the operator's reaction on one transcript entry, or take it back off.
    * False when the entry is not in the conversation's retained log.
@@ -3001,6 +3069,13 @@ export function createOperatorConversationServiceClient(
       }
       return result.persona;
     },
+    async setPersonaRole(personaId, role) {
+      const result = await dispatch({ op: "set_persona_role", schemaVersion: 1, personaId, role });
+      if (result.op !== "set_persona_role") {
+        throw new Error(`Unexpected ${result.op} result for set_persona_role`);
+      }
+      return result.persona;
+    },
     async terminalCatalog() {
       const result = await dispatch({ op: "terminal_catalog", schemaVersion: 1 });
       if (result.op !== "terminal_catalog") {
@@ -3052,8 +3127,13 @@ export function createOperatorConversationServiceClient(
       if (result.op !== "work_repos") throw new Error(`Unexpected ${result.op} result for work_repos`);
       return result.repos;
     },
-    async workItems(repoId) {
-      const result = await dispatch({ op: "work_items", schemaVersion: 1, repoId });
+    async workItems(repoId, options) {
+      const result = await dispatch({
+        op: "work_items",
+        schemaVersion: 1,
+        repoId,
+        ...(options?.label === undefined ? {} : { label: options.label }),
+      });
       if (result.op !== "work_items") throw new Error(`Unexpected ${result.op} result for work_items`);
       return result.result;
     },

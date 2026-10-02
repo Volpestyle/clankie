@@ -670,6 +670,8 @@ paths:
         .clankie/work/ (ADR 0191). `action` is repos, discover, init, list, show, create,
         update or attach. A path names and registers a local repo; registered repos are
         readable from paired devices through the work_repos and work_items operator ops.
+        list takes optional status, owner and label (case-insensitive) filters; items carry
+        the backend's labels (ADR 0208).
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1552,6 +1554,12 @@ paths:
         contacts nor channel participants. Seats, channels, tallies and edges
         are unchanged. Omitting the selector preserves the full directory;
         `personas` and conversation IDs still address retained history.
+        `set_persona_role` (`personaId`, `role` one of planner, designer,
+        builder, tester, reviewer, researcher, or null to clear) returns the
+        updated persona and rides the steer grant (ADR 0208). Fleet seats may
+        carry `subagents` (running count and up to eight recent labels) for
+        local Claude seats that were hired or whose chat is open; absent means
+        unknown. `work_items` takes an optional case-insensitive `label`.
         `replay` optionally takes `direction: backward`, `turnLimit` (1..40,
         default 20) and `limit` (1..500, default 500 for backward). Omit `cursor`
         to open the newest window; pass the page's `previousCursor` as the next

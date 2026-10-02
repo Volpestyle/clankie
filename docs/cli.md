@@ -673,8 +673,13 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
 - `clankie work repos` lists the repos registered on this machine. A repo is
   registered the first time a local command names it; only registered repos are
   readable from a paired device.
-- `clankie work list [--status todo,in_progress] [--owner NAME]`,
-  `work show ID`.
+- `clankie work list [--status todo,in_progress] [--owner NAME] [--label L]`,
+  `work show ID`. `--label` keeps items carrying that label, matched
+  case-insensitively; it is how a role station reads its backlog
+  ([ADR 0208](adr/0208-agents-carry-a-role-the-world-reads-it.md)). Items carry
+  `labels` from the backend: Linear labels, GitHub labels (without the
+  `status: …` labels this backend writes), or a Markdown item's `labels:` front
+  matter (`[a, b]`, `a, b`, or a YAML block list).
 - `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
 [--status S]`.
 - `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]
@@ -1253,6 +1258,17 @@ with none. `clankie sessions` is also an alias for these CLI commands. Existing
 now opens the agents that are live, with offline agents that kept a thread behind
 one "Past agents" entry. `clankie agents contacts` returns every known identity,
 live or not, through the existing fleet API.
+
+`clankie agents role NAME|PERSONA_ID ROLE|none` assigns an agent's team role:
+`planner`, `designer`, `builder`, `tester`, `reviewer` or `researcher`; `none`
+clears it ([ADR 0208](adr/0208-agents-carry-a-role-the-world-reads-it.md)). A
+name must match exactly one agent, case-insensitively; otherwise pass the
+persona id from `agents contacts`. It prints the updated persona. The role is
+semantic, unlike the cosmetic `appearance.accessory`, and persists with the
+persona across seats. The same setting is the `set_persona_role` operator op
+(`{ personaId, role: ROLE | null }`, steer grant) and `hire_agent`'s optional
+`role`; `/agents role NAME ROLE` works in the TUI, and the `/agents` picker
+shows each live agent's role.
 
 The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
 (known identities), `/rooms` (group channels and Discord inspection), and

@@ -10,8 +10,11 @@ import {
   OperatorAgentPersonaSchema,
   OperatorSwarmContactSchema,
   type OperatorSwarmContact,
+  SetOperatorAgentPersonaRoleSchema,
   UpdateOperatorAgentPersonaSchema,
   type OperatorAgentPersona,
+  type OperatorAgentRole,
+  type SetOperatorAgentPersonaRole,
   type OperatorConversation,
   type OperatorFleetSeat,
   type UpdateOperatorAgentPersona,
@@ -108,7 +111,7 @@ export class PersonaStore {
   }
 
   /** Preserve the operator's chosen hire name before a terminal title can change. */
-  public adoptSpawn(observed: ObservedFleetSeat, name: string): OperatorFleetSeat {
+  public adoptSpawn(observed: ObservedFleetSeat, name: string, role?: OperatorAgentRole): OperatorFleetSeat {
     const previousRecords = new Map(this.records);
     const previousBindings = new Map(this.bindings);
     const { seat } = this.bindSeat(observed);
@@ -120,6 +123,8 @@ export class PersonaStore {
       personaId: seat.personaId,
       name,
       appearance: current.appearance,
+      // A move re-adopts the same character; it keeps the role it had.
+      ...((role ?? current.role) === undefined ? {} : { role: role ?? current.role }),
       harness: seat.harness,
       ...(current.avatarRevision === undefined ? {} : { avatarRevision: current.avatarRevision }),
       createdAt: current.createdAt,
@@ -244,6 +249,27 @@ export class PersonaStore {
     return updated;
   }
 
+  /** Assign or clear a character's team role (ADR 0208). */
+  public setRole(input: SetOperatorAgentPersonaRole): OperatorAgentPersona {
+    const parsed = SetOperatorAgentPersonaRoleSchema.parse(input);
+    const current = this.records.get(parsed.personaId);
+    if (current === undefined) throw new Error(`Unknown agent ${parsed.personaId}`);
+    const { role: _role, ...rest } = current;
+    const updated: OperatorAgentPersona = {
+      ...rest,
+      ...(parsed.role === null ? {} : { role: parsed.role }),
+      updatedAt: new Date().toISOString(),
+    };
+    this.records.set(parsed.personaId, updated);
+    try {
+      this.save();
+    } catch (error) {
+      this.records.set(parsed.personaId, current);
+      throw error;
+    }
+    return updated;
+  }
+
   public presentation(
     personaId: string,
     publicHostname: string | undefined,
@@ -346,6 +372,7 @@ export class PersonaStore {
       renamed: _renamed,
       paneId: _paneId,
       parentPaneId: _parentPaneId,
+      session: _session,
       ...seat
     } = observed;
     return {

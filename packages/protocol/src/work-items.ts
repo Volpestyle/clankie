@@ -43,6 +43,10 @@ export const WorkEvidenceSchema = z
   .strict();
 export type WorkEvidence = z.infer<typeof WorkEvidenceSchema>;
 
+export const WORK_ITEM_LABEL_MAX = 64;
+export const WORK_ITEM_LABELS_MAX = 20;
+export const WorkItemLabelSchema = z.string().max(WORK_ITEM_LABEL_MAX);
+
 export const WorkItemSchema = z
   .object({
     /** Backend-native id: `W-ab12cd`, a GitHub issue number `#42`, a Linear `VUH-123`. */
@@ -57,6 +61,12 @@ export const WorkItemSchema = z
     /** Where to open it: an issue URL, or the repo-relative file path. */
     location: z.string().max(2048),
     updatedAt: z.string().max(64).optional(),
+    /**
+     * The backend's own labels: Linear labels, GitHub labels, or a Markdown
+     * item's `labels:` front matter. A role station reads its backlog by one
+     * (ADR 0208). Absent from items and bodies that predate it.
+     */
+    labels: z.array(WorkItemLabelSchema).max(WORK_ITEM_LABELS_MAX).optional(),
   })
   .strict();
 export type WorkItem = z.infer<typeof WorkItemSchema>;

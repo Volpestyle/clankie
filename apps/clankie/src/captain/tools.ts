@@ -6,6 +6,7 @@ import {
   DrawSequenceDiagramRequestSchema,
   OPERATOR_SEAT_DIRECTORY_MAX,
   OPERATOR_SEAT_EFFORT_MAX,
+  OPERATOR_AGENT_ROLES,
   OPERATOR_SEAT_HARNESSES,
   OPERATOR_SEAT_MODEL_MAX,
   SpawnOperatorSeatSchema,
@@ -644,6 +645,12 @@ function hireAgentTool(
         }),
       ),
       title: Type.String({ minLength: 1, maxLength: 80, description: "What the roster calls it." }),
+      role: Type.Optional(
+        StringEnum(OPERATOR_AGENT_ROLES, {
+          description:
+            "Its team role, where the owner's world places it and whose backlog its station reads. Omit to leave it unassigned.",
+        }),
+      ),
       workingDirectory: Type.String({
         minLength: 1,
         maxLength: OPERATOR_SEAT_DIRECTORY_MAX,
@@ -761,7 +768,8 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
       label: "Work items",
       description:
         "Read work items in a repo, wherever that repo tracks work: its Linear team, its GitHub issues, its own " +
-        "Markdown directory, or .clankie/work/ when it has nothing. action=list (optionally by status or owner), " +
+        "Markdown directory, or .clankie/work/ when it has nothing. action=list (optionally by status, owner, or " +
+        "label, matched case-insensitively), " +
         "show one by id, or discover how the repo tracks work. If discovery finds more than one tracker it returns " +
         "a question: ask the owner once, then record the answer with work_item_write action=init.",
       parameters: Type.Object({
@@ -770,6 +778,7 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
         id: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
         status: Type.Optional(Type.Array(WORK_STATUS, { maxItems: 5 })),
         owner: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+        label: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
       }),
       execute: async (_id, params) => {
         const target = params.repo ?? "workspace";
@@ -784,6 +793,7 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
           repo: target,
           ...(params.status === undefined ? {} : { status: params.status }),
           ...(params.owner === undefined ? {} : { owner: params.owner }),
+          ...(params.label === undefined ? {} : { label: params.label }),
         });
       },
     }),

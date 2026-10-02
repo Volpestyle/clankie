@@ -103,3 +103,57 @@ it("reads known identities from the fleet API rather than the saved session inve
   expect(result).toEqual([]);
   expect(calls).toEqual([expect.objectContaining({ op: "fleet" })]);
 });
+
+it("assigns and clears a persona's role by name or id through set_persona_role", async () => {
+  const now = "2026-10-02T00:00:00.000Z";
+  const persona = {
+    schemaVersion: 1,
+    personaId: "agent-1",
+    name: "Pixel Smith",
+    appearance: { variant: "teal", accessory: "none", shape: "circle" },
+    harness: "claude",
+    createdAt: now,
+    updatedAt: now,
+  };
+  const twin = { ...persona, personaId: "agent-2", name: "Twin" };
+  const calls: Array<Record<string, unknown>> = [];
+  const options = {
+    env: { CLANKIE_CAPTAIN_TOKEN: "captain" },
+    fetchImpl: (async (_url, init) => {
+      const request = JSON.parse(init!.body as string);
+      calls.push(request);
+      if (request.op === "fleet")
+        return Response.json({
+          op: "fleet",
+          schemaVersion: 1,
+          snapshot: {
+            schemaVersion: 1,
+            cursor: "0",
+            seats: [],
+            personas: [persona, twin, { ...twin, personaId: "agent-3" }],
+            channels: [],
+          },
+        });
+      return Response.json({
+        op: "set_persona_role",
+        schemaVersion: 1,
+        persona: request.role === null ? persona : { ...persona, role: request.role },
+      });
+    }) as typeof fetch,
+  };
+  expect(await runAgentsCommand(["role", "pixel", "smith", "Designer"], options)).toMatchObject({
+    role: "designer",
+  });
+  expect(calls.at(-1)).toEqual({
+    op: "set_persona_role",
+    schemaVersion: 1,
+    personaId: "agent-1",
+    role: "designer",
+  });
+  await runAgentsCommand(["role", "agent-1", "none"], options);
+  expect(calls.at(-1)).toMatchObject({ personaId: "agent-1", role: null });
+  await expect(runAgentsCommand(["role", "agent-1", "wizard"], options)).rejects.toThrow("Unknown role");
+  await expect(runAgentsCommand(["role", "twin", "builder"], options)).rejects.toThrow("persona id");
+  await expect(runAgentsCommand(["role", "nobody", "builder"], options)).rejects.toThrow("No agent named");
+  await expect(runAgentsCommand(["role", "builder"], options)).rejects.toThrow("Usage");
+});

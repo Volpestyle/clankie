@@ -27,6 +27,12 @@ Recent rollout usage is the fallback if that query fails. Missing or stale usage
 not an empty plan. `hire_agent` can pin `account: "LABEL"`; the hire and roster
 report the chosen account. Registration changes apply to new hires only.
 
+`hire_agent` can also set `role` (planner, designer, builder, tester, reviewer,
+researcher): the owner's world places the agent at that station and reads its
+backlog from work items labelled with the role. `clankie agents role NAME
+ROLE|none` changes it later. Fleet seats you hired or opened report native
+Claude subagents as `subagents`; absent means unknown (ADR 0208).
+
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
 comes from turn events, and the owner can type into the same bound session.

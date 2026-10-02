@@ -3259,7 +3259,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           result: { outcome: "unavailable", message: "Work tracking is not running on this host" },
         });
       try {
-        const result = await dependencies.workItems.handle({ action: "list", repo: repoId }, false);
+        const label = parsed.data.label?.trim();
+        const result = await dependencies.workItems.handle(
+          { action: "list", repo: repoId, ...(label ? { label } : {}) },
+          false,
+        );
         if (!("items" in result)) throw new Error("unexpected work result");
         return context.json({
           op: "work_items",

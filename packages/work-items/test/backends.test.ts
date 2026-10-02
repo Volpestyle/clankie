@@ -297,3 +297,73 @@ describe("the GitHub REST client", () => {
     expect(failure).toBe("Error: GitHub GET /fail: HTTP 500");
   });
 });
+
+describe("work item labels (ADR 0208)", () => {
+  it("reads Markdown front matter labels in flow, comma and block form, and filters case-insensitively", async () => {
+    const root = await mkdtemp(join(tmpdir(), "work-labels-"));
+    await mkdir(join(root, "docs/tasks"), { recursive: true });
+    await writeFile(join(root, "docs/tasks/T-1-a.md"), '---\nlabels: [Designer, "ui polish"]\n---\n# A\n');
+    await writeFile(join(root, "docs/tasks/T-2-b.md"), "---\nlabels: builder, infra\nowner:\n---\n# B\n");
+    await writeFile(
+      join(root, "docs/tasks/T-3-c.md"),
+      "---\nlabels:\n  - designer\n  - research\nstatus: todo\n---\n# C\n",
+    );
+    await writeFile(join(root, "docs/tasks/T-4-d.md"), "# D\n");
+    const backend = createFilesBackend({ root, directory: "docs/tasks", kind: "markdown", clock });
+    const items = await backend.list();
+    expect(items.map((item) => item.labels)).toEqual([
+      ["Designer", "ui polish"],
+      ["builder", "infra"],
+      ["designer", "research"],
+      undefined,
+    ]);
+    expect(items[1]).not.toHaveProperty("owner");
+    expect((await backend.list({ label: "DESIGNER" })).map((item) => item.id)).toEqual(["T-1", "T-3"]);
+    // An update rewrites front matter without losing the list.
+    await backend.update("T-3", { status: "done" });
+    expect((await backend.get("T-3"))?.labels).toEqual(["designer", "research"]);
+  });
+
+  it("reads GitHub labels without the status labels the backend writes", async () => {
+    const issue = {
+      number: 5,
+      title: "Station art",
+      body: "",
+      state: "open",
+      html_url: "https://github.com/o/r/issues/5",
+      labels: [{ name: "Designer" }, "status: in progress", { name: "" }, "art"],
+    };
+    const gh: GhRunner = async () => JSON.stringify([[issue]]);
+    const backend = createGithubBackend({ repo: "o/r", gh });
+    const [item] = await backend.list({ label: "designer" });
+    expect(item).toMatchObject({ status: "in_progress", labels: ["Designer", "art"] });
+    expect(await backend.list({ label: "tester" })).toEqual([]);
+  });
+
+  it("asks Linear for labels and bounds them to the item contract", async () => {
+    const asked: Record<string, unknown>[] = [];
+    const backend = createLinearBackend({
+      team: "VUH",
+      call: async (tool, args) => {
+        asked.push({ tool, ...args });
+        return {
+          issues: [
+            {
+              id: "u1",
+              identifier: "VUH-1",
+              title: "Many labels",
+              labels: Array.from({ length: 25 }, (_, index) => `L${String(index)}${"x".repeat(80)}`),
+            },
+            { id: "u2", identifier: "VUH-2", title: "Builder work", labels: ["Builder", "Bug"] },
+            { id: "u3", identifier: "VUH-3", title: "Nested", labels: { nodes: [{ name: "builder" }] } },
+          ],
+        };
+      },
+    });
+    const all = await backend.list();
+    expect(asked[0]?.fields).toContain("labels");
+    expect(all[0]?.labels).toHaveLength(20);
+    expect(all[0]?.labels?.[0]).toHaveLength(64);
+    expect((await backend.list({ label: "builder" })).map((item) => item.id)).toEqual(["VUH-2", "VUH-3"]);
+  });
+});

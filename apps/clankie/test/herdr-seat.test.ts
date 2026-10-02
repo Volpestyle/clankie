@@ -113,6 +113,8 @@ describe("herdr session census", () => {
         subject: "release-prep-ab12",
         renamed: { name: "release-prep-ab12", from: expect.stringMatching(/^adhoc-[a-f0-9]{20}$/u) },
         occupantId: occupantIdForHerdrSession(session),
+        // Internal: the persona store strips it before the wire (ADR 0208).
+        session,
         harness: "codex",
         status: "idle",
         title: "",
@@ -127,6 +129,7 @@ describe("herdr session census", () => {
           kind: "id",
           value: "session-unmanaged",
         }),
+        session: { source: "herdr:claude", kind: "id", value: "session-unmanaged" },
         harness: "claude",
         status: "idle",
         title: "",

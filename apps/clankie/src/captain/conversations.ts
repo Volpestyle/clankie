@@ -67,6 +67,7 @@ type ConversationServiceRequest = Exclude<
   | { op: "state_stance" }
   | { op: "personas" }
   | { op: "update_persona" }
+  | { op: "set_persona_role" }
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "spawn_seat" }
@@ -87,6 +88,7 @@ type ConversationServiceResult = Exclude<
   | { op: "state_stance" }
   | { op: "personas" }
   | { op: "update_persona" }
+  | { op: "set_persona_role" }
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "spawn_seat" }

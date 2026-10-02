@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { WorkItemSchema } from "../src/work-items.ts";
 import type {
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
@@ -22,8 +23,12 @@ import {
   OPERATOR_CONVERSATION_REF_MAX,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   defaultOperatorAgentAppearance,
+  OPERATOR_AGENT_ROLES,
   OperatorAgentAppearanceSchema,
   OperatorAgentNameSchema,
+  OperatorAgentPersonaSchema,
+  OperatorFleetSeatSchema,
+  SpawnOperatorSeatSchema,
   OperatorConversationRecoverySchema,
   OperatorConversationRevisionConflictSchema,
   OperatorConversationSchema,
@@ -45,6 +50,63 @@ import {
 } from "../src/index.ts";
 
 describe("protocol", () => {
+  it("carries an optional semantic role, seat subagents and work item labels (ADR 0208)", () => {
+    const now = "2026-10-02T00:00:00.000Z";
+    const persona = {
+      schemaVersion: 1,
+      personaId: "agent-1",
+      name: "Smith",
+      appearance: { variant: "teal", accessory: "planner", shape: "circle" },
+      harness: "claude",
+      createdAt: now,
+      updatedAt: now,
+    };
+    expect(OperatorAgentPersonaSchema.parse({ ...persona, role: "designer" }).role).toBe("designer");
+    expect(OperatorAgentPersonaSchema.parse(persona)).not.toHaveProperty("role");
+    expect(() => OperatorAgentPersonaSchema.parse({ ...persona, role: "planner-ish" })).toThrow();
+    expect(
+      OperatorConversationServiceRequestSchema.parse({
+        op: "set_persona_role",
+        schemaVersion: 1,
+        personaId: "agent-1",
+        role: null,
+      }),
+    ).toMatchObject({ role: null });
+    const seat = {
+      seatId: "term-1",
+      occupantId: "o",
+      personaId: "agent-1",
+      harness: "claude",
+      status: "working",
+      title: "t",
+    };
+    expect(
+      OperatorFleetSeatSchema.parse({
+        ...seat,
+        subagents: { running: 1, recent: [{ label: "Map the app", status: "running" }] },
+      }).subagents?.running,
+    ).toBe(1);
+    expect(() =>
+      OperatorFleetSeatSchema.parse({
+        ...seat,
+        subagents: { running: 0, recent: Array(9).fill({ label: "x", status: "done" }) },
+      }),
+    ).toThrow();
+    expect(SpawnOperatorSeatSchema.shape.role.unwrap().options).toEqual([...OPERATOR_AGENT_ROLES]);
+    const item = {
+      id: "W-1",
+      title: "T",
+      status: "todo",
+      dependsOn: [],
+      summary: "",
+      criteria: [],
+      evidence: [],
+      location: "x",
+    };
+    expect(WorkItemSchema.parse({ ...item, labels: ["designer"] }).labels).toEqual(["designer"]);
+    expect(() => WorkItemSchema.parse({ ...item, labels: ["x".repeat(65)] })).toThrow();
+  });
+
   it("bounds durable personas separately from the live-seat roster", () => {
     const personas = Array.from({ length: OPERATOR_FLEET_ROSTER_MAX + 1 }, (_, index) => ({
       schemaVersion: 1 as const,

@@ -7,7 +7,7 @@ import { commandHost } from "./io.ts";
 const WORK_USAGE = [
   "Usage: clankie work [status|discover] | repos | init [--backend default|markdown|github|linear] [--directory D]",
   "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--note TEXT]",
-  "  | list [--status S,S] [--owner O] | show ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S]",
+  "  | list [--status S,S] [--owner O] [--label L] | show ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S]",
   "  | update ID [--status S] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
@@ -91,6 +91,7 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         repo,
         ...(status === undefined ? {} : { status: status.split(",").map((value) => value.trim()) }),
         ...(one(parsed, "--owner") === undefined ? {} : { owner: one(parsed, "--owner") }),
+        ...(one(parsed, "--label") === undefined ? {} : { label: one(parsed, "--label") }),
       };
     case "show":
       if (rest[0] === undefined) throw new Error(WORK_USAGE);

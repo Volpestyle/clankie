@@ -1,9 +1,11 @@
-import type {
-  WorkBackendKind,
-  WorkCriterion,
-  WorkEvidence,
-  WorkItem,
-  WorkItemStatus,
+import {
+  WORK_ITEM_LABEL_MAX,
+  WORK_ITEM_LABELS_MAX,
+  type WorkBackendKind,
+  type WorkCriterion,
+  type WorkEvidence,
+  type WorkItem,
+  type WorkItemStatus,
 } from "@clankie/protocol/work-items";
 
 export interface WorkItemDraft {
@@ -33,6 +35,8 @@ export interface WorkItemPatch {
 export interface WorkListFilter {
   readonly status?: readonly WorkItemStatus[];
   readonly owner?: string;
+  /** Items carrying this label, case-insensitively (ADR 0208). */
+  readonly label?: string;
   readonly limit?: number;
 }
 
@@ -86,5 +90,21 @@ export function matchesFilter(item: WorkItem, filter: WorkListFilter | undefined
   if (filter?.status !== undefined && filter.status.length > 0 && !filter.status.includes(item.status))
     return false;
   if (filter?.owner !== undefined && item.owner !== filter.owner) return false;
+  if (filter?.label !== undefined) {
+    const wanted = filter.label.trim().toLowerCase();
+    if (!(item.labels ?? []).some((label) => label.trim().toLowerCase() === wanted)) return false;
+  }
   return true;
+}
+
+/** A backend's label names as the item contract bounds them: trimmed, deduped, at most 20 of 64 chars. */
+export function workItemLabels(names: readonly unknown[]): { labels?: string[] } {
+  const labels = [
+    ...new Set(
+      names
+        .map((name) => (typeof name === "string" ? name.trim().slice(0, WORK_ITEM_LABEL_MAX) : ""))
+        .filter((name) => name.length > 0),
+    ),
+  ].slice(0, WORK_ITEM_LABELS_MAX);
+  return labels.length === 0 ? {} : { labels };
 }

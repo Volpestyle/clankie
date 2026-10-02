@@ -158,6 +158,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               serviceRequest.op === "move_seat" ||
               serviceRequest.op === "channel" ||
               serviceRequest.op === "update_persona" ||
+              serviceRequest.op === "set_persona_role" ||
               serviceRequest.op === "discord_rooms"
             ? // Hiring is at least as consequential as closing: it starts a
               // process on the operator's machine. Moving is both at once — it

@@ -4,6 +4,7 @@ import {
   patchCriteria,
   touchesCriteria,
   WorkItemNotFoundError,
+  workItemLabels,
   type WorkBackend,
   type WorkItemPatch,
 } from "../backend.ts";
@@ -149,6 +150,8 @@ export function createGithubBackend(
       evidence: parsed.evidence,
       location: issue.html_url,
       ...(issue.updated_at === undefined ? {} : { updatedAt: issue.updated_at }),
+      // The status labels this backend writes are its status, not the item's labels.
+      ...workItemLabels(labelNames(issue).filter((name) => !Object.values(STATUS_LABELS).includes(name))),
     });
   };
 

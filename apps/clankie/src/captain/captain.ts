@@ -115,6 +115,7 @@ import {
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import { PersonaStore } from "./personas.ts";
+import { withSeatSubagents } from "./seat-subagents.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
@@ -1632,7 +1633,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const result = await herdrWatches.spawnSeat(request, undefined, brief, resume);
     if (result.outcome !== "spawned") return result;
     const title = resume === undefined ? request.title : result.seat.title;
-    const seat = personas.adoptSpawn(result.seat, title);
+    const seat = personas.adoptSpawn(result.seat, title, request.role);
     conversations.bindPersona(seat.personaId, seat.seatId, title);
     liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
     seatByPersona.set(seat.personaId, seat.seatId);
@@ -1709,6 +1710,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   let swarmRoster = "";
+  let seatSubagents = "";
   let swarmTasks: readonly SwarmTaskView[] = [];
   let swarmTaskBoard = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
@@ -1719,7 +1721,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         : await readFleet({ fleets: censusFleets, ...(binding ? { herdrSession: binding.session } : {}) });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
-    const seats = personas.reconcile(fleet.seats);
+    const seats = withSeatSubagents(
+      personas.reconcile(fleet.seats),
+      fleet.seats,
+      (seat) =>
+        conversations.conversationIdForPersona(seat.personaId) !== undefined ||
+        conversations.conversationIdForSeat(seat.seatId) !== undefined,
+    );
+    // A subagent starting or finishing is a roster change the long poll reports.
+    const nextSubagents = JSON.stringify(seats.map((seat) => seat.subagents ?? null));
+    if (seatSubagents !== nextSubagents) {
+      seatSubagents = nextSubagents;
+      fleetChanges.touch();
+    }
     const peers = (await options.swarm?.contacts()) ?? [];
     personas.reconcileSwarm(peers);
     const nextSwarmRoster = JSON.stringify(peers);
@@ -2555,6 +2569,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         fleetChanges.touch();
         return {
           op: "update_persona",
+          schemaVersion: 1,
+          persona: {
+            ...updated,
+            ...(seatByPersona.has(updated.personaId)
+              ? { activeSeatId: seatByPersona.get(updated.personaId)! }
+              : {}),
+            conversationId: conversations.conversationIdForPersona(updated.personaId),
+          },
+        };
+      }
+      if (request.op === "set_persona_role") {
+        const updated = personas.setRole({
+          schemaVersion: 1,
+          personaId: request.personaId,
+          role: request.role,
+        });
+        fleetChanges.touch();
+        return {
+          op: "set_persona_role",
           schemaVersion: 1,
           persona: {
             ...updated,

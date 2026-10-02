@@ -12,6 +12,20 @@ it("limits hosted device authority to explicit routes and validated conversation
     hostedOperatorAllows(
       "POST",
       "/operator/v1/dispatch",
+      JSON.stringify({ op: "set_persona_role", schemaVersion: 1, personaId: "agent-1", role: "designer" }),
+    ),
+  ).toBe(true);
+  expect(
+    hostedOperatorAllows(
+      "POST",
+      "/operator/v1/dispatch",
+      JSON.stringify({ op: "set_persona_role", schemaVersion: 1, personaId: "agent-1", role: "wizard" }),
+    ),
+  ).toBe(false);
+  expect(
+    hostedOperatorAllows(
+      "POST",
+      "/operator/v1/dispatch",
       JSON.stringify({
         op: "reset",
         schemaVersion: 1,

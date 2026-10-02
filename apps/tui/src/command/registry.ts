@@ -47,6 +47,8 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["agents", "sessions"],
     lines: [
       "  agents contacts          Known agent identities and availability (JSON)",
+      "  agents role NAME|ID ROLE|none",
+      "                           Assign planner|designer|builder|tester|reviewer|researcher (JSON)",
       "  sessions                 Alias for agents session commands",
       "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",
       "  agents resume HOST:SESSION [--fleet ID] [--brief TEXT]",
@@ -200,7 +202,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["work"],
     lines: [
-      "  work [status] | repos | init [--backend B ...] | list [--status S] [--owner O] | show ID",
+      "  work [status] | repos | init [--backend B ...] | list [--status S] [--owner O] [--label L] | show ID",
       "  work create TITLE [--criterion C]... | update ID [--status S] [--check N]... | close ID",
       "  work attach ID --url URL --caption TEXT [--kind K]   [--repo PATH on any command]",
       "                           Track work in the repo's own convention, with evidence (JSON)",

@@ -27,3 +27,10 @@ toward the host's 4 MiB read cap. A cursor carries the session, the byte offset 
 a hash of the bytes before it, so a page after it detects a replaced file and
 restarts from the tail. Pages re-read 256 KiB before the cursor so tool results and
 Claude's parent chain resolve, and report only entries that changed.
+
+`subagents.ts` derives a seat's native subagents (Claude Code `Agent`/`Task`
+calls, including background calls closed by their `<task-notification>`) for the
+fleet roster ([ADR 0208](../../docs/adr/0208-agents-carry-a-role-the-world-reads-it.md)).
+It tails the session incrementally from at most 2 MiB before the end and keeps
+only labels and states, never content. The service calls it only for local seats
+it already has an address for (ADR 0188).

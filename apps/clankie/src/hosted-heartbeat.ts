@@ -14,6 +14,7 @@ const WORK_OPS = new Set([
   "cancel",
   "channel",
   "update_persona",
+  "set_persona_role",
   "react",
   "close_seat",
   "spawn_seat",

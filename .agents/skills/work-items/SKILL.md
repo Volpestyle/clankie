@@ -23,14 +23,17 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 | How does this repo track work? | `clankie work` (discover: signals, convention, or a question) |
 | Record the answer once         | `clankie work init` (discovered) or `init --backend B ...`    |
 | What is open?                  | `clankie work list --status todo,in_progress`                 |
+| One role's backlog             | `clankie work list --label designer` (case-insensitive)       |
 | One item                       | `clankie work show ID`                                        |
 | New item                       | `clankie work create "Title" --criterion "..." --owner NAME`  |
 | Progress                       | `clankie work update ID --status in_progress --check 1`       |
 | Finished                       | `clankie work close ID` (`--canceled` if dropped)             |
 | Evidence                       | `clankie work attach ID --url URL --caption "what it proves"` |
 
-Statuses: `todo`, `in_progress`, `in_review`, `done`, `canceled`. Criterion
-numbers are 1-based. Clankie himself has the same contract as the `work_items`
+Statuses: `todo`, `in_progress`, `in_review`, `done`, `canceled`. Items carry
+the backend's `labels` (Linear, GitHub, or Markdown `labels:` front matter);
+label an item with a role name (`designer`, `builder`, …) to put it on that
+role's station in the owner's world. Criterion numbers are 1-based. Clankie himself has the same contract as the `work_items`
 and `work_item_write` tools.
 
 ## Rules

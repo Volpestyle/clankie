@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -148,5 +148,27 @@ describe("the work routes", () => {
       })
     ).json()) as { result: { outcome: string } };
     expect(unknown.result.outcome).toBe("unavailable");
+
+    // A role station reads its backlog by label (ADR 0208).
+    const [file] = readdirSync(join(workspace, ".clankie/work"));
+    const path = join(workspace, ".clankie/work", file!);
+    writeFileSync(path, readFileSync(path, "utf8").replace(/^---\n/u, "---\nlabels: [Designer]\n"));
+    const station = async (label: string) =>
+      (
+        (await (
+          await post(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+            op: "work_items",
+            schemaVersion: 1,
+            repoId: "workspace",
+            label,
+          })
+        ).json()) as { result: { items: { title: string; labels?: string[] }[] } }
+      ).result.items;
+    expect(await station("designer")).toMatchObject([{ title: "Seen from the phone", labels: ["Designer"] }]);
+    expect(await station("builder")).toEqual([]);
+    const cli = (await (
+      await post("/v1/work", { action: "list", repo: workspace, label: "DESIGNER" })
+    ).json()) as { items: unknown[] };
+    expect(cli.items).toHaveLength(1);
   });
 });

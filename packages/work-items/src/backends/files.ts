@@ -6,6 +6,7 @@ import {
   patchCriteria,
   touchesCriteria,
   WorkItemNotFoundError,
+  workItemLabels,
   type WorkBackend,
   type WorkItemDraft,
   type WorkItemPatch,
@@ -32,10 +33,28 @@ function parseFile(path: string, text: string): FileItem {
   const match = FRONT.exec(text.replace(/\r\n?/gu, "\n"));
   const fields = new Map<string, string>();
   if (match) {
+    let list: { key: string; items: string[] } | undefined;
+    const closeList = () => {
+      // An empty value with no items stays empty, as it always read.
+      if (list !== undefined)
+        fields.set(list.key, list.items.length === 0 ? "" : `[${list.items.join(", ")}]`);
+      list = undefined;
+    };
     for (const line of match[1]!.split("\n")) {
+      // A YAML block list (`labels:` then `  - a`) folds into the flow form.
+      const item = list === undefined ? null : /^\s+-\s+(.*)$/u.exec(line);
+      if (item) {
+        list!.items.push(item[1]!.trim());
+        continue;
+      }
+      closeList();
       const pair = /^([A-Za-z_]+):\s*(.*)$/u.exec(line);
-      if (pair) fields.set(pair[1]!.toLowerCase(), unquote(pair[2]!.trim()));
+      if (!pair) continue;
+      const key = pair[1]!.toLowerCase();
+      if (pair[2]!.trim() === "") list = { key, items: [] };
+      else fields.set(key, unquote(pair[2]!.trim()));
     }
+    closeList();
   }
   return { path, fields, body: match ? text.slice(match[0].length) : text };
 }
@@ -44,7 +63,19 @@ function unquote(value: string): string {
   return /^".*"$/u.test(value) ? (JSON.parse(value) as string) : value;
 }
 
+/** `labels: [a, "b c"]` or `labels: a, b`. */
+function listField(raw: string | undefined): string[] {
+  if (raw === undefined) return [];
+  const inner = /^\[(.*)\]$/su.exec(raw.trim())?.[1] ?? raw;
+  return inner
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => (/^(["']).*\1$/u.test(value) ? value.slice(1, -1) : value));
+}
+
 function quote(value: string): string {
+  if (/^\[[^\]\n]*\]$/u.test(value)) return value;
   return /^[\w .,/@:+()-]*$/u.test(value) && !/^\s|\s$|:\s/u.test(value) ? value : JSON.stringify(value);
 }
 
@@ -112,6 +143,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       evidence: parsed.evidence,
       location: relative(root, file.path),
       ...(file.fields.get("updated") === undefined ? {} : { updatedAt: file.fields.get("updated")! }),
+      ...workItemLabels(listField(file.fields.get("labels"))),
     });
   };
 

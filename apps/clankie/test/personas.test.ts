@@ -57,6 +57,43 @@ describe("PersonaStore", () => {
     expect(restarted.reconcile([{ ...seat, occupantId: OCCUPANT_TWO }])[0]?.account).toBeUndefined();
   });
 
+  it("persists a role from the hire or the owner, keeps it across a move, and clears it", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-role-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const seat = store.adoptSpawn(observed("term-1"), "Smith", "designer");
+    const persona = () => store.all([], () => undefined).find((entry) => entry.personaId === seat.personaId);
+    expect(persona()?.role).toBe("designer");
+    // A move re-adopts under the same name without naming a role.
+    store.adoptSpawn(observed("term-2"), "Smith");
+    expect(persona()?.role).toBe("designer");
+    expect(store.setRole({ schemaVersion: 1, personaId: seat.personaId, role: "builder" }).role).toBe(
+      "builder",
+    );
+    expect(
+      new PersonaStore(root).all([], () => undefined).find((entry) => entry.personaId === seat.personaId)
+        ?.role,
+    ).toBe("builder");
+    expect(store.setRole({ schemaVersion: 1, personaId: seat.personaId, role: null })).not.toHaveProperty(
+      "role",
+    );
+    expect(() => store.setRole({ schemaVersion: 1, personaId: "agent-missing", role: "tester" })).toThrow(
+      "Unknown agent",
+    );
+    expect(() =>
+      store.setRole({ schemaVersion: 1, personaId: seat.personaId, role: "wizard" as "tester" }),
+    ).toThrow();
+  });
+
+  it("never puts the internal harness session on a wire seat", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-session-"));
+    roots.push(root);
+    const [seat] = new PersonaStore(root).reconcile([
+      { ...observed("term-1"), session: { source: "herdr:claude", kind: "id", value: "abc" } },
+    ]);
+    expect(seat).not.toHaveProperty("session");
+  });
+
   it("carries the character across a Herdr rename instead of minting a stranger", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
     roots.push(root);
