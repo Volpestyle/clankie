@@ -77,7 +77,8 @@ export async function buildLaneToolBank(
   ).map((tool) => authoredLaneTool(tool, turn));
   const browser = await deps.browser.catalog();
   for (const tool of browser.available ? browser.tools : []) {
-    tools.push(browserLaneTool(deps, turn, tool));
+    if (tool.requiresShell && lane !== "operator" && turn.shell !== true) continue;
+    tools.push(browserLaneTool(deps, turn, tool, lane === "operator" || turn.shell === true));
   }
   for (const tool of await deps.mcp.catalog(lane)) tools.push(mcpLaneTool(deps, lane, tool));
   if (lane === "operator") tools.push(...swarmTools.map((tool) => authoredLaneTool(tool, turn)));
@@ -119,13 +120,22 @@ function authoredLaneTool(tool: ToolDefinition, turn: TurnContext): LaneTool {
 }
 
 /** Browser tools carry artifacts the same way `browserExtension` does. */
-function browserLaneTool(deps: CaptainDeps, turn: TurnContext, tool: BrowserToolDescriptor): LaneTool {
+function browserLaneTool(
+  deps: CaptainDeps,
+  turn: TurnContext,
+  tool: BrowserToolDescriptor,
+  shell: boolean,
+): LaneTool {
   return {
     name: `browser_${tool.name}`,
     description: tool.description,
     inputSchema: tool.inputSchema,
     async call(args) {
-      const result = await deps.browser.call({ schemaVersion: 1, tool: tool.name, arguments: args });
+      const result = await deps.browser.call(
+        { schemaVersion: 1, tool: tool.name, arguments: args },
+        undefined,
+        { shell },
+      );
       if (result.outcome === "ok" && result.isError) {
         return { content: [{ type: "text", text: result.content }], isError: true };
       }

@@ -218,6 +218,7 @@ const HEADLESS_COMMAND_HELP = [
       "  browser [status] | record on|off  Save each burst of his browsing as a WebM (JSON)",
       "  browser harnesses | delegate on|off",
       "                           Computer-use harnesses he can hire, and whether he is offered them (JSON)",
+      "  browser tools | call TOOL JSON  Inspect or call Browser Use Pi tools",
     ],
   },
   {

@@ -2429,6 +2429,7 @@ paths:
       tags: [Browser]
       operationId: getBrowserTools
       summary: Live browser tool catalog
+      description: Browser Use Pi tools; native JavaScript is listed only for operators.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       responses:
         "200":
@@ -2441,7 +2442,7 @@ paths:
       tags: [Browser]
       operationId: postBrowserCall
       summary: Call a browser tool
-      description: Calls one raw `agent-browser` MCP tool from the live catalog.
+      description: Calls one Browser Use Pi tool. Native JavaScript requires operator authentication; captain bearers may use browser-only operations.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       requestBody:
         required: true
@@ -2449,7 +2450,7 @@ paths:
           application/json:
             example:
               schemaVersion: 1
-              tool: agent_browser_snapshot
+              tool: browser_use_snapshot
               arguments: {}
       responses:
         "200":

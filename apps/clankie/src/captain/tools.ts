@@ -1563,13 +1563,14 @@ export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): Inl
 }
 
 const INITIAL_BROWSER_TOOLS = new Set([
-  "agent_browser_open",
-  "agent_browser_read",
-  "agent_browser_snapshot",
-  "agent_browser_click",
-  "agent_browser_fill",
-  "agent_browser_screenshot",
-  "agent_browser_get_url",
+  "browser_use_open",
+  "browser_use_javascript",
+  "browser_use_read",
+  "browser_use_snapshot",
+  "browser_use_click",
+  "browser_use_fill",
+  "browser_use_screenshot",
+  "browser_use_close",
 ]);
 const BROWSER_TOOL_SEARCH = "browser_tool_search";
 
@@ -1594,6 +1595,7 @@ export function browserExtension(deps: CaptainDeps, turn: TurnContext): InlineEx
 
       const registeredNames = new Set<string>();
       for (const tool of catalog.tools) {
+        if (tool.requiresShell && turn.shell !== true) continue;
         const name = `browser_${tool.name}`;
         registeredNames.add(name);
         pi.registerTool({
@@ -1603,11 +1605,15 @@ export function browserExtension(deps: CaptainDeps, turn: TurnContext): InlineEx
           parameters: (tool.inputSchema ?? Type.Object({})) as TSchema,
           executionMode: "sequential",
           execute: async (_id, params) => {
-            const result = await deps.browser.call({
-              schemaVersion: 1,
-              tool: tool.name,
-              arguments: (params ?? {}) as Record<string, unknown>,
-            });
+            const result = await deps.browser.call(
+              {
+                schemaVersion: 1,
+                tool: tool.name,
+                arguments: (params ?? {}) as Record<string, unknown>,
+              },
+              undefined,
+              { shell: turn.shell === true },
+            );
             if (result.outcome === "ok" && result.isError) {
               throw new Error(result.content || `${tool.name} failed`);
             }
@@ -1638,9 +1644,9 @@ export function browserExtension(deps: CaptainDeps, turn: TurnContext): InlineEx
             .split(/[^a-z0-9]+/u)
             .filter(Boolean);
           const matches = catalog.tools
+            .filter((tool) => !tool.requiresShell || turn.shell === true)
             .filter((tool) => {
-              const haystack =
-                `${tool.name.replace(/^agent_browser_/u, "")} ${tool.description}`.toLowerCase();
+              const haystack = `${tool.name.replace(/^browser_use_/u, "")} ${tool.description}`.toLowerCase();
               return terms.every((term) => haystack.includes(term));
             })
             .slice(0, params.limit ?? 5)
@@ -1656,6 +1662,7 @@ export function browserExtension(deps: CaptainDeps, turn: TurnContext): InlineEx
         const keep = pi.getActiveTools().filter((name) => !registeredNames.has(name));
         const initial = catalog.tools
           .filter((tool) => INITIAL_BROWSER_TOOLS.has(tool.name))
+          .filter((tool) => !tool.requiresShell || turn.shell === true)
           .map((tool) => `browser_${tool.name}`);
         pi.setActiveTools([...new Set([...keep, ...initial, BROWSER_TOOL_SEARCH])]);
       });

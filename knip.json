@@ -33,9 +33,6 @@
         "/clankie/*": ["./*"]
       }
     },
-    "apps/clankie": {
-      "entry": ["test/fixtures/browser-mcp-server.mjs"]
-    },
     "apps/discord-user-session": {
       "entry": ["src/presence-runtime-module.ts"]
     },

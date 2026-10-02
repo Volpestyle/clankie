@@ -81,8 +81,14 @@ selects an existing session; `clankie herdr create` selects Clankie’s own.
 Restart Clankie to apply. `clankie-herdr` opens the running fleet without owning its lifetime.
 The Clankie TUI works inside vanilla Herdr in either distribution.
 
-Optional integrations such as cloudflared and external browser tools remain
-external executables. Clankie's own herdr plugin declaration ships under
+Browser Use Pi ships with its JavaScript worker and dependency graph intact;
+the worker is launched from a sibling file and cannot be flattened into the
+service bundle. Chrome and FFmpeg remain external executables. Set
+`CLANKIE_RELEASE_SMOKE_BROWSER=1` to exercise the packaged SDK against local
+Chrome during release smoke.
+
+Optional integrations such as cloudflared remain external executables.
+Clankie's own herdr plugin declaration ships under
 `integrations/herdr-plugin` so it can be linked without a git checkout.
 `clankie doctor` reports whether this tree is a release or a checkout, which
 models and credentials are configured, and whether those optional commands

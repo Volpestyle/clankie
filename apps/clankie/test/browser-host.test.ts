@@ -1,360 +1,250 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BrowserUse, CDP, Page, CellError, type BrowserUseOptions } from "@browser_use/pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  browserEnabled,
-  createBrowserHost,
-  type BrowserHost,
-  type BrowserHostOptions,
-} from "../src/browser-host.ts";
+import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
+import { startBrowserRecording } from "../src/browser-recording.ts";
 
-const logger = { info: () => undefined, warn: () => undefined };
+vi.mock("../src/browser-recording.ts", () => ({ startBrowserRecording: vi.fn() }));
 
-interface FakeServerOptions {
-  tools?: { name: string; description?: string; inputSchema?: unknown }[];
-  toolPages?: { name: string; description?: string; inputSchema?: unknown }[][];
-  callResult?: {
-    content: { type: string; text?: string; data?: string; mimeType?: string }[];
-    isError?: boolean;
-  };
-  callDelayMs?: number;
-  statsPath?: string;
-  eventsPath?: string;
-  failClose?: boolean;
-  failRecording?: boolean;
+const logger = { info: vi.fn(), warn: vi.fn() };
+const jpeg = Buffer.from("test screenshot bytes");
+let stateRoot: string;
+let host: BrowserHost | undefined;
+const execute = vi.fn(async () => ({ text: "cell result", images: [], targetId: "tab-1" }));
+const close = vi.fn(async () => {});
+const page = {
+  targetId: "tab-1",
+  sessionId: "session-1",
+  goto: vi.fn(async () => ({ url: "https://example.com", title: "Example" })),
+  info: vi.fn(async () => ({ url: "https://example.com", title: "Example" })),
+  evaluate: vi.fn(async () => "Page text"),
+  snapshot: vi.fn(async () => ({ nodes: [] })),
+  screenshot: vi.fn(async () => jpeg),
+  cdp: vi.fn(async () => ({})),
+  clickAt: vi.fn(async () => {}),
+};
+
+beforeEach(async () => {
+  vi.clearAllMocks();
+  execute.mockImplementation(async () => ({ text: "cell result", images: [], targetId: "tab-1" }));
+  stateRoot = await mkdtemp(join(tmpdir(), "clankie-browser-unit-"));
+  vi.spyOn(BrowserUse, "create").mockImplementation(async (options: BrowserUseOptions) => {
+    const browser = options.browser;
+    if (!browser || !("profileDir" in browser) || !browser.profileDir)
+      throw new Error("private profile required");
+    await writeFile(join(browser.profileDir, "DevToolsActivePort"), "1234\n/devtools/browser/test");
+    return { execute, close } as unknown as BrowserUse;
+  });
+  vi.spyOn(CDP, "connect").mockResolvedValue({
+    close: vi.fn(),
+    send: vi.fn(async () => ({})),
+  } as unknown as CDP);
+  vi.spyOn(Page, "attach").mockResolvedValue(page as unknown as Page);
+});
+
+afterEach(async () => {
+  await host?.close();
+  host = undefined;
+  vi.restoreAllMocks();
+  await rm(stateRoot, { recursive: true, force: true });
+});
+
+async function build(idleMs = 60_000) {
+  host = await createBrowserHost({ stateRoot, attachmentRoot: stateRoot, logger, idleMs });
+  return host;
 }
-
-const fakeServerPath = join(import.meta.dirname, "fixtures", "browser-mcp-server.mjs");
-
-describe("browserEnabled", () => {
-  it("defaults on so an unconfigured service still has a browser", () => {
-    expect(browserEnabled(undefined)).toBe(true);
-    expect(browserEnabled("")).toBe(true);
-    expect(browserEnabled("   ")).toBe(true);
-  });
-
-  it("stays off only when the operator says so", () => {
-    for (const value of ["0", "false", "no", "off", "FALSE", " Off "]) {
-      expect(browserEnabled(value), value).toBe(false);
-    }
-    for (const value of ["1", "true", "yes", "on", "TRUE"]) {
-      expect(browserEnabled(value), value).toBe(true);
-    }
-  });
+const open = (headed?: boolean) => ({
+  schemaVersion: 1 as const,
+  tool: "browser_use_open",
+  arguments: headed === undefined ? {} : { headed },
+});
+const code = () => ({
+  schemaVersion: 1 as const,
+  tool: "browser_use_javascript",
+  arguments: { code: "console.log(await page.info())" },
 });
 
 describe("browser host", () => {
-  let stateRoot: string;
-  let host: BrowserHost | undefined;
-
-  beforeEach(async () => {
-    stateRoot = await mkdtemp(join(tmpdir(), "clankie-browser-"));
+  it("defaults enabled, with explicit opt-out", () => {
+    for (const value of [undefined, "", "true", "yes"]) expect(browserEnabled(value)).toBe(true);
+    for (const value of ["0", "false", " Off ", "NO"]) expect(browserEnabled(value)).toBe(false);
   });
-
-  afterEach(async () => {
-    await host?.close();
-    host = undefined;
-    await rm(stateRoot, { recursive: true, force: true });
-  });
-
-  async function build(
-    server: FakeServerOptions,
-    blockedTools: readonly string[] = [],
-    options: Partial<BrowserHostOptions> = {},
-  ): Promise<BrowserHost> {
-    const executable = join(stateRoot, "agent-browser.mjs");
-    await writeFile(
-      executable,
-      `#!${process.execPath}\nprocess.argv.splice(2, 0, ${JSON.stringify(JSON.stringify(server))});\nawait import(${JSON.stringify(pathToFileURL(fakeServerPath).href)});\n`,
+  it("exposes the SDK catalog without launching Chrome during discovery", async () => {
+    const current = await build();
+    expect((await current.catalog()).tools).toContainEqual(
+      expect.objectContaining({ name: "browser_use_javascript", requiresShell: true }),
     );
-    await chmod(executable, 0o755);
+    expect(BrowserUse.create).not.toHaveBeenCalled();
+  });
+  it("refuses Node execution without host-stamped machine authority, including forged arguments", async () => {
+    const current = await build();
+    for (const arguments_ of [code().arguments, { ...code().arguments, shell: true }]) {
+      expect(await current.call({ ...code(), arguments: arguments_ })).toMatchObject({
+        outcome: "refused",
+        reason: "approval_required",
+      });
+    }
+    expect(execute).not.toHaveBeenCalled();
+    expect(await current.call(code(), undefined, { shell: true })).toMatchObject({
+      outcome: "ok",
+      content: "cell result",
+    });
+  });
+  it("keeps browser-only evaluation out of the Node REPL", async () => {
+    const current = await build();
+    const expression = "document.title";
+    await current.call({ schemaVersion: 1, tool: "browser_use_evaluate", arguments: { expression } });
+    expect(page.evaluate).toHaveBeenCalledWith(expression);
+    expect(execute).toHaveBeenCalledTimes(1); // Host-authored initialization only.
+  });
+  it("reuses a private persistent SDK session and preserves long page text", async () => {
+    const current = await build();
+    page.evaluate.mockResolvedValueOnce("useful text ".repeat(6000));
+    expect(
+      await current.call({
+        schemaVersion: 1,
+        tool: "browser_use_read",
+        arguments: { url: "https://example.com" },
+      }),
+    ).toMatchObject({ content: "useful text ".repeat(6000) });
+    await current.call(code(), undefined, { shell: true });
+    expect(BrowserUse.create).toHaveBeenCalledTimes(1);
+    expect(BrowserUse.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        telemetry: false,
+        workspace: join(stateRoot, "browser", "workspace"),
+        browser: expect.objectContaining({
+          profileDir: join(stateRoot, "browser", "profile"),
+          headless: true,
+        }),
+      }),
+    );
+  });
+  it("saves screenshots as hash-bound artifacts", async () => {
+    const current = await build();
+    const result = await current.call({ schemaVersion: 1, tool: "browser_use_screenshot", arguments: {} });
+    const digest = createHash("sha256").update(jpeg).digest("hex");
+    expect(result).toMatchObject({
+      outcome: "ok",
+      artifacts: [{ artifactRef: `sha256:${digest}:browser/${digest}.jpg`, mimeType: "image/jpeg" }],
+    });
+    expect(await readFile(join(stateRoot, "browser", `${digest}.jpg`))).toEqual(jpeg);
+  });
+  it("resets the session on headed changes and returns to headless after idle", async () => {
+    const current = await build(20);
+    await current.call(open());
+    await current.call(open(true));
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(BrowserUse.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ browser: expect.objectContaining({ headless: false }) }),
+    );
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+    await current.call(open());
+    expect(BrowserUse.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ browser: expect.objectContaining({ headless: true }) }),
+    );
+  });
+  it("drains accepted calls before shutdown and rejects later calls", async () => {
+    const current = await build();
+    const first = current.call(open());
+    const second = current.call(code(), undefined, { shell: true });
+    const stopped = current.close();
+    expect(await current.call(open())).toMatchObject({ outcome: "refused" });
+    expect(await first).toMatchObject({ outcome: "ok" });
+    expect(await second).toMatchObject({ outcome: "ok" });
+    await stopped;
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+  it("reports worker loss without replaying the uncertain cell", async () => {
+    const current = await build();
+    await current.call(open());
+    execute.mockRejectedValueOnce(
+      new CellError("worker timed out; bindings reset", { text: "before timeout", images: [] }, true),
+    );
+    const result = await current.call(code(), undefined, { shell: true });
+    expect(result).toMatchObject({
+      outcome: "ok",
+      isError: true,
+      content: expect.stringContaining("Inspect before retrying"),
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+  it("reports missing Chrome as unavailable without crashing service creation", async () => {
+    vi.mocked(BrowserUse.create).mockRejectedValueOnce(new Error("Chrome not found"));
+    const current = await build();
+    expect(await current.call(open())).toMatchObject({
+      outcome: "refused",
+      reason: "browser_unavailable",
+      detail: "Chrome not found",
+    });
+  });
+
+  it("observes the selected tab even when the cell fails after changing it", async () => {
+    const current = await build();
+    await current.call(open());
+    execute.mockRejectedValueOnce(
+      new CellError("after tab switch", { text: "", images: [], targetId: "tab-2" }, false),
+    );
+    expect(await current.call(code(), undefined, { shell: true })).toMatchObject({ isError: true });
+    expect(Page.attach).toHaveBeenLastCalledWith(expect.anything(), "tab-2");
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts recording after the first navigation and finishes it before closing Chrome", async () => {
+    const stopped = vi.fn(async () => {
+      expect(close).not.toHaveBeenCalled();
+      return "/recording.webm";
+    });
+    vi.mocked(startBrowserRecording).mockImplementationOnce(async () => {
+      expect(page.goto).toHaveBeenCalledWith("https://example.com");
+      return { stop: stopped };
+    });
     host = await createBrowserHost({
       stateRoot,
       attachmentRoot: stateRoot,
       logger,
-      environment: {},
-      command: executable,
-      args: [],
-      blockedTools,
-      ...options,
+      recordSessions: async () => true,
     });
-    return host;
-  }
-
-  it("projects the full server catalog minus the blocklist", async () => {
-    const created = await build(
-      {
-        tools: [
-          { name: "navigate", description: "Go to a URL", inputSchema: { type: "object" } },
-          { name: "eval", description: "Run JavaScript", inputSchema: { type: "object" } },
-          { name: "new_superpower", description: "shipped last week", inputSchema: { type: "object" } },
-        ],
-      },
-      ["eval"],
-    );
-    const catalog = await created.catalog();
-    expect(catalog.available).toBe(true);
-    // Doctrine projection left with the governance machinery: everything the
-    // server advertises is his, except what the blocklist names.
-    expect(catalog.tools.map((tool) => tool.name).sort()).toEqual(["navigate", "new_superpower"]);
-    expect(catalog.tools.find((tool) => tool.name === "navigate")).toMatchObject({
-      requiresApproval: false,
-    });
+    await host.call({ ...open(), arguments: { url: "https://example.com" } });
+    await host.close();
+    expect(stopped).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("loads every paginated catalog page", async () => {
-    const created = await build({
-      toolPages: [
-        [{ name: "first", inputSchema: { type: "object" } }],
-        [{ name: "second", inputSchema: { type: "object" } }],
-      ],
-    });
-
-    expect((await created.catalog()).tools.map((tool) => tool.name)).toEqual(["first", "second"]);
-  });
-
-  it("calls a granted tool and returns its bounded text", async () => {
-    const created = await build({
-      tools: [{ name: "navigate", inputSchema: { type: "object" } }],
-      callResult: { content: [{ type: "text", text: "visited via navigate" }] },
-    });
-    const result = await created.call({
-      schemaVersion: 1,
-      tool: "navigate",
-      arguments: { url: "https://example.com" },
-    });
-    expect(result).toMatchObject({ outcome: "ok", tool: "navigate", content: "visited via navigate" });
-  });
-
-  it("parks an image block as a hash-bound artifact instead of dropping it", async () => {
-    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
-    const created = await build({
-      tools: [{ name: "navigate", inputSchema: { type: "object" } }],
-      callResult: {
-        content: [
-          { type: "text", text: "/tmp/shot.png" },
-          { type: "image", data: png.toString("base64"), mimeType: "image/png" },
-        ],
-      },
-    });
-    const result = await created.call({ schemaVersion: 1, tool: "navigate", arguments: {} });
-    expect(result.outcome).toBe("ok");
-    if (result.outcome !== "ok") return;
-    // The path still reaches him as text, but the pixels now exist somewhere
-    // he can point at — that gap is what made a screenshot look successful
-    // while nothing attachable had been produced.
-    expect(result.content).toContain("/tmp/shot.png");
-    expect(result.artifacts).toHaveLength(1);
-    const artifact = result.artifacts[0]!;
-    const digest = createHash("sha256").update(png).digest("hex");
-    expect(artifact.artifactRef).toBe(`sha256:${digest}:${join("browser", `${digest}.png`)}`);
-    expect(artifact).toMatchObject({ mimeType: "image/png", byteLength: png.byteLength });
-    // Written where the Discord attachment resolver already looks.
-    expect(readFileSync(join(stateRoot, "browser", `${digest}.png`)).equals(png)).toBe(true);
-  });
-
-  it("refuses a blocklisted tool instead of forwarding it", async () => {
-    const created = await build({ tools: [{ name: "navigate", inputSchema: { type: "object" } }] }, ["eval"]);
-    const result = await created.call({ schemaVersion: 1, tool: "eval", arguments: {} });
-    expect(result).toMatchObject({ outcome: "refused", reason: "unknown_tool" });
-  });
-
-  it("degrades a startup failure instead of failing service boot", async () => {
+  it("keeps browsing and cleanup working when recording fails", async () => {
+    vi.mocked(startBrowserRecording).mockRejectedValueOnce(new Error("ffmpeg missing"));
     host = await createBrowserHost({
       stateRoot,
       attachmentRoot: stateRoot,
       logger,
-      environment: {},
-      command: join(stateRoot, "missing-agent-browser"),
-      args: [],
+      recordSessions: async () => true,
     });
-    await expect(host.catalog()).resolves.toMatchObject({ available: false, tools: [] });
-    await expect(host.call({ schemaVersion: 1, tool: "navigate", arguments: {} })).resolves.toMatchObject({
-      outcome: "refused",
-      reason: "browser_unavailable",
-    });
-  });
-
-  it("shuts down the SDK transport and refuses later calls", async () => {
-    const created = await build({ tools: [{ name: "navigate", inputSchema: { type: "object" } }] });
-    await created.close();
-    await expect(created.call({ schemaVersion: 1, tool: "navigate", arguments: {} })).resolves.toMatchObject({
-      outcome: "refused",
-      reason: "browser_unavailable",
-      detail: "browser_host_closed",
-    });
-  });
-
-  it("serializes calls across sessions and rejects raw CLI arguments", async () => {
-    const statsPath = join(stateRoot, "call-stats.json");
-    const created = await build({
-      tools: [{ name: "navigate", inputSchema: { type: "object" } }],
-      callDelayMs: 5,
-      statsPath,
-    });
-
-    await Promise.all([
-      created.call({ schemaVersion: 1, tool: "navigate", arguments: {} }),
-      created.call({ schemaVersion: 1, tool: "navigate", arguments: {} }),
-    ]);
-    expect(JSON.parse(readFileSync(statsPath, "utf8"))).toEqual({ maxActiveCalls: 1 });
-    await expect(
-      created.call({ schemaVersion: 1, tool: "navigate", arguments: { extraArgs: ["--profile", "/tmp/x"] } }),
-    ).resolves.toMatchObject({ outcome: "refused" });
-  });
-
-  function events(): Record<string, unknown>[] {
-    return readFileSync(join(stateRoot, "events.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-  }
-
-  async function lifecycle(options: Partial<BrowserHostOptions> = {}, server: FakeServerOptions = {}) {
-    return build({ eventsPath: join(stateRoot, "events.jsonl"), ...server }, [], {
-      idleMs: 100,
-      environment: { AGENT_BROWSER_HEADED: "1" },
-      ...options,
-    });
-  }
-
-  const open = (headed?: boolean) => ({
-    schemaVersion: 1 as const,
-    tool: "agent_browser_open",
-    arguments: headed === undefined ? { url: "https://example.com" } : { url: "https://example.com", headed },
-  });
-
-  it("retires stale daemons before connecting and pins headless despite inherited headed defaults", async () => {
-    const created = await lifecycle();
-    expect(events()).toEqual([
-      { cli: ["close"], headed: "0" },
-      { server: true, headed: "0", idle: "300000", restore: "clankie", restoreSave: "always" },
-    ]);
-    await created.call(open());
-    expect(events().find((event) => event.call)).toMatchObject({
-      call: { arguments: { extraArgs: ["--headed", "false"] } },
-    });
-  });
-
-  it("waits for the retiring daemon to remove its PID file before connecting", async () => {
-    const run = join(stateRoot, "browser", "run", "namespaces", "clankie", "run");
-    await mkdir(run, { recursive: true });
-    const pid = join(run, "clankie.pid");
-    await writeFile(pid, "fake retiring daemon");
-    const cleanup = new Promise<void>((resolve) => setTimeout(() => void rm(pid).then(resolve), 250));
-    await lifecycle();
-    expect(existsSync(pid)).toBe(false);
-    await cleanup;
-  });
-
-  it("refuses browsing if retiring the stale daemon fails", async () => {
-    const created = await lifecycle({}, { failClose: true });
-    expect((await created.catalog()).available).toBe(false);
-    expect(await created.call(open())).toMatchObject({ outcome: "refused" });
-    expect(events()).toHaveLength(1);
-  });
-
-  it("closes idle bursts even with recordings off, preserves the profile, and reopens headless", async () => {
-    const created = await lifecycle();
-    const marker = join(stateRoot, "browser", "profile", "login-marker");
-    await writeFile(marker, "keep me");
-    await created.call(open(true));
-    await created.call({ schemaVersion: 1, tool: "agent_browser_snapshot", arguments: {} });
-    expect(events().filter((event) => event.call)).toMatchObject([
-      { call: { arguments: { extraArgs: ["--headed", "true"] } } },
-      { call: { arguments: { extraArgs: ["--headed", "true"] } } },
-    ]);
-    await vi.waitFor(() => expect(events().filter((event) => event.cli)).toHaveLength(2));
-    expect(readFileSync(marker, "utf8")).toBe("keep me");
-    await created.call(open());
-    expect(
-      events()
-        .filter((event) => event.call)
-        .at(-1),
-    ).toMatchObject({
-      call: { arguments: { extraArgs: ["--headed", "false"] } },
-    });
-  });
-
-  it("saves recordings before mode changes and idle close using the burst's mode", async () => {
-    const created = await lifecycle({ recordSessions: async () => true });
-    await created.call(open());
-    await created.call(open(true));
-    await created.call({ schemaVersion: 1, tool: "agent_browser_snapshot", arguments: {} });
-    await vi.waitFor(() =>
-      expect(events().filter((event) => (event.cli as string[] | undefined)?.[0] === "close")).toHaveLength(
-        2,
-      ),
+    expect(await host.call(open())).toMatchObject({ outcome: "ok" });
+    await host.close();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "browser.recording.failed" }),
+      expect.any(String),
     );
-    const commands = events()
-      .filter((event) => event.cli)
-      .map((event) => event.cli as string[]);
-    expect(commands).toEqual([
-      ["close"],
-      ["state", "save", expect.any(String), "--headed", "false"],
-      ["record", "start", expect.any(String), "--headed", "false"],
-      ["state", "load", expect.any(String), "--headed", "false"],
-      ["record", "stop", "--headed", "false"],
-      ["state", "save", expect.any(String), "--headed", "true"],
-      ["record", "start", expect.any(String), "--headed", "true"],
-      ["state", "load", expect.any(String), "--headed", "true"],
-      ["record", "stop", "--headed", "true"],
-      ["close"],
-    ]);
-    expect(await readdir(join(stateRoot, "browser", "recordings"))).toHaveLength(2);
   });
 
-  it("keeps in-flight and queued calls ahead of idle cleanup and drains on shutdown", async () => {
-    const created = await lifecycle({ idleMs: 20 }, { callDelayMs: 80 });
-    const first = created.call(open());
-    const second = created.call(open());
-    const shutdown = created.close();
-    await expect(created.call(open())).resolves.toMatchObject({ outcome: "refused" });
-    await Promise.all([first, second, shutdown]);
-    expect(
-      events()
-        .filter((event) => event.cli || event.finished)
-        .map((event) => event.cli ?? event.finished),
-    ).toEqual([["close"], "agent_browser_open", "agent_browser_open", ["close"]]);
+  it("keeps idle cleanup armed after an aborted call", async () => {
+    const current = await build(20);
+    await current.call(open());
+    await current.call(open(), AbortSignal.abort());
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1));
   });
-
-  it("does not let a refused call cancel idle cleanup", async () => {
-    const created = await lifecycle();
-    await created.call(open());
-    await expect(
-      created.call({ schemaVersion: 1, tool: "agent_browser_open", arguments: { extraArgs: [] } }),
-    ).resolves.toMatchObject({ outcome: "refused" });
-    await vi.waitFor(() => expect(events().filter((event) => event.cli)).toHaveLength(2));
-  });
-
-  it("allows explicit early return to headless and saves before explicit close", async () => {
-    const created = await lifecycle({ recordSessions: async () => true, idleMs: 1000 });
-    await created.call(open(true));
-    await created.call(open(false));
-    await created.call({ schemaVersion: 1, tool: "agent_browser_close", arguments: {} });
-    const calls = events().filter((event) => event.call);
-    expect(calls.map((event) => event.call)).toMatchObject([
-      { arguments: { extraArgs: ["--headed", "true"] } },
-      { arguments: { extraArgs: ["--headed", "false"] } },
-      { name: "agent_browser_close", arguments: { extraArgs: ["--headed", "false"] } },
-    ]);
-    const lastStop = events().findLastIndex((event) => (event.cli as string[] | undefined)?.[1] === "stop");
-    const closeCall = events().findIndex(
-      (event) => (event.call as { name?: string } | undefined)?.name === "agent_browser_close",
+  it("refuses old tools and unknown arguments before starting a browser", async () => {
+    const current = await build();
+    expect(await current.call({ schemaVersion: 1, tool: "agent_browser_open", arguments: {} })).toMatchObject(
+      { outcome: "refused", reason: "unknown_tool" },
     );
-    expect(lastStop).toBeLessThan(closeCall);
-    await created.close();
-    expect(events().filter((event) => (event.cli as string[] | undefined)?.[0] === "close")).toHaveLength(1);
-  });
-
-  it("still closes the browser when recording fails", async () => {
-    const created = await lifecycle({ recordSessions: async () => true }, { failRecording: true });
-    await expect(created.call(open())).resolves.toMatchObject({ outcome: "ok" });
-    await created.close();
-    expect(events().at(-1)).toMatchObject({ cli: ["close"] });
+    expect(
+      await current.call({ ...open(), arguments: { extraArgs: ["--user-data-dir=/private"] } }),
+    ).toMatchObject({ isError: true });
+    expect(BrowserUse.create).not.toHaveBeenCalled();
   });
 });

@@ -61,6 +61,8 @@ clankie video-model set xai/grok-imagine-video-1.5
 clankie persona set --display-name Clankie --chattiness balanced
 clankie games set on
 clankie browser record on
+clankie browser tools
+clankie browser call browser_use_open '{"url":"https://example.com"}'
 clankie discord set --application-id 12345 --active-body bot
 ```
 

@@ -17,6 +17,7 @@
     "persona-images:eval": "tsx scripts/persona-images-eval.ts"
   },
   "dependencies": {
+    "@browser_use/pi": "0.1.0",
     "@clankie/agent-hosts": "workspace:*",
     "@clankie/agent-transcript": "workspace:*",
     "@clankie/credential-broker": "workspace:*",

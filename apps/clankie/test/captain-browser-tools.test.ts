@@ -8,7 +8,7 @@ describe("captain browser tools", () => {
     const tools = new Map<string, ToolDefinition>();
     const page = {
       outcome: "ok",
-      tool: "agent_browser_read",
+      tool: "browser_use_read",
       content: "# Browser documentation\nUseful page content.\n".repeat(2000),
       isError: false,
       artifacts: [],
@@ -17,7 +17,7 @@ describe("captain browser tools", () => {
       browser: {
         catalog: async () => ({
           available: true,
-          tools: [descriptor("agent_browser_read", "Read a page")],
+          tools: [descriptor("browser_use_read", "Read a page")],
         }),
         call: async () => page,
       },
@@ -28,8 +28,8 @@ describe("captain browser tools", () => {
       registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
       on: () => {},
     } as unknown as ExtensionAPI);
-    const read = tools.get("browser_agent_browser_read");
-    if (read === undefined) throw new Error("browser_agent_browser_read is missing");
+    const read = tools.get("browser_browser_use_read");
+    if (read === undefined) throw new Error("browser_browser_use_read is missing");
 
     const result = await read.execute("large-page", {}, undefined, undefined, {} as never);
     const text = result.content.find((block) => block.type === "text")?.text ?? "";
@@ -63,8 +63,8 @@ describe("captain browser tools", () => {
             schemaVersion: 1 as const,
             available: true,
             tools: [
-              descriptor("agent_browser_open", "Open a page"),
-              descriptor("agent_browser_console", "Read console errors"),
+              descriptor("browser_use_open", "Open a page"),
+              descriptor("browser_use_console", "Read console errors"),
             ],
           }),
         call: () => Promise.reject(new Error("unused")),
@@ -77,12 +77,12 @@ describe("captain browser tools", () => {
     start?.();
 
     expect([...tools]).toHaveLength(3);
-    expect(active).toEqual(["remember_episode", "browser_tool_search", "browser_agent_browser_open"]);
+    expect(active).toEqual(["remember_episode", "browser_tool_search", "browser_browser_use_open"]);
     const search = tools.get("browser_tool_search");
     if (search === undefined) throw new Error("browser_tool_search is missing");
     await search.execute("call-1", { query: "console errors" }, undefined, undefined, {} as never);
-    expect(active).toContain("browser_agent_browser_console");
-    expect(tools.get("browser_agent_browser_console")?.executionMode).toBe("sequential");
+    expect(active).toContain("browser_browser_use_console");
+    expect(tools.get("browser_browser_use_console")?.executionMode).toBe("sequential");
   });
 });
 

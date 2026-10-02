@@ -318,7 +318,10 @@ describes explicit, restricted grants and the current isolation limits.
 browser settings; [`clankie browser harnesses`](/cli/#browser-harnesses-browser-delegate-on-off)
 lists the computer-use harnesses he can hire.
 
-Clankie has his own browser profile for browsing tasks. Harder work in your
+Clankie uses Browser Use Pi with his own browser profile for browsing tasks.
+Machine-authorized turns can keep JavaScript variables and helpers between
+browser calls; ordinary social turns have browser-only tools. Inspect them
+with `clankie browser tools`. Harder work in your
 existing apps can go to an installed computer-use harness. Native macOS control
 also has a Peekaboo path with documented limits. The [desktop-control reference](https://github.com/Volpestyle/clankie/blob/main/docs/desktop-control.md)
 distinguishes available tools from proven behavior; installing Clankie does not

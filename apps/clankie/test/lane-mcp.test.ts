@@ -206,6 +206,42 @@ describe("lane MCP endpoint", () => {
 
 const IMAGE_REF = "media:2026-09-01/leaf.png";
 
+it("keeps Node browser tools out of social MCP banks", async () => {
+  const deps = bankDeps();
+  const call = vi.fn(async () => ({
+    outcome: "ok" as const,
+    tool: "browser_use_javascript",
+    content: "42",
+    artifacts: [],
+    isError: false,
+  }));
+  const browser = {
+    catalog: async () => ({
+      schemaVersion: 1 as const,
+      available: true,
+      tools: [
+        {
+          name: "browser_use_javascript",
+          description: "Node code",
+          inputSchema: {},
+          riskClass: "read" as const,
+          requiresApproval: false,
+          requiresShell: true,
+        },
+      ],
+    }),
+    call,
+  };
+  const laneLog = { append: async () => {}, observe: async () => [] } as unknown as LaneLog;
+  const social = await buildLaneToolBank({ ...deps, browser }, {}, laneLog, "discord_presence");
+  expect(social.tools.some((tool) => tool.name === "browser_browser_use_javascript")).toBe(false);
+  const operator = await buildLaneToolBank({ ...deps, browser }, {}, laneLog, "operator");
+  await operator.tools
+    .find((tool) => tool.name === "browser_browser_use_javascript")!
+    .call({ code: "console.log(42)" });
+  expect(call).toHaveBeenLastCalledWith(expect.anything(), undefined, { shell: true });
+});
+
 function bankDeps(): CaptainDeps {
   return {
     browser: { catalog: () => Promise.resolve({ schemaVersion: 1, available: false, tools: [] }) },

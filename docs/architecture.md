@@ -309,23 +309,30 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   the HTTP surface is
   [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml). This document does
   not duplicate their changing census.
-- **Browser catalog.** The service registers the complete paginated
-  `agent-browser` catalog with pi, but only everyday navigation tools and
-  `browser_tool_search` start active. Browser calls are sequential across rooms.
+- **Browser catalog.** The service owns a Browser Use Pi SDK session. Clankie
+  drives its persistent JavaScript workspace directly through `execute()`;
+  it does not run a second model or a hidden browser agent. Machine-authorized
+  turns receive `browser_use_javascript`; social turns receive browser-only
+  navigation, DOM evaluation, accessibility, input and screenshot tools.
+  The host enforces the same boundary behind tool discovery and the HTTP API.
+  Browser calls are sequential across rooms.
   Model-facing JSON previews retain up to 50 KiB or 2,000 serialized lines,
   followed by a truncation notice when needed. A large page string keeps a
   UTF-8-safe prefix instead of being dropped as an oversized line; full results
   remain in the Pi tool details.
-  The subprocess receives no Clankie credentials, but true filesystem/network
+  The SDK's JavaScript worker receives no Clankie credentials, but true filesystem/network
   isolation requires a VM or remote broker ([ADR 0082](adr/0082-clankie-holds-the-browser.md)).
   The persistent profile holds his own accounts, signed up for by hand: the
-  catalog's `headed` argument relaunches the browser visible on the operator's
+  `browser_use_open` tool's `headed` argument relaunches Chrome visible on the operator's
   screen, so he can hand over the window for a signup, a CAPTCHA, or a phone
   check rather than grinding at it ([ADR 0127](adr/0127-his-accounts-are-his.md)).
   Browsing defaults to headless. After 60 seconds without a browser call, the
   host saves any recording and closes the burst's tabs/windows, including a
   takeover window. Persistent logins remain; the next burst starts headless.
-  Startup retires the private daemon so stale headed settings cannot carry over.
+  The SDK launches Chrome lazily with that private profile and owns its shutdown.
+  JavaScript bindings reset at idle close, mode changes or worker timeout; workspace
+  files and persistent logins survive. Opt-in recordings sample the current tab
+  every 750 ms through the SDK's public CDP primitives and encode WebM with FFmpeg.
   Hard work in the owner's own apps and Chrome goes to a hired computer-use
   harness where one is ready; the service detects them and the reach card
   lists them on machine-access lanes

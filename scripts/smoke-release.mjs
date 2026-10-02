@@ -34,6 +34,8 @@ try {
     ...["lead", "swarm-mcp"].map((name) => join(extracted, ".agents/skills", name, "SKILL.md")),
     join(extracted, "node_modules/swarm-mcp/dist/coordination/owner-cli.js"),
     join(extracted, "node_modules/swarm-mcp/dist/coordination/herdr-worker-cli.js"),
+    join(extracted, "node_modules/@browser_use/pi/dist/worker.js"),
+    join(extracted, ".agents/skills/browser-use/SKILL.md"),
     join(extracted, "integrations/claude-plugin/skills/lead/SKILL.md"),
     ...["cli.md", "worker-access.md", "model-keys.md", "rivals.md", "discord-ingress.md"].map((name) =>
       join(extracted, "docs", name),
@@ -72,6 +74,35 @@ try {
     "--eval",
     `import { createRequire } from "node:module"; const require = createRequire(${JSON.stringify(bundleRequire)}); for (const id of ["ajv-formats/dist/formats", "ajv/dist/runtime/equal", "ajv/dist/runtime/ucs2length", "ajv/dist/runtime/uri", "ajv/dist/runtime/validation_error"]) require(id);`,
   ]);
+  const browserSdk = pathToFileURL(join(extracted, "node_modules/@browser_use/pi/dist/index.js")).href;
+  capture(node, ["--input-type=module", "--eval", `await import(${JSON.stringify(browserSdk)});`], {
+    cwd: workspace,
+  });
+  if (process.env.CLANKIE_RELEASE_SMOKE_BROWSER === "1") {
+    capture(
+      node,
+      [
+        "--input-type=module",
+        "--eval",
+        `
+        import assert from 'node:assert/strict';
+        import { Browser, BrowserUse } from ${JSON.stringify(browserSdk)};
+        const session = await BrowserUse.create({
+          model: 'openai/gpt-5.4', telemetry: false, log: false,
+          streamFn: () => { throw new Error('No model calls in release smoke'); },
+          browser: Browser.chromium({ profileDir: ${JSON.stringify(join(temporary, "browser-profile"))}, headless: true }),
+          workspace: ${JSON.stringify(join(temporary, "browser-workspace"))}
+        });
+        try {
+          await session.execute('var releaseProof = 40; await page.goto("data:text/html,<h1>Packaged browser</h1>");');
+          const result = await session.execute('console.log(releaseProof + 2, await page.evaluate(() => document.body.innerText));');
+          assert.match(result.text, /42.*Packaged browser/s);
+        } finally { await session.close(); }
+        `,
+      ],
+      { cwd: workspace, timeout: 60_000 },
+    );
+  }
 
   const servicePort = await freePort();
   const activityPort = await freePort();

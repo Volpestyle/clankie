@@ -1,12 +1,21 @@
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { SettingsStore, defaultSettingsPath, type BrowserSettings } from "@clankie/settings";
 import { commandHost } from "./io.ts";
+import {
+  BrowserToolCatalogSchema,
+  CallBrowserToolRequestSchema,
+  CallBrowserToolResultSchema,
+  type BrowserToolCatalog,
+  type CallBrowserToolResult,
+} from "@clankie/protocol";
 
 const BROWSER_USAGE = [
   "Usage: clankie browser [status]",
   "       clankie browser record on|off",
   "       clankie browser delegate on|off",
   "       clankie browser harnesses",
+  "       clankie browser tools",
+  "       clankie browser call TOOL JSON",
 ].join("\n");
 
 export interface BrowserCommandOptions {
@@ -133,10 +142,23 @@ export async function browserHarnesses(options: BrowserCommandOptions = {}): Pro
 export async function runBrowserCommand(
   args: readonly string[],
   options: BrowserCommandOptions = {},
-): Promise<BrowserCommandResult | BrowserHarnessesResult> {
+): Promise<BrowserCommandResult | BrowserHarnessesResult | BrowserToolCatalog | CallBrowserToolResult> {
   const verb = args[0];
   if (verb === undefined || verb === "status") return await browserStatus(options);
   if (verb === "harnesses" && args.length === 1) return await browserHarnesses(options);
+  if (verb === "tools" && args.length === 1) {
+    const body = await browserRequest("/v1/browser/tools", options);
+    return BrowserToolCatalogSchema.parse(body.catalog);
+  }
+  if (verb === "call" && args.length === 3) {
+    const request = CallBrowserToolRequestSchema.parse({
+      schemaVersion: 1,
+      tool: args[1],
+      arguments: JSON.parse(args[2] ?? "{}"),
+    });
+    const body = await browserRequest("/v1/browser/call", options, request);
+    return CallBrowserToolResultSchema.parse(body.result);
+  }
   if (
     (verb === "record" || verb === "delegate") &&
     args.length === 2 &&
@@ -147,4 +169,26 @@ export async function runBrowserCommand(
       : await browserSetDelegation(args[1] === "on", options);
   }
   throw new Error(BROWSER_USAGE);
+}
+
+async function browserRequest(
+  path: string,
+  options: BrowserCommandOptions,
+  request?: unknown,
+): Promise<Record<string, unknown>> {
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+  });
+  if (!credential?.token)
+    throw new Error("No operator credential is available; `clankie status` reports this install's.");
+  const response = await (options.fetchImpl ?? fetch)(new URL(path, commandHost({ ...options, env })), {
+    method: request === undefined ? "GET" : "POST",
+    headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+    ...(request === undefined ? {} : { body: JSON.stringify(request) }),
+    signal: AbortSignal.timeout(150_000),
+  });
+  if (!response.ok) throw new Error(`clankie service returned ${response.status}`);
+  return (await response.json()) as Record<string, unknown>;
 }
