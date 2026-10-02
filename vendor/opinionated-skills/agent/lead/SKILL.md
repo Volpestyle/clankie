@@ -259,7 +259,8 @@ across transports.
 
 Load `herdr` for the CLI; prefer `herdr --skill` from the running binary. A
 socket-attached lead uses its configured socket and explicit pane identity, never
-the UI-focused pane. Use `herdr-handoff` for a real context transfer.
+the UI-focused pane. For a real context transfer, write a handoff file and send
+a one-line pointer to it.
 
 ### Dispatch and receive
 

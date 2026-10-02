@@ -22,7 +22,7 @@ the console picker, also reachable through `/setup`. `clankie doctor` includes
 the configured selection and its catalog.
 
 Product/tool skills are always on: `this-machine`, `trace-clankie`, `work-items`,
-`research-team`, `computer-use-delegation`, `desktop-control`, `swarm-mcp`, `herdr`,
+`research-team`, `computer-use-delegation`, `desktop-control`, `browser-use`, `swarm-mcp`, `herdr`,
 and every other skill authored in this repo (including `comparison-shopping`,
 `daily-digest`, `inbox-triage` and `trip-planning`). Product exclusions are refused
 by the CLI and ignored by loaders if present in an older settings file.
@@ -30,15 +30,15 @@ by the CLI and ignored by loaders if present in an older settings file.
 Everything selected from `vendor/opinionated-skills/` is opinionated, including
 `lead`:
 
-| Area            | Opinionated skills                                                                       |
-| --------------- | ---------------------------------------------------------------------------------------- |
-| Leadership      | lead, co-w, herdr-handoff, shared-checkout                                               |
-| Work tracking   | linear-issues, linear-orient, linear-plan, linear-grind                                  |
-| Review          | reflect, blast-radius, robust-review, interrogate, conventions, perf-review, docs-review |
-| Delivery        | c, p, pr-description, testing-archive                                                    |
-| Working methods | solution-space                                                                           |
+| Area            | Opinionated skills           |
+| --------------- | ---------------------------- |
+| Leadership      | lead, shared-checkout        |
+| Work tracking   | linear-issues, linear-orient |
+| Review          | reflect                      |
+| Delivery        | c, p                         |
+| Working methods | solution-space               |
 
-The catalog contains **33 skills: 20 opinionated and 13 product/tool skills**.
+The catalog contains **22 skills: 8 opinionated and 14 product/tool skills**.
 VUH-1457 merged the three leadership entries into `lead`, with shared judgment,
 Swarm-first coordination and an explicit Herdr fallback. Its Herdr references
 use the native CLI; the vendored dashboard plugin and board-specific references
@@ -68,6 +68,18 @@ excluded from releases. They require the sibling skills checkout.
 - `work-tracking`: its missing human-assignment, lead/worker authorship and bug
   triage policy is now in `work-items`; tracker selection is already there and
   in the captain instructions.
+
+## Unbundled for near-zero use (2026-10-02)
+
+Twelve process skills left the bundle: `blast-radius`, `co-w`, `conventions`,
+`docs-review`, `herdr-handoff`, `interrogate`, `linear-grind`, `linear-plan`,
+`perf-review`, `pr-description`, `robust-review` and `testing-archive`. Over 21
+days of Clankie and worker transcripts each was loaded about as often as it merely
+appeared in a skill listing (cut audit C22, extended). Each one cost catalog
+context on every turn and duplicated James's global copy or a harness's own review
+command. Upstream sources and owner-global selections are unchanged. The `lead`
+skill's Herdr fallback now describes a handoff file instead of naming
+`herdr-handoff`.
 
 `reflect` stays. The pinned
 upstream text is heavier: four steps, a lesson/evidence/route ledger and a
