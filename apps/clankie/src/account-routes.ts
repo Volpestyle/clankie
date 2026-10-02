@@ -14,6 +14,8 @@ import {
   ACCOUNT_GITHUB_POLL_PATH,
   ACCOUNT_GITHUB_START_PATH,
   ACCOUNT_LINEAR_COMPLETE_PATH,
+  ACCOUNT_LINEAR_APP_PATH,
+  AccountLinearAppRequestSchema,
   ACCOUNT_LINEAR_START_PATH,
   AccountDisconnectRequestSchema,
   AccountDisconnectResultSchema,
@@ -41,6 +43,7 @@ export function createAccountRoutes(
     ACCOUNT_GITHUB_POLL_PATH,
     ACCOUNT_LINEAR_START_PATH,
     ACCOUNT_LINEAR_COMPLETE_PATH,
+    ACCOUNT_LINEAR_APP_PATH,
     ACCOUNT_DISCONNECT_PATH,
   ];
   for (const path of paths) {
@@ -131,6 +134,12 @@ export function createAccountRoutes(
       ? AccountLinearCompleteResultSchema.parse(
           await accounts!.completeLinear(parsed.data.state, parsed.data.code),
         )
+      : malformed;
+  });
+  post(ACCOUNT_LINEAR_APP_PATH, async (body) => {
+    const parsed = AccountLinearAppRequestSchema.safeParse(body);
+    return parsed.success
+      ? AccountLinearCompleteResultSchema.parse(await accounts!.connectLinearApp(parsed.data))
       : malformed;
   });
   post(ACCOUNT_DISCONNECT_PATH, async (body) => {

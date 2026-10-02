@@ -13,7 +13,9 @@ export const ProviderAccountSchema = z
     connectionId: z.string().uuid(),
     userId: z.string().min(1),
     workspaceId: z.string().min(1),
-    email: z.string().min(1),
+    email: z.string().min(1).optional(),
+    /** Provider-verified actor kind; older user connections omit it. */
+    actor: z.enum(["user", "app"]).optional(),
     name: z.string().min(1),
     workspaceName: z.string().min(1),
     verifiedAt: z.string().datetime(),
@@ -45,6 +47,8 @@ export const ProviderCredentialSchema = z.discriminatedUnion("type", [
     clientId: z.string().optional(),
     /** Dynamic-registration client secret, when the AS issued one. */
     clientSecret: z.string().optional(),
+    /** Linear app tokens use client credentials at api.linear.app, not MCP OAuth. */
+    linearAuth: z.literal("app").optional(),
     account: ProviderAccountSchema.optional(),
   }),
   z.object({

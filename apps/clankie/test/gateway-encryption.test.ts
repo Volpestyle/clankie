@@ -378,11 +378,14 @@ it("carries account-connection codes only in the encrypted envelope and never re
     ok: true as const,
     connection: { provider: "linear" as const, status: "connected" as const, scopes: ["read", "write"] },
   }));
+  const clientSecret = "MARKER_linear_app_secret_encrypted_only";
+  const connectLinearApp = vi.fn(completeLinear.getMockImplementation()!);
   const accounts: AccountsPort = {
     list: async () => ({
       connections: [{ provider: "github", status: "connected", account: "octo-owner", scopes: ["repo"] }],
     }),
     startGithub: async () => ({ ok: false, error: "unconfigured" }),
+    connectLinearApp,
     pollGithub: async () => ({ ok: false, error: "unknown_flow" }),
     startLinear: async () => ({ ok: false, error: "unconfigured" }),
     completeLinear,
@@ -397,6 +400,22 @@ it("carries account-connection codes only in the encrypted envelope and never re
       body: JSON.stringify({ state, code }),
     });
     expect(response.status).toBe(grants.terminalControl ? 200 : 403);
+    const appResponse = await own.client(`${own.base}/v1/accounts/linear/app`, {
+      method: "POST",
+      headers: own.headers,
+      body: JSON.stringify({ clientId: "application-id", clientSecret }),
+    });
+    expect(appResponse.status).toBe(grants.terminalControl ? 200 : 403);
+    expect(JSON.stringify(own.outerRequests)).not.toContain(clientSecret);
+    expect(
+      (
+        await own.raw(`${own.base}/v1/accounts/linear/app`, {
+          method: "POST",
+          headers: own.headers,
+          body: JSON.stringify({ clientId: "application-id", clientSecret }),
+        })
+      ).status,
+    ).toBe(426);
     const listed = await own.client(`${own.base}/v1/accounts`, { headers: own.headers });
     expect(listed.status).toBe(grants.terminalControl ? 200 : 403);
     expect(JSON.stringify(own.outerRequests)).not.toContain(code);
@@ -412,4 +431,5 @@ it("carries account-connection codes only in the encrypted envelope and never re
     ).toBe(426);
   }
   expect(completeLinear).toHaveBeenCalledExactlyOnceWith(state, code);
+  expect(connectLinearApp).toHaveBeenCalledExactlyOnceWith({ clientId: "application-id", clientSecret });
 });

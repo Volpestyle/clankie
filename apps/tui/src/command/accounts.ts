@@ -1,10 +1,12 @@
 import { runCodexAccountsCommand } from "./codex-accounts.ts";
+import { text } from "node:stream/consumers";
+import { AccountLinearAppRequestSchema } from "@clankie/protocol/accounts";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { OauthAppsSettingsSchema, SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { commandHost } from "./io.ts";
 
 const ACCOUNTS_USAGE =
-  "Usage: clankie accounts [list] | connect github | disconnect github|linear | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]";
+  "Usage: clankie accounts [list] | connect github | connect linear-app --client-id ID --secret-stdin | disconnect github|linear | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]";
 
 const APP_FLAGS = {
   "--github-client-id": ["github", "clientId"],
@@ -14,8 +16,8 @@ const APP_FLAGS = {
 
 /**
  * The owner's GitHub and Linear account connections (ADR 0196). Tokens never
- * pass through here: the service runs each flow and keeps the result in the
- * credential broker; this prints the GitHub code to type and the outcome.
+ * come back out: the service keeps them in the credential broker. Linear app
+ * secrets enter through stdin, never argv; output carries only the outcome.
  */
 export async function runAccountsCommand(
   args: readonly string[],
@@ -24,6 +26,7 @@ export async function runAccountsCommand(
     readonly settings?: SettingsStore;
     readonly prompt?: (line: string) => void;
     readonly sleep?: (ms: number) => Promise<void>;
+    readonly stdin?: Parameters<typeof text>[0];
     readonly request?: (path: string, body?: unknown) => Promise<Record<string, unknown>>;
   } = {},
 ): Promise<unknown> {
@@ -47,6 +50,20 @@ export async function runAccountsCommand(
     });
 
   if (args.length === 0 || (args.length === 1 && args[0] === "list")) return request("/v1/accounts");
+  if (
+    args.length === 5 &&
+    args[0] === "connect" &&
+    args[1] === "linear-app" &&
+    args[2] === "--client-id" &&
+    args[4] === "--secret-stdin"
+  ) {
+    const parsed = AccountLinearAppRequestSchema.safeParse({
+      clientId: args[3],
+      clientSecret: (await text(options.stdin ?? process.stdin)).trim(),
+    });
+    if (!parsed.success) throw new Error("Invalid Linear app credentials");
+    return request("/v1/accounts/linear/app", parsed.data);
+  }
   if (args.length === 2 && args[0] === "disconnect" && (args[1] === "github" || args[1] === "linear"))
     return request("/v1/accounts/disconnect", { provider: args[1] });
   if (args.length === 2 && args[0] === "connect" && args[1] === "github") {

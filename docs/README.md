@@ -20,6 +20,7 @@ This directory and the module READMEs hold the technical references.
 | [Model keys](model-keys.md)                     | Paired-device API for model credentials and selection               |
 | [Worker access](worker-access.md)               | Restricted grants for connected tools                               |
 | [Tracker identity](worker-tracker-identity.md)  | Connected-account enforcement and remaining isolation work          |
+| [Worker posts](linear-worker-posts.md)          | One Linear app, worker names and portraits, compact handoffs        |
 | [Discord media](discord-media.md)               | Voice, music, Activity, Go Live, and screen-share differences       |
 | [Remote Discord ingress](discord-ingress.md)    | Authenticated sealed text ingress protocol, independent of rollout  |
 | [Desktop control](desktop-control.md)           | Native computer-use workflow and evidence limits                    |

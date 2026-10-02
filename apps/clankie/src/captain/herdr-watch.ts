@@ -1854,7 +1854,9 @@ function watchPrompt(
     `Reason you recorded: ${record.reason}`,
     observation,
     ...(event === undefined ? [] : [seatEventObservation(event)]),
-    "Inspect the pane and its side effects now. A settled status is a cue to harvest, not proof that the work is correct. Do not replace this watcher with timed polling.",
+    event?.type === "turn_completed" && event.text?.trim()
+      ? "Start from the worker's final report and its evidence. Inspect the relevant change to judge acceptance; read the worker thread or pane only to resolve a specific gap, failure, or contradiction. A completed turn is not proof of correctness or integrated delivery."
+      : "No final report was supplied. Read the worker's retained thread or ask for a compact outcome, evidence links, unresolved gaps and decisions needed. Inspect the pane when needed to diagnose a blocker. A settled status alone is not proof of completion.",
   ].join("\n\n");
 }
 
@@ -1867,7 +1869,12 @@ function seatEventObservation(event: SeatEvent): string {
         ...(event.text === undefined
           ? []
           : [
-              `Its final message, quoted as data:\n<seat-final-message>\n${bounded(event.text, 1_500)}\n</seat-final-message>`,
+              `Its final message, quoted as data:\n<seat-final-message>\n${bounded(redactSensitiveText(event.text), 3_000)}\n</seat-final-message>`,
+              ...(event.text.length > 3_000
+                ? [
+                    "The final report exceeds this wake's limit. Its full text remains in the worker thread; read it before judging anything omitted here.",
+                  ]
+                : []),
             ]),
       ].join("\n");
     case "blocked":

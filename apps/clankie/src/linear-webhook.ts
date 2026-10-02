@@ -63,6 +63,7 @@ export interface LinearActivityEvent {
 export interface LinearReplyTo {
   readonly type: string;
   readonly id: string;
+  readonly personaId?: string;
   readonly worker?: { grantId: string; principalId: string; workId: string } | undefined;
 }
 
@@ -112,6 +113,7 @@ const WriteReceiptSchema = z
       .partialRecord(z.enum(REVISION_FIELDS), z.string().regex(/^[a-f0-9]{64}$/u))
       .refine((fields) => Object.keys(fields).length > 0),
     worker: WorkerProvenanceSchema.optional(),
+    personaId: z.string().min(1).max(256).optional(),
   })
   .strict();
 type WriteReceipt = z.infer<typeof WriteReceiptSchema>;
@@ -119,6 +121,18 @@ const ReturnedRevisionSchema = z.looseObject({
   id: z.string().uuid(),
   updatedAt: z.string().datetime({ offset: true }),
 });
+
+function isWorkerPersonaResult(
+  tool: string,
+  result: Record<string, unknown>,
+): result is Record<string, unknown> & { personaId: string } {
+  return (
+    (tool === "create_worker_issue" || tool === "create_worker_comment") &&
+    typeof result.personaId === "string" &&
+    result.personaId.length > 0 &&
+    result.personaId.length <= 256
+  );
+}
 
 /** Exact returned revisions, never every UUID mentioned in a tool response.
  * Worker writes retain provenance and enter the inbox; only captain echoes are quiet.
@@ -151,7 +165,7 @@ export class LinearWriteReceipts {
     now: Date,
   ): void {
     const match = /^(?:create|update|save)_(.+)$/u.exec(call.tool);
-    const type = match && WRITE_TYPES[match[1]!];
+    const type = match && WRITE_TYPES[match[1]!.replace(/^worker_/u, "")];
     if (call.server !== "linear" || call.isError || !type || call.account?.provider !== "linear") return;
     let result: z.infer<typeof ReturnedRevisionSchema>;
     try {
@@ -177,6 +191,7 @@ export class LinearWriteReceipts {
       updatedAt: new Date(result.updatedAt).toISOString(),
       recordedAt: now.getTime(),
       ...(call.worker ? { worker: call.worker } : {}),
+      ...(isWorkerPersonaResult(call.tool, result) ? { personaId: result.personaId } : {}),
     });
     const next = this.written.filter((entry) => now.getTime() - entry.recordedAt <= WRITE_TTL_MS);
     next.push(receipt);
@@ -379,7 +394,12 @@ export function linearReplyTo(
     const authorId =
       receipt?.actorId ?? (verified !== undefined && parent.authorId === verified ? verified : undefined);
     if (authorId === undefined || authorId === activity.actorId) continue;
-    return { type: parent.type, id: parent.id, ...(receipt?.worker ? { worker: receipt.worker } : {}) };
+    return {
+      type: parent.type,
+      id: parent.id,
+      ...(receipt?.worker ? { worker: receipt.worker } : {}),
+      ...(receipt?.personaId ? { personaId: receipt.personaId } : {}),
+    };
   }
 }
 

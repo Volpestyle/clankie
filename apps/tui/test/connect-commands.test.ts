@@ -138,6 +138,8 @@ describe("Linear follow setup", () => {
     readonly url?: string | undefined;
     readonly stored?: Record<string, unknown>;
     readonly gatewayHook?: ConnectServices["gatewayHook"];
+    readonly connectLinearApp?: ConnectServices["connectLinearApp"];
+    readonly storeProviderCredential?: ConnectServices["storeProviderCredential"];
   }) {
     let settings: ClankieSettings = {
       ...emptySettings(),
@@ -156,6 +158,7 @@ describe("Linear follow setup", () => {
         return selections.shift();
       },
       readSecret: async () => options.secret,
+      readText: async () => "application-id",
       renderLine: (line: string) => lines.push(line),
     } as unknown as SetupFlow;
     const shell = {
@@ -179,7 +182,8 @@ describe("Linear follow setup", () => {
       setCredential: async (providerId: string, key: string) => {
         stored.set(providerId, key);
       },
-      storeProviderCredential: async () => undefined,
+      storeProviderCredential: options.storeProviderCredential ?? (async () => undefined),
+      ...(options.connectLinearApp ? { connectLinearApp: options.connectLinearApp } : {}),
       removeCredential: async (providerId: string) => {
         removed.push(providerId);
         return true;
@@ -193,6 +197,41 @@ describe("Linear follow setup", () => {
     const connect = commands.find((command) => command.name === "connect")!;
     return { connect, shell, stored, removed, lines, results, settings: () => settings };
   }
+
+  it("connects a verified app using concealed secret entry and reports the workspace", async () => {
+    const saved: string[] = [];
+    const h = harness({
+      selections: ["app"],
+      secret: "private-client-secret",
+      connectLinearApp: async (client) => {
+        expect(client).toEqual({ clientId: "application-id", clientSecret: "private-client-secret" });
+        return {
+          type: "oauth",
+          linearAuth: "app",
+          access: "private-access",
+          refresh: "",
+          expires: 1,
+          account: {
+            provider: "linear",
+            actor: "app",
+            name: "Clankie",
+            workspaceName: "Personal",
+            userId: "app",
+            workspaceId: "workspace",
+            connectionId: "00000000-0000-4000-8000-000000000001",
+            verifiedAt: new Date().toISOString(),
+          },
+        };
+      },
+      storeProviderCredential: async (id) => {
+        saved.push(id);
+      },
+    });
+    await h.connect.run("linear", h.shell);
+    expect(saved).toEqual(["linear"]);
+    expect(h.results.join("\n")).toContain("Clankie (app) · Personal");
+    expect([...h.lines, ...h.results].join("\n")).not.toContain("private-");
+  });
 
   it("stores the webhook secret without automatically enabling follow", async () => {
     const h = harness({ selections: ["follow", "setup"], secret: "sec-1234567890" });

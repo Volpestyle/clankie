@@ -71,6 +71,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/accounts/github/poll",
       "/v1/accounts/linear/start",
       "/v1/accounts/linear/complete",
+      "/v1/accounts/linear/app",
       "/v1/accounts/disconnect",
       "/v1/runtime-connections",
       "/v1/agent-hosts",

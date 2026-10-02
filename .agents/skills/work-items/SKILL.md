@@ -66,6 +66,22 @@ For a bug investigation where a tracker is in use, search in-progress and recent
 closed items for the symptom or related changes before forming a code hypothesis.
 Use `linear-issues` when available for Linear-specific formatting and attachments.
 
+## Linear worker results
+
+With a verified Clankie Linear app connection, publish a worker's result using
+`linear_create_worker_comment` (or `clankie linear post comment --json-stdin`
+from the operator seat), with its existing fleet `personaId`, `issueId` and
+`body`. The service derives the worker's name and colored portrait. This is one
+app identity, not an email alias or a separate Linear member. A worker bridge
+grant must pin the exact `personaId`; without that grant, send the result to
+the lead to publish. Never substitute an inherited personal tracker connector.
+
+Return a short final report: outcome, evidence links, unresolved gaps and open
+decisions. Leads start from that report and evidence and open the retained
+thread only when needed. Keep routine coordination out of issue comments.
+For setup and supported paths, read `docs/linear-worker-posts.md` in Clankie's
+repository or the worker-posts section of the CLI reference.
+
 ## When the backend is unavailable
 
 `backend_unavailable` names the recorded convention: Linear or GitHub is not

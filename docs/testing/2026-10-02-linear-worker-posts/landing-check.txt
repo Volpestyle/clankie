@@ -1,0 +1,47 @@
+Landing tree: origin/main 5229c86a plus VUH-1518 scope
+Command: pnpm check
+Observed exit status: 1
+Selected output (fixture logs omitted):
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ node scripts/herdr-skill.mjs --check
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+$ node scripts/check-doc-links.mjs && pnpm docs:public:check
+$ pnpm --filter @clankie/docs check
+$ node scripts/check.mjs
+$ infra/aws/public-docs/check.sh
+$ turbo run typecheck
+ Tasks:    26 successful, 26 total
+$ vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug
+ FAIL  apps/clankie/test/app-smoke.test.ts > clankie app smoke > keeps Swarm diagnostics behind operator authentication
+ FAIL  apps/clankie/test/codex-seat-driver.test.ts > lets the native TUI create a fresh thread before input and subscribes after persistence
+ FAIL  apps/clankie/test/codex-seat-driver.test.ts > resumes the selected native thread and applies config to both clients without replay
+ FAIL  apps/clankie/test/herdr-startup.test.ts > returns a typed not_ready failure and closes its pane when Herdr's bounded startup expires
+ FAIL  apps/clankie/test/herdr-startup.test.ts > still requires pi's durable session report within a bounded wait
+ Test Files  3 failed | 389 passed (392)
+      Tests  5 failed | 3315 passed | 4 skipped (3324)
+
+Clean baseline: 5229c86a, no changes
+Command: pnpm exec vitest run apps/clankie/test/app-smoke.test.ts apps/clankie/test/codex-seat-driver.test.ts apps/clankie/test/herdr-startup.test.ts
+Observed exit status: 1
+
+ FAIL  apps/clankie/test/app-smoke.test.ts > clankie app smoke > keeps Swarm diagnostics behind operator authentication
+ FAIL  apps/clankie/test/codex-seat-driver.test.ts > lets the native TUI create a fresh thread before input and subscribes after persistence
+ FAIL  apps/clankie/test/codex-seat-driver.test.ts > resumes the selected native thread and applies config to both clients without replay
+ FAIL  apps/clankie/test/herdr-startup.test.ts > returns a typed not_ready failure and closes its pane when Herdr's bounded startup expires
+ FAIL  apps/clankie/test/herdr-startup.test.ts > still requires pi's durable session report within a bounded wait
+ Test Files  3 failed (3)
+      Tests  5 failed | 11 passed (16)
+
+Remaining checks run separately:
+Command: pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug
+Observed exit status: 0
+
+$ cargo test --locked --all-features && cargo build --locked
+test result: ok. 124 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+$ node test/ipc-smoke.ts debug
+Vox IPC ready: /private/tmp/clankie-vuh1518-land/apps/vox/target/debug/clankvox

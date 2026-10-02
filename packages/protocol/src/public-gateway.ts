@@ -5,6 +5,7 @@ import {
   ACCOUNT_GITHUB_POLL_PATH,
   ACCOUNT_GITHUB_START_PATH,
   ACCOUNT_LINEAR_COMPLETE_PATH,
+  ACCOUNT_LINEAR_APP_PATH,
   ACCOUNT_LINEAR_START_PATH,
 } from "./accounts.ts";
 import {
@@ -60,6 +61,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: ACCOUNT_GITHUB_POLL_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_LINEAR_START_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_LINEAR_COMPLETE_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_LINEAR_APP_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_DISCONNECT_PATH, target: "control" },
   { method: "GET", path: "/v1/gateway/challenge", target: "control" },
   { method: "POST", path: "/v1/gateway/encrypted", target: "control" },

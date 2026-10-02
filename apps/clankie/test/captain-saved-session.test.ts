@@ -74,7 +74,12 @@ it("native continuation goes through one hire/adoption path and preserves the ex
       },
     });
     expect(spawn).toHaveBeenCalledOnce();
-    expect(spawn).toHaveBeenCalledWith(seat, undefined, "continue", session);
+    expect(spawn).toHaveBeenCalledWith(
+      seat,
+      undefined,
+      expect.stringContaining("continue\n\nEnd each finished turn with a short report"),
+      session,
+    );
     expect(track).toHaveBeenCalledWith("term_existing");
     for (const bad of [
       { ...seat, harness: "codex" as const },

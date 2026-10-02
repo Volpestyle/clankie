@@ -11,12 +11,21 @@ export const ACCOUNT_GITHUB_START_PATH = "/v1/accounts/github/start";
 export const ACCOUNT_GITHUB_POLL_PATH = "/v1/accounts/github/poll";
 export const ACCOUNT_LINEAR_START_PATH = "/v1/accounts/linear/start";
 export const ACCOUNT_LINEAR_COMPLETE_PATH = "/v1/accounts/linear/complete";
+export const ACCOUNT_LINEAR_APP_PATH = "/v1/accounts/linear/app";
 export const ACCOUNT_DISCONNECT_PATH = "/v1/accounts/disconnect";
 
 export const AccountProviderSchema = z.enum(["github", "linear"]);
 export type AccountProvider = z.infer<typeof AccountProviderSchema>;
 
 const FlowIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/u);
+
+/** Write-only app credentials. Never returned in a connection response. */
+export const AccountLinearAppRequestSchema = z
+  .object({
+    clientId: z.string().trim().min(1).max(256),
+    clientSecret: z.string().trim().min(1).max(4096),
+  })
+  .strict();
 
 export const AccountGithubPollRequestSchema = z.object({ flowId: FlowIdSchema }).strict();
 export const AccountLinearCompleteRequestSchema = z
@@ -39,6 +48,8 @@ export const AccountConnectionSchema = z
     /** `unconfigured`: this body has no OAuth client for the provider yet. */
     status: z.enum(["connected", "not_connected", "unconfigured"]),
     account: z.string().max(320).optional(),
+    actor: z.enum(["user", "app"]).optional(),
+    workspace: z.string().max(320).optional(),
     scopes: z.array(z.string().max(128)).max(64),
     connectedAt: z.string().datetime().optional(),
     /** Where the owner can review or revoke the grant at the provider. */

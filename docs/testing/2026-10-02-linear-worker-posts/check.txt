@@ -1,0 +1,25 @@
+Initial shared-tree run, before integration onto origin/main.
+Command: pnpm check
+Observed exit status: 0
+Selected result lines (fixture logs omitted):
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ node scripts/herdr-skill.mjs --check
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+$ node scripts/check-doc-links.mjs && pnpm docs:public:check
+$ pnpm --filter @clankie/docs check
+$ node scripts/check.mjs
+$ infra/aws/public-docs/check.sh
+$ turbo run typecheck
+ Tasks:    26 successful, 26 total
+$ vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug
+ Test Files  392 passed (392)
+      Tests  3318 passed | 4 skipped (3322)
+$ cargo test --locked --all-features && cargo build --locked
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+$ node test/ipc-smoke.ts debug
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox

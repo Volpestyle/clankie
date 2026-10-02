@@ -412,6 +412,15 @@ recover a replacement token whose reply was lost.
 `set --url URL --host-id ID` remains only for legacy static-bearer migration and
 local verification. It never accepts a secret as a flag.
 
+### `linear post comment|issue --json-stdin`
+
+Publish through the operator tool bank as an existing worker persona using
+the connected Linear app. Input is JSON with `personaId`; comments also need
+`issueId` and `body`, issues need `teamId` (UUID) and `title`. The service derives
+the name and colored Clankie portrait from the fleet. Output includes the MCP
+result and `ok`; provider/tool rejection sets `ok: false` and exits nonzero.
+See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
+
 ### `linear status` / `linear follow on|off`
 
 When a webhook is configured, accepted events appear in the **Linear inbox**
@@ -581,7 +590,7 @@ queue delivery use the account's home; seat-sync uses the hook's transcript path
 The owner's own GitHub and Linear accounts, linked to this body
 ([ADR 0196](adr/0196-account-connections-keep-tokens-on-the-body.md)). The
 service runs each flow and keeps the token in the credential broker (`github`,
-`linear`); nothing here prints or accepts one. `accounts` lists each provider's
+`linear`); nothing here prints a token. `accounts` lists each provider's
 `status` (`connected`, `not_connected`, `unconfigured`), account, scopes and
 where to manage it. `accounts connect github` prints the code to type at
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
@@ -589,6 +598,13 @@ GitHub on stderr, polls at GitHub's interval, and returns the connection.
 always deletes the local token; `revoked: false` comes with the `manageUrl`
 to revoke by hand. Linear connects from `/connect linear` on a Mac, or from the
 app through `/v1/accounts/linear/start` and `/complete`.
+
+For worker names and portraits, use a workspace-owned app:
+`accounts connect linear-app --client-id ID --secret-stdin`. The secret enters
+through stdin and is verified and stored by the service, never returned.
+`/connect linear` also offers **Connect a Clankie app**. `accounts list` reports
+the verified `actor` and `workspace`. This replaces the one Linear connection
+and requires new worker grants. Setup and scope: [worker posts](linear-worker-posts.md).
 
 `accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID]
 [--linear-redirect-uri URL]` reads or writes the public OAuth client settings

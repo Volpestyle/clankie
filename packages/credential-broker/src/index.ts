@@ -24,6 +24,7 @@ export {
   type RedactedCredential,
 } from "./credential-store.ts";
 export { verifyLinearApiAccount } from "./linear-account.ts";
+export { connectLinearApp, verifyLinearAppAccount } from "./linear-app.ts";
 export {
   LINEAR_AUTHORIZE_ENDPOINT,
   LINEAR_MCP_RESOURCE,

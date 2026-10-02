@@ -41,6 +41,7 @@ import {
 } from "@clankie/credential-broker";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
+import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -146,6 +147,9 @@ export interface McpHostOptions {
   readonly curated?: readonly McpServerSettings[];
   /** Injected in tests; the real one connects a transport. */
   readonly connect?: (server: McpServerSettings, credentials: CredentialStore) => Promise<McpConnection>;
+  readonly linearAuthor?: (personaId: string) => Promise<{ name: string; avatarUrl: string } | undefined>;
+  /** Test seam for the two app-attributed GraphQL mutations. */
+  readonly linearFetch?: typeof fetch;
   /** Sees every settled call, for side channels that must know what he wrote. */
   readonly observeCall?: (call: {
     readonly server: string;
@@ -354,6 +358,25 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         // the reason a large one should name the handful worth carrying.
         initial: initial.size === 0 || initial.has(tool.name),
       }));
+    const credential =
+      server.id === "linear" && server.credential === "linear"
+        ? await options.credentials.get("linear")
+        : undefined;
+    if (
+      credential?.type === "oauth" &&
+      credential.linearAuth === "app" &&
+      credential.account?.actor === "app" &&
+      options.linearAuthor
+    ) {
+      projected.push(
+        ...LINEAR_WORKER_TOOLS.map((tool) => ({
+          ...tool,
+          server: "linear",
+          qualifiedName: `linear_${tool.name}`,
+          initial: true,
+        })),
+      );
+    }
     state.tools = projected;
     return projected;
   }
@@ -449,7 +472,19 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         if (input.delegation !== undefined && connectedAccount?.binding !== input.delegation.binding)
           throw new Error("Delegated account binding changed; a new grant is required");
         await assertCurrent(server, state);
-        const result = await client.callTool(input.tool, input.arguments);
+        const workerPost =
+          server.id === "linear" && server.credential === "linear" && isLinearWorkerTool(input.tool);
+        const credential = workerPost ? await options.credentials.get("linear") : undefined;
+        const result = workerPost
+          ? await publishLinearWorker({
+              tool: input.tool,
+              args: input.arguments,
+              credential,
+              author: options.linearAuthor ?? (async () => undefined),
+              beforeWrite: () => assertCurrent(server, state!),
+              ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+            })
+          : await client.callTool(input.tool, input.arguments);
         options.logger.info(
           {
             event: "mcp.host.call",

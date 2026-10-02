@@ -5,6 +5,7 @@
  */
 import { SettingsStore, type EmailSettings } from "@clankie/settings";
 import {
+  connectLinearApp,
   LINEAR_MCP_RESOURCE,
   LINEAR_WEBHOOK_PROVIDER_ID,
   verifyLinearApiAccount,
@@ -67,6 +68,7 @@ export interface ConnectCommandServices {
   runLinearOauth: () => Promise<ProviderCredential>;
   probeLinear?: typeof probeLinearKey;
   probeLinearMcp?: typeof probeLinearMcp;
+  connectLinearApp?: typeof connectLinearApp;
   /**
    * The doorway this Mac answers on, for the webhook URL an owner pastes into
    * Linear (ADR 0165). Absent means remote access is not configured yet, which
@@ -304,6 +306,7 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
         { value: "follow", label: "Follow Linear", hint: followHint },
         { value: "oauth", label: "Sign in with Linear again", hint: "browser OAuth" },
         { value: "key", label: "Replace with an API key" },
+        { value: "app", label: "Connect a Clankie app", hint: "worker names and avatars" },
         { value: "remove", label: "Disconnect Linear" },
       ],
       allowBack: true,
@@ -327,6 +330,10 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
       await connectLinearApiKey(shell, services);
       return;
     }
+    if (choice === "app") {
+      await connectLinearApplication(shell, services);
+      return;
+    }
   }
 
   const method = await flow.readSelect({
@@ -344,6 +351,7 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
         hint: "advanced",
         description: `Personal key from ${LINEAR_KEY_URL}.`,
       },
+      { value: "app", label: "Connect a Clankie app", hint: "worker names and avatars" },
       {
         value: "follow",
         label: "Follow Linear",
@@ -355,6 +363,7 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
   });
   if (method === "oauth") await connectLinearOauth(shell, services);
   else if (method === "key") await connectLinearApiKey(shell, services);
+  else if (method === "app") await connectLinearApplication(shell, services);
   else if (method === "follow") await runLinearFollowFlow(shell, services);
 }
 
@@ -564,6 +573,39 @@ async function connectLinearApiKey(shell: ClankieFaceShell, services: ConnectCom
     `Linear connected as ${result.viewer} with an API key. Search and file issues from any room.`,
     "success",
   );
+}
+
+async function connectLinearApplication(
+  shell: ClankieFaceShell,
+  services: ConnectCommandServices,
+): Promise<void> {
+  const flow = shell.setupFlow;
+  flow.renderLine(
+    "Create a workspace OAuth application in Linear Settings → API and enable client credentials tokens. Its name and icon represent Clankie.",
+    "info",
+  );
+  const clientId = await flow.readText({ message: "Linear application client ID" });
+  if (!clientId?.trim()) return;
+  const clientSecret = await flow.readSecret({ message: "Linear application client secret" });
+  if (!clientSecret?.trim()) return;
+  try {
+    const credential = await (services.connectLinearApp ?? connectLinearApp)({
+      clientId: clientId.trim(),
+      clientSecret: clientSecret.trim(),
+    });
+    const account = credential.account!;
+    await services.storeProviderCredential(LINEAR_PROVIDER_ID, credential);
+    shell.insertCommandResult(
+      "/connect linear",
+      `Connected as ${account.name} (app) · ${account.workspaceName}. Worker posts can use their own names and avatars.`,
+      "success",
+    );
+  } catch {
+    flow.renderLine(
+      "Linear could not verify the application. Check its client credentials setting and credentials. Nothing was stored.",
+      "error",
+    );
+  }
 }
 
 async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {

@@ -336,9 +336,10 @@ unauthorized scope access and account disconnection. An unavailable or revoked
 connection never falls back to the human's credentials. Verify the same behavior
 for a worker reached outside Herdr; runtime placement does not select the account.
 
-The dedicated Linear user is the initial account model. Linear's
-[app identity](https://linear.app/developers/oauth-actor-authorization) is a separate
-product option, not a prerequisite or an automatic replacement for that user.
+The dedicated Linear user remains supported. A workspace-owned app can also be
+connected explicitly; it adds [worker names and portraits](../../docs/linear-worker-posts.md)
+on issue/comment creation through the same grant boundary. It does not create
+separate Linear members or automatically replace a user connection.
 Two-worker regression coverage exercises shared identity, call provenance,
 session isolation, tool/argument refusal, expiry, revocation, restart and account
 replacement/disconnect with synthetic credentials. Live provider writes are not established by those checks. Launcher tests cover

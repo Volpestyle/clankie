@@ -73,6 +73,7 @@ import { createEmailPort } from "./email.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
+import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
@@ -494,6 +495,12 @@ const mcpHost = createMcpHost({
   settings: settingsStore,
   logger,
   observeCall: (call) => linearWrites.record(call, new Date()),
+  linearAuthor: async (personaId) => {
+    const result = await captain.serveOperatorConversation({ op: "personas", schemaVersion: 1 });
+    const persona =
+      result.op === "personas" ? result.personas.find((entry) => entry.personaId === personaId) : undefined;
+    return persona === undefined ? undefined : linearWorkerAuthor(persona);
+  },
 });
 await mcpHost.warm();
 

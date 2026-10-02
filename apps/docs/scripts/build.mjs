@@ -256,6 +256,13 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/accounts/linear/app",
+      {
+        access: "Encrypted device bearer with terminal-control access",
+        purpose: "Verify and connect a workspace-owned Linear app; client credentials stay on the host.",
+      },
+    ],
+    [
       "POST /v1/accounts/disconnect",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

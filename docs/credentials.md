@@ -9,6 +9,12 @@ file, `.env.local`, shell profiles, commands, logs, or issue text. The
 headless CLI never takes secrets as flags; its contract is
 [`docs/cli.md`](cli.md).
 
+For Linear worker names and portraits, connect a verified workspace-owned app
+through `/connect linear` or `accounts connect linear-app --client-id ID --secret-stdin`.
+Its client credentials and renewable app token stay in the broker's `linear`
+entry. [Worker posts](linear-worker-posts.md) covers setup, account verification
+and replacement of existing grants.
+
 For initial setup, use [Get started](https://docs.clankie.bot/get-started/).
 This reference owns credential identities and trust boundaries. The
 [broker implementation](../packages/credential-broker/README.md) owns storage

@@ -13,12 +13,14 @@
  */
 import { normalizeProviderId, type CredentialStore, type ProviderCredential } from "./credential-store.ts";
 import { LINEAR_PROVIDER_ID, linearOauthNeedsRefresh, refreshLinearOauth } from "./linear-oauth.ts";
+import { refreshLinearApp } from "./linear-app.ts";
 
 type OauthCredential = Extract<ProviderCredential, { type: "oauth" }>;
 
 /** Providers whose expired access tokens this process knows how to renew. */
 const REFRESHERS: Readonly<Record<string, (credential: OauthCredential) => Promise<OauthCredential>>> = {
-  [LINEAR_PROVIDER_ID]: refreshLinearOauth,
+  [LINEAR_PROVIDER_ID]: (credential) =>
+    credential.linearAuth === "app" ? refreshLinearApp(credential) : refreshLinearOauth(credential),
 };
 
 /**

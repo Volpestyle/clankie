@@ -185,12 +185,14 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  linear [status] | follow on|off | inbox [read | ack CURSOR]  Linear awareness and unread activity",
       "  linear work list",
+      "  linear post comment|issue --json-stdin   Publish as an existing worker persona through the connected app",
     ],
   },
   {
     nouns: ["accounts"],
     lines: [
       "  accounts [list] | connect github | disconnect github|linear   Owner's GitHub and Linear connections (JSON)",
+      "  accounts connect linear-app --client-id ID --secret-stdin   Connect a workspace-owned Clankie app",
       "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
       "  accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]",
     ],

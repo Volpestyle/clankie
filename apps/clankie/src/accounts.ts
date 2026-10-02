@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
+  connectLinearApp,
   LINEAR_OAUTH_ISSUER,
   LINEAR_OAUTH_SCOPES,
   LINEAR_PROVIDER_ID,
@@ -51,6 +52,7 @@ export interface AccountsPort {
   pollGithub(flowId: string): Promise<AccountGithubPollResult>;
   startLinear(): Promise<AccountLinearStartResult>;
   completeLinear(state: string, code: string): Promise<AccountLinearCompleteResult>;
+  connectLinearApp(client: { clientId: string; clientSecret: string }): Promise<AccountLinearCompleteResult>;
   disconnect(provider: AccountProvider): Promise<AccountDisconnectResult>;
 }
 
@@ -191,11 +193,17 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
     return {
       provider: "linear",
       status: "connected",
-      ...(account === undefined ? {} : { account: account.email }),
+      ...(account === undefined
+        ? {}
+        : {
+            account: account.actor === "app" ? account.name : (account.email ?? account.name),
+            actor: account.actor ?? "user",
+            workspace: account.workspaceName,
+          }),
       // A personal API key carries its owner's full access and no scope list.
       scopes: credential.type === "oauth" ? scopesOf(LINEAR_OAUTH_SCOPES) : [],
       ...(account === undefined ? {} : { connectedAt: account.verifiedAt }),
-      manageUrl: LINEAR_MANAGE_URL,
+      manageUrl: account?.actor === "app" ? "https://linear.app/settings/api" : LINEAR_MANAGE_URL,
     };
   };
 
@@ -224,14 +232,22 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
   const revokeLinear = async (credential: ProviderCredential | undefined) => {
     if (credential?.type !== "oauth" || credential.clientId === undefined) return false;
     try {
-      const metadata = AuthorizationServerSchema.safeParse(
-        await (
-          await call(`${linearIssuer}/.well-known/oauth-authorization-server`, {
-            headers: { accept: "application/json" },
-          })
-        ).json(),
-      );
-      const endpoint = metadata.success ? metadata.data.revocation_endpoint : undefined;
+      const metadata =
+        credential.linearAuth === "app"
+          ? undefined
+          : AuthorizationServerSchema.safeParse(
+              await (
+                await call(`${linearIssuer}/.well-known/oauth-authorization-server`, {
+                  headers: { accept: "application/json" },
+                })
+              ).json(),
+            );
+      const endpoint =
+        credential.linearAuth === "app"
+          ? "https://api.linear.app/oauth/revoke"
+          : metadata?.success
+            ? metadata.data.revocation_endpoint
+            : undefined;
       if (endpoint === undefined) return false;
       // RFC 7009: revoking the refresh token ends the grant; the access token goes with it.
       const response = await call(endpoint, {
@@ -396,6 +412,17 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
         redirectUri,
         expiresAt: new Date(expiresAt).toISOString(),
       };
+    },
+
+    async connectLinearApp(client) {
+      let credential: ProviderCredential;
+      try {
+        credential = await connectLinearApp(client, request);
+      } catch {
+        return { ok: false, error: "provider_rejected" };
+      }
+      await store.set(LINEAR_PROVIDER_ID, credential);
+      return { ok: true, connection: await linearConnection(await options.apps()) };
     },
 
     async completeLinear(state, code) {

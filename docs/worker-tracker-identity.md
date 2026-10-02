@@ -10,6 +10,12 @@ Workers write through Clankie's connected tools or an explicitly granted
 the write through the connected account. An independently authenticated harness
 connector must never substitute for that account.
 
+With a verified Linear app connection, issue and comment creation can carry
+the worker's existing name and colored portrait **via Clankie**. This changes
+post appearance, not the shared authenticated identity or worker permissions.
+See [worker posts and compact handoffs](linear-worker-posts.md) for connection,
+publishing, explicit grants and the native-hire limitations below.
+
 ## Current enforcement
 
 The seat and notification changes ship first. Automatic worker isolation below

@@ -444,6 +444,43 @@ paths:
         "401": { description: authentication_required }
         "403": { description: forbidden — terminalControl required }
         "503": { description: unavailable }
+  /v1/accounts/linear/app:
+    post:
+      tags: [Operator]
+      operationId: connectLinearApp
+      summary: Connect a workspace-owned Linear app for worker names and portraits
+      description: |
+        Verifies an app actor and workspace before replacing the Linear credential.
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. Client credentials and tokens
+        stay in the broker and are never returned or logged. Cache-Control no-store.
+        Enable client credentials tokens on the workspace's Linear OAuth application.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [clientId, clientSecret]
+              properties:
+                clientId: { type: string, minLength: 1, maxLength: 256 }
+                clientSecret: { type: string, minLength: 1, maxLength: 4096, writeOnly: true }
+      responses:
+        "200":
+          description: Verified connection with actor and workspace; no credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "400":
+          description: malformed or provider_rejected; previous connection retained
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
   /v1/accounts/disconnect:
     post:
       tags: [Operator]
@@ -2793,6 +2830,8 @@ components:
         provider: { type: string, enum: [github, linear] }
         status: { type: string, enum: [connected, not_connected, unconfigured] }
         account: { type: string }
+        actor: { type: string, enum: [user, app] }
+        workspace: { type: string }
         scopes: { type: array, items: { type: string } }
         connectedAt: { type: string, format: date-time }
         manageUrl: { type: string, format: uri }

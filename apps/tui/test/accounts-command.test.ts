@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { runAccountsCommand } from "../src/command/accounts.ts";
@@ -14,6 +15,27 @@ afterEach(async () => {
 const env = { CLANKIE_OPERATOR_TOKEN: "owner-token", CLANKIE_CONTROL_PLANE_URL: "http://clankie.test" };
 
 describe("clankie accounts", () => {
+  it("sends an app secret from stdin only to the authenticated account route", async () => {
+    const request = vi.fn(async () => ({ ok: true, connection: { actor: "app", account: "Clankie" } }));
+    const secret = "app-secret-from-stdin";
+    const result = await runAccountsCommand(
+      ["connect", "linear-app", "--client-id", "app-id", "--secret-stdin"],
+      { request, stdin: Readable.from([secret, "\n"]) },
+    );
+    expect(request).toHaveBeenCalledExactlyOnceWith("/v1/accounts/linear/app", {
+      clientId: "app-id",
+      clientSecret: secret,
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    await expect(
+      runAccountsCommand(["connect", "linear-app", "--client-id", "app-id", "--secret-stdin"], {
+        request,
+        stdin: Readable.from([" "]),
+      }),
+    ).rejects.toThrow("Invalid Linear app credentials");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("sets and clears OAuth client configuration without restarting", async () => {
     const dir = await mkdtemp(join(tmpdir(), "accounts-cli-"));
     dirs.push(dir);

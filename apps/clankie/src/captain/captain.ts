@@ -150,10 +150,12 @@ import {
  * Every assignment carries the one work-tracking contract (ADR 0191), so a
  * hire tracks work in the repo's own convention the same way he does.
  */
+const WORKER_RESULT_BRIEF =
+  "End each finished turn with a short report the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open.";
 const WORK_TRACKING_BRIEF = [
   "# Work tracking",
   "Track work where this repo already does. Run `clankie work` in the repo to see its convention (Linear, GitHub issues, its own Markdown directory, or .clankie/work/ when it has none); if it answers with a question, ask the lead once instead of choosing. Use `clankie work list | show | create | update | close | attach` (JSON) for items, criteria and status. Every result you report carries evidence attached with `clankie work attach ID --url URL --caption TEXT`: a screenshot or video for anything visible, test output, numbers and commit links otherwise, each captioned with what it proves and what is sample data. Load the work-items skill for details.",
-  "End each finished turn with a short report the lead can act on without your transcript: the outcome, links to its evidence, and any decision still open.",
+  WORKER_RESULT_BRIEF,
 ].join("\n");
 
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
@@ -1597,6 +1599,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // persona thread created through `create` is — otherwise its first reply
   // lands in a thread nothing is listening to.
   const hireSeat: HireSeat = async (request, brief) => {
+    if (brief?.trim()) {
+      brief += `\n\n${WORKER_RESULT_BRIEF}`;
+    }
     if (
       brief !== undefined &&
       (!brief.trim() || brief.includes("\0") || Buffer.byteLength(brief) > 32 * 1024)

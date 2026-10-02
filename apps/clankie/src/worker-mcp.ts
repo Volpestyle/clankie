@@ -9,6 +9,7 @@ import {
   ProviderAccountSchema,
   type CredentialStore,
   verifyLinearApiAccount,
+  verifyLinearAppAccount,
   resolveProviderBearer,
 } from "@clankie/credential-broker";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -17,6 +18,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
 import type { SwarmHost } from "@clankie/swarm";
+import { isLinearWorkerTool } from "./linear-publishing.ts";
 
 const SwarmAssignmentSchema = z
   .object({
@@ -142,7 +144,9 @@ export class WorkerMcp {
         const account =
           current.type === "api"
             ? await verifyLinearApiAccount(current.key)
-            : await verifyLinearMcpAccount(current);
+            : current.linearAuth === "app"
+              ? await verifyLinearAppAccount(current.access)
+              : await verifyLinearMcpAccount(current);
         if (current.account?.userId === account.userId && current.account.workspaceId === account.workspaceId)
           account.connectionId = current.account.connectionId;
         return { ...current, account };
@@ -165,6 +169,12 @@ export class WorkerMcp {
     if (new Set(request.tools.map((tool) => tool.name)).size !== request.tools.length)
       throw new Error("Tool names must be unique");
     for (const rule of request.tools) {
+      if (
+        request.server === "linear" &&
+        isLinearWorkerTool(rule.name) &&
+        typeof rule.arguments.personaId !== "string"
+      )
+        throw new Error("Worker publishing grants must bind an exact personaId");
       if (!catalog.some((tool) => tool.server === request.server && tool.name === rule.name))
         throw new Error(`Unavailable tool: ${rule.name}`);
     }

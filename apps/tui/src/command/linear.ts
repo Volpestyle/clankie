@@ -5,6 +5,9 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
+import { text } from "node:stream/consumers";
+import { connectLaneUpstream, type LaneToolUpstream } from "./mcp.ts";
+import { z } from "zod";
 import {
   SettingsStore,
   defaultSettingsPath,
@@ -13,7 +16,21 @@ import {
 } from "@clankie/settings";
 
 const LINEAR_USAGE =
-  "Usage: clankie linear [status] | follow on|off | webhook set --url URL | webhook clear | inbox [read [--limit N] [--before CURSOR] [--headlines] | ack CURSOR [--conversation ID]] | work [list]";
+  "Usage: clankie linear [status] | post comment|issue --json-stdin | follow on|off | webhook set --url URL | webhook clear | inbox [read [--limit N] [--before CURSOR] [--headlines] | ack CURSOR [--conversation ID]] | work [list]";
+
+function publishingResult(result: Awaited<ReturnType<LaneToolUpstream["callTool"]>>) {
+  // Lane tools wrap the host result as JSON text. A refused host call is not
+  // necessarily a protocol-level MCP error, so inspect both boundaries.
+  const content = result.content.find((block) => block.type === "text");
+  try {
+    const host = z
+      .object({ outcome: z.literal("ok"), isError: z.boolean().optional() })
+      .safeParse(JSON.parse(content?.type === "text" ? content.text : "null"));
+    return { ...result, ok: result.isError !== true && host.success && host.data.isError !== true };
+  } catch {
+    return { ...result, ok: false };
+  }
+}
 
 /** The query string for `inbox read` flags; `undefined` when a flag is malformed. */
 export function parseInboxRead(flags: readonly string[]): string | undefined {
@@ -44,8 +61,32 @@ export async function runLinearCommand(
     readonly env?: NodeJS.ProcessEnv;
     readonly settings?: SettingsStore;
     readonly credentials?: Pick<CredentialStore, "get">;
+    readonly stdin?: Parameters<typeof text>[0];
+    readonly callTool?: LaneToolUpstream["callTool"];
   } = {},
 ) {
+  if (args[0] === "post") {
+    if (args.length !== 3 || !["comment", "issue"].includes(args[1]!) || args[2] !== "--json-stdin")
+      throw new Error(LINEAR_USAGE);
+    const body: unknown = JSON.parse(await text(options.stdin ?? process.stdin));
+    if (typeof body !== "object" || body === null || Array.isArray(body))
+      throw new Error("Expected a JSON object");
+    const name = `linear_create_worker_${args[1]}`;
+    if (options.callTool) {
+      const result = await options.callTool(name, body as Record<string, unknown>);
+      return publishingResult(result);
+    }
+    const env = options.env ?? process.env;
+    const credential = await resolveOperatorCredential({ env });
+    if (!credential) throw new Error("Worker publishing needs the operator credential. Run clankie doctor.");
+    const upstream = await connectLaneUpstream({ host: commandHost({ env }), bearer: credential.token });
+    try {
+      const result = await upstream.callTool(name, body as Record<string, unknown>);
+      return publishingResult(result);
+    } finally {
+      await upstream.close();
+    }
+  }
   const request = async (path: string, method = "GET", body?: unknown) => {
     const env = options.env ?? process.env;
     const credential = await resolveOperatorCredential({ env });
