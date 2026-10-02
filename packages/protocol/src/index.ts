@@ -284,6 +284,138 @@ export const OperatorDeliveredFileDownloadRequestSchema = z
   .strict();
 export type OperatorDeliveredFileDownloadRequest = z.infer<typeof OperatorDeliveredFileDownloadRequestSchema>;
 
+// ---------------------------------------------------------------------------
+// Owner attachments (ADR 0209): images and video the owner attaches in a
+// composer, uploaded in chunks because the relay and the gateway's encrypted
+// envelope each carry at most 1 MiB per request. A committed upload is stored
+// beside the conversation's delivered files, with the same retention, and is
+// named by the same kind of reference.
+// ---------------------------------------------------------------------------
+
+/** Media an owner may attach. HEIC/HEIF is converted to JPEG for harnesses that cannot read it. */
+export const OPERATOR_ATTACHMENT_MEDIA_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/heic",
+  "image/heif",
+  "image/gif",
+  "image/webp",
+  "video/mp4",
+  "video/quicktime",
+] as const;
+export type OperatorAttachmentMediaType = (typeof OPERATOR_ATTACHMENT_MEDIA_TYPES)[number];
+/** A 48 MP phone photo or a large screenshot fits; anything bigger is not a photo. */
+export const OPERATOR_ATTACHMENT_IMAGE_BYTES_MAX = 20 * 1024 * 1024;
+/** A couple of minutes of 4K phone video, or several of 1080p; bounded disk and upload time. */
+export const OPERATOR_ATTACHMENT_VIDEO_BYTES_MAX = 200 * 1024 * 1024;
+/**
+ * Raw bytes per chunk. Base64 grows them to 699,052 characters, which leaves
+ * room for the JSON request inside the relay's 1 MiB body limit and the public
+ * gateway's 1 MiB encrypted plaintext.
+ */
+export const OPERATOR_ATTACHMENT_CHUNK_BYTES_MAX = 512 * 1024;
+export const OPERATOR_ATTACHMENT_CHUNK_BASE64_MAX = Math.ceil(OPERATOR_ATTACHMENT_CHUNK_BYTES_MAX / 3) * 4;
+/** Attachments one message may carry. */
+export const OPERATOR_CONVERSATION_ATTACHMENTS_MAX = 8;
+
+export function operatorAttachmentBytesMax(mediaType: OperatorAttachmentMediaType): number {
+  return mediaType.startsWith("video/")
+    ? OPERATOR_ATTACHMENT_VIDEO_BYTES_MAX
+    : OPERATOR_ATTACHMENT_IMAGE_BYTES_MAX;
+}
+
+export const OperatorAttachmentMediaTypeSchema = z.enum(OPERATOR_ATTACHMENT_MEDIA_TYPES);
+
+/** A committed owner upload: an `OperatorDeliveredFile` whose size may reach the video cap. */
+export const OperatorConversationAttachmentSchema = OperatorDeliveredFileSchema.extend({
+  mediaType: OperatorAttachmentMediaTypeSchema,
+  byteCount: z.number().int().positive().max(OPERATOR_ATTACHMENT_VIDEO_BYTES_MAX),
+}).strict();
+export type OperatorConversationAttachment = z.infer<typeof OperatorConversationAttachmentSchema>;
+
+/** What a send names: an attachment committed to the same conversation. */
+export const OperatorConversationAttachmentRefSchema = z
+  .object({ artifactId: z.string().regex(/^[a-f0-9]{48}$/u) })
+  .strict();
+export type OperatorConversationAttachmentRef = z.infer<typeof OperatorConversationAttachmentRefSchema>;
+
+export const OperatorAttachmentUploadIdSchema = z.string().regex(/^upload-[a-f0-9]{32}$/u);
+
+export const BeginOperatorAttachmentUploadSchema = z
+  .object({
+    conversationId: OperatorConversationIdSchema,
+    filename: z.string().trim().min(1).max(256),
+    mediaType: OperatorAttachmentMediaTypeSchema,
+    byteCount: z.number().int().positive().max(OPERATOR_ATTACHMENT_VIDEO_BYTES_MAX),
+    /** Hex SHA-256 of the whole file; commit refuses bytes that do not match it. */
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+export type BeginOperatorAttachmentUpload = z.infer<typeof BeginOperatorAttachmentUploadSchema>;
+
+export const OperatorAttachmentChunkSchema = z
+  .object({
+    conversationId: OperatorConversationIdSchema,
+    uploadId: OperatorAttachmentUploadIdSchema,
+    /** Must equal the bytes received so far; a retried last chunk is acknowledged again. */
+    offset: z.number().int().nonnegative().max(OPERATOR_ATTACHMENT_VIDEO_BYTES_MAX),
+    dataBase64: z
+      .string()
+      .max(OPERATOR_ATTACHMENT_CHUNK_BASE64_MAX)
+      .refine(isCanonicalBase64, { message: "expected non-empty canonical base64" }),
+  })
+  .strict();
+export type OperatorAttachmentChunk = z.infer<typeof OperatorAttachmentChunkSchema>;
+
+export const OperatorAttachmentUploadRefusalReasonSchema = z.enum([
+  "unknown_conversation",
+  "unsupported_conversation",
+  "unknown_upload",
+  "offset_mismatch",
+  "too_large",
+  "incomplete",
+  "hash_mismatch",
+  "content_mismatch",
+  "busy",
+  "unavailable",
+]);
+export type OperatorAttachmentUploadRefusalReason = z.infer<
+  typeof OperatorAttachmentUploadRefusalReasonSchema
+>;
+
+export const OperatorAttachmentUploadResultSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      status: z.literal("uploading"),
+      conversationId: OperatorConversationIdSchema,
+      uploadId: OperatorAttachmentUploadIdSchema,
+      byteCount: z.number().int().positive().max(OPERATOR_ATTACHMENT_VIDEO_BYTES_MAX),
+      receivedBytes: z.number().int().nonnegative().max(OPERATOR_ATTACHMENT_VIDEO_BYTES_MAX),
+      chunkBytes: z.number().int().positive().max(OPERATOR_ATTACHMENT_CHUNK_BYTES_MAX),
+      /** An upload idle past this is discarded. */
+      expiresAt: z.string().datetime(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal("committed"),
+      conversationId: OperatorConversationIdSchema,
+      file: OperatorConversationAttachmentSchema,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal("refused"),
+      conversationId: OperatorConversationIdSchema,
+      reason: OperatorAttachmentUploadRefusalReasonSchema,
+      message: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX),
+      /** Present on `offset_mismatch`: where the next chunk must start. */
+      receivedBytes: z.number().int().nonnegative().max(OPERATOR_ATTACHMENT_VIDEO_BYTES_MAX).optional(),
+    })
+    .strict(),
+]);
+export type OperatorAttachmentUploadResult = z.infer<typeof OperatorAttachmentUploadResultSchema>;
+
 export const OperatorConversationChannelIdSchema = z
   .string()
   .trim()
@@ -1419,6 +1551,12 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     personaId: OperatorAgentPersonaIdSchema.optional(),
     /** Legacy channel attribution retained while old event logs are readable. */
     seatId: z.string().trim().min(1).max(512).optional(),
+    /** Files the owner attached to an operator message (ADR 0209). */
+    attachments: z
+      .array(OperatorConversationAttachmentSchema)
+      .min(1)
+      .max(OPERATOR_CONVERSATION_ATTACHMENTS_MAX)
+      .optional(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("reasoning"),
@@ -1764,10 +1902,27 @@ const SubmitOperatorConversationTurnBaseSchema = z.object({
 /** Revision-fenced operator message submit. */
 export const SubmitOperatorConversationTurnSchema = SubmitOperatorConversationTurnBaseSchema.extend({
   kind: z.literal("message"),
-  message: z.string().trim().min(1).max(OPERATOR_CONVERSATION_MESSAGE_MAX),
+  /** May be empty only when the message carries attachments. */
+  message: z.string().trim().max(OPERATOR_CONVERSATION_MESSAGE_MAX),
   /** Steer a live Clankie turn or wait for a separate turn. Omitted preserves automatic admission. */
   delivery: z.enum(["steer", "queue"]).optional(),
-}).strict();
+  /** Uploads committed to this conversation (ADR 0209). Owner content, never instructions. */
+  attachments: z
+    .array(OperatorConversationAttachmentRefSchema)
+    .min(1)
+    .max(OPERATOR_CONVERSATION_ATTACHMENTS_MAX)
+    .optional(),
+})
+  .strict()
+  .superRefine((turn, context) => {
+    if (turn.message.length === 0 && turn.attachments === undefined) {
+      context.addIssue({ code: "custom", path: ["message"], message: "message or attachments required" });
+    }
+    const ids = (turn.attachments ?? []).map((attachment) => attachment.artifactId);
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({ code: "custom", path: ["attachments"], message: "duplicate attachment" });
+    }
+  });
 export type SubmitOperatorConversationTurn = z.infer<typeof SubmitOperatorConversationTurnSchema>;
 
 export const OperatorConversationTurnAcceptedSchema = z
@@ -2579,6 +2734,33 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       mediaType: z.string().trim().min(1).max(256).optional(),
     })
     .strict(),
+  /**
+   * Owner attachments (ADR 0209): declare a file, send its bytes in order in
+   * chunks of at most `OPERATOR_ATTACHMENT_CHUNK_BYTES_MAX`, then commit. The
+   * committed file is named in a later `send` by its `artifactId`.
+   */
+  z
+    .object({
+      op: z.literal("upload_begin"),
+      schemaVersion: z.literal(1),
+      upload: BeginOperatorAttachmentUploadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("upload_chunk"),
+      schemaVersion: z.literal(1),
+      chunk: OperatorAttachmentChunkSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("upload_commit"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      uploadId: OperatorAttachmentUploadIdSchema,
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
 
@@ -2846,6 +3028,27 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       file: OperatorDeliveredFileSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("upload_begin"),
+      schemaVersion: z.literal(1),
+      result: OperatorAttachmentUploadResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("upload_chunk"),
+      schemaVersion: z.literal(1),
+      result: OperatorAttachmentUploadResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("upload_commit"),
+      schemaVersion: z.literal(1),
+      result: OperatorAttachmentUploadResultSchema,
+    })
+    .strict(),
 ]);
 export type OperatorConversationServiceResult = z.infer<typeof OperatorConversationServiceResultSchema>;
 
@@ -2988,6 +3191,21 @@ export interface OperatorConversationServiceClient {
     readonly filename?: string;
     readonly mediaType?: string;
   }): Promise<OperatorDeliveredFile>;
+  /** Declare one owner attachment (ADR 0209). */
+  beginUpload?(upload: BeginOperatorAttachmentUpload): Promise<OperatorAttachmentUploadResult>;
+  /** Append the next chunk of an open upload. */
+  uploadChunk?(chunk: OperatorAttachmentChunk): Promise<OperatorAttachmentUploadResult>;
+  /** Verify and store a fully received upload. */
+  commitUpload?(conversationId: string, uploadId: string): Promise<OperatorAttachmentUploadResult>;
+  /**
+   * Upload one file end to end: begin, every chunk in order, commit. The caller
+   * supplies the hex SHA-256, since this package has no hashing dependency.
+   * Returns the commit result, or the first refusal.
+   */
+  uploadAttachment?(
+    input: BeginOperatorAttachmentUpload & { readonly bytes: Uint8Array },
+    options?: { readonly onProgress?: (receivedBytes: number, byteCount: number) => void },
+  ): Promise<OperatorAttachmentUploadResult>;
   /** Authenticated raw-byte retrieval; supplied by HTTP transports that expose the file route. */
   downloadFile?(
     request: OperatorDeliveredFileDownloadRequest,
@@ -3248,7 +3466,75 @@ export function createOperatorConversationServiceClient(
       }
       return result.file;
     },
+    beginUpload,
+    uploadChunk,
+    commitUpload,
+    async uploadAttachment(input, uploadOptions) {
+      const { bytes, ...upload } = input;
+      if (bytes.byteLength !== upload.byteCount)
+        throw new Error("byteCount does not match the bytes supplied");
+      let state = await beginUpload(upload);
+      while (state.status === "uploading" && state.receivedBytes < state.byteCount) {
+        const offset = state.receivedBytes;
+        const end = Math.min(offset + state.chunkBytes, state.byteCount);
+        const next = await uploadChunk({
+          conversationId: upload.conversationId,
+          uploadId: state.uploadId,
+          offset,
+          dataBase64: encodeBase64(bytes.subarray(offset, end)),
+        });
+        if (
+          next.status === "refused" &&
+          next.reason === "offset_mismatch" &&
+          next.receivedBytes !== undefined
+        ) {
+          state = { ...state, receivedBytes: next.receivedBytes };
+          continue;
+        }
+        if (next.status !== "uploading") return next;
+        state = next;
+        uploadOptions?.onProgress?.(state.receivedBytes, state.byteCount);
+      }
+      if (state.status !== "uploading") return state;
+      return commitUpload(upload.conversationId, state.uploadId);
+    },
   };
+
+  async function beginUpload(upload: BeginOperatorAttachmentUpload): Promise<OperatorAttachmentUploadResult> {
+    const result = await dispatch({ op: "upload_begin", schemaVersion: 1, upload });
+    if (result.op !== "upload_begin") throw new Error(`Unexpected ${result.op} result for upload_begin`);
+    return result.result;
+  }
+  async function uploadChunk(chunk: OperatorAttachmentChunk): Promise<OperatorAttachmentUploadResult> {
+    const result = await dispatch({ op: "upload_chunk", schemaVersion: 1, chunk });
+    if (result.op !== "upload_chunk") throw new Error(`Unexpected ${result.op} result for upload_chunk`);
+    return result.result;
+  }
+  async function commitUpload(
+    conversationId: string,
+    uploadId: string,
+  ): Promise<OperatorAttachmentUploadResult> {
+    const result = await dispatch({ op: "upload_commit", schemaVersion: 1, conversationId, uploadId });
+    if (result.op !== "upload_commit") throw new Error(`Unexpected ${result.op} result for upload_commit`);
+    return result.result;
+  }
+}
+
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** Canonical padded base64 without Buffer or btoa, so React Native and Node share one encoder. */
+export function encodeBase64(bytes: Uint8Array): string {
+  let output = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const a = bytes[index]!;
+    const b = bytes[index + 1];
+    const c = bytes[index + 2];
+    const triple = (a << 16) | ((b ?? 0) << 8) | (c ?? 0);
+    output += BASE64_ALPHABET[(triple >> 18) & 63]! + BASE64_ALPHABET[(triple >> 12) & 63]!;
+    output += b === undefined ? "=" : BASE64_ALPHABET[(triple >> 6) & 63]!;
+    output += c === undefined ? "=" : BASE64_ALPHABET[triple & 63]!;
+  }
+  return output;
 }
 
 export const CommandAuthoritySchema = z.object({

@@ -45,6 +45,9 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "terminal_control",
         "terminal_input",
         "publish_file",
+        "upload_begin",
+        "upload_chunk",
+        "upload_commit",
       ]).has(request.data.op)
     );
   }

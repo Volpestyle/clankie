@@ -1496,7 +1496,7 @@ inspection. Voice rooms contain captain handoffs, not unrecorded ambient voice.
 The existing authenticated conversation API provides these same list/get/replay/tail
 operations. See [ADR 0176](adr/0176-every-room-is-an-inspectable-conversation.md).
 
-### `send --conversation ID [--delivery steer|queue] (MESSAGE | --stdin)`
+### `send --conversation ID [--delivery steer|queue] [--attach PATH]... (MESSAGE | --stdin)`
 
 Send to an existing operator conversation through the shared service API.
 The default `steer` joins Clankie's active Pi turn at its next input boundary;
@@ -1520,6 +1520,24 @@ A revision conflict or offline seat returns its JSON refusal and exit 1;
 inspect the conversation before resubmitting. Observe replies with
 `clankie --chat ID` or the conversation API. The running service and a local
 captain credential are required.
+
+`--attach PATH` (repeatable, at most eight) sends images or video with the
+message: PNG, JPEG, HEIC/HEIF, GIF and WebP up to 20 MiB, and MP4 or MOV up to
+200 MiB. The message may then be empty. Each file is uploaded through the
+`upload_begin`, `upload_chunk` and `upload_commit` conversation ops in
+512 KiB chunks and verified by SHA-256 before the send. Clankie sees images as
+images and video as keyframes. A local agent seat receives copies under
+`.clankie/inbox/<message>/` in its working directory (git-ignored by the
+inbox's own `.gitignore`), with keyframes beside a video when ffmpeg is
+installed, and a message listing their paths. A Swarm peer or an agent on
+another machine cannot receive files: that send is refused as
+`seat_undelivered` and nothing is delivered. See
+[ADR 0209](adr/0209-owner-attachments-reach-agents-as-files.md).
+
+```bash
+clankie send --conversation global-default --attach ~/Desktop/bug.png "What is wrong here?"
+clankie send --conversation CONVERSATION_ID --attach repro.mov --attach crash.heic
+```
 
 ### `file publish --conversation ID PATH [--name FILE] [--type MEDIA_TYPE]`
 

@@ -85,8 +85,9 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["send"],
     lines: [
-      "  send --conversation ID [--delivery steer|queue] (MESSAGE | --stdin)",
-      "                           Steer the active turn or queue a follow-up (JSON receipt)",
+      "  send --conversation ID [--delivery steer|queue] [--attach PATH]... (MESSAGE | --stdin)",
+      "                           Steer the active turn or queue a follow-up (JSON receipt);",
+      "                           --attach uploads images or video with the message",
     ],
   },
   {

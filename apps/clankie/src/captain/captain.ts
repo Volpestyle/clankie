@@ -61,7 +61,9 @@ import {
   ConversationStore,
   LINEAR_INBOX_CONVERSATION_ID,
   type ConversationTurnContext,
+  type OwnerAttachmentHost,
 } from "./conversations.ts";
+import { materializeOwnerAttachments, modelImagesForOwnerAttachments } from "../owner-attachments.ts";
 import { Evaluator, type EvaluationCapture } from "./evaluator.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
@@ -540,7 +542,8 @@ export interface CaptainOptions {
   /** Real process-level overrides captured before stored settings are projected into child env. */
   readonly discordEnvironment?: NodeJS.ProcessEnv;
   /** Conversation-scoped file publication; bytes share the conversation retention lifecycle. */
-  readonly deliveredFiles?: Pick<DeliveredFileStore, "publish" | "removeConversation">;
+  readonly deliveredFiles?: Pick<DeliveredFileStore, "publish" | "removeConversation"> &
+    Partial<Pick<DeliveredFileStore, "beginUpload" | "appendUpload" | "commitUpload" | "attachment">>;
   /**
    * Trusted Discord runtime, used to make a channel's room and webhook
    * (ADR 0146). It is also what answers which guild the swarm home is, so an
@@ -1259,11 +1262,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (message === undefined) return;
       const kind = seatEventKind(conversationId, context);
       if (kind !== undefined) {
+        // The harness in his seat opens files by path, the way any worker does.
+        const attached =
+          context.attachments === undefined
+            ? undefined
+            : await materializeOwnerAttachments({
+                workspace: context.workspace ?? workingDirectory,
+                messageId: context.runId,
+                attachments: context.attachments,
+              });
         const delivery = await seatOutbox(conversationId).deliver({
           kind,
           conversationId,
           source: context.surfaceClientId ?? "service",
-          content: message,
+          content: attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
           wantsReply: kind === "escalation",
           signal: context.signal,
         });
@@ -1452,8 +1464,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           conversationId === LINEAR_INBOX_CONVERSATION_ID
             ? undefined
             : await readHerdrSessionCensus(paneId, { fleets: censusFleets });
+        // Owner attachments reach his model as images; the note numbers them
+        // and names where each original is stored (ADR 0209).
+        const attached =
+          context.attachments === undefined
+            ? undefined
+            : await modelImagesForOwnerAttachments(context.attachments);
         const prompt = resolveOperatorPrompt(
-          message,
+          attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
           invocableSkills(lane.session.resourceLoader.getSkills().skills, lane.quietSkills),
           paneId,
           census,
@@ -1474,7 +1492,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
         // The resource loader disables discovered extensions and prompt templates;
         // exact, loaded operator skills are the only input allowed to reach Pi expansion.
-        const role = await runDurableTurn(lane, prompt.prompt, [], {
+        const role = await runDurableTurn(lane, prompt.prompt, attached?.images ?? [], {
           expandPromptTemplates: prompt.skillName !== undefined,
         });
         if (role === "absorbed") return;
@@ -1593,7 +1611,57 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         await options.swarm.sendContact(contact, message, context.runId, conversationId);
       };
     },
+    ownerAttachmentHost(),
   );
+
+  /**
+   * Owner uploads and their way into a seat (ADR 0209). A seat receives files
+   * in its own workspace, so only a local seat whose working directory is
+   * known can take them; anything else is an explicit refusal.
+   */
+  function ownerAttachmentHost(): OwnerAttachmentHost | undefined {
+    const store = options.deliveredFiles;
+    if (
+      store?.beginUpload === undefined ||
+      store.appendUpload === undefined ||
+      store.commitUpload === undefined ||
+      store.attachment === undefined
+    )
+      return undefined;
+    return {
+      beginUpload: (upload) => store.beginUpload!(upload),
+      appendUpload: (chunk) => store.appendUpload!(chunk),
+      commitUpload: (conversationId, uploadId) => store.commitUpload!(conversationId, uploadId),
+      attachment: (conversationId, artifactId) => store.attachment!(conversationId, artifactId),
+      async forSeat(seatId, conversationId, attachments) {
+        if (splitFleetQualified(seatId))
+          return {
+            undeliverable:
+              "This agent runs on another machine. Attachments reach only agents on this one; send the text alone.",
+          };
+        const workspace =
+          liveSeats.find((seat) => seat.seatId === seatId)?.workingDirectory ??
+          conversations.nativeSource(conversationId)?.workingDirectory ??
+          (await herdrWatches.readNativeChat(seatId, undefined).catch(() => undefined))?.agent
+            .workingDirectory;
+        if (workspace === undefined)
+          return {
+            undeliverable: "This agent's working directory is unknown, so its files have nowhere safe to go.",
+          };
+        try {
+          return await materializeOwnerAttachments({
+            workspace,
+            messageId: `msg-${randomUUID()}`,
+            attachments,
+          });
+        } catch (error) {
+          return {
+            undeliverable: `The files could not be placed in this agent's workspace (${error instanceof Error ? error.message : "unknown error"}).`,
+          };
+        }
+      },
+    };
+  }
 
   // One hire path for the compose page and the captain's own `hire_agent`
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a

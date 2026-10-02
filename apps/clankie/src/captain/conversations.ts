@@ -24,6 +24,9 @@ import {
   type OperatorConversationContextUsage,
   type OperatorConversationEventBody,
   type OperatorDeliveredFile,
+  type OperatorAttachmentUploadResult,
+  type BeginOperatorAttachmentUpload,
+  type OperatorAttachmentChunk,
   type OperatorConversationLiveDraft,
   type OperatorConversationReactor,
   type OperatorConversationScope,
@@ -37,7 +40,7 @@ import {
   type UpsertOperatorChannel,
 } from "@clankie/protocol";
 import { parseDiscordWebhookUrl } from "@clankie/discord-presence-core";
-import { isDeliveredImagePath, namedImagePaths } from "../delivered-files.ts";
+import { isDeliveredImagePath, namedImagePaths, type StoredOwnerAttachment } from "../delivered-files.ts";
 import {
   CHANNEL_NOTICE_AUTHOR,
   CHANNEL_ROUND_INTERRUPTED_NOTICE,
@@ -240,6 +243,8 @@ export interface ConversationTurnContext {
   readonly surfaceClientId?: string;
   /** Side conversations inherit a Pi branch but never continue their parent's active task. */
   readonly side?: true;
+  /** Files the owner attached to this message (ADR 0209); owner content, never instructions. */
+  readonly attachments?: readonly StoredOwnerAttachment[];
   /** Conversation-store run id; one metrics line uses this, including absorbed steers. */
   readonly runId: string;
   readonly acceptedAt: string;
@@ -345,6 +350,23 @@ type ConversationForker = (input: {
   readonly conversationId: string;
   readonly workspace?: string;
 }) => Promise<void>;
+/**
+ * Owner attachments (ADR 0209): the upload store, and how a seat receives
+ * files. `forSeat` copies them into the seat's own workspace and returns the
+ * note its message carries, or the reason they cannot reach it.
+ */
+export interface OwnerAttachmentHost {
+  beginUpload(upload: BeginOperatorAttachmentUpload): Promise<OperatorAttachmentUploadResult>;
+  appendUpload(chunk: OperatorAttachmentChunk): Promise<OperatorAttachmentUploadResult>;
+  commitUpload(conversationId: string, uploadId: string): Promise<OperatorAttachmentUploadResult>;
+  attachment(conversationId: string, artifactId: string): Promise<StoredOwnerAttachment | undefined>;
+  forSeat?(
+    seatId: string,
+    conversationId: string,
+    attachments: readonly StoredOwnerAttachment[],
+  ): Promise<{ readonly note: string } | { readonly undeliverable: string }>;
+}
+
 type DeliveredFilePublisher = (input: {
   readonly conversationId: string;
   readonly sourceRoot: string;
@@ -454,6 +476,7 @@ export class ConversationStore {
   private readonly publishDeliveredFile: DeliveredFilePublisher | undefined;
   private readonly defaultWorkingDirectory: string;
   private readonly personaRunner: ((personaId: string) => ConversationRunner | undefined) | undefined;
+  private readonly ownerAttachments: OwnerAttachmentHost | undefined;
   private readonly forkConversation: ConversationForker | undefined;
   private readonly projection: ChannelProjection | undefined;
   private readonly seatForPersona: PersonaSeatResolver | undefined;
@@ -484,6 +507,7 @@ export class ConversationStore {
     publishDeliveredFile?: DeliveredFilePublisher,
     defaultWorkingDirectory = process.cwd(),
     personaRunner?: (personaId: string) => ConversationRunner | undefined,
+    ownerAttachments?: OwnerAttachmentHost,
   ) {
     this.root = root;
     this.journal = new ConversationJournal(root);
@@ -499,6 +523,7 @@ export class ConversationStore {
     this.publishDeliveredFile = publishDeliveredFile;
     this.defaultWorkingDirectory = defaultWorkingDirectory;
     this.personaRunner = personaRunner;
+    this.ownerAttachments = ownerAttachments;
     mkdirSync(root, { recursive: true });
     // Complete a reset interrupted after archiving but before installing fresh metadata.
     const archives = join(dirname(root), "conversation-archives");
@@ -726,6 +751,28 @@ export class ConversationStore {
       }
       case "send":
         return { op: "send", schemaVersion: 1, result: await this.send(request.turn) };
+      case "upload_begin":
+        return {
+          op: "upload_begin",
+          schemaVersion: 1,
+          result: await this.upload(request.upload.conversationId, (host) =>
+            host.beginUpload(request.upload),
+          ),
+        };
+      case "upload_chunk":
+        return {
+          op: "upload_chunk",
+          schemaVersion: 1,
+          result: await this.upload(request.chunk.conversationId, (host) => host.appendUpload(request.chunk)),
+        };
+      case "upload_commit":
+        return {
+          op: "upload_commit",
+          schemaVersion: 1,
+          result: await this.upload(request.conversationId, (host) =>
+            host.commitUpload(request.conversationId, request.uploadId),
+          ),
+        };
       case "publish_file":
         return {
           op: "publish_file",
@@ -758,6 +805,47 @@ export class ConversationStore {
     this.cancelRequests.add(runId);
     entry.controller.abort();
     return true;
+  }
+
+  /** An upload op, refused where this conversation cannot take attachments. */
+  private async upload(
+    conversationId: string,
+    run: (host: OwnerAttachmentHost) => Promise<OperatorAttachmentUploadResult>,
+  ): Promise<OperatorAttachmentUploadResult> {
+    const meta = this.metas.get(conversationId);
+    const refused = (
+      reason: "unknown_conversation" | "unsupported_conversation" | "unavailable",
+      message: string,
+    ): OperatorAttachmentUploadResult => ({ status: "refused", conversationId, reason, message });
+    if (meta === undefined) return refused("unknown_conversation", "That conversation does not exist.");
+    if (meta.scope.kind === "room" || meta.scope.kind === "channel")
+      return refused(
+        "unsupported_conversation",
+        "Attachments go to Clankie or one agent, not a room or channel.",
+      );
+    if (this.ownerAttachments === undefined)
+      return refused("unavailable", "This Clankie cannot store attachments.");
+    return run(this.ownerAttachments);
+  }
+
+  /** The send's attachments, every one committed to this conversation, or a refusal. */
+  private async sendAttachments(
+    meta: ConversationMeta,
+    turn: SubmitOperatorConversationTurn,
+  ): Promise<readonly StoredOwnerAttachment[] | undefined> {
+    if (turn.attachments === undefined) return undefined;
+    if (meta.scope.kind === "channel")
+      throw new ConversationRefusedError("Attachments go to Clankie or one agent, not a channel.");
+    const host = this.ownerAttachments;
+    if (host === undefined) throw new ConversationRefusedError("This Clankie cannot store attachments.");
+    const stored = await Promise.all(
+      turn.attachments.map((reference) => host.attachment(meta.conversationId, reference.artifactId)),
+    );
+    if (stored.some((attachment) => attachment === undefined))
+      throw new ConversationRefusedError(
+        "An attachment is not uploaded to this conversation; upload it again.",
+      );
+    return stored as StoredOwnerAttachment[];
   }
 
   public async publishFile(input: {
@@ -1936,8 +2024,9 @@ export class ConversationStore {
       throw new ConversationRefusedError(
         "This is a read-only room transcript. Send messages in Discord; work started from a Discord room reports back through that room.",
       );
+    const attachments = await this.sendAttachments(meta, turn);
     if (meta.scope.kind === "seat") {
-      return this.queueSeatSend(meta, meta.scope.seatId, turn, { seatId: meta.scope.seatId });
+      return this.queueSeatSend(meta, meta.scope.seatId, turn, { seatId: meta.scope.seatId }, attachments);
     }
     if (meta.scope.kind === "persona") {
       const runner = this.personaRunner?.(meta.scope.personaId);
@@ -1951,6 +2040,20 @@ export class ConversationStore {
             currentRevision: meta.revision,
             safeCursor: this.lastCursor(meta),
           };
+        // A Swarm peer shares no filesystem with this machine, and its mailbox
+        // carries text. Refusing keeps the owner's draft rather than sending
+        // a message that silently lost what it was about.
+        if (attachments !== undefined)
+          return {
+            schemaVersion: 1,
+            status: "seat_undelivered",
+            conversationId: meta.conversationId,
+            personaId: meta.scope.personaId,
+            detail:
+              "Attachments cannot reach a Swarm peer: it shares no filesystem with this machine. Send the text alone, or put the files somewhere the peer can read.",
+            currentRevision: meta.revision,
+            safeCursor: this.lastCursor(meta),
+          };
         return this.enqueue(meta, turn.message, undefined, true, runner, {
           surfaceClientId: turn.surfaceClientId,
           delivery: "queue",
@@ -1958,7 +2061,7 @@ export class ConversationStore {
       }
       const seatId =
         this.seatForPersona === undefined ? meta.scope.personaId : this.seatForPersona(meta.scope.personaId);
-      return this.queueSeatSend(meta, seatId, turn, { personaId: meta.scope.personaId });
+      return this.queueSeatSend(meta, seatId, turn, { personaId: meta.scope.personaId }, attachments);
     }
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
@@ -1983,6 +2086,7 @@ export class ConversationStore {
       {
         surfaceClientId: turn.surfaceClientId,
         ...(turn.delivery === undefined || meta.scope.kind === "channel" ? {} : { delivery: turn.delivery }),
+        ...(attachments === undefined ? {} : { attachments }),
       },
     );
   }
@@ -2259,9 +2363,12 @@ export class ConversationStore {
     seatId: string | undefined,
     turn: SubmitOperatorConversationTurn,
     offlineIdentity: { readonly seatId: string } | { readonly personaId: string },
+    attachments?: readonly StoredOwnerAttachment[],
   ): Promise<SubmitOperatorConversationTurnResult> {
     const previous = this.seatSends.get(meta.conversationId) ?? Promise.resolve();
-    const pending = previous.then(() => this.deliverSeatTurn(meta, seatId, offlineIdentity, turn));
+    const pending = previous.then(() =>
+      this.deliverSeatTurn(meta, seatId, offlineIdentity, turn, attachments),
+    );
     const settled = pending.then(
       () => undefined,
       () => undefined,
@@ -2278,6 +2385,7 @@ export class ConversationStore {
     seatId: string | undefined,
     offlineIdentity: { readonly seatId: string } | { readonly personaId: string },
     turn: SubmitOperatorConversationTurn,
+    attachments?: readonly StoredOwnerAttachment[],
   ): Promise<SubmitOperatorConversationTurnResult> {
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
@@ -2290,10 +2398,30 @@ export class ConversationStore {
         safeCursor,
       };
     }
+    // Files go into the seat's own workspace before the message that names
+    // them; a seat that cannot take them gets nothing, and the owner keeps
+    // the draft (ADR 0209).
+    let message = turn.message;
+    if (attachments !== undefined && seatId !== undefined) {
+      const prepared = (await this.ownerAttachments?.forSeat?.(seatId, meta.conversationId, attachments)) ?? {
+        undeliverable: "This Clankie cannot hand files to agents.",
+      };
+      if ("undeliverable" in prepared)
+        return {
+          schemaVersion: 1,
+          status: "seat_undelivered",
+          conversationId: meta.conversationId,
+          ...offlineIdentity,
+          detail: prepared.undeliverable.slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX),
+          currentRevision: meta.revision,
+          safeCursor,
+        };
+      message = [turn.message, prepared.note].filter((part) => part.length > 0).join("\n\n");
+    }
     const delivery =
       seatId === undefined
         ? undefined
-        : await this.sendToSeat?.(seatId, turn.message, {
+        : await this.sendToSeat?.(seatId, message, {
             conversationId: meta.conversationId,
             source: "operator",
           });
@@ -2325,7 +2453,13 @@ export class ConversationStore {
     meta.revision += 1;
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
-    this.append(meta, { type: "message", role: "operator", text: turn.message, streaming: false });
+    this.append(meta, {
+      type: "message",
+      role: "operator",
+      text: turn.message,
+      streaming: false,
+      ...(attachments === undefined ? {} : { attachments: attachments.map((attachment) => attachment.file) }),
+    });
     this.append(meta, { type: "turn", runId, phase: "accepted" });
     this.append(meta, { type: "turn", runId, phase: "completed" });
     this.prune(meta.conversationId);
@@ -2345,7 +2479,7 @@ export class ConversationStore {
     herdrPaneId: string | undefined,
     publishOperatorMessage: boolean,
     runner: ConversationRunner = this.runner,
-    provenance: Pick<ConversationTurnContext, "origin" | "surfaceClientId"> & {
+    provenance: Pick<ConversationTurnContext, "origin" | "surfaceClientId" | "attachments"> & {
       delivery?: SubmitOperatorConversationTurn["delivery"];
     } = {},
   ): SubmitOperatorConversationTurnResult {
@@ -2357,7 +2491,15 @@ export class ConversationStore {
     this.saveMeta(meta);
     const runId = `run-${randomUUID()}`;
     if (publishOperatorMessage) {
-      this.append(meta, { type: "message", role: "operator", text: message, streaming: false });
+      this.append(meta, {
+        type: "message",
+        role: "operator",
+        text: message,
+        streaming: false,
+        ...(provenance.attachments === undefined
+          ? {}
+          : { attachments: provenance.attachments.map((attachment) => attachment.file) }),
+      });
     }
     this.append(meta, { type: "turn", runId, phase: "accepted" });
 
@@ -2406,6 +2548,7 @@ export class ConversationStore {
             ? {}
             : { surfaceClientId: provenance.surfaceClientId }),
           ...(meta.parentConversationId === undefined ? {} : { side: true as const }),
+          ...(provenance.attachments === undefined ? {} : { attachments: provenance.attachments }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(herdrPaneId === undefined ? {} : { seat: { herdrPaneId } }),
         },
