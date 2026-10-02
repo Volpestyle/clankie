@@ -1,22 +1,22 @@
 {
   "repository": "https://github.com/herdrdev/herdr",
-  "revision": "v0.9.1",
-  "sha256": "03403d3ef80dcf2b954dd5d27eb636e6c4f5279d240b48de272b7f53e4b73093",
+  "revision": "v0.9.3",
+  "sha256": "e48f6706440c92362773663131ef5b524c62549523e50a03f2b55d315edca100",
   "release": {
-    "version": "0.9.1",
+    "version": "0.9.3",
     "assets": {
-      "linux-x86_64": "https://github.com/herdrdev/herdr/releases/download/v0.9.1/herdr-linux-x86_64",
-      "linux-aarch64": "https://github.com/herdrdev/herdr/releases/download/v0.9.1/herdr-linux-aarch64",
-      "macos-x86_64": "https://github.com/herdrdev/herdr/releases/download/v0.9.1/herdr-macos-x86_64",
-      "macos-aarch64": "https://github.com/herdrdev/herdr/releases/download/v0.9.1/herdr-macos-aarch64",
-      "windows-x86_64": "https://github.com/herdrdev/herdr/releases/download/v0.9.1/herdr-windows-x86_64.zip"
+      "linux-x86_64": "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-linux-x86_64",
+      "linux-aarch64": "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-linux-aarch64",
+      "macos-x86_64": "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-macos-x86_64",
+      "macos-aarch64": "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-macos-aarch64",
+      "windows-x86_64": "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-windows-x86_64.zip"
     },
     "sha256": {
-      "linux-x86_64": "2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7",
-      "linux-aarch64": "f4ccf4de745f2cb9a39a983e9ba3703dad50ec2a58dea83026ceab721bbd8d9e",
-      "macos-x86_64": "053be0639935fe54ab5efbdb46651054e4f6a753a5b43153c88bd6912bce1e94",
-      "macos-aarch64": "5fc7a7e7adfaca56fa80aa89dcb025693357268dab8285b9ce2d08a2313c89de",
-      "windows-x86_64": "04ce380cac5af27bfcf75d0951ac49b7afe4c984aee8852985806d4f71f93a6e"
+      "linux-x86_64": "18a8dc65f1c2fa485884344356dea1cfd911c6f06cf46fa78e193f4087f4dba7",
+      "linux-aarch64": "4de7aa3e25678812e92960de64f7c2aaa1bca1f0f80a3c5e559837e231e1f5c0",
+      "macos-x86_64": "db62d548ff3e832b087a96b1894a08d26be3905f1830309cd556783f215d4054",
+      "macos-aarch64": "5173a3e0ae42d5d1ab7ebfa5d5e6329f7c3d23f8e1a3677c7ce3231da2884157",
+      "windows-x86_64": "c75b1fa49f7a3ba4b8b11789912a6147e4214a3b6fd3556d0f80076c8887d795"
     }
   }
 }
