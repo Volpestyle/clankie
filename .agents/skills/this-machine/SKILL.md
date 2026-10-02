@@ -38,6 +38,16 @@ for a workspace conversation. Reopening the TUI does not reset model context.
 
 ## Launcher control
 
+You can restart yourself with `clankie restart` from your own bash tool when
+that restart is authorized. The launcher detaches a helper and waits for your
+current console or Discord turn to finish; `status: "scheduled"` means it is
+queued, not already healthy. Finish your reply so the helper can proceed. Its
+`logPath` records the result; check `clankie status` afterward, including Discord.
+There is no need to hire a worker, write a delayed script, or ask the owner to
+run the command. A worker's backend can share your process lifetime, so handing
+it the restart does not make that worker survive. Named service targets are for
+an intentionally narrower restart; the normal command needs no extra `clankie`.
+
 This skill is the installed agent companion to the canonical launcher command
 layer. Do not write Keychain entries, `~/.config/clankie/clankie.json`, or
 `~/.config/clankie/settings.json` yourself. The full flag/JSON/exit-code
@@ -70,7 +80,7 @@ index). Configure through the headless CLI:
 | His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                  |
 | Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)                |
 | Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                         |
-| Pick up model/provider config         | `clankie restart captain`                                                                      |
+| Pick up model/provider config         | `clankie restart`                                                                              |
 | Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`          |
 | Rotate operator credential            | `clankie operator-credential rotate --json`                                                    |
 | Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                          |

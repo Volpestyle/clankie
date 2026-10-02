@@ -27,7 +27,7 @@ export async function effortStatus(options: EffortCommandOptions = {}): Promise<
     model,
     effort: model === null ? null : (config.variant?.[model] ?? null),
     ...(issues.length === 0 ? {} : { issues }),
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 
@@ -58,7 +58,7 @@ export async function effortSet(
     ok: true,
     model: ref,
     effort: config.variant?.[ref] ?? null,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 

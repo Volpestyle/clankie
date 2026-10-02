@@ -25,7 +25,7 @@ live owned server applies them. `pnpm herdr:build` prepares the official offline
 fallback in a checkout. `clankie herdr status` distinguishes the
 configured choice from the running `active` binding. Change it with
 `use NAME`, `create`, or the compatibility command `set --runtime auto`
-(the bundled default), then `clankie restart captain`.
+(the bundled default), then `clankie restart`.
 `set --runtime external` keeps whichever session name is already saved.
 
 `clankie-herdr`, `clankie herdr open`, and TUI `/herdr open` attach to the
@@ -56,7 +56,7 @@ Voice model selection preserves the configured voice ID and providers. Explicit
 v2.5. `voice status` reports stored/effective settings and environment overrides.
 `voice model clear` restores an originally unset model; restore any explicit
 previous model with `voice model set ID`. The launcher does not restart for these
-writes. When authorized, `clankie restart clankie` reloads the service and its
+writes. When authorized, `clankie restart` reloads the service and its
 dependent bodies. Older installations have only the console `/voice` wizard.
 A readiness check skips paid ElevenLabs synthesis: separate offline tests, real
 provider audio, and actual Discord audibility when reporting verification.

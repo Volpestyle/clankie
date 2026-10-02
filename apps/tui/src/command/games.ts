@@ -24,7 +24,7 @@ export async function gamesStatus(options: GamesCommandOptions = {}): Promise<Ga
     ok: true,
     games: (await settings.load()).gameplay,
     settingsFile: settings.path,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 
@@ -41,7 +41,7 @@ export async function gamesSet(
     ok: true,
     games: updated.gameplay,
     settingsFile: settings.path,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 

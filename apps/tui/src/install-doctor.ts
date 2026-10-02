@@ -497,7 +497,7 @@ function collectRemediations(input: {
   }
   if (input.doorway.state === "unavailable") {
     remediations.push(
-      "The public doorway is configured but this Clankie holds no connection to it, so no app reaches him and pairing refuses; read his log, then `clankie restart captain`.",
+      "The public doorway is configured but this Clankie holds no connection to it, so no app reaches him and pairing refuses; read his log, then `clankie restart`.",
     );
   }
   if (input.power.advice !== undefined) remediations.push(input.power.advice);

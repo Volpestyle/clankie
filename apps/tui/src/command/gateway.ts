@@ -102,7 +102,7 @@ async function result(options: GatewayCommandOptions): Promise<GatewayCommandRes
     enabled: publicGateway.url !== undefined && credentialPresent,
     ...(hostId === undefined ? {} : { hostId }),
     settingsFile: settings.path,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
     doorway: await probeDoorway(options),
   };
 }

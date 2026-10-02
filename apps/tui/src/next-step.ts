@@ -15,7 +15,7 @@ export function nextStepLine(input: {
     case "sign_in_required":
       return 'Sign this Mac back in: run /remote-access and choose "Sign this Mac back in", or `clankie remote-access on`.';
     case "unavailable":
-      return "Remote access is configured but holds no connection: read Clankie's log, then `clankie restart captain`.";
+      return "Remote access is configured but holds no connection: read Clankie's log, then `clankie restart`.";
     case "unreachable":
       return "Clankie is not answering: start him with `clankie`, then check `clankie status`.";
     default:

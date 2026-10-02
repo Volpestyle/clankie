@@ -45,7 +45,7 @@ describe("clankie fleet", () => {
     });
     expect(set.fleet.notes).toBe("grok attacks what codex builds.");
     expect(read().fleet.notes).toBe("grok attacks what codex builds.");
-    expect(set.restart).toBe("clankie restart captain");
+    expect(set.restart).toBe("clankie restart");
 
     expect((await runFleetCommand(["clear"], { settings })).fleet.notes).toBe("");
   });

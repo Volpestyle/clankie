@@ -1261,7 +1261,7 @@ async function addLocalProviderFlow(
     "/provider",
     [
       `${added.providerId} → ${added.baseURL} (${added.models.length} models) written to clankie.json.`,
-      "No credential needed. Restart the service (`clankie restart captain`) before Clankie himself uses it.",
+      "No credential needed. Restart the service (`clankie restart`) before Clankie himself uses it.",
     ].join("\n"),
     "success",
   );

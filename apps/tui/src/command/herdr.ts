@@ -52,7 +52,7 @@ async function herdrStatus(options: HerdrCommandOptions = {}): Promise<HerdrComm
     ok: true,
     herdr: (await settings.load()).herdr,
     settingsFile: settings.path,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 
@@ -76,7 +76,7 @@ async function herdrSet(
     ok: true,
     herdr: updated.herdr,
     settingsFile: settings.path,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 

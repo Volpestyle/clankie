@@ -53,7 +53,7 @@ export async function personaStatus(options: PersonaCommandOptions = {}): Promis
     ok: true,
     persona: (await settings.load()).persona,
     settingsFile: settings.path,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 
@@ -70,7 +70,7 @@ export async function personaUpdate(
     ok: true,
     persona: updated.persona,
     settingsFile: settings.path,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 
@@ -118,7 +118,7 @@ export async function runPersonaCommand(
     const images = personaImageStatus(
       await loadPersonaImages(status.persona.imagesDir, personaImageCacheDir(options.env)),
     );
-    return { ...status, images, restart: "Restart Clankie to apply persona images: clankie restart captain" };
+    return { ...status, images, restart: "Restart Clankie to apply persona images: clankie restart" };
   }
   if (verb === undefined || verb === "status") return await personaStatus(options);
   if (verb === "set") return await personaUpdate(parseSetArgs(args.slice(1)), options);

@@ -90,7 +90,7 @@ function doorwayLine(status: GatewayCommandResult): string {
     case "connecting":
       return "configured, reconnecting";
     case "unavailable":
-      return "configured, but Clankie holds no connection — check his log, then `clankie restart captain`";
+      return "configured, but Clankie holds no connection — check his log, then `clankie restart`";
     case "disabled":
       return "configured, not started";
     case "unreachable":

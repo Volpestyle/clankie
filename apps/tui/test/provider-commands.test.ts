@@ -654,7 +654,7 @@ describe("provider and model commands", () => {
     });
     // Back on the picker, the endpoint is selectable without leaving the modal.
     expect(view.selects[1]?.options.map((option) => option.value)).toContain("ollama");
-    expect(rendered(view)).toContain("clankie restart captain");
+    expect(rendered(view)).toContain("clankie restart");
   });
 
   it("falls back to typed model ids when the local endpoint is unreachable", async () => {

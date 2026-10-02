@@ -59,6 +59,6 @@ export async function runVoiceCommand(
     effectiveVoice: resolved.settings,
     overriddenByEnvironment: resolved.overriddenByEnvironment,
     settingsFile: store.path,
-    restart: "clankie restart clankie",
+    restart: "clankie restart",
   };
 }

@@ -95,7 +95,7 @@ export async function modelStatus(
     effort: config.model === undefined ? null : (config.variant?.[config.model] ?? null),
     providers: localProviders(config),
     ...(issues.length === 0 ? {} : { issues }),
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 
@@ -126,7 +126,7 @@ export async function modelDeclareLocal(
     baseURL: config.provider?.[providerId]?.options?.baseURL as string,
     models: input.models.map((model) => model.id),
     model: captain,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 
@@ -167,7 +167,7 @@ async function modelAddLocal(
  * included, is invisible to `model set`, to the captain, and to gameplay until
  * something fetches. The TUI does it inside `/provider` and `/model`; a
  * headless install needs a command of its own, and the running service picks
- * the new catalog up on `clankie restart captain`.
+ * the new catalog up on `clankie restart`.
  */
 async function modelRefresh(
   options: ModelCommandOptions = {},
@@ -186,7 +186,7 @@ async function modelRefresh(
     updated: result.updated,
     providers: Object.keys(catalog).length,
     models: countModels(catalog),
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 
@@ -201,7 +201,7 @@ export async function modelSet(
   if (parseModelRef(ref) === undefined)
     throw new Error(`Invalid model ref ${JSON.stringify(ref)}; expected providerId/modelId.`);
   const config = await setCaptainModel(ref, options.env === undefined ? {} : { env: options.env });
-  return { ok: true, model: config.model ?? ref, restart: "clankie restart captain" };
+  return { ok: true, model: config.model ?? ref, restart: "clankie restart" };
 }
 
 interface AddLocalFlags {

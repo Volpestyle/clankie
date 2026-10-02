@@ -15,9 +15,7 @@ describe("nextStepLine", () => {
   });
 
   it("sends a configured doorway that holds no connection to the captain restart", () => {
-    expect(nextStepLine({ doorway: { state: "unavailable" }, ...configured })).toContain(
-      "clankie restart captain",
-    );
+    expect(nextStepLine({ doorway: { state: "unavailable" }, ...configured })).toContain("clankie restart");
   });
 
   it("asks to start Clankie when he is not answering", () => {

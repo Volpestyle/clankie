@@ -226,10 +226,21 @@ if inspection fails, the launcher conservatively refuses matching unowned
 processes. Named activity tunnels check their configured tunnel name. Foreign
 processes are never signalled.
 
-When Clankie runs this from his own operator-turn bash, the launcher waits
-for that turn to settle. Stdout then reports `"status": "scheduled"` with
-`afterRun`, and stderr says the restart is deferred. That is success (exit 0),
-not a no-op.
+Use plain `clankie restart` for a normal restart. The optional service target
+is only needed to select a narrower dependency set.
+
+Clankie can run this from his own bash in the console or an authorized Discord
+text/voice turn. The launcher detaches a helper and waits for the current turn
+to settle. Stdout reports `"status": "scheduled"` with `afterRun` (console) or
+`afterSession` (native Pi room), plus `logPath` for the helper's output. This is
+success (exit 0), not proof of recovery: finish the reply, then check the log
+and `clankie status`, including the Discord bridge. The helper cancels if the
+turn has not settled within ten minutes. No hired worker or custom sleep script
+is needed; a hired worker's backend may share the service's process lifetime.
+
+New service processes clear inherited pnpm lifecycle and Pi session markers.
+Otherwise a restart launched from a running package script can be mistaken for
+a recursive `start` and skipped by pnpm, leaving all stopped dependents offline.
 
 ### `down [service]`
 

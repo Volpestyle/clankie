@@ -81,7 +81,7 @@ describe("clankie model add-local / set / status", () => {
       baseURL: "http://127.0.0.1:8000/v1",
       models: ["deepseek-v4-flash"],
       model: "ds4/deepseek-v4-flash",
-      restart: "clankie restart captain",
+      restart: "clankie restart",
     });
     expect((await loadConfig({ env })).config.model).toBe("ds4/deepseek-v4-flash");
 
@@ -154,7 +154,7 @@ describe("clankie model refresh", () => {
       updated: true,
       providers: 1,
       models: 1,
-      restart: "clankie restart captain",
+      restart: "clankie restart",
     });
   });
 

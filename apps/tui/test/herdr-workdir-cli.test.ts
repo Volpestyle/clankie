@@ -17,7 +17,7 @@ describe("clankie herdr", () => {
     const settings = await tempStore();
     const status = await runHerdrCommand([], { settings });
     expect(status.herdr).toEqual({ runtime: "auto", session: "default" });
-    expect(status.restart).toBe("clankie restart captain");
+    expect(status.restart).toBe("clankie restart");
 
     const updated = await runHerdrCommand(["set", "--session", "clankies"], { settings });
     expect(updated.herdr).toEqual({ runtime: "external", session: "clankies" });

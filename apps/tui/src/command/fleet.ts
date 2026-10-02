@@ -49,7 +49,7 @@ export function formatFleetLines(fleet: FleetSettings): string[] {
 }
 
 async function result(settings: SettingsStore, fleet: FleetSettings): Promise<FleetCommandResult> {
-  return { ok: true, fleet, settingsFile: settings.path, restart: "clankie restart captain" };
+  return { ok: true, fleet, settingsFile: settings.path, restart: "clankie restart" };
 }
 
 export async function fleetStatus(options: FleetCommandOptions = {}): Promise<FleetCommandResult> {

@@ -479,8 +479,18 @@ export async function startService(
   let child: ChildProcess | undefined;
   try {
     options.onStatus?.(`Starting ${service.label}…`);
-    const serviceEnv =
-      service.serviceEnv?.({ env, repoRoot: options.repoRoot, captainToken: options.captainToken }) ?? env;
+    const serviceEnv = {
+      ...(service.serviceEnv?.({ env, repoRoot: options.repoRoot, captainToken: options.captainToken }) ??
+        env),
+    };
+    // A self-restart inherits pnpm's running-script context. pnpm deliberately
+    // skips that same script/package to prevent recursion, leaving us stopped.
+    // This detached service is a new lifecycle, not a nested package script.
+    delete serviceEnv.npm_lifecycle_event;
+    delete serviceEnv.npm_lifecycle_script;
+    delete serviceEnv.PNPM_SCRIPT_SRC_DIR;
+    delete serviceEnv.PI_SESSION_FILE;
+    delete serviceEnv.PI_SESSION_ID;
     const fallbackArgs =
       typeof service.spawnArgs === "function" ? service.spawnArgs(serviceEnv) : service.spawnArgs;
     const resolved = service.resolveProcess?.({ env: serviceEnv, repoRoot: options.repoRoot }) ?? {

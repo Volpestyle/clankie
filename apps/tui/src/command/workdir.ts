@@ -30,7 +30,7 @@ function result(configured: string | undefined, settings: SettingsStore): Workdi
     workingDirectory: configured ?? null,
     effective: configured ?? homedir(),
     settingsFile: settings.path,
-    restart: "clankie restart captain",
+    restart: "clankie restart",
   };
 }
 

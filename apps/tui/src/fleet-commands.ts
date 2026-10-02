@@ -104,7 +104,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     });
     if (notes === undefined) return;
     await fleetUpdate({ size, models, notes: notes.trim() }, { settings: services.settings });
-    flow.renderLine("Saved. Run `clankie restart captain` to apply it.", "success");
+    flow.renderLine("Saved. Run `clankie restart` to apply it.", "success");
   } finally {
     flow.end();
   }

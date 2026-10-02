@@ -1,5 +1,6 @@
 import type { ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -99,6 +100,48 @@ async function writeRecord(env: NodeJS.ProcessEnv, id: ServiceId, pid: number): 
 }
 
 describe("service supervisor", () => {
+  it("starts a real pnpm service from its own inherited lifecycle environment", async () => {
+    const state = await stateEnv();
+    const root = state.XDG_STATE_HOME!;
+    const ready = join(root, "ready.json");
+    await writeFile(join(root, "pnpm-workspace.yaml"), "packages: []\n");
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({
+        name: "@clankie/restart-fixture",
+        private: true,
+        scripts: { start: "node ready.cjs" },
+      }),
+    );
+    await writeFile(
+      join(root, "ready.cjs"),
+      `require('node:fs').writeFileSync(${JSON.stringify(ready)}, JSON.stringify({session: process.env.PI_SESSION_FILE ?? null}));`,
+    );
+    const env = {
+      ...process.env,
+      ...state,
+      npm_lifecycle_event: "start",
+      npm_lifecycle_script: "node ready.cjs",
+      PNPM_SCRIPT_SRC_DIR: root,
+      PI_SESSION_FILE: "/old/discord/session.jsonl",
+    };
+    const result = await startService(
+      {
+        ...stubService(),
+        spawnArgs: ["--filter", "@clankie/restart-fixture", "start"],
+        probe: async () => ({ state: existsSync(ready) ? "healthy" : "unreachable" }),
+      },
+      {
+        repoRoot: root,
+        env,
+        listProcessCommandsImpl: noProcesses,
+      },
+    );
+    expect(result.state).toBe("healthy");
+    expect(JSON.parse(await readFile(ready, "utf8"))).toEqual({ session: null });
+    expect(env.npm_lifecycle_event).toBe("start");
+  });
+
   it("gives Clankie longer than its configured play shutdown deadline", () => {
     expect(clankieStopGraceMs({})).toBe(17_000);
     expect(clankieStopGraceMs({ CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS: "25000" })).toBe(27_000);

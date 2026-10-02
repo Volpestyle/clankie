@@ -276,7 +276,7 @@ describe("headless ElevenLabs model selection", () => {
     expect(selected).toMatchObject({
       ok: true,
       voice: { elevenLabsModelId: "eleven_v4_turbo", elevenLabsVoiceId: "existing_voice" },
-      restart: "clankie restart clankie",
+      restart: "clankie restart",
     });
     expect(await store.load()).toEqual({
       ...before,

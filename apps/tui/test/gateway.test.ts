@@ -99,7 +99,7 @@ describe("gateway command", () => {
     const key = await credentials.get(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID);
     expect(key?.type === "api" && key.key).toMatch(/^[a-f0-9]{64}$/u);
     expect(key?.type === "api" && key.key).not.toBe("a".repeat(64));
-    expect(rotated.restart).toBe("clankie restart captain");
+    expect(rotated.restart).toBe("clankie restart");
   });
 
   it("re-signs a signed-out Mac in under its existing installation id and host id", async () => {
