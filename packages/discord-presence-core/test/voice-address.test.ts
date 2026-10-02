@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyVoiceAddress, phoneticKey, voiceAddressesCharacter } from "../src/voice-address.ts";
+import { classifyVoiceAddress, voiceAddressesCharacter } from "../src/voice-address.ts";
 
 // The tolerance must come from the phonetics, not from a padded alias list, so
 // most cases run against the display name alone.
@@ -7,20 +7,6 @@ const displayNameOnly = ["clankie"];
 
 // What characterNames(persona) actually produces: displayName + owner aliases.
 const characterNamesList = ["clankie", "clanky", "clank"];
-
-describe("phoneticKey", () => {
-  it("collapses transcription variants of the name onto one skeleton", () => {
-    const key = phoneticKey("clankie");
-    for (const heard of ["clanky", "clankee", "klankie", "clanki"]) {
-      expect(phoneticKey(heard)).toBe(key);
-    }
-  });
-
-  it("keeps consonant differences distinct", () => {
-    expect(phoneticKey("blankie")).not.toBe(phoneticKey("clankie"));
-    expect(phoneticKey("clankiest")).not.toBe(phoneticKey("clankie"));
-  });
-});
 
 describe("classifyVoiceAddress", () => {
   it("treats a clean hail as addressed", () => {

@@ -30,6 +30,7 @@ import {
 } from "@clankie/model-provider";
 import {
   GENERATED_MEDIA_DIRECTORY,
+  isGeneratedMediaRef,
   GenerateImageResultSchema,
   GenerateVideoResultSchema,
   type GenerateImageRequest,
@@ -517,8 +518,10 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
   }
 
   private pathForRef(artifactRef: string): string {
-    // Shape already validated by `isGeneratedMediaRef`: one safe segment under
-    // the generated directory, so this cannot climb out of the root.
+    if (!isGeneratedMediaRef(artifactRef)) {
+      throw new MediaRefusal("provider_failed", "source image must be a generated-media reference");
+    }
+    // One safe segment under the generated directory cannot climb out of the root.
     const relativePath = artifactRef.slice(artifactRef.indexOf(":", 7) + 1);
     return join(this.options.attachmentRoot, relativePath);
   }

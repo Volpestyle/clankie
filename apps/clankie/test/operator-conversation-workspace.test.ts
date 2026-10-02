@@ -1,3 +1,4 @@
+import { sendMessage } from "./conversation-requests.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,18 +34,12 @@ describe("workspace-scoped operator conversations", () => {
     if (created.op !== "create") throw new Error("conversation was not created");
 
     for (const conversationId of [created.conversation.conversationId, "global-default"]) {
-      const sent = await store.serve({
-        op: "send",
-        schemaVersion: 1,
-        turn: {
-          schemaVersion: 1,
-          kind: "message",
-          conversationId,
-          surfaceClientId: "test",
-          expectedRevision: 0,
-          message: "where are you",
-          herdrPaneId: "pane-3",
-        },
+      const sent = await sendMessage(store, {
+        conversationId,
+        surfaceClientId: "test",
+        expectedRevision: 0,
+        message: "where are you",
+        herdrPaneId: "pane-3",
       });
       if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("turn was not accepted");
       await store.awaitRun(sent.result.runId);

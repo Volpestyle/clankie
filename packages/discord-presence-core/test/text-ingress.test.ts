@@ -212,13 +212,7 @@ describe("DiscordTextIngress", () => {
   });
 
   it("admits interleaved Discord turns without serializing unrelated captain work", async () => {
-    const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
-    const port = new RecordingPort(
-      (request) =>
-        new Promise((resolve) => {
-          pending.set(request.deliveryId, resolve);
-        }),
-    );
+    const { pending, port } = pendingTurns();
     const ingress = new DiscordTextIngress(port, config());
 
     const first = ingress.handle(guildMessage("message-a"));
@@ -290,6 +284,17 @@ class RecordingPort implements DiscordTextIngressPort {
   public get typing(): DiscordPresenceWrite[] {
     return this.writes.filter((write) => write.payload.kind === "typing_start");
   }
+}
+
+function pendingTurns() {
+  const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
+  const port = new RecordingPort(
+    (request) =>
+      new Promise((resolve) => {
+        pending.set(request.deliveryId, resolve);
+      }),
+  );
+  return { pending, port };
 }
 
 /** A reply is one message whether or not it carries a picture (ADR 0085). */
@@ -593,9 +598,11 @@ describe("reading live, then checking in", () => {
   });
 
   it("keeps the backlog to the recent room rather than an archive", async () => {
+    const port = new RecordingPort();
     const ingress = new DiscordTextIngress(
-      new RecordingPort(),
-      room({ liveMessageWindow: 0, maxPendingPerChannel: 3 }),
+      port,
+      // Keep the downstream context limit above the pending cap so it cannot hide overflow.
+      room({ liveMessageWindow: 0, maxPendingPerChannel: 3, contextMessageLimit: 10 }),
       () => undefined,
     );
     await ingress.handle(say("m1", "clankie how did the run go?"));
@@ -604,6 +611,8 @@ describe("reading live, then checking in", () => {
 
     const [outcome] = await ingress.catchUp();
     expect(outcome).toMatchObject({ state: "settled" });
+    expect(port.turns.at(-1)?.contextMessages.map((message) => message.id)).toEqual(["m4", "m5"]);
+    expect(port.turns.at(-1)?.trigger.id).toBe("m6");
   });
 
   it("still answers a direct mention in a channel he had drifted from", async () => {
@@ -624,13 +633,7 @@ describe("typing while he processes a live message", () => {
   it("shows him typing while an addressed turn is in flight and stops once it settles", async () => {
     vi.useFakeTimers();
     try {
-      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
-      const port = new RecordingPort(
-        (request) =>
-          new Promise((resolve) => {
-            pending.set(request.deliveryId, resolve);
-          }),
-      );
+      const { pending, port } = pendingTurns();
       const ingress = new DiscordTextIngress(port, config());
 
       const outcome = ingress.handle(guildMessage("message-typing"));
@@ -669,13 +672,7 @@ describe("typing while he processes a live message", () => {
   it("shows him typing on a live follow-up that never repeats his name", async () => {
     vi.useFakeTimers();
     try {
-      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
-      const port = new RecordingPort(
-        (request) =>
-          new Promise((resolve) => {
-            pending.set(request.deliveryId, resolve);
-          }),
-      );
+      const { pending, port } = pendingTurns();
       const ingress = new DiscordTextIngress(port, {
         ...config(),
         channelIds: new Set(),
@@ -721,13 +718,7 @@ describe("typing while he processes a live message", () => {
   it("stays invisible while he catches up on a backlog nobody is waiting on", async () => {
     vi.useFakeTimers();
     try {
-      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
-      const port = new RecordingPort(
-        (request) =>
-          new Promise((resolve) => {
-            pending.set(request.deliveryId, resolve);
-          }),
-      );
+      const { pending, port } = pendingTurns();
       const ingress = new DiscordTextIngress(port, {
         ...config(),
         channelIds: new Set(),
@@ -772,13 +763,7 @@ describe("typing while he processes a live message", () => {
   it("stops refreshing after a failed typing post without failing the turn", async () => {
     vi.useFakeTimers();
     try {
-      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
-      const port = new RecordingPort(
-        (request) =>
-          new Promise((resolve) => {
-            pending.set(request.deliveryId, resolve);
-          }),
-      );
+      const { pending, port } = pendingTurns();
       port.failTyping = true;
       const ingress = new DiscordTextIngress(port, config());
 
@@ -803,13 +788,7 @@ describe("typing while he processes a live message", () => {
   it("keeps him typing for as long as the turn is actually running", async () => {
     vi.useFakeTimers();
     try {
-      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
-      const port = new RecordingPort(
-        (request) =>
-          new Promise((resolve) => {
-            pending.set(request.deliveryId, resolve);
-          }),
-      );
+      const { pending, port } = pendingTurns();
       const ingress = new DiscordTextIngress(port, config());
 
       const outcome = ingress.handle(guildMessage("message-long-lookup"));
@@ -832,13 +811,7 @@ describe("typing while he processes a live message", () => {
   it("stops refreshing when he chooses silence after processing the message", async () => {
     vi.useFakeTimers();
     try {
-      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
-      const port = new RecordingPort(
-        (request) =>
-          new Promise((resolve) => {
-            pending.set(request.deliveryId, resolve);
-          }),
-      );
+      const { pending, port } = pendingTurns();
       const ingress = new DiscordTextIngress(port, config());
 
       // Typing acknowledges processing even if he ultimately chooses silence.
@@ -864,13 +837,7 @@ describe("typing while he processes a live message", () => {
   it("never lights the channel for room chatter he lets pass in silence", async () => {
     vi.useFakeTimers();
     try {
-      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
-      const port = new RecordingPort(
-        (request) =>
-          new Promise((resolve) => {
-            pending.set(request.deliveryId, resolve);
-          }),
-      );
+      const { pending, port } = pendingTurns();
       const ingress = new DiscordTextIngress(port, config());
 
       // Nobody asked him anything: he is shown the room, not addressed. He may

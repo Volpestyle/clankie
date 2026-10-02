@@ -12,7 +12,13 @@ export default defineConfig({
   root: repoRoot,
   test: {
     include: packageTestPattern,
-    exclude: ["**/node_modules/**", "**/.turbo/**", "**/dist/**", "artifacts/**"],
+    exclude: [
+      "**/node_modules/**",
+      "**/.turbo/**",
+      "**/dist/**",
+      "artifacts/**",
+      "packages/play/test/free-play-corpus.test.ts", // Explicit manual eval lane.
+    ],
     fileParallelism: false,
     retry: 0,
     ...(process.env.CI

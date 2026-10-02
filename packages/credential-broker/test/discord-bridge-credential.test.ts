@@ -1,3 +1,4 @@
+import { MemoryCredentialStore } from "./memory-store.ts";
 import {
   DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID,
   DISCORD_USER_BRIDGE_CREDENTIAL_PROVIDER_ID,
@@ -15,31 +16,8 @@ import {
   resolveDiscordUserBridgeCredential,
   resolveDiscordUserVoiceBridgeCredential,
   resolveDiscordVoiceBridgeCredential,
-  type CredentialStore,
-  type ProviderCredential,
 } from "../src/index.ts";
 import { describe, expect, it } from "vitest";
-
-class MemoryCredentialStore implements CredentialStore {
-  public readonly credentials = new Map<string, ProviderCredential>();
-
-  public get(providerId: string): Promise<ProviderCredential | undefined> {
-    return Promise.resolve(this.credentials.get(providerId));
-  }
-
-  public set(providerId: string, credential: ProviderCredential): Promise<void> {
-    this.credentials.set(providerId, credential);
-    return Promise.resolve();
-  }
-
-  public delete(providerId: string): Promise<boolean> {
-    return Promise.resolve(this.credentials.delete(providerId));
-  }
-
-  public list(): Promise<Record<string, never>> {
-    return Promise.resolve({});
-  }
-}
 
 describe("Discord bridge credential", () => {
   it("mints and persists one stable 256-bit local bearer", async () => {

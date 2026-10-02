@@ -1,3 +1,4 @@
+import { replayConversation, sendMessage } from "./conversation-requests.ts";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,6 +18,27 @@ async function makeRoot(prefix: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), prefix));
   roots.push(root);
   return root;
+}
+
+/** Shared offline captain/seat scaffolding; projections and live senders stay scenario-owned. */
+function channelStore(
+  root: string,
+  projection?: ConstructorParameters<typeof ConversationStore>[6],
+  sendToSeat: ConstructorParameters<typeof ConversationStore>[3] = vi.fn(() => Promise.resolve(false)),
+): ConversationStore {
+  return new ConversationStore(
+    root,
+    vi.fn(() => Promise.resolve()),
+    undefined,
+    sendToSeat,
+    undefined,
+    undefined,
+    projection,
+  );
+}
+
+function upsertChannel(store: ConversationStore, channel: Omit<UpsertOperatorChannel, "schemaVersion">) {
+  return store.serve({ op: "channel", schemaVersion: 1, channel: { schemaVersion: 1, ...channel } });
 }
 
 describe("channel conversations", () => {
@@ -102,14 +124,9 @@ describe("channel conversations", () => {
     );
     store = new ConversationStore(root, captainRunner, undefined, sendToSeat);
 
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "atlas slowness",
-        members: ["atlas", "dev", "greenhouse", "quiet"],
-      },
+    const created = await upsertChannel(store, {
+      title: "atlas slowness",
+      members: ["atlas", "dev", "greenhouse", "quiet"],
     });
     if (created.op !== "channel") throw new Error("channel expected");
     expect(created.channel.members.map((member) => member.personaId)).toEqual([
@@ -120,17 +137,11 @@ describe("channel conversations", () => {
     ]);
     expect(created.conversation.scope).toEqual({ kind: "channel", channelId: created.channel.channelId });
 
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: created.conversation.conversationId,
-        surfaceClientId: "ios",
-        expectedRevision: 0,
-        message: "why is the atlas slow?",
-      },
+    const sent = await sendMessage(store, {
+      conversationId: created.conversation.conversationId,
+      surfaceClientId: "ios",
+      expectedRevision: 0,
+      message: "why is the atlas slow?",
     });
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("accepted expected");
     await store.awaitRun(sent.result.runId);
@@ -153,14 +164,9 @@ describe("channel conversations", () => {
     // embedded newline would submit a half-written turn.
     for (const prompt of prompts) expect(prompt.text).not.toContain("\n");
 
-    const replay = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: created.conversation.conversationId,
-        surfaceClientId: "ios",
-      },
+    const replay = await replayConversation(store, {
+      conversationId: created.conversation.conversationId,
+      surfaceClientId: "ios",
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
     const said = replay.result.events.flatMap((event) =>
@@ -186,13 +192,8 @@ describe("channel conversations", () => {
       }, 0);
       return Promise.resolve(true);
     });
-    store = new ConversationStore(
+    store = channelStore(
       root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      sendToSeat,
-      undefined,
-      undefined,
       {
         post: (post) => {
           posted.push({ ...post });
@@ -201,34 +202,24 @@ describe("channel conversations", () => {
         resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
         swarmGuildId: () => "guild-1",
       },
+      sendToSeat,
     );
 
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "clankies united",
-        members: ["atlas", "grove"],
-        discord: {
-          kind: "webhook",
-          webhookUrl: "https://discord.com/api/webhooks/42/super-secret-token",
-        },
+    const created = await upsertChannel(store, {
+      title: "clankies united",
+      members: ["atlas", "grove"],
+      discord: {
+        kind: "webhook",
+        webhookUrl: "https://discord.com/api/webhooks/42/super-secret-token",
       },
     });
     if (created.op !== "channel") throw new Error("channel expected");
     const send = (expectedRevision: number, message: string) =>
-      store.serve({
-        op: "send",
-        schemaVersion: 1,
-        turn: {
-          schemaVersion: 1,
-          kind: "message",
-          conversationId: created.conversation.conversationId,
-          surfaceClientId: "ios",
-          expectedRevision,
-          message,
-        },
+      sendMessage(store, {
+        conversationId: created.conversation.conversationId,
+        surfaceClientId: "ios",
+        expectedRevision,
+        message,
       });
 
     // Nobody is seated: the operator typed into a room that could not ask
@@ -257,15 +248,10 @@ describe("channel conversations", () => {
 
     // And the notice is a delivery fact, not something anyone said, so it is
     // never in the record the members read back.
-    const replay = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: created.conversation.conversationId,
-        surfaceClientId: "ios",
-        limit: 50,
-      },
+    const replay = await replayConversation(store, {
+      conversationId: created.conversation.conversationId,
+      surfaceClientId: "ios",
+      limit: 50,
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
     const said = replay.result.events.flatMap((event) => (event.type === "message" ? [event.text] : []));
@@ -284,27 +270,14 @@ describe("channel conversations", () => {
       swarmGuildId: () => "guild-1",
     });
     const before: Record<string, unknown>[] = [];
-    const first = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      // Nothing ever answers, so the run is still accepted when the lights go out.
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      projection(before) as never,
-    );
-    const created = await first.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "clankies united",
-        members: ["atlas"],
-        discord: {
-          kind: "webhook",
-          webhookUrl: "https://discord.com/api/webhooks/42/super-secret-token",
-        },
+    // Nothing ever answers, so the run is still accepted when the lights go out.
+    const first = channelStore(root, projection(before) as never);
+    const created = await upsertChannel(first, {
+      title: "clankies united",
+      members: ["atlas"],
+      discord: {
+        kind: "webhook",
+        webhookUrl: "https://discord.com/api/webhooks/42/super-secret-token",
       },
     });
     if (created.op !== "channel") throw new Error("channel expected");
@@ -330,15 +303,7 @@ describe("channel conversations", () => {
     );
 
     const after: Record<string, unknown>[] = [];
-    const second = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      projection(after) as never,
-    );
+    const second = channelStore(root, projection(after) as never);
     // The notice is fired off at boot rather than awaited, so booting is never
     // held up by Discord being slow or down.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -364,13 +329,8 @@ describe("channel conversations", () => {
       }, 0);
       return Promise.resolve(true);
     });
-    store = new ConversationStore(
+    store = channelStore(
       root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      sendToSeat,
-      undefined,
-      undefined,
       {
         post: (post) => {
           posted.push({ ...post });
@@ -381,19 +341,15 @@ describe("channel conversations", () => {
         resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
         swarmGuildId: () => "guild-1",
       },
+      sendToSeat,
     );
 
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "release",
-        members: ["atlas"],
-        discord: {
-          kind: "webhook",
-          webhookUrl: "https://discord.com/api/webhooks/42/super-secret-token",
-        },
+    const created = await upsertChannel(store, {
+      title: "release",
+      members: ["atlas"],
+      discord: {
+        kind: "webhook",
+        webhookUrl: "https://discord.com/api/webhooks/42/super-secret-token",
       },
     });
     if (created.op !== "channel") throw new Error("channel expected");
@@ -407,17 +363,11 @@ describe("channel conversations", () => {
     expect(JSON.stringify(created)).not.toContain("super-secret-token");
 
     const send = (expectedRevision: number) =>
-      store.serve({
-        op: "send",
-        schemaVersion: 1,
-        turn: {
-          schemaVersion: 1,
-          kind: "message",
-          conversationId: created.conversation.conversationId,
-          surfaceClientId: "ios",
-          expectedRevision,
-          message: "shipping today?",
-        },
+      sendMessage(store, {
+        conversationId: created.conversation.conversationId,
+        surfaceClientId: "ios",
+        expectedRevision,
+        message: "shipping today?",
       });
     const first = await send(0);
     if (first.op !== "send" || first.result.status !== "accepted") throw new Error("accepted expected");
@@ -454,14 +404,9 @@ describe("channel conversations", () => {
     await store.awaitRun(second.result.runId);
     // Both posts were attempted and both were refused; the round carried on.
     expect(posted).toHaveLength(2);
-    const replay = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: created.conversation.conversationId,
-        surfaceClientId: "ios",
-      },
+    const replay = await replayConversation(store, {
+      conversationId: created.conversation.conversationId,
+      surfaceClientId: "ios",
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
     expect(
@@ -480,25 +425,17 @@ describe("channel conversations", () => {
         webhookToken: "provisioned-secret",
       }),
     );
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision, swarmGuildId: () => "guild-1" },
-    );
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(),
+      provision,
+      swarmGuildId: () => "guild-1",
+    });
 
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "Atlas slowness",
-        members: ["atlas"],
-        discord: { kind: "provision" },
-      },
+    const created = await upsertChannel(store, {
+      title: "Atlas slowness",
+      members: ["atlas"],
+      discord: { kind: "provision" },
     });
     if (created.op !== "channel") throw new Error("channel expected");
     expect(provision).toHaveBeenCalledWith({ name: "Atlas slowness" });
@@ -528,21 +465,13 @@ describe("channel conversations", () => {
         { kind: "channel" as const, channelId: "43", name: "fleet" },
       ]),
     );
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      {
-        post: vi.fn(() => Promise.resolve()),
-        resolve: vi.fn(),
-        provision,
-        rooms,
-        swarmGuildId: () => "guild-1",
-      },
-    );
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(),
+      provision,
+      rooms,
+      swarmGuildId: () => "guild-1",
+    });
 
     // The picker reads the guild's own rooms, so choosing one is a pick rather
     // than a snowflake typed from memory.
@@ -550,15 +479,10 @@ describe("channel conversations", () => {
     if (listed.op !== "discord_rooms") throw new Error("discord_rooms expected");
     expect(listed.rooms.map((room) => room.name)).toEqual(["general", "fleet"]);
 
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "Atlas slowness",
-        members: ["atlas"],
-        discord: { kind: "provision", room: { kind: "channel", channelId: "43" } },
-      },
+    const created = await upsertChannel(store, {
+      title: "Atlas slowness",
+      members: ["atlas"],
+      discord: { kind: "provision", room: { kind: "channel", channelId: "43" } },
     });
     if (created.op !== "channel") throw new Error("channel expected");
     expect(provision).toHaveBeenCalledWith({
@@ -583,25 +507,12 @@ describe("channel conversations", () => {
           webhookToken: "provisioned-secret",
         }),
     );
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      { post, resolve: vi.fn(), provision, swarmGuildId: () => "oathkeeper" },
-    );
+    const store = channelStore(root, { post, resolve: vi.fn(), provision, swarmGuildId: () => "oathkeeper" });
 
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "Field notes",
-        members: [],
-        discord: { kind: "provision", room: { kind: "forum", channelId: "forum-1" } },
-      },
+    const created = await upsertChannel(store, {
+      title: "Field notes",
+      members: [],
+      discord: { kind: "provision", room: { kind: "forum", channelId: "forum-1" } },
     });
     if (created.op !== "channel") throw new Error("channel expected");
     expect(created.channel.discord).toEqual({
@@ -611,17 +522,11 @@ describe("channel conversations", () => {
       webhookId: "101",
     });
 
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: created.conversation.conversationId,
-        surfaceClientId: "ios",
-        expectedRevision: 0,
-        message: "from the app",
-      },
+    const sent = await sendMessage(store, {
+      conversationId: created.conversation.conversationId,
+      surfaceClientId: "ios",
+      expectedRevision: 0,
+      message: "from the app",
     });
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("accepted expected");
     await store.awaitRun(sent.result.runId);
@@ -643,30 +548,21 @@ describe("channel conversations", () => {
     // A forum is a container, not the conversation identity: another room gets
     // another post under the same parent without stealing inbound delivery.
     await expect(
-      store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          title: "Second post",
-          members: [],
-          discord: { kind: "provision", room: { kind: "forum", channelId: "forum-1" } },
-        },
+      upsertChannel(store, {
+        title: "Second post",
+        members: [],
+        discord: { kind: "provision", room: { kind: "forum", channelId: "forum-1" } },
       }),
     ).resolves.toBeDefined();
   });
 
   it("lists no rooms rather than failing where nothing can read the guild", async () => {
     const root = await makeRoot("clankie-channel-norooms-");
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), swarmGuildId: () => "guild-1" },
-    );
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(),
+      swarmGuildId: () => "guild-1",
+    });
     const listed = await store.serve({ op: "discord_rooms", schemaVersion: 1 });
     if (listed.op !== "discord_rooms") throw new Error("discord_rooms expected");
     expect(listed.rooms).toEqual([]);
@@ -674,25 +570,16 @@ describe("channel conversations", () => {
 
   it("says so plainly when it cannot make the room, rather than half-projecting", async () => {
     const root = await makeRoot("clankie-channel-noprovision-");
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), swarmGuildId: () => "guild-1" },
-    );
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(),
+      swarmGuildId: () => "guild-1",
+    });
     await expect(
-      store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          title: "Atlas slowness",
-          members: ["atlas"],
-          discord: { kind: "provision" },
-        },
+      upsertChannel(store, {
+        title: "Atlas slowness",
+        members: ["atlas"],
+        discord: { kind: "provision" },
       }),
     ).rejects.toThrow("paste one from your swarm server instead");
   });
@@ -702,13 +589,8 @@ describe("channel conversations", () => {
     const posted: { username: string; content: string }[] = [];
     // Runs chain FIFO per conversation, so two rounds only overlap across two
     // rooms — and a seat may sit in several. Both rooms then wait on one seat.
-    const store = new ConversationStore(
+    const store = channelStore(
       root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(true)),
-      undefined,
-      undefined,
       {
         post: (post) => {
           posted.push({ username: post.username, content: post.content });
@@ -718,36 +600,26 @@ describe("channel conversations", () => {
           Promise.resolve({ guildId: "guild-1", channelId: `discord-${credential.webhookId}` }),
         swarmGuildId: () => "guild-1",
       },
+      vi.fn(() => Promise.resolve(true)),
     );
     const room = async (title: string, webhookId: string) => {
-      const made = await store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          title,
-          members: ["atlas"],
-          discord: {
-            kind: "webhook",
-            webhookUrl: `https://discord.com/api/webhooks/${webhookId}/tok`,
-          },
+      const made = await upsertChannel(store, {
+        title,
+        members: ["atlas"],
+        discord: {
+          kind: "webhook",
+          webhookUrl: `https://discord.com/api/webhooks/${webhookId}/tok`,
         },
       });
       if (made.op !== "channel") throw new Error("channel expected");
       return made.conversation.conversationId;
     };
     const send = (conversationId: string, message: string) =>
-      store.serve({
-        op: "send",
-        schemaVersion: 1,
-        turn: {
-          schemaVersion: 1,
-          kind: "message",
-          conversationId,
-          surfaceClientId: "ios",
-          expectedRevision: 0,
-          message,
-        },
+      sendMessage(store, {
+        conversationId,
+        surfaceClientId: "ios",
+        expectedRevision: 0,
+        message,
       });
 
     const left = await send(await room("release", "42"), "WADDAP");
@@ -771,26 +643,18 @@ describe("channel conversations", () => {
   it("leaves no room behind when the projection it was asked for fails", async () => {
     const root = await makeRoot("clankie-channel-rollback-");
     const provision = vi.fn(() => Promise.reject(new Error("Missing Permissions")));
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision, swarmGuildId: () => "guild-1" },
-    );
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(),
+      provision,
+      swarmGuildId: () => "guild-1",
+    });
 
     await expect(
-      store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          title: "should not exist",
-          members: ["atlas"],
-          discord: { kind: "provision" },
-        },
+      upsertChannel(store, {
+        title: "should not exist",
+        members: ["atlas"],
+        discord: { kind: "provision" },
       }),
     ).rejects.toThrow("Missing Permissions");
     // A create that could not be projected is not a room. Anything else leaves
@@ -803,33 +667,21 @@ describe("channel conversations", () => {
   it("leaves a room's title and roster untouched when an edit's projection fails", async () => {
     const root = await makeRoot("clankie-channel-editrollback-");
     const provision = vi.fn(() => Promise.reject(new Error("Missing Permissions")));
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision, swarmGuildId: () => "guild-1" },
-    );
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: { schemaVersion: 1, title: "Atlas slowness", members: ["atlas"] },
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(),
+      provision,
+      swarmGuildId: () => "guild-1",
     });
+    const created = await upsertChannel(store, { title: "Atlas slowness", members: ["atlas"] });
     if (created.op !== "channel") throw new Error("channel expected");
 
     await expect(
-      store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          channelId: created.channel.channelId,
-          title: "renamed",
-          members: ["atlas", "dev"],
-          discord: { kind: "provision" },
-        },
+      upsertChannel(store, {
+        channelId: created.channel.channelId,
+        title: "renamed",
+        members: ["atlas", "dev"],
+        discord: { kind: "provision" },
       }),
     ).rejects.toThrow("Missing Permissions");
 
@@ -844,29 +696,20 @@ describe("channel conversations", () => {
   it("unprojects a room on request, deleting only a webhook Clankie made", async () => {
     const root = await makeRoot("clankie-channel-unproject-");
     const remove = vi.fn(() => Promise.resolve());
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      {
-        post: vi.fn(() => Promise.resolve()),
-        resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "pasted-channel" }),
-        provision: () =>
-          Promise.resolve({
-            guildId: "guild-1",
-            channelId: "made-channel",
-            webhookId: "77",
-            webhookToken: "made-secret",
-          }),
-        remove,
-        swarmGuildId: () => "guild-1",
-      },
-    );
-    const upsert = (channel: Omit<UpsertOperatorChannel, "schemaVersion">) =>
-      store.serve({ op: "channel", schemaVersion: 1, channel: { schemaVersion: 1, ...channel } });
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "pasted-channel" }),
+      provision: () =>
+        Promise.resolve({
+          guildId: "guild-1",
+          channelId: "made-channel",
+          webhookId: "77",
+          webhookToken: "made-secret",
+        }),
+      remove,
+      swarmGuildId: () => "guild-1",
+    });
+    const upsert = (channel: Omit<UpsertOperatorChannel, "schemaVersion">) => upsertChannel(store, channel);
 
     const made = await upsert({ title: "release", members: ["atlas"], discord: { kind: "provision" } });
     if (made.op !== "channel") throw new Error("channel expected");
@@ -902,31 +745,23 @@ describe("channel conversations", () => {
   it("retires the webhook it made when a projected room is deleted", async () => {
     const root = await makeRoot("clankie-channel-deletecleanup-");
     const remove = vi.fn(() => Promise.resolve());
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      {
-        post: vi.fn(() => Promise.resolve()),
-        resolve: vi.fn(),
-        provision: () =>
-          Promise.resolve({
-            guildId: "guild-1",
-            channelId: "made-channel",
-            webhookId: "77",
-            webhookToken: "made-secret",
-          }),
-        remove,
-        swarmGuildId: () => "guild-1",
-      },
-    );
-    const made = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: { schemaVersion: 1, title: "release", members: ["atlas"], discord: { kind: "provision" } },
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(),
+      provision: () =>
+        Promise.resolve({
+          guildId: "guild-1",
+          channelId: "made-channel",
+          webhookId: "77",
+          webhookToken: "made-secret",
+        }),
+      remove,
+      swarmGuildId: () => "guild-1",
+    });
+    const made = await upsertChannel(store, {
+      title: "release",
+      members: ["atlas"],
+      discord: { kind: "provision" },
     });
     if (made.op !== "channel") throw new Error("channel expected");
 
@@ -951,37 +786,24 @@ describe("channel conversations", () => {
           webhookToken: "secret",
         }),
     );
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve: vi.fn(), provision, swarmGuildId: () => "guild-1" },
-    );
-    const first = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "Atlas slowness",
-        members: ["atlas"],
-        discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
-      },
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(),
+      provision,
+      swarmGuildId: () => "guild-1",
+    });
+    const first = await upsertChannel(store, {
+      title: "Atlas slowness",
+      members: ["atlas"],
+      discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
     });
     if (first.op !== "channel") throw new Error("channel expected");
 
     await expect(
-      store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          title: "Second room",
-          members: ["dev"],
-          discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
-        },
+      upsertChannel(store, {
+        title: "Second room",
+        members: ["dev"],
+        discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
       }),
     ).rejects.toThrow("already holds");
     // Refused before Discord was touched a second time, so no orphan webhook.
@@ -989,16 +811,11 @@ describe("channel conversations", () => {
 
     // Restating the same room onto the room it already has is not a conflict.
     await expect(
-      store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          channelId: first.channel.channelId,
-          title: "Atlas slowness",
-          members: ["atlas", "dev"],
-          discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
-        },
+      upsertChannel(store, {
+        channelId: first.channel.channelId,
+        title: "Atlas slowness",
+        members: ["atlas", "dev"],
+        discord: { kind: "provision", room: { kind: "channel", channelId: "42" } },
       }),
     ).resolves.toBeDefined();
 
@@ -1016,31 +833,18 @@ describe("channel conversations", () => {
     // Resolves into blinker city, a server on the ingress and presence lists
     // that Clankie does not control. The swarm home is oathkeeper.
     const resolve = vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" }));
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      {
-        post: vi.fn(() => Promise.resolve()),
-        resolve,
-        provision: vi.fn(),
-        swarmGuildId: () => "oathkeeper",
-      },
-    );
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve,
+      provision: vi.fn(),
+      swarmGuildId: () => "oathkeeper",
+    });
 
     await expect(
-      store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          title: "back door",
-          members: ["atlas"],
-          discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
-        },
+      upsertChannel(store, {
+        title: "back door",
+        members: ["atlas"],
+        discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
       }),
     ).rejects.toThrow(/swarm server/);
     // A guild he is merely in cannot acquire a room by any path, so the refusal
@@ -1052,32 +856,19 @@ describe("channel conversations", () => {
 
   it("refuses a pasted forum webhook because it does not identify a post", async () => {
     const root = await makeRoot("clankie-channel-forum-webhook-");
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      {
-        post: vi.fn(() => Promise.resolve()),
-        resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "forum-1" })),
-        rooms: vi.fn(() =>
-          Promise.resolve([{ kind: "forum" as const, channelId: "forum-1", name: "field-notes" }]),
-        ),
-        swarmGuildId: () => "oathkeeper",
-      },
-    );
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "forum-1" })),
+      rooms: vi.fn(() =>
+        Promise.resolve([{ kind: "forum" as const, channelId: "forum-1", name: "field-notes" }]),
+      ),
+      swarmGuildId: () => "oathkeeper",
+    });
     await expect(
-      store.serve({
-        op: "channel",
-        schemaVersion: 1,
-        channel: {
-          schemaVersion: 1,
-          title: "Field notes",
-          members: [],
-          discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
-        },
+      upsertChannel(store, {
+        title: "Field notes",
+        members: [],
+        discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
       }),
     ).rejects.toThrow("does not identify a post");
   });
@@ -1086,26 +877,19 @@ describe("channel conversations", () => {
     const root = await makeRoot("clankie-channel-noswarm-");
     const resolve = vi.fn(() => Promise.resolve({ guildId: "anywhere", channelId: "77" }));
     const provision = vi.fn();
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      { post: vi.fn(() => Promise.resolve()), resolve, provision, swarmGuildId: () => undefined },
-    );
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve,
+      provision,
+      swarmGuildId: () => undefined,
+    });
     for (const discord of [
       { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" } as const,
       { kind: "provision" } as const,
     ]) {
-      await expect(
-        store.serve({
-          op: "channel",
-          schemaVersion: 1,
-          channel: { schemaVersion: 1, title: "nowhere", members: ["atlas"], discord },
-        }),
-      ).rejects.toThrow(/no swarm server set/);
+      await expect(upsertChannel(store, { title: "nowhere", members: ["atlas"], discord })).rejects.toThrow(
+        /no swarm server set/,
+      );
     }
     // Unset is not "no opinion". Neither path is even attempted, so a paste
     // cannot stand in for a server Clankie was never given.
@@ -1122,24 +906,11 @@ describe("channel conversations", () => {
       resolve: vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" })),
       swarmGuildId: (): string | undefined => "blinker-city",
     };
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      projection,
-    );
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "Atlas slowness",
-        members: ["atlas"],
-        discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
-      },
+    const store = channelStore(root, projection);
+    const created = await upsertChannel(store, {
+      title: "Atlas slowness",
+      members: ["atlas"],
+      discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
     });
     if (created.op !== "channel") throw new Error("channel expected");
     expect(store.submitProjectedMessage("blinker-city", "77", "still listening?")).toBeDefined();
@@ -1157,28 +928,15 @@ describe("channel conversations", () => {
 
   it("takes a pasted webhook that resolves inside the swarm home", async () => {
     const root = await makeRoot("clankie-channel-swarmwebhook-");
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-      undefined,
-      undefined,
-      {
-        post: vi.fn(() => Promise.resolve()),
-        resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "77" })),
-        swarmGuildId: () => "oathkeeper",
-      },
-    );
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        title: "Atlas slowness",
-        members: ["atlas"],
-        discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
-      },
+    const store = channelStore(root, {
+      post: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "77" })),
+      swarmGuildId: () => "oathkeeper",
+    });
+    const created = await upsertChannel(store, {
+      title: "Atlas slowness",
+      members: ["atlas"],
+      discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
     });
     if (created.op !== "channel") throw new Error("channel expected");
     expect(created.channel.discord?.guildId).toBe("oathkeeper");
@@ -1186,18 +944,9 @@ describe("channel conversations", () => {
 
   it("keeps membership an operator decision, scoped listing exact, and reactions off the entries", async () => {
     const root = await makeRoot("clankie-channel-membership-");
-    const store = new ConversationStore(
-      root,
-      vi.fn(() => Promise.resolve()),
-      undefined,
-      vi.fn(() => Promise.resolve(false)),
-    );
+    const store = channelStore(root);
 
-    const created = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: { schemaVersion: 1, title: "atlas slowness", members: ["atlas", "dev"] },
-    });
+    const created = await upsertChannel(store, { title: "atlas slowness", members: ["atlas", "dev"] });
     if (created.op !== "channel") throw new Error("channel expected");
     const { channelId, conversationId } = created.channel;
     const joinedAtlas = created.channel.members[0]!.joinedAt;
@@ -1216,15 +965,10 @@ describe("channel conversations", () => {
 
     // Restating the roster reorders, adds, and drops in one write, and a member
     // that was already there keeps the joinedAt it had.
-    const restated = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: {
-        schemaVersion: 1,
-        channelId,
-        title: "atlas slowness (deep)",
-        members: ["dev", "atlas", "gh"],
-      },
+    const restated = await upsertChannel(store, {
+      channelId,
+      title: "atlas slowness (deep)",
+      members: ["dev", "atlas", "gh"],
     });
     if (restated.op !== "channel") throw new Error("channel expected");
     expect(restated.channel.conversationId).toBe(conversationId);
@@ -1235,11 +979,7 @@ describe("channel conversations", () => {
       { personaId: "gh", position: 2, joinedAt: expect.any(String) },
     ]);
 
-    const second = await store.serve({
-      op: "channel",
-      schemaVersion: 1,
-      channel: { schemaVersion: 1, title: "release", members: ["dev"] },
-    });
+    const second = await upsertChannel(store, { title: "release", members: ["dev"] });
     if (second.op !== "channel") throw new Error("channel expected");
     const listed = await store.serve({ op: "channels", schemaVersion: 1 });
     expect(listed.op === "channels" ? listed.channels.map((item) => item.title).sort() : undefined).toEqual([
@@ -1253,26 +993,19 @@ describe("channel conversations", () => {
       conversationId,
     ]);
 
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId,
-        surfaceClientId: "ios",
-        expectedRevision: 0,
-        message: "shipping today?",
-      },
+    const sent = await sendMessage(store, {
+      conversationId,
+      surfaceClientId: "ios",
+      expectedRevision: 0,
+      message: "shipping today?",
     });
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("accepted expected");
     await store.awaitRun(sent.result.runId);
 
     const page = async () => {
-      const replay = await store.serve({
-        op: "replay",
-        schemaVersion: 1,
-        replay: { schemaVersion: 1, conversationId, surfaceClientId: "ios" },
+      const replay = await replayConversation(store, {
+        conversationId,
+        surfaceClientId: "ios",
       });
       if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
       return replay.result.events;

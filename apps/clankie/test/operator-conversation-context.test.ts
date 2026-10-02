@@ -1,3 +1,4 @@
+import { replayConversation, sendMessage } from "./conversation-requests.ts";
 import { cpSync } from "node:fs";
 import type { LinearActivityEvent } from "../src/linear-webhook.ts";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
@@ -153,15 +154,10 @@ describe("operator conversation context", () => {
     const accepted = store.submitInternal("global-default", "scheduled wake", "wake");
     if (accepted.status !== "accepted") throw new Error("internal turn was not accepted");
     await store.awaitRun(accepted.runId);
-    const replay = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        limit: 20,
-      },
+    const replay = await replayConversation(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      limit: 20,
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("replay failed");
     expect(replay.result.events).toContainEqual(
@@ -191,15 +187,10 @@ describe("operator conversation context", () => {
     // A distinct origin, so the turn can say the comment came from Linear
     // rather than passing as one of his own self-wakes.
     expect(origins).toEqual(["hook"]);
-    const replay = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: inbox,
-        surfaceClientId: "test",
-        limit: 20,
-      },
+    const replay = await replayConversation(store, {
+      conversationId: inbox,
+      surfaceClientId: "test",
+      limit: 20,
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("replay failed");
     // He wrote the comment in Linear, not here: nothing may appear as though
@@ -318,15 +309,10 @@ describe("operator conversation context", () => {
     const reopened = new ConversationStore(root, async () => {
       runs += 1;
     });
-    const replay = await reopened.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: "linear-inbox",
-        surfaceClientId: "test",
-        limit: 20,
-      },
+    const replay = await replayConversation(reopened, {
+      conversationId: "linear-inbox",
+      surfaceClientId: "test",
+      limit: 20,
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("replay failed");
     expect(replay.result.events.map((event) => event.type)).toEqual(["message", "message"]);
@@ -423,17 +409,11 @@ describe("operator conversation context", () => {
     expect(started).toEqual(["autonomy"]);
     session.startStreaming();
 
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 1,
-        message: "human",
-      },
+    const sent = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 1,
+      message: "human",
     });
     expect(sent.op).toBe("send");
     if (sent.op !== "send" || sent.result.status !== "accepted")
@@ -449,15 +429,10 @@ describe("operator conversation context", () => {
     await store.awaitRun(internal.runId);
     await store.awaitRun(sent.result.runId);
 
-    const replay = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        limit: 40,
-      },
+    const replay = await replayConversation(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      limit: 40,
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("replay failed");
     const captainMessages = replay.result.events.filter(
@@ -484,32 +459,20 @@ describe("operator conversation context", () => {
       started.push(`end:${message}`);
     });
 
-    const first = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 0,
-        message: "first",
-      },
+    const first = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 0,
+      message: "first",
     });
     if (first.op !== "send" || first.result.status !== "accepted")
       throw new Error("first turn was not accepted");
     await drain();
-    const second = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 1,
-        message: "second",
-      },
+    const second = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 1,
+      message: "second",
     });
     if (second.op !== "send" || second.result.status !== "accepted")
       throw new Error("second turn was not accepted");
@@ -536,17 +499,11 @@ describe("operator conversation context", () => {
       started.push(`end:${message}`);
     });
 
-    const first = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 0,
-        message: "first",
-      },
+    const first = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 0,
+      message: "first",
     });
     if (first.op !== "send" || first.result.status !== "accepted")
       throw new Error("first turn was not accepted");
@@ -558,17 +515,11 @@ describe("operator conversation context", () => {
     await drain();
     expect(started).toEqual(["start:first"]);
 
-    const second = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 2,
-        message: "second",
-      },
+    const second = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 2,
+      message: "second",
     });
     if (second.op !== "send" || second.result.status !== "accepted")
       throw new Error("second turn was not accepted");
@@ -597,32 +548,20 @@ describe("operator conversation context", () => {
       publish({ type: "context", usage: { tokens: 72_400, contextWindow: 200_000 } });
     });
 
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 0,
-        message: "hello",
-      },
+    const sent = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 0,
+      message: "hello",
     });
     expect(sent.op).toBe("send");
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("turn was not accepted");
     await store.awaitRun(sent.result.runId);
-    const stale = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 0,
-        message: "stale",
-      },
+    const stale = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 0,
+      message: "stale",
     });
     expect(stale.op === "send" ? stale.result : undefined).toMatchObject({
       status: "revision_conflict",
@@ -643,15 +582,10 @@ describe("operator conversation context", () => {
       contextWindow: 200_000,
     });
 
-    const replay = await restarted.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        limit: 20,
-      },
+    const replay = await replayConversation(restarted, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      limit: 20,
     });
     expect(
       replay.op === "replay" && replay.result.status === "page"

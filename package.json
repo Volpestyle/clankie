@@ -34,7 +34,7 @@
     "hosted:build": "docker build -f scripts/release/clankie-linux.Dockerfile -t clankie-hosted:local .",
     "hosted:smoke": "node scripts/smoke-hosted.mjs",
     "test:integration": "vitest run --config vitest.config.ts apps/clankie/test/http-journey.test.ts apps/clankie/test/pairing.test.ts apps/clankie/test/devices.test.ts apps/clankie/test/gateway-encryption.test.ts apps/relay/test/operator-conversations.test.ts",
-    "test:eval": "vitest run --config vitest.config.ts packages/play/test/free-play-corpus.test.ts apps/clankie/test/system-authority.test.ts apps/clankie/test/captain-evaluator-scope.test.ts"
+    "test:eval": "vitest run --config vitest.eval.config.ts"
   },
   "devDependencies": {
     "esbuild": "0.28.1",

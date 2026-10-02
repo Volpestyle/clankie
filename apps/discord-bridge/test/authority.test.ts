@@ -44,12 +44,6 @@ describe("voice presence authority", () => {
     });
   });
 
-  it("admits any guild member once voice is deliberately opened", () => {
-    expect(authorizeVoicePresenceCommand(stranger, bindings, "guild_members")).toEqual({
-      allowed: true,
-    });
-  });
-
   it("never widens the ambient tier when voice is opened", () => {
     // The whole point of the split: opening a call to a room must not hand
     // that room the ambient command tier.

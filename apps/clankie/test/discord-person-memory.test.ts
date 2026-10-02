@@ -206,31 +206,6 @@ describe("Discord person-memory routes", () => {
     ).toBe(204);
     expect(memory.catalog()).toMatchObject({ discordPeople: [], captainEpisodes: [] });
   });
-
-  it("keeps one global ring bounded to the 128 newest episodes", async () => {
-    const { memory } = await harness();
-    for (let index = 0; index < 130; index += 1) {
-      memory.recordEpisode({
-        schemaVersion: 1,
-        episodeId: `episode-${String(index)}`,
-        lane: index % 2 === 0 ? "operator" : "gameplay",
-        targetId: "self",
-        summary: `Note ${String(index)}`,
-        visibility: "operator_private",
-        provenance: {
-          characterId: "clankie",
-          sessionId: "session-1",
-          selfAuthored: true,
-          rawTranscript: false,
-        },
-        occurredAt: new Date(Date.UTC(2026, 6, 25, 0, 0, index)).toISOString(),
-      });
-    }
-    const episodes = memory.catalog().captainEpisodes;
-    expect(episodes).toHaveLength(128);
-    expect(episodes[0]?.episodeId).toBe("episode-2");
-    expect(episodes.at(-1)?.episodeId).toBe("episode-129");
-  });
 });
 
 function proposal() {

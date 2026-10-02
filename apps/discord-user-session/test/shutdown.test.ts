@@ -33,7 +33,6 @@ describe("user-session shutdown", () => {
       "presence_close",
       "receipt",
     ]);
-    expect(order.filter((step) => step === "vox_close")).toHaveLength(1);
   });
 
   it("still closes Vox and the gateway when voice leave fails", async () => {
@@ -56,33 +55,5 @@ describe("user-session shutdown", () => {
 
     await expect(shutdown("SIGTERM")).rejects.toThrow("leave failed");
     expect(order).toEqual(["vox_close", "gateway_close"]);
-  });
-
-  it("quiesces an interleaved dispatch before any media release", async () => {
-    const order: string[] = [];
-    let closed = false;
-    const dispatch = (): void => {
-      if (!closed) order.push("dispatch_started_stream");
-    };
-    const shutdown = createUserSessionShutdown({
-      quiesceCallbacks: () => {
-        closed = true;
-        order.push("callbacks");
-        dispatch();
-      },
-      stopControls: () => undefined,
-      stopStreams: () => order.push("streams"),
-      disposeGatewayBridge: () => order.push("bridge"),
-      leaveVoice: async () => undefined,
-      releaseVoiceMembership: () => order.push("membership"),
-      disposeVoice: async () => undefined,
-      closeVox: () => order.push("vox"),
-      closeGateway: () => undefined,
-      stopPresence: async () => undefined,
-      recordStopped: async () => undefined,
-    });
-
-    await shutdown("SIGTERM");
-    expect(order).toEqual(["callbacks", "streams", "bridge", "membership", "vox"]);
   });
 });

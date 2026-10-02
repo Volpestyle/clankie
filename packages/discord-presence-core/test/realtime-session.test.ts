@@ -1,3 +1,4 @@
+import { ManualTimers } from "./manual-timers.ts";
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
@@ -14,7 +15,6 @@ import {
   type RealtimeResponseMeta,
   type RealtimeSessionCloseReason,
   type RealtimeSocket,
-  type RealtimeTimers,
   type RealtimeTranscriptEvent,
   type RealtimeTranscriptionSession,
   type RealtimeTranscriptionSessionOptions,
@@ -61,36 +61,6 @@ class FakeRealtimeSocket implements RealtimeSocket {
   }
 }
 
-class FakeTimers implements RealtimeTimers {
-  public readonly scheduled: {
-    handle: number;
-    delayMs: number;
-    handler: () => void;
-    cleared: boolean;
-    fired: boolean;
-  }[] = [];
-  private nextHandle = 1;
-
-  public setTimeout(handler: () => void, delayMs: number): unknown {
-    const handle = this.nextHandle;
-    this.nextHandle += 1;
-    this.scheduled.push({ handle, delayMs, handler, cleared: false, fired: false });
-    return handle;
-  }
-
-  public clearTimeout(handle: unknown): void {
-    const entry = this.scheduled.find((candidate) => candidate.handle === handle);
-    if (entry !== undefined) entry.cleared = true;
-  }
-
-  public fire(): void {
-    const entry = this.scheduled.find((candidate) => !candidate.cleared && !candidate.fired);
-    if (entry === undefined) throw new Error("No armed timer to fire");
-    entry.fired = true;
-    entry.handler();
-  }
-}
-
 function frames(socket: FakeRealtimeSocket): Record<string, unknown>[] {
   return socket.sentRaw.map((raw) => JSON.parse(raw) as Record<string, unknown>);
 }
@@ -111,12 +81,12 @@ interface ConversationEvents {
 async function openConversation(overrides: Partial<RealtimeConversationSessionOptions> = {}): Promise<{
   session: RealtimeConversationSession;
   socket: FakeRealtimeSocket;
-  timers: FakeTimers;
+  timers: ManualTimers;
   factory: { url: string; headers: Record<string, string> }[];
   events: ConversationEvents;
 }> {
   const socket = new FakeRealtimeSocket();
-  const timers = new FakeTimers();
+  const timers = new ManualTimers();
   const factory: { url: string; headers: Record<string, string> }[] = [];
   const events: ConversationEvents = {
     audio: [],
@@ -148,13 +118,13 @@ async function openConversation(overrides: Partial<RealtimeConversationSessionOp
 async function openTranscription(overrides: Partial<RealtimeTranscriptionSessionOptions> = {}): Promise<{
   session: RealtimeTranscriptionSession;
   socket: FakeRealtimeSocket;
-  timers: FakeTimers;
+  timers: ManualTimers;
   factory: { url: string; headers: Record<string, string> }[];
   transcripts: RealtimeTranscriptEvent[];
   closes: RealtimeSessionCloseReason[];
 }> {
   const socket = new FakeRealtimeSocket();
-  const timers = new FakeTimers();
+  const timers = new ManualTimers();
   const factory: { url: string; headers: Record<string, string> }[] = [];
   const transcripts: RealtimeTranscriptEvent[] = [];
   const closes: RealtimeSessionCloseReason[] = [];
@@ -664,7 +634,7 @@ describe("xAI voice sessions", () => {
         calls.push({ url, headers });
         return Promise.resolve(socket);
       },
-      timers: new FakeTimers(),
+      timers: new ManualTimers(),
       onTranscript: (event) => transcripts.push(event),
     });
     const pcm = Buffer.from([1, 0, 2, 0]);

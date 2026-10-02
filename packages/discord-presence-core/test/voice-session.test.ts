@@ -1,3 +1,4 @@
+import { ManualTimers } from "./manual-timers.ts";
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
@@ -21,7 +22,8 @@ import {
 import {
   MAX_REALTIME_AUDIO_APPEND_BYTES,
   type RealtimeSessionCloseReason,
-  type RealtimeTimers,
+  type RealtimeResponseMeta,
+  type RealtimeFunctionCall,
 } from "../src/realtime-session.ts";
 import type { VoiceFloorOptions } from "../src/voice-floor.ts";
 import { DiscordVoiceIngress } from "../src/voice-ingress.ts";
@@ -358,51 +360,6 @@ class FakeConversation implements VoiceConversationPort {
   }
 }
 
-class TestTimers implements RealtimeTimers {
-  public readonly scheduled: {
-    handle: number;
-    delayMs: number;
-    handler: () => void;
-    cleared: boolean;
-    fired: boolean;
-  }[] = [];
-  private nextHandle = 1;
-
-  public setTimeout(handler: () => void, delayMs: number): unknown {
-    const handle = this.nextHandle;
-    this.nextHandle += 1;
-    this.scheduled.push({ handle, delayMs, handler, cleared: false, fired: false });
-    return handle;
-  }
-
-  public clearTimeout(handle: unknown): void {
-    const entry = this.scheduled.find((candidate) => candidate.handle === handle);
-    if (entry !== undefined) entry.cleared = true;
-  }
-
-  public pending(): { delayMs: number }[] {
-    return this.scheduled.filter((candidate) => !candidate.cleared && !candidate.fired);
-  }
-
-  public fire(delayMs: number): void {
-    const entry = this.scheduled.find(
-      (candidate) => !candidate.cleared && !candidate.fired && candidate.delayMs === delayMs,
-    );
-    if (entry === undefined) throw new Error(`No armed timer with delay ${delayMs.toString()}`);
-    entry.fired = true;
-    entry.handler();
-  }
-
-  public fireLast(delayMs: number): void {
-    const entry = this.scheduled.findLast(
-      (candidate) => !candidate.cleared && !candidate.fired && candidate.delayMs === delayMs,
-    );
-    if (entry === undefined) throw new Error(`No armed timer with delay ${delayMs.toString()}`);
-    entry.fired = true;
-    entry.handler();
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Harness.
 // ---------------------------------------------------------------------------
@@ -439,6 +396,17 @@ function pcmDelta(bytes: number, fill = 3): Buffer {
 const settledResult = (turnId: string, response: string): CaptainChannelTurnResult =>
   ({ state: "settled", captainSessionId: "session-1", turnId, response }) as CaptainChannelTurnResult;
 
+function completedResponse(
+  responseId: string,
+  details: Partial<Omit<RealtimeResponseMeta, "responseId" | "status">> = {},
+): RealtimeResponseMeta {
+  return { responseId, status: "completed", audioBytes: 0, textCharacters: 0, ...details };
+}
+
+function askClankie(callId: string, argumentsJson: string): RealtimeFunctionCall {
+  return { callId, name: "ask_clankie", argumentsJson };
+}
+
 interface HarnessOptions {
   readonly narrationMinIntervalMs?: number;
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
@@ -455,7 +423,7 @@ interface HarnessOptions {
 
 function buildHarness(options: HarnessOptions = {}) {
   const clock = { now: 0 };
-  const timers = new TestTimers();
+  const timers = new ManualTimers();
   const evidence: DiscordVoiceEvidence[] = [];
   const vox = new FakeVox();
   const transcriptions: FakeTranscription[] = [];
@@ -565,12 +533,7 @@ function buildHarness(options: HarnessOptions = {}) {
       // Most fixtures start after a quiet arrival and its conversation hold.
       // Arrival-specific tests call session.join directly and inspect that turn.
       await flush();
-      harness.conversation().input.onResponseDone({
-        responseId: "arrival",
-        status: "completed",
-        audioBytes: 0,
-        textCharacters: 0,
-      });
+      harness.conversation().input.onResponseDone(completedResponse("arrival"));
       timers.fire(ENGAGED_HOLD_MS);
       await flush();
       conversations.length = 0;
@@ -1405,12 +1368,7 @@ describe("floor decisions", () => {
       state: "dormant",
     });
     expect(at(conversation.textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
-    conversation.input.onResponseDone({
-      responseId: "resp_silent",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_silent"));
     await flush();
     expect(harness.session.status().floorState).toBe("dormant");
     expect(harness.timers.pending().map((timer) => timer.delayMs)).toContain(ENGAGED_HOLD_MS);
@@ -1488,18 +1446,8 @@ describe("floor decisions", () => {
     expect(harness.conversation().responseCreates).toBe(2);
     expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "offer", userId: ALICE });
     expect(harness.conversation().textItems).toContain(ENGAGED_OFFER_TURN_ITEM);
-    harness.conversation().input.onResponseDone({
-      responseId: "resp_a",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
-    harness.conversation().input.onResponseDone({
-      responseId: "resp_b",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    harness.conversation().input.onResponseDone(completedResponse("resp_a"));
+    harness.conversation().input.onResponseDone(completedResponse("resp_b"));
     await flush();
     expect(harness.ofType("volition")).toHaveLength(0);
     expect(harness.ofType("model_response").filter((event) => event.outcome === "silent")).toHaveLength(2);
@@ -1512,12 +1460,7 @@ describe("floor decisions", () => {
     expect(conversation.responseCreates).toBe(2);
     expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "offer", userId: ALICE });
     expect(at(conversation.textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
-    conversation.input.onResponseDone({
-      responseId: "resp_silent",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_silent"));
     await flush();
     expect(harness.ofType("volition")).toHaveLength(0);
     harness.clock.now = 61_000;
@@ -1538,12 +1481,7 @@ describe("floor decisions", () => {
     });
     expect(conversation.responseCreates).toBe(2);
     expect(at(conversation.textItems, -1)).toBe(ADDRESSED_OFFER_TURN_ITEM);
-    conversation.input.onResponseDone({
-      responseId: "resp_about",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_about"));
     await flush();
     expect(harness.session.status().floorState).toBe("engaged");
     expect(harness.ofType("model_response").some((event) => event.outcome === "silent")).toBe(true);
@@ -1732,12 +1670,7 @@ describe("unprompted turns", () => {
     expect(harness.session.status().floorState).toBe("engaged");
     expect(at(harness.ofType("floor"), -1)).toMatchObject({ state: "engaged", reason: "volition" });
     expect(at(harness.ofType("volition"), -1)).toMatchObject({ offered: 1, taken: 1, suppressed: 0 });
-    conversation.input.onResponseDone({
-      responseId: "resp_1",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_1", { audioBytes: 480 }));
     await flush();
     // The outcome is recorded exactly once, however the response finishes.
     expect(harness.ofType("volition")).toHaveLength(1);
@@ -1754,24 +1687,14 @@ describe("unprompted turns", () => {
     // The external-TTS shape: the realtime model answers in text and the
     // audible bytes come from the TTS engine, so the response meta reports
     // none. He still spoke, and the receipt has to say so.
-    conversation.input.onResponseDone({
-      responseId: "resp_tts",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 96,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_tts", { textCharacters: 96 }));
     await flush();
     expect(at(harness.ofType("model_response"), -1)).toMatchObject({ phase: "completed", outcome: "audio" });
   });
 
   it("an empty response is him passing: suppressed, still dormant, session parked on the hold", async () => {
     const harness = await offeredHarness();
-    harness.conversation().input.onResponseDone({
-      responseId: "resp_1",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    harness.conversation().input.onResponseDone(completedResponse("resp_1"));
     await flush();
     expect(harness.ofType("volition")).toMatchObject([
       { type: "volition", guildId: GUILD, channelId: CHANNEL, offered: 1, taken: 0, suppressed: 1 },
@@ -1866,12 +1789,9 @@ describe("fast path responses", () => {
     const playbackId = at(harness.vox.audio, -1).playbackId;
     harness.clock.now = 3_250;
     harness.vox.emit({ type: "tts_playback_state", playbackId, status: "started" });
-    conversation.input.onResponseDone({
-      responseId: "resp_latency",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 10,
-    });
+    conversation.input.onResponseDone(
+      completedResponse("resp_latency", { audioBytes: 480, textCharacters: 10 }),
+    );
     await flush();
     harness.clock.now = 3_800;
     harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
@@ -1904,12 +1824,7 @@ describe("fast path responses", () => {
     expect(delta.equals(Buffer.alloc(480))).toBe(true);
     await flush();
     harness.clock.now = 1_150;
-    conversation.input.onResponseDone({
-      responseId: "resp_1",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_1", { audioBytes: 480 }));
     await flush();
     const first = at(harness.ofType("response"), 0);
     expect(first).toMatchObject({
@@ -1930,12 +1845,7 @@ describe("fast path responses", () => {
     conversation.input.onAudioDelta(pcmDelta(480), "item_2");
     await flush();
     harness.clock.now = 2_130;
-    conversation.input.onResponseDone({
-      responseId: "resp_2",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_2", { audioBytes: 480 }));
     await flush();
     expect(at(harness.ofType("response"), 1)).toMatchObject({
       fastPath: true,
@@ -1955,12 +1865,7 @@ describe("fast path responses", () => {
     await flush();
     const playbackId = at(harness.vox.audio, -1).playbackId;
     harness.clock.now = 1_100;
-    conversation.input.onResponseDone({
-      responseId: "resp_delayed",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_delayed", { audioBytes: 480 }));
     await flush();
     expect(harness.ofType("response")).toHaveLength(0);
     expect(at(harness.ofType("model_response"), -1).phase).toBe("requested");
@@ -1992,12 +1897,7 @@ describe("fast path responses", () => {
     conversation.input.onAudioDelta(pcmDelta(480), "item_never_started");
     await flush();
     const playbackId = at(harness.vox.audio, -1).playbackId;
-    conversation.input.onResponseDone({
-      responseId: "resp_never_started",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_never_started", { audioBytes: 480 }));
     harness.vox.emit({ type: "tts_playback_state", playbackId, status: "buffered" });
     harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
     await flush();
@@ -2048,12 +1948,7 @@ describe("fast path responses", () => {
     conversation.input.onAudioDelta(pcmDelta(480), "item_correlated");
     await flush();
     const playbackId = at(harness.vox.audio, -1).playbackId;
-    conversation.input.onResponseDone({
-      responseId: "resp_correlated",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_correlated", { audioBytes: 480 }));
     await flush();
     expect(harness.ofType("response")).toHaveLength(0);
     harness.vox.emit({ type: "tts_playback_state", playbackId: "stale-playback", status: "drained" });
@@ -2110,12 +2005,7 @@ describe("fast path responses", () => {
     const conversation = harness.conversation();
     const original = Buffer.alloc(48_000 * seconds, 7);
     conversation.input.onAudioDelta(Buffer.from(original), "item_earned_riff");
-    conversation.input.onResponseDone({
-      responseId: "riff",
-      status: "completed",
-      audioBytes: original.length,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("riff", { audioBytes: original.length }));
     await flush();
     expect(harness.vox.finishes).toHaveLength(0);
     for (let tick = 0; tick < (seconds - 1) * 10; tick += 1) {
@@ -2142,12 +2032,7 @@ describe("fast path responses", () => {
     const original = Buffer.alloc(24_000 * 2 * 60, 7);
     const incoming = Buffer.from(original);
     conversation.input.onAudioDelta(incoming, "item_long_answer");
-    conversation.input.onResponseDone({
-      responseId: "resp_paced",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_paced"));
     await flush();
     expect(incoming.every((value) => value === 0)).toBe(true);
     expect(harness.vox.finishes).toHaveLength(0);
@@ -2195,12 +2080,7 @@ describe("fast path responses", () => {
     await harness.say(ALICE, "clankie still there");
     const replacement = harness.conversation();
     replacement.input.onAudioDelta(pcmDelta(480, 9), "replacement");
-    replacement.input.onResponseDone({
-      responseId: "replacement",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    replacement.input.onResponseDone(completedResponse("replacement"));
     await flush();
     expect(harness.ofType("response").at(-1)?.deliveryId).toBe(
       harness.ofType("transcription").at(-1)?.deliveryId,
@@ -2229,18 +2109,9 @@ describe("fast path responses", () => {
     });
     const conversation = harness.conversation();
     // The acknowledgement is still playing when the tool result requests its answer.
-    conversation.input.onFunctionCall({
-      callId: "call_paced",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_paced", '{"request":"check Linear"}'));
     conversation.input.onAudioDelta(pcmDelta(48_000 * 2, 3), "item_first_paced");
-    conversation.input.onResponseDone({
-      responseId: "resp_first",
-      status: "completed",
-      audioBytes: 96_000,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_first", { audioBytes: 96_000 }));
     await flush();
     expect(harness.submitCalls).toHaveLength(1);
     resolveCaptain(settledResult("turn_paced", "Found the Linear issue."));
@@ -2250,12 +2121,7 @@ describe("fast path responses", () => {
       { callId: "call_paced", output: expect.stringContaining("Found the Linear issue.") },
     ]);
     conversation.input.onAudioDelta(pcmDelta(480, 7), "item_second_paced");
-    conversation.input.onResponseDone({
-      responseId: "resp_second",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_second", { audioBytes: 480 }));
     await flush();
     expect(new Set(harness.vox.audio.map((chunk) => chunk.playbackId)).size).toBe(1);
     for (let tick = 0; tick < 10; tick += 1) {
@@ -2280,12 +2146,7 @@ describe("fast path responses", () => {
       status: "failed",
       reason: "transport_send_failed",
     });
-    conversation.input.onResponseDone({
-      responseId: "resp_paced",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_paced"));
     await flush();
     expect(harness.timers.pending().some((timer) => timer.delayMs === 100)).toBe(false);
     expect(harness.vox.finishes).toHaveLength(0);
@@ -2300,12 +2161,7 @@ describe("fast path responses", () => {
     conversation.input.onAudioDelta(pcmDelta(480), "item_overflow");
     await flush();
     const playbackId = at(harness.vox.audio, -1).playbackId;
-    conversation.input.onResponseDone({
-      responseId: "resp_overflow",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_overflow", { audioBytes: 480 }));
     harness.vox.emit({
       type: "tts_buffer_overflow",
       playbackId,
@@ -2351,12 +2207,7 @@ describe("fast path responses", () => {
     conversation.input.onAudioDelta(pcmDelta(480), "item_finish_rejected");
     await flush();
     harness.vox.finishError = new VoxClientError("not_ready", "Vox became unavailable", "test-playback");
-    conversation.input.onResponseDone({
-      responseId: "resp_finish_rejected",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_finish_rejected", { audioBytes: 480 }));
     await flush();
     expect(at(harness.ofType("failed"), -1)).toMatchObject({
       deliveryId: at(harness.ofType("utterance"), -1).deliveryId,
@@ -2387,12 +2238,7 @@ describe("fast path responses", () => {
         harness.timers.fireLast(2 * 60_000);
       }
       await flush();
-      conversation.input.onResponseDone({
-        responseId: "resp_failed_response",
-        status: "completed",
-        audioBytes: 480,
-        textCharacters: 0,
-      });
+      conversation.input.onResponseDone(completedResponse("resp_failed_response", { audioBytes: 480 }));
       await flush();
 
       await harness.say(ALICE, "clankie try the next response");
@@ -2408,12 +2254,7 @@ describe("fast path responses", () => {
       harness.vox.autoDrain = true;
       conversation.input.onAudioDelta(pcmDelta(480), "item_recovered_response");
       await flush();
-      conversation.input.onResponseDone({
-        responseId: "resp_recovered_response",
-        status: "completed",
-        audioBytes: 480,
-        textCharacters: 0,
-      });
+      conversation.input.onResponseDone(completedResponse("resp_recovered_response", { audioBytes: 480 }));
       await flush();
       expect(harness.ofType("response")).toContainEqual(
         expect.objectContaining({ deliveryId: nextDeliveryId }),
@@ -2429,11 +2270,7 @@ describe("ability path", () => {
     await flush();
     const conversation = harness.conversation();
 
-    conversation.input.onFunctionCall({
-      callId: "call_narration",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"fix the battle helper"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_narration", '{"request":"fix the battle helper"}'));
     await flush();
 
     expect(harness.submitCalls).toHaveLength(0);
@@ -2463,11 +2300,7 @@ describe("ability path", () => {
 
     await harness.say(ALICE, "clankie check the deploy");
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "call_alice",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check the deploy"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_alice", '{"request":"check the deploy"}'));
     await flush();
     await harness.say(BOB, "clankie, before that, check the runner");
 
@@ -2491,23 +2324,10 @@ describe("ability path", () => {
     harness.clock.now = 1_000;
     await harness.say(ALICE, "hey clankie check on the deploy");
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "call_1",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check the deploy status"}',
-    });
-    conversation.input.onFunctionCall({
-      callId: "call_2",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"and restart the runner"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_1", '{"request":"check the deploy status"}'));
+    conversation.input.onFunctionCall(askClankie("call_2", '{"request":"and restart the runner"}'));
     // The function-call response itself settles with no audio.
-    conversation.input.onResponseDone({
-      responseId: "resp_fn",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_fn"));
     await flush();
     expect(harness.submitCalls).toHaveLength(2);
     expect(harness.submitCalls[0]?.deliveryId).not.toBe(harness.submitCalls[1]?.deliveryId);
@@ -2536,21 +2356,11 @@ describe("ability path", () => {
     // Their spoken results play and receipt in order.
     conversation.input.onAudioDelta(pcmDelta(480), "item_r1");
     await flush();
-    conversation.input.onResponseDone({
-      responseId: "resp_r1",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_r1", { audioBytes: 480 }));
     await flush();
     conversation.input.onAudioDelta(pcmDelta(480), "item_r2");
     await flush();
-    conversation.input.onResponseDone({
-      responseId: "resp_r2",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_r2", { audioBytes: 480 }));
     await flush();
     const responses = harness.ofType("response");
     expect(responses.map((event) => event.turnId)).toEqual(["turn-1", "turn-2"]);
@@ -2593,17 +2403,8 @@ describe("ability path", () => {
     await harness.consent(ALICE);
     await harness.say(ALICE, "hey clankie merge the release");
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "call_1",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"merge the release"}',
-    });
-    conversation.input.onResponseDone({
-      responseId: "resp_fn",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onFunctionCall(askClankie("call_1", '{"request":"merge the release"}'));
+    conversation.input.onResponseDone(completedResponse("resp_fn"));
     await flush();
     const result = at(conversation.functionResults, 0);
     expect(result.output).toContain(
@@ -2612,12 +2413,7 @@ describe("ability path", () => {
     expect(result.output).not.toContain("secret");
     conversation.input.onAudioDelta(pcmDelta(480), "item_r1");
     await flush();
-    conversation.input.onResponseDone({
-      responseId: "resp_r1",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_r1", { audioBytes: 480 }));
     await flush();
     expect(at(harness.ofType("response"), 0)).toMatchObject({
       fastPath: false,
@@ -2638,11 +2434,7 @@ describe("ability path", () => {
     await harness.consent(ALICE);
     await harness.say(ALICE, "hey clankie do the thing");
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "call_1",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"do the thing"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_1", '{"request":"do the thing"}'));
     await flush();
     expect(at(conversation.functionResults, 0).output).toBe(CAPTAIN_UNREACHABLE_TEXT);
     expect(harness.ofType("failed")).toMatchObject([
@@ -2655,11 +2447,7 @@ describe("ability path", () => {
       },
     ]);
     // The queue is not hung: the next call reaches the captain and speaks.
-    conversation.input.onFunctionCall({
-      callId: "call_2",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"try again"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_2", '{"request":"try again"}'));
     await flush();
     expect(at(conversation.functionResults, 1)).toEqual({
       callId: "call_2",
@@ -2676,12 +2464,7 @@ describe("ability path", () => {
       name: "music_play",
       argumentsJson: '{"url":"https://youtu.be/video-1"}',
     });
-    conversation.input.onResponseDone({
-      responseId: "music-function-response",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("music-function-response"));
     await flush();
     expect(harness.ofType("realtime_tool")).toMatchObject([
       { deliveryId, callId: "music-call-1", name: "music_play", phase: "called" },
@@ -2758,12 +2541,7 @@ describe("ability path", () => {
     await flush();
     const playbackId = harness.vox.activePlaybackId;
     const deliveryId = at(harness.ofType("model_response"), 0).deliveryId;
-    conversation.input.onResponseDone({
-      responseId: "done",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 5,
-    });
+    conversation.input.onResponseDone(completedResponse("done", { audioBytes: 480, textCharacters: 5 }));
     conversation.input.onError("ElevenLabs transport error", "synthesis_item");
     await flush();
     expect(at(harness.ofType("failed"), -1)).toMatchObject({
@@ -2790,7 +2568,7 @@ describe("ability path", () => {
   it("rejects malformed ask_clankie arguments without hanging", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({ callId: "call_1", name: "ask_clankie", argumentsJson: "not json" });
+    conversation.input.onFunctionCall(askClankie("call_1", "not json"));
     await flush();
     expect(harness.submitCalls).toHaveLength(0);
     expect(at(conversation.functionResults, 0).output).toBe(CAPTAIN_UNREACHABLE_TEXT);
@@ -2813,11 +2591,7 @@ describe("ability path", () => {
     await harness.consent(ALICE);
     await harness.say(ALICE, "hey clankie check the queue");
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "call_1",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check the queue"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_1", '{"request":"check the queue"}'));
     await flush();
     // The model gets the fixed sentence so the exchange can close; no
     // response receipt exists for a turn that never produced one, so the
@@ -2848,11 +2622,7 @@ describe("ability path", () => {
     await harness.consent(ALICE);
     await harness.say(ALICE, "hey clankie whats new");
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "call_1",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"whats new"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_1", '{"request":"whats new"}'));
     await flush();
     // Deliberate silence: no function result, no response receipt, no
     // failure — deciding to stay quiet must not cost a response.
@@ -2860,11 +2630,7 @@ describe("ability path", () => {
     expect(harness.ofType("response")).toHaveLength(0);
     expect(harness.ofType("failed")).toHaveLength(0);
     // The turn queue is not wedged: the next ask_clankie round-trips.
-    conversation.input.onFunctionCall({
-      callId: "call_2",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"still there?"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_2", '{"request":"still there?"}'));
     await flush();
     expect(at(conversation.functionResults, 0)).toEqual({
       callId: "call_2",
@@ -2883,11 +2649,7 @@ describe("ability path", () => {
     });
     await harness.consent(ALICE);
     await harness.say(ALICE, "hey clankie look this up");
-    harness.conversation().input.onFunctionCall({
-      callId: "call_abs",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"look this up"}',
-    });
+    harness.conversation().input.onFunctionCall(askClankie("call_abs", '{"request":"look this up"}'));
     await flush();
     expect(harness.ofType("realtime_tool").some((event) => event.code === "captain_absorbed")).toBe(true);
     expect(harness.ofType("realtime_tool").some((event) => event.code === "captain_declined")).toBe(false);
@@ -2904,11 +2666,7 @@ describe("ability path", () => {
     });
     await harness.consent(ALICE);
     await harness.say(ALICE, "hey clankie look this up");
-    harness.conversation().input.onFunctionCall({
-      callId: "call_slow",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"look this up"}',
-    });
+    harness.conversation().input.onFunctionCall(askClankie("call_slow", '{"request":"look this up"}'));
     await flush();
     expect(harness.session.status().floorState).toBe("engaged");
     harness.clock.now = 61_000;
@@ -2932,11 +2690,7 @@ describe("ability path", () => {
     });
     await harness.consent(ALICE);
     await harness.say(ALICE, "hey clankie look this up");
-    harness.conversation().input.onFunctionCall({
-      callId: "call_wedged",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"look this up"}',
-    });
+    harness.conversation().input.onFunctionCall(askClankie("call_wedged", '{"request":"look this up"}'));
     await flush();
     expect(harness.session.status().floorState).toBe("engaged");
     // Still held while the work is plausibly alive.
@@ -3016,11 +2770,7 @@ describe("barge-in", () => {
     await flush();
     harness.transcribe(ALICE, "stop");
     await flush();
-    conversation.input.onFunctionCall({
-      callId: "stale-tool",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"old request"}',
-    });
+    conversation.input.onFunctionCall(askClankie("stale-tool", '{"request":"old request"}'));
     conversation.input.onResponseDone(completed("stale-tool"));
     await flush();
     expect(harness.submitCalls).toHaveLength(0);
@@ -3079,11 +2829,7 @@ describe("barge-in", () => {
         }),
     });
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "lookup",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear"}',
-    });
+    conversation.input.onFunctionCall(askClankie("lookup", '{"request":"check Linear"}'));
     conversation.input.onAudioDelta(pcmDelta(48_000 * 2, 3), "ack");
     conversation.input.onResponseDone(completed("ack"));
     await flush();
@@ -3148,12 +2894,7 @@ describe("barge-in", () => {
     const capture = harness.startCapture(ALICE);
     capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
-    conversation.input.onResponseDone({
-      responseId: "first",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("first", { audioBytes: 480 }));
     await flush();
     await harness.session.narrate("another moment in the game");
     conversation.input.onAudioDelta(pcmDelta(480), "item_next");
@@ -3274,12 +3015,7 @@ describe("barge-in", () => {
   it("speech already underway must overlap playback before it truncates", async () => {
     const harness = await engagedHarness({ narrationMinIntervalMs: 0 });
     const conversation = harness.conversation();
-    conversation.input.onResponseDone({
-      responseId: "resp_wake",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("resp_wake"));
     await flush();
 
     const capture = harness.startCapture(ALICE);
@@ -3340,11 +3076,7 @@ describe("reconnect", () => {
     const secondDeliveryId = at(harness.ofType("utterance"), -1).deliveryId;
     expect(secondDeliveryId).not.toBe(firstDeliveryId);
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "call_realigned",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check the realigned turn"}',
-    });
+    conversation.input.onFunctionCall(askClankie("call_realigned", '{"request":"check the realigned turn"}'));
     await flush();
 
     expect(at(harness.submitCalls, -1).deliveryId).toBe(`${secondDeliveryId}:call_realigned`);
@@ -3507,12 +3239,7 @@ describe("play narration and hearing (ADR 0064)", () => {
     expect(harness.conversation().responseCreates).toBe(1);
     // The server runs one response at a time, so the later reports here are
     // measuring the interval rather than that first response still being open.
-    harness.conversation().input.onResponseDone({
-      responseId: "resp_narration",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    harness.conversation().input.onResponseDone(completedResponse("resp_narration"));
     await flush();
 
     harness.clock.now += 1_000;
@@ -3681,14 +3408,9 @@ describe("voice stay correlation", () => {
     const conversation = harness.conversation();
     conversation.input.onAudioDelta(pcmDelta(480), "item_play");
     await flush();
-    conversation.input.onResponseDone({
-      responseId: "resp_play",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-      inputTokens: 640,
-      outputTokens: 80,
-    });
+    conversation.input.onResponseDone(
+      completedResponse("resp_play", { audioBytes: 480, inputTokens: 640, outputTokens: 80 }),
+    );
     await flush();
     expect(at(harness.ofType("response"), 0)).toMatchObject({
       trigger: "narration",
@@ -3741,22 +3463,15 @@ describe("voice arrival", () => {
     expect(harness.vox.subscriptions).toEqual([]);
     expect(harness.transcriptions).toHaveLength(1); // readiness probe only
     expect(harness.transcriptions[0]?.appended).toEqual([]);
-    conversation.input.onFunctionCall({
-      callId: "arrival_no_actor",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"run a command for the asker"}',
-    });
+    conversation.input.onFunctionCall(
+      askClankie("arrival_no_actor", '{"request":"run a command for the asker"}'),
+    );
     await flush();
     expect(harness.submitCalls).toEqual([]);
     expect(harness.ofType("realtime_tool")).toContainEqual(
       expect.objectContaining({ code: "speakerless_trigger" }),
     );
-    conversation.input.onResponseDone({
-      responseId: "quiet-arrival",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("quiet-arrival"));
     await flush();
     expect(harness.vox.audio).toEqual([]);
     expect(harness.session.status().active).toBe(true);
@@ -3796,12 +3511,7 @@ describe("voice arrival", () => {
     const conversation = harness.conversation();
     conversation.input.onAudioDelta(pcmDelta(480), "arrival_greeting");
     await flush();
-    conversation.input.onResponseDone({
-      responseId: "greeting",
-      status: "completed",
-      audioBytes: 480,
-      textCharacters: 0,
-    });
+    conversation.input.onResponseDone(completedResponse("greeting", { audioBytes: 480 }));
     await flush();
     expect(harness.vox.audio).toHaveLength(1);
     expect(harness.ofType("response")).toContainEqual(
@@ -3875,11 +3585,7 @@ describe("voice room membership and self-directed departure", () => {
     occupants.pop();
     harness.session.memberChannelChanged(GUILD, ALICE, undefined);
     await flush();
-    harness.conversation().input.onFunctionCall({
-      callId: "no_actor",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"run a shell command"}',
-    });
+    harness.conversation().input.onFunctionCall(askClankie("no_actor", '{"request":"run a shell command"}'));
     await flush();
     expect(harness.submitCalls).toEqual([]);
     expect(harness.ofType("realtime_tool")).toContainEqual(
@@ -3899,11 +3605,7 @@ describe("voice room membership and self-directed departure", () => {
         }),
     });
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "investigate",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"investigate this session"}',
-    });
+    conversation.input.onFunctionCall(askClankie("investigate", '{"request":"investigate this session"}'));
     conversation.input.onResponseDone(silent);
     await flush();
     occupants.pop();
@@ -3947,11 +3649,7 @@ describe("voice room membership and self-directed departure", () => {
     occupants.splice(1, 1);
     harness.session.memberChannelChanged(GUILD, BOB, undefined);
     await flush();
-    conversation.input.onFunctionCall({
-      callId: "compound",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"investigate this session"}',
-    });
+    conversation.input.onFunctionCall(askClankie("compound", '{"request":"investigate this session"}'));
     await flush();
     const request = at(harness.submitCalls, -1);
     expect(request.trigger.actorId).toBe(ALICE);
@@ -4053,13 +3751,7 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
   await harness.consent(MALLORY);
   await harness.say(ALICE, "hey clankie find a co-op game");
   const conversation = harness.conversation();
-  const done = () =>
-    conversation.input.onResponseDone({
-      responseId: "r",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+  const done = () => conversation.input.onResponseDone(completedResponse("r"));
   const ask = (callId: string, request: string) => {
     conversation.input.onFunctionCall({
       callId,
@@ -4140,13 +3832,7 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
 });
 
 describe("snappy conversation absorption", () => {
-  const done = (conversation: FakeConversation) =>
-    conversation.input.onResponseDone({
-      responseId: "r",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
+  const done = (conversation: FakeConversation) => conversation.input.onResponseDone(completedResponse("r"));
 
   it("answers a burst once with the latest state and drops stale generation and queued requests", async () => {
     const harness = await engagedHarness();
@@ -4187,19 +3873,11 @@ describe("snappy conversation absorption", () => {
         }),
     });
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "original",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear"}',
-    });
+    conversation.input.onFunctionCall(askClankie("original", '{"request":"check Linear"}'));
     done(conversation);
     await flush();
     await harness.say(ALICE, "did you check my Linear activity");
-    conversation.input.onFunctionCall({
-      callId: "repeat",
-      name: "ask_clankie",
-      argumentsJson: JSON.stringify(repeat),
-    });
+    conversation.input.onFunctionCall(askClankie("repeat", JSON.stringify(repeat)));
     done(conversation);
     await flush();
     expect(harness.submitCalls).toHaveLength(1);
@@ -4224,19 +3902,11 @@ describe("snappy conversation absorption", () => {
     });
     await harness.consent(BOB);
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "alice",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear"}',
-    });
+    conversation.input.onFunctionCall(askClankie("alice", '{"request":"check Linear"}'));
     done(conversation);
     await flush();
     await harness.say(BOB, "clankie check my Linear too");
-    conversation.input.onFunctionCall({
-      callId: "bob",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear","join_call_id":"alice"}',
-    });
+    conversation.input.onFunctionCall(askClankie("bob", '{"request":"check Linear","join_call_id":"alice"}'));
     done(conversation);
     await flush();
     expect(conversation.functionResults).toHaveLength(0);
@@ -4257,11 +3927,7 @@ describe("snappy conversation absorption", () => {
         }),
     });
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "slow",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear"}',
-    });
+    conversation.input.onFunctionCall(askClankie("slow", '{"request":"check Linear"}'));
     done(conversation);
     await flush();
     harness.timers.fire(1_200);
@@ -4290,11 +3956,7 @@ describe("snappy conversation absorption", () => {
         }),
     });
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "slow",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear"}',
-    });
+    conversation.input.onFunctionCall(askClankie("slow", '{"request":"check Linear"}'));
     // Still generating its tool-calling response; checking waits behind it.
     await flush();
     harness.timers.fire(1_200);
@@ -4313,11 +3975,7 @@ describe("snappy conversation absorption", () => {
   it("never schedules a beat for fast work and cancels pending beats on leave", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "fast",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear"}',
-    });
+    conversation.input.onFunctionCall(askClankie("fast", '{"request":"check Linear"}'));
     done(conversation);
     await flush();
     expect(harness.timers.pending().some((timer) => timer.delayMs === 1_200)).toBe(false);
@@ -4335,11 +3993,7 @@ describe("snappy conversation absorption", () => {
         }),
     });
     const conversation = harness.conversation();
-    conversation.input.onFunctionCall({
-      callId: "slow",
-      name: "ask_clankie",
-      argumentsJson: '{"request":"check Linear"}',
-    });
+    conversation.input.onFunctionCall(askClankie("slow", '{"request":"check Linear"}'));
     done(conversation);
     await flush();
     await harness.say(ALICE, "Can you stop talking?");
@@ -4373,20 +4027,10 @@ it("keeps capped generation correlated after its 45 seconds have already drained
   await flush();
   expect(harness.vox.audio).toHaveLength(beforeLate);
   expect(late.every((value) => value === 0)).toBe(true);
-  conversation.input.onResponseDone({
-    responseId: "long",
-    status: "completed",
-    audioBytes: 0,
-    textCharacters: 0,
-  });
+  conversation.input.onResponseDone(completedResponse("long"));
   expect(conversation.responseGuards.at(-1)!()).toBe(true);
   conversation.input.onAudioDelta(pcmDelta(480, 9), "next");
-  conversation.input.onResponseDone({
-    responseId: "next",
-    status: "completed",
-    audioBytes: 0,
-    textCharacters: 0,
-  });
+  conversation.input.onResponseDone(completedResponse("next"));
   await flush();
   expect(harness.ofType("response").at(-1)?.deliveryId).toBe(
     harness.ofType("transcription").at(-1)?.deliveryId,
@@ -4404,12 +4048,7 @@ it("stops PCM buffered in Vox before it becomes audible when newer speech arrive
   await harness.say(ALICE, "actually Friday");
   expect(harness.vox.stops).toEqual([playbackId]);
   harness.vox.emit({ type: "tts_playback_state", playbackId, status: "started" });
-  conversation.input.onResponseDone({
-    responseId: "buffered",
-    status: "completed",
-    audioBytes: 0,
-    textCharacters: 0,
-  });
+  conversation.input.onResponseDone(completedResponse("buffered"));
   await flush();
   expect(harness.ofType("response")).toHaveLength(0);
 });
@@ -4423,28 +4062,16 @@ it("lets a new ask after stop rejoin pending work and request its result again",
       }),
   });
   const conversation = harness.conversation();
-  const done = () =>
-    conversation.input.onResponseDone({
-      responseId: "r",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 0,
-    });
-  conversation.input.onFunctionCall({
-    callId: "original",
-    name: "ask_clankie",
-    argumentsJson: '{"request":"check Linear"}',
-  });
+  const done = () => conversation.input.onResponseDone(completedResponse("r"));
+  conversation.input.onFunctionCall(askClankie("original", '{"request":"check Linear"}'));
   done();
   await flush();
   await harness.say(ALICE, "stop talking");
   done();
   await harness.say(ALICE, "actually tell me when you have that result");
-  conversation.input.onFunctionCall({
-    callId: "repeat",
-    name: "ask_clankie",
-    argumentsJson: '{"request":"check Linear","join_call_id":"original"}',
-  });
+  conversation.input.onFunctionCall(
+    askClankie("repeat", '{"request":"check Linear","join_call_id":"original"}'),
+  );
   done();
   await flush();
   resolveCaptain(settledResult("linear", "Found it."));
@@ -4460,12 +4087,7 @@ it("lets a new ask after stop rejoin pending work and request its result again",
 
 describe("opt-in spoken transcripts", () => {
   const done = (h: Awaited<ReturnType<typeof engagedHarness>>) =>
-    h.conversation().input.onResponseDone({
-      responseId: "spoken-response",
-      status: "completed",
-      audioBytes: 0,
-      textCharacters: 15,
-    });
+    h.conversation().input.onResponseDone(completedResponse("spoken-response", { textCharacters: 15 }));
 
   it.each(["native_audio", "tts_text"] as const)(
     "records %s wording once with completed playback, separate from human speech and receipts",
@@ -4613,12 +4235,9 @@ it("drops in-flight wording when the last retention subscriber leaves", async ()
   unsubscribe();
   h.session.subscribeSpokenTranscript((entry) => spoken.push(entry));
   h.conversation().input.onAudioDelta(pcmDelta(480), "private");
-  h.conversation().input.onResponseDone({
-    responseId: "private",
-    status: "completed",
-    audioBytes: 480,
-    textCharacters: 19,
-  });
+  h.conversation().input.onResponseDone(
+    completedResponse("private", { audioBytes: 480, textCharacters: 19 }),
+  );
   await flush();
   expect(spoken).toEqual([]);
 });

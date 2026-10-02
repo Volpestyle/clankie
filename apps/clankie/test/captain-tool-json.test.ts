@@ -10,22 +10,6 @@ describe("tool JSON previews", () => {
     expect(result.details).toBe(value);
   });
 
-  it("keeps page content when one serialized string exceeds the byte limit", () => {
-    const value = {
-      outcome: "ok",
-      tool: "agent_browser_read",
-      content: "Useful page content.\n".repeat(3000),
-      isError: false,
-      artifacts: [],
-    };
-    const result = toolJson(value);
-    const serialized = JSON.stringify(value, null, 2);
-    expect(result.content[0].text).toBe(
-      `${serialized.slice(0, DEFAULT_MAX_BYTES)}\n\n[Output truncated to ${DEFAULT_MAX_BYTES} of ${Buffer.byteLength(serialized)} bytes; request a narrower result.]`,
-    );
-    expect(result.details).toBe(value);
-  });
-
   it.each(["é", "界", "🧙"])("does not split a UTF-8 character (%s)", (character) => {
     const value = character.repeat(DEFAULT_MAX_BYTES);
     const text = toolJson(value).content[0].text;

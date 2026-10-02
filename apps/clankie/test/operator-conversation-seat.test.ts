@@ -1,3 +1,4 @@
+import { replayConversation, sendMessage } from "./conversation-requests.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -101,17 +102,11 @@ describe("seat conversations", () => {
     });
     expect(renamed.op === "get" ? renamed.conversation?.title : undefined).toBe("Atlas");
 
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: created.conversation.conversationId,
-        surfaceClientId: "ios",
-        expectedRevision: 0,
-        message: "Are you there?",
-      },
+    const sent = await sendMessage(store, {
+      conversationId: created.conversation.conversationId,
+      surfaceClientId: "ios",
+      expectedRevision: 0,
+      message: "Are you there?",
     });
     expect(sent.op === "send" ? sent.result : undefined).toMatchObject({
       status: "seat_offline",
@@ -206,14 +201,9 @@ describe("seat conversations", () => {
       text: "Tests are green.",
       streaming: false,
     });
-    const replay = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: first.conversation.conversationId,
-        surfaceClientId: "ios",
-      },
+    const replay = await replayConversation(store, {
+      conversationId: first.conversation.conversationId,
+      surfaceClientId: "ios",
     });
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
     expect(replay.result.events).toEqual(
@@ -284,15 +274,10 @@ describe("seat conversations", () => {
       });
       if (result.op !== "replay") throw new Error("replay expected");
       if (result.result.status === "recover") {
-        result = await store.serve({
-          op: "replay",
-          schemaVersion: 1,
-          replay: {
-            schemaVersion: 1,
-            conversationId,
-            surfaceClientId: "ios",
-            cursor: result.result.resetCursor,
-          },
+        result = await replayConversation(store, {
+          conversationId,
+          surfaceClientId: "ios",
+          cursor: result.result.resetCursor,
         });
       }
       if (result.op !== "replay" || result.result.status !== "page") throw new Error("page expected");
@@ -325,17 +310,11 @@ describe("seat conversations", () => {
     ]);
 
     const sentAt = new Date().toISOString();
-    await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId,
-        surfaceClientId: "ios",
-        expectedRevision: 0,
-        message: "One more",
-      },
+    await sendMessage(store, {
+      conversationId,
+      surfaceClientId: "ios",
+      expectedRevision: 0,
+      message: "One more",
     });
     store.syncSeatTranscript("term-potato", {
       ...initial,
@@ -358,21 +337,15 @@ describe("seat conversations", () => {
     const store = new ConversationStore(root, () => Promise.resolve());
     const conversationId = store.defaultGlobalConversationId();
     const shape = async () => {
-      let result = await store.serve({
-        op: "replay",
-        schemaVersion: 1,
-        replay: { schemaVersion: 1, conversationId, surfaceClientId: "ios" },
+      let result = await replayConversation(store, {
+        conversationId,
+        surfaceClientId: "ios",
       });
       if (result.op === "replay" && result.result.status === "recover") {
-        result = await store.serve({
-          op: "replay",
-          schemaVersion: 1,
-          replay: {
-            schemaVersion: 1,
-            conversationId,
-            surfaceClientId: "ios",
-            cursor: result.result.resetCursor,
-          },
+        result = await replayConversation(store, {
+          conversationId,
+          surfaceClientId: "ios",
+          cursor: result.result.resetCursor,
         });
       }
       if (result.op !== "replay" || result.result.status !== "page") throw new Error("page expected");

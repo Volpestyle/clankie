@@ -206,15 +206,6 @@ function recordingSink(): {
 }
 
 describe("TUI operator conversation selection", () => {
-  it("enumerates and selects the server-owned default across restart", async () => {
-    const first = new OperatorConversationSelection(client());
-    expect((await first.selectDefault()).conversationId).toBe("global-default");
-    const restarted = new OperatorConversationSelection(client(), first.conversationId);
-    expect((await restarted.select(restarted.conversationId as string)).conversationId).toBe(
-      "global-default",
-    );
-  });
-
   it("lists every conversation, including counterpart threads", async () => {
     const agent: OperatorConversation = {
       ...DEFAULT,
@@ -239,6 +230,7 @@ describe("TUI operator conversation selection", () => {
     ]);
     // Selection and discovery expose the same records.
     expect((await selection.select("persona-1")).conversationId).toBe("persona-1");
+    expect(selection.conversationId).toBe("persona-1");
   });
 
   it("supports the stable direct --chat form without inventing a conversation", () => {

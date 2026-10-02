@@ -24,11 +24,6 @@ export interface ChannelTurnState {
   readonly members: readonly OperatorChannelMember[];
   /** Outcomes so far for the message currently being answered. */
   readonly taken: readonly ChannelTurnRecord[];
-  /**
-   * Seats that have posted since the operator last spoke, including any that
-   * started the exchange. A member never answers its own message.
-   */
-  readonly lastSpeakerPersonaId?: string;
 }
 
 /**
@@ -46,7 +41,7 @@ export function nextChannelTurn(state: ChannelTurnState): OperatorChannelMember 
     .sort(
       (first, second) => first.position - second.position || first.personaId.localeCompare(second.personaId),
     )
-    .find((member) => !done.has(member.personaId) && member.personaId !== state.lastSpeakerPersonaId);
+    .find((member) => !done.has(member.personaId));
 }
 
 /**
@@ -58,7 +53,7 @@ export function nextChannelTurn(state: ChannelTurnState): OperatorChannelMember 
  */
 const CHANNEL_TURN_PASS = "PASS";
 
-export function isChannelTurnPass(reply: string): boolean {
+function isChannelTurnPass(reply: string): boolean {
   return reply.trim().toUpperCase() === CHANNEL_TURN_PASS;
 }
 

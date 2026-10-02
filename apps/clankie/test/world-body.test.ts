@@ -147,27 +147,17 @@ describe("hosted world body", () => {
   it("joins by credential, maps every available view, drives actions, and leaves once", async () => {
     let current = observation({ frame: 10, x: 13, y: 13 });
     const audioUnavailable: string[] = [];
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return current;
-        case "play.act": {
-          const action = (request.input as { action: { kind: string } }).action;
-          if (action.kind === "select_menu_entry") {
-            return actRejected({ reason: "menu_entry_not_present", available: [] }, current.frame);
-          }
-          current = observation({ frame: 20, x: 14, y: 13 });
-          return actRan(current);
+    const world = await worldWithHandlers({
+      "play.observe": () => current,
+      "play.act": (request) => {
+        const action = (request.input as { action: { kind: string } }).action;
+        if (action.kind === "select_menu_entry") {
+          return actRejected({ reason: "menu_entry_not_present", available: [] }, current.frame);
         }
-        case "play.frame":
-          return frame({ frame: current.frame, data: "after-action" });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+        current = observation({ frame: 20, x: 14, y: 13 });
+        return actRan(current);
+      },
+      "play.frame": () => frame({ frame: current.frame, data: "after-action" }),
     });
     const env = await provisionedEnv(world.stateDir);
     const result = await joinWorld({
@@ -263,43 +253,33 @@ describe("hosted world body", () => {
         ],
       },
     });
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return current;
-        case "play.act": {
-          expect(request.input).toMatchObject({ action: { kind: "select_menu_entry", entry: "gary" } });
-          current = observation({
-            frame: 40,
-            mode: "menu",
-            menu: {
-              menuId: "intro-name-confirmation",
-              cursor: 0,
-              entries: [
-                { id: "yes", label: "Yes" },
-                { id: "no", label: "No" },
-              ],
-            },
-          });
-          return actRan(current, {
-            kind: "select_menu_entry",
-            menuId: "intro-rival-name-menu",
-            entryId: "gary",
-            label: "Gary",
-            confirmed: true,
-            presses: 3,
-            endedBecause: "selected",
-          });
-        }
-        case "play.frame":
-          return frame({ frame: current.frame, data: "gary-confirmation" });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => current,
+      "play.act": (request) => {
+        expect(request.input).toMatchObject({ action: { kind: "select_menu_entry", entry: "gary" } });
+        current = observation({
+          frame: 40,
+          mode: "menu",
+          menu: {
+            menuId: "intro-name-confirmation",
+            cursor: 0,
+            entries: [
+              { id: "yes", label: "Yes" },
+              { id: "no", label: "No" },
+            ],
+          },
+        });
+        return actRan(current, {
+          kind: "select_menu_entry",
+          menuId: "intro-rival-name-menu",
+          entryId: "gary",
+          label: "Gary",
+          confirmed: true,
+          presses: 3,
+          endedBecause: "selected",
+        });
+      },
+      "play.frame": () => frame({ frame: current.frame, data: "gary-confirmation" }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -332,21 +312,10 @@ describe("hosted world body", () => {
       mode: "menu",
       menu: { menuId: "test-menu", cursor: 0, entries: [{ id: "one", label: "One" }] },
     });
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return current;
-        case "play.act":
-          return actRan(current);
-        case "play.frame":
-          return frame({ frame: current.frame, data: "menu-still-open" });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => current,
+      "play.act": () => actRan(current),
+      "play.frame": () => frame({ frame: current.frame, data: "menu-still-open" }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -372,43 +341,33 @@ describe("hosted world body", () => {
         },
       ],
     });
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return current;
-        case "play.act": {
-          const action = (request.input as { action: { kind: string } }).action;
-          if (action.kind === "walk_to" && current.minimap?.exits[0]?.walkTo === "unsupported") {
-            return actRejected(
-              {
-                reason: "walk_exit_unsupported",
-                at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
-                to: "pallet-town",
-              },
-              current.frame,
-            );
-          }
-          current = observation({
-            frame: current.frame + 10,
-            exits: [
-              {
-                at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
-                to: "pallet-town",
-                walkTo: "supported",
-              },
-            ],
-          });
-          return actRan(current);
+    const world = await worldWithHandlers({
+      "play.observe": () => current,
+      "play.act": (request) => {
+        const action = (request.input as { action: { kind: string } }).action;
+        if (action.kind === "walk_to" && current.minimap?.exits[0]?.walkTo === "unsupported") {
+          return actRejected(
+            {
+              reason: "walk_exit_unsupported",
+              at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
+              to: "pallet-town",
+            },
+            current.frame,
+          );
         }
-        case "play.frame":
-          return frame({ frame: current.frame, data: "capability-changed" });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+        current = observation({
+          frame: current.frame + 10,
+          exits: [
+            {
+              at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
+              to: "pallet-town",
+              walkTo: "supported",
+            },
+          ],
+        });
+        return actRan(current);
+      },
+      "play.frame": () => frame({ frame: current.frame, data: "capability-changed" }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -446,27 +405,18 @@ describe("hosted world body", () => {
         },
       ],
     });
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return current;
-        case "play.act":
-          return actRejected(
-            {
-              reason: "walk_exit_unsupported",
-              at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
-              to: "pallet-town",
-            },
-            current.frame,
-            2,
-          );
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => current,
+      "play.act": () =>
+        actRejected(
+          {
+            reason: "walk_exit_unsupported",
+            at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
+            to: "pallet-town",
+          },
+          current.frame,
+          2,
+        ),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -483,25 +433,16 @@ describe("hosted world body", () => {
 
   it("carries a hosted walk refusal's nearest open tile to the player", async () => {
     const current = observation({ frame: 10 });
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return current;
-        case "play.act":
-          return actRejected(
-            {
-              reason: "walk_target_impassable",
-              nearestOpen: { mapId: "route-1", x: 17, y: 16 },
-            },
-            current.frame,
-          );
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => current,
+      "play.act": () =>
+        actRejected(
+          {
+            reason: "walk_target_impassable",
+            nearestOpen: { mapId: "route-1", x: 17, y: 16 },
+          },
+          current.frame,
+        ),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -519,21 +460,10 @@ describe("hosted world body", () => {
 
   it("treats decoded:false as uncertainty while raw buttons remain usable", async () => {
     const undecoded = observation({ frame: 1, decoded: false });
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return undecoded;
-        case "play.act":
-          return actRan({ ...undecoded, frame: 5 });
-        case "play.frame":
-          return frame({ frame: 5, data: "raw-button-screen" });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => undecoded,
+      "play.act": () => actRan({ ...undecoded, frame: 5 }),
+      "play.frame": () => frame({ frame: 5, data: "raw-button-screen" }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -553,21 +483,10 @@ describe("hosted world body", () => {
 
   it("does not reuse action keys when the world replays an existing join", async () => {
     const current = observation({ frame: 10 });
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return current;
-        case "play.act":
-          return actRan(current);
-        case "play.frame":
-          return frame({ frame: current.frame, data: "rejoined" });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => current,
+      "play.act": () => actRan(current),
+      "play.frame": () => frame({ frame: current.frame, data: "rejoined" }),
     });
     const env = await provisionedEnv(world.stateDir);
     const first = await joinWorld({ environmentId: "pokemon-firered", env });
@@ -599,26 +518,17 @@ describe("hosted world body", () => {
       frame({ bodyGeneration: 2, frame: 1, data: "generation-2-frame-1" }),
       frame({ bodyGeneration: 1, frame: 99, data: "stale-generation" }),
     ];
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return observation({ bodyGeneration: currentGeneration, frame: currentFrame });
-        case "play.frame": {
-          const next = frames[Math.min(frameIndex, frames.length - 1)]!;
-          frameIndex += 1;
-          if (next.bodyGeneration >= currentGeneration) {
-            currentGeneration = next.bodyGeneration;
-            currentFrame = next.frame;
-          }
-          return next;
+    const world = await worldWithHandlers({
+      "play.observe": () => observation({ bodyGeneration: currentGeneration, frame: currentFrame }),
+      "play.frame": () => {
+        const next = frames[Math.min(frameIndex, frames.length - 1)]!;
+        frameIndex += 1;
+        if (next.bodyGeneration >= currentGeneration) {
+          currentGeneration = next.bodyGeneration;
+          currentFrame = next.frame;
         }
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+        return next;
+      },
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -659,21 +569,13 @@ describe("hosted world body", () => {
 
   it("starts hosted audio at live time and drains bounded PCM for the activity", async () => {
     let currentFrame = 10;
-    const world = await fakeWorld(
-      (request) => {
-        switch (request.operation) {
-          case "world.join":
-            return joinResult();
-          case "play.observe":
-            return observation({ frame: currentFrame });
-          case "play.frame":
-            currentFrame += 1;
-            return frame({ frame: currentFrame, data: `frame-${String(currentFrame)}` });
-          case "world.leave":
-            return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-          default:
-            throw new Error(`unexpected operation ${request.operation}`);
-        }
+    const world = await worldWithHandlers(
+      {
+        "play.observe": () => observation({ frame: currentFrame }),
+        "play.frame": () => {
+          currentFrame += 1;
+          return frame({ frame: currentFrame, data: `frame-${String(currentFrame)}` });
+        },
       },
       () => ({
         ok: true,
@@ -832,32 +734,22 @@ describe("hosted world body", () => {
   });
 
   it("exposes granted session and presence operations and preserves a world refusal", async () => {
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return { ...joinResult(), capabilities: [...CAPABILITIES, "world.presence"] };
-        case "play.observe":
-          return observation({ frame: 10 });
-        case "world.session":
-          return {
-            ok: true,
-            worldId: WORLD_ID,
-            playerId: PLAYER_ID,
-            sessionId: SESSION_ID,
-            gameId: "firered",
-            displayName: "Clankie",
-            state: "playing",
-            bodyGeneration: 1,
-            frame: 10,
-            startedAt: NOW,
-          };
-        case "world.who":
-          return { ok: false, code: "budget_exhausted", message: "who is rate limited" };
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "world.join": () => ({ ...joinResult(), capabilities: [...CAPABILITIES, "world.presence"] }),
+      "play.observe": () => observation({ frame: 10 }),
+      "world.session": () => ({
+        ok: true,
+        worldId: WORLD_ID,
+        playerId: PLAYER_ID,
+        sessionId: SESSION_ID,
+        gameId: "firered",
+        displayName: "Clankie",
+        state: "playing",
+        bodyGeneration: 1,
+        frame: 10,
+        startedAt: NOW,
+      }),
+      "world.who": () => ({ ok: false, code: "budget_exhausted", message: "who is rate limited" }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -904,6 +796,25 @@ describe("hosted world body", () => {
     await result.body.close();
   });
 });
+
+/** Common join/leave scaffolding; each scenario supplies its actual world responses. */
+function worldWithHandlers(
+  handlers: Readonly<Record<string, (request: WireRequest) => unknown | Promise<unknown>>>,
+  watch?: (request: WireRequest) => unknown | Promise<unknown>,
+): Promise<FakeWorld> {
+  const responses = new Map<string, (request: WireRequest) => unknown | Promise<unknown>>(
+    Object.entries({
+      "world.join": () => joinResult(),
+      "world.leave": () => ({ ok: true, sessionId: SESSION_ID, endedAt: NOW }),
+      ...handlers,
+    }),
+  );
+  return fakeWorld((request) => {
+    const respond = responses.get(request.operation);
+    if (respond === undefined) throw new Error(`unexpected operation ${request.operation}`);
+    return respond(request);
+  }, watch);
+}
 
 async function fakeWorld(
   respond: (request: WireRequest) => unknown | Promise<unknown>,
@@ -988,20 +899,11 @@ describe("a decoded screen with no semantic state", () => {
     // VUH-980. The world decodes FireRed's intro perfectly and says so; it just
     // has no position or party to report. Calling that `unknown` at high
     // severity told a mind the game was broken for the minutes the intro runs.
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return {
-            ...observation({ frame: 371, decoded: false }),
-            scene: { mode: "cutscene", inputReady: false, waitingForAdvance: false, decoded: true },
-          };
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => ({
+        ...observation({ frame: 371, decoded: false }),
+        scene: { mode: "cutscene", inputReady: false, waitingForAdvance: false, decoded: true },
+      }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -1030,27 +932,18 @@ describe("a decoded screen with no semantic state", () => {
   // twice on 2026-08-16, believed it broken, and went back to pressing A.
   it("keeps what a composite action read, so the effect line can say it", async () => {
     let current = observation({ frame: 30, x: 5, y: 7 });
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return current;
-        case "play.act":
-          current = observation({ frame: 40, x: 5, y: 7 });
-          return actRan(current, {
-            kind: "advance_dialog",
-            transcript: ["Welcome to the world of POKéMON!"],
-            presses: 3,
-            endedBecause: "dialog_closed",
-          });
-        case "play.frame":
-          return frame({ frame: current.frame, data: "after-dialog" });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => current,
+      "play.act": () => {
+        current = observation({ frame: 40, x: 5, y: 7 });
+        return actRan(current, {
+          kind: "advance_dialog",
+          transcript: ["Welcome to the world of POKéMON!"],
+          presses: 3,
+          endedBecause: "dialog_closed",
+        });
+      },
+      "play.frame": () => frame({ frame: current.frame, data: "after-dialog" }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -1069,17 +962,8 @@ describe("a decoded screen with no semantic state", () => {
   });
 
   it("names a screen it could not interpret without raising an alarm", async () => {
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return observation({ frame: 12, decoded: false });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected operation ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => observation({ frame: 12, decoded: false }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -1146,22 +1030,13 @@ describe("a decoded screen with no semantic state", () => {
 
   it("counts the frame gap when act jumps the latest screen", async () => {
     let currentFrame = 1;
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return observation({ frame: currentFrame });
-        case "play.act":
-          currentFrame = 50;
-          return actRan(observation({ frame: 50, x: 13, y: 13 }));
-        case "play.frame":
-          return frame({ frame: currentFrame, data: `frame-${String(currentFrame)}` });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => observation({ frame: currentFrame }),
+      "play.act": () => {
+        currentFrame = 50;
+        return actRan(observation({ frame: 50, x: 13, y: 13 }));
+      },
+      "play.frame": () => frame({ frame: currentFrame, data: `frame-${String(currentFrame)}` }),
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -1185,21 +1060,13 @@ describe("a decoded screen with no semantic state", () => {
 
   it("keeps publishing frames after a transient play.frame failure", async () => {
     let frames = 0;
-    const world = await fakeWorld((request) => {
-      switch (request.operation) {
-        case "world.join":
-          return joinResult();
-        case "play.observe":
-          return observation({ frame: Math.max(1, frames) });
-        case "play.frame":
-          frames += 1;
-          if (frames === 3) return { not: "a frame" };
-          return frame({ frame: frames, data: `frame-${String(frames)}` });
-        case "world.leave":
-          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-        default:
-          throw new Error(`unexpected ${request.operation}`);
-      }
+    const world = await worldWithHandlers({
+      "play.observe": () => observation({ frame: Math.max(1, frames) }),
+      "play.frame": () => {
+        frames += 1;
+        if (frames === 3) return { not: "a frame" };
+        return frame({ frame: frames, data: `frame-${String(frames)}` });
+      },
     });
     const result = await joinWorld({
       environmentId: "pokemon-firered",
@@ -1220,20 +1087,10 @@ describe("a decoded screen with no semantic state", () => {
   it("stops the watch audio poller on 401 and signals unavailable", async () => {
     const fetches: number[] = [];
     const unavailable: string[] = [];
-    const world = await fakeWorld(
-      (request) => {
-        switch (request.operation) {
-          case "world.join":
-            return joinResult();
-          case "play.observe":
-            return observation({ frame: 1 });
-          case "play.frame":
-            return frame({ frame: 1, data: "frame-1" });
-          case "world.leave":
-            return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-          default:
-            throw new Error(`unexpected ${request.operation}`);
-        }
+    const world = await worldWithHandlers(
+      {
+        "play.observe": () => observation({ frame: 1 }),
+        "play.frame": () => frame({ frame: 1, data: "frame-1" }),
       },
       () => ({ ok: true, visibility: "unlisted", url: `https://watch.example/watch#wtk.${"A".repeat(43)}` }),
     );
@@ -1583,19 +1440,10 @@ function frame(options: { frame: number; data: string; bodyGeneration?: number }
 async function staticWorld(
   current: ReturnType<typeof observation> | ReturnType<typeof emeraldObservation>,
 ): Promise<FakeWorld> {
-  return fakeWorld((request) => {
-    switch (request.operation) {
-      case "world.join":
-        return joinResult(current.gameId === "emerald" ? "emerald" : "firered");
-      case "play.observe":
-        return current;
-      case "play.frame":
-        return frame({ frame: current.frame, data: "still" });
-      case "world.leave":
-        return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
-      default:
-        throw new Error(`unexpected operation ${request.operation}`);
-    }
+  return worldWithHandlers({
+    "world.join": () => joinResult(current.gameId === "emerald" ? "emerald" : "firered"),
+    "play.observe": () => current,
+    "play.frame": () => frame({ frame: current.frame, data: "still" }),
   });
 }
 

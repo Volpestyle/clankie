@@ -1,3 +1,4 @@
+import { replayConversation, sendMessage, tailConversation } from "./conversation-requests.ts";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -40,10 +41,10 @@ it("discovers trusted, one-shot and voice histories, then tails tool results wit
   rooms.discover(root);
   const conversationId = store.roomConversation("discord_presence", "123:456");
   const replay = async () => {
-    const response = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: { schemaVersion: 1, conversationId, surfaceClientId: "test", limit: 100 },
+    const response = await replayConversation(store, {
+      conversationId,
+      surfaceClientId: "test",
+      limit: 100,
     });
     OperatorConversationServiceResultSchema.parse(response);
     if (response.op !== "replay" || response.result.status !== "page") throw new Error("expected replay");
@@ -62,16 +63,11 @@ it("discovers trusted, one-shot and voice histories, then tails tool results wit
     ),
   ).toBe(true);
   expect(await readFile(path, "utf8")).toBe(original);
-  const pending = store.serve({
-    op: "tail",
-    schemaVersion: 1,
-    tail: {
-      schemaVersion: 1,
-      conversationId,
-      surfaceClientId: "test",
-      cursor: first.nextCursor,
-      waitMs: 1000,
-    },
+  const pending = tailConversation(store, {
+    conversationId,
+    surfaceClientId: "test",
+    cursor: first.nextCursor,
+    waitMs: 1000,
   });
   await appendFile(
     path,
@@ -114,17 +110,11 @@ it("discovers trusted, one-shot and voice histories, then tails tool results wit
     2,
   );
   await expect(
-    store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId,
-        expectedRevision: 0,
-        surfaceClientId: "test",
-        message: "secret",
-      },
+    sendMessage(store, {
+      conversationId,
+      expectedRevision: 0,
+      surfaceClientId: "test",
+      message: "secret",
     }),
   ).rejects.toThrow("read-only");
   await expect(

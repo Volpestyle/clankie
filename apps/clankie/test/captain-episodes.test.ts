@@ -209,21 +209,25 @@ describe("durable retention", () => {
       first.recordEpisode(
         episode({
           episodeId: `noise-${String(index)}`,
-          lane: "gameplay",
+          lane: index % 2 === 0 ? "operator" : "gameplay",
           targetId: "pokemon-emerald",
-          visibility: "shareable",
+          visibility: index % 3 === 0 ? "operator_private" : "shareable",
           summary: `Routine turn ${String(index)}.`,
           occurredAt: new Date(Date.parse("2026-08-01T00:00:00.000Z") + index * 60_000).toISOString(),
         }),
       );
     }
 
+    const expectedIds = [
+      "kept-1",
+      ...Array.from({ length: 128 }, (_, index) => `noise-${String(index + 72)}`),
+    ];
+    expect(first.catalog().captainEpisodes.map((entry) => entry.episodeId)).toEqual(expectedIds);
     // A fresh store over the same directory is the restart.
     const restarted = createFileMemory({ dataDir: root });
     const ids = restarted.catalog().captainEpisodes.map((entry) => entry.episodeId);
     // The recent window did evict: 128 unretained survive, and the kept one is extra.
-    expect(ids).toHaveLength(129);
-    expect(ids).not.toContain("noise-0");
+    expect(ids).toEqual(expectedIds);
 
     // Recall on demand reaches it; the automatic card still shows only the newest few.
     const found = restarted.searchEpisodeCard({ lane: "operator", query: "gateway state" });

@@ -1,10 +1,9 @@
+import { MemoryCredentialStore } from "../../../packages/credential-broker/test/memory-store.ts";
 import type { DiscordControlPlaneReadiness, DiscordVoiceBriefing } from "@clankie/api-client";
 import {
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID,
   mintDiscordVoiceBridgeToken,
-  type CredentialStore,
-  type ProviderCredential,
 } from "@clankie/credential-broker";
 import { Buffer } from "node:buffer";
 import { Routes } from "discord.js";
@@ -15,23 +14,6 @@ import {
   type RealtimeSocketFactory,
 } from "@clankie/discord-presence-core";
 import { inspectDiscordVoiceReadiness, probeVoiceWakeTransition } from "../src/voice-readiness.ts";
-
-class MemoryCredentialStore implements CredentialStore {
-  public readonly credentials = new Map<string, ProviderCredential>();
-  public get(providerId: string): Promise<ProviderCredential | undefined> {
-    return Promise.resolve(this.credentials.get(providerId));
-  }
-  public set(providerId: string, credential: ProviderCredential): Promise<void> {
-    this.credentials.set(providerId, credential);
-    return Promise.resolve();
-  }
-  public delete(providerId: string): Promise<boolean> {
-    return Promise.resolve(this.credentials.delete(providerId));
-  }
-  public list(): Promise<Record<string, never>> {
-    return Promise.resolve({});
-  }
-}
 
 const controlPlane: DiscordControlPlaneReadiness = {
   schemaVersion: 1,

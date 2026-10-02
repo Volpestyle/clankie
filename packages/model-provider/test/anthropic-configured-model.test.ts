@@ -1,7 +1,7 @@
+import { MemoryCredentialStore } from "../../credential-broker/test/memory-store.ts";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CredentialStore, ProviderCredential, RedactedCredential } from "@clankie/credential-broker";
 import { CatalogSchema } from "@clankie/model-registry";
 import { generateText } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,33 +12,6 @@ const tempDirs: string[] = [];
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
-
-class MemoryCredentialStore implements CredentialStore {
-  private readonly values: Record<string, ProviderCredential>;
-
-  public constructor(values: Record<string, ProviderCredential>) {
-    this.values = values;
-  }
-
-  public get(providerId: string): Promise<ProviderCredential | undefined> {
-    return Promise.resolve(this.values[providerId]);
-  }
-
-  public set(providerId: string, credential: ProviderCredential): Promise<void> {
-    this.values[providerId] = credential;
-    return Promise.resolve();
-  }
-
-  public delete(providerId: string): Promise<boolean> {
-    const found = this.values[providerId] !== undefined;
-    delete this.values[providerId];
-    return Promise.resolve(found);
-  }
-
-  public list(): Promise<Record<string, RedactedCredential>> {
-    return Promise.resolve({});
-  }
-}
 
 const catalog = CatalogSchema.parse({
   anthropic: {

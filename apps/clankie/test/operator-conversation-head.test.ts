@@ -1,3 +1,4 @@
+import { replayConversation, sendMessage } from "./conversation-requests.ts";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,10 +22,10 @@ async function store(runner: ConversationRunner = () => Promise.resolve()): Prom
 }
 
 async function events(conversations: ConversationStore, conversationId: string) {
-  const replay = await conversations.serve({
-    op: "replay",
-    schemaVersion: 1,
-    replay: { schemaVersion: 1, conversationId, surfaceClientId: "test", limit: 200 },
+  const replay = await replayConversation(conversations, {
+    conversationId,
+    surfaceClientId: "test",
+    limit: 200,
   });
   if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
   return replay.result.events;
@@ -110,17 +111,11 @@ describe("the seat's head conversation", () => {
     const wake = conversations.submitInternal(head, "wake up", "wake");
     if (wake.status !== "accepted") throw new Error("accepted expected");
     await conversations.awaitRun(wake.runId);
-    const sent = await conversations.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: head,
-        surfaceClientId: "clankie-app",
-        expectedRevision: 1,
-        message: "can you check the build?",
-      },
+    const sent = await sendMessage(conversations, {
+      conversationId: head,
+      surfaceClientId: "clankie-app",
+      expectedRevision: 1,
+      message: "can you check the build?",
     });
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("accepted expected");
     await conversations.awaitRun(sent.result.runId);
@@ -211,17 +206,11 @@ it("settles native display records without ending a service run, and deduplicate
     expect(settled.at(-1)).toMatchObject({ type: "activity", phase: "waiting" });
     conversations.syncNativeSeatTranscript(id, "native-session", [entry], "waiting");
     expect(await events(conversations, id)).toEqual(settled);
-    const sent = await conversations.serve({
-      schemaVersion: 1,
-      op: "send",
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: id,
-        surfaceClientId: "test",
-        expectedRevision: 0,
-        message: "New service work",
-      },
+    const sent = await sendMessage(conversations, {
+      conversationId: id,
+      surfaceClientId: "test",
+      expectedRevision: 0,
+      message: "New service work",
     });
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("send refused");
     await started;

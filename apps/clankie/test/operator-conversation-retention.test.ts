@@ -1,3 +1,4 @@
+import { replayConversation, sendMessage } from "./conversation-requests.ts";
 import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,17 +46,11 @@ describe("operator conversation retention", () => {
     });
     if (created.op !== "create") throw new Error("conversation was not created");
     const conversationId = created.conversation.conversationId;
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId,
-        surfaceClientId: "test",
-        expectedRevision: 0,
-        message: "stay alive",
-      },
+    const sent = await sendMessage(store, {
+      conversationId,
+      surfaceClientId: "test",
+      expectedRevision: 0,
+      message: "stay alive",
     });
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("turn was not accepted");
 
@@ -88,29 +83,18 @@ describe("operator conversation retention", () => {
         publish({ type: "activity", phase: "thinking" });
       }
     });
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 0,
-        message: "fill the retained event window",
-      },
+    const sent = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 0,
+      message: "fill the retained event window",
     });
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("turn was not accepted");
     await store.awaitRun(sent.result.runId);
 
-    const expired = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: "global-default",
-        surfaceClientId: "test",
-      },
+    const expired = await replayConversation(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
     });
     expect(expired.op === "replay" ? expired.result : undefined).toMatchObject({
       status: "recover",
@@ -120,31 +104,20 @@ describe("operator conversation retention", () => {
     if (expired.op !== "replay" || expired.result.status !== "recover") {
       throw new Error("expired cursor did not recover");
     }
-    const replay = await store.serve({
-      op: "replay",
-      schemaVersion: 1,
-      replay: {
-        schemaVersion: 1,
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        cursor: expired.result.resetCursor,
-        limit: 500,
-      },
+    const replay = await replayConversation(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      cursor: expired.result.resetCursor,
+      limit: 500,
     });
     expect(
       replay.op === "replay" && replay.result.status === "page" ? replay.result.events : [],
     ).toHaveLength(400);
-    const next = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 1,
-        message: "continue after trimming",
-      },
+    const next = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 1,
+      message: "continue after trimming",
     });
     expect(next.op === "send" && next.result.status === "accepted" ? next.result.safeCursor : undefined).toBe(
       "000000000503",

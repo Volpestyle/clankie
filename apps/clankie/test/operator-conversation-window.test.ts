@@ -1,3 +1,4 @@
+import { sendMessage } from "./conversation-requests.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -91,17 +92,11 @@ describe("backward operator replay", () => {
         publish({ type: "activity", phase: "thinking" });
       }
     });
-    const sent = await store.serve({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
-        schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "test",
-        expectedRevision: 0,
-        message: "fill retention",
-      },
+    const sent = await sendMessage(store, {
+      conversationId: "global-default",
+      surfaceClientId: "test",
+      expectedRevision: 0,
+      message: "fill retention",
     });
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("send failed");
     await store.awaitRun(sent.result.runId);

@@ -1,3 +1,4 @@
+import { replayConversation, sendMessage } from "./conversation-requests.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,24 +20,18 @@ async function failingStore(error: unknown): Promise<ConversationStore> {
 async function failedTurn(store: ConversationStore, message: string) {
   const got = await store.serve({ op: "get", schemaVersion: 1, conversationId: "global-default" });
   if (got.op !== "get" || got.conversation === undefined) throw new Error("default conversation missing");
-  const sent = await store.serve({
-    op: "send",
-    schemaVersion: 1,
-    turn: {
-      schemaVersion: 1,
-      kind: "message",
-      conversationId: "global-default",
-      surfaceClientId: "test",
-      expectedRevision: got.conversation.revision,
-      message,
-    },
+  const sent = await sendMessage(store, {
+    conversationId: "global-default",
+    surfaceClientId: "test",
+    expectedRevision: got.conversation.revision,
+    message,
   });
   if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("turn was not accepted");
   await store.awaitRun(sent.result.runId);
-  const replay = await store.serve({
-    op: "replay",
-    schemaVersion: 1,
-    replay: { schemaVersion: 1, conversationId: "global-default", surfaceClientId: "test", limit: 50 },
+  const replay = await replayConversation(store, {
+    conversationId: "global-default",
+    surfaceClientId: "test",
+    limit: 50,
   });
   if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("replay failed");
   const failure = replay.result.events.find((event) => event.type === "turn" && event.phase === "failed");

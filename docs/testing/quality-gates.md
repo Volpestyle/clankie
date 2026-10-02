@@ -1,21 +1,29 @@
 # Repeatable quality gates
 
-`pnpm check` is the required main/PR and release gate. It includes the HTTP
-journey and offline evaluation corpus below, alongside the existing unit,
-integration, Rust, IPC, type, lint and documentation checks. No paid model,
-Discord account, live gateway or running operator service is required.
+`pnpm check` is the required local handoff and release gate. It includes the
+HTTP journey, unit, integration, Rust, IPC, type, lint and documentation checks.
+Pushes and pull requests run only fast formatting and lint on Linux. Run the
+complete CI gate explicitly with `workflow_dispatch`; the release workflow also
+runs it. There are no scheduled full checks. No paid model, Discord account,
+live gateway or running operator service is required.
 
-| Lane             | Command                 | Evidence and limits                                                                                                          |
-| ---------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Full gate        | `pnpm check`            | CI JUnit report in `.data/qa/tests.xml`; Rust/IPC results remain in the job log.                                             |
-| Host integration | `pnpm test:integration` | Loopback HTTP boot/restart, pairing, device authority, encryption and conversation relay.                                    |
-| Offline eval     | `pnpm test:eval`        | Frozen play-evidence calibration cases, Discord authority decisions and evaluator self-exclusion. Every assertion must pass. |
+Evaluations are always explicit manual runs, including the frozen offline
+calibration corpus. `pnpm check`, ordinary `pnpm test`, builds and releases do
+not select that corpus. `pnpm test:eval` uses `vitest.eval.config.ts` to run it.
+Authority and evaluator-runner unit regressions remain ordinary tests; they do
+not execute evaluations.
 
-The focused commands select tests already in the full gate; CI does not run
-those tests a second time. Retries are disabled. CI cancels superseded runs on
-the same ref, retains test reports for seven days, and keeps its existing
-30-minute ceiling. The private app runs its cross-repo client/host journey on
-Linux; native device builds remain in its release/manual workflow.
+| Lane                | Command                 | Evidence and limits                                                                                                     |
+| ------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Full gate           | `pnpm check`            | CI JUnit report in `.data/qa/tests.xml`; Rust/IPC results remain in the job log.                                        |
+| Host integration    | `pnpm test:integration` | Loopback HTTP boot/restart, pairing, device authority, encryption and conversation relay.                               |
+| Manual offline eval | `pnpm test:eval`        | Frozen play-evidence calibration cases. Every assertion must pass; this lane is excluded from full checks and releases. |
+
+The host-integration command selects tests already in the full gate. The eval
+command is separate and never runs implicitly. Retries are disabled. CI cancels
+superseded runs on the same ref, retains manual full-check reports for seven
+days, and keeps its 30-minute ceiling. The private app's full client/host journey
+and native builds run at release time or on an explicit manual run.
 
 ## Isolation and reproducibility
 

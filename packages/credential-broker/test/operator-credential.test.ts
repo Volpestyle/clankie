@@ -1,3 +1,4 @@
+import { MemoryCredentialStore } from "./memory-store.ts";
 import { describe, expect, it } from "vitest";
 import {
   ensureOperatorCredential,
@@ -8,30 +9,7 @@ import {
   resolveOperatorCredential,
   rotateOperatorCredential,
   type CredentialStore,
-  type ProviderCredential,
-  type RedactedCredential,
 } from "../src/index.ts";
-
-class MemoryCredentialStore implements CredentialStore {
-  public readonly credentials = new Map<string, ProviderCredential>();
-
-  public get(providerId: string): Promise<ProviderCredential | undefined> {
-    return Promise.resolve(this.credentials.get(providerId));
-  }
-
-  public set(providerId: string, credential: ProviderCredential): Promise<void> {
-    this.credentials.set(providerId, credential);
-    return Promise.resolve();
-  }
-
-  public delete(providerId: string): Promise<boolean> {
-    return Promise.resolve(this.credentials.delete(providerId));
-  }
-
-  public list(): Promise<Record<string, RedactedCredential>> {
-    return Promise.resolve({});
-  }
-}
 
 const firstEntropy = (size: number): Buffer => Buffer.alloc(size, 0x11);
 const secondEntropy = (size: number): Buffer => Buffer.alloc(size, 0x22);

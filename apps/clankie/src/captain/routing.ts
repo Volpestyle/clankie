@@ -26,9 +26,9 @@ export const ESCALATE_TOOL_NAME = "escalate";
 /**
  * One run's escalation budget. A run escalates at most once, whatever fires
  * first; the next run starts back on the routine model. Pure, so the bounds
- * are testable without a model.
+ * are enforced by the extension without a model.
  */
-export class RoutineRunBudget {
+class RoutineRunBudget {
   private allowed = false;
   private limit: number | undefined;
   private onProviderError = false;

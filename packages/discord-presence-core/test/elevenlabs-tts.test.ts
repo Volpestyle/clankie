@@ -1,3 +1,4 @@
+import { ManualTimers } from "./manual-timers.ts";
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
@@ -9,7 +10,7 @@ import {
   type ElevenLabsTtsSession,
   type ElevenLabsTtsSessionOptions,
 } from "../src/elevenlabs-tts.ts";
-import type { RealtimeSocket, RealtimeTimers } from "../src/realtime-session.ts";
+import type { RealtimeSocket } from "../src/realtime-session.ts";
 
 class FakeSocket implements RealtimeSocket {
   public readonly sentRaw: string[] = [];
@@ -50,36 +51,6 @@ class FakeSocket implements RealtimeSocket {
   }
 }
 
-class FakeTimers implements RealtimeTimers {
-  public readonly scheduled: {
-    handle: number;
-    delayMs: number;
-    handler: () => void;
-    cleared: boolean;
-    fired: boolean;
-  }[] = [];
-  private nextHandle = 1;
-
-  public setTimeout(handler: () => void, delayMs: number): unknown {
-    const handle = this.nextHandle;
-    this.nextHandle += 1;
-    this.scheduled.push({ handle, delayMs, handler, cleared: false, fired: false });
-    return handle;
-  }
-
-  public clearTimeout(handle: unknown): void {
-    const entry = this.scheduled.find((candidate) => candidate.handle === handle);
-    if (entry !== undefined) entry.cleared = true;
-  }
-
-  public fire(): void {
-    const entry = this.scheduled.find((candidate) => !candidate.cleared && !candidate.fired);
-    if (entry === undefined) throw new Error("No armed timer to fire");
-    entry.fired = true;
-    entry.handler();
-  }
-}
-
 function frames(socket: FakeSocket): Record<string, unknown>[] {
   return socket.sentRaw.map((raw) => JSON.parse(raw) as Record<string, unknown>);
 }
@@ -87,7 +58,7 @@ function frames(socket: FakeSocket): Record<string, unknown>[] {
 async function openSession(overrides: Partial<ElevenLabsTtsSessionOptions> = {}): Promise<{
   session: ElevenLabsTtsSession;
   socket: FakeSocket;
-  timers: FakeTimers;
+  timers: ManualTimers;
   factory: { url: string; headers: Record<string, string> }[];
   audio: { pcm: Buffer; contextId: string }[];
   done: string[];
@@ -95,7 +66,7 @@ async function openSession(overrides: Partial<ElevenLabsTtsSessionOptions> = {})
   errors: string[];
 }> {
   const socket = new FakeSocket();
-  const timers = new FakeTimers();
+  const timers = new ManualTimers();
   const factory: { url: string; headers: Record<string, string> }[] = [];
   const audio: { pcm: Buffer; contextId: string }[] = [];
   const done: string[] = [];

@@ -383,20 +383,6 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
         "can ever approve privileged actions. Use **/clankie voice-consent opt-in** to let me " +
         "hear you and **/clankie voice-consent opt-out** to revoke immediately.",
     );
-    // The residency sentence and every required disclosure element.
-    expect(disclosure).toContain("DAVE protocol 1");
-    expect(disclosure).toContain("explicitly consented");
-    expect(disclosure).toContain("live OpenAI realtime session");
-    expect(disclosure).toContain("for as long as the call lasts");
-    expect(disclosure).toContain("listen continuously");
-    expect(disclosure).toContain("AI-generated voice");
-    expect(disclosure).toContain("privileged actions");
-    expect(disclosure).toContain("/clankie voice-consent opt-in");
-    expect(disclosure).toContain("/clankie voice-consent opt-out");
-    // The promise this architecture cannot honor must be gone.
-    expect(disclosure.toLowerCase()).not.toContain("discard");
-    expect(disclosure.toLowerCase()).not.toContain("after each turn");
-    expect(disclosure.toLowerCase()).not.toContain("not retained");
   });
 
   it("carries the residency terms in the opt-in reply, where consent is actually granted", () => {

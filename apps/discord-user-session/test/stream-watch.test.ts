@@ -220,28 +220,6 @@ describe("stream watch / publish controller", () => {
       }),
     });
     const started = controller.requestPublish({ guildId: GUILD, channelId: CHANNEL });
-    const key = buildDiscordStreamKey({ guildId: GUILD, channelId: CHANNEL, userId: SELF });
-    controller.handleRaw({
-      t: "STREAM_CREATE",
-      d: { stream_key: key, endpoint: "stream.discord.gg", token: "tok", rtc_server_id: "10" },
-    });
-    await expect(started).resolves.toBe(true);
-    expect(vox.commands).toContainEqual({ type: "stream_publish_browser_start", mimeType: "image/png" });
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(vox.commands.some((command) => command.type === "stream_publish_browser_frame")).toBe(true);
-    controller.close();
-  });
-
-  it("keeps a stream-only membership muted and deafened", () => {
-    const gateway = fakeGateway();
-    const controller = startStreamWatch({
-      gateway,
-      api: { reportDiscordStreamWatch: async () => ({}) } as never,
-      allowlisted: () => true,
-      vox: fakeVox(),
-      membership: new VoiceMembershipCoordinator(gateway),
-    });
-    void controller.requestPublish({ guildId: GUILD, channelId: CHANNEL });
     expect(gateway.payloads).toContainEqual({
       op: 4,
       d: {
@@ -251,6 +229,15 @@ describe("stream watch / publish controller", () => {
         self_deaf: true,
       },
     });
+    const key = buildDiscordStreamKey({ guildId: GUILD, channelId: CHANNEL, userId: SELF });
+    controller.handleRaw({
+      t: "STREAM_CREATE",
+      d: { stream_key: key, endpoint: "stream.discord.gg", token: "tok", rtc_server_id: "10" },
+    });
+    await expect(started).resolves.toBe(true);
+    expect(vox.commands).toContainEqual({ type: "stream_publish_browser_start", mimeType: "image/png" });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(vox.commands.some((command) => command.type === "stream_publish_browser_frame")).toBe(true);
     controller.close();
   });
 
@@ -591,7 +578,17 @@ describe("stream watch / publish controller", () => {
       role: "stream_publish",
     });
     expect(membership.targetFor("stream_publish")).toBeUndefined();
-    void controller.requestPublish({ guildId: GUILD, channelId: CHANNEL });
+    const restarted = controller.requestPublish({ guildId: GUILD, channelId: CHANNEL });
+    controller.handleRaw({
+      t: "STREAM_CREATE",
+      d: {
+        stream_key: buildDiscordStreamKey({ guildId: GUILD, channelId: CHANNEL, userId: SELF }),
+        endpoint: "stream.discord.gg",
+        token: "retry-token",
+        rtc_server_id: "11",
+      },
+    });
+    await expect(restarted).resolves.toBe(true);
     controller.close();
   });
 

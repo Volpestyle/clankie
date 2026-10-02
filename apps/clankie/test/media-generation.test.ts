@@ -168,6 +168,31 @@ describe("making a picture", () => {
     // The bytes he made earlier, read back off disk and uploaded verbatim.
     expect(uploaded).toEqual(original);
   });
+  it("refuses source references that escape the generated-media directory", async () => {
+    const workspace = await workspaceWith({ image_model: "openai/gpt-image-2" });
+    const privateImage = Buffer.from("dummy private image bytes");
+    await writeFile(join(workspace.attachmentRoot, "..", "not-generated.png"), privateImage);
+    const uploaded: Buffer[] = [];
+    const generator = new ConfiguredMediaGenerator({
+      credentials: store({ openai: "openai-secret" }),
+      attachmentRoot: workspace.attachmentRoot,
+      configCwd: workspace.configCwd,
+      environment: workspace.environment,
+      fetchImpl: async (_input, init) => {
+        const form = init?.body as FormData;
+        uploaded.push(Buffer.from(await (form.get("image[]") as File).arrayBuffer()));
+        return Response.json({ data: [{ b64_json: Buffer.from("edited").toString("base64") }] });
+      },
+    });
+
+    const result = await generator.generateImage({
+      schemaVersion: 1,
+      prompt: "edit this image",
+      sourceRef: `sha256:${createHash("sha256").update(privateImage).digest("hex")}:generated/../../not-generated.png`,
+    });
+    expect(result).toMatchObject({ outcome: "refused", reason: "provider_failed" });
+    expect(uploaded).toEqual([]);
+  });
 });
 
 describe("rendering a clip", () => {

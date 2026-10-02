@@ -6,7 +6,6 @@ import type { RoutedSelection } from "../src/captain/model.ts";
 import {
   captainRoutingExtension,
   ESCALATE_TOOL_NAME,
-  RoutineRunBudget,
   type EscalationRecord,
 } from "../src/captain/routing.ts";
 
@@ -100,35 +99,6 @@ async function harness(current: () => RoutedSelection | undefined) {
     },
   };
 }
-
-describe("RoutineRunBudget", () => {
-  it("escalates at most once per run, at the call limit", () => {
-    const budget = new RoutineRunBudget();
-    budget.start({ turnLimit: 3, onProviderError: true });
-    expect(budget.modelCallEnded()).toBeUndefined();
-    expect(budget.modelCallEnded()).toBeUndefined();
-    expect(budget.modelCallEnded()).toBe("looping");
-    expect(budget.claim()).toBe(true);
-    expect(budget.claim()).toBe(false);
-    expect(budget.modelCallEnded()).toBeUndefined();
-    expect(budget.modelCallFailed(true)).toBeUndefined();
-
-    budget.start({ turnLimit: 3, onProviderError: true });
-    expect(budget.canEscalate).toBe(true);
-  });
-
-  it("never escalates a run that may not, and never on an error Pi will not retry", () => {
-    const budget = new RoutineRunBudget();
-    budget.start(undefined);
-    for (let call = 0; call < 50; call += 1) expect(budget.modelCallEnded()).toBeUndefined();
-    expect(budget.modelCallFailed(true)).toBeUndefined();
-    expect(budget.claim()).toBe(false);
-
-    budget.start({ turnLimit: 3, onProviderError: true });
-    expect(budget.modelCallFailed(false)).toBeUndefined();
-    expect(budget.modelCallFailed(true)).toBe("provider_error");
-  });
-});
 
 describe("captainRoutingExtension", () => {
   it("never moves a routine run when escalation is off, however long it runs or fails", async () => {

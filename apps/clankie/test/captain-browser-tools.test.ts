@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { browserExtension } from "../src/captain/tools.ts";
@@ -36,6 +37,10 @@ describe("captain browser tools", () => {
     expect(text).toContain("# Browser documentation");
     expect(text).toContain("Useful page content.");
     expect(text).toContain("[Output truncated to 51200 of ");
+    const serialized = JSON.stringify(page, null, 2);
+    expect(text).toBe(
+      `${serialized.slice(0, DEFAULT_MAX_BYTES)}\n\n[Output truncated to ${DEFAULT_MAX_BYTES} of ${Buffer.byteLength(serialized)} bytes; request a narrower result.]`,
+    );
     expect(result.details).toBe(page);
   });
 

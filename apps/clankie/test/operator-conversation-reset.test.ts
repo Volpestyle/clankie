@@ -1,3 +1,4 @@
+import { replayConversation } from "./conversation-requests.ts";
 import { mkdtemp, mkdir, readFile, writeFile, rm, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -56,16 +57,11 @@ it("archives transcript and Pi context, retains identity, invalidates cursors, a
   expect(await readFile(join(archive, "events.jsonl"), "utf8")).toBe(events);
   expect(await readFile(join(archive, "pi", "session.jsonl"), "utf8")).toBe("old model context");
   await expect(readFile(join(path, id, "pi", "session.jsonl"))).rejects.toMatchObject({ code: "ENOENT" });
-  const replay = await store.serve({
-    op: "replay",
-    schemaVersion: 1,
-    replay: {
-      schemaVersion: 1,
-      conversationId: id,
-      surfaceClientId: "test",
-      cursor: last.cursor,
-      limit: 20,
-    },
+  const replay = await replayConversation(store, {
+    conversationId: id,
+    surfaceClientId: "test",
+    cursor: last.cursor,
+    limit: 20,
   });
   expect(replay).toMatchObject({ op: "replay", result: { status: "recover", code: "cursor_expired" } });
   await store.close();

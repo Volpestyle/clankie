@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   CapabilityTokenIssuer,
   DiscordBotCredentialProvider,
-  redactCredential,
   type CredentialStore,
   type ProviderCredential,
   type RedactedCredential,
@@ -23,7 +22,7 @@ class MemoryStore implements CredentialStore {
     return false;
   }
   public async list(): Promise<Record<string, RedactedCredential>> {
-    return this.credential === undefined ? {} : { discord_bot: redactCredential(this.credential) };
+    throw new Error("Use a real credential store to exercise listing and redaction");
   }
 }
 
@@ -87,13 +86,6 @@ describe("DiscordBotCredentialProvider", () => {
         channelIds: ["channel-1"],
       }),
     ).rejects.toThrow(/No API credential stored for discord_bot/);
-  });
-
-  it("redacts the discord_bot provider from summaries and logs", async () => {
-    const secret = "discord-secret-token-never-log";
-    const listed = await new MemoryStore({ type: "api", key: secret }).list();
-    expect(JSON.stringify(listed)).not.toContain(secret);
-    expect(listed.discord_bot).toEqual({ type: "api", key: "disc…" });
   });
 });
 

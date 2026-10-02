@@ -1153,7 +1153,7 @@ describe("voice owns speech", () => {
     const decide = vi.fn(() => Promise.resolve({ speak: "a second voice", reply: null }));
     const result = await runFreePlay({
       io: io(() => Promise.resolve(completed())),
-      mind: mind([press("up", "up")]),
+      mind: mind([{ ...press("up", "up"), speak: "a player fallback quip" }]),
       voice: { decide },
       roomAuthors: () => true,
       turns: 3,
