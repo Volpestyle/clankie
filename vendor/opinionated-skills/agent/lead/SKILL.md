@@ -111,7 +111,9 @@ Keep one current brief: result, owner, owned checkout/paths, acceptance,
 destination and next action. Name who can change its scope. **Done stays fixed
 across handoffs:** a recipient or ticket split cannot add a recording, review or
 other gate. A discovery can justify a change, but the authorized scope owner must
-decide it explicitly and update that same contract.
+decide it explicitly and update that same contract. Ask for a final report the
+lead can act on without the transcript: outcome, evidence links and any open
+decision, in a few lines. It is what the completion event carries.
 
 Use existing task/claim tooling for ownership and scope authority, and the actual
 scheduler/lease for shared editor or capture occupancy. Inspect what the tools
@@ -138,6 +140,8 @@ and follows through to the destination; the lead and tracker do not add parallel
 watchers or re-report the same completion. Reuse an existing watcher. For a new
 assignment, verify pickup and use the selected transport's completion subscription.
 Read on the completion event or a concrete new finding, not worker output on a timer.
+Start from that report and the evidence it links. Read the transcript or pane
+only to resolve a gap, contradiction or failure, and only the part in question.
 
 The lead owns getting the separable results working together. Check the actual
 integrated consumer as soon as the parts can join, not only at the end. On

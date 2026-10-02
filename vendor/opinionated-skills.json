@@ -25,6 +25,7 @@
     "testing-archive": "review/testing-archive"
   },
   "localChanges": [
-    "VUH-1457: merge leadership into agent/lead (including Herdr references); remove the vendored dashboard and update linear-grind leadership reference."
+    "VUH-1457: merge leadership into agent/lead (including Herdr references); remove the vendored dashboard and update linear-grind leadership reference.",
+    "lead: workers end with a compact final report; the lead harvests from it and reads transcripts only for gaps (also applied upstream in agent/lead)."
   ]
 }

@@ -153,6 +153,7 @@ import {
 const WORK_TRACKING_BRIEF = [
   "# Work tracking",
   "Track work where this repo already does. Run `clankie work` in the repo to see its convention (Linear, GitHub issues, its own Markdown directory, or .clankie/work/ when it has none); if it answers with a question, ask the lead once instead of choosing. Use `clankie work list | show | create | update | close | attach` (JSON) for items, criteria and status. Every result you report carries evidence attached with `clankie work attach ID --url URL --caption TEXT`: a screenshot or video for anything visible, test output, numbers and commit links otherwise, each captioned with what it proves and what is sample data. Load the work-items skill for details.",
+  "End each finished turn with a short report the lead can act on without your transcript: the outcome, links to its evidence, and any decision still open.",
 ].join("\n");
 
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
