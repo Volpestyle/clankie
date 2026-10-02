@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import {
   DiscordTextIngress,
@@ -9,6 +10,25 @@ import {
 } from "@clankie/discord-presence-core";
 import { Collection, type TextBasedChannel, type Message } from "discord.js";
 import { DiscordTextInbox, scanDiscordTextChannel } from "../src/text-inbox.ts";
+
+it("indexes both delivery identifiers when opening an existing inbox", () => {
+  const directory = mkdtempSync(join(tmpdir(), "clankie-inbox-index-"));
+  const path = join(directory, "inbox.sqlite");
+  new DiscordTextInbox(path, "0").close();
+  const db = new DatabaseSync(path);
+  try {
+    const plan = db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT * FROM deliveries WHERE id = ? OR json_extract(request, '$.deliveryId') = ?",
+      )
+      .all("a", "b");
+    expect(plan.map((row) => row.detail).join("\n")).toContain("deliveries_request_id");
+    expect(plan.map((row) => row.detail).join("\n")).not.toContain("SCAN deliveries");
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 const config: DiscordTextIngressConfig = {
   characterId: "clankie",
@@ -443,6 +463,24 @@ it("does not reset live attention when history sees an already-known reply", asy
     );
     expect(ingress.engagedInChannel("room")).toBe(false);
     expect(inbox.channelActivity.load()).toEqual([{ channelId: "room", sinceReply: 5 }]);
+  } finally {
+    inbox.close();
+  }
+});
+
+it("seeds negative attention history once and keeps scanning new messages", async () => {
+  const inbox = new DiscordTextInbox(":memory:", "200");
+  const fetch = vi.fn(async () => new Collection());
+  const channel = { id: "room", messages: { fetch }, isDMBased: () => false } as unknown as TextBasedChannel;
+  try {
+    const ingress = new DiscordTextIngress(inbox.port(replyPort()), guildConfig);
+    await scanDiscordTextChannel(inbox, channel, "bot", ingress);
+    await scanDiscordTextChannel(inbox, channel, "bot", ingress);
+    expect(fetch.mock.calls).toEqual([
+      [{ before: "201", limit: 100 }],
+      [{ after: "200", limit: 100 }],
+      [{ after: "200", limit: 100 }],
+    ]);
   } finally {
     inbox.close();
   }

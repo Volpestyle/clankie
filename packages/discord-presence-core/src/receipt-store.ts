@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
@@ -129,7 +130,13 @@ export class DiscordBridgeReceiptStore {
   private readonly path: string;
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
-  private queue: Promise<unknown> = Promise.resolve();
+  private readonly pending: {
+    receipt: DiscordBridgeReceipt;
+    resolve: (receipt: DiscordBridgeReceipt) => void;
+    reject: (error: unknown) => void;
+  }[] = [];
+  private flushing = false;
+  private parentReady = false;
 
   public constructor(options: DiscordBridgeReceiptStoreOptions) {
     this.path = options.path;
@@ -149,26 +156,58 @@ export class DiscordBridgeReceiptStore {
       type,
       data,
     });
-    const result = this.queue.then(async () => {
-      await this.ensureTarget();
-      const handle = await open(this.path, "a", 0o600);
-      try {
-        await handle.appendFile(`${JSON.stringify(receipt)}\n`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await chmod(this.path, 0o600);
-      return receipt;
+    if (this.pending.length >= 1024) return Promise.reject(new Error("Discord receipt writer overloaded"));
+    const result = new Promise<DiscordBridgeReceipt>((resolve, reject) => {
+      this.pending.push({ receipt, resolve, reject });
     });
-    this.queue = result.catch(() => undefined);
+    if (!this.flushing) {
+      this.flushing = true;
+      queueMicrotask(() => {
+        void this.flush();
+      });
+    }
     return result;
+  }
+
+  private async flush(): Promise<void> {
+    try {
+      while (this.pending.length > 0) {
+        const batch = this.pending.splice(0, 64);
+        try {
+          await this.ensureTarget();
+          const handle = await open(
+            this.path,
+            constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW,
+            0o600,
+          );
+          try {
+            await handle.chmod(0o600);
+            await handle.appendFile(
+              batch.map(({ receipt }) => `${JSON.stringify(receipt)}\n`).join(""),
+              "utf8",
+            );
+            await handle.sync();
+          } finally {
+            await handle.close();
+          }
+          // Every caller still waits for durable data, including the shutdown receipt.
+          for (const item of batch) item.resolve(item.receipt);
+        } catch (error) {
+          for (const item of batch) item.reject(error);
+        }
+      }
+    } finally {
+      this.flushing = false;
+    }
   }
 
   private async ensureTarget(): Promise<void> {
     const parent = dirname(this.path);
-    await mkdir(parent, { recursive: true, mode: 0o700 });
-    await chmod(parent, 0o700);
+    if (!this.parentReady) {
+      await mkdir(parent, { recursive: true, mode: 0o700 });
+      await chmod(parent, 0o700);
+      this.parentReady = true;
+    }
     try {
       const target = await lstat(this.path);
       if (target.isSymbolicLink() || !target.isFile()) {

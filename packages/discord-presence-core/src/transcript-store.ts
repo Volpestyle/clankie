@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, rename, unlink, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import {
@@ -31,6 +31,10 @@ export function discordVoiceTranscriptLogPath(env: NodeJS.ProcessEnv = process.e
 export class DiscordVoiceTranscriptStore {
   private readonly path: string;
   private queue: Promise<unknown> = Promise.resolve();
+  private reads: Promise<unknown> = Promise.resolve();
+  private offsets = [0];
+  private scannedBytes = 0;
+  private identity: { dev: number; ino: number; size: number; mtimeMs: number } | undefined;
 
   public constructor(path = discordVoiceTranscriptLogPath()) {
     this.path = path;
@@ -69,39 +73,83 @@ export class DiscordVoiceTranscriptStore {
     const cursor =
       afterCursor === undefined ? undefined : DiscordVoiceTranscriptCursorSchema.parse(afterCursor);
     await this.queue;
-    let raw: string;
+    const result = this.reads.then(() => this.readPage(cursor, limit));
+    this.reads = result.catch(() => undefined);
+    return result;
+  }
+
+  private async readPage(cursor: string | undefined, limit: number): Promise<DiscordVoiceTranscriptReadPage> {
     try {
       const handle = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
-        raw = await handle.readFile("utf8");
+        const info = await handle.stat();
+        if (!info.isFile()) throw new Error("Discord voice transcript path must be a regular file");
+        const previous = this.identity;
+        if (
+          !previous ||
+          previous.dev !== info.dev ||
+          previous.ino !== info.ino ||
+          info.size < previous.size ||
+          (info.size === previous.size && info.mtimeMs !== previous.mtimeMs)
+        ) {
+          this.offsets = [0];
+          this.scannedBytes = 0;
+        }
+        await this.index(handle, info.size);
+        this.identity = { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs };
+        const count = this.offsets.length - 1;
+        const start = Math.min(cursor === undefined ? Math.max(0, count - limit) : Number(cursor), count);
+        const end = Math.min(start + limit, count);
+        const entries: DiscordVoiceTranscriptLogEntry[] = [];
+        for (let line = start; line < end; line++) {
+          const length = this.offsets[line + 1]! - this.offsets[line]!;
+          // Invalid oversized lines retain their cursor but never allocate unbounded memory.
+          if (length > 1024 * 1024) continue;
+          const buffer = Buffer.allocUnsafe(length);
+          let read = 0;
+          while (read < length) {
+            const { bytesRead } = await handle.read(buffer, read, length - read, this.offsets[line]! + read);
+            if (bytesRead === 0) break;
+            read += bytesRead;
+          }
+          try {
+            if (read === length)
+              entries.push(DiscordVoiceTranscriptLogEntrySchema.parse(JSON.parse(buffer.toString("utf8"))));
+          } catch {
+            /* Malformed lines do not shift later cursors. */
+          }
+        }
+        return { entries, nextCursor: String(end).padStart(12, "0"), hasMore: end < count };
       } finally {
         await handle.close();
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        this.identity = undefined;
         return { entries: [], nextCursor: ZERO_CURSOR, hasMore: false };
       }
       throw error;
     }
-    const lines = raw.endsWith("\n") ? raw.slice(0, -1).split("\n") : raw.split("\n");
-    if (lines.length === 1 && lines[0] === "") lines.length = 0;
-    // ponytail: this development-only log is scanned in memory; add an index if it grows beyond a few MB.
-    const requestedStart = cursor === undefined ? Math.max(0, lines.length - limit) : Number(cursor);
-    const start = Math.min(requestedStart, lines.length);
-    const end = Math.min(start + limit, lines.length);
-    const entries: DiscordVoiceTranscriptLogEntry[] = [];
-    for (const line of lines.slice(start, end)) {
-      try {
-        entries.push(DiscordVoiceTranscriptLogEntrySchema.parse(JSON.parse(line)));
-      } catch {
-        // A malformed/torn line is not exposed and does not shift later cursors.
+  }
+
+  private async index(handle: FileHandle, size: number): Promise<void> {
+    if (this.scannedBytes >= size) return;
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, size - this.scannedBytes));
+    while (this.scannedBytes < size) {
+      const { bytesRead } = await handle.read(
+        chunk,
+        0,
+        Math.min(chunk.length, size - this.scannedBytes),
+        this.scannedBytes,
+      );
+      if (bytesRead === 0) break;
+      for (let i = 0; i < bytesRead; i++) {
+        if (chunk[i] === 10) this.offsets.push(this.scannedBytes + i + 1);
       }
+      this.scannedBytes += bytesRead;
     }
-    return {
-      entries,
-      nextCursor: String(end).padStart(12, "0"),
-      hasMore: end < lines.length,
-    };
+    // An unterminated tail is indexed only after its newline arrives, so a poll
+    // cannot consume the cursor of a transcript that is still being written.
   }
 
   private async ensureTarget(): Promise<void> {

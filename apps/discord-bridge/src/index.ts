@@ -543,7 +543,7 @@ client.once("ready", async () => {
     // configuration provenance is exactly what wastes an hour of debugging.
     console.info({ names: settingsFilledNames }, "Discord configuration filled from operator settings");
   }
-  void recoverTextInbox();
+  void recoverTextInbox(true);
   console.log(
     `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered /${DISCORD_COMMAND_NAME} with ${DISCORD_SUBCOMMANDS.length} subcommands, text ingress ${textIngressEnabled ? "enabled" : "disabled"}, voice ${voiceEnabled ? "enabled" : "disabled"}.`,
   );
@@ -552,13 +552,14 @@ client.once("ready", async () => {
 client.on("shardReady", () => {
   syncGuildMembership();
   void presenceSession.gatewayReady().catch(reportPresencePhaseFailure);
+  void recoverTextInbox(true);
 });
 
 client.on("shardResume", () => {
   syncGuildMembership();
   void presenceSession
     .gatewayResumed()
-    .then(() => recoverTextInbox())
+    .then(() => recoverTextInbox(true))
     .catch(reportPresencePhaseFailure);
 });
 
@@ -1528,13 +1529,22 @@ async function readDiscordContext(
 }
 
 let recoveringText = false;
-async function recoverTextInbox(): Promise<void> {
+let fullRecoveryRequested = false;
+let nextFullRecoveryAt = 0;
+async function recoverTextInbox(full = false): Promise<void> {
+  fullRecoveryRequested ||= full;
   if (recoveringText || shuttingDown || !client.isReady() || !textInbox || !textIngress) return;
   recoveringText = true;
+  const scanAll = fullRecoveryRequested || Date.now() >= nextFullRecoveryAt;
+  fullRecoveryRequested = false;
   try {
-    const channelIds = new Set(textInbox.channels());
+    // The gateway handles live traffic. Routine recovery only scans rooms with
+    // unfinished deliveries, always reconciling replies before retrying them.
+    const channelIds = new Set(
+      scanAll ? textInbox.channels() : textInbox.pending().map((row) => row.channel_id),
+    );
     const reconciled = new Set<string>();
-    for (const guild of client.guilds.cache.values()) {
+    for (const guild of scanAll ? client.guilds.cache.values() : []) {
       if (!ingressGuildIds.has(guild.id)) continue;
       const channels = await guild.channels.fetch();
       const threads = await guild.channels.fetchActiveThreads();
@@ -1593,11 +1603,13 @@ async function recoverTextInbox(): Promise<void> {
       }
     }
   } catch (error) {
+    fullRecoveryRequested ||= scanAll;
     console.error(
       { error: error instanceof Error ? error.message : String(error) },
       "Discord inbox recovery failed",
     );
   } finally {
+    if (scanAll && !fullRecoveryRequested) nextFullRecoveryAt = Date.now() + 15 * 60_000;
     recoveringText = false;
   }
 }

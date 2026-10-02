@@ -39,6 +39,8 @@ export class DiscordTextInbox {
         id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, guild_id TEXT,
         request TEXT, result TEXT, reply TEXT, done INTEGER NOT NULL DEFAULT 0
       );
+      CREATE INDEX IF NOT EXISTS deliveries_request_id
+        ON deliveries(json_extract(request, '$.deliveryId'));
     `);
     if (
       !this.db
@@ -156,6 +158,16 @@ export class DiscordTextInbox {
       .prepare("SELECT id FROM channels UNION SELECT channel_id AS id FROM deliveries")
       .all()
       .map((row) => String(row.id));
+  }
+
+  needsAttentionSeed(channelId: string): boolean {
+    return (
+      this.db.prepare("SELECT 1 FROM metadata WHERE key = ?").get(`attention_seed:${channelId}`) === undefined
+    );
+  }
+
+  attentionSeeded(channelId: string): void {
+    this.db.prepare("INSERT OR IGNORE INTO metadata VALUES (?, '1')").run(`attention_seed:${channelId}`);
   }
 
   enqueue(id: string, channelId: string, guildId?: string): void {
@@ -288,10 +300,15 @@ export async function scanDiscordTextChannel(
   let after = inbox.after(channel.id);
   // Upgrade/first discovery: a reply just before the cursor still makes this
   // an active room. Bound the bootstrap to one prior page; later scans persist it.
-  if (!channel.isDMBased() && !ingress.hasSpokenInChannel(channel.id)) {
+  if (
+    !channel.isDMBased() &&
+    !ingress.hasSpokenInChannel(channel.id) &&
+    inbox.needsAttentionSeed(channel.id)
+  ) {
     const prior = await channel.messages.fetch({ before: (BigInt(after) + 1n).toString(), limit: 100 });
     if ([...prior.values()].some((message) => message.author.id === botId))
       ingress.observeChannelReply(channel.id);
+    inbox.attentionSeeded(channel.id);
   }
   for (;;) {
     const page = await channel.messages.fetch({ after, limit: 100 });

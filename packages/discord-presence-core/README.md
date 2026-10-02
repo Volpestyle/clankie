@@ -155,3 +155,9 @@ output cannot masquerade as room input. Without a subscriber the session does
 not accumulate output text. Interrupted/failed/truncated entries may include an
 unheard ending; suppressed entries never played. The private transcript store
 and authenticated API retain these labels; content-free receipts never carry text.
+
+Transcript readers incrementally index newline offsets and read only the requested
+page. Existing line-number cursors stay valid; an unfinished tail waits for its newline.
+File replacement or truncation rebuilds the index. Receipt writers combine concurrent
+appends into batches of at most 64 records; each promise resolves only after the batch
+is flushed to disk. The pending queue is bounded at 1,024 records and rejects overload.

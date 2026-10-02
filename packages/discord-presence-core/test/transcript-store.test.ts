@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -26,6 +26,28 @@ function transcript(text: string, deliveryId: string): DiscordVoiceTranscript {
 }
 
 describe("DiscordVoiceTranscriptStore", () => {
+  it("tails external appends, waits for complete lines and rebuilds after replacement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-transcript-tail-"));
+    roots.push(root);
+    const path = join(root, "transcripts.jsonl");
+    const store = new DiscordVoiceTranscriptStore(path);
+    const line = (id: string) => JSON.stringify({ schemaVersion: 1, body: "bot", ...transcript(id, id) });
+    await writeFile(path, `${line("one")}\nmalformed\n${line("two").slice(0, 80)}`);
+    const first = await store.read("000000000000");
+    expect(first.entries.map((entry) => entry.text)).toEqual(["one"]);
+    expect(first.nextCursor).toBe("000000000002");
+    expect((await store.read(first.nextCursor)).entries).toEqual([]);
+    await appendFile(path, `${line("two").slice(80)}\n`);
+    const second = await store.read(first.nextCursor);
+    expect(second.entries.map((entry) => entry.text)).toEqual(["two"]);
+    expect(second.nextCursor).toBe("000000000003");
+    await writeFile(`${path}.new`, `${line("replacement")}\n`);
+    await rename(`${path}.new`, path);
+    expect((await store.read()).entries.map((entry) => entry.text)).toEqual(["replacement"]);
+    await writeFile(path, "");
+    expect((await store.read()).nextCursor).toBe("000000000000");
+  });
+
   it("refuses a relative state root", () => {
     expect(() => discordVoiceTranscriptLogPath({ XDG_STATE_HOME: "relative" })).toThrow(/absolute/u);
   });

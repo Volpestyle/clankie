@@ -14,6 +14,19 @@ import { voiceEvidenceReceiptData, voiceEvidenceReceiptType } from "../src/voice
 
 const roots: string[] = [];
 
+it("durably writes a burst in order and settles every pending receipt", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-receipt-batch-"));
+  roots.push(root);
+  const path = join(root, "receipts.jsonl");
+  const store = new DiscordBridgeReceiptStore({ path });
+  const expected = await Promise.all(
+    Array.from({ length: 200 }, (_, index) =>
+      store.append("discord.voice.floor", { index, state: "engaged" }),
+    ),
+  );
+  expect(await readDiscordBridgeReceipts(path)).toEqual(expected);
+});
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });

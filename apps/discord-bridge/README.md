@@ -13,6 +13,12 @@ credential and gateway; see
 [credential guide](../../docs/credentials.md) distinguishes both Discord account
 tokens from Clankie's local bridge bearers.
 
+The gateway handles live text. A one-minute recovery tick scans only channels
+with unfinished deliveries and reconciles posted replies before retrying. Startup
+and gateway recovery request a full history scan; a fifteen-minute sweep also
+discovers missed channels. Prior-page attention history is seeded once per channel,
+including when no prior bot reply exists. Delivery IDs and stored request IDs are indexed.
+
 ## Configure
 
 1. Start the clankie service once so it mints the internal bridge bearers.
