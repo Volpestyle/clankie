@@ -1,16 +1,19 @@
 # CLI
 
-The `clankie <noun> <verb>` command layer is the canonical local control
-product. Its noun modules return JSON-shaped results. The argv face prints
-those results; the fullscreen TUI is chrome over the same functions, with
-modals that collect flags, render the result, and navigate. Neither face shells
-out to the other or owns a second config writer
+This is the command contract for agents, scripts, and people using Clankie from
+a terminal. For installation, use [Get started](https://docs.clankie.bot/get-started/).
+For console keys and slash commands, use the [console reference](https://docs.clankie.bot/console/).
+
+`clankie <noun> <verb>` exposes headless configuration and control. The CLI and
+local TUI share command functions and configuration writers; the TUI adds
+interactive forms and navigation
 ([ADR 0012](adr/0012-provider-auth-model-registry.md)).
 
 Live operator work stays on the service HTTP catalog already shared by the TUI,
-phone, relay, and menu bar: chat, play, memory, pairing, and conversations are
-not launcher configuration commands. This page is the contract for agents,
-scripts, and anyone driving Clankie without a TTY.
+phone and relay: chat, play, memory, pairing, and conversations are
+not separate copies of the service's state. The commands below describe local
+mode unless noted. [Hosted mode](#local-and-hosted-connection-modes) connects to
+an existing remote service with a smaller supported set.
 
 `clankie help` prints the same command index. On every install the file lives
 at `{repoRoot}/docs/cli.md` — `clankie doctor` names `repoRoot`.
@@ -18,18 +21,20 @@ at `{repoRoot}/docs/cli.md` — `clankie doctor` names `repoRoot`.
 ## Invocation
 
 ```bash
-clankie                         # start the core service and open the console (TTY)
+clankie                         # choose mode on first run; open the selected console (TTY)
 clankie --version               # also -V
 clankie --chat <conversationId> # resume a server-owned operator conversation
 clankie <command>               # headless; no TTY
 clankie help                    # also --help, -h
 ```
 
-`--chat` is stripped before headless routing. With no command, the launcher
-starts the clankie service if needed and opens the existing main **Clankie**
+`--chat` is stripped before headless routing. In local mode, with no command,
+the launcher starts the service if needed and opens the existing main **Clankie**
 conversation, regardless of the launch directory. It does not create a chat.
 Use `--chat ID` for another retained conversation, `/new` for a fresh chat,
 or `/cd PATH` to select a project conversation.
+An unknown command exits 1 without starting anything. Common near-misses name
+the real command: stop the service with `clankie down`, not `stop`.
 
 ## Conventions
 
@@ -48,7 +53,7 @@ the token is never an argument, settings value, or printed result.
 
 | Command                                                                                                      | stdout                                                                                       |
 | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`                                               | JSON                                                                                         |
+| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`, `awake`                                      | JSON                                                                                         |
 | `model …`, `effort …`, `image-model …`, `video-model …`                                                      | JSON                                                                                         |
 | `linear …`, `persona …`, `games …`, `browser …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                                                                | JSON                                                                                         |
@@ -72,9 +77,10 @@ Do not edit `~/.config/clankie/clankie.json`,
 | Task                                                   | Commands                                        |
 | ------------------------------------------------------ | ----------------------------------------------- |
 | [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                    |
-| [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`                  |
+| [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`         |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                    |
 | [Connect accounts and track work](#account-setup)      | `accounts`, `work`                              |
+| [Choose working skills](#skill-setup)                  | `skills`                                        |
 | [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model` |
 | [Select runtime connections](#runtime-setup)           | `connections`, `runtime`, `agents`, `herdr`     |
 | [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`       |
@@ -111,7 +117,9 @@ the clankie row has them. The payload never includes fingerprints or secret
 values.
 
 Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
-`discord-user-session`, `activity`, `tunnel`.
+`discord-user-session`, `activity`, `tunnel`, `awake`. `awake` is the owner's
+keep-awake ([`awake`](#awake)); it reads healthy and "off" until
+they opt in.
 
 ### `doctor`
 
@@ -147,6 +155,14 @@ tools are facts in `remediations`, not failures.
   "herdrPlugin": { "bundled": true, "bundlePath": "…/integrations/herdr-plugin" },
   "laneTools": { "url": "http://127.0.0.1:4310/v1/mcp", "reachable": true },
   "doorway": { "state": "connected" },
+  "power": {
+    "state": "sleep_allowed",
+    "source": "battery",
+    "sleepAfterMinutes": 1,
+    "heldAwakeBy": [],
+    "keepAwakeRequested": false,
+    "advice": "On battery this Mac sleeps after 1 min idle, so Discord and the app go quiet. Plug in and run `clankie awake on` to keep it awake while plugged in, or use a hosted Clankie."
+  },
   "remediations": ["Pick a captain model with `clankie model set provider/model` or `/setup`."]
 }
 ```
@@ -167,6 +183,15 @@ and wants a lane bearer. `doorway` is the live public doorway
 ([ADR 0151](adr/0151-the-public-doorway-routes-home.md)) in the states
 `clankie gateway status` reports; `sign_in_required` and `unavailable` each earn
 a remediation, because until they clear no app reaches him at all.
+`power` says whether this Mac may sleep, which drops Discord and the app while
+it is down ([always-on guide](always-on.md)). `state` is `always_on` (power
+settings never sleep, or something holds a sleep assertion), `sleep_allowed`
+(with `advice`, which is also a remediation), or `unknown` (no `pmset`, as on a
+hosted Linux body; no warning). `source` is `ac` or `battery`,
+`sleepAfterMinutes` is the `pmset` idle sleep for that source (`0` never), and
+`heldAwakeBy` names processes holding a sleep assertion that applies on that
+source. `lastSleep` appears once the running service has noticed the host sleep
+underneath it. The same object is on the service's `/health` as `power`.
 
 <a id="service-lifecycle"></a>
 
@@ -242,6 +267,41 @@ changing them. `enable` is idempotent (a loaded agent is booted out first) and
 disagree; run `enable`). The job's own output lands in `log`; the services keep
 their usual per-process logs.
 
+<a id="awake"></a>
+
+### `awake [status|on|off]`
+
+Keep this Mac awake while it is plugged in, so Discord and the app stay reachable
+([always-on guide](always-on.md), [ADR 0203](adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
+`on` stores the opt-in (`host.keepAwake` in settings) and starts a
+launcher-supervised `caffeinate -s` now; `off` clears it and stops that process.
+macOS holds a `-s` assertion only on AC power, so unplugging lets the Mac sleep as
+its own settings say. The opt-in survives a restart: the launcher restarts
+`awake` with the clankie service, so [`autostart`](#service-lifecycle)
+brings it back at login. It never runs `pmset` with anything but `-g` and never
+changes a power setting. Local only; hosted mode and non-macOS hosts refuse
+`on`. The console has the same command as `/awake [on|off]`.
+
+```json
+{
+  "ok": true,
+  "keepAwake": true,
+  "service": { "state": "healthy", "detail": "holding this Mac awake while plugged in", "pid": 4242 },
+  "power": {
+    "state": "always_on",
+    "source": "ac",
+    "sleepAfterMinutes": 10,
+    "heldAwakeBy": ["caffeinate"],
+    "keepAwakeRequested": true
+  },
+  "note": "Keeps this Mac awake only while it is plugged in; …"
+}
+```
+
+`service.state` is `healthy` when off or holding, and `unreachable` when
+requested with no `caffeinate` running (`clankie restart awake`). A `caffeinate`
+you started yourself is never touched and never counted as the launcher's.
+
 <a id="device-setup"></a>
 
 ### `pair [--json] [--timeout SEC] [--review --days N [--count N]]`
@@ -251,7 +311,9 @@ app. Pairing reuses a healthy app relay or starts a stopped one before minting
 an offer. If the relay cannot start, no offer is minted. A configured public
 doorway carries the offer, so when this Mac has no live connection to it —
 `doorway.state` anything but `connected` — pairing fails `unavailable` rather
-than handing out a code the phone can only report as unrecognized. `--timeout` covers
+than handing out a code the phone can only report as unrecognized, unless a
+direct route is configured: then the offer carries that route alone (ADR 0204).
+`--timeout` covers
 startup and minting together and defaults to 30 seconds; an ordinary offer
 lives five minutes. A remote `CLANKIE_CONTROL_PLANE_URL` fails with
 `unavailable`: run pairing on that host so its launcher can verify the relay.
@@ -259,15 +321,28 @@ The console's `/pair` runs this same command and accepts the same flags.
 
 Public-gateway pairing uses a secure QR or full pasted link; the encryption
 credential is in its fragment. Short codes are for direct private connections.
+One link carries every route the Mac has (ADR 0204): the gateway fragment when
+remote access is on, and `direct=<origin>` when `clankie gateway direct` has
+configured a device-reachable control origin. With a direct route, the App
+Store app pairs without a Clankie account. It uses the gateway first when both
+are present. Human output ends with `Routes: remote access (gateway) + direct
+(<origin>)`, one of them, or `Route: this Mac only`, which pairs only a source
+build. It warns when the App Store app cannot reach the direct origin: plain
+HTTP works only for `.local`, single-label and private IP addresses, so serve
+tailnet names over HTTPS (`tailscale serve --https`). The service reaches the
+LAN only through the opt-in device doorway (`CLANKIE_DEVICE_HOST`,
+`CLANKIE_DEVICE_PORT`, default 4311), which serves device routes alone.
 Human mode writes the QR and code/link to stdout. Those values are secret-bearing
-display data — never log or persist them. `--json` is the agent form:
+display data — never log or persist them. `--json` is the agent form; `routes`
+is omitted when the link carries neither route:
 
 ```json
 {
   "ok": true,
   "code": "ABCD-EFGH",
-  "deepLink": "clankie://pair/…",
-  "expiresAt": "2026-08-30T12:00:00.000Z"
+  "deepLink": "clankie://connect?v=1&offer=…&direct=…",
+  "expiresAt": "2026-08-30T12:00:00.000Z",
+  "routes": { "gateway": false, "direct": "http://my-mac.local:4311" }
 }
 ```
 
@@ -326,24 +401,44 @@ invited email and one-time code; the rotating account credential goes to
 Keychain and the wizard restarts Clankie automatically. `disable` signs this Mac
 out and removes its installation binding.
 
+After sleep or an offline startup, the account connector backs off until the
+account endpoint responds to a harmless reachability probe. Lost refresh replies
+get up to three quick retries with the same token inside the rotation grace
+window. Network failures keep the doorway `connecting`; an explicit credential
+rejection parks it at `sign_in_required`, visible in `/gateway` and `doctor`,
+until the owner signs in again. Sleeping through the entire grace window cannot
+recover a replacement token whose reply was lost.
+
 `set --url URL --host-id ID` remains only for legacy static-bearer migration and
 local verification. It never accepts a secret as a flag.
 
 ### `linear status` / `linear follow on|off`
 
-With the webhook configured, accepted events appear in the **Linear inbox**
+When a webhook is configured, accepted events appear in the **Linear inbox**
 conversation (`linear-inbox`) as **External activity** messages, including swarm
-posts delivered by the webhook. Following controls whether those messages wake
-Clankie:
+posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
+account’s actual Linear notifications once at startup and when webhooks arrive.
+There is no periodic poll. A newly persisted, signed workspace event requests a
+refresh after a 1.5-second debounce; if no new notifications appear, it retries
+once after another 1.5 seconds. Refreshes coalesce bursts and never overlap an
+active read. A failed startup or manual read gets one delayed catch-up attempt;
+a failed retry retains its checkpoint for the next webhook or restart.
+Following requires a configured webhook. Following controls
+whether those notifications wake his operator conversation:
 
-| Following     | Inbox delivery                          | Automatic model turns                |
-| ------------- | --------------------------------------- | ------------------------------------ |
-| Off (default) | Events stay visible in the conversation | None from incoming events            |
-| On            | Events stay visible in the conversation | New events wake their selected owner |
+| Following     | Inbox delivery                          | Automatic model turns                       |
+| ------------- | --------------------------------------- | ------------------------------------------- |
+| Off (default) | Events stay visible in the conversation | None from incoming events                   |
+| On            | Events stay visible in the conversation | Account notifications wake `global-default` |
 
 Activity authored by Clankie's own verified Linear account, his or a
 worker's, is collected but never wakes him ([ADR 0189](adr/0189-his-own-linear-activity-does-not-wake-him.md)).
-Before a wake, a Linear inbox context above 30k tokens is compacted.
+Mentions, assignments, subscribed issue activity and replies follow Linear’s
+own inbox semantics. No per-issue binding is needed. The first connection starts
+watching from now; existing Linear notifications remain readable with
+`linear_get_notifications`. Notification IDs and a private durable checkpoint
+prevent restart, pagination and read-state changes from creating extra wakes.
+Unavailable connections are retried without waking; no human connector is used.
 
 Open the conversation with `clankie --chat linear-inbox`. It is created on the
 first accepted event, including while off. Ask Clankie to **check the Linear
@@ -368,21 +463,40 @@ Following controls waking, not collection.
 `clankie linear follow off` suppresses new event-triggered turns and skips model
 turns still queued; their inbox messages remain. An already-running turn can
 finish. `clankie linear follow on|off` applies without a restart, and
-`clankie linear status` reads the switch. All three return JSON with `ok`,
-`following`, `conversationId` (`linear-inbox`), and `settingsFile`.
+`clankie linear status` reports the switch and webhook readiness. All three
+return JSON with `ok`, `following`, `active`, `webhookConfigured`, `reason`,
+`missingWebhook`, `detail`, `conversationId` (`linear-inbox`),
+`wakeConversationId` (`global-default`), and `settingsFile`. Enabling without a
+stored webhook URL or signing secret leaves the switch unchanged and returns
+`ok: false`, `error: "linear_webhook_required"`, and a nonzero exit status.
+`missingWebhook` names `url`, `secret`, or both, with setup guidance in `detail`.
+`PUT /v1/linear/follow` refuses with HTTP 409 and the same reason; its authenticated
+GET reports readiness. Removing a prerequisite while following is on reports
+`following: true`, `active: false`, and `reason: "linear_webhook_required"`, also
+shown plainly in the TUI. Turning following off always remains available.
 
-Unbound work wakes the inbox's model context. Explicit issue bindings route new
-activity to the selected Clankie conversation or native seat. Events remain in
-one canonical inbox. Removing the webhook stops delivery; following off keeps
-delivery enabled.
+Notifications wake the operator conversation or its attached native seat. All
+records remain in one canonical inbox. `--conversation global-default` scopes
+reads and acknowledgments to that stream; omitting it reads all retained history.
+Removing the webhook stops ongoing notification refreshes and workspace history
+delivery; disconnecting Linear stops notification reads. Startup and queued wakes
+recheck webhook readiness. Following off keeps webhook ingestion and notification
+collection enabled. Readiness checks local configuration, not delivery health or
+whether someone deleted the webhook in Linear's own settings.
 
 Configure the webhook from `/connect linear` → **Follow Linear** → **Configure
-webhook**. The flow prints the public URL and stores the signing secret in the
-credential broker (`linear-webhook`). In Linear's webhook settings, select **all
+webhook**. The flow prints and stores the registered public URL in
+`linearWebhook.url`, and stores the signing secret in the credential broker
+(`linear-webhook`). In Linear's webhook settings, select **all
 available activity events**, including issues, comments, projects, and updates.
 An existing Comments-only webhook also needs its event selection expanded there.
 Setup does not enable following; **Start following** / **Stop following** is a
-separate choice under **Follow Linear**.
+separate choice under **Follow Linear**, enabled only once both are configured.
+Existing setups that stored only a secret must run **Configure webhook** again
+and choose **Keep it**, or record the already-registered URL with
+`clankie linear webhook set --url URL`. `clankie linear webhook clear` removes the
+stored URL and leaves any requested following visible as blocked. The secret
+remains broker-owned; it is never a CLI flag.
 
 The consumer accepts signed `create`, `update`, and `remove` activity from any
 resource type and actor. A verified, matching revision of Clankie's own MCP write
@@ -398,47 +512,69 @@ reply. A delivery supplies context, not new permission.
 The local operator API exposes `GET /v1/linear/follow` and
 `PUT /v1/linear/follow` with `{ "following": true | false }`. Both require the
 operator bearer and return `{ "schemaVersion": 1, "following": boolean,
-"conversationId": "linear-inbox" }`. The signed public ingress remains
+"conversationId": "linear-inbox", "wakeConversationId": "global-default" }`. The signed public ingress remains
 `POST /v1/hooks/linear`. Changing the local follow switch does not change which
 events Linear sends; the owner configures that subscription in Linear.
 
 #### Issue ownership
 
-Use provider UUIDs, not issue labels or email addresses. Bind only work the
-operator authorizes Clankie to lead:
+Issue bindings are legacy metadata and no longer route events or notifications.
+`clankie linear work list` and `GET /v1/linear/work` still show existing records.
+`work bind` and `work unbind` are retired; authenticated `PUT` and `DELETE`
+requests return `410` with `linear_work_bindings_retired`. Existing records are
+not rewritten or deleted and no longer pin conversations against retention or
+explicit deletion. Notifications always wake `global-default`.
+Use `clankie linear inbox read --conversation global-default` and retain the
+same conversation on `inbox ack`. Omit the conversation to inspect all history.
+Never acknowledge truncated output or a cursor offered to another conversation.
 
-```bash
-clankie linear work list
-clankie linear work bind ORG_UUID ISSUE_UUID CONVERSATION_ID
-clankie linear work bind ORG_UUID ISSUE_UUID NEW_CONVERSATION --from CURRENT_CONVERSATION
-clankie linear work unbind ORG_UUID ISSUE_UUID CURRENT_CONVERSATION
-clankie linear inbox read --conversation CONVERSATION_ID
-clankie linear inbox ack CURSOR --conversation CONVERSATION_ID
-```
-
-The same commands are available through `/linear` in the TUI. Bindings require
-an existing Clankie global/workspace conversation and prevent its automatic
-pruning or removal until unbound. The expected owner protects a rebind from
-concurrent changes. New Issue and Comment deliveries use that owner; an already
-admitted event keeps its original destination across retries and rebinding.
-Unbound activity uses `linear-inbox`. No binding grants provider access or turns
-webhook text into operator instructions. The lead checks current Swarm ownership
-before assigning work or replying.
-
-`GET /v1/linear/work` returns `{ owners: [...] }`. Operator-authenticated `PUT`
-accepts `{ organizationId, issueId, conversationId, expectedConversationId? }`;
-`DELETE` accepts the current organization, issue and conversation. Conflicts or
-unavailable owners return 409. Inbox GET accepts `conversationId`; acknowledgment
-POST accepts the same optional field alongside `ackCursor`. Omission reads the
-whole inbox. Never acknowledge a cursor under a different conversation.
-
-Signed-event identities commit with the inbox record, surviving restart and
-history trimming for the provider retry window. Pending followed wakes resume
-on startup when following is enabled; passive backlog stays passive. A recovered
-lead reconciles existing work before repeating external side effects. Current
-storage and recovery limits live in [ADR 0168](adr/0168-linear-awareness-is-opt-in.md).
+The Claude seat denies the inherited `linear-server` MCP server with Claude
+Code’s server-prefix permission rule. It uses Clankie’s connected `linear_*`
+tools as the owner-connected account. Whatever tracker identity the owner connects
+is the identity of Clankie and every worker he hires, across Claude, Codex and pi.
+No email, display name or installation-specific user ID selects that identity.
+Worker tracker writes use his granted broker connection; without a grant, the
+worker asks the lead to write rather than using an independent harness account.
+The remaining automatic worker-isolation work is specified in
+[worker tracker identity](worker-tracker-identity.md).
 
 <a id="account-setup"></a>
+
+### `accounts codex [list | add HOME --label LABEL | remove LABEL]`
+
+Register the owner's extra Codex homes, without copying or inspecting credentials:
+
+```sh
+clankie accounts codex add ~/.codex-second --label second
+clankie accounts codex list
+clankie accounts codex remove second
+```
+
+The TUI accepts the same arguments under `/accounts codex`. The owner signs in
+and approves hooks in each home through Codex itself. Registration stores only a
+canonical home path and label; `authPresent` checks file existence, not whether
+the login is valid. `default` is implicit (`CODEX_HOME`, otherwise `~/.codex`).
+Removing a registration never deletes its home or credentials.
+
+Local Codex hires choose the greatest minimum remaining fraction across the
+windows Codex reports (some plans report only a weekly window). The read-only
+`account/rateLimits/read` query uses each home without starting a model turn.
+If unavailable after ten seconds, recent rollout `rate_limits` provide a fallback.
+Missing usage or fallback observations older than 24 hours are unknown, not free quota.
+Known positive headroom wins over unknown; unknown wins over exhausted accounts;
+registration order breaks ties. Passed reset times restore the corresponding
+window. If all accounts are exhausted the least constrained one is returned;
+Codex still enforces its quota. No credentials present means the hire fails.
+`hire_agent`'s `account: "second"` pins a registered label (including `default`),
+even when it has less headroom. Overrides on remote or non-Codex hires fail.
+The hire result and fleet roster carry `seat.account: {label, home}`; the app
+shows the label. Existing seats keep their account. New registrations apply
+without a service restart.
+
+The owner-authorized API offers `GET /v1/accounts/codex` and
+`POST /v1/accounts/codex` with `{op:"add", home, label}` or `{op:"remove", label}`.
+Local transcript discovery, `clankie agents`, resumed sessions and follow-up
+queue delivery use the account's home; seat-sync uses the hook's transcript path.
 
 ### `accounts [list]` / `accounts connect github` / `accounts disconnect PROVIDER` / `accounts apps`
 
@@ -461,6 +597,33 @@ app through `/v1/accounts/linear/start` and `/complete`.
 `CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them, which is how a hosted body
 is configured. GitHub revocation needs the OAuth app's client secret as the
 broker entry `github-oauth-app`.
+
+### `voice [status]` / `voice model set MODEL_ID` / `voice model clear`
+
+The headless launcher now supports inspecting voice settings and changing only
+an already configured ElevenLabs model. Earlier builds exposed `/voice` only
+inside the console and rejected `clankie voice`.
+
+`voice status` returns `voice` (stored), `effectiveVoice`,
+`overriddenByEnvironment` (environment variable names), `settingsFile`, and
+`restart`. No credential is returned. Model writes preserve the voice ID,
+realtime provider, consent and all other settings; they never restart services.
+Select the provider and voice ID with the console's `/voice` first.
+
+```bash
+clankie voice status
+clankie voice model set eleven_v4_turbo
+# After reviewing settings and arranging an interruption of active calls/work:
+clankie restart clankie
+```
+
+`eleven_v4_turbo` selects Text to Dialogue multi-context WebSocket synthesis.
+An unset model retains `eleven_flash_v2_5` on the legacy TTS transport. To roll
+back an originally unset model, use `clankie voice model clear`, then the same
+restart. If a model was explicitly set, restore it with `model set ORIGINAL_ID`.
+Environment overrides still win: check `effectiveVoice` before restarting.
+This command is local-only; hosted mode refuses it. See the
+[voice operating guide](../apps/discord-bridge/README.md) for verification limits.
 
 ### `work [status]` / `work init` / `work list|show|create|update|close|attach`
 
@@ -678,7 +841,7 @@ next turn (the next play session for `gameplay`); no restart is needed.
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `model routing set providerId/modelId`                        | Choose the routine model; turns routing on                                                  |
 | `model routing off`                                           | Remove the routine model; every purpose returns to `model`. Other routing settings are kept |
-| `model routing escalate on\|off [--model providerId/modelId]` | Let a routine turn move to the escalation model (default: `model`) once per turn            |
+| `model routing escalate on\|off [--model providerId/modelId]` | Let a turn move to the escalation model once per turn (routine turns default to `model`)    |
 | `model routing purpose PURPOSE routine\|work\|default`        | Override one purpose's tier                                                                 |
 | `model routing turn-limit N\|default`                         | Model calls a routine turn may make before it escalates as looping (default 12)             |
 
@@ -687,9 +850,13 @@ of that turn when he calls `escalate`, when it reaches the turn limit, or when
 the routine model fails with an error the runtime retries (the retry runs on
 the escalation model). A permanent error does not escalate. A routine model that
 cannot be served fails the turn by name; it never falls back to the work
-model. Effort is per model ref, so `clankie effort set LEVEL --model REF` sets
-the routine model's effort. Hosted bodies receive routing from the fleet at
-start. The console's `/routing` takes the same arguments.
+model. A work turn (operator, granted Discord, gameplay) escalates too when
+escalation is on and `--model` names a model other than the captain model, but
+only when he calls `escalate`: never on the turn limit or a provider error, since
+long work is normal there. This works without a routine model. Effort is per
+model ref, so `clankie effort set LEVEL --model REF` sets the routine model's
+effort. Hosted bodies receive routing from the fleet at start. The console's
+`/routing` takes the same arguments.
 
 ### `model compaction [status]` / `model compaction set TOKENS` / `model compaction default`
 
@@ -743,6 +910,25 @@ TUI `/video-model` command calls the same functions.
 Return the complete owner-authored persona plus `settingsFile` and the restart
 command. Character configuration grants no authority.
 
+### `persona images status|set <folder>|clear`
+
+Select an owner-authored image/video folder with `persona images set ~/Pictures/clankie-vibe`.
+`status` previews filenames, roles, counts, source/base64 sizes, dimensions, video
+durations, sample timestamps and viewable cached `sheetPath` paths, skips and load
+errors; it never emits image bytes. `clear` clears the setting without deleting
+files. Restart Clankie to apply changes (the command prints the reminder).
+
+Top-level files are vibe; put physical character references in `appearance/`.
+Only appearance references feed self-portraits. PNG/JPEG/WebP sources may be up
+to 10 MiB; MOV/MP4/WebM up to 256 MiB / ten minutes. Videos require ffmpeg and
+ffprobe and become one 5×2 contact sheet of ten evenly spaced samples each; audio
+is ignored. Read sheets left to right, then top to bottom. Appearance loads first,
+then vibe, filename-sorted: eight source slots and eight references total. Stills
+fit within a 1024-pixel edge, sheets within 2000×800; both cap base64 at 128 KiB. The TUI `/persona` → Persona images
+uses the same writer. The authenticated `/v1/operator/persona` API accepts
+`imagesDir`; an empty string clears it. Hosted paths name folders on the body.
+See [persona images](persona-images.md) for caching, voice, model support and A/B evaluation.
+
 ### `persona set [flags]`
 
 Update one or more persona fields atomically:
@@ -771,10 +957,37 @@ same writer.
 Read or set `browser.recordSessions`. When on, each burst of Clankie's browsing
 is saved as a WebM under `~/.clankie/runner/browser/recordings/`: recording
 starts before the burst's first browser call and stops after 60 seconds without
-one; the newest 50 are kept. Off by default, because videos capture every page
+one; the newest 50 are kept. The browser then closes its tabs/windows while
+keeping its private profile and persistent logins, even with recording off.
+Browsing defaults to headless; explicit `headed: true` takeover lasts for that
+burst, and the next burst starts headless. Changing modes saves the previous
+recording before starting another. Off by default, because videos capture every page
 he opens, signed-in ones included. JSON contains `browser.recordSessions`,
 `settingsFile`, and `"appliesTo": "next_browsing_burst"` — no restart is needed.
 The TUI `/browser` command calls this same writer.
+
+### `browser harnesses` / `browser delegate on|off`
+
+The computer-use harnesses on this machine that Clankie can hire for hard
+computer and browser work
+([ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
+`harnesses` asks the service (`GET /v1/browser/harnesses`, operator bearer),
+which re-probes on every read: `codex login status` and `codex features list`
+plus Codex's plugin config for Codex computer use and Chrome, and
+`claude auth status` plus `~/.claude.json` and Chrome's native host for Claude
+in Chrome. Nothing is started or driven. JSON contains `detected` (false on a
+hosted body or a non-macOS host, where nothing is probed), `harnesses` (each
+with `harness`, `signedIn`, `surfaces` of `desktop` and/or `chrome`,
+`chromeNeedsHireFlag`, and `missing` saying what the owner does when it is not
+ready) and `harnessDelegation`.
+
+`delegate on|off` sets `browser.harnessDelegation` (default on): whether the
+ready harnesses appear in the `reach` section of his prompt, on lanes with
+machine access only. Turn it off to keep him from spending those plans. His own
+browser is unaffected. JSON is the `browser status` shape with
+`"appliesTo": "next_session"`. `/browser harnesses` and `/browser delegate on|off`
+in the TUI call the same code. A listed harness is hired with `hire_agent`;
+`chrome: true` starts claude with `--chrome`.
 
 ### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE]` / `fleet clear`
 
@@ -785,7 +998,7 @@ to. `set` takes any combination of the three flags; what is left out keeps its
 value. `clear` returns all three to their defaults.
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
-lead skills (`lead`, `swarm-lead`, `herdr-lead`) and his prompt use them to aim.
+leadership skill (`lead`) and his prompt use them to aim.
 An owner who wants a thousand agents picks `max` or says so in the notes.
 
 | `--size`        | Fits                                                               | Aims for                                                                                                                                     |
@@ -837,7 +1050,7 @@ In the TUI, `/connections` opens a menu over the same data: execution runtimes
 (details, connect, disconnect, Herdr settings), Swarm (contacts, one row per
 actor, and messaging; external coordinators), agent sessions (hosts → sessions →
 read or send, add or remove SSH hosts), and accounts. `/runtime`, `/swarm` and
-`/agents` with no argument open their own section; with arguments they print JSON
+`/sessions` with no argument open their own section; with arguments they print JSON
 as before, and `/connections json` prints the raw inventory.
 
 ```sh
@@ -854,8 +1067,9 @@ ID to a verified socket and session label; use a new ID for a different endpoint
 Disconnect disables routing and retains identity without stopping any worker.
 An unavailable named connection never selects another session. Native Herdr
 commands/viewers require a local Clankie service. These managed launch routes
-share the service's filesystem and executable paths. For workers on another
-machine, connect their Swarm coordinator using the external-connection contract.
+share the service's filesystem and executable paths. A Herdr fleet on another
+machine is an ssh connection (`herdr add`, below); its peers reach this
+coordinator through that fleet's relay (`swarm fleet-peer`).
 
 For custom capacity/capabilities, `runtime connect CONNECTION.json` accepts
 `{ "id": "build", "session": "workers", "capacity": 2, "capabilities": ["code"] }`.
@@ -894,6 +1108,35 @@ Settings are reconciled into existing owners without replacing in-flight receipt
 `runtime status` reports each effective value and its source: default, owner or unlimited.
 These controls use the operator API; no Swarm tool or captain bearer can change them.
 
+`clankie runtime harness ID claude|codex|pi` selects the managed worker harness
+for the default or a named local runtime. The operator API accepts
+`POST /v1/runtime-connections` with `{ "action": "harness", "id": "default", "harness": "codex" }`;
+`runtime list` reports `workerHarness`. The TUI Connections → Runtimes → Worker
+harness menu uses the same command. Codex defaults to `gpt-6-astra`; pi uses its
+native model preference. All three require native-interactive support in the
+installed Swarm build. Unsupported selections return `harness_unsupported` or
+`harness_mode_unsupported`; unavailable executables block dispatch without a
+Claude fallback. New routed assignments inherit the selected runtime's harness;
+`swarm_assign harness: "claude" | "codex" | "pi"` explicitly constrains it.
+The intent and launch receipt retain the selected harness. Keep the original
+payload when reconciling an uncertain dispatch.
+
+`clankie runtime mode ID interactive` sets how Swarm runs the workers it
+dispatches into the default or a named local runtime; `runtime list` reports it as
+`workerMode`. Interactive is the default and runs each selected harness's native
+TUI in the Herdr pane. Codex's native UI owns its private app-server thread and
+approvals; Pi receives native follow-up turns through its worker extension.
+Claude receives Swarm mail over a channel and needs the owner-approved
+`clankie-worker@clankie` plugin in Claude Code's managed settings
+([ADR 0194](adr/0194-interactive-swarm-workers-receive-leased-channel-events.md))
+and a Swarm runtime that accepts that harness's interactive route: Clankie refuses
+the selection while the installed swarm-mcp does not. A saved stream setting stays
+readable for recovery, but its launch route is disabled; new stream settings are
+refused. A blocked or uncertain native start never falls back to headless execution.
+Connecting or reconnecting a runtime remains possible for its existing peers.
+An ssh fleet has no worker
+mode, because its peers enroll themselves.
+
 Each call **replaces** that runtime's extra approvals; `--clear` restores the
 conversation-directory-only default. `runtime list` shows the stored policy.
 `--repo` pins the canonical Git common directory and accepts that repository's
@@ -902,6 +1145,9 @@ the original directory. Stale approvals grant nothing; rejected requests identif
 them as `stale_workspace` with `staleWorkspaces` details.
 `--dir` permits only that canonical directory, never its children. Paths must be
 absolute and exist on the service host. The runtime retains one capacity pool.
+An ssh fleet is the exception: its grants are exact `--dir` paths on that
+machine (a drive path such as `C:\src\rivals` for a Windows fleet), stored as
+written, because this host can neither resolve nor stat them.
 
 The operator-only POST `/v1/runtime-connections` accepts
 `{ "action": "workspaces", "id": "default", "workspaces": [{ "kind": "repository", "path": "/absolute/project" }] }`.
@@ -917,9 +1163,9 @@ blocks new launches; it does not redirect or duplicate existing assignments.
 Old owners report `restart-required` until deliberately upgraded; coordinate the
 restart with running work. See [ADR 0193](adr/0193-runtime-workspaces-are-owner-approved.md).
 
-### `agents [list]` / `agents read` / `agents hosts`
+### `agents [list]` / `agents read` / `agents resume` / `agents hosts`
 
-Clankie reads and resumes any Claude Code, Codex, Grok or Pi session from the
+Clankie reads any Claude Code, Codex, Grok or Pi session from the
 agent's own transcript, on this machine or an owner-configured SSH host. No
 terminal host is involved: a session in Herdr, tmux, or a bare PowerShell tab
 reads the same way
@@ -931,6 +1177,8 @@ clankie agents                          # every host, newest first
 clankie agents list --host pc --limit 5
 clankie agents read pc:01a0da31 --tail 20
 clankie agents read pc:01a0da31 --after CURSOR
+clankie agents resume local:SESSION_ID
+clankie agents resume pc:SESSION_ID --fleet pc --brief "Continue the task"
 clankie agents hosts remove pc
 ```
 
@@ -951,36 +1199,49 @@ was appended. A cursor is bound to its session; `reset: true` means the transcri
 was replaced and the page restarted from its tail, and `skippedBytes` means one
 record was too large for a single read and was stepped over.
 
-```sh
-clankie agents send pc:01a0da31 "Where did you leave the migration?"
-clankie agents runs RUN
-clankie agents read pc:01a0da31 --after CURSOR   # the reply
-clankie agents cancel RUN
-```
+`/sessions` in the TUI takes the same arguments, or opens the saved sessions menu
+with none. `clankie sessions` is also an alias for these CLI commands. Existing
+`/agents` session arguments remain supported, but `/agents` without arguments
+now opens the agents that are live, with offline agents that kept a thread behind
+one "Past agents" entry. `clankie agents contacts` returns every known identity,
+live or not, through the existing fleet API.
 
-`send` continues a session by starting a **new headless process** of its harness
-resumed onto the saved history, with the message on stdin or in a private
-prompt file rather than the command line, in the directory the transcript recorded. It is
-not delivered into a tab that has the session open: that tab does not see the turn
-and can later write its own branch. `send` refuses a session written in the last
-60 seconds, which lowers but does not remove that risk; use it on sessions that
-have gone quiet or that Clankie started. The turn gets the harness's default
-permissions, so it may decline tools that need approval.
+The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
+(known identities), `/rooms` (group channels and Discord inspection), and
+`/history` (all retained threads, including ongoing ones). `/conversation`,
+`/conversations`, and `/chat` alias `/chats`; use `/history ID` for any retained
+thread. See [product vocabulary](product-vocabulary.md).
 
-`send` returns at once with a `runId` and a `cursor`; read the reply with
-`--after` that cursor. One turn runs per session at a time. A run ends `finished`,
-`failed`, `aborted`, `timeout`, or `unknown`: the connection was lost, so the
-remote turn may still be running and the session stays locked until `cancel`
-releases it. Runs live in the service process and are forgotten on restart.
+`resume` continues a saved session as an ordinary hired seat in its native TUI.
+It resolves fresh transcript metadata, reuses the exact live session when found,
+or opens that session in Herdr. A remote resume needs an existing registered
+Herdr fleet with the same SSH target and shell as the transcript source, plus a
+grant for its recorded working directory; matching friendly ids alone are
+insufficient. `--fleet` selects among several matching fleets. A local Codex
+resume uses the original registered account that owns its transcript, rather
+than choosing another account by headroom. The TUI's saved-session actions offer
+**Resume in native TUI**.
 
-`/agents` in the TUI takes the same arguments, or opens the agent sessions menu
-with none. The operator API is
+An optional `--brief` is sent through native control when reusing a live seat;
+an uncontrolled live seat must be messaged explicitly through its existing
+lane. Incomplete fleet discovery refuses a new start. `delivery_unconfirmed`
+or `start_unconfirmed` means inspect the named pane before retrying: it may
+already have taken the work. A failed resumed start keeps its pane visible.
+The inventory covers configured Herdr servers; it cannot prove that a separate
+unregistered terminal is not holding the same history. Close that terminal before
+resuming. A transcript's age is never used as proof of absence.
+
+The operator API for saved sessions is
 GET `/v1/agent-sessions?host=&limit=`, GET `/v1/agent-sessions/read?ref=&tail=|after=`,
-GET/POST `/v1/agent-hosts`, DELETE `/v1/agent-hosts/ID`, POST `/v1/agent-sessions/send`
-`{ref, message}`, and GET/DELETE `/v1/agent-sessions/runs[/ID]`. Clankie's own tools
-are `agent_sessions`, `agent_session_read`, `agent_session_send` and
-`agent_session_run`, available where he has machine access. For agents enrolled in
-Swarm, message them through Swarm instead.
+POST `/v1/agent-sessions/resume` `{ ref, fleet?, brief? }`, GET/POST `/v1/agent-hosts`,
+and DELETE `/v1/agent-hosts/ID`. The resume route delegates to the existing
+`spawn_seat` service operation; it has no separate runner or run store. Clankie's own tools
+are `agent_sessions` and `agent_session_read`, available where he has machine
+access. `hire_agent` accepts `resume: "host:sessionId"` with the recorded harness
+and workingDirectory; follow-ups use `message_seat`. Reading never starts or
+resumes a harness. Enrolled Swarm workers retain their Swarm identity and fenced
+ownership; a native resume does not enroll or replace them. Headless continuation
+remains retired (ADR 0203).
 
 ### `herdr [status|open|create]` / `herdr use NAME`
 
@@ -1063,6 +1324,56 @@ worker. The optional board requires herdr-lead installed and linked in the
 selected runtime. Pane-scoped messages and `clankie stance` carry the source
 socket in `x-clankie-herdr-socket`: unrelated pane IDs cannot attach to or
 change a worker with the same ID in another session.
+
+### `herdr fleets` / `herdr add NAME --ssh HOST` / `herdr remove NAME`
+
+A Herdr session on another machine is a **fleet** ([ADR 0184](adr/0184-clankie-leads-more-than-one-fleet.md)):
+a named runtime connection whose transport is the owner's own ssh.
+
+```sh
+clankie herdr add pc --ssh volpe@supedupsilly --session default --shell powershell
+clankie runtime workspaces pc --dir 'C:\src\rivals'
+clankie herdr fleets
+clankie restart captain
+clankie herdr remove pc
+```
+
+`add` is `runtime connect NAME --ssh HOST --session SESSION [--shell posix|powershell]`.
+`HOST` is a host or alias from the owner's ssh configuration; keys and host
+trust stay there (`BatchMode`, so an unknown host key or a locked key fails
+instead of prompting). `--shell powershell` is for a Windows host whose sshd
+default shell is PowerShell. The session must already be running there: adding
+checks `herdr --session SESSION api snapshot` over ssh and refuses otherwise.
+`remove` disables the connection and keeps its identity, like `runtime disconnect`.
+Changes reach the captain on `clankie restart captain`.
+
+What crosses the link, and what cannot:
+
+- Every call runs `herdr --session SESSION <verb> …` on the remote host with an
+  exact argv (a Windows command line is built for `CommandLineToArgvW` and
+  handed to `ProcessStartInfo`, so PowerShell never parses it). One multiplexed
+  ssh connection per fleet carries them (`~/.clankie/ssh/%C`, `ControlPersist=600`).
+- Only read and pane verbs pass: `agent list|get|read|wait|prompt|send-keys|start`,
+  `pane list|get|read|send-text|send-keys|close|process-info|layout`,
+  `tab|workspace create|list`, `api snapshot`, `session list`. Nothing that
+  launches, attaches, stops, updates or reconfigures a server can be sent, and
+  the Herdr CLI never starts a server for a subcommand. The remote server stays
+  the one its owner started. Agent seats may run in a service session;
+  desktop-bound work uses that machine's separately authorized desktop bridge.
+- A remote pane's ids carry the fleet: `pc/w2:p1J`, `pc/term_…`. Local ids stay
+  bare. The census Clankie reads lists each fleet under its own `HERDR FLEET`
+  heading, and the roster carries remote seats with `fleet` set.
+- He can watch (`herdr_watch pc/w2:p1J`), message and hire there
+  (`hire_agent` with `fleet: "pc"` and a granted `workingDirectory`). A watch is
+  persisted under its qualified id, so it resumes after a service restart.
+  Remote panes are observed by polling one shared `pane list` every three
+  seconds rather than holding a wait open per pane.
+- A remote seat takes the pty lane: its transcript is read with `herdr agent
+read`, a Codex seat is not reached through `codex queue`, and a Claude hire
+  there starts without the seat channel. Terminal observe/control and the
+  reverse-forward mailbox are not wired for ssh fleets yet.
+- An unreachable fleet is a state. `herdr fleets` (and `runtime list`) report
+  `state: "unreachable"` with `lastSeenAt`; other fleets answer normally.
 
 ### `workdir [status]` / `workdir set PATH` / `workdir clear`
 
@@ -1179,14 +1490,14 @@ comes from the credential broker, so this reads the operator lane.
 
 Sections default to the five a session is built with, joined by one blank line:
 
-| Section    | What it is                                                              |
-| ---------- | ----------------------------------------------------------------------- |
-| `identity` | `instructions.md` — who he is and how he works                          |
-| `persona`  | The owner-authored character configuration                              |
-| `reach`    | The machine-access or this-room paragraph for that lane                 |
-| `fleet`    | Owner-authored routing preference; shell-holding lanes only, when set   |
-| `address`  | His own mailbox, when one is connected                                  |
-| `model`    | The card naming the model the service lanes run on (ask for it by name) |
+| Section    | What it is                                                                                                                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity` | `instructions.md` — who he is, his trust boundaries and where things live                                                                                                                                  |
+| `persona`  | The owner-authored character configuration                                                                                                                                                                 |
+| `reach`    | The machine-access or this-room paragraph for that lane; with machine access, the ready computer-use harnesses (`browser harnesses`) unless delegation is off; in Discord lanes, how a reply carries media |
+| `fleet`    | Owner-authored routing preference; shell-holding lanes only, when set                                                                                                                                      |
+| `address`  | His own mailbox, when one is connected                                                                                                                                                                     |
+| `model`    | The card naming the model the service lanes run on (ask for it by name)                                                                                                                                    |
 
 A seat that carries the identity some other way asks for the rest:
 `clankie prompt --sections persona,reach,address`.
@@ -1256,11 +1567,18 @@ No transcript, tool argument, tool output, or credential appears in the output.
 }
 ```
 
-### `memory-card [--lane LANE]`
+### `memory-card [--lane LANE] [--hook]`
 
 The memory card that lane's next run injects, printed verbatim as plain text.
 The intended consumer is a per-turn hook, so a seat in another harness carries
 the same recent past his own sessions do.
+
+`--hook` reads Claude hook JSON on stdin. On `UserPromptSubmit` it prints the
+card only when that `session_id` has not seen this exact card yet, so unchanged
+turns add nothing to the conversation. `SessionStart` prints nothing and re-arms
+the session, so the prompt after startup, resume, `/clear`, or compaction
+injects it again. Input without a usable `session_id` prints the card every
+time.
 
 Filtered by lane exactly as the session's own injection is: operator-private
 episodes reach only the operator lane. Empty output means the lane has recalled
@@ -1282,27 +1600,106 @@ spool file has shipped and advances only after CloudWatch accepts.
 and `{"ok":false,"error":…}` on stderr when a pass fails; a failed pass is
 retried from the same cursor. See [hosted bodies](../infra/hosted/README.md#body-telemetry).
 
+<a id="skill-setup"></a>
+
+### `skills [opinionated on|off | exclude NAME | include NAME]`
+
+List the bundled skill catalog as JSON, with `class` (`product` or `opinionated`)
+and `included` for each skill. `clankie doctor` includes the same selection.
+
+```bash
+clankie skills
+clankie skills opinionated off
+clankie skills opinionated on
+clankie skills exclude reflect
+clankie skills include reflect
+```
+
+`skills.opinionated` defaults to `true`; `skills.exclude` defaults to `[]`.
+Product/tool and repo-authored skills always stay on; excluding one is refused.
+`include` removes an exclusion and leaves the class switch unchanged. The console
+has the same controls in `/skills` and `/setup` → Working skills.
+
+Changes apply to new service sessions, local hires and Claude seats; existing
+context is not erased. Reset a service conversation or start a fresh seat after
+changing the selection, and reopen the console for its initial autocomplete.
+No service restart is needed for selection changes once this code is running.
+
+`hire_agent` accepts `skills: "bundled" | "plain"` for one local Claude, Pi or
+Codex hire; omission follows the owner setting. `bundled` still honors exclusions.
+The result records the condition and supplied names. Unsupported/remote routes
+cannot honor an explicit override and refuse it. Independent global or project
+skills can still be discovered by Claude/Codex; this switch does not rewrite
+owner-global selection. See [the full bundle and A/B limits](bundled-skills.md).
+
+Local briefed Codex hires use a dedicated app-server with a native Codex TUI in
+Herdr. Briefs and `message_seat` use protocol receipts; completion comes from turn
+events. The owner can type into the same session, whose identity and transcript
+stay visible. Existing unmanaged seats retain queue/terminal fallback. An
+uncertain protocol send is never replayed through terminal typing.
+
+A supplied `hire_agent` brief goes through the harness's own interface when a
+seat adapter drives that harness locally ([ADR 0187](adr/0187-clankie-hires-his-own-seats.md),
+VUH-1458). A Claude hire starts the real interactive TUI with the
+`clankie-worker@clankie` plugin enabled for that session: the brief and later
+`message_seat` messages arrive as channel notifications, a message counts as
+delivered only once it appears whole in the native transcript, and the plugin's
+Stop and StopFailure hooks settle `herdr_watch` with Claude's own final text.
+The worker is never swapped for a headless process; the owner can type into its
+pane at any time. This needs the owner's one-time consent: the plugin installed
+and disabled, and its channel approved in managed settings (see the
+[plugin README](../integrations/claude-plugin/README.md#worker-channel-plugin-clankie-worker)).
+Until then the hire result carries
+`control: { mode: "terminal", reason: "consent_required", fix }` and the brief
+takes the terminal fallback below; nothing accepts the development-channel
+warning on the owner's behalf.
+
+Every hire logs its selected lane and reason. The result carries `control.mode`:
+`channel` for the Claude worker channel, `adapter` for Codex, or `terminal` with
+`control.reason` explaining the fallback (including a remote fleet, absent brief,
+unavailable adapter or pane capability). Registered remote fleets do not change
+the control lane of a local hire. A visible folder-trust prompt returns
+`trust_required` and closes the new pane without accepting trust; review the
+prompt yourself in that directory before retrying.
+
+Failed startups log `hire_agent.startup_failed` before closing the pane, with its
+session ID, resolved transcript path (null when no file is found), and rejecting
+rule. Claude receipt failures also log `hire_agent.receipt_rejected`, distinguishing
+`transcript_unavailable`, `no_new_operator_message`, `complete_body_mismatch`, and
+`mailbox_not_delivered`, without logging the brief. A mailbox delivery alone is
+not proof that Claude recorded it. Only the selected bridge polls: a globally
+registered `clankie-seat` stays inactive when the worker plugin is selected.
+
+On the terminal fallback, the brief uses Herdr's paste-aware `agent prompt` after
+startup readiness. Delivery is reported only when
+the complete brief appears in the native transcript. An unverifiable receipt
+returns `not_ready` with `brief_delivery_unverified` and closes the new pane;
+the turn may already have started, so inspect its work before retrying. For a
+brief that exceeds the transcript display limit (16,384 characters), is redacted,
+or has no readable native transcript, use a brief file with a short pointer.
+
 <a id="seat-commands"></a>
 
-### `seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
+### `seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
 
 Sit in Claude Code as Clankie ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
-Needs a TTY and `claude` on `PATH`. The launcher does the things the plugin
-cannot: it passes `--settings` with the permission allowlist for `clankie`
-commands and, when the plugin is installed from the repo's marketplace
-(`clankie@clankie`), `enabledPlugins` for this session only plus the channel
-development flag so wakes and escalations reach the session. The plugin stays
-disabled at user scope, because its forced output style would otherwise make
-every Claude Code session answer as him. When the plugin is not installed it
-loads the bundled `integrations/claude-plugin` with `--plugin-dir` (tools and
-skills, no channel). Inside a herdr pane it names that pane `clankie` once Claude Code
+Needs a TTY and `claude` on `PATH`. The launcher projects the bundled plugin
+(or `--plugin-dir` source) into a private launch directory with only the selected
+skills. Identity, hooks, and MCP are retained. It passes the permission allowlist
+for `clankie` commands, disables an older installed `clankie@clankie` for this
+session, and enables `clankie@inline` with the development channel flag for that
+same identity. This also prevents a stale marketplace copy from restoring pruned
+or disabled skills. Keep any marketplace seat plugin disabled globally, since
+its forced output style makes every session answer as him when enabled there.
+Inside a herdr pane it names that pane `clankie` once Claude Code
 is detected there, which binds the pane to his own persona rather than a fleet
 contact; a second pane claiming the name stays an ordinary fleet agent and is
 told so on stderr. The pane is un-named again when the session ends.
 
 Every seat starts a new Claude Code session under a recorded id;
 `--resume` reopens the last one from the directory it was opened in. The
-selection is retained on resume, and a different `--conversation` is refused.
+conversation selection is retained on resume, and a different `--conversation` is refused.
+Skill selection is reapplied at launch, but resumed history can still contain previously loaded guidance.
 `--conversation ID` selects an existing global/workspace service conversation,
 resolves its cwd through `/v1/captain/seat-context`, and opens Claude there. That
 workspace must exist on the native host. The prompt includes its agent
@@ -1323,12 +1720,14 @@ Selected project seats do not rename themselves as the global Herdr head.
     "--settings",
     "{…}",
     "--plugin-dir",
-    "…/integrations/claude-plugin",
+    "…/skill-projections/launch-…",
+    "--dangerously-load-development-channels",
+    "plugin:clankie@inline",
     "--session-id",
     "…"
   ],
-  "plugin": { "source": "plugin-dir", "path": "…/integrations/claude-plugin" },
-  "channel": false,
+  "plugin": { "source": "plugin-dir", "path": "…/skill-projections/launch-…" },
+  "channel": true,
   "sessionId": "…",
   "resumed": false,
   "cwd": "/Users/me/dev/project",
@@ -1336,11 +1735,18 @@ Selected project seats do not rename themselves as the global Herdr head.
 }
 ```
 
-`plugin.source` is `installed` with `channel: true` after
-`claude plugin marketplace add <repoRoot>/integrations/claude-plugin`,
-`claude plugin install clankie@clankie`, and `claude plugin disable
-clankie@clankie`. The plugin README documents the install and what the plugin
-carries.
+`plugin.source` is `plugin-dir`; the projected skill catalog is also in the plan.
+The [plugin README](../integrations/claude-plugin/README.md) describes the component
+source and session-only channel identity.
+
+`--harness codex` opens the real Codex TUI on its own app-server thread.
+Install the [Codex seat plugin](../integrations/codex-plugin/README.md) first.
+The launch plan includes a typed `hook_trust_required` owner step: review the
+plugin in Codex's `/hooks`, then exit and launch the seat again. The launcher never
+bypasses hook trust. Wakes bind only after trusted session hooks succeed.
+`--resume` retains the last Codex thread and conversation independently of the
+Claude seat. Both harnesses use the same service prompt, memory card, tool bank,
+redacted transcript endpoint and conversation outbox.
 
 ### `mcp [--lane operator] [--conversation ID]`
 
@@ -1445,6 +1851,21 @@ Return stored and effective non-secret Discord configuration:
 `discord` is the stored value. `effectiveDiscord` includes environment
 overrides, whose variable names appear in `overriddenByEnvironment`.
 
+### `discord transcripts [--cursor CURSOR] [--limit N]`
+
+Read the private retained voice log through the authenticated service API.
+The default page contains the newest 100 entries; `--limit` accepts 1–200.
+Pass `nextCursor` to read later entries and follow `hasMore` when paging.
+Logging must be enabled through `discord set --voice-transcript-logging-enabled on`
+and activated by restarting the relevant services; otherwise the page is empty
+with `enabled: false`. `/vt` shows the same entries in the console.
+
+Human entries retain consented final recognition. Clankie's entries have
+`role: assistant`, generated `text`, provider `itemId`, and playback outcomes
+(`played`, `interrupted`, `suppressed`, `failed`, `truncated`). An interrupted
+or failed reply may include words that never played: the exact audible word
+cutoff is unknown. No raw audio is saved. See [ADR 0121](adr/0121-development-voice-transcripts-are-explicit.md).
+
 ### `discord set --field value […]` / `discord clear --field […]`
 
 Set several fields atomically, or reset fields to their schema defaults.
@@ -1509,13 +1930,18 @@ authority 401/503, and conflicting commands 409. The status includes `enabled`,
 50 recent `jobs`. An enabled evaluator can report an operational error (missing
 harness, blocked startup, unavailable Herdr); inspect `error` and the pane.
 
-The evaluator defaults off and captures only Clankie’s Pi turns and native
-head-seat replies while enabled. Other Herdr agents do not trigger assessments.
+The evaluator is a developer diagnostic, not a user feature. It defaults off and
+captures only Clankie’s Pi turns and native head-seat replies while enabled; the
+console footer shows `evaluator on · HARNESS` for as long as it is. Other Herdr agents do not trigger assessments.
 Enabling creates its own pane and starts a harness;
 new work uses fresh agent context. Captures coalesce for a quiet minute, with
 fifteen-minute checkpoints for continuing activity. Only a schema-valid report
 from a settled agent completes an assessment. Restart resumes inspection of the
-existing assignment; uncertain failures require explicit retry. The service
+existing assignment; uncertain failures require explicit retry. A busy evaluator
+pane keeps new work queued rather than failing it. The pane is recognized by its
+Herdr name, or by its terminal plus harness session or process once a harness
+clears that name; a pane it can no longer prove is its own is left open and a
+fresh one is started. The service
 interrupts assessments after thirty minutes. Disable stops new capture and
 dispatch; in-flight work finishes. It does not change Linear following, merge
 changes or close review panes.
@@ -1528,9 +1954,20 @@ their existing bounded entries. Gameplay journals are not separate triggers.
 Raw evidence remains local; findings carry redacted excerpts to Linear. See
 [the evaluator decision](adr/0178-the-evaluator-has-its-own-seat.md) for scope and limits.
 
+### Hired seat lifecycle hooks
+
+`clankie seat-hook` is the `clankie-worker` plugin's hook (VUH-1458). Inside a
+pane Clankie hired (`HERDR_PANE_ID` set, no `SWARM_WORKER_LAUNCH`), it reads
+Claude's `SessionStart`, `UserPromptSubmit`, `Stop` or `StopFailure` JSON on
+stdin and posts `{ event, sessionId, lastMessage?, error? }` to
+`/v1/fleet/seats/{paneId}/hook` with the operator credential. The final text is
+the hook's `last_assistant_message`, or the transcript's last reply when the hook
+omits it. The service records it only when herdr reports that Claude session in
+that pane; anywhere else the command does nothing.
+
 ### Native seat transcript sync
 
-`clankie seat-sync` consumes Claude hook JSON on stdin. The `clankie seat` launcher
+`clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The `clankie seat` launcher
 sets `CLANKIE_SEAT_SESSION_ID` and its selected `CLANKIE_CONVERSATION_ID`; unlaunched
 plugin use and hooks for another session are ignored. The plugin invokes sync at
 session start/end, prompt submission, stop/failure and before compaction.
@@ -1545,7 +1982,7 @@ compaction leaves activity unchanged. Empty transcripts still carry lifecycle
 activity. These are display signals, not service-run completion or ownership. Reset retires that
 conversation's native sessions; launch a new seat afterward so old history cannot
 repopulate the cleared conversation. Sync failures never
-instruct Claude to continue or block a stop. The current 9,000-entry display tail
+instruct the harness to continue or block a stop. The current 9,000-entry display tail
 is the replay bound. Image files use `clankie file publish` separately.
 
 <a id="swarm-commands"></a>
@@ -1556,7 +1993,10 @@ is the replay bound. Image files use `clankie file publish` separately.
 `GET /v1/swarm` diagnostic view: configured connections, active conversation actors
 and coordinator state. `swarm connections` is the same inventory.
 `clankie swarm contacts` lists discovered Swarm personas, including saved offline
-contacts. `clankie swarm message PERSONA TEXT` opens its DM and submits one message;
+contacts. `clankie swarm tasks` lists every unfinished Swarm task on the connected
+coordinators with its lead, owner, state, worktree and blocker: the same board the
+app shows ([ADR 0205](adr/0205-the-fleet-carries-its-open-swarm-tasks.md)).
+`clankie swarm message PERSONA TEXT` opens its DM and submits one message;
 `clankie swarm thread PERSONA` reads a bounded history page. The same commands work
 under `/swarm` in the TUI. Select the exact persona ID from the catalog. Replaced
 sessions have new contacts; old threads do not redirect. An accepted local turn
@@ -1569,12 +2009,14 @@ through its existing turn queue; processing requires explicit acknowledgment.
 through the Clankie MCP server; omission selects the global head. Its launch
 directory does not select another Swarm scope.
 With the plugin channel enabled, queued envelopes reach the native seat through
-that channel; processing still requires `swarm_inbox` acknowledgment. A plugin-dir
-seat has tools but no channel wakes. See the [seat plugin](../integrations/claude-plugin/README.md)
+that channel; processing still requires `swarm_inbox` acknowledgment. The projected
+plugin uses its `clankie@inline` channel identity. See the [seat plugin](../integrations/claude-plugin/README.md)
 for context, resume and native-workspace requirements.
 
-Use `swarm-lead` for the default leadership workflow, `lead` for shared judgment,
-and `swarm-mcp` for peer participation. `herdr-lead` is the explicit fallback.
+When included, use `lead` for shared judgment, Swarm-first leadership,
+and the explicit Herdr fallback. `swarm-mcp` always
+remains available for peer participation; turning opinionated skills off retains
+the captain's own leadership instructions.
 Through `clankie mcp`, Pi or the Claude seat, `swarm_assign` accepts optional
 `skills: ["installed-name"]`. Selected skills and supporting files travel with the
 assignment's pinned project context. The existing conversation composer catalog
@@ -1596,8 +2038,37 @@ The regular file must be private (0600) and at most 16 KiB. Its exact shape is:
 Use a session enrolled for Clankie, distinct from worker sessions. The service
 verifies its actor/scope and stores only a broker reference in settings. This
 connects to the refactored coordinator protocol, not the legacy database API.
-An SSH Unix-socket forward can provide the local endpoint for a remote owner;
-Clankie does not start, modify or stop that external owner. Provisioning uses
+An operator-managed SSH Unix-socket forward can provide the local endpoint.
+Alternatively, name a registered, enabled SSH fleet with `ssh`; `endpoint` then
+names the existing coordinator socket or Windows named pipe on that machine:
+
+```json
+{
+  "id": "rivals",
+  "conversationId": "global-default",
+  "ssh": "pc",
+  "endpoint": "\\\\.\\pipe\\swarm-mcp-<owner-endpoint-hash>",
+  "capability": "<dedicated Clankie session capability from the PC launcher>"
+}
+```
+
+Discover the endpoint from that coordinator; do not guess its hash. This uses
+the fleet's SSH target and shell, without calling Herdr. For each connection,
+Clankie starts a stdlib `node -e` splice on the remote machine, listening only
+on `127.0.0.1` at an OS-allocated port and connecting to the existing endpoint.
+The same SSH connection carries a local forward from a private Mac/Linux Unix
+socket (0600, inside a process-private 0700 directory). Nothing is installed.
+The remote splice exits when SSH stdin closes. The loopback listener is reachable
+by other users/processes on that remote machine; the coordinator still requires
+a session capability for every operation. The splice holds no credentials.
+
+Clankie supervises the link with bounded backoff, restores it for saved bindings
+on service start, and refreshes its local clients after reconnection. Disconnect
+and service shutdown close the link and remove its local sockets. A failed
+import closes a newly created link. Existing manually forwarded local endpoints
+remain operator-managed. Clankie does not start, modify or stop the external
+owner. An oversight peer leaves the project lead's dispatch authority and workers
+in place; joining a coordinator does not require a lead handoff. Provisioning uses
 that coordinator's configured routes. A configured connection belongs to one
 conversation; that conversation can address several independent coordinators.
 Import starts inbox listening immediately, including before its next model turn.
@@ -1607,15 +2078,14 @@ Pass `connection: "project-team"` on any `swarm_*` call. Omit it (or use
 replying, acknowledging, reading evidence or retrying an intent. Incoming wake
 context names the connection. Instruction snapshots come from the selected
 Clankie conversation and stay pinned to that coordinator's work. Reusing a
-connection ID for another actor, scope, endpoint or conversation is refused.
+connection ID for another actor, scope, endpoint, SSH fleet or conversation is refused.
 
 `clankie swarm disconnect project-team` disables access, closes its sessions and
 removes the brokered capability. External workers and work records stay with
 their owner. Import a valid capability for the same retained identity to reconnect;
 use a new ID for a different identity. A disconnected or unreachable connection
-never falls back to another coordinator. Endpoint/tunnel lifecycle remains the
-operator's selected runtime's responsibility; connection loss does not enroll
-another session or replay uncertain assignments.
+never falls back to another coordinator. Connection loss does not enroll another
+session or replay uncertain assignments.
 
 For grants on external work, add `swarm.connectionId` to the issuance request.
 Enrolled workers use `CLANKIE_SWARM_CONNECTION=project-team` with
@@ -1623,6 +2093,47 @@ Enrolled workers use `CLANKIE_SWARM_CONNECTION=project-team` with
 `SWARM_SESSION_CAPABILITY`. Their Clankie service URL must be reachable privately
 (for example over SSH); the public app gateway does not expose worker MCP routes.
 Enrollment still grants no provider tools. [Grant contract](worker-access.md).
+
+#### Peers on another machine: `swarm fleet-peer`
+
+One coordinator serves every fleet ([ADR 0198](adr/0198-one-coordinator-reaches-every-fleet.md)).
+A peer on a registered ssh fleet joins a conversation's embedded coordinator
+through that fleet's relay:
+
+```sh
+clankie swarm fleet-peer pc rivals-worker --conversation global-default --out ./pc-rivals-worker.json
+```
+
+The first enrollment pins the fleet's relay to that conversation's coordinator
+(`execution.connections[].relay`) and starts it; the service restores it on
+every start and reconnects with backoff. The peer is its own actor in that
+conversation's scope, keyed by fleet and name, so enrolling the same name again
+resumes the same actor with a new generation. The capability is written once,
+to the private `--out` file (0600, never overwritten), and never printed. That
+file's `environment` is exactly what the peer's stock `swarm-mcp` adapter needs
+on its machine: `SWARM_COORDINATOR_ENDPOINT` (the relay endpoint there),
+`SWARM_SESSION_CAPABILITY` and `SWARM_SCOPE`. Move it to that machine over the
+owner's ssh and keep it readable only by the peer's user. The operator API is
+POST `/v1/swarm/fleet-peers` `{ "conversationId", "fleet", "name" }`.
+
+The relay is one ssh connection per fleet, separate from the Herdr calls:
+
+- On this machine, `ssh -R 127.0.0.1:0:<owner socket>` asks sshd for a
+  loopback-only port on the remote host that forwards to the coordinator's Unix
+  socket. Nothing listens on a network address on either side.
+- On the remote host, a small Node program started by that same connection
+  (`node -e`, nothing installed) serves `\\.\pipe\clankie-swarm-<fleet>` on
+  Windows, where OpenSSH cannot forward a named pipe, or
+  `~/.clankie/swarm-relay-<fleet>.sock` (0600) elsewhere, and splices each
+  client to that port. It exits when the connection closes, so the endpoint
+  exists only while the link is up. Node must be on that host's PATH.
+- Exposure on the remote host is that loopback port and that endpoint. Any
+  local process there can open them, but the coordinator admits nothing
+  without a session capability; the relay carries bytes and holds none.
+- `runtime list` reports each fleet's `relayState`: `starting`, `ready` (with
+  the endpoint and port) or `unreachable` (with the last ssh error). While the
+  link is down a peer cannot fetch, so its mail waits unleased instead of
+  dead-lettering; it resumes when the relay is back.
 
 See [Swarm architecture](adr/0180-swarm-is-the-coordination-layer.md).
 
@@ -1637,6 +2148,7 @@ See [Swarm architecture](adr/0180-swarm-is-the-coordination-layer.md).
 | `user-session`  | personal-lab Discord body            | `discord-user-session`, `lab`                                          |
 | `activity`      | watch-me-play surface                | `watch`, `viewer`                                                      |
 | `tunnel`        | cloudflared in front of the activity | `cloudflared`                                                          |
+| `awake`         | owner's keep-awake (`caffeinate -s`) | `keep-awake`, `caffeinate`                                             |
 
 Unknown names fail closed without signalling any process.
 
@@ -1722,3 +2234,99 @@ Revert with `clankie model set <provider>/<model>` and another
 - [Distribution](distribution.md) — install layout and `clankie doctor` on a release
 - [Credentials](credentials.md) — bot vs user vs internal tokens
 - [Architecture canonical homes](architecture.md#canonical-homes)
+
+Managed pi workers use OpenRouter `moonshotai/kimi-k3`; the runtime harness selector chooses that explicit model instead of inheriting pi’s personal default.
+
+## Local and hosted connection modes
+
+A fresh `clankie` launch offers **This Mac** or a hosted connection before starting
+a service. Existing installations remain local. Hosted startup never starts a
+local body. Its footer identifies **Hosted · <machine>** and reports Connected,
+Asleep/Waking, Sign-in expired, Access revoked, or Unavailable.
+
+```sh
+clankie login
+clankie login --email you@example.com --code-stdin
+clankie whoami
+clankie conversations list
+clankie --chat global-default
+clankie logout
+```
+
+`login` is the one account sign-in (email code). If the account has a hosted
+Clankie it lists the account's hosted machines and pairs a revocable device;
+otherwise it signs **this Mac** in for remote access, which is also how a
+signed-out Mac signs back in (restart the captain afterwards; the JSON output
+says so). `connect hosted` asks for a hosted body specifically, so an account
+without one gets an explanation instead of a doorway. `logout` only forgets the
+hosted client; on a Mac that is not a hosted client it changes nothing and
+points at `clankie remote-access off`. The current fleet model permits one machine per
+account, so it is selected automatically. The list contract supports a picker
+if that changes; headless selection uses `--machine ID`. `--url ORIGIN` selects
+a compatible deployment (HTTPS, or loopback HTTP for development). Account
+credentials exist only during login; the broker retains the device session,
+encryption material and a separate device wake key. `whoami` shows the selected
+machine and checks access without revealing secrets. `connect hosted` and
+`disconnect` remain aliases for `login` and `logout`.
+
+`/connection`, `/settings` and local `/setup` expose the mode choice. Reopen the
+console after changing modes. Hosted `/conversation [ID]` selects a retained
+thread; `/reconnect` retries the saved selection. `/persona`, `/model set
+provider/model`, `/keys [PROVIDER]` and `/connect github|linear` change the
+hosted body. `/fleet` and `/terminal` show its fleet and terminal catalog.
+
+Headless `conversations`, `send`, `model`, `persona`, `accounts`, `fleet`,
+`terminal` and `keys` address the selected machine. `keys set PROVIDER
+--key-stdin` accepts a secret only on stdin. `fleet spawn|move|close --json-stdin`
+and `terminal tail|control|input --json-stdin` accept the corresponding protocol
+request fields from stdin; the verb fixes the operation. Terminal input keeps
+the existing exclusive-control lease validation. Unknown operations fail closed.
+
+The single hosted-device authority policy allows chat, fleet, terminal, model,
+keys, persona and connections. **Restart, reset and deprovision require the
+account page/control plane**, including when attempted through the old device
+relay. The API policy does not inspect shell commands typed under terminal
+control. Local lifecycle, autostart, sockets, `seat`, `mcp` and shell escapes
+refuse in hosted mode.
+
+Closing the client leaves accepted work running. `logout` forgets this Mac's
+device credential and wake key and selects This Mac for the next launch;
+account-side device revocation invalidates a lost Mac. Expired or revoked
+access requires `login`. After pairing, an asleep host is woken using the app's
+device-signed P-256 challenge protocol; status shows the wait and wake failures.
+First login can wake the selected machine using the signed-in account. A legacy
+body without wake registration needs account-page wake and a fresh login.
+There is no local fallback.
+
+`/remote-access` means **Remote access for this Mac**, for self-hosted use only;
+`/gateway` remains its alias. When the Mac is signed out, its menu opens on
+**Sign this Mac back in** (email + one-time code) and its status text starts with
+that step; the same menu reads **Sign this Mac in to enable remote access** before
+first setup. Headless: `clankie remote-access [status]`, `on [--email EMAIL
+--code-stdin]` (the same sign-in as `login`, pinned to this Mac), `off`, `rotate-key`
+and `direct --control-plane-url URL --relay-url URL`; `gateway` and the older
+`disable` / `rotate-encryption-key` spellings still work.
+
+`clankie status` also carries what `whoami` reports (`connection`), the live
+`doorway`, and one `nextStep` line for phone access; `clankie doctor` carries the
+same `nextStep`. `whoami` keeps working. In the console, `/login` is the account
+sign-in (it skips the `/remote-access` menu; the model-provider `/auth` no longer
+answers to `/login`), `/pair` adds a sign-in note when a code lacks the gateway
+route because remote access is signed out, and `/devices` lists or revokes
+paired devices and opens an empty list on `/pair`.
+
+`clankie pair` never prints a code the doorway cannot carry. When the service
+refuses an offer because remote access is signed out, it exits 1 with "No pairing
+code was made" and names `/remote-access` → **Sign this Mac back in** as the fix
+(JSON `status: "unavailable"`, same text in `error`).
+It detects an existing hosted tenant and offers connection instead of creating
+another doorway. Matching fleet, body and relay deployments plus a real
+Mac/phone rehearsal remain separate from source verification.
+
+## Bundled working skills
+
+Clankie's seats include his process and leadership skill bundle. Local hired
+Claude, Codex and Pi workers receive it through their launch configuration; a
+plain harness keeps the owner's independent global selection. See
+[bundled working skills](bundled-skills.md) for the inventory, source revisions,
+per-harness mechanisms, deployment gate and remote/Swarm limitations.

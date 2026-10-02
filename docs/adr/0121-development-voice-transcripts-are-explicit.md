@@ -30,6 +30,8 @@ flowchart LR
   B --> C[In-memory room conversation]
   B --> D[Content-free receipt]
   B -->|owner toggle on| E[Private full-text JSONL]
+  F[Generated reply text] --> G[Playback outcome and identity]
+  G -->|owner toggle on| E
 ```
 
 `discord.voiceTranscriptLoggingEnabled` is configured beside the Discord voice
@@ -70,5 +72,33 @@ the same current setting as context for his own disclosure.
   the JSONL from disk or mixing speech into `/trace`.
 - Enabling retention increases the sensitivity and unbounded size of the local
   state directory. The owner explicitly manages and deletes that log.
-- The file records inbound final speech, not exact native-realtime audio output;
-  provider-native spoken wording remains outside this transcript.
+- The initial version recorded only inbound speech. The amendment below adds
+  Clankie's generated wording with playback evidence.
+
+## Spoken output amendment (2026-09-29)
+
+The same owner toggle now retains Clankie's wording from native OpenAI/xAI audio
+transcripts or the text sent toward ElevenLabs synthesis. Both Discord bodies
+subscribe separately from the room listener, so his own output is never fed
+back as a human utterance. No output text is accumulated in the media session
+without a subscriber. Each response's text is bounded to 8000 characters.
+
+Assistant entries use `role: assistant` and `speakerId: clankie` (an identity
+label, not an authenticated Discord user). They carry `itemId`, optional
+`playbackId` and `responseId`, `textSource`, `textComplete`, `audioStarted`,
+`playbackMs`, and `outcome`: `played`, `interrupted`, `suppressed`, `failed`, or
+`truncated`. Existing inbound entries remain readable without a role field.
+Item identity distinguishes a handoff acknowledgment from its answer even
+when both share a delivery id.
+
+The text is generated wording, not an audio recording or word-aligned proof.
+A clean playback gives useful wording for tone review. After interruption,
+failure, suppression, or the audio ceiling, the logged text may include an
+unheard ending; the exact audible word cutoff is unknown. A response lost
+before its final transcript can retain only the text received so far. Empty
+text produces no entry. Process crashes cannot promise a terminal entry.
+
+The existing authenticated API, `/vt`, and menu bar expose both sides with
+outcome labels. `clankie discord transcripts [--cursor CURSOR] [--limit N]`
+reads the same bounded page. Disabled logging still returns an empty page;
+receipts remain content-free, and raw audio is never retained.

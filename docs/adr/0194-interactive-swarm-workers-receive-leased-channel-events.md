@@ -1,8 +1,57 @@
 # ADR 0194: Interactive Swarm workers receive leased channel events
 
-Status: Proposed, 2026-09-26. [VUH-1380](https://linear.app/vuhlp/issue/VUH-1380).
-The native channel transport has empirical evidence; the production integration
-is not implemented by this ADR.
+Status: Accepted, 2026-09-27 (proposed 2026-09-26). [VUH-1380](https://linear.app/vuhlp/issue/VUH-1380).
+
+## Decision
+
+James accepted this design on 2026-09-27 with consent path **(a)**: unattended
+interactive workers start through an **owner-managed approval of the exact
+installed worker plugin `clankie-worker@clankie`** in Claude Code managed
+settings (`allowedChannelPlugins`), not through the development-channel flag.
+James applies that policy himself as this Mac's administrator; no dispatch,
+runtime setting or agent installs or edits managed policy. Native-only source
+now defaults to interactive; an unsupported installed runtime disables dispatch
+instead of starting headless workers. Claude still requires
+the two-fresh-session consent probe and a live interactive dispatch. The
+seat-preservation checks in [managed consent](../testing/2026-09-26-interactive-swarm-workers/managed-consent.md)
+still apply when the policy is adopted.
+
+## Implementation status
+
+- Swarm (`vuh-1380-interactive-workers`, integrated with main `a72a2d3`, not yet vendored):
+  owner-selected Herdr route `workerMode` (`interactive` | `stream`) and
+  `channelPlugin`; the resolved mode is stored in the intent row (schema 16),
+  dispatch result and launch receipt, and an explicit `execution.mode` joins the
+  intent fingerprint. Interactive launches the TUI on inherited terminal stdio;
+  the wrapper keeps the launch token, lease renewal and MCP health; the worker's
+  own Swarm MCP serves the channel with its enrolled capability only, proves
+  readiness with a nonce round-trip (`swarm_ready`), and projects the leased
+  inbox one envelope at a time between native turns. Hooks publish lifecycle
+  only. Blocked or timed-out startup stays `uncertain` in interactive mode.
+- Clankie: the `clankie-worker@clankie` plugin
+  ([integrations/claude-plugin/worker](../../integrations/claude-plugin/worker/)) and
+  the per-runtime mode in settings, API, CLI and TUI.
+- Native Codex runs a private Unix app-server and its native remote TUI. The UI
+  creates the thread and handles approvals; the wrapper verifies its exact
+  ID/workspace and submits a single protocol turn. Pi runs its native CLI with
+  an extension that consumes its one leased inbox and submits native follow-ups.
+  Both preserve their own enrollment, MCP readiness and fenced claims.
+- Local Herdr is interactive-only. Stream settings/intents/receipts are retained
+  for recovery, never used for new launches. Installed capability probes gate
+  each harness without a headless fallback. No active artifact swap or restart
+  is included in this source integration; live acceptance below remains open.
+- Not implemented here: model/effort selection (step 6), task-title labels
+  (step 7), install locks and immutable runtime generations.
+
+## Harness axis amendment — VUH-1407 (2026-09-27)
+
+Managed harness selection (`claude`, `codex`, `pi`) remains independent of identity.
+The native-only amendment on 2026-09-30 replaces Codex/Pi headless I/O with native
+UI delivery while retaining their managed lifecycle. Claude's plugin and consent
+requirements are unchanged. Schema 16 combines both schema-15 lineages: main's
+`harness` and the interactive branch's `execution_mode`. It inspects and fills
+the missing column in one SQLite writer transaction, with atomic rollback and
+no reset of actors, tasks, claims or fingerprints.
 
 ## Current stream-worker implementation
 
@@ -84,9 +133,8 @@ mode; it must never switch to stream automatically. An owner may explicitly
 choose stream for a subsequent dispatch after the existing attempt is reconciled.
 
 Owner-managed approval of the exact installed worker plugin is the **preferred
-unattended interactive path if the prepared probe passes**. The proposed worker
-identity is `clankie-worker@clankie`, separate from the operator-seat plugin; it
-is not implemented yet. First prove persistent consent with two fresh sessions
+unattended interactive path if the prepared probe passes**. The worker identity
+is `clankie-worker@clankie`, separate from the operator-seat plugin. First prove persistent consent with two fresh sessions
 of the isolated custom-plugin fixture, then repeat readiness against the actual
 worker package. The policy must also preserve the operator seat: verify actual
 wake, watch and Swarm channel receipts after policy adoption and a coordinated

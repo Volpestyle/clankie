@@ -8,13 +8,19 @@
             "type": "command",
             "command": "clankie",
             "args": ["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"],
-            "timeout": 20
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "clankie",
+            "args": ["memory-card", "--lane", "operator", "--hook"],
+            "timeout": 60
           },
           {
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 20
+            "timeout": 60
           }
         ]
       }
@@ -25,14 +31,14 @@
           {
             "type": "command",
             "command": "clankie",
-            "args": ["memory-card", "--lane", "operator"],
-            "timeout": 15
+            "args": ["memory-card", "--lane", "operator", "--hook"],
+            "timeout": 60
           },
           {
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 20
+            "timeout": 60
           }
         ]
       }
@@ -44,7 +50,8 @@
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 20
+            "timeout": 60,
+            "async": true
           }
         ]
       }
@@ -56,7 +63,8 @@
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 20
+            "timeout": 60,
+            "async": true
           }
         ]
       }
@@ -68,7 +76,7 @@
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 20
+            "timeout": 60
           }
         ]
       }
@@ -80,7 +88,8 @@
             "type": "command",
             "command": "clankie",
             "args": ["seat-sync"],
-            "timeout": 20
+            "timeout": 60,
+            "async": true
           }
         ]
       }

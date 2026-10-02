@@ -24,8 +24,8 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { resolveWorldCredential, WorldCredentialError } from "@clankie/credential-broker";
-import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
 import {
+  EnvironmentAdapterActionError,
   FREE_PLAY_HARD_FAILURE_LIMIT,
   worldPlayJourneyId,
   type FreePlayProvenance,

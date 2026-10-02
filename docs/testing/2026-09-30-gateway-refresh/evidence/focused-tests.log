@@ -1,0 +1,51 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > signs an invited user in with one email OTP and derives a per-installation host 5ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > rotates an expiring refresh token once across concurrent connector reads 1ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > recovers a lost transport reply inside rotation grace and keeps concurrent callers signed in 1ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > recovers a lost body reply inside rotation grace and keeps concurrent callers signed in 1ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > does not spend a refresh token while the account endpoint is unreachable after wake 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > bounds transport recovery and preserves the credential for reconnect 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > bounds untyped 503 recovery and preserves the credential for reconnect 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > does not continue grace recovery after a retry timer slept beyond its deadline 1ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > opens signup with the same email code when the pool permits it 1ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > keeps the rotated refresh token when the access token it arrives with is unusable 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > treats a rotation the pool has revoked as terminal, not a passing outage 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > keeps a rate limit and an unreachable pool retryable 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > says to try again in a few minutes for the per-IP WAF limit 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > says to try again in a few minutes for a 429 without Cognito's body 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > says to try again in a few minutes for the per-email sign-up limit 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > says to try again in a few minutes for the per-email code-email limit 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > says the same when the sign-in limit refuses the code 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > leaves other trigger refusals as they were 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > keeps a refresh that meets a bare 429 retryable instead of signing the Mac out 0ms
+ ✓ packages/credential-broker/test/account-credential.test.ts > Clankie account credential > names a rejected refresh token as one only a human can clear 0ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > registers hashed offers and refuses plaintext application forwarding 15ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > hands the control plane a Linear signature and the bytes it covers 9ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > replays live pairing routes after an authenticated reconnect 8ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > sends a restored review route on the first connect without a socket at restore time 1ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > uses renewable account credentials with the installation-bound route 1ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > backs off through an offline wake, then recovers a lost rotation and reconnects signed in 416ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > parks on a credential no retry can fix and says the Mac needs signing in 32ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > parks a managed connector when the gateway rejects its host upgrade 52ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > public gateway Mac connector > keeps retrying a token failure that might clear on its own 31ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > push wakes over the same socket > answers a wake with the gateway's status and carries ids only 3ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > push wakes over the same socket > reports unavailable when the socket drops before the gateway answers 1ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > push wakes over the same socket > reports unavailable when the connector is closed, and never rejects a caller 1ms
+ ✓ apps/clankie/test/public-gateway-connector.test.ts > push wakes over the same socket > closes the socket when the gateway sends a host-owned wake frame 1ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > treats a tree with libexec/node and release.json as a release 3ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > reports ids not secrets, and names the setup steps this install still needs 12ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > the selected model > says the runtime is down rather than reporting a healthy install 27ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > the selected model > names the credential an endpoint asks for, on the evidence of its own 401 3ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > the selected model > catches a ref naming a model the provider does not declare 2ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > the selected model > stays quiet for a healthy local endpoint, and never probes a builtin provider 4ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > names where a harness reaches his tools, on the evidence of the route's own 401 3ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > asks for a sign-in when the Mac is shut out of its own doorway 2ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > asks to link a bundled herdr plugin when herdr is present and the plugin is not linked 4ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > treats herdr-lead as present from PATH without executing it 352ms
+
+ Test Files  3 passed (3)
+      Tests  43 passed (43)
+   Start at  03:04:08
+   Duration  2.40s (transform 592ms, setup 0ms, import 1.19s, tests 997ms, environment 0ms)

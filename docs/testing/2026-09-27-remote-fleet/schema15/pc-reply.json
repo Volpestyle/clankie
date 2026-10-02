@@ -1,0 +1,11 @@
+{
+  "data": {
+    "value": {
+      "messageId": "ca92a6e7-2356-4ed3-824f-bc4f7b1ca7f7",
+      "recipients": ["4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0"],
+      "idempotencyKey": "vuh1381-schema15-reply"
+    },
+    "cursor": 7568,
+    "replayed": false
+  }
+}

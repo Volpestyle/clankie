@@ -30,7 +30,8 @@ export type ServiceId =
   | "discord-bridge"
   | "discord-user-session"
   | "activity"
-  | "tunnel";
+  | "tunnel"
+  | "awake";
 
 /** Stable operator-facing service order. */
 export const SERVICE_ORDER: readonly ServiceId[] = [
@@ -40,6 +41,7 @@ export const SERVICE_ORDER: readonly ServiceId[] = [
   "discord-user-session",
   "activity",
   "tunnel",
+  "awake",
 ];
 
 type ServiceState = "healthy" | "unhealthy" | "unreachable";

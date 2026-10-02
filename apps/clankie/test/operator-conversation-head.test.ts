@@ -117,7 +117,7 @@ describe("the seat's head conversation", () => {
         schemaVersion: 1,
         kind: "message",
         conversationId: head,
-        surfaceClientId: "clankie-menu-bar-voice",
+        surfaceClientId: "clankie-app",
         expectedRevision: 1,
         message: "can you check the build?",
       },
@@ -126,7 +126,7 @@ describe("the seat's head conversation", () => {
     await conversations.awaitRun(sent.result.runId);
     expect(contexts.map((context) => [context.internal, context.origin, context.surfaceClientId])).toEqual([
       [true, "wake", undefined],
-      [undefined, undefined, "clankie-menu-bar-voice"],
+      [undefined, undefined, "clankie-app"],
     ]);
   });
 });

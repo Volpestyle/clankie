@@ -13,7 +13,7 @@ import type {
 } from "@clankie/protocol";
 import {
   createCaptainOperatorConversationClient,
-  createProductionOperatorConversationClient,
+  createCaptainRouteClient,
   OperatorConversationClientError,
   OperatorConversationPromptSession,
   OperatorConversationSelection,
@@ -364,10 +364,12 @@ describe("TUI operator conversation selection", () => {
       try {
         const address = server.address();
         if (address === null || typeof address === "string") throw new Error("Missing server address");
-        const captain = createProductionOperatorConversationClient({
-          host: `http://127.0.0.1:${address.port}`,
-          ...(captainToken === undefined ? {} : { captainToken }),
-        });
+        const captain = createCaptainOperatorConversationClient(
+          createCaptainRouteClient({
+            host: `http://127.0.0.1:${address.port}`,
+            ...(captainToken === undefined ? {} : { captainToken }),
+          }),
+        );
         expect(await captain.list()).toEqual([DEFAULT]);
         expect(headers).toEqual([authorization]);
       } finally {

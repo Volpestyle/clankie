@@ -274,6 +274,9 @@ export function createPlayVoiceListener(options: PlayVoiceListenerOptions): Play
       return typeof address === "object" && address !== null ? address.port : port;
     },
     publishUtterance(text) {
+      // Room input exists outside play sessions. No consumer means no delivery
+      // attempt: discard it without minting a misleading failure receipt.
+      if (attached.size === 0) return;
       const bounded = boundedUtteranceText(text);
       if (bounded === undefined) return;
       const message = PlayUtteranceSchema.safeParse({

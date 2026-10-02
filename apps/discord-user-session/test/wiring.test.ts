@@ -17,6 +17,14 @@ describe("sole-Vox package wiring", () => {
     };
 
     expect(source.match(/createVoxClient\s*\(/gu)).toHaveLength(1);
+    // The owner-only body keeps consent explicit and invitation context separate.
+    const askedJoin = index.slice(
+      index.indexOf("async function executeCaptainVoicePresenceNow"),
+      index.indexOf("function resolveUserSessionVoiceTarget"),
+    );
+    expect(askedJoin).toContain("invokingUserId: target.actorId");
+    expect(askedJoin).toMatch(/arrival: \{\s*requestedBy: target.actorId,/u);
+    expect(askedJoin).toContain("requestText: input.requestText");
     expect(index).toMatch(/new DiscordVoiceSession\(\{\s*vox,/u);
     expect(index).toMatch(/startStreamWatch\(\{[\s\S]*?vox,[\s\S]*?membership,/u);
     expect(source).not.toContain("DiscordUserVoiceAdapters");

@@ -55,13 +55,39 @@ to the pinned `grok-voice-think-fast-2.0` model and `eve` voice; `/voice` can
 change both and xAI's `high`/`none` reasoning effort. xAI does not expose a
 streaming-STT model selector, so no fake model knob is presented.
 
+For OpenAI plus ElevenLabs, explicit `voice.elevenLabsModelId: eleven_v4_turbo`
+selects `/v1/text-to-dialogue/multi-stream-input`. It registers the existing
+voice ID, sends dialogue `inputs`, and requests the same 24 kHz mono PCM as
+legacy TTS. Context keep-alives cover model pauses; `is_final` releases a
+completed utterance, while `is_final_audio_for_turn` alone does not. Barge-in
+retires the context and discards late audio. The provider flushes a retired
+dialogue context, so this does not guarantee cancellation of billed generation.
+Room audio still goes only to the realtime provider, under the existing consent
+and trust policies. Unset models retain `eleven_flash_v2_5`; other legacy model
+IDs retain the TTS endpoint. No automatic fallback changes the chosen model.
+
+Set the model through the console `/voice`, or the new headless
+`clankie voice model set eleven_v4_turbo`; `clankie voice status` reports stored
+and effective settings. Review before `clankie restart clankie`, which also
+restarts dependent bodies. Roll back an originally unset model with
+`clankie voice model clear` and the same restart. Explicit models can be restored
+with `model set ORIGINAL_ID`. See [CLI contract](../../docs/cli.md).
+
+Offline transport/wiring tests prove client behavior; a broker-authenticated
+provider canary proves real synthesis; only listening in Discord proves room
+audibility. `pnpm discord:voice-readiness` skips paid ElevenLabs synthesis and
+cannot establish either of the latter claims.
+
 `CLANKIE_API_URL` defaults to `http://127.0.0.1:4310`.
 `DISCORD_BRIDGE_RECEIPT_PATH` may select an absolute receipt path; otherwise it
 uses `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-live-receipts.jsonl`.
 When the owner enables full transcript logging in `/discord`, exact consented
-final speech from either body is appended to the mode-0600
-`${XDG_STATE_HOME:-~/.local/state}/clankie/discord-voice-transcripts.jsonl`.
-Receipts remain content-free.
+final speech and Clankie's generated reply wording from either body are appended
+to the mode-0600 `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-voice-transcripts.jsonl`.
+Assistant entries include provider/playback ids and outcomes: played, interrupted,
+suppressed, failed, or truncated. After a cutoff, text may include an unheard
+ending; no raw audio or word alignment is saved. Read with
+`clankie discord transcripts` or `/vt`. Receipts remain content-free.
 
 ## Start And Verify
 
@@ -143,7 +169,9 @@ satisfy these live gates.
   room's shared floor, so the realtime persona may answer aloud or stay silent
   without a second text reply ([ADR 0124](../../docs/adr/0124-one-self-has-many-local-threads.md)).
   Pending deliveries and accepted turn results persist in the private delivery
-  journal; Discord remains the channel-history source
+  journal, along with channel activity and the live attention counter. Catch-up
+  uses live admission, including unaddressed follow-ups after he has spoken;
+  one prior history page bootstraps activity on upgrade. Discord remains the channel-history source
   ([ADR 0177](../../docs/adr/0177-discord-delivery-survives-a-bridge-restart.md)).
 - Presence actions use a live gateway claim and the configured presence
   allowlists. Reactions and thread actions are grounded in the triggering
@@ -175,3 +203,44 @@ satisfy these live gates.
 
 Receipts contain bounded ids, counts, durations, and typed outcomes only. They
 exclude message bodies, transcripts, names, media, and credentials.
+
+Gateway participant joins and leaves supply the current human count as room
+observations and offer Clankie a turn even when nobody speaks. He decides
+whether to remain, speak, or use `voice_leave` to end his own stay. There is no
+automatic leave timer. Departures revoke capture without discarding an
+in-flight captain exchange. Handoffs include room observations and the original
+attributed utterance so a model summary cannot hide part of a compound request.
+The voice leave receipt records `reason: self_decided` for the local tool
+(ADR 0057).
+
+Speech interruption waits for a substantive transcript with speech-level overlap
+from a recently engaged speaker, or a direct re-address. Brief fragments and acknowledgements
+let playback continue; “wait” and “hold on” remain valid interruptions. An explicit
+“stop talking” cuts playback on its final transcript even below the overlap
+loudness gate, discards queued speech, and keeps late handoff results silent.
+New speech also replaces unheard replies during ordinary conversation; voice
+matches the length to the moment, usually short with room for earned longer
+answers and character. A 45-second audio backstop catches runaways without
+clipping a deliberate 20–30 second riff.
+`interrupted`, completed `response`, and synthesis `failed` receipts include
+playback and provider item ids when available, alongside the delivery id.
+Intentional TTS teardown does not emit a synthesis failure for late socket errors.
+
+Group engagement retains up to five recent speakers; their follow-ups remain
+optional response opportunities. Different people's actionable asks receive
+separate handoffs in order, while same-person refinements can steer live work.
+Realtime banter continues while handoffs wait. Results identify their recipient
+so Clankie can name who he is answering. See
+[ADR 0091](../../docs/adr/0091-a-mid-turn-message-steers-the-turn.md) for the
+serialization tradeoff and pending live verification.
+
+### Interpreting voice latency
+
+The bridge log labels first-audio time from the response request separately
+from time since the last input audio and the final transcript. The latter
+measurements include wake setup and any Clankie tool handoff; an acknowledgment
+and the resulting answer each have their own playback. Detailed content-free
+stage measurements live in the voice response receipts; see the
+[voice core latency contract](../../packages/discord-presence-core/README.md#voice-latency-evidence).
+Missing historical response receipts can be a writer field-limit failure;
+check Vox playback starts and drains before concluding that speech was lost.

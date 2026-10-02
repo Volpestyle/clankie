@@ -312,3 +312,35 @@ function recorder(responseBody: unknown): {
     },
   };
 }
+
+it("sends every Google reference and explicitly rejects unsupported Grok sets", async () => {
+  const sources = ["data:image/png;base64,aGVsbG8=", "data:image/png;base64,d29ybGQ="];
+  const transport = recorder({
+    candidates: [
+      {
+        content: { parts: [{ inlineData: { data: imageBytes.toString("base64"), mimeType: "image/png" } }] },
+      },
+    ],
+  });
+  await new GoogleImageAdapter({ apiKey: "test", fetch: transport.fetch }).generate(
+    request({
+      provider: "google",
+      model: "gemini-3.1-flash-image",
+      outputPath: await output("refs.png"),
+      referenceImages: sources,
+    }),
+  );
+  expect(JSON.stringify(transport.calls[0]!.body)).toContain("aGVsbG8=");
+  expect(JSON.stringify(transport.calls[0]!.body)).toContain("d29ybGQ=");
+  await expect(
+    new GrokImageAdapter({ apiKey: "test", fetch: transport.fetch }).generate(
+      request({
+        provider: "grok",
+        model: "grok-imagine-image-quality",
+        outputPath: await output("grok-refs.png"),
+        referenceImages: sources,
+      }),
+    ),
+  ).rejects.toThrow("multiple_references_unsupported");
+  expect(transport.calls).toHaveLength(1);
+});

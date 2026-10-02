@@ -1,0 +1,26 @@
+{
+  "before-claude": {
+    "sessionKey": "herdr:claude:id:280ce486-5e32-4e1a-bf2f-ad1397597ef0",
+    "sentBytes": 4486,
+    "receivedBytes": 397,
+    "intact": false,
+    "sentSha256": "f11fc2d0a3d777ca140f4dedc98f48f5787f466e63cbd4923b566951702a42b8",
+    "receivedSha256": "b24d99bef84f39115abb351a3c2f35cfbb8b7894d2ab4a4240084d9fb8f6075a"
+  },
+  "after-claude": {
+    "sessionKey": "herdr:claude:id:d84f349f-14c6-47ac-b42e-f4278c48c25f",
+    "sentBytes": 4486,
+    "receivedBytes": 4486,
+    "intact": true,
+    "sentSha256": "f11fc2d0a3d777ca140f4dedc98f48f5787f466e63cbd4923b566951702a42b8",
+    "receivedSha256": "f11fc2d0a3d777ca140f4dedc98f48f5787f466e63cbd4923b566951702a42b8"
+  },
+  "after-codex": {
+    "sessionKey": "herdr:codex:id:01a0ef6f-535e-72f0-bb9c-2189693f85b5",
+    "sentBytes": 4486,
+    "receivedBytes": 4486,
+    "intact": true,
+    "sentSha256": "f11fc2d0a3d777ca140f4dedc98f48f5787f466e63cbd4923b566951702a42b8",
+    "receivedSha256": "f11fc2d0a3d777ca140f4dedc98f48f5787f466e63cbd4923b566951702a42b8"
+  }
+}

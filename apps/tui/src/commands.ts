@@ -1,3 +1,4 @@
+import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
 import { runSwarmCommand } from "./command/swarm.ts";
@@ -34,6 +35,7 @@ import type {
   OperatorConversationSessionState,
   EvaluatorStatus,
   OperatorConversationScope,
+  OperatorAgentPersona,
 } from "@clankie/protocol";
 import type { PresenceSnapshot } from "./observation/presence.ts";
 import type { HerdrRosterSnapshot } from "./observation/herdr-roster.ts";
@@ -46,16 +48,25 @@ import {
 } from "./observation/herd-lead-companion.ts";
 import { describeHerdrBinding, formatCaptainContextUsage } from "./shell/footer.ts";
 import { formatHerdrJumpResult, type HerdrSessionEntry } from "./session/herdr-report.ts";
-import { browserSetRecording, browserStatus } from "./command/browser.ts";
+import {
+  browserHarnesses,
+  browserSetDelegation,
+  browserSetRecording,
+  browserStatus,
+  type BrowserHarnessesResult,
+} from "./command/browser.ts";
+import { runSkillsCommand } from "./command/skills.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
+import type { AwakeCommandResult } from "./command/awake.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
+  readonly repoRoot?: string;
   readonly settings?: SettingsStore;
   readonly herdrOptions?: HerdrConnectionOptions;
   /** Herdr's saved sessions, for the `/herdr` session picker. */
@@ -67,6 +78,8 @@ export interface ConsoleCommandContext {
   readonly restartCaptain?: () => Promise<void>;
   readonly commandStatus?: () => Promise<StatusCommandResult>;
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
+  /** `clankie awake`: the launcher-supervised keep-awake, and the power state it answers to. */
+  readonly commandAwake?: (args: readonly string[]) => Promise<AwakeCommandResult>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -88,6 +101,8 @@ export interface ConsoleCommandContext {
     readonly title?: string | undefined;
     /** Directory the selected conversation's session works in. */
     readonly workspace?: string;
+    agents?(): Promise<readonly OperatorAgentPersona[]>;
+    openAgent?(agent: OperatorAgentPersona): Promise<{ readonly title: string }>;
     conversations(): Promise<
       readonly {
         readonly conversationId: string;
@@ -167,7 +182,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "evaluator",
       aliases: [],
-      description: "Control the independent evaluator in Herdr",
+      description: "Developer diagnostic: the independent evaluator in Herdr",
       argumentHint: "[status|enable --harness codex|claude|disable|open|retry ID]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -192,7 +207,11 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[status|follow on/off|inbox read|work list/bind/unbind]",
       async run(argument, shell): Promise<void> {
         const result = await runLinearCommand(argument.trim().split(/\s+/u).filter(Boolean));
-        shell.insertCommandResult("/linear", JSON.stringify(result, null, 2), "success");
+        shell.insertCommandResult(
+          "/linear",
+          JSON.stringify(result, null, 2),
+          result.ok === false ? "error" : "success",
+        );
       },
     },
     {
@@ -236,7 +255,78 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "agents",
       aliases: [],
-      description: "List, read or resume Claude/Codex/Grok/Pi sessions here or on SSH hosts",
+      description: "Live agents, and past ones that kept a thread",
+      takesArgument: true,
+      argumentHint: "[contacts | legacy session commands; see /sessions]",
+      async run(argument, shell): Promise<void> {
+        if (argument.trim()) {
+          const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
+          shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
+          return;
+        }
+        if (!conversations?.agents || !conversations.openAgent) {
+          shell.insertCommandResult("/agents", "Agent directory is unavailable.", "error");
+          return;
+        }
+        const flow = shell.setupFlow;
+        flow.begin("agents");
+        try {
+          // Every hire leaves an identity behind, so the directory opens on who is
+          // reachable now. Past agents are only worth listing when a thread
+          // survives them; the rest cannot be opened at all.
+          const agents = await conversations.agents();
+          const live = agents.filter(agentIsLive);
+          const past = agents
+            .filter((agent) => !agentIsLive(agent) && agent.conversationId !== undefined)
+            .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+          if (!live.length && !past.length) {
+            flow.renderLine(
+              "No live agents and no saved agent threads. /sessions browses saved harness sessions.",
+            );
+            return;
+          }
+          const option = (agent: OperatorAgentPersona) => ({
+            value: agent.personaId,
+            label: agent.name,
+            hint: agent.swarm
+              ? `Swarm · ${agent.swarm.connectionId}${agentIsLive(agent) ? "" : " · offline"}`
+              : `Herdr · ${agent.harness}${agentIsLive(agent) ? "" : " · offline"}`,
+            description: agent.personaId,
+          });
+          let id = await flow.readSelect({
+            message: live.length ? `Live agents (${live.length})` : "No live agents",
+            options: [
+              ...live.map(option),
+              ...(past.length
+                ? [
+                    {
+                      value: "past",
+                      label: `Past agents (${past.length})…`,
+                      hint: "offline, with a saved thread",
+                    },
+                  ]
+                : []),
+            ],
+          });
+          if (id === "past")
+            id = await flow.readSelect({
+              message: "Past agents",
+              options: past.map(option),
+              allowBack: true,
+            });
+          const agent = agents.find((entry) => entry.personaId === id);
+          if (!agent) return;
+          const selected = await conversations.openAgent(agent);
+          shell.insertCommandResult("/agents", `Opened ${selected.title}.`, "success");
+        } finally {
+          flow.end();
+        }
+      },
+    },
+    {
+      name: "sessions",
+      aliases: [],
+      description: "List or read Claude/Codex/Grok/Pi sessions here or on SSH hosts",
       takesArgument: true,
       argumentHint:
         "[list [--host ID]|read HOST:SESSION [--tail N]|send HOST:SESSION MESSAGE|runs [RUN]|cancel RUN|release RUN|hosts|hosts add ID --ssh TARGET [--shell powershell]|hosts remove ID]",
@@ -247,10 +337,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         }
         try {
           const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
-          shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
+          shell.insertCommandResult("/sessions", JSON.stringify(result, null, 2), "success");
         } catch (error) {
           shell.insertCommandResult(
-            "/agents",
+            "/sessions",
             error instanceof Error ? error.message : String(error),
             "error",
           );
@@ -364,105 +454,151 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.insertCommandResult("/help", lines.join("\n"), "success");
       },
     },
-    {
-      name: "conversation",
-      aliases: ["chat", "conversations"],
-      description: "Choose or switch persistent chat conversations",
-      argumentHint: "[<name-or-path>]",
-      takesArgument: true,
-      async run(argument, shell): Promise<void> {
-        if (conversations === undefined) {
-          shell.insertCommandResult("/conversation", "Conversations are unavailable.", "error");
-          return;
-        }
-        const selector = argument.trim();
-        if (selector.length === 0) {
-          const flow = shell.setupFlow;
-          flow.begin("conversation");
-          try {
-            for (;;) {
-              const rows = await conversations.conversations();
-              const currentConversationId = conversations.conversationId;
-              let conversationIdToClose: string | undefined;
-              const picked = await flow.readSelect({
-                message: "Conversations",
-                options: rows.map((item) => ({
-                  value: item.conversationId,
-                  label: item.title,
-                  hint: conversationHint(item),
-                  ...(item.scope.kind === "workspace" ? { description: item.scope.workspaceId } : {}),
-                })),
-                ...(currentConversationId === undefined
-                  ? {}
-                  : { currentValue: currentConversationId, initialValue: currentConversationId }),
-                ...(conversations.close === undefined
-                  ? {}
-                  : { onClose: (conversationId: string) => (conversationIdToClose = conversationId) }),
-              });
-              if (conversationIdToClose !== undefined && conversations.close !== undefined) {
-                const closing = rows.find((item) => item.conversationId === conversationIdToClose);
-                const closed = await conversations.close(conversationIdToClose);
-                if (!closed) {
-                  flow.renderLine(
-                    closing?.isDefault === true
-                      ? "The default conversation stays available."
-                      : closing?.sessionState === "active"
-                        ? "That conversation is still active."
-                        : "That conversation could not be closed.",
-                    "warning",
-                  );
+    ...[
+      {
+        name: "chats",
+        aliases: ["chat", "conversation", "conversations"],
+        description: "Talk with Clankie in personal and workspace chats",
+        argumentHint: "[<name-or-path>]",
+        takesArgument: true,
+        title: "Chats",
+        kinds: ["global", "workspace"],
+      },
+      {
+        name: "rooms",
+        aliases: [],
+        description: "Group channels and Discord text or voice history",
+        argumentHint: "[<name-or-path>]",
+        takesArgument: true,
+        title: "Rooms",
+        kinds: ["channel", "room"],
+      },
+      {
+        name: "history",
+        aliases: [],
+        description: "Browse all retained threads, including offline agents",
+        argumentHint: "[<name-or-path>]",
+        takesArgument: true,
+        title: "History",
+        kinds: [],
+      },
+    ].map(
+      ({ name, aliases, title, description, kinds, argumentHint, takesArgument }): FaceShellCommand => ({
+        name,
+        aliases,
+        description,
+        argumentHint,
+        takesArgument,
+        async run(argument, shell): Promise<void> {
+          if (conversations === undefined) {
+            shell.insertCommandResult(`/${name}`, "Conversations are unavailable.", "error");
+            return;
+          }
+          const selector = argument.trim();
+          if (selector.length === 0) {
+            const flow = shell.setupFlow;
+            flow.begin(name);
+            try {
+              flow.renderLine(
+                "/chats · Clankie   /agents · directory   /rooms · shared spaces   /history · all threads",
+              );
+              for (;;) {
+                const rows = (await conversations.conversations()).filter(
+                  (item) => kinds.length === 0 || kinds.includes(item.scope.kind),
+                );
+                if (!rows.length) {
+                  flow.renderLine(`No saved threads in ${title.toLowerCase()}.`);
+                  return;
+                }
+                const currentConversationId = conversations.conversationId;
+                let conversationIdToClose: string | undefined;
+                const picked = await flow.readSelect({
+                  message: title,
+                  options: rows.map((item) => ({
+                    value: item.conversationId,
+                    label: item.title,
+                    hint: conversationHint(item),
+                    ...(item.scope.kind === "workspace" ? { description: item.scope.workspaceId } : {}),
+                  })),
+                  ...(currentConversationId === undefined ||
+                  !rows.some((item) => item.conversationId === currentConversationId)
+                    ? {}
+                    : { currentValue: currentConversationId, initialValue: currentConversationId }),
+                  ...(conversations.close === undefined
+                    ? {}
+                    : { onClose: (conversationId: string) => (conversationIdToClose = conversationId) }),
+                });
+                if (conversationIdToClose !== undefined && conversations.close !== undefined) {
+                  const closing = rows.find((item) => item.conversationId === conversationIdToClose);
+                  const closed = await conversations.close(conversationIdToClose);
+                  if (!closed) {
+                    flow.renderLine(
+                      closing?.isDefault === true
+                        ? "The default conversation stays available."
+                        : closing?.sessionState === "active"
+                          ? "That conversation is still active."
+                          : "That conversation could not be closed.",
+                      "warning",
+                    );
+                    continue;
+                  }
+                  if (conversationIdToClose === currentConversationId) {
+                    const remaining = await conversations.conversations();
+                    const fallback =
+                      remaining.find((item) => item.isDefault && item.scope.kind === "global") ??
+                      remaining[0];
+                    if (fallback === undefined) throw new Error("No conversation remains after close");
+                    await conversations.select(fallback.conversationId);
+                  }
+                  flow.renderLine(`Closed ${closing?.title ?? "conversation"}.`, "success");
                   continue;
                 }
-                if (conversationIdToClose === currentConversationId) {
-                  const fallback = (await conversations.conversations())[0];
-                  if (fallback === undefined) throw new Error("No conversation remains after close");
-                  await conversations.select(fallback.conversationId);
-                }
-                flow.renderLine(`Closed ${closing?.title ?? "conversation"}.`, "success");
-                continue;
+                const conversationId = picked;
+                if (conversationId === undefined) return;
+                const selected = await conversations.select(conversationId);
+                shell.insertCommandResult(`/${name}`, `Switched to ${selected.title}.`, "success");
+                return;
               }
-              const conversationId = picked;
-              if (conversationId === undefined) return;
-              const selected = await conversations.select(conversationId);
-              shell.insertCommandResult("/conversation", `Switched to ${selected.title}.`, "success");
-              return;
+            } finally {
+              flow.end();
             }
-          } finally {
-            flow.end();
           }
-        }
-        const rows = await conversations.conversations();
-        const byId = rows.find((item) => item.conversationId === selector);
-        const matches =
-          byId === undefined
-            ? rows.filter(
-                (item) =>
-                  item.title.toLowerCase() === selector.toLowerCase() ||
-                  (item.scope.kind === "workspace" && item.scope.workspaceId === selector) ||
-                  (item.scope.kind === "room" &&
-                    (item.scope.targetId === selector || item.scope.targetId.split(":").at(-1) === selector)),
-              )
-            : [byId];
-        if (matches.length === 0) {
-          shell.insertCommandResult(
-            `/conversation ${selector}`,
-            `No conversation matches ${selector}. Run /conversation to choose one.`,
-            "error",
+          const rows = (await conversations.conversations()).filter(
+            (item) => kinds.length === 0 || kinds.includes(item.scope.kind),
           );
-          return;
-        }
-        if (matches.length > 1) {
-          shell.insertCommandResult(
-            `/conversation ${selector}`,
-            `More than one conversation is named ${selector}. Use /cd <path> to choose its workspace.`,
-            "error",
-          );
-          return;
-        }
-        const selected = await conversations.select(matches[0]!.conversationId);
-        shell.insertCommandResult(`/conversation ${selector}`, `Switched to ${selected.title}.`, "success");
-      },
-    },
+          const byId = rows.find((item) => item.conversationId === selector);
+          const matches =
+            byId === undefined
+              ? rows.filter(
+                  (item) =>
+                    item.title.toLowerCase() === selector.toLowerCase() ||
+                    (item.scope.kind === "workspace" && item.scope.workspaceId === selector) ||
+                    (item.scope.kind === "room" &&
+                      (item.scope.targetId === selector ||
+                        item.scope.targetId.split(":").at(-1) === selector)),
+                )
+              : [byId];
+          if (matches.length === 0) {
+            shell.insertCommandResult(
+              `/${name} ${selector}`,
+              `No conversation matches ${selector}. Run /${name} to choose one; /history searches all retained threads.`,
+              "error",
+            );
+            return;
+          }
+          if (matches.length > 1) {
+            shell.insertCommandResult(
+              `/${name} ${selector}`,
+              `More than one thread is named ${selector}. Use its conversation ID to choose one.`,
+              "error",
+            );
+            return;
+          }
+          const selected = await conversations.select(matches[0]!.conversationId);
+          shell.insertCommandResult(`/${name} ${selector}`, `Switched to ${selected.title}.`, "success");
+        },
+      }),
+    ),
     {
       name: "new",
       aliases: [],
@@ -717,6 +853,80 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "accounts",
+      aliases: [],
+      description: "Register and inspect local Codex accounts and headroom",
+      argumentHint: "codex [list | add HOME --label LABEL | remove LABEL]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const words = argument.trim().split(/\s+/u).filter(Boolean);
+        if (words[0] !== "codex")
+          throw new Error("Use /accounts codex [list | add HOME --label LABEL | remove LABEL]");
+        const result = await runCodexAccountsCommand(words.slice(1), settings ? { settings } : {});
+        shell.insertCommandResult("/accounts", JSON.stringify(result, null, 2), "success");
+      },
+    },
+    {
+      name: "skills",
+      aliases: [],
+      description: "Choose Clankie's bundled working skills",
+      argumentHint: "[opinionated on|off | exclude NAME | include NAME]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (!settings || !context.repoRoot) {
+          shell.insertCommandResult("/skills", "Skill settings are unavailable.", "error");
+          return;
+        }
+        const options = { settings, repoRoot: context.repoRoot };
+        const words = argument.trim().split(/\s+/u).filter(Boolean);
+        if (words.length > 0) {
+          const result = await runSkillsCommand(words, options);
+          shell.insertCommandResult(
+            "/skills",
+            `${result.catalog.map((skill) => `${skill.included ? "✓" : "○"} ${skill.name} (${skill.class})`).join("\n")}\n\n${result.applies}`,
+            "success",
+          );
+          return;
+        }
+        const flow = shell.setupFlow;
+        flow.begin("skills");
+        try {
+          for (;;) {
+            const result = await runSkillsCommand([], options);
+            const choice = await flow.readSelect({
+              message: "Bundled skills · product/tool skills are always on",
+              options: [
+                {
+                  value: "opinionated",
+                  label: `Opinionated skills: ${result.skills.opinionated ? "on" : "off"}`,
+                  hint: "Toggle the whole class",
+                },
+                ...result.catalog
+                  .filter((skill) => skill.class === "opinionated")
+                  .map((skill) => ({
+                    value: skill.name,
+                    label: `${skill.included ? "✓" : "○"} ${skill.name}`,
+                    hint: result.skills.exclude.includes(skill.name)
+                      ? "excluded"
+                      : "included when opinionated is on",
+                  })),
+              ],
+              statusActions: [{ value: "done", label: "Done", hint: "applies to new sessions and hires" }],
+            });
+            if (!choice || choice === "done") break;
+            await runSkillsCommand(
+              choice === "opinionated"
+                ? ["opinionated", result.skills.opinionated ? "off" : "on"]
+                : [result.skills.exclude.includes(choice) ? "include" : "exclude", choice],
+              options,
+            );
+          }
+        } finally {
+          flow.end();
+        }
+      },
+    },
+    {
       name: "games",
       aliases: ["gameplay"],
       description: "Configure Clankie's PokeAgent play",
@@ -753,8 +963,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "browser",
       aliases: [],
-      description: "Record Clankie's browsing as video",
-      argumentHint: "[record on|off]",
+      description: "Recording, and the computer-use harnesses he can hire",
+      argumentHint: "[record on|off | delegate on|off | harnesses]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (settings === undefined) {
@@ -767,8 +977,38 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           shell.insertCommandResult("/browser", formatBrowserSettings(result.browser), "success");
           return;
         }
-        if (words.length !== 2 || words[0] !== "record" || (words[1] !== "on" && words[1] !== "off")) {
-          shell.insertCommandResult("/browser", "Usage: /browser [record on|off]", "error");
+        if (words.length === 1 && words[0] === "harnesses") {
+          try {
+            const result = await browserHarnesses({ settings });
+            shell.insertCommandResult("/browser", formatBrowserHarnesses(result), "success");
+          } catch (error) {
+            shell.insertCommandResult(
+              "/browser",
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
+          }
+          return;
+        }
+        if (
+          words.length !== 2 ||
+          (words[0] !== "record" && words[0] !== "delegate") ||
+          (words[1] !== "on" && words[1] !== "off")
+        ) {
+          shell.insertCommandResult(
+            "/browser",
+            "Usage: /browser [record on|off | delegate on|off | harnesses]",
+            "error",
+          );
+          return;
+        }
+        if (words[0] === "delegate") {
+          const next = await browserSetDelegation(words[1] === "on", { settings });
+          shell.insertCommandResult(
+            "/browser",
+            `${formatBrowserSettings(next.browser)}\n\nApplies from his next session.`,
+            "success",
+          );
           return;
         }
         const next = await browserSetRecording(words[1] === "on", { settings });
@@ -998,6 +1238,34 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "awake",
+      aliases: [],
+      description: "Keep this Mac awake while plugged in, so Discord and the app stay reachable",
+      argumentHint: "[on|off]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (context.commandAwake === undefined) {
+          shell.insertCommandResult("/awake", "Keep-awake is unavailable.", "error");
+          return;
+        }
+        const words = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+        if (words.length > 1 || (words[0] !== undefined && !["status", "on", "off"].includes(words[0]))) {
+          shell.insertCommandResult("/awake", "Usage: /awake [on|off]", "error");
+          return;
+        }
+        try {
+          const result = await context.commandAwake(words);
+          shell.insertCommandResult("/awake", formatAwake(result), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/awake",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
       name: "doctor",
       aliases: [],
       description: "Show this install's canonical doctor report",
@@ -1037,16 +1305,16 @@ function conversationHint(conversation: {
     case "workspace":
       return "workspace";
     case "seat":
-      return "seat";
+      return "agent thread · legacy seat";
     case "persona":
-      return "agent";
+      return "agent thread · availability in /agents";
     case "channel":
       return "channel";
     case "global":
       // The default global room is the head (ADR 0152) — the same thread the
       // app pins as Clankie. Name it that here too, so one room does not read
       // as two things depending on which face you opened.
-      return conversation.isDefault ? "head" : "global";
+      return conversation.isDefault ? "Clankie" : "personal chat";
   }
 }
 
@@ -1065,11 +1333,38 @@ function formatAutonomyStatus(status: OperatorAutonomyStatus): string {
 }
 
 function formatBrowserSettings(settings: BrowserSettings): string {
-  return `Record browsing: ${settings.recordSessions ? "on" : "off"}\nVideos: ~/.clankie/runner/browser/recordings/ (newest 50)`;
+  return [
+    `Record browsing: ${settings.recordSessions ? "on" : "off"}`,
+    "Videos: ~/.clankie/runner/browser/recordings/ (newest 50)",
+    `Computer-use harnesses: ${settings.harnessDelegation ? "offered" : "off"} (/browser harnesses lists them)`,
+  ].join("\n");
+}
+
+function formatBrowserHarnesses(result: BrowserHarnessesResult): string {
+  if (!result.detected)
+    return "This body has no owner desktop, so no harness is offered; his own browser is the path.";
+  if (result.harnesses.length === 0) return "No Codex or Claude install here; his own browser is the path.";
+  const lines = result.harnesses.map((entry) => {
+    const ready = entry.signedIn && entry.surfaces.length > 0;
+    const detail = ready
+      ? `${entry.surfaces.join(", ")}${entry.chromeNeedsHireFlag ? " (hired with --chrome)" : ""}`
+      : (entry.missing ?? "not ready");
+    return `${ready ? "✓" : "·"} ${entry.harness}: ${detail}`;
+  });
+  return [
+    ...lines,
+    "",
+    `Offered to him: ${result.harnessDelegation ? "yes" : "no (/browser delegate on)"}`,
+  ].join("\n");
 }
 
 function formatGameplaySettings(settings: GameplaySettings): string {
   return `PokeAgent MMO: ${settings.pokeagentMmoEnabled ? "enabled" : "disabled"}`;
+}
+
+/** Reachable now: a live Herdr seat, or an available Swarm contact. */
+function agentIsLive(agent: OperatorAgentPersona): boolean {
+  return agent.swarm ? agent.swarm.available : agent.activeSeatId !== undefined;
 }
 
 /** `/evaluator` with no arguments: the same controls as the CLI, as a menu. */
@@ -1320,4 +1615,16 @@ function herdrActiveLine(status: HerdrCommandResult): string {
     : status.active
       ? `Active: ${describeHerdrBinding(status.active)}`
       : (status.unavailable ?? "Active session unavailable");
+}
+
+function formatAwake(result: AwakeCommandResult): string {
+  const { power } = result;
+  const lines = [
+    `keep-awake: ${result.keepAwake ? "on" : "off"} · ${result.service.state}${result.service.detail === undefined ? "" : ` · ${result.service.detail}`}`,
+    `power: ${power.state.replace("_", " ")} · ${power.source}${power.sleepAfterMinutes === null ? "" : power.sleepAfterMinutes === 0 ? " · never sleeps" : ` · sleeps after ${String(power.sleepAfterMinutes)} min`}`,
+  ];
+  if (power.heldAwakeBy.length > 0) lines.push(`held awake by: ${power.heldAwakeBy.join(", ")}`);
+  if (power.advice !== undefined) lines.push(power.advice);
+  lines.push(result.note);
+  return lines.join("\n");
 }

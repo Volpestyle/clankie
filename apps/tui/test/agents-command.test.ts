@@ -20,36 +20,28 @@ it("maps agents verbs onto the operator session and host routes", async () => {
   await runAgentsCommand(["--host", "pc", "--limit", "5"], options);
   await runAgentsCommand(["read", "pc:01a0", "--tail", "10"], options);
   await runAgentsCommand(["read", "pc:01a0", "--after", "abc"], options);
+  await runAgentsCommand(["resume", "pc:01a0", "--fleet", "pc", "--brief", "carry on"], options);
   await runAgentsCommand(
     ["hosts", "add", "pc", "--ssh", "volpe@supedupsilly", "--shell", "powershell"],
     options,
   );
   await runAgentsCommand(["hosts", "remove", "pc"], options);
-  await runAgentsCommand(["send", "pc:01a0", "are", "you", "done?"], options);
-  await runAgentsCommand(["runs"], options);
-  await runAgentsCommand(["runs", "r1"], options);
-  await runAgentsCommand(["cancel", "r1"], options);
-  await runAgentsCommand(["release", "r1"], options);
   expect(calls).toEqual([
     { path: "/v1/agent-sessions", method: "GET" },
     { path: "/v1/agent-sessions?host=pc&limit=5", method: "GET" },
     { path: "/v1/agent-sessions/read?ref=pc%3A01a0&tail=10", method: "GET" },
     { path: "/v1/agent-sessions/read?ref=pc%3A01a0&after=abc", method: "GET" },
     {
+      path: "/v1/agent-sessions/resume",
+      method: "POST",
+      body: { ref: "pc:01a0", fleet: "pc", brief: "carry on" },
+    },
+    {
       path: "/v1/agent-hosts",
       method: "POST",
       body: { id: "pc", ssh: "volpe@supedupsilly", shell: "powershell" },
     },
     { path: "/v1/agent-hosts/pc", method: "DELETE" },
-    {
-      path: "/v1/agent-sessions/send",
-      method: "POST",
-      body: { ref: "pc:01a0", message: "are you done?" },
-    },
-    { path: "/v1/agent-sessions/runs", method: "GET" },
-    { path: "/v1/agent-sessions/runs/r1", method: "GET" },
-    { path: "/v1/agent-sessions/runs/r1", method: "DELETE" },
-    { path: "/v1/agent-sessions/runs/r1/release", method: "POST" },
   ]);
 });
 
@@ -63,8 +55,11 @@ it("refuses malformed arguments before any request", async () => {
     ["hosts", "add", "pc"],
     ["list", "--bogus", "1"],
     ["list", "--host"],
-    ["send", "pc:01a0"],
-    ["cancel"],
+    ["resume"],
+    ["resume", "pc:01a0", "--fleet"],
+    // Resuming a saved session headlessly is retired (ADR 0203).
+    ["send", "pc:01a0", "hello"],
+    ["runs"],
   ])
     await expect(runAgentsCommand(args, { env: { CLANKIE_OPERATOR_TOKEN: "t" }, fetchImpl })).rejects.toThrow(
       /Usage: clankie agents/,
@@ -83,4 +78,28 @@ it("surfaces the service's reason for a refused read", async () => {
       fetchImpl,
     }),
   ).rejects.toThrow("Invalid transcript cursor");
+});
+
+it("reads known identities from the fleet API rather than the saved session inventory", async () => {
+  const calls: unknown[] = [];
+  const result = await runAgentsCommand(["contacts"], {
+    env: { CLANKIE_CAPTAIN_TOKEN: "captain" },
+    fetchImpl: (async (_url, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer captain");
+      calls.push(JSON.parse(init!.body as string));
+      return Response.json({
+        op: "fleet",
+        schemaVersion: 1,
+        snapshot: {
+          schemaVersion: 1,
+          cursor: "000000000001",
+          seats: [],
+          personas: [],
+          channels: [],
+        },
+      });
+    }) as typeof fetch,
+  });
+  expect(result).toEqual([]);
+  expect(calls).toEqual([expect.objectContaining({ op: "fleet" })]);
 });

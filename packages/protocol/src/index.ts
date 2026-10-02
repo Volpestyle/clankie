@@ -234,6 +234,8 @@ export const OPERATOR_SEAT_EFFORT_MAX = 64;
 export const OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX = 32;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX = 500;
 export const OPERATOR_CONVERSATION_REPLAY_LIMIT_DEFAULT = 200;
+export const OPERATOR_CONVERSATION_WINDOW_TURNS_DEFAULT = 20;
+export const OPERATOR_CONVERSATION_WINDOW_TURNS_MAX = 40;
 /**
  * Longest a tail request may park on the server waiting for the next change
  * ([ADR 0141](../../../docs/adr/0141-the-console-watches-him-type.md)). Bounded
@@ -381,6 +383,21 @@ export const OperatorAgentPersonaSchema = z
   })
   .strict();
 export type OperatorAgentPersona = z.infer<typeof OperatorAgentPersonaSchema>;
+
+/** Reserved coordinator labels are diagnostics, not people in Messages.
+ * This is presentation only: it never merges identities or grants authority.
+ * Keep saved records/threads accessible by ID when hiding legacy contacts.
+ */
+export function isInternalSwarmContact(persona: {
+  readonly name: string;
+  readonly swarm?: unknown;
+}): boolean {
+  return (
+    persona.swarm !== undefined &&
+    (/^clankie:[^\s]+$/u.test(persona.name) || /^runtime:[^\s]+ transport:[^\s]+$/u.test(persona.name))
+  );
+}
+
 export const UpdateOperatorAgentPersonaSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -729,8 +746,13 @@ export const OperatorHerdrPlacementSchema = z
   .strict();
 export type OperatorHerdrPlacement = z.infer<typeof OperatorHerdrPlacementSchema>;
 
+export const OperatorCodexAccountSchema = z
+  .object({ label: z.string().min(1).max(64), home: z.string().min(1).max(4096) })
+  .strict();
+
 export const OperatorFleetSeatSchema = z
   .object({
+    account: OperatorCodexAccountSchema.optional(),
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     /** Harness-session identity; stable when the same agent moves panes. */
     occupantId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
@@ -757,6 +779,18 @@ export const OperatorFleetSeatSchema = z
      * could not be read; the seat is still a seat.
      */
     placement: OperatorHerdrPlacementSchema.optional(),
+    /** Display identity of the host machine; fleet remains the routing key. */
+    machine: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
+    /** Named Herdr server session, independent of the occupying harness session. */
+    herdrSession: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
+    /**
+     * The registered machine (Herdr fleet) holding this seat (ADR 0184), for a
+     * machine tag. Absent on the local default fleet.
+     */
+    fleet: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
     /**
      * What the occupying agent last said it was doing, while that statement
      * stands. Absent once it expires, so a surface never has to reason about
@@ -835,6 +869,51 @@ export type OperatorFleetEdge = z.infer<typeof OperatorFleetEdgeSchema>;
  */
 export const OPERATOR_FLEET_EDGE_MAX = 128;
 
+/** A task's objective and blocker as the board shows them, never the full contract. */
+export const OPERATOR_FLEET_TASK_TEXT_MAX = 1024;
+export const OPERATOR_FLEET_TASK_MAX = 128;
+
+/**
+ * One side of a Swarm task (ADR 0205), named the way the board says it.
+ * `clankie` marks one of his own conversation actors. `personaId` is present
+ * only when that Swarm actor is a messageable contact; the task names an
+ * actor, never a seat, so no surface may place it on a figure by guessing.
+ */
+export const OperatorFleetTaskAgentSchema = z
+  .object({
+    name: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    clankie: z.literal(true).optional(),
+    personaId: OperatorAgentPersonaIdSchema.optional(),
+  })
+  .strict();
+export type OperatorFleetTaskAgent = z.infer<typeof OperatorFleetTaskAgentSchema>;
+
+/**
+ * One unfinished Swarm task, read from its coordinator on every fleet read
+ * (ADR 0205). Finished work is not carried: the board shows what is being
+ * worked on now, and a task's result stays with its coordinator.
+ */
+export const OperatorFleetTaskSchema = z
+  .object({
+    taskId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    status: z.enum(["open", "blocked", "running", "cancel_requested"]),
+    /** Who assigned it: the lead whose branch this task belongs to. */
+    lead: OperatorFleetTaskAgentSchema,
+    /** Who holds it now; absent while nobody has claimed it. */
+    owner: OperatorFleetTaskAgentSchema.optional(),
+    objective: z.string().trim().min(1).max(OPERATOR_FLEET_TASK_TEXT_MAX).optional(),
+    /** The directory the contract names, which is what a commons district is keyed by. */
+    worktree: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    /** Why it is blocked or being cancelled, in the coordinator's words. */
+    reason: z.string().trim().min(1).max(OPERATOR_FLEET_TASK_TEXT_MAX).optional(),
+    /** Running, but its owner's lease lapsed or its progress deadline passed. */
+    stale: z.literal(true).optional(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type OperatorFleetTask = z.infer<typeof OperatorFleetTaskSchema>;
+
 /** A full live-fleet read plus the cursor that wakes its next long poll. */
 export const OPERATOR_FLEET_WAIT_MS_MAX = 30_000;
 export const OperatorFleetSnapshotSchema = z
@@ -855,9 +934,35 @@ export const OperatorFleetSnapshotSchema = z
      * a quiet fleet.
      */
     edges: z.array(OperatorFleetEdgeSchema).max(OPERATOR_FLEET_EDGE_MAX).optional(),
+    /**
+     * Unfinished Swarm work across every connected coordinator (ADR 0205).
+     * Absent from a host that does not publish tasks; empty when none is open.
+     */
+    tasks: z.array(OperatorFleetTaskSchema).max(OPERATOR_FLEET_TASK_MAX).optional(),
   })
   .strict();
 export type OperatorFleetSnapshot = z.infer<typeof OperatorFleetSnapshotSchema>;
+
+/** Home needs seated people, reachable Swarm threads, and room participants.
+ * Archived personas remain addressable through personas/get; never delete them.
+ * Shared by the service projection and older-host client fallback.
+ */
+export function operatorFleetHome(snapshot: OperatorFleetSnapshot): OperatorFleetSnapshot {
+  const visible = new Set(snapshot.seats.map((seat) => seat.personaId));
+  for (const channel of snapshot.channels) {
+    for (const member of channel.members) visible.add(member.personaId);
+  }
+  return {
+    ...snapshot,
+    personas: snapshot.personas.filter(
+      (persona) =>
+        visible.has(persona.personaId) ||
+        (!isInternalSwarmContact(persona) &&
+          persona.swarm !== undefined &&
+          (persona.swarm.available || persona.conversationId !== undefined)),
+    ),
+  };
+}
 
 /**
  * Herdr's `agent start --kind` allowlist. A harness value reaches an exec
@@ -900,6 +1005,12 @@ export const SpawnOperatorSeatSchema = z
   .object({
     schemaVersion: z.literal(1),
     harness: z.enum(OPERATOR_SEAT_HARNESSES),
+    /** Saved transcript ref (`host:sessionId`); continue it as a normal native seat. */
+    resume: z.string().trim().min(1).max(128).optional(),
+    account: z
+      .string()
+      .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
+      .optional(),
     /** What the roster calls it; herdr's own agent name is derived from this. */
     title: OperatorAgentNameSchema,
     /** Absolute path it starts in — the district it joins (ADR 0022). */
@@ -916,6 +1027,23 @@ export const SpawnOperatorSeatSchema = z
      * `model_reasoning_effort`) (ADR 0185). Absent means the harness default.
      */
     effort: z.string().trim().min(1).max(OPERATOR_SEAT_EFFORT_MAX).optional(),
+    /**
+     * Start the harness with its owner's-Chrome integration on (ADR 0199):
+     * claude's `--chrome`. Codex's Chrome and computer use follow the owner's
+     * own Codex settings, so it needs no flag; other harnesses fail typed.
+     */
+    chrome: z.boolean().optional(),
+    /** Local hire's opinionated skill condition; product/tool skills remain present. */
+    skills: z.enum(["bundled", "plain"]).optional(),
+    /**
+     * The Herdr fleet it starts on (ADR 0184): a registered machine's name.
+     * Absent means the local default fleet; the seat id comes back as
+     * `<fleet>/<terminal>` for any other.
+     */
+    fleet: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
   })
   .strict();
 export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;
@@ -926,13 +1054,53 @@ export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;
  * ready. Those are outcomes to render, not exceptions to crash a surface on —
  * the same call the send lane makes with `undelivered`.
  */
+const SeatControlModeSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.enum(["channel", "adapter"]) }).strict(),
+  z
+    .object({
+      mode: z.literal("terminal"),
+      reason: z.string(),
+      detail: z.string(),
+      fix: z.string().optional(),
+    })
+    .strict(),
+]);
+
 export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
-  z.object({ outcome: z.literal("spawned"), seat: OperatorFleetSeatSchema }).strict(),
+  z
+    .object({
+      outcome: z.literal("spawned"),
+      seat: OperatorFleetSeatSchema,
+      control: SeatControlModeSchema.optional(),
+      skills: z
+        .object({
+          mode: z.enum(["bundled", "plain"]),
+          source: z.enum(["setting", "override"]),
+          applied: z.boolean(),
+          included: z.array(z.string()),
+          excluded: z.array(z.string()),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
   z
     .object({
       outcome: z.literal("failed"),
-      reason: z.enum(["unknown_directory", "harness_unavailable", "not_ready", "herdr_unreachable"]),
+      /** `at_capacity`: a hosted body already runs as many hired agents as its plan allows (VUH-1388). */
+      reason: z.enum([
+        "unknown_directory",
+        "harness_unavailable",
+        "not_ready",
+        "trust_required",
+        "herdr_unreachable",
+        "at_capacity",
+        /** The native message/start may have landed: inspect its pane, never blindly replay. */
+        "delivery_unconfirmed",
+        "start_unconfirmed",
+      ]),
       detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+      control: SeatControlModeSchema.optional(),
     })
     .strict(),
 ]);
@@ -969,9 +1137,11 @@ export const OperatorSeatMoveResultSchema = z.discriminatedUnion("outcome", [
         "unknown_directory",
         "harness_unavailable",
         "not_ready",
+        "trust_required",
         "herdr_unreachable",
       ]),
       detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+      control: SeatControlModeSchema.optional(),
     })
     .strict(),
 ]);
@@ -1185,6 +1355,8 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     linear: z
       .object({
         eventId: z.string().regex(/^[a-f0-9]{64}$/u),
+        /** Present only for the connected bot’s notification inbox, never workspace webhooks. */
+        notification: z.boolean().optional(),
         conversationId: OperatorConversationIdSchema,
         following: z.boolean(),
       })
@@ -1320,6 +1492,95 @@ export function foldOperatorConversationReactions(
   return [...standing.values()];
 }
 
+/**
+ * Select the newest bounded transcript window, preserving chronological order.
+ * `before` is exclusive; omitted means the newest retained event. The event
+ * ceiling still applies when one assistant turn alone has hundreds of events.
+ *
+ * Operator and external messages each make a visible turn. Accepted runs make
+ * one assistant turn, including their captain prose, reasoning and tools. Bare
+ * seat/agent messages settle their own turn. A truncated run starts an implicit
+ * assistant turn at its first retained content event, never forcing a scan of
+ * the entire journal. This helper is node-free so device caches use the same
+ * window as the captain.
+ */
+export function operatorConversationWindow(
+  events: readonly OperatorConversationStreamEvent[],
+  options: { readonly before?: string; readonly limit?: number; readonly turnLimit?: number } = {},
+): { events: OperatorConversationStreamEvent[]; hasOlder: boolean } {
+  const limit = Math.max(
+    1,
+    Math.min(options.limit ?? OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX, OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX),
+  );
+  const turnLimit = Math.max(
+    1,
+    Math.min(
+      options.turnLimit ?? OPERATOR_CONVERSATION_WINDOW_TURNS_DEFAULT,
+      OPERATOR_CONVERSATION_WINDOW_TURNS_MAX,
+    ),
+  );
+  let end = events.length;
+  if (options.before !== undefined) {
+    let low = 0;
+    while (low < end) {
+      const middle = (low + end) >>> 1;
+      if (events[middle]!.cursor < options.before) low = middle + 1;
+      else end = middle;
+    }
+  }
+  const floor = Math.max(0, end - limit);
+  const starts: number[] = [];
+  let assistantOpen = false;
+  let lifecycleOpen = false;
+  for (let index = floor; index < end; index += 1) {
+    const event = events[index]!;
+    if (event.type === "turn") {
+      if (event.phase === "accepted") {
+        starts.push(index);
+        assistantOpen = true;
+        lifecycleOpen = true;
+      } else {
+        assistantOpen = false;
+        lifecycleOpen = false;
+      }
+    } else if (event.type === "message") {
+      if (event.role === "external") {
+        if (!event.streaming) {
+          starts.push(index);
+          // A window can begin on this independent message, omitting a run
+          // that began earlier. Budget a subsequent assistant continuation as
+          // another turn so folding that suffix cannot exceed the ceiling.
+          assistantOpen = false;
+        }
+      } else if (event.role === "operator") {
+        if (!event.streaming) starts.push(index);
+        assistantOpen = false;
+        lifecycleOpen = false;
+      } else {
+        if (!assistantOpen) starts.push(index);
+        assistantOpen = event.role !== "agent" || event.streaming;
+      }
+    } else if (
+      event.type === "reasoning" ||
+      event.type === "tool" ||
+      event.type === "file" ||
+      event.type === "input_requested" ||
+      event.type === "auth"
+    ) {
+      if (!assistantOpen) starts.push(index);
+      assistantOpen = true;
+    } else if (
+      (event.type === "activity" && event.phase === "waiting") ||
+      (event.type === "session" && event.phase !== "started")
+    ) {
+      // A live run can publish waiting mid-turn; bare projections settle here.
+      if (!lifecycleOpen) assistantOpen = false;
+    }
+  }
+  const start = starts.length > turnLimit ? starts[starts.length - turnLimit]! : floor;
+  return { events: events.slice(start, end), hasOlder: start > 0 };
+}
+
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 /**
@@ -1334,7 +1595,9 @@ export type OperatorConversationEventBody = DistributiveOmit<
 
 /**
  * Bounded, pageable replay/tail request. `limit` caps the returned page; `cursor`
- * is the exclusive lower bound (surface clients keep independent cursors).
+ * is the exclusive lower bound by default. Backward replay uses an exclusive
+ * upper bound; omitting it starts at the newest event. Surfaces keep their own
+ * forward-tail and backward-history cursors.
  */
 export const ReplayOperatorConversationRequestSchema = z
   .object({
@@ -1343,6 +1606,9 @@ export const ReplayOperatorConversationRequestSchema = z
     surfaceClientId: OperatorSurfaceClientIdSchema,
     cursor: OperatorConversationCursorSchema.optional(),
     limit: z.number().int().positive().max(OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX).optional(),
+    direction: z.literal("backward").optional(),
+    /** Visible turn ceiling for backward replay; defaults to 20. */
+    turnLimit: z.number().int().positive().max(OPERATOR_CONVERSATION_WINDOW_TURNS_MAX).optional(),
     /**
      * Highest live-draft sequence this surface has already rendered. A tail that
      * would return neither a new event nor a newer draft parks for `waitMs`
@@ -1385,8 +1651,12 @@ export const OperatorConversationReplayPageSchema = z
     events: z.array(OperatorConversationStreamEventSchema).max(OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX),
     /** Oldest cursor still retained; clients below this must reset. */
     retainedFromCursor: OperatorConversationCursorSchema,
-    /** Resume cursor for the next page (exclusive lower bound). */
+    /** Forward replay/tail resume cursor (exclusive lower bound), even on a backward page. */
     nextCursor: OperatorConversationCursorSchema,
+    /** Exclusive upper bound for the next backward page; present on backward replay. */
+    previousCursor: OperatorConversationCursorSchema.optional(),
+    /** More retained events precede this page; present on backward replay. */
+    hasOlder: z.boolean().optional(),
     /** Latest durable cursor (upper bound). */
     safeCursor: OperatorConversationCursorSchema,
     hasMore: z.boolean(),
@@ -1937,49 +2207,38 @@ export function fleetSeatEventsPath(paneId: string): string {
 }
 /** The MCP server name a fleet seat's harness loads the channel from (`server:` form of the channels flag). */
 export const FLEET_SEAT_MCP_SERVER = "clankie-seat";
+/**
+ * The Claude worker plugin a hired seat is driven through (VUH-1458): its
+ * channel carries the seat's mailbox, and its hooks report each settled turn.
+ * The owner approves this exact installed identity in managed policy once.
+ */
+export const CLAUDE_WORKER_PLUGIN = { plugin: "clankie-worker", marketplace: "clankie" } as const;
+export const CLAUDE_WORKER_PLUGIN_ID = `${CLAUDE_WORKER_PLUGIN.plugin}@${CLAUDE_WORKER_PLUGIN.marketplace}`;
+/**
+ * One lifecycle hook from a hired seat's worker plugin, reported by
+ * `clankie seat-hook` from inside its pane. `lastMessage` is the harness's own
+ * final text for a settled turn; `error` names a StopFailure.
+ */
+export const FleetSeatHookSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    event: z.enum(["SessionStart", "UserPromptSubmit", "Stop", "StopFailure"]),
+    sessionId: z.string().min(1).max(200),
+    lastMessage: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX).optional(),
+    error: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+  })
+  .strict();
+export type FleetSeatHook = z.infer<typeof FleetSeatHookSchema>;
+export const FLEET_SEAT_HOOK_PATH = "/v1/fleet/seats/:paneId/hook";
+export function fleetSeatHookPath(paneId: string): string {
+  return `/v1/fleet/seats/${encodeURIComponent(paneId)}/hook`;
+}
 
 /** The seat's answer to one escalation; it lands in the conversation as his reply. */
 export const OperatorSeatReplySchema = z
   .object({ schemaVersion: z.literal(1), text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX) })
   .strict();
 export type OperatorSeatReply = z.infer<typeof OperatorSeatReplySchema>;
-
-/** Private loopback voice chat used by authenticated local operator surfaces. */
-export const LOCAL_VOICE_CHAT_PATH = "/operator/v1/voice-chat";
-
-export const LocalVoiceChatClientEventSchema = z
-  .object({ schemaVersion: z.literal(1), type: z.literal("commit") })
-  .strict();
-export type LocalVoiceChatClientEvent = z.infer<typeof LocalVoiceChatClientEventSchema>;
-
-export const LocalVoiceChatServerEventSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      schemaVersion: z.literal(1),
-      type: z.literal("status"),
-      state: z.enum(["listening", "thinking", "speaking"]),
-    })
-    .strict(),
-  z
-    .object({
-      schemaVersion: z.literal(1),
-      type: z.literal("transcript"),
-      speaker: z.enum(["operator", "clankie"]),
-      text: z.string().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
-      final: z.boolean(),
-      occurredAt: z.string().datetime(),
-    })
-    .strict(),
-  z.object({ schemaVersion: z.literal(1), type: z.literal("response_done") }).strict(),
-  z
-    .object({
-      schemaVersion: z.literal(1),
-      type: z.literal("error"),
-      message: z.string().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
-    })
-    .strict(),
-]);
-export type LocalVoiceChatServerEvent = z.infer<typeof LocalVoiceChatServerEventSchema>;
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   z
@@ -2162,6 +2421,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("fleet"),
       schemaVersion: z.literal(1),
+      /** Omitted preserves the full durable directory for existing clients. */
+      view: z.literal("home").optional(),
       cursor: OperatorConversationCursorSchema.optional(),
       waitMs: z.number().int().min(0).max(OPERATOR_FLEET_WAIT_MS_MAX).optional(),
     })
@@ -2209,6 +2470,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("spawn_seat"),
       schemaVersion: z.literal(1),
       seat: SpawnOperatorSeatSchema,
+      brief: z.string().min(1).max(32_768).optional(),
     })
     .strict(),
   z
@@ -4274,8 +4536,55 @@ export const PairingOfferWireSchema = z.object({
   expiresAt: z.string().datetime(),
   /** Present on long-lived review offers so the operator's output can say so. */
   review: z.literal(true).optional(),
+  /** The link carries the gateway's encrypted route in its fragment (ADR 0151). */
+  gateway: z.literal(true).optional(),
+  /** The Mac's direct control origin the link carries (ADR 0204). */
+  direct: z.string().min(1).max(2_048).optional(),
 });
 export type PairingOfferWire = z.infer<typeof PairingOfferWireSchema>;
+
+/** Query parameter naming the Mac's direct control origin in a pairing link (ADR 0204). */
+export const PAIRING_DIRECT_PARAM = "direct";
+
+export type DirectOriginTransport = "https" | "local" | "blocked";
+
+function privateIpLiteral(hostname: string): boolean {
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/u.exec(hostname);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    );
+  }
+  if (!hostname.startsWith("[")) return false;
+  const v6 = hostname.slice(1, -1).toLowerCase();
+  return v6 === "::1" || /^f[cd][0-9a-f]{0,2}:/u.test(v6) || /^fe[89ab][0-9a-f]?:/u.test(v6);
+}
+
+/**
+ * How an App Store build may reach a direct origin under ATS (ADR 0204): HTTPS
+ * anywhere; plain HTTP only where `NSAllowsLocalNetworking` applies and the
+ * address is on the LAN — `.local`, single-label names, and private, link-local
+ * or loopback IP literals. A tailnet or public name over HTTP is blocked, as is
+ * a tailnet IP: serve it over HTTPS (`tailscale serve --https`) instead.
+ */
+export function directOriginTransport(value: string): DirectOriginTransport {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "blocked";
+  }
+  if (url.protocol === "https:") return "https";
+  if (url.protocol !== "http:") return "blocked";
+  const hostname = url.hostname.toLowerCase().replace(/\.$/u, "");
+  if (hostname.endsWith(".local") || privateIpLiteral(hostname)) return "local";
+  return /^[a-z0-9-]+$/u.test(hostname) && !/^\d+$/u.test(hostname) ? "local" : "blocked";
+}
 
 /** Host identity shown on the device's access-review screen. */
 export const PairingHostSchema = z.object({ name: z.string().min(1) });
@@ -4338,12 +4647,29 @@ export const PairingCompleteRequestSchema = z.object({
 });
 export type PairingCompleteRequest = z.infer<typeof PairingCompleteRequestSchema>;
 
+const DeviceDirectOriginSchema = DeviceHostBaseUrlSchema.refine((value) => {
+  try {
+    const url = new URL(value);
+    return url.pathname === "/" && url.hostname !== "api.clankie.bot";
+  } catch {
+    return false;
+  }
+}, "expected a direct origin, not a public gateway route");
+
+/** Host-advertised private endpoints; control and relay need not share a port. */
+export const DeviceDirectRouteSchema = z.object({
+  controlPlaneUrl: DeviceDirectOriginSchema,
+  relayUrl: DeviceDirectOriginSchema,
+});
+export type DeviceDirectRoute = z.infer<typeof DeviceDirectRouteSchema>;
+
 export const PairingCompleteResponseSchema = z.object({
   deviceId: z.string().min(1),
   deviceToken: z.string().min(1),
   grants: DeviceGrantSetSchema,
   sessionExpiresAt: z.string().datetime(),
   relayUrl: DeviceHostBaseUrlSchema.optional(),
+  directRoute: DeviceDirectRouteSchema.optional(),
 });
 export type PairingCompleteResponse = z.infer<typeof PairingCompleteResponseSchema>;
 
@@ -4352,11 +4678,15 @@ export const DeviceSessionRefreshResponseSchema = z.object({
   grants: DeviceGrantSetSchema,
   sessionExpiresAt: z.string().datetime(),
   relayUrl: DeviceHostBaseUrlSchema.optional(),
+  directRoute: DeviceDirectRouteSchema.optional(),
 });
 export type DeviceSessionRefreshResponse = z.infer<typeof DeviceSessionRefreshResponseSchema>;
 
 /** Device-authenticated view of its own registration, used to restore a session on launch. */
 export const DeviceSelfResponseSchema = z.object({
+  /** Hosting lifecycle is never granted to a device, including through the legacy relay. */
+  controlScope: z.literal("hosted").optional(),
+  directRoute: DeviceDirectRouteSchema.optional(),
   deviceId: z.string().min(1),
   name: z.string().min(1),
   platform: DevicePlatformSchema,
@@ -5047,6 +5377,8 @@ export type MediaRefusalReason = z.infer<typeof MediaRefusalReasonSchema>;
 
 export const GenerateImageRequestSchema = z
   .object({
+    /** Use only owner-configured appearance references for self-depiction, never vibe images. */
+    personaReference: z.boolean().optional(),
     schemaVersion: z.literal(1),
     prompt: z.string().trim().min(1).max(4_000),
     /** Provider-neutral shape hint; the provider and model come from operator config. */
@@ -5287,7 +5619,7 @@ const DiscordVoiceLocalIdSchema = z.string().min(1).max(128).regex(/^\S+$/u);
 export const DISCORD_VOICE_TRANSCRIPTS_PATH = "/v1/discord/voice-transcripts";
 export const DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX = 200;
 export const DiscordVoiceTranscriptCursorSchema = z.string().regex(/^\d{12}$/u);
-export const DiscordVoiceTranscriptLogEntrySchema = z
+const DiscordVoiceTranscriptBaseSchema = z
   .object({
     schemaVersion: z.literal(1),
     body: z.enum(["bot", "user_session"]),
@@ -5301,6 +5633,22 @@ export const DiscordVoiceTranscriptLogEntrySchema = z
     text: z.string().min(1).max(64_000),
   })
   .strict();
+export const DiscordVoiceTranscriptLogEntrySchema = z.union([
+  DiscordVoiceTranscriptBaseSchema.extend({ role: z.literal("user").optional() }).strict(),
+  DiscordVoiceTranscriptBaseSchema.extend({
+    role: z.literal("assistant"),
+    speakerId: z.literal("clankie"),
+    itemId: z.string().max(256),
+    playbackId: z.string().min(1).max(256).optional(),
+    responseId: z.string().min(1).max(256).optional(),
+    textSource: z.enum(["native_audio", "tts_text"]),
+    textComplete: z.boolean(),
+    // Generated wording is not word-aligned to audible PCM after a cutoff.
+    outcome: z.enum(["played", "interrupted", "suppressed", "failed", "truncated"]),
+    audioStarted: z.boolean(),
+    playbackMs: z.number().finite().nonnegative(),
+  }).strict(),
+]);
 export type DiscordVoiceTranscriptLogEntry = z.infer<typeof DiscordVoiceTranscriptLogEntrySchema>;
 
 export const DiscordVoiceTranscriptPageSchema = z
@@ -5362,7 +5710,7 @@ export type DiscordVoiceResponseState = z.infer<typeof DiscordVoiceResponseState
  * the latency line cannot tell a real reply from a play narration — which is
  * exactly the ambiguity that slowed the 2026-08-02 diagnosis.
  */
-export const DiscordVoiceResponseTriggerSchema = z.enum(["room", "narration"]);
+export const DiscordVoiceResponseTriggerSchema = z.enum(["room", "narration", "membership"]);
 export type DiscordVoiceResponseTrigger = z.infer<typeof DiscordVoiceResponseTriggerSchema>;
 
 /** Content-free checkpoints between captured audio and a spoken response. */
@@ -5385,6 +5733,7 @@ export const DiscordVoiceFloorDecisionReasonSchema = z.enum([
   "mentioned",
   "holder",
   "reply_policy_all",
+  "transcript",
   "volition",
   "explicit",
   "decay",
@@ -5397,6 +5746,7 @@ export const DiscordVoiceModelResponseOutcomeSchema = z.enum(["audio", "tool", "
 export type DiscordVoiceModelResponseOutcome = z.infer<typeof DiscordVoiceModelResponseOutcomeSchema>;
 
 export const DiscordVoiceRealtimeToolNameSchema = z.enum([
+  "voice_leave",
   "ask_clankie",
   "look_at_screen",
   "youtube_search",
@@ -5478,6 +5828,16 @@ export const DiscordVoiceEvidenceSchema = z
   .discriminatedUnion("type", [
     z
       .object({
+        type: z.literal("participant"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        action: z.enum(["joined", "left"]),
+        humanCount: DiscordVoiceCounterSchema,
+        deliveryId: DiscordVoiceLocalIdSchema,
+      })
+      .strict(),
+    z
+      .object({
         type: z.literal("joined"),
         ...discordVoiceChannelScope,
         daveProtocolVersion: z.number().int().nonnegative(),
@@ -5500,6 +5860,11 @@ export const DiscordVoiceEvidenceSchema = z
         userId: DiscordVoiceGatewayIdSchema,
         deliveryId: DiscordVoiceLocalIdSchema,
         durationMs: DiscordVoiceDurationMsSchema,
+        /** Capture endpoint, not proof of the last spoken phoneme. */
+        silenceDurationMs: DiscordVoiceDurationMsSchema.optional(),
+        /** Near-silent captures never sent to the transcription provider. */
+        filtered: z.boolean().optional(),
+        peakRms: z.number().nonnegative().max(32_768).optional(),
       })
       .strict(),
     z
@@ -5511,7 +5876,10 @@ export const DiscordVoiceEvidenceSchema = z
         outcome: DiscordVoiceTranscriptionOutcomeSchema,
         /** Character count only; transcript content remains unrepresentable. */
         characters: DiscordVoiceCounterSchema,
+        /** Capture start to final transcript; includes speaking time. */
         latencyMs: DiscordVoiceDurationMsSchema,
+        captureEndToFinalMs: DiscordVoiceDurationMsSchema.optional(),
+        lastAudioToFinalMs: DiscordVoiceDurationMsSchema.optional(),
         addressed: z.boolean(),
         /**
          * Loudest RMS in the capture, full scale 32_768. Content-free — it is
@@ -5602,6 +5970,8 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("response"),
         ...discordVoiceChannelScope,
+        playbackId: DiscordVoiceLocalIdSchema.optional(),
+        itemId: DiscordVoiceLocalIdSchema.optional(),
         deliveryId: DiscordVoiceLocalIdSchema,
         /** Gateway speaker whose immutable utterance id caused this response. */
         userId: DiscordVoiceGatewayIdSchema.optional(),
@@ -5617,6 +5987,15 @@ export const DiscordVoiceEvidenceSchema = z
         /** Captain round trip inside `ask_clankie`; 0 on the fast path. */
         handoffMs: DiscordVoiceDurationMsSchema,
         playbackMs: DiscordVoiceDurationMsSchema,
+        /** Last received input PCM to transmitted speech; not headphone latency. */
+        lastAudioToFirstAudioMs: DiscordVoiceDurationMsSchema.optional(),
+        captureEndToFirstAudioMs: DiscordVoiceDurationMsSchema.optional(),
+        transcriptToFirstAudioMs: DiscordVoiceDurationMsSchema.optional(),
+        /** Includes wake setup, queuing, and any handoff before this response. */
+        transcriptToRequestMs: DiscordVoiceDurationMsSchema.optional(),
+        requestToFirstTextMs: DiscordVoiceDurationMsSchema.optional(),
+        requestToFirstAudioChunkMs: DiscordVoiceDurationMsSchema.optional(),
+        firstAudioChunkToPlaybackMs: DiscordVoiceDurationMsSchema.optional(),
         /** Realtime `response.done` usage; omitted when the provider sent none. */
         inputTokens: DiscordVoiceCounterSchema.optional(),
         outputTokens: DiscordVoiceCounterSchema.optional(),
@@ -5644,6 +6023,9 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("interrupted"),
         ...discordVoiceChannelScope,
+        playbackId: DiscordVoiceLocalIdSchema.optional(),
+        itemId: DiscordVoiceLocalIdSchema.optional(),
+        deliveryId: DiscordVoiceLocalIdSchema.optional(),
         userId: DiscordVoiceGatewayIdSchema,
         /** Deliberate truncation while playing; streamed audio has no synthesizing phase to cut. */
         phase: z.literal("playing"),
@@ -5653,6 +6035,8 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("failed"),
         ...discordVoiceChannelScope,
+        playbackId: DiscordVoiceLocalIdSchema.optional(),
+        itemId: DiscordVoiceLocalIdSchema.optional(),
         deliveryId: DiscordVoiceLocalIdSchema.optional(),
         userId: DiscordVoiceGatewayIdSchema.optional(),
         stage: DiscordVoiceFailureStageSchema,
@@ -5663,6 +6047,7 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("left"),
         ...discordVoiceChannelScope,
+        reason: DiscordVoiceFailureCodeSchema.optional(),
         inputTokens: DiscordVoiceCounterSchema.optional(),
         outputTokens: DiscordVoiceCounterSchema.optional(),
         spokenCount: DiscordVoiceCounterSchema.optional(),

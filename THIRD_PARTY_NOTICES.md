@@ -1,18 +1,23 @@
 # Third-party notices
 
-Vendored code:
+Vendored code and instructions:
+
+- [Opinionated process skills](vendor/opinionated-skills.json) — MIT, authored in
+  Volpestyle/skills. The snapshot retains [its license](vendor/opinionated-skills/LICENSE);
+  downloadable releases include it as `licenses/opinionated-skills-MIT.txt`.
 
 - [`apps/vox`](apps/vox/README.md) — Clankie's recovered native media package,
   AGPL-3.0-or-later. See its [license](apps/vox/LICENSE),
   [provenance](apps/vox/PROVENANCE.md), and
   [native dependency notices](apps/vox/THIRD_PARTY_NOTICES.md).
 
-Release-built native dependency:
+Bundled native dependency:
 
-- Herdr — the pinned `Volpestyle/clankie-herdr` source declares Apache-2.0.
-  Its repository, commit, and archive checksum are recorded in
-  [`scripts/release/herdr.json`](scripts/release/herdr.json). The release includes
-  the locked Cargo graph's license texts and the vendored libghostty-vt notices.
+- Herdr — an official release binary from `herdrdev/herdr`. Its repository,
+  release tag, platform binary checksums, and matching source-archive checksum
+  are recorded in [`scripts/release/herdr.json`](scripts/release/herdr.json).
+  Release assembly retains that source for the locked Cargo license inventory
+  and vendored libghostty-vt notices; it does not build the retired Clankie fork.
 
 The architecture uses or interoperates with, but does not vendor, the following projects:
 

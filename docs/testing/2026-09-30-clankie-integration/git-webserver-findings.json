@@ -1,0 +1,113 @@
+{
+  "sourceRevision": "7431b8c85edc5da95f081ca12ee7270ca8fd95cb",
+  "harness": "claude",
+  "model": "claude-sonnet-5-5",
+  "finishedAt": "2026-09-30T14:43:24.856Z",
+  "caseId": "terminal-bench/configure-git-webserver",
+  "rows": [
+    {
+      "config": "current",
+      "rep": 0,
+      "passed": false,
+      "reward": 0,
+      "error": null,
+      "verifierSha256": "17099ad0c2d225474aa008f695aa125072dc2cd51409615f7686d485ed029f5e",
+      "observedFailure": "test_hello_html_exists: Web server returned HTTP 404"
+    },
+    {
+      "config": "bare",
+      "rep": 0,
+      "passed": false,
+      "reward": 0,
+      "error": null,
+      "verifierSha256": "f4bdd60b479f4ba3b5af0deb0dfa6e8d9e1a7b6cc12b275303abffee88f8d0f6",
+      "observedFailure": "test_hello_html_exists: Web server returned HTTP 404"
+    },
+    {
+      "config": "bare",
+      "rep": 1,
+      "passed": false,
+      "reward": null,
+      "error": "AgentSetupTimeoutError: Agent setup timed out after 360.0 seconds"
+    },
+    {
+      "config": "current",
+      "rep": 1,
+      "passed": false,
+      "reward": null,
+      "error": "AgentSetupTimeoutError: Agent setup timed out after 360.0 seconds"
+    },
+    {
+      "config": "bare",
+      "rep": 1,
+      "passed": true,
+      "reward": 1,
+      "error": null,
+      "verifierSha256": "aaefd80a035425f48e478458bf9401540b363028d2b3c531fb4c192ce1790bd6"
+    },
+    {
+      "config": "current",
+      "rep": 1,
+      "passed": false,
+      "reward": 0,
+      "error": null,
+      "verifierSha256": "0b99143f3b1eaad21bea6b13bd22af49c7b901d89f961906530557f1318628d8",
+      "observedFailure": "test_hello_html_exists: Web server returned HTTP 404"
+    },
+    {
+      "config": "current",
+      "rep": 2,
+      "passed": false,
+      "reward": 0,
+      "error": null,
+      "verifierSha256": "ddd2dc4fa518d9422e0ba1c45e4e1c4553ecc8f5bb3ddaf775d266bbee9069c3",
+      "observedFailure": "test_hello_html_exists: Web server returned HTTP 404"
+    },
+    {
+      "config": "bare",
+      "rep": 2,
+      "passed": true,
+      "reward": 1,
+      "error": null,
+      "verifierSha256": "38f368a6c5e16e234eb7fa5a4b9c7915d004cc19c7d743b202cc47b4428864f0"
+    },
+    {
+      "config": "bare",
+      "rep": 3,
+      "passed": false,
+      "reward": 0,
+      "error": null,
+      "verifierSha256": "70213a587787a56e10d10fa08517ae6c7e8563dc94a2a2ac658e7a13a1c60cbc",
+      "observedFailure": "test_hello_html_exists: Web server returned HTTP 404"
+    },
+    {
+      "config": "current",
+      "rep": 3,
+      "passed": false,
+      "reward": 0,
+      "error": null,
+      "verifierSha256": "5c6da59d840cebbf2ab60c73055b0b962c1a86bb8c0b55cfcb142a0defb20c2d",
+      "observedFailure": "test_hello_html_exists: Web server returned HTTP 404"
+    },
+    {
+      "config": "current",
+      "rep": 4,
+      "passed": false,
+      "reward": 0,
+      "error": null,
+      "verifierSha256": "b5b2fdeec14dc18ac3c981d4844601590f4df87ea168c2f4bb72aec335f646f4",
+      "observedFailure": "test_hello_html_exists: Web server returned HTTP 404"
+    },
+    {
+      "config": "bare",
+      "rep": 4,
+      "passed": false,
+      "reward": 0,
+      "error": null,
+      "verifierSha256": "6552744e8a123e313da141d8fd6e0b0b6abfda9ec01ba5388ed232b88cdcc5fb",
+      "observedFailure": "test_hello_html_exists: Web server returned HTTP 404"
+    }
+  ],
+  "criteriaChanged": false,
+  "newTrials": 0
+}

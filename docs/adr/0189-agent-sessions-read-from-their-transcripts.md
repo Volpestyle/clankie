@@ -1,6 +1,9 @@
 # ADR 0189: Agent sessions read from their transcripts, on any host
 
-Status: proposed (Claude and Codex, 2026-09-25). Extends
+Status: proposed (Claude and Codex, 2026-09-25). Step 2 (resumed turns) retired
+2026-09-30 under [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md):
+it was never used, and a headless process replacing a worker is what ADR 0203
+rules out; reading stays. Extends
 [ADR 0188](0188-native-agent-chats-read-their-own-history.md) and applies
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md).
 
@@ -51,17 +54,34 @@ flowchart LR
 
 ## Resumed turns (step 2)
 
-Clankie can also continue a Claude, Codex, Grok or Pi session by running that
-harness headless, resumed onto the saved history, over the same host connection.
-This is a new process, not delivery into an open tab, so it can fork a session a
-tab still holds. A one-minute quiet window and one turn per session reduce that
-risk without removing it. A run whose connection was lost is `unknown`, and keeps
-the session locked until an operator releases it. The turn gets the harness's
-default permissions; granting more is a later owner setting.
+Retired 2026-09-30: the separate headless runner and its durable runs/quiet-window
+heuristic are removed. A file's modification time cannot establish exclusive
+ownership of a session.
 
-This needs no Swarm enrollment and no install, so it reaches agents that were
-never set up for Clankie. Agents enrolled in Swarm are still messaged through
-Swarm.
+## Native continuation
+
+Saved-session continuation is an option on `hire_agent`, not another runner.
+Fresh confined transcript metadata provides the exact UUID, harness and original
+working directory. A complete inventory of the configured Herdr servers on that
+host identifies an existing native seat; reuse precedes capacity checks. Otherwise
+the normal hire path starts `claude --resume`, `codex resume`, `grok --resume`,
+or `pi --session` interactively and confirms the same UUID before sending work.
+Claude and Codex use the existing adapters; other or remote hires keep the normal
+native terminal lane. Completion remains the existing seat watch/harness event.
+
+Remote transcript and runtime labels need not agree. Their exact SSH target and
+shell must agree, and the runtime must grant the original workspace. Codex keeps
+the registered account that owns the transcript, including canonical path checks.
+Concurrent starts serialize within the hire path, without a parallel run store.
+Incomplete inventory or ambiguous live identity refuses a start. Uncertain native
+delivery is typed and never retried through another lane; an uncertain start
+retains its labeled pane for inspection, including after service recreation.
+Unregistered terminals are outside this inventory, so their owners must close
+them before resuming that history. Quiet history is not proof they are closed.
+
+CLI, API and TUI project the same hire path (`agents resume`,
+`POST /v1/agent-sessions/resume`, and the saved-session action). Enrolled Swarm
+workers keep Swarm fencing; resumption never creates a replacement actor or claim.
 
 ## Not yet decided
 

@@ -1,0 +1,48 @@
+{
+  "set": {
+    "ok": true,
+    "count": 6,
+    "vibeCount": 6,
+    "appearanceCount": 0,
+    "encodedBytes": 346992,
+    "restart": "Restart Clankie to apply persona images: clankie restart captain"
+  },
+  "status": {
+    "ok": true,
+    "count": 6,
+    "vibeCount": 6,
+    "appearanceCount": 0,
+    "encodedBytes": 346992,
+    "restart": "Restart Clankie to apply persona images: clankie restart captain",
+    "videos": [
+      {
+        "role": "vibe",
+        "kind": "video",
+        "status": "loaded",
+        "bytes": 7297299,
+        "encodedBytes": 176452,
+        "frames": 3,
+        "duration": 29.711667,
+        "timestamps": [4.952, 14.856, 24.76]
+      },
+      {
+        "role": "vibe",
+        "kind": "video",
+        "status": "loaded",
+        "bytes": 3208553,
+        "encodedBytes": 170540,
+        "frames": 3,
+        "duration": 13.316667,
+        "timestamps": [2.219, 6.658, 11.097]
+      }
+    ]
+  },
+  "clear": {
+    "ok": true,
+    "count": 0,
+    "vibeCount": 0,
+    "appearanceCount": 0,
+    "encodedBytes": 0,
+    "restart": "Restart Clankie to apply persona images: clankie restart captain"
+  }
+}

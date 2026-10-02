@@ -1,6 +1,20 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["login", "logout", "whoami", "connect", "disconnect", "fleet", "terminal", "keys", "deprovision"],
+    lines: [
+      "  login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]",
+      "                           Sign in by email code: connects a hosted Clankie if the account has",
+      "                           one, otherwise signs this Mac in for remote access",
+      "  logout | whoami          Hosted sign-out (never touches remote access); whoami is also in `status`",
+      "  Hosted restart/reset/deprovision require the account page/control plane.",
+      "  fleet | terminal         Hosted fleet/terminal catalog; mutations use --json-stdin",
+      "  keys [status|set PROVIDER --key-stdin|remove PROVIDER|validate PROVIDER]",
+      "  connect hosted           Like login, but requires a hosted Clankie; disconnect is an alias for logout",
+      "  disconnect               Forget this hosted client; hosted work continues",
+    ],
+  },
+  {
     nouns: ["connections"],
     lines: ["  connections              Inspect runtime, Swarm and connected-account inventory (JSON)"],
   },
@@ -10,12 +24,17 @@ const HEADLESS_COMMAND_HELP = [
       "  runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID",
       "          workspaces ID (--repo /checkout | --dir /directory)... | workspaces ID --clear",
       "          capacity ID N|--clear | budget N|--clear (per coordinator scope; default 16; clear = unlimited)",
+      "          harness ID claude|codex|pi | mode ID interactive (native worker terminal)",
       "                           Manage named execution connections (JSON)",
     ],
   },
   {
     nouns: ["seat-sync"],
-    lines: ["  seat-sync                Project the launched Claude seat transcript (hook stdin)"],
+    lines: ["  seat-sync                Project the launched native seat transcript (hook stdin)"],
+  },
+  {
+    nouns: ["seat-hook"],
+    lines: ["  seat-hook                Report a hired seat's settled turn (worker plugin hook stdin)"],
   },
   {
     nouns: ["access"],
@@ -25,19 +44,21 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
-    nouns: ["agents"],
+    nouns: ["agents", "sessions"],
     lines: [
+      "  agents contacts          Known agent identities and availability (JSON)",
+      "  sessions                 Alias for agents session commands",
       "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",
-      "  agents send HOST:SESSION MESSAGE | runs [RUN] | cancel RUN | release RUN",
+      "  agents resume HOST:SESSION [--fleet ID] [--brief TEXT]",
       "  agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID",
-      "                           Read or resume any Claude/Codex/Grok/Pi session, here or over SSH (JSON)",
+      "                           Read any Claude/Codex/Grok/Pi session, here or over SSH (JSON)",
     ],
   },
   {
     nouns: ["swarm"],
     lines: [
       "  swarm [status|connections] | connect PRIVATE.json | disconnect ID",
-      "  swarm contacts | thread PERSONA | message PERSONA TEXT",
+      "  swarm contacts | tasks | thread PERSONA | message PERSONA TEXT",
       "                           Inspect or connect an authorized Swarm coordinator (JSON)",
     ],
   },
@@ -45,7 +66,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["evaluator"],
     lines: [
       "  evaluator [status|enable [--harness codex|claude]|disable|open|retry ID]",
-      "                           Independent task assessments in Herdr (JSON)",
+      "                           Developer diagnostic: independent assessments in Herdr (JSON)",
     ],
   },
   {
@@ -97,6 +118,12 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["awake"],
+    lines: [
+      "  awake [status|on|off]    Keep this Mac awake while plugged in (launcher-supervised caffeinate; JSON)",
+    ],
+  },
+  {
     nouns: ["pair"],
     lines: [
       "  pair [--json] [--timeout SEC]",
@@ -105,9 +132,12 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["devices"], lines: ["  devices [--json]         List paired devices"] },
   {
-    nouns: ["gateway"],
+    nouns: ["remote-access", "gateway"],
     lines: [
-      "  gateway [status]         Public doorway configuration (JSON)",
+      "  remote-access [status]   Remote access for this Mac (self-host only; gateway alias)",
+      "  remote-access on [--email EMAIL] [--code-stdin]",
+      "                           Sign this Mac in (or back in) with an email code",
+      "  remote-access off | rotate-key | direct --control-plane-url URL --relay-url URL",
       "  gateway set --url URL --host-id ID | disable",
     ],
   },
@@ -142,6 +172,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["effort"],
     lines: ["  effort set LEVEL [--model provider/model] | clear [--model provider/model]"],
   },
+  { nouns: ["voice"], lines: ["  voice [status] | model set MODEL_ID | model clear (ElevenLabs)"] },
   { nouns: ["image-model"], lines: ["  image-model [status] | set provider/model | clear"] },
   { nouns: ["video-model"], lines: ["  video-model [status] | set provider/model | clear"] },
   { nouns: ["persona"], lines: ["  persona [status]         Read owner-authored character configuration"] },
@@ -153,13 +184,14 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["linear"],
     lines: [
       "  linear [status] | follow on|off | inbox [read | ack CURSOR]  Linear awareness and unread activity",
-      "  linear work list | bind ORG ISSUE CONVERSATION [--from ID] | unbind ORG ISSUE CONVERSATION",
+      "  linear work list",
     ],
   },
   {
     nouns: ["accounts"],
     lines: [
       "  accounts [list] | connect github | disconnect github|linear   Owner's GitHub and Linear connections (JSON)",
+      "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
       "  accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]",
     ],
   },
@@ -172,10 +204,21 @@ const HEADLESS_COMMAND_HELP = [
       "                           Track work in the repo's own convention, with evidence (JSON)",
     ],
   },
+  {
+    nouns: ["skills"],
+    lines: [
+      "  skills [opinionated on|off | exclude NAME | include NAME]",
+      "                           Bundled skill classes and selection (JSON)",
+    ],
+  },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
     nouns: ["browser"],
-    lines: ["  browser [status] | record on|off  Save each burst of his browsing as a WebM (JSON)"],
+    lines: [
+      "  browser [status] | record on|off  Save each burst of his browsing as a WebM (JSON)",
+      "  browser harnesses | delegate on|off",
+      "                           Computer-use harnesses he can hire, and whether he is offered them (JSON)",
+    ],
   },
   {
     nouns: ["rivals"],
@@ -227,7 +270,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["memory-card"],
     lines: [
-      "  memory-card [--lane LANE]",
+      "  memory-card [--lane LANE] [--hook]",
       "                           The memory card that lane's next run injects (plain text)",
     ],
   },
@@ -258,8 +301,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["seat"],
     lines: [
-      "  seat [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
-      "                           Sit in Claude Code as Clankie (TTY); --dry-run prints the launch plan (JSON)",
+      "  seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
+      "                           Sit in Claude Code or Codex as Clankie (TTY); --dry-run prints the launch plan (JSON)",
     ],
   },
   {
@@ -277,6 +320,10 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  discord [status]         Read non-secret Discord identifiers and body selection"],
   },
   { nouns: ["discord"], lines: ["  discord set --field value […] | clear --field […]"] },
+  {
+    nouns: ["discord"],
+    lines: ["  discord transcripts [--cursor CURSOR] [--limit N]  Read private retained voice text"],
+  },
 ] as const;
 
 export const HEADLESS_NOUNS: readonly string[] = [
@@ -287,6 +334,27 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
   return (
     command === "help" || command === "--help" || command === "-h" || HEADLESS_NOUNS.includes(command ?? "")
   );
+}
+
+/** Words people reach for that name a different launcher command. */
+const LAUNCHER_COMMAND_HINTS: Readonly<Record<string, string>> = {
+  stop: "down",
+  start: "restart",
+  up: "restart",
+  kill: "down",
+};
+
+/**
+ * The launcher opens the console only when no command is given. Any other
+ * word that is not a headless command must be refused before the launcher
+ * starts the service for a console that will never open.
+ */
+export function unknownLauncherCommand(command: string | undefined): string | undefined {
+  if (command === undefined || isHeadlessCaptainCommand(command)) return undefined;
+  const hint = LAUNCHER_COMMAND_HINTS[command];
+  return hint === undefined
+    ? `unknown command "${command}"; run \`clankie help\``
+    : `unknown command "${command}"; did you mean \`clankie ${hint}\`? Run \`clankie help\` for all commands`;
 }
 
 export function commandHelp(): string {
@@ -311,7 +379,7 @@ export function commandHelp(): string {
     "  An endpoint that wants a key reads it from the credential store under the provider",
     "  id; put it there with /auth <providerId> in the console.",
     "  --set selects the first listed model as captain.",
-    "  Config writes need `clankie restart captain`, except Linear follow which applies live.",
+    "  Config writes need `clankie restart captain`, except Linear follow (live) and skills (new sessions/hires).",
     "",
     "pair / devices / operator-credential rotate default to human text; pass --json.",
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",

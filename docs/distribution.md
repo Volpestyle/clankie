@@ -7,13 +7,10 @@ executable; the launcher keeps the existing process boundaries behind it.
 
 ## Install
 
-The release supports macOS 14 or newer on Apple silicon.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
-clankie --version
-clankie
-```
+Follow the [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-mac)
+for requirements, installation, local/hosted selection, and first model setup.
+This reference covers the installer and runtime layout. `clankie --version`
+reports the installed release.
 
 The installer verifies the archive's published SHA-256 checksum and installs
 each version immutably under `~/.local/share/clankie/releases/`. It updates
@@ -24,7 +21,7 @@ each version immutably under `~/.local/share/clankie/releases/`. It updates
 Install a specific release with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh -s -- --version v0.2.0
+curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh -s -- --version v0.3.3
 ```
 
 The release binaries are ad-hoc signed. The command-line installer uses
@@ -36,13 +33,13 @@ browser-downloaded package.
 
 ```text
 ~/.local/share/clankie/
-├── current -> releases/v0.2.0
-└── releases/v0.2.0/
+├── current -> releases/v0.3.3
+└── releases/v0.3.3/
     ├── bin/clankie
     ├── libexec/node
     ├── bin/clankie-herdr      # attach-only viewer shortcut
     ├── libexec/herdr          # Clankie-owned native worker runtime
-    ├── .agents/skills/        # product skills (this-machine, trace-clankie)
+    ├── .agents/skills/        # product and working skills
     ├── docs/cli.md            # headless command contract
     ├── apps/                  # bundled services, assets, and clankvox
     ├── integrations/          # game runtime assets and the optional herdr plugin
@@ -61,6 +58,11 @@ Supervised services run from their installed release root.
 Herdr ships as an official stable release binary, verified against the
 platform checksum in `scripts/release/herdr.json`. Its matching source archive
 is retained for license inventory; no fork or Rust/Zig build is needed for Herdr.
+The build generates the bundled `herdr` skill directly from that executable's
+`--skill` output, including both Claude plugin copies. `pnpm herdr:skill` refreshes
+the checkout copy from the same checksum-verified pin; `pnpm check` rejects drift.
+The hosted image verifies the skill bytes and pinned version as its runtime user,
+so a fresh body needs no globally installed Herdr skill.
 The service checks `https://herdr.dev/latest.json` at startup and every six hours,
 staging verified releases outside the immutable install. Live workers keep a
 matching server/CLI copy. Staged releases apply when Clankie's own fleet starts
@@ -87,7 +89,8 @@ models and credentials are configured, and whether those optional commands
 are on PATH. The headless command contract is
 [`docs/cli.md`](cli.md) (`clankie help` prints the same index). Checkout-only
 skills under `.agents/dev-skills` stay out of the archive. The release also
-ships `docs/worker-access.md`, `docs/model-keys.md`, `docs/rivals.md`,
+ships `docs/bundled-skills.md`, the pinned process-skill manifest and MIT license,
+`docs/worker-access.md`, `docs/model-keys.md`, `docs/rivals.md`,
 `docs/discord-ingress.md`, `packages/swarm/README.md`, and
 `infra/hosted/README.md` for the installed skills' operational references.
 Other repository documentation does not ship.
@@ -108,8 +111,7 @@ from the Mac release and reuses its existing private S3 and CloudFront hosting.
 
 ## Build and release
 
-On an Apple silicon Mac with the repository toolchain and Zig 0.15.2 installed
-(the Herdr source pin supplies its own Rust toolchain):
+On an Apple silicon Mac with the [repository toolchain](../CONTRIBUTING.md):
 
 ```bash
 pnpm release:build
@@ -130,6 +132,6 @@ Swarm/Herdr worker and relay image; `pnpm hosted:smoke` checks isolated executio
 and persistence. The [hosted deployment guide](../infra/hosted/README.md) owns
 setup, supported capabilities and remaining managed-hosting requirements.
 
-Pushing a version tag matching `package.json` (for example `v0.2.0`) runs the
+Pushing a version tag matching `package.json` (for example `v0.3.3`) runs the
 full repository check, builds and smoke-tests the archive on an Apple silicon
 GitHub runner, and uploads both assets to the matching GitHub Release.

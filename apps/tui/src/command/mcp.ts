@@ -39,6 +39,7 @@ import {
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
   CaptainSessionLaneV2Schema,
+  CLAUDE_WORKER_PLUGIN_ID,
   FLEET_SEAT_MCP_SERVER,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorSeatEventsPageSchema,
@@ -53,6 +54,13 @@ const execFileAsync = promisify(execFileCallback);
 const MCP_USAGE =
   "Usage: clankie mcp [--lane operator [--conversation ID] | --seat | --grant FILE | --swarm-grant ID | --swarm]";
 const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
+/** A hired seat's worker plugin channel (VUH-1458), approved under `--channels`. */
+const WORKER_CHANNEL_PLUGIN = `plugin:${CLAUDE_WORKER_PLUGIN_ID}`;
+const OPERATOR_CHANNEL_ENTRIES = [
+  "plugin:clankie@inline",
+  "plugin:clankie@clankie",
+  "server:clankie",
+] as const;
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
 const OUTBOX_POLL_WAIT_MS = 25_000;
@@ -163,8 +171,34 @@ export function parseMcpArgs(args: readonly string[]): McpArgs {
  * (or the `=` form of that pair). `--channels` is not a bind: Claude Code
  * rejects `server:` entries under it, so polling there is a black hole.
  */
-export function parentArgvLoadsFleetChannel(argv: string | undefined): boolean {
-  return parentArgvLoadsChannel(argv, FLEET_CHANNEL_SERVER);
+export function parentArgvLoadsFleetChannel(argv: string | undefined, workerPlugin = false): boolean {
+  // A globally registered clankie-seat can run beside the worker plugin.
+  // Only the selected server may consume the mailbox; Claude drops events
+  // from the other connection even though both advertise the capability.
+  return workerPlugin
+    ? parentArgvApprovesChannel(argv, WORKER_CHANNEL_PLUGIN)
+    : parentArgvLoadsChannel(argv, FLEET_CHANNEL_SERVER);
+}
+
+/**
+ * Whether `--channels` names this approved plugin entry. Unlike the
+ * development flag, it takes plugin entries only, and the owner's managed
+ * policy decides whether Claude honors them.
+ */
+function parentArgvApprovesChannel(argv: string | undefined, entry: string): boolean {
+  if (argv === undefined) return false;
+  const tokens = argv.trim().split(/\s+/u);
+  if (tokens.includes("--print") || tokens.includes("-p")) return false;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.startsWith("--channels=")) return token.slice("--channels=".length).split(",").includes(entry);
+    if (token !== "--channels") continue;
+    for (const value of tokens.slice(index + 1)) {
+      if (value.startsWith("-")) break;
+      if (value.split(",").includes(entry)) return true;
+    }
+  }
+  return false;
 }
 
 function parentArgvLoadsChannel(argv: string | undefined, entry: string): boolean {
@@ -531,11 +565,14 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
 
   let parentArgv: string | undefined;
   try {
-    parentArgv = await (options.readParentArgv ?? defaultReadParentArgv)();
+    // Served by the clankie-worker plugin, this bridge's parent is the plugin's
+    // wrapper, which hands over Claude's own argv (VUH-1458).
+    const handed = env.CLANKIE_SEAT_PARENT_ARGV?.trim();
+    parentArgv = await (options.readParentArgv ?? (handed ? async () => handed : defaultReadParentArgv))();
   } catch {
     parentArgv = undefined;
   }
-  if (!parentArgvLoadsFleetChannel(parentArgv)) {
+  if (!parentArgvLoadsFleetChannel(parentArgv, env.CLANKIE_SEAT_PARENT_ARGV !== undefined)) {
     await server.connect(transport);
     stderr.write("clankie mcp: channel not loaded for this session; not polling\n");
     await closed;
@@ -587,9 +624,9 @@ export async function runMcpCommand(
     throw new Error(MCP_USAGE);
   const stderr = options.stderr ?? process.stderr;
   const parentArgv = await (options.readParentArgv ?? defaultReadParentArgv)().catch(() => undefined);
-  const channel =
-    parentArgvLoadsChannel(parentArgv, "plugin:clankie@clankie") ||
-    parentArgvLoadsChannel(parentArgv, "server:clankie");
+  // `clankie seat` loads the projected plugin as the session-only
+  // `clankie@inline`; an installed marketplace copy is `clankie@clankie`.
+  const channel = OPERATOR_CHANNEL_ENTRIES.some((entry) => parentArgvLoadsChannel(parentArgv, entry));
   const upstream = await (options.connectUpstream ?? defaultUpstream)({
     lane,
     ...(conversationId === undefined ? {} : { conversationId }),

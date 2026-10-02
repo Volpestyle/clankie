@@ -1,3 +1,5 @@
+import { monitorEventLoopDelay } from "node:perf_hooks";
+import { gatewayDiagnostic } from "./gateway-diagnostics.ts";
 import { ClankieApiClient } from "@clankie/api-client";
 import {
   createDefaultCredentialStore,
@@ -9,7 +11,12 @@ import {
 import { PLAY_VOICE_PATH, startPlayVoiceListener } from "@clankie/play-voice";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { DiscordTextInbox, discordSnowflakeAt, scanDiscordTextChannel } from "./text-inbox.ts";
+import {
+  DiscordTextInbox,
+  discordSnowflakeAt,
+  scanDiscordTextChannel,
+  mentionsDiscordBot,
+} from "./text-inbox.ts";
 import { createServer } from "node:http";
 import {
   ChannelType,
@@ -235,6 +242,7 @@ const textIngress = textIngressEnabled
         replyPolicy: storedSettings.persona.replyPolicy,
         characterNames: characterNames(storedSettings.persona),
         liveMessageWindow: storedSettings.persona.liveMessageWindow,
+        channelActivity: textInbox!.channelActivity,
       },
       (event) => {
         console.info(event, "Discord text ingress event");
@@ -329,7 +337,11 @@ const voiceSession =
           // He is in his own channel and is not someone he needs memory of.
           return [...channel.members.values()]
             .filter((member) => member.id !== client.user?.id)
-            .map((member) => ({ userId: member.id, displayName: member.displayName }));
+            .map((member) => ({
+              userId: member.id,
+              displayName: member.displayName,
+              isBot: member.user.bot,
+            }));
         },
         realtime: createVoiceRealtimePorts({
           apiKey: realtimeCredential.key,
@@ -367,6 +379,11 @@ const voiceGateway =
       });
 const voiceTranscriptStore = voiceTranscriptLoggingEnabled ? new DiscordVoiceTranscriptStore() : undefined;
 if (voiceSession !== undefined && voiceTranscriptStore !== undefined) {
+  voiceSession.subscribeSpokenTranscript((transcript) => {
+    void voiceTranscriptStore.append("bot", transcript).catch(() => {
+      console.error({ deliveryId: transcript.deliveryId }, "Discord spoken transcript append failed");
+    });
+  });
   voiceSession.subscribeTranscript((_line, transcript) => {
     void voiceTranscriptStore.append("bot", transcript).catch((error: unknown) => {
       console.error(
@@ -563,7 +580,18 @@ client.on("guildMemberUpdate", (_previous, current) => {
   if (current.id === client.user?.id) scheduleGuildMembershipSync();
 });
 
-client.on("shardReconnecting", () => {
+const gatewayLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+gatewayLoopDelay.enable();
+client.on("debug", (message) => {
+  const diagnostic = gatewayDiagnostic(message);
+  if (diagnostic) console.info({ at: new Date().toISOString(), ...diagnostic }, "Discord gateway diagnostic");
+});
+client.on("shardReconnecting", (shardId) => {
+  console.info(
+    { at: new Date().toISOString(), shardId, maxEventLoopDelayMs: Math.round(gatewayLoopDelay.max / 1e6) },
+    "Discord gateway reconnecting",
+  );
+  gatewayLoopDelay.reset();
   void presenceSession.gatewayReconnecting().catch(reportPresencePhaseFailure);
 });
 
@@ -710,9 +738,7 @@ async function handleDiscordMessage(message: Message, recovering = false): Promi
       channelId: message.channelId,
       authorId: message.author.id,
       authorIsBot,
-      mentionsBot:
-        client.user !== null &&
-        (message.mentions.users.has(client.user.id) || message.mentions.repliedUser?.id === client.user.id),
+      mentionsBot: client.user !== null && (await mentionsDiscordBot(message, client.user.id)),
       body: message.content,
       attachments: selection.attachments,
       attachmentsOmitted: selection.omitted,
@@ -1258,6 +1284,7 @@ async function executeCaptainVoicePresence(
     },
     {
       intent: action,
+      ...(input.requestText === undefined ? {} : { requestText: input.requestText }),
       guildId: target.guildId,
       principal: { userId: target.actorId, roleIds: new Set(target.member.roles.cache.keys()) },
       memberVoiceChannelId: target.member.voice.channelId ?? undefined,
@@ -1538,12 +1565,7 @@ async function recoverTextInbox(): Promise<void> {
             ])
         )
           continue;
-        await scanDiscordTextChannel(
-          textInbox,
-          channel,
-          client.user.id,
-          characterNames(storedSettings.persona),
-        );
+        await scanDiscordTextChannel(textInbox, channel, client.user.id, textIngress);
         reconciled.add(id);
       } catch (error) {
         console.error(
@@ -1654,6 +1676,7 @@ const shutdown = coalesceOnce(async (signal: NodeJS.Signals) => {
       if (membershipSyncTimer !== undefined) clearTimeout(membershipSyncTimer);
       if (catchUpTimer !== undefined) clearInterval(catchUpTimer);
       clearInterval(inboxTimer);
+      gatewayLoopDelay.disable();
       await Promise.all([
         (async () => {
           stopPlayVoiceTranscript?.();

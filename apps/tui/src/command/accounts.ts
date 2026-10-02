@@ -1,3 +1,4 @@
+import { runCodexAccountsCommand } from "./codex-accounts.ts";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { OauthAppsSettingsSchema, SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { commandHost } from "./io.ts";
@@ -23,20 +24,27 @@ export async function runAccountsCommand(
     readonly settings?: SettingsStore;
     readonly prompt?: (line: string) => void;
     readonly sleep?: (ms: number) => Promise<void>;
+    readonly request?: (path: string, body?: unknown) => Promise<Record<string, unknown>>;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "codex") {
+    if (options.request) throw new Error("Codex homes are managed on the local machine");
+    return runCodexAccountsCommand(args.slice(1), options);
+  }
   const env = options.env ?? process.env;
-  const request = async (path: string, body?: unknown) => {
-    const credential = await resolveOperatorCredential({ env });
-    if (!credential) throw new Error("Accounts need the operator credential. Run clankie doctor.");
-    const response = await fetch(`${commandHost({ env })}${path}`, {
-      method: body === undefined ? "GET" : "POST",
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-      signal: AbortSignal.timeout(30_000),
+  const request =
+    options.request ??
+    (async (path: string, body?: unknown) => {
+      const credential = await resolveOperatorCredential({ env });
+      if (!credential) throw new Error("Accounts need the operator credential. Run clankie doctor.");
+      const response = await fetch(`${commandHost({ env })}${path}`, {
+        method: body === undefined ? "GET" : "POST",
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+        signal: AbortSignal.timeout(30_000),
+      });
+      return (await response.json()) as Record<string, unknown>;
     });
-    return (await response.json()) as Record<string, unknown>;
-  };
 
   if (args.length === 0 || (args.length === 1 && args[0] === "list")) return request("/v1/accounts");
   if (args.length === 2 && args[0] === "disconnect" && (args[1] === "github" || args[1] === "linear"))
@@ -56,6 +64,7 @@ export async function runAccountsCommand(
     }
   }
   if (args[0] === "apps") {
+    if (options.request) throw new Error("OAuth application configuration is managed by the hosted service");
     const settings = options.settings ?? new SettingsStore(defaultSettingsPath(env));
     const action = args[1];
     if (args.length === 1 || (args.length === 2 && action === "status")) {

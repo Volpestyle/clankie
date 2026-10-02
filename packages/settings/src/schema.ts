@@ -88,7 +88,7 @@ export const DiscordSettingsSchema = z
      */
     voiceConsentPolicy: z.enum(["explicit", "presence"]).default("explicit"),
     /**
-     * Retain exact consented speech for local development diagnostics. The
+     * Retain consented speech and generated reply text for local development diagnostics. The
      * transcript file is private, separate from the content-free receipt log,
      * and disabled until the owner deliberately enables it.
      */
@@ -169,6 +169,8 @@ export const PersonaSettingsSchema = z
      * it belongs to a human — the code carries it, it does not invent it.
      */
     characterNotes: z.string().max(4_000).default(""),
+    /** Owner-selected mood board directory on the service host; restart applies changes. */
+    imagesDir: z.string().trim().max(4096).optional(),
     /** How readily he speaks, and how much room he takes when he does. */
     chattiness: z.enum(["quiet", "balanced", "chatty"]).default("balanced"),
     /** What he perceives in admitted text channels; silence remains his decision. */
@@ -221,7 +223,7 @@ export const VoiceSettingsSchema = z
     xAiReasoningEffort: z.enum(["high", "none"]).default("high"),
     /** Public ElevenLabs voice identifier, required when {@link ttsProvider} is `elevenlabs`. */
     elevenLabsVoiceId: VendorIdentifierSchema.optional(),
-    /** ElevenLabs model (e.g. `eleven_flash_v2_5`); unset defers to the runtime default. */
+    /** ElevenLabs model: `eleven_v4_turbo` uses dialogue; unset keeps legacy `eleven_flash_v2_5`. */
     elevenLabsModelId: VendorIdentifierSchema.optional(),
   })
   .strict()
@@ -252,10 +254,25 @@ export const RelaySettingsSchema = z
      * e.g. `http://my-mac.tailnet.ts.net:4321`. Unset advertises nothing and
      * paired devices keep whatever origin they already hold.
      */
+    /** Explicit device-reachable control origin; never inferred from the relay port. */
+    controlPlaneUrl: z.string().min(1).max(512).optional(),
     url: z.string().min(1).max(512).optional(),
   })
   .strict();
 export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
+
+/**
+ * This host's own behavior. `keepAwake` is the owner's opt-in to an always-on
+ * Mac (VUH-1461): the launcher supervises `caffeinate -s`, which macOS holds
+ * only while the Mac is plugged in. Off by default; sleep stays a normal
+ * condition to recover from.
+ */
+export const HostSettingsSchema = z
+  .object({
+    keepAwake: z.boolean().default(false),
+  })
+  .strict();
+export type HostSettings = z.infer<typeof HostSettingsSchema>;
 
 /** Public AWS doorway used by App Store builds; the host bearer stays in Keychain. */
 export const PublicGatewaySettingsSchema = z
@@ -345,11 +362,35 @@ export const ExecutionWorkspacesSchema = z
     z
       .object({
         kind: z.enum(["repository", "directory"]),
-        path: z.string().startsWith("/").max(4096),
+        /** POSIX absolute, or a Windows drive path for a Windows ssh fleet (ADR 0184). */
+        path: z
+          .string()
+          .max(4096)
+          .regex(/^(?:\/|[A-Za-z]:[\\/])/u, "must be an absolute path"),
       })
       .strict(),
   )
   .max(32);
+
+/** The ssh route to a remote Herdr fleet. Authentication stays in the owner's ssh configuration. */
+export const HerdrSshTransportSchema = z
+  .object({
+    host: z.string().regex(/^(?:[a-zA-Z0-9_.-]+@)?[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u),
+    shell: z.enum(["posix", "powershell"]),
+  })
+  .strict();
+export type HerdrSshTransport = z.infer<typeof HerdrSshTransportSchema>;
+
+/**
+ * How Swarm runs a dispatched worker in a runtime (ADR 0194/0203). Unset is
+ * native interactive. Stream remains readable for legacy settings; new writes
+ * and local dispatch refuse it, preserving retained receipts for reconciliation.
+ */
+export const ExecutionWorkerHarnessSchema = z.enum(["claude", "codex", "pi"]);
+export type ExecutionWorkerHarness = z.infer<typeof ExecutionWorkerHarnessSchema>;
+
+export const ExecutionWorkerModeSchema = z.enum(["stream", "interactive"]);
+export type ExecutionWorkerMode = z.infer<typeof ExecutionWorkerModeSchema>;
 
 /** Named execution endpoints are pinned; disabling a connection keeps its identity. */
 export const ExecutionConnectionSchema = z
@@ -360,10 +401,26 @@ export const ExecutionConnectionSchema = z
       .refine((id) => id !== "default"),
     kind: z.literal("herdr").default("herdr"),
     session: z.string().regex(/^[\w][\w.-]{0,63}$/u),
+    /** A local runtime's socket. An ssh fleet names only its session (ADR 0184). */
     socketPath: z
       .string()
       .startsWith("/")
-      .refine((path) => new TextEncoder().encode(path).length <= 102),
+      .refine((path) => new TextEncoder().encode(path).length <= 102)
+      .optional(),
+    /**
+     * An ssh fleet (ADR 0184): Herdr on another machine, reached through the
+     * owner's own ssh configuration. Its CLI runs there with `--session`; the
+     * remote server is never started, stopped or replaced from here.
+     */
+    ssh: HerdrSshTransportSchema.optional(),
+    /**
+     * The embedded coordinator this ssh fleet's peers reach through its relay
+     * (VUH-1381): the conversation whose scope they join. One per fleet.
+     */
+    relay: z
+      .object({ conversationId: z.string().min(1).max(256) })
+      .strict()
+      .optional(),
     capabilities: z
       .array(
         z
@@ -376,6 +433,8 @@ export const ExecutionConnectionSchema = z
       .default(["code", "review", "research"]),
     capacity: z.number().int().min(0).nullable().optional(),
     workspaces: ExecutionWorkspacesSchema.optional(),
+    workerMode: ExecutionWorkerModeSchema.optional(),
+    workerHarness: ExecutionWorkerHarnessSchema.optional(),
     enabled: z.boolean().default(true),
   })
   .strict();
@@ -388,7 +447,22 @@ export const SwarmConnectionSchema = z
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
       .refine((id) => id !== "embedded"),
     conversationId: z.string().min(1).max(256),
-    endpoint: z.string().startsWith("/").max(4096),
+    endpoint: z
+      .string()
+      .max(4096)
+      .refine(
+        (value) =>
+          !value.includes("\0") &&
+          !value.includes("\r") &&
+          !value.includes("\n") &&
+          (value.startsWith("/") || /^\\\\\.\\pipe\\[^\\/]+$/u.test(value)),
+        "Expected an absolute Unix socket or Windows named pipe",
+      ),
+    /** Registered SSH fleet; endpoint is on that machine when present. */
+    ssh: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
     scope: z.string().min(1).max(256),
     actor: z.string().min(1).max(256),
     credential: z.string().min(1).max(128),
@@ -428,6 +502,13 @@ export const BrowserSettingsSchema = z
      * capture every page he opens, including signed-in ones.
      */
     recordSessions: z.boolean().default(false),
+    /**
+     * Show him the computer-use harnesses on this machine (Codex computer use,
+     * Claude in Chrome) as his main way into hard computer and browser work
+     * (ADR 0199). Off when the owner would rather not spend those plans; his
+     * own browser is then his only way in.
+     */
+    harnessDelegation: z.boolean().default(true),
   })
   .strict();
 export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
@@ -631,6 +712,8 @@ export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
 export const LinearWebhookSettingsSchema = z
   .object({
     following: z.boolean().default(false),
+    /** Public URL registered in Linear; the signing secret remains broker-owned. */
+    url: z.url({ protocol: /^https?$/ }).optional(),
   })
   .strict();
 export type LinearWebhookSettings = z.infer<typeof LinearWebhookSettingsSchema>;
@@ -680,16 +763,61 @@ export const AgentHostConnectionSchema = z
   .strict();
 export type AgentHostConnection = z.infer<typeof AgentHostConnectionSchema>;
 
+/** Product/tool skills are always available; this selection controls the opinionated bundle. */
+export const SkillsSettingsSchema = z
+  .object({
+    opinionated: z.boolean().default(true),
+    exclude: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]*$/u)).default([]),
+  })
+  .strict();
+export type SkillsSettings = z.infer<typeof SkillsSettingsSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
+    client: z
+      .discriminatedUnion("mode", [
+        z.object({ mode: z.literal("local") }).strict(),
+        z
+          .object({
+            mode: z.literal("hosted"),
+            gatewayUrl: z.string().url(),
+            hostId: z.string().regex(/^[A-Za-z0-9_-]{16,128}$/u),
+          })
+          .strict(),
+      ])
+      .optional(),
     // Defaulted lazily: the parsed output carries every field's own default,
     // which a bare `{}` literal does not satisfy.
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
+    host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
+    codexAccounts: z
+      .array(
+        z
+          .object({
+            label: z
+              .string()
+              .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
+              .refine((value) => value !== "default", "default is reserved"),
+            home: z
+              .string()
+              .min(1)
+              .refine((value) => value.startsWith("/"), "Codex home must be absolute"),
+          })
+          .strict(),
+      )
+      .max(15)
+      .refine(
+        (accounts) =>
+          new Set(accounts.map((a) => a.label)).size === accounts.length &&
+          new Set(accounts.map((a) => a.home)).size === accounts.length,
+        "Codex accounts need unique labels and homes",
+      )
+      .default([]),
     agentHosts: z
       .object({ connections: z.array(AgentHostConnectionSchema).max(15).default([]) })
       .strict()
@@ -703,6 +831,8 @@ export const ClankieSettingsSchema = z
         connections: z.array(ExecutionConnectionSchema).max(15).default([]),
         workspaces: ExecutionWorkspacesSchema.optional(),
         capacity: z.number().int().min(0).nullable().optional(),
+        workerMode: ExecutionWorkerModeSchema.optional(),
+        workerHarness: ExecutionWorkerHarnessSchema.optional(),
         budget: z.number().int().min(0).nullable().optional(),
       })
       .strict()
@@ -710,9 +840,15 @@ export const ClankieSettingsSchema = z
         (value) => new Set(value.connections.map((entry) => entry.id)).size === value.connections.length,
         "Execution connection IDs must be unique",
       )
+      .refine(
+        (value) =>
+          value.connections.every((entry) => (entry.ssh === undefined) !== (entry.socketPath === undefined)),
+        "An execution connection is either a local socket or an ssh fleet",
+      )
       .default(() => ({ connections: [] })),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
     swarm: SwarmSettingsSchema.default(() => SwarmSettingsSchema.parse({})),
+    skills: SkillsSettingsSchema.default(() => SkillsSettingsSchema.parse({})),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),

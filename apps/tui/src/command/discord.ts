@@ -1,3 +1,9 @@
+import { parseArgs } from "node:util";
+import { resolveCaptainCredential, type CredentialStore } from "@clankie/credential-broker";
+import { DiscordVoiceTranscriptCursorSchema, type DiscordVoiceTranscriptPage } from "@clankie/protocol";
+import { createCaptainRouteClient } from "../session/operator-conversations.ts";
+import { createDiscordVoiceTranscriptClient } from "../session/voice-transcripts.ts";
+import { commandHost } from "./io.ts";
 import {
   DiscordSettingsSchema,
   SettingsStore,
@@ -9,12 +15,16 @@ import {
 
 const DISCORD_USAGE = [
   "Usage: clankie discord [status]",
+  "       clankie discord transcripts [--cursor CURSOR] [--limit N]",
   "       clankie discord set --field value [--field value ...]",
   "       clankie discord clear --field [--field ...]",
   "Fields are the settings.json Discord keys in kebab-case; lists are comma-separated.",
 ].join("\n");
 
 export interface DiscordCommandOptions {
+  readonly host?: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly captainCredentialStore?: CredentialStore;
   readonly env?: NodeJS.ProcessEnv;
   readonly settings?: SettingsStore;
 }
@@ -198,8 +208,38 @@ async function discordClearArgs(
 export async function runDiscordCommand(
   args: readonly string[],
   options: DiscordCommandOptions = {},
-): Promise<DiscordCommandResult> {
+): Promise<DiscordCommandResult | DiscordVoiceTranscriptPage> {
   const verb = args[0];
+  if (verb === "transcripts") {
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      allowPositionals: true,
+      options: { cursor: { type: "string" }, limit: { type: "string", default: "100" } },
+    });
+    const limit = Number(values.limit);
+    if (
+      positionals.length ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 200 ||
+      (values.cursor !== undefined && !DiscordVoiceTranscriptCursorSchema.safeParse(values.cursor).success)
+    )
+      throw new Error(DISCORD_USAGE);
+    const env = options.env ?? process.env;
+    const credential = await resolveCaptainCredential({
+      env,
+      ...(options.captainCredentialStore === undefined ? {} : { store: options.captainCredentialStore }),
+    });
+    if (credential === undefined)
+      throw new Error("No captain credential is available; start the clankie service once first.");
+    return createDiscordVoiceTranscriptClient(
+      createCaptainRouteClient({
+        host: commandHost({ ...options, env }),
+        captainToken: credential.token,
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      }),
+    ).read({ limit, ...(values.cursor === undefined ? {} : { cursor: values.cursor }) });
+  }
   if (verb === undefined || verb === "status") return await discordStatus(options);
   if (verb === "set") return await discordSetArgs(args.slice(1), options);
   if (verb === "clear") return await discordClearArgs(args.slice(1), options);

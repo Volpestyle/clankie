@@ -117,6 +117,8 @@ export interface EmbodimentManagerOptions {
   readonly idFactory: () => string;
   /** Starts that never reach the local play host past this window are refused. */
   readonly startWindowMs?: number;
+  /** Lazy service host startup, including stale-session reconciliation. */
+  readonly startHost?: () => Promise<void>;
 }
 
 const DEFAULT_START_WINDOW_MS = 60_000;
@@ -244,7 +246,15 @@ export class EmbodimentManager {
     return undefined;
   }
 
+  /** Explicit play observation wakes the host; internal projections remain passive. */
+  public async observe(sessionId?: string): Promise<EmbodimentSession | undefined> {
+    await this.options.startHost?.();
+    return sessionId === undefined ? this.liveSession() : this.getSession(sessionId);
+  }
+
   public async submit(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult> {
+    // Outside the mutation queue: reconciliation reports through that same queue.
+    await this.options.startHost?.();
     return this.serialized(async () => {
       await this.expireStale();
       if (this.options.decide(intent) !== "allow") {

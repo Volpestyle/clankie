@@ -120,6 +120,9 @@ function phaseEventFromDomainEvent(event: DomainEvent): DiscordPresencePhaseEven
   return parsed.success ? parsed.data : undefined;
 }
 
+/** The most stays anyone may ask for; the history holds exactly this many. */
+export const DISCORD_VOICE_HISTORY_LIMIT_MAX = 32;
+
 /**
  * Completed voice stays, derived from the durable phase stream (VUH-940).
  *
@@ -130,23 +133,44 @@ function phaseEventFromDomainEvent(event: DomainEvent): DiscordPresencePhaseEven
  * open stay is simply never reported, because inventing a `leftAt` would be a
  * false record. Newest stays first.
  *
+ * Folded as events arrive, so it holds only the newest closed stays, the open
+ * ones, and the guilds of sessions currently in voice — not the whole stream.
+ *
  * This is a read-side projection, not memory: "who was I just with" stays
  * presence-class data about his own whereabouts, and the episode ring
  * (ADR 0054) remains reserved for notes Clankie composes himself.
  */
-export function deriveDiscordVoiceHistory(events: readonly DomainEvent[], limit: number): DiscordVoiceStay[] {
-  const guildsBySession = new Map<string, ReadonlySet<string>>();
-  const openStays = new Map<string, { joinedAt: string; room: DiscordVoiceRoom | undefined }>();
-  const closed: DiscordVoiceStay[] = [];
-  for (const domainEvent of events) {
+export class DiscordVoiceHistoryProjection {
+  private readonly latestSessionByBinding = new Map<string, string>();
+  private readonly guildsBySession = new Map<string, ReadonlySet<string>>();
+  private readonly openStays = new Map<string, { joinedAt: string; room: DiscordVoiceRoom | undefined }>();
+  /** Oldest first, each with the session that produced it. */
+  private readonly closed: { readonly sessionId: string; readonly stay: DiscordVoiceStay }[] = [];
+
+  public constructor(events: readonly DomainEvent[] = []) {
+    for (const event of events) this.apply(event);
+  }
+
+  public apply(domainEvent: DomainEvent): void {
     const event = phaseEventFromDomainEvent(domainEvent);
-    if (event === undefined) continue;
+    if (event === undefined) return;
     const session = event.data.session;
+    const binding = bindingKey(session);
+    const previousSession = this.latestSessionByBinding.get(binding);
+    if (previousSession !== undefined && previousSession !== session.sessionId) {
+      // A crashed process can leave voice without a final event. Its unfinished
+      // stays cannot close in the replacement session and must not accumulate.
+      for (const guildId of this.guildsBySession.get(previousSession) ?? []) {
+        this.openStays.delete(`${previousSession}//${guildId}`);
+      }
+      this.guildsBySession.delete(previousSession);
+    }
+    this.latestSessionByBinding.set(binding, session.sessionId);
     const nextGuilds = new Set(session.voiceGuildIds);
-    const previousGuilds = guildsBySession.get(session.sessionId) ?? new Set<string>();
+    const previousGuilds = this.guildsBySession.get(session.sessionId) ?? new Set<string>();
     for (const guildId of nextGuilds) {
       if (previousGuilds.has(guildId)) continue;
-      openStays.set(`${session.sessionId}//${guildId}`, {
+      this.openStays.set(`${session.sessionId}//${guildId}`, {
         joinedAt: event.occurredAt,
         room: session.voiceRooms?.find((room) => room.guildId === guildId),
       });
@@ -154,22 +178,65 @@ export function deriveDiscordVoiceHistory(events: readonly DomainEvent[], limit:
     for (const guildId of previousGuilds) {
       if (nextGuilds.has(guildId)) continue;
       const stayKey = `${session.sessionId}//${guildId}`;
-      const open = openStays.get(stayKey);
+      const open = this.openStays.get(stayKey);
       if (open === undefined) continue;
-      openStays.delete(stayKey);
-      closed.push({
-        guildId,
-        ...(open.room?.guildName === undefined ? {} : { guildName: open.room.guildName }),
-        ...(open.room?.channelId === undefined ? {} : { channelId: open.room.channelId }),
-        ...(open.room?.channelName === undefined ? {} : { channelName: open.room.channelName }),
-        occupants: open.room?.occupants ?? [],
-        joinedAt: open.joinedAt,
-        leftAt: event.occurredAt,
+      this.openStays.delete(stayKey);
+      this.closed.push({
+        sessionId: session.sessionId,
+        stay: {
+          guildId,
+          ...(open.room?.guildName === undefined ? {} : { guildName: open.room.guildName }),
+          ...(open.room?.channelId === undefined ? {} : { channelId: open.room.channelId }),
+          ...(open.room?.channelName === undefined ? {} : { channelName: open.room.channelName }),
+          occupants: open.room?.occupants ?? [],
+          joinedAt: open.joinedAt,
+          leftAt: event.occurredAt,
+        },
       });
+      if (this.closed.length > DISCORD_VOICE_HISTORY_LIMIT_MAX) this.closed.shift();
     }
-    guildsBySession.set(session.sessionId, nextGuilds);
+    // A session out of voice is the same as one never seen.
+    if (nextGuilds.size === 0) this.guildsBySession.delete(session.sessionId);
+    else this.guildsBySession.set(session.sessionId, nextGuilds);
   }
-  return closed.slice(Math.max(0, closed.length - limit)).reverse();
+
+  public list(limit: number): DiscordVoiceStay[] {
+    return this.closed
+      .slice(Math.max(0, this.closed.length - limit))
+      .map(({ stay }) => structuredClone(stay))
+      .reverse();
+  }
+
+  /** Sessions whose phase events the reported stays were derived from. */
+  public sessionIds(): ReadonlySet<string> {
+    return new Set(this.closed.map(({ sessionId }) => sessionId));
+  }
+}
+
+/**
+ * Phase events a durable log may drop without changing anything replay builds.
+ *
+ * Retirement is by whole session, because the session projection refuses a
+ * binding whose first event is not a `process_start` at revision 1. Kept: every
+ * event of each binding's latest session (so the session projection replays to
+ * the same records and revisions), and every event of a session behind one of
+ * the newest {@link DISCORD_VOICE_HISTORY_LIMIT_MAX} closed voice stays (so voice
+ * history reads the same). Everything else is an ended session's history.
+ */
+export function retiredDiscordPresenceEventIds(events: readonly DomainEvent[]): Set<string> {
+  const latestSessionByBinding = new Map<string, string>();
+  const history = new DiscordVoiceHistoryProjection();
+  const phases: { readonly id: string; readonly sessionId: string }[] = [];
+  for (const domainEvent of events) {
+    const event = phaseEventFromDomainEvent(domainEvent);
+    if (event === undefined) continue;
+    const session = event.data.session;
+    latestSessionByBinding.set(bindingKey(session), session.sessionId);
+    history.apply(domainEvent);
+    phases.push({ id: domainEvent.id, sessionId: session.sessionId });
+  }
+  const kept = new Set([...latestSessionByBinding.values(), ...history.sessionIds()]);
+  return new Set(phases.flatMap(({ id, sessionId }) => (kept.has(sessionId) ? [] : [id])));
 }
 
 function bindingKey(

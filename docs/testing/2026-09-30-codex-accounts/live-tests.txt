@@ -1,0 +1,55 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  5 passed (5)
+      Tests  76 passed (76)
+   Start at  11:00:15
+   Duration  2.77s (transform 260ms, setup 0ms, import 891ms, tests 1.52s, environment 0ms)
+
+
+Full-suite failure summary before fixture fixes:
+ FAIL  apps/clankie/test/hire-brief.test.ts [ apps/clankie/test/hire-brief.test.ts ]
+ReferenceError: vi is not defined
+ ❯ apps/clankie/test/hire-brief.test.ts:331:1
+    329| );
+    330|
+    331| vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+       | ^
+    332|   readCodexRateLimits: vi.fn(async () => null),
+    333| }));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/hire-brief-receipt.test.ts > codex reports a long brief delivered only after its complete transcript receipt
+TypeError: ready is not a function
+ ❯ apps/clankie/test/hire-brief-receipt.test.ts:63:7
+     61|       await vi.advanceTimersByTimeAsync(1000);
+     62|       expect(runner.promptAgent).not.toHaveBeenCalled();
+     63|       ready();
+       |       ^
+     64|       await vi.advanceTimersByTimeAsync(1000);
+     65|       expect(await pending).toMatchObject({ outcome: "spawned" });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 382 passed (384)
+      Tests  1 failed | 3246 passed | 2 skipped (3249)
+   Start at  11:00:42
+   Duration  221.10s (transform 3.61s, setup 0ms, import 88.68s, tests 106.46s, environment 14ms)
+
+
+Final rerun of both affected files:
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  2 passed (2)
+      Tests  15 passed (15)
+   Start at  11:05:06
+   Duration  15.21s (transform 901ms, setup 0ms, import 1.97s, tests 13.11s, environment 0ms)
+

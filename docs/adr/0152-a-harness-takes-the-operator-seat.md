@@ -86,9 +86,11 @@ flowchart LR
 - **The seat ships as a Claude Code plugin** at `integrations/claude-plugin`,
   beside the herdr plugin and under its rule: a plugin carries only what a
   plugin can uniquely declare. That is the output style holding his identity
-  (forced on while the plugin is enabled, coding instructions left out), a
+  (forced on while the plugin is enabled; amended 2026-09-30 to keep Claude
+  Code's own engineering instructions, so the seat only adds), a
   `SessionStart` hook that injects persona, reach, fleet preferences, address, and the service
-  model card, a `UserPromptSubmit` hook that injects the newest memory card, one
+  model card, a `UserPromptSubmit` hook that injects the newest memory card (once
+  per session and again when it changes; see Consequences), one
   stdio MCP entry (`clankie mcp`, a bridge to `/v1/mcp` that reads the operator
   bearer from the broker so no secret lands in a config file), and his product
   skills linked from `.agents/skills`. `clankie seat` is the launcher: it checks
@@ -96,8 +98,8 @@ flowchart LR
   channel development flag (the two things a plugin cannot carry), enables the
   plugin for its own session only (a forced output style applies wherever the
   plugin is enabled, so it stays disabled at user scope), names an unselected
-  global seat's Herdr pane `clankie`, and starts Claude Code. Codex is not a Claude plugin;
-  it takes the same `clankie mcp` over stdio and the same skills directory.
+  global seat's Herdr pane `clankie`, and starts Claude Code. Codex uses its own
+  plugin and native app-server thread, as described in the amendment below.
 - **The seated pane is his head.** A herdr agent named `clankie` is never a
   fleet contact: the census binds it to Clankie's own persona, and its Claude
   Code transcript projects into the head conversation the app pins, through
@@ -169,3 +171,45 @@ flowchart LR
   preview ends.
 - The app's Clankie thread shows the seat's settled turns; live drafts do not
   cross, because a Claude Code transcript holds settled turns only.
+- Claude Code keeps every hook injection in the conversation, so the memory
+  card hook (`clankie memory-card --hook`, amended 2026-09-28) prints the card
+  on a session's first prompt and then only when it changes, keyed by the
+  hook's `session_id`; `SessionStart`, including after compaction, re-arms it.
+
+## Codex operator plugin (2026-09-30, VUH-1468)
+
+`integrations/codex-plugin` packages the same seat through Codex's native plugin,
+hook and MCP contracts. `clankie seat --harness codex` selects it; Claude remains
+the default. The identity is generated from the same instructions source and
+added by a trusted `SessionStart` hook, preserving Codex's built-in instructions.
+The hook also reads the service prompt and re-arms the existing memory-card
+deduplication. `UserPromptSubmit` injects the first or changed card. Native
+transcript hooks reuse `clankie seat-sync` and the authenticated display endpoint.
+
+The launcher starts an owned Codex app-server and attaches the real interactive
+TUI to that server. The TUI creates the native thread. Turn delivery reuses the
+Codex seat driver introduced for fleet seats (VUH-1459), and the existing
+conversation outbox pump supplies wakes, watches and room escalations. It does
+not create another turn controller or type messages into the terminal. The owner
+can still use Codex's own composer, commands and approval dialogs. Exiting the
+TUI closes only its owned server.
+
+```mermaid
+flowchart LR
+  Plugin[Codex plugin] -->|trusted native hooks| Context[Identity · prompt · memory]
+  Plugin -->|clankie mcp| Bank[Service tool bank]
+  TUI[Real Codex TUI] <--> Thread[Owned app-server thread]
+  Outbox[Selected conversation outbox] --> Pump[Existing seat event pump]
+  Pump --> Driver[Shared Codex seat driver]
+  Driver --> Thread
+  Thread -->|native hooks · seat-sync| App[Selected conversation in the app]
+```
+
+Hook trust belongs to the owner. The launch plan exposes a typed
+`hook_trust_required` step directing them to `/hooks`; installing or enabling the
+plugin is not trust. The launcher neither bypasses trust nor writes trust hashes.
+It binds the outbox only after the trusted session-start hooks succeed. Resume
+keeps the Codex thread and its selected conversation, using a separate record
+from Claude. Live verification uses a scratch conversation and closes its own
+seat, never the owner's global-default conversation. Full live acceptance remains
+dependent on the owner's native hook review; see the issue's attached evidence.

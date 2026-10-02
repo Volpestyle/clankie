@@ -21,7 +21,11 @@ function floor(overrides: Partial<VoiceFloorOptions> = {}): VoiceFloor {
 }
 
 function said(speakerId: string, text: string, atMs: number): VoiceTranscriptEvent {
-  return { speakerId, text, atMs };
+  return { speakerId, text, atMs, source: "speech" };
+}
+
+function typed(speakerId: string, text: string, atMs: number): VoiceTranscriptEvent {
+  return { speakerId, text, atMs, source: "text" };
 }
 
 describe("waking", () => {
@@ -126,10 +130,13 @@ describe("holding the floor", () => {
     expect(f.floorHolderId).toBe("alice");
   });
 
-  it("only positive about-him evidence stays listen; ambiguous mentions are offered", () => {
+  it("about-him speech and ambiguous mentions are offered without stealing engagement", () => {
     const f = floor();
     f.observeTranscript(said("alice", "hey clankie", 0));
-    expect(f.observeTranscript(said("bob", "ask clankie about it", 5_000))).toEqual({ action: "listen" });
+    expect(f.observeTranscript(said("bob", "ask clankie about it", 5_000))).toEqual({
+      action: "offer",
+      reason: "transcript",
+    });
     expect(f.observeTranscript(said("bob", "hey bob what did clankie say to you", 6_000))).toEqual({
       action: "offer",
       reason: "mentioned",
@@ -142,17 +149,19 @@ describe("holding the floor", () => {
     f.observeTranscript(said("alice", "hey clankie", 0));
     expect(f.observeTranscript(said("bob", "clanky what about you", 10_000))).toEqual({ action: "hold" });
     expect(f.floorHolderId).toBe("bob");
-    // The previous holder is a bystander now; nameless speech from them is overheard.
+    // Both people remain engaged; he may decline a same-breath pivot.
     expect(f.observeTranscript(said("alice", "and then i told him", 20_000))).toEqual({
-      action: "listen",
+      action: "offer",
+      reason: "holder",
     });
   });
 
-  it("crosstalk between other people is overheard and does not refresh decay", () => {
+  it("crosstalk between other people is offered and does not refresh decay", () => {
     const f = floor();
     f.observeTranscript(said("alice", "clankie you there", 0));
     expect(f.observeTranscript(said("bob", "so anyway the meeting moved", 30_000))).toEqual({
-      action: "listen",
+      action: "offer",
+      reason: "transcript",
     });
     // Had the crosstalk refreshed the clock, this tick would still be inside the window.
     expect(f.tick(WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
@@ -173,11 +182,14 @@ describe("holding the floor", () => {
     expect(f.tick(WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
   });
 
-  it("under the all policy, engaged crosstalk is still overheard", () => {
+  it("under the all policy, engaged crosstalk is still an offer", () => {
     const f = floor({ replyPolicy: "all" });
     f.observeTranscript(said("alice", "morning", 0));
     f.noteSpeechFrom("alice", 0);
-    expect(f.observeTranscript(said("bob", "morning alice", 5_000))).toEqual({ action: "listen" });
+    expect(f.observeTranscript(said("bob", "morning alice", 5_000))).toEqual({
+      action: "offer",
+      reason: "transcript",
+    });
     expect(f.floorHolderId).toBe("alice");
   });
 });
@@ -194,11 +206,12 @@ describe("closing phrases", () => {
     expect(f.tick(10_000 + WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
   });
 
-  it("thanks aimed at another person is still crosstalk", () => {
+  it("thanks aimed at another person is offered without changing the holder", () => {
     const f = floor();
     f.observeTranscript(said("alice", "hey clankie", 0));
     expect(f.observeTranscript(said("bob", "thanks bob that fixed it", 10_000))).toEqual({
-      action: "listen",
+      action: "offer",
+      reason: "transcript",
     });
     expect(f.state).toBe("engaged");
     expect(f.floorHolderId).toBe("alice");
@@ -229,8 +242,8 @@ describe("decay", () => {
     const f = floor();
     f.observeTranscript(said("alice", "clankie you around", 0));
     expect(f.observeTranscript(said("bob", "unrelated chatter much later", WINDOW + 5_000))).toEqual({
-      action: "release",
-      reason: "decay",
+      action: "offer",
+      reason: "transcript",
     });
     expect(f.state).toBe("dormant");
   });
@@ -260,12 +273,12 @@ describe("decay", () => {
   });
 });
 
-describe("volition gate", () => {
+describe("typed room volition gate", () => {
   const gated = () => floor({ volition: { minIntervalMs: 60_000, maxPerHour: 2 } });
 
   it("opens on unaddressed transcript when the cap permits, and counts the offer", () => {
     const f = gated();
-    expect(f.observeTranscript(said("bob", "the build is red again", 0))).toEqual({
+    expect(f.observeTranscript(typed("bob", "the build is red again", 0))).toEqual({
       action: "volition_gate_open",
     });
     expect(f.state).toBe("dormant");
@@ -274,24 +287,24 @@ describe("volition gate", () => {
 
   it("stays shut inside the minimum interval since the last offer", () => {
     const f = gated();
-    f.observeTranscript(said("bob", "the build is red again", 0));
+    f.observeTranscript(typed("bob", "the build is red again", 0));
     f.noteVolitionOutcome(false);
-    expect(f.observeTranscript(said("bob", "still red", 30_000))).toEqual({ action: "ignore" });
-    expect(f.observeTranscript(said("bob", "yep still red", 60_000))).toEqual({
+    expect(f.observeTranscript(typed("bob", "still red", 30_000))).toEqual({ action: "ignore" });
+    expect(f.observeTranscript(typed("bob", "yep still red", 60_000))).toEqual({
       action: "volition_gate_open",
     });
   });
 
   it("enforces the sliding hourly cap, reopening only as offers age out", () => {
     const f = gated();
-    expect(f.observeTranscript(said("bob", "chatter", 0)).action).toBe("volition_gate_open");
+    expect(f.observeTranscript(typed("bob", "chatter", 0)).action).toBe("volition_gate_open");
     f.noteVolitionOutcome(false);
-    expect(f.observeTranscript(said("bob", "chatter", 60_000)).action).toBe("volition_gate_open");
+    expect(f.observeTranscript(typed("bob", "chatter", 60_000)).action).toBe("volition_gate_open");
     f.noteVolitionOutcome(false);
     // Interval satisfied but two offers already sit inside the hour.
-    expect(f.observeTranscript(said("bob", "chatter", 120_000))).toEqual({ action: "ignore" });
+    expect(f.observeTranscript(typed("bob", "chatter", 120_000))).toEqual({ action: "ignore" });
     // One ms past the first offer's hour: one slot frees up.
-    expect(f.observeTranscript(said("bob", "chatter", 3_600_001)).action).toBe("volition_gate_open");
+    expect(f.observeTranscript(typed("bob", "chatter", 3_600_001)).action).toBe("volition_gate_open");
     expect(f.accounting()).toEqual({ offered: 3, taken: 0, suppressed: 2 });
   });
 
@@ -304,7 +317,7 @@ describe("volition gate", () => {
 
   it("a maxPerHour of zero disables volition entirely", () => {
     const f = floor({ volition: { maxPerHour: 0 } });
-    expect(f.observeTranscript(said("bob", "anything at all", 0))).toEqual({ action: "ignore" });
+    expect(f.observeTranscript(typed("bob", "anything at all", 0))).toEqual({ action: "ignore" });
     expect(f.accounting()).toEqual({ offered: 0, taken: 0, suppressed: 0 });
   });
 
@@ -317,23 +330,23 @@ describe("volition gate", () => {
       chatty: { minIntervalMs: 90_000, maxPerHour: 15 },
     });
     const quiet = floor({ chattiness: "quiet", volition: {} });
-    expect(quiet.observeTranscript(said("bob", "chatter", 0)).action).toBe("volition_gate_open");
+    expect(quiet.observeTranscript(typed("bob", "chatter", 0)).action).toBe("volition_gate_open");
     quiet.noteVolitionOutcome(false);
-    expect(quiet.observeTranscript(said("bob", "chatter", 599_999))).toEqual({ action: "ignore" });
-    expect(quiet.observeTranscript(said("bob", "chatter", 600_000)).action).toBe("volition_gate_open");
+    expect(quiet.observeTranscript(typed("bob", "chatter", 599_999))).toEqual({ action: "ignore" });
+    expect(quiet.observeTranscript(typed("bob", "chatter", 600_000)).action).toBe("volition_gate_open");
   });
 });
 
-describe("volition outcomes", () => {
+describe("typed room volition outcomes", () => {
   it("a taken offer engages the floor, held by whoever provoked the remark", () => {
     const f = floor({ volition: { minIntervalMs: 0, maxPerHour: 10 } });
-    f.observeTranscript(said("bob", "ugh this deploy keeps failing", 0));
+    f.observeTranscript(typed("bob", "ugh this deploy keeps failing", 0));
     expect(f.noteVolitionOutcome(true)).toEqual({ action: "wake", reason: "volition" });
     expect(f.state).toBe("engaged");
     expect(f.floorHolderId).toBe("bob");
     // Nameless reply is an offer: he may answer or stay quiet. Barge-in still
     // treats Bob as the holder.
-    expect(f.observeTranscript(said("bob", "huh good point", 10_000))).toEqual({
+    expect(f.observeTranscript(typed("bob", "huh good point", 10_000))).toEqual({
       action: "offer",
       reason: "holder",
     });
@@ -342,7 +355,7 @@ describe("volition outcomes", () => {
 
   it("a suppressed offer stays dormant and is counted", () => {
     const f = floor({ volition: { minIntervalMs: 0, maxPerHour: 10 } });
-    f.observeTranscript(said("bob", "the tests are flaky again", 0));
+    f.observeTranscript(typed("bob", "the tests are flaky again", 0));
     expect(f.noteVolitionOutcome(false)).toEqual({ action: "ignore" });
     expect(f.state).toBe("dormant");
     expect(f.accounting()).toEqual({ offered: 1, taken: 0, suppressed: 1 });
@@ -357,8 +370,8 @@ describe("volition outcomes", () => {
 
   it("an addressed wake racing ahead of the outcome keeps the floor it won", () => {
     const f = floor({ volition: { minIntervalMs: 0, maxPerHour: 10 } });
-    f.observeTranscript(said("bob", "the deploy is stuck", 0));
-    f.observeTranscript(said("carol", "hey clankie", 1_000));
+    f.observeTranscript(typed("bob", "the deploy is stuck", 0));
+    f.observeTranscript(typed("carol", "hey clankie", 1_000));
     // The offer really happened, so the accounting lands; the floor does not move.
     expect(f.noteVolitionOutcome(true)).toEqual({ action: "ignore" });
     expect(f.floorHolderId).toBe("carol");
@@ -369,7 +382,7 @@ describe("volition outcomes", () => {
     const f = floor({ volition: { minIntervalMs: 0, maxPerHour: 100 } });
     for (let i = 0; i < 5; i += 1) {
       const atMs = i * 120_000;
-      f.observeTranscript(said("bob", "room chatter", atMs));
+      f.observeTranscript(typed("bob", "room chatter", atMs));
       f.noteVolitionOutcome(i % 2 === 0);
       // A duplicate outcome for the same offer must not double-count.
       f.noteVolitionOutcome(true);
@@ -391,5 +404,65 @@ describe("options validation", () => {
     expect(() => floor({ volition: { minIntervalMs: -1 } })).toThrow(/minIntervalMs/u);
     expect(() => floor({ volition: { maxPerHour: -1 } })).toThrow(/maxPerHour/u);
     expect(() => floor({ volition: { maxPerHour: 1.5 } })).toThrow(/maxPerHour/u);
+  });
+});
+
+it("retains five recent participants without letting crosstalk or assistant speech renew them", () => {
+  const f = floor();
+  for (let i = 0; i < 5; i += 1) f.observeTranscript(said(`friend-${i}`, "hey clankie", i * 1_000));
+  for (let i = 0; i < 5; i += 1) {
+    expect(f.observeTranscript(said(`friend-${i}`, "what about mine", 5_000))).toEqual({
+      action: "offer",
+      reason: "holder",
+    });
+    expect(f.isEngagedSpeaker(`friend-${i}`, 5_000)).toBe(true);
+  }
+  expect(f.observeTranscript(said("bystander", "pass the chips", 5_000))).toEqual({
+    action: "offer",
+    reason: "transcript",
+  });
+  f.observeTranscript(said("sixth", "hey clankie", 6_000));
+  expect(f.isEngagedSpeaker("friend-0", 6_000)).toBe(false);
+  f.noteAssistantSpokeAt(59_000);
+  expect(f.observeTranscript(said("friend-1", "talking to someone else", 61_001))).toEqual({
+    action: "offer",
+    reason: "transcript",
+  });
+  expect(f.isEngagedSpeaker("sixth", 61_001)).toBe(true);
+  expect(f.accounting()).toEqual({ offered: 0, taken: 0, suppressed: 0 });
+});
+
+describe("every finalized speech transcript reaches model judgment", () => {
+  it("offers nameless music requests even with volition disabled and after decay", () => {
+    const f = floor({ chattiness: "quiet", volition: { maxPerHour: 0 } });
+    for (const atMs of [0, 1_000, 2_000]) {
+      expect(f.observeTranscript(said("alice", "can you play some music", atMs))).toEqual({
+        action: "offer",
+        reason: "transcript",
+      });
+      expect(f.state).toBe("dormant");
+      expect(f.isEngagedSpeaker("alice", atMs)).toBe(false);
+    }
+    f.noteSpeechFrom("alice", 2_000);
+    expect(f.observeTranscript(said("alice", "can you turn that up", WINDOW + 2_001))).toEqual({
+      action: "offer",
+      reason: "transcript",
+    });
+    expect(f.state).toBe("dormant");
+    expect(f.accounting()).toEqual({ offered: 0, taken: 0, suppressed: 0 });
+  });
+
+  it("does not offer empty speech and preserves typed input policy", () => {
+    const f = floor({ volition: { maxPerHour: 0 } });
+    expect(f.observeTranscript(said("alice", "…", 0))).toEqual({ action: "ignore" });
+    expect(f.observeTranscript(typed("alice", "can you play some music", 1))).toEqual({ action: "ignore" });
+    f.observeTranscript(said("alice", "hey clankie", 2));
+    expect(f.observeTranscript(typed("bob", "pass the chips", 3))).toEqual({ action: "listen" });
+    expect(f.observeTranscript(said("bob", "pass the chips", 4))).toEqual({
+      action: "offer",
+      reason: "transcript",
+    });
+    expect(f.isEngagedSpeaker("bob", 4)).toBe(false);
+    expect(f.floorHolderId).toBe("alice");
   });
 });

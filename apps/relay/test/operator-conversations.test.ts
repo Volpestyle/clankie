@@ -59,6 +59,31 @@ afterEach(async () => {
 });
 
 describe("authenticated operator conversation relay", () => {
+  it("refuses hosted reset through the legacy device relay before dispatch", async () => {
+    const dispatch = vi.fn();
+    const relay = await startRelay({
+      dispatch,
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: {
+            ...activeDevice,
+            controlScope: "hosted",
+            grants: { ...activeDevice.grants, terminalControl: true },
+          },
+        }),
+      },
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "reset",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      expectedRevision: 0,
+    });
+    expect(response.status).toBe(403);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("forwards an authenticated file download as exact bytes", async () => {
     const expected = Buffer.from("delivered bytes");
     const relay = await startRelay({

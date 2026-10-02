@@ -53,10 +53,15 @@ export function isModelTier(value: string): value is ModelTier {
 }
 
 export interface ModelEscalation {
-  /** The model an escalated routine run continues on. */
+  /** The model an escalated run continues on. */
   readonly ref: string;
-  /** Model calls before a routine run escalates as looping. */
-  readonly turnLimit: number;
+  /**
+   * Model calls before a routine run escalates as looping. Absent on a work
+   * run: long work is normal there, so only his own call escalates it.
+   */
+  readonly turnLimit?: number;
+  /** Whether a retryable provider error moves the retry to the escalation model (routine runs only). */
+  readonly onProviderError: boolean;
 }
 
 export interface ModelRoute {
@@ -64,7 +69,10 @@ export interface ModelRoute {
   readonly tier: ModelTier;
   /** The configured ref this purpose runs on; undefined only when no captain model is chosen. */
   readonly ref: string | undefined;
-  /** Present only for a routine route whose owner turned escalation on. */
+  /**
+   * Present when the owner turned escalation on: every routine route, and a
+   * work route whose escalation model differs from the work model.
+   */
   readonly escalation?: ModelEscalation;
 }
 
@@ -86,8 +94,20 @@ export function purposeTier(config: ClankieConfig, purpose: ModelPurpose): Model
  */
 export function routeFor(config: ClankieConfig, purpose: ModelPurpose): ModelRoute {
   const tier = purposeTier(config, purpose);
-  if (tier === "work") return { purpose, tier, ref: config.model };
   const routing = config.routing ?? {};
+  if (tier === "work") {
+    // A work turn escalates only to a different, named model, and only when he
+    // judges the task needs it (VUH-1391): no loop limit, no keyword gate.
+    const escalationRef = routing.escalation_model;
+    const escalates =
+      routing.escalate === true && escalationRef !== undefined && escalationRef !== config.model;
+    return {
+      purpose,
+      tier,
+      ref: config.model,
+      ...(escalates ? { escalation: { ref: escalationRef, onProviderError: false } } : {}),
+    };
+  }
   const escalationRef = routing.escalation_model ?? config.model;
   return {
     purpose,
@@ -98,6 +118,7 @@ export function routeFor(config: ClankieConfig, purpose: ModelPurpose): ModelRou
           escalation: {
             ref: escalationRef,
             turnLimit: routing.routine_turn_limit ?? DEFAULT_ROUTINE_TURN_LIMIT,
+            onProviderError: true,
           },
         }
       : {}),

@@ -12,6 +12,7 @@
   "dependencies": {
     "@clankie/observability": "workspace:*",
     "@clankie/protocol": "workspace:*",
+    "@clankie/settings": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

@@ -808,8 +808,11 @@ describe("service targets", () => {
       // The tunnel fronts the activity surface, so it starts after the thing it
       // publishes and is torn down before it.
       "tunnel",
+      // The owner's keep-awake holds the Mac up for all of the above.
+      "awake",
     ]);
     expect([...resolveTargets("all")].reverse()).toEqual([
+      "awake",
       "tunnel",
       "activity",
       "discord-user-session",
@@ -890,6 +893,126 @@ describe("service targets", () => {
     expect(status.state).toBe("healthy");
   });
 
+  describe("keep-awake", () => {
+    const optedIn = async (): Promise<NodeJS.ProcessEnv> => ({
+      ...(await stateEnv()),
+      CLANKIE_KEEP_AWAKE: "1",
+    });
+    const unusedFetch = (async () => {
+      throw new Error("keep-awake has no network surface");
+    }) as unknown as typeof fetch;
+
+    it("never spawns caffeinate unless the owner opted in, and off is not a fault", async () => {
+      const spawned: string[] = [];
+      const status = await startService(managedService("awake"), {
+        repoRoot: "/repo",
+        env: await stateEnv(),
+        fetchImpl: unusedFetch,
+        listProcessCommandsImpl: noProcesses,
+        spawnImpl: ((command: string) => {
+          spawned.push(command);
+          return runningChild(1234);
+        }) as unknown as typeof spawn,
+      });
+
+      expect(spawned).toEqual([]);
+      expect(status).toMatchObject({ id: "awake", state: "healthy" });
+      expect(status.detail).toMatch(/off/u);
+    });
+
+    it.skipIf(process.platform !== "darwin")(
+      "spawns `caffeinate -s` (plugged-in only) once opted in, and reports it held",
+      async () => {
+        const env = await optedIn();
+        const spawned: (readonly string[])[] = [];
+        const status = await startService(managedService("awake"), {
+          repoRoot: "/repo",
+          env,
+          fetchImpl: unusedFetch,
+          // The process table shows the spawned pid once it exists.
+          listProcessCommandsImpl: () => (spawned.length === 0 ? [] : [[5_150, "/usr/bin/caffeinate -s"]]),
+          processIsAliveImpl: (pid) => pid === 5_150,
+          spawnImpl: ((command: string, args: readonly string[]) => {
+            spawned.push([command, ...args]);
+            return runningChild(5_150);
+          }) as unknown as typeof spawn,
+        });
+
+        // `-s` alone: macOS honors it on AC only, so unplugging lets the Mac
+        // sleep and nothing here watches the charger. `-i` would hold on battery.
+        expect(spawned).toEqual([["caffeinate", "-s"]]);
+        expect(status).toMatchObject({ id: "awake", state: "healthy", owned: true });
+        expect(status.detail).toMatch(/plugged in/u);
+      },
+    );
+
+    it.skipIf(process.platform !== "darwin")(
+      "reports a requested keep-awake with no caffeinate as unreachable, naming the repair",
+      async () => {
+        const status = await inspectService(managedService("awake"), {
+          repoRoot: "/repo",
+          env: await optedIn(),
+          fetchImpl: unusedFetch,
+          listProcessCommandsImpl: noProcesses,
+        });
+
+        expect(status.state).toBe("unreachable");
+        expect(status.detail).toContain("clankie restart awake");
+      },
+    );
+
+    it.skipIf(process.platform !== "darwin")(
+      "neither conflicts with nor mistakes an owner's own `caffeinate -s` for its own",
+      async () => {
+        const env = await optedIn();
+        const service = managedService("awake");
+        const foreign = processList("/usr/bin/caffeinate -s");
+
+        // Not launcher-owned, so it reads as not held by the launcher...
+        expect(
+          (await inspectService(service, { repoRoot: "/repo", env, listProcessCommandsImpl: foreign })).state,
+        ).toBe("unreachable");
+        // ...and it does not block the launcher from starting its own.
+        const spawned: string[] = [];
+        await startService(service, {
+          repoRoot: "/repo",
+          env,
+          fetchImpl: unusedFetch,
+          listProcessCommandsImpl: () => (spawned.length === 0 ? foreign() : [[7_001, "caffeinate -s"]]),
+          processIsAliveImpl: (pid) => pid === 7_001,
+          spawnImpl: ((command: string) => {
+            spawned.push(command);
+            return runningChild(7_001);
+          }) as unknown as typeof spawn,
+        });
+        expect(spawned).toEqual(["caffeinate"]);
+      },
+    );
+
+    it("only recognizes its own shape, never another caffeinate", () => {
+      const { commandMatches } = managedService("awake");
+      expect(commandMatches("caffeinate -s")).toBe(true);
+      expect(commandMatches("/usr/bin/caffeinate -s")).toBe(true);
+      expect(commandMatches("caffeinate -t 300")).toBe(false);
+      expect(commandMatches("caffeinate -i -s make")).toBe(false);
+      expect(commandMatches("vim caffeinate -s notes")).toBe(false);
+    });
+
+    it("restarts with the clankie service so login autostart brings it back", () => {
+      expect(managedService("awake").restartsWith).toEqual(["clankie"]);
+    });
+
+    it("is off in a hosted loadout even when requested", async () => {
+      const status = await inspectService(managedService("awake"), {
+        repoRoot: "/repo",
+        env: { ...(await optedIn()), CLANKIE_SERVICES: "clankie,relay" },
+        fetchImpl: unusedFetch,
+        listProcessCommandsImpl: noProcesses,
+      });
+      expect(status).toMatchObject({ state: "healthy", detail: "off in this loadout" });
+    });
+  });
+
   it("stops the fan-out at the first failure so downstream errors cannot mask it", async () => {
     const env = await stateEnv();
     const spawned: string[] = [];
@@ -930,6 +1053,7 @@ describe("service targets", () => {
     });
 
     expect(outcomes.map((outcome) => outcome.id)).toEqual([
+      "awake",
       "tunnel",
       "activity",
       "discord-user-session",
@@ -956,6 +1080,7 @@ describe("service targets", () => {
     });
 
     expect(outcomes.map((outcome) => [outcome.id, outcome.ok])).toEqual([
+      ["awake", true],
       ["tunnel", true],
       ["activity", true],
       ["discord-user-session", true],
@@ -1133,6 +1258,9 @@ describe("restart carries dependents", () => {
       "relay",
       "discord-bridge",
       "discord-user-session",
+      // Keep-awake follows the service, so the login-time `restart clankie`
+      // brings it back after a reboot.
+      "awake",
     ]);
   });
 

@@ -1,0 +1,67 @@
+{
+  "data": {
+    "items": [
+      {
+        "id": 7568,
+        "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+        "actor": "766c124c-9211-4f42-99c3-6300f0ef8ea9",
+        "type": "message.accepted",
+        "entity_id": "ca92a6e7-2356-4ed3-824f-bc4f7b1ca7f7",
+        "payload": {
+          "audience": "direct",
+          "kind": "reply",
+          "recipients": ["4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0"]
+        },
+        "created_at": 1790532203336
+      },
+      {
+        "id": 7569,
+        "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+        "actor": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+        "type": "delivery.leased",
+        "entity_id": "ca92a6e7-2356-4ed3-824f-bc4f7b1ca7f7",
+        "payload": {
+          "attempt": 1,
+          "consumer": "clankie",
+          "generation": 16,
+          "leaseUntil": 1790532233341,
+          "recipient": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+          "sessionId": "40e479bc-aed5-40ff-8fc7-81244768e421"
+        },
+        "created_at": 1790532203341
+      },
+      {
+        "id": 7570,
+        "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+        "actor": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+        "type": "runtime.wake",
+        "entity_id": "ca92a6e7-2356-4ed3-824f-bc4f7b1ca7f7",
+        "payload": {
+          "attemptId": null,
+          "deliveryAttempt": 1,
+          "generation": 16,
+          "recipient": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+          "sessionId": "40e479bc-aed5-40ff-8fc7-81244768e421",
+          "status": "accepted",
+          "taskId": null
+        },
+        "created_at": 1790532203347
+      },
+      {
+        "id": 7573,
+        "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+        "actor": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+        "type": "delivery.acknowledged",
+        "entity_id": "ca92a6e7-2356-4ed3-824f-bc4f7b1ca7f7",
+        "payload": {
+          "attempt": 1,
+          "generation": 16,
+          "recipient": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+          "sessionId": "40e479bc-aed5-40ff-8fc7-81244768e421"
+        },
+        "created_at": 1790532209724
+      }
+    ],
+    "cursor": 7586
+  }
+}

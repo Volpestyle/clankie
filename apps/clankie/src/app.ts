@@ -1,9 +1,16 @@
+import { createAgentSessionRoutes } from "./agent-session-routes.ts";
+import { loadPersonaImages, personaImageBriefing, personaImageStatus } from "@clankie/persona-images";
+import type { PersonaImageSource } from "./persona-images.ts";
+import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
+import { WorkerHarnessError } from "./herdr-session.ts";
 import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
 import { createModelKeyRoutes } from "./model-key-routes.ts";
+import { createHostedCreditsRoutes } from "./hosted-credits-routes.ts";
 import { createAccountRoutes } from "./account-routes.ts";
 import type { AccountsPort } from "./accounts.ts";
+import type { ComputerUseHarness } from "./computer-use-harnesses.ts";
 import type { ModelKeysPort } from "./model-keys.ts";
-import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
+import { HOSTED_OPERATOR_PATH, HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
 import type { HostedPairing } from "./hosted-pairing.ts";
 import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
 import type { HostedDeviceSecurity } from "./hosted-device-security.ts";
@@ -26,15 +33,10 @@ import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@cla
  * Discord presence, the captain seam, memory, embodiment (play), browser,
  * media, and device pairing live here.
  */
+import { linearFollowStatus } from "@clankie/settings";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { dirname } from "node:path";
-import { upgradeWebSocket } from "@hono/node-server";
-import {
-  DiscordVoiceTranscriptStore,
-  type TranscriptVoiceRealtimePorts,
-} from "@clankie/discord-presence-core";
+import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
 import { createLogger } from "@clankie/observability";
 import {
   DISCORD_PRESENCE_LIVE_PHASE_HEADER,
@@ -70,10 +72,11 @@ import {
   DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX,
   DISCORD_VOICE_TRANSCRIPTS_PATH,
   DiscordVoiceTranscriptCursorSchema,
-  LOCAL_VOICE_CHAT_PATH,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   FLEET_SEAT_EVENTS_PATH,
+  FLEET_SEAT_HOOK_PATH,
+  FleetSeatHookSchema,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorConversationServiceRequestSchema,
@@ -114,6 +117,7 @@ import {
   DEVICE_PUSH_PATH,
   type DevicePushBinding,
   type DeviceSelfResponse,
+  DeviceDirectRouteSchema,
   type DeviceSessionRefreshResponse,
   type DiscordPersonIdentity,
   type DiscordPersonMemoryFact,
@@ -126,14 +130,14 @@ import {
   type PairingRedeemResponse,
 } from "@clankie/protocol";
 import { LINEAR_WEBHOOK_PATH, type PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway";
+import type { HostPowerReport } from "@clankie/protocol/host-power";
 import {
-  AgentHostConnectionSchema,
+  PersonaSettingsSchema,
   personaInstructions,
   SettingsStore,
   type ClankieSettings,
 } from "@clankie/settings";
 import type { AgentSessions } from "./agent-sessions.ts";
-import { AgentSessionRequestError } from "@clankie/agent-transcript";
 import { Hono, type Context } from "hono";
 import { RivalsCommandSchema } from "@clankie/protocol";
 import type { RivalsClient } from "./rivals.ts";
@@ -147,9 +151,10 @@ import {
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import {
   DiscordPresenceSessionProjection,
-  deriveDiscordVoiceHistory,
+  DiscordVoiceHistoryProjection,
   discordPresenceDomainEvent,
 } from "./discord-presence-session.ts";
+import { RecentEvents, appendEventLog, loadEventLog, persistable } from "./event-log.ts";
 import {
   DISCORD_USER_SESSION_OPT_IN_STREAM_ID,
   DISCORD_USER_SESSION_OPT_IN_RECORDED,
@@ -161,6 +166,7 @@ import {
   mintPairingOffer,
   pairingOfferRecord,
   pairingOfferWire,
+  withDirectPairingRoute,
   PairingOfferStore,
   replayReviewOffers,
   type PairingOfferRecord,
@@ -175,15 +181,9 @@ import {
   mintDeviceSessionClaims,
 } from "./device-session.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
-import {
-  LinearWorkOwnerSchema,
-  type LinearWriteReceipts,
-  classifyLinearDelivery,
-  linearReplyTo,
-} from "./linear-webhook.ts";
+import { type LinearWriteReceipts, classifyLinearDelivery, linearReplyTo } from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
-import { LocalVoiceChatSession } from "./local-voice-chat.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 import type { DeliveredFileStore } from "./delivered-files.ts";
@@ -233,18 +233,10 @@ const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
   "- `ask_clankie` is your own captain mind and carries your full Clankie capabilities; it is not another assistant. Capabilities you reach through it are yours. Use it for web browsing and research, starting Pokemon, and anything else that touches the world — code, messages, memory, settings, or drawing. It is also your reach onto the operator's machine: the shell, files, the herdr agent fleet, and what was posted in text channels. Your captain mind knows what each speaker may have — hand the request off and let it decide; never tell someone you cannot do or see something before asking it.",
   "- Songs and YouTube are `youtube_search` then `music_play` / `music_queue`. After you list results, '1 please' or 'the second one' is `music_play` with that index. Never `ask_clankie` or treat a song as a game. `look_at_screen` is one still of the game.",
   REALTIME_MEMORY_AGENCY_RULE,
-  "- Answer briefly in a spoken register: short sentences, no lists, no headers, no markdown — nothing you would not say out loud.",
+  "- You are a friend hanging out in a call. Match the length to the moment; most turns are short, sometimes just a few words. A story, a strong opinion, a bit you are invested in, or a real question that needs a real answer can earn more room. Keep your personality without constantly performing. No lists or assistant padding: no 'Great question', 'I'd be happy to', menus of options, or restating the request. Leave room for people. Text can be thorough. Handoff results follow the same proportion: give the gist, expand when the substance warrants it, and you can offer to drop details in text chat. Pending work is part of the conversation: one natural brief acknowledgment is enough, with no repeated fillers.",
+  "- An interruption changes the conversation: respond to the latest intent instead of resuming an older speech. When someone asks for quiet, silence is a complete response; you need not explain that you will stop.",
   "- Every room utterance arrives as structured text with an authenticated Discord `speakerId`. Keep track of each person separately, address the person who spoke, and treat that id as ground truth; never infer identity from voice characteristics.",
-  "- This is a group room, not a one-to-one call. Follow the whole conversation. Answer only when someone is talking to you — by name, or a short nameless follow-up to what you just said. Do not jump into a side thread. Use people's display names when you speak; speakerId is how you keep them distinct. Never infer identity from how they sound.",
-].join("\n");
-
-const LOCAL_VOICE_REALTIME_SURFACE_RULES = [
-  "# This surface",
-  "You are in a private voice conversation with your operator on this Mac.",
-  "- Speak naturally and briefly. No markdown, lists, links, file paths, or anything that only makes sense on a screen.",
-  "- Conversation stays in the realtime voice session. Use ask_clankie for tools, memory, files, or any other action.",
-  REALTIME_MEMORY_AGENCY_RULE,
-  "- Voice never approves privileged actions. If a tool needs typed input or approval, send the operator to the authenticated operator console.",
+  "- Follow the whole room conversation and decide whether each utterance calls for you. Your name is a clue, not a requirement: a direct request or contextual follow-up can be for you without it, even after a pause. Fragments, acknowledgments, and side conversations often need no reply. You may stay silent. Use display names when they help make the recipient clear; speakerId keeps people distinct. Never infer identity from how they sound.",
 ].join("\n");
 
 /**
@@ -362,6 +354,14 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
+const FleetPeerEnrollSchema = z
+  .object({
+    conversationId: z.string().min(1).max(256),
+    fleet: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+    name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+  })
+  .strict();
+
 export interface ClankieAppDependencies {
   discordIngress?: DiscordIngress;
   modelKeys?: ModelKeysPort;
@@ -370,6 +370,8 @@ export interface ClankieAppDependencies {
   hostedPairing?: HostedPairing;
   onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
+  /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
+  hostedCredits?: Pick<HostedBodyClient, "readCredits">;
   hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
@@ -380,17 +382,28 @@ export interface ClankieAppDependencies {
   runtimes?: ExecutionConnections;
   swarm?: Pick<SwarmHost, "status"> &
     Partial<Pick<SwarmHost, "connect" | "disconnect" | "syncRuntimeConnections">>;
+  /**
+   * Enrolls a peer on a registered ssh fleet into a conversation's coordinator
+   * through that fleet's relay (VUH-1381). The capability is returned once, to
+   * the authenticated operator, for that peer alone.
+   */
+  fleetPeers?: {
+    enroll(input: { conversationId: string; fleet: string; name: string }): Promise<unknown>;
+  };
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
   /** Only a currently available connection has an active binding. */
   herdrBinding?: () => HerdrBinding | undefined;
   /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */
   publicGatewayDoorway?: () => PublicGatewayDoorwayState;
+  /** Whether this host may sleep, and when it last did, so the app can say why he went quiet. */
+  hostPower?: () => HostPowerReport;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
   memory?: MemoryStores;
+  personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
   settings?: {
     load(): Promise<ClankieSettings>;
@@ -399,13 +412,18 @@ export interface ClankieAppDependencies {
   discordPresenceRuntime?: DiscordPresenceRuntimePort;
   discordUserPresenceRuntime?: DiscordPresenceRuntimePort;
   activityObservations?: ActivityObservationReadPort;
+  /** Activated by the first play join or authorized observation, never by boot. */
+  startPlayHost?: () => Promise<void>;
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
+  /**
+   * Computer-use harnesses on this machine (ADR 0199). Absent on a hosted body,
+   * which has no owner desktop; the route then answers an empty list.
+   */
+  computerUseHarnesses?: { refresh(): Promise<readonly ComputerUseHarness[]> };
   rivals?: RivalsClient;
   mediaGenerator?: MediaGeneratorPort;
-  /** Shared realtime voice provider composition; the app owns only loopback media transport. */
-  localVoiceRealtime?: TranscriptVoiceRealtimePorts;
   /** Private exact Discord transcript log, injected by tests when needed. */
   voiceTranscriptStore?: DiscordVoiceTranscriptStore;
   authenticateCaptain?: CaptainAuthenticator;
@@ -428,6 +446,8 @@ export interface ClankieAppDependencies {
   linearWebhook?: {
     secret(): Promise<string | undefined>;
     writes?: LinearWriteReceipts;
+    /** Refresh the recipient inbox after a verified event is persisted. */
+    requestNotificationPoll?(): void;
     /** His own verified Linear identity; activity it authors is kept without a wake. */
     ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
   };
@@ -459,44 +479,6 @@ export interface ClankieApp {
   close(): void;
 }
 
-/** Recorded heartbeats are pure liveness noise; everything else is worth the disk. */
-function persistable(event: DomainEvent): boolean {
-  return event.type !== "captain.heartbeat";
-}
-
-function readEventLog(path: string): DomainEvent[] {
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return [];
-  }
-  const events: DomainEvent[] = [];
-  for (const line of raw.split("\n")) {
-    if (line.trim().length === 0) continue;
-    try {
-      events.push(JSON.parse(line) as DomainEvent);
-    } catch {
-      continue; // a torn tail line must not stop the boot
-    }
-  }
-  return events;
-}
-
-const AgentSessionSendSchema = z
-  .object({
-    ref: z.string().min(1).max(200),
-    message: z
-      .string()
-      .min(1)
-      .max(32 * 1024),
-  })
-  .strict();
-
-function errorDetail(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export async function createClankieApp(dependencies: ClankieAppDependencies): Promise<ClankieApp> {
   const clock = dependencies.clock ?? (() => new Date());
   const idFactory = dependencies.idFactory ?? randomUUID;
@@ -507,19 +489,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   const instanceId = randomUUID();
   const hostDisplayName = dependencies.hostDisplayName ?? hostname();
 
+  // Replayed once below, then dropped: after boot the projections hold state
+  // and `recentEvents` holds only what redelivery checks need.
   const storedEvents: DomainEvent[] = dependencies.eventLogPath
-    ? readEventLog(dependencies.eventLogPath)
+    ? loadEventLog(dependencies.eventLogPath, (message) =>
+        logger.warn({ event: "event_log.compaction" }, message),
+      )
     : [];
-  if (dependencies.eventLogPath) {
-    mkdirSync(dirname(dependencies.eventLogPath), { recursive: true, mode: 0o700 });
-  }
-  const persistedEventIds = new Set(storedEvents.map((event) => event.id));
+  const recentEvents = new RecentEvents(storedEvents);
+  const discordVoiceHistory = new DiscordVoiceHistoryProjection(storedEvents);
   const appendEvent = (event: DomainEvent): void => {
-    storedEvents.push(event);
-    persistedEventIds.add(event.id);
-    if (dependencies.eventLogPath && persistable(event)) {
-      appendFileSync(dependencies.eventLogPath, `${JSON.stringify(event)}\n`, { mode: 0o600 });
-    }
+    // Heartbeats neither reach the disk nor stay in memory: the presence
+    // manager keeps the current lease, and nothing replays liveness noise.
+    if (!persistable(event)) return;
+    recentEvents.add(event);
+    discordVoiceHistory.apply(event);
+    if (dependencies.eventLogPath) appendEventLog(dependencies.eventLogPath, event);
   };
 
   const recordEvent = (
@@ -633,6 +618,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   >();
 
   const embodiment = new EmbodimentManager({
+    ...(dependencies.startPlayHost === undefined ? {} : { startHost: dependencies.startPlayHost }),
     clock,
     idFactory: () => `embodiment-${idFactory()}`,
     emit: (type, sessionId, data) => {
@@ -657,7 +643,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? {}
       : { recordedHeartbeatIntervalMs: dependencies.captainHeartbeatRecordIntervalMs }),
     emit: ({ event }) => {
-      if (!persistedEventIds.has(event.id)) appendEvent(event);
+      if (!recentEvents.has(event.id)) appendEvent(event);
       return Promise.resolve();
     },
     onBackgroundError: (error) => {
@@ -667,6 +653,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     },
   });
+
+  // Every boot projection has consumed the log; release its replay buffer.
+  storedEvents.length = 0;
 
   const app = new Hono();
 
@@ -697,6 +686,102 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     };
   };
 
+  // Only requests created inside the authenticated device bridge acquire operator
+  // authority. No header, client platform, or ordinary pairing link can assert it.
+  const hostedRequests = new WeakMap<Request, string>();
+  const localOperator = dependencies.authenticateOperator;
+  const localCaptain = dependencies.authenticateCaptain;
+  if (dependencies.hostedPairing !== undefined)
+    dependencies = {
+      ...dependencies,
+      authenticateOperator: async (request) => {
+        const candidate = hostedRequests.get(request);
+        const deviceId =
+          candidate !== undefined && devices.get(candidate)?.status === "active" ? candidate : undefined;
+        return deviceId === undefined
+          ? localOperator?.(request)
+          : { operatorId: deviceId, steerSourceLane: "tui" };
+      },
+      authenticateCaptain: async (request) => {
+        const candidate = hostedRequests.get(request);
+        const deviceId =
+          candidate !== undefined && devices.get(candidate)?.status === "active" ? candidate : undefined;
+        return deviceId === undefined
+          ? localCaptain?.(request)
+          : { captainId: deviceId, steerSourceLane: "api" };
+      },
+    };
+  app.post(HOSTED_OPERATOR_PATH, bodyLimit({ maxSize: 2 * 1024 * 1024 }), async (context) => {
+    const identity = await authenticateDevice(context.req.raw);
+    if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+    if ("denied" in identity) return deviceDenialResponse(context, identity);
+    const record = devices.get(identity.deviceId);
+    if (
+      dependencies.hostedPairing === undefined ||
+      record?.mintedBy !== "hosted-account-operator" ||
+      !identity.grants.terminalControl
+    )
+      return context.json({ error: "operator_device_required" }, 403);
+    const parsed = z
+      .object({
+        method: z.enum(["GET", "POST"]),
+        path: z.string().regex(/^(?:\/health|\/operator\/v1\/dispatch|\/v1\/[A-Za-z0-9_/-]+)$/u),
+        body: z
+          .string()
+          .max(1024 * 1024)
+          .optional(),
+      })
+      .strict()
+      .safeParse(await readJson(context.req.raw));
+    if (!parsed.success || !hostedOperatorAllows(parsed.data.method, parsed.data.path, parsed.data.body))
+      return context.json({ error: "invalid_operator_route" }, 400);
+    const inner = new Request(`http://control${parsed.data.path}`, {
+      method: parsed.data.method,
+      headers: { "content-type": "application/json" },
+      signal: context.req.raw.signal,
+      ...(parsed.data.method === "POST" && parsed.data.body !== undefined ? { body: parsed.data.body } : {}),
+    });
+    hostedRequests.set(inner, identity.deviceId);
+    try {
+      const response = await app.fetch(inner);
+      // A parked tail can outlive revocation or expiry. Recheck before releasing
+      // its page; admission of an earlier write is not undone by this denial.
+      const current = await authenticateDevice(context.req.raw);
+      if (current === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+      if ("denied" in current) return deviceDenialResponse(context, current);
+      return response;
+    } finally {
+      hostedRequests.delete(inner);
+    }
+  });
+
+  app.get("/v1/operator/persona", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, dependencies);
+    if (!identity || identity === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    const persona = (await settingsSource.load()).persona;
+    return context.json({ persona, images: personaImageStatus(await loadPersonaImages(persona.imagesDir)) });
+  });
+  app.post("/v1/operator/persona", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, dependencies);
+    if (!identity || identity === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
+    const patch = PersonaSettingsSchema.partial()
+      .strict()
+      .safeParse(await readJson(context.req.raw));
+    if (!patch.success) return context.json({ error: "malformed" }, 400);
+    const updated = await settingsSource.update((value) => ({
+      ...value,
+      persona: PersonaSettingsSchema.parse({ ...value.persona, ...patch.data }),
+    }));
+    return context.json({
+      persona: updated.persona,
+      restart: "Restart Clankie to apply persona images.",
+      images: personaImageStatus(await loadPersonaImages(updated.persona.imagesDir)),
+    });
+  });
+
   const deviceDenialResponse = (context: Context, denial: DeviceAuthDenial) => {
     if (denial.denied === "revoked") return context.json({ error: "revoked" }, 401);
     if (denial.denied === "expired") return context.json({ error: "expired" }, 401);
@@ -715,7 +800,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return device.grants.terminalControl ? true : "forbidden";
   };
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
-  app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets));
+  app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
+  /**
+   * Owner operator or any active paired device: account data that is not a
+   * secret and needs no terminal grant, such as the hosted credit balance.
+   */
+  const authorizeOwnerDevice = async (
+    request: Request,
+  ): Promise<true | "authentication_required" | "forbidden"> => {
+    const operator = await authenticateOperator(request, dependencies);
+    if (operator && operator !== "unavailable") return true;
+    const device = await authenticateDevice(request);
+    return device === "unavailable" || "denied" in device ? "authentication_required" : true;
+  };
+  app.route("/", createHostedCreditsRoutes(dependencies.hostedCredits, authorizeOwnerDevice));
 
   /** Captain or authenticated operator, for reads the owner should never have to authorize. */
   const authenticateCaptainOrOperator = async (
@@ -796,7 +894,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } catch (error) {
       return context.json(
         {
-          error: "runtime_connection_refused",
+          error: error instanceof WorkerHarnessError ? error.code : "runtime_connection_refused",
           detail: error instanceof Error ? error.message : "Connection refused",
         },
         409,
@@ -823,161 +921,26 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  app.get("/v1/agent-hosts", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    return context.json({ hosts: await dependencies.agentSessions.hosts() });
-  });
-
-  app.post("/v1/agent-hosts", bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    const input = AgentHostConnectionSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!input.success) return context.json({ error: "invalid_agent_host" }, 400);
-    return context.json({ hosts: await dependencies.agentSessions.addHost(input.data) });
-  });
-
-  app.delete("/v1/agent-hosts/:id", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    try {
-      return context.json({ hosts: await dependencies.agentSessions.removeHost(context.req.param("id")) });
-    } catch (error) {
-      return context.json(
-        { error: "unknown_agent_host", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 409,
-      );
-    }
-  });
-
-  app.get("/v1/agent-sessions", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    const host = context.req.query("host");
-    const limit = context.req.query("limit");
-    try {
-      return context.json(
-        await dependencies.agentSessions.list({
-          ...(host ? { host } : {}),
-          ...(limit ? { limit: Number(limit) } : {}),
-        }),
-      );
-    } catch (error) {
-      return context.json(
-        { error: "agent_sessions_failed", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 502,
-      );
-    }
-  });
-
-  app.get("/v1/agent-sessions/read", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    const ref = context.req.query("ref");
-    if (!ref) return context.json({ error: "agent_session_ref_required" }, 400);
-    const tail = context.req.query("tail");
-    const after = context.req.query("after");
-    try {
-      return context.json(
-        await dependencies.agentSessions.read(ref, {
-          ...(tail ? { tail: Number(tail) } : {}),
-          ...(after ? { after } : {}),
-        }),
-      );
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_read_failed", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 502,
-      );
-    }
-  });
-
-  app.post("/v1/agent-sessions/send", bodyLimit({ maxSize: 40 * 1024 }), async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    const input = AgentSessionSendSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!input.success) return context.json({ error: "invalid_agent_session_send" }, 400);
-    try {
-      return context.json(await dependencies.agentSessions.send(input.data.ref, input.data.message), 202);
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_send_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 502,
-      );
-    }
-  });
-
-  app.get("/v1/agent-sessions/runs", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    return context.json({ runs: dependencies.agentSessions.runs() });
-  });
-
-  app.get("/v1/agent-sessions/runs/:id", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    try {
-      return context.json(dependencies.agentSessions.run(context.req.param("id")));
-    } catch (error) {
-      return context.json({ error: "unknown_agent_session_run", detail: errorDetail(error) }, 404);
-    }
-  });
-
-  app.delete("/v1/agent-sessions/runs/:id", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    try {
-      return context.json(dependencies.agentSessions.cancel(context.req.param("id")));
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_cancel_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 409,
-      );
-    }
-  });
-
-  app.post("/v1/agent-sessions/runs/:id/release", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.agentSessions) return context.json({ error: "agent_sessions_unavailable" }, 503);
-    try {
-      return context.json(dependencies.agentSessions.release(context.req.param("id")));
-    } catch (error) {
-      return context.json(
-        { error: "agent_session_release_refused", detail: errorDetail(error) },
-        error instanceof AgentSessionRequestError ? error.status : 409,
-      );
-    }
-  });
+  app.route(
+    "/",
+    createAgentSessionRoutes(
+      dependencies.agentSessions,
+      async (request) => {
+        const operator = await authenticateOperator(request, dependencies);
+        return operator === "unavailable" ? operator : Boolean(operator);
+      },
+      async (seat, brief) => {
+        const result = await dependencies.captain.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          seat,
+          ...(brief === undefined ? {} : { brief }),
+        });
+        if (result.op !== "spawn_seat") throw new Error("The captain did not return a hire result");
+        return result.result;
+      },
+    ),
+  );
 
   app.get("/v1/swarm", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
@@ -1001,6 +964,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json(await dependencies.swarm.connect(parsed.data, binding.cwd));
     } catch {
       return context.json({ error: "swarm_connection_refused" }, 409);
+    }
+  });
+
+  app.post("/v1/swarm/fleet-peers", bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.fleetPeers) return context.json({ error: "swarm_unavailable" }, 503);
+    const parsed = FleetPeerEnrollSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_fleet_peer" }, 400);
+    try {
+      return context.json(await dependencies.fleetPeers.enroll(parsed.data));
+    } catch (error) {
+      return context.json(
+        {
+          error: "fleet_peer_refused",
+          detail: error instanceof Error ? error.message : "Enrollment refused",
+        },
+        409,
+      );
     }
   });
 
@@ -1118,11 +1102,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "hosted_security_unavailable" }, 503);
     const herdr = dependencies.herdrRuntime?.();
     const doorway = dependencies.publicGatewayDoorway?.();
+    const power = dependencies.hostPower?.();
     return context.json({
       ok: true,
       service: "clankie",
       ...(herdr === undefined ? {} : { herdr }),
       ...(doorway === undefined ? {} : { doorway }),
+      ...(power === undefined ? {} : { power }),
     });
   });
 
@@ -1243,6 +1229,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(page);
   });
 
+  // A hired seat's worker plugin reports each settled turn (VUH-1458), from
+  // inside the pane it names. Same door as its mailbox: operator lane only.
+  app.post(FLEET_SEAT_HOOK_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const parsed = FleetSeatHookSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const recorded = await dependencies.captain.recordSeatHook(context.req.param("paneId"), parsed.data);
+    return recorded
+      ? context.json({ schemaVersion: 1 as const, recorded: true as const })
+      : context.json({ error: "unknown_seat" }, 404);
+  });
+
   app.get("/v1/captain/memory-card", async (context) => {
     const auth = await authenticateLane(context);
     if ("denial" in auth) return auth.denial;
@@ -1321,6 +1321,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const instructions = boundVoiceBriefingText(
       [
         personaInstructions(persona, "social"),
+        dependencies.personaImages ? personaImageBriefing(await dependencies.personaImages()) : "",
         dependencies.captain.voiceLaneInstructions(),
         DISCORD_VOICE_REALTIME_SURFACE_RULES,
       ].join("\n\n"),
@@ -1391,8 +1392,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const sessionKey = discordPresenceBindingKey(event.data.session);
     return withSerializedLock(discordPresenceSessionLocks, sessionKey, async () => {
       const domainEvent = discordPresenceDomainEvent(event, PROFILE_HASH);
-      if (persistedEventIds.has(event.id)) {
-        const existing = storedEvents.find((candidate) => candidate.id === event.id);
+      if (recentEvents.has(event.id)) {
+        const existing = recentEvents.get(event.id);
         if (existing === undefined || JSON.stringify(existing) !== JSON.stringify(domainEvent)) {
           return context.json({ error: "discord_presence_event_id_conflict" }, 409);
         }
@@ -1437,7 +1438,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     return context.json({
       schemaVersion: 1 as const,
-      stays: deriveDiscordVoiceHistory(storedEvents, parsedLimit),
+      stays: discordVoiceHistory.list(parsedLimit),
     });
   });
 
@@ -2220,7 +2221,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.get("/v1/embodiment/sessions/live", async (context) => {
     const authorization = await authenticateCaptainOrOperator(context);
     if ("denial" in authorization) return authorization.denial;
-    return context.json({ session: embodiment.liveSession() ?? null });
+    return context.json({ session: (await embodiment.observe()) ?? null });
   });
 
   /** Present-tense self-observation, read straight from the in-process projection. */
@@ -2237,7 +2238,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (!operator) return context.json({ error: "activity_observation_authentication_required" }, 401);
     }
 
-    const live = embodiment.liveSession();
+    const live = await embodiment.observe();
     if (live === undefined) {
       return context.json(ActivityObservationReadSchema.parse({ schemaVersion: 1, outcome: "not_playing" }));
     }
@@ -2302,7 +2303,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (dependencies.playSight === undefined) {
       return context.json({ schemaVersion: 1, outcome: "not_playing" });
     }
-    const live = embodiment.liveSession();
+    const live = await embodiment.observe();
     const sight = dependencies.playSight.still();
     if (live === undefined) {
       return context.json({ schemaVersion: 1, outcome: "not_playing" });
@@ -2331,7 +2332,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (dependencies.playSight === undefined) {
       return context.json({ schemaVersion: 1, outcome: "not_playing" });
     }
-    const live = embodiment.liveSession();
+    const live = await embodiment.observe();
     const sight = dependencies.playSight.story();
     if (live === undefined) {
       return context.json({ schemaVersion: 1, outcome: "not_playing" });
@@ -2351,6 +2352,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       });
     }
     return context.json(sight);
+  });
+
+  // Which harnesses here can drive the owner's apps and Chrome (ADR 0199). It
+  // describes the owner's machine and sessions, so only the operator reads it;
+  // an explicit read re-probes rather than trusting the prompt's cache.
+  app.get("/v1/browser/harnesses", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const harnesses = (await dependencies.computerUseHarnesses?.refresh()) ?? [];
+    return context.json(
+      { schemaVersion: 1, detected: dependencies.computerUseHarnesses !== undefined, harnesses },
+      200,
+      { "cache-control": "no-store" },
+    );
   });
 
   app.get("/v1/browser/tools", async (context) => {
@@ -2461,7 +2478,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "captain_authentication_unavailable" }, 503);
     }
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-    const session = embodiment.getSession(context.req.param("id"));
+    const session = await embodiment.observe(context.req.param("id"));
     if (session === undefined) return context.json({ error: "embodiment_session_not_found" }, 404);
     return context.json({ session });
   });
@@ -2561,25 +2578,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (context.req.method === "GET")
       return context.json({ owners: dependencies.captain.linearWorkOwners() });
-    const input = LinearWorkOwnerSchema.extend({
-      expectedConversationId: z.string().min(1).max(256).optional(),
-    }).safeParse(await readJson(context.req.raw));
-    if (!input.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
-    const { expectedConversationId, ...owner } = input.data;
-    owner.organizationId = owner.organizationId.toLowerCase();
-    owner.issueId = owner.issueId.toLowerCase();
-    try {
-      dependencies.captain.setLinearWorkOwner(owner, expectedConversationId, context.req.method === "DELETE");
-      return context.json({ owners: dependencies.captain.linearWorkOwners() });
-    } catch (error) {
-      return context.json(
-        {
-          error: "linear_work_owner_refused",
-          detail: error instanceof Error ? error.message : "Unavailable",
-        },
-        409,
-      );
-    }
+    return context.json({ error: "linear_work_bindings_retired" }, 410);
   });
 
   // Local operator control, independent of the publicly reachable signed webhook.
@@ -2588,6 +2587,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
+    const secret = await dependencies.linearWebhook?.secret();
+    const secretPresent = secret !== undefined && secret.trim().length > 0;
     let current;
     if (context.req.method === "PUT") {
       const body = await readJson(context.req.raw);
@@ -2603,7 +2604,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
       if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
       const following = body.following;
-      current = await settingsSource.update((value) => ({ ...value, linearWebhook: { following } }));
+      let refused = false;
+      current = await settingsSource.update((value) => {
+        if (following && !linearFollowStatus(value.linearWebhook, secretPresent).webhookConfigured) {
+          refused = true;
+          return value;
+        }
+        return { ...value, linearWebhook: { ...value.linearWebhook, following } };
+      });
+      if (refused)
+        return context.json(
+          { error: "linear_webhook_required", ...linearFollowStatus(current.linearWebhook, secretPresent) },
+          409,
+        );
     } else {
       current = await settingsSource.load();
     }
@@ -2611,8 +2624,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       dependencies.captain.resumeLinearActivity();
     return context.json({
       schemaVersion: 1 as const,
-      following: current.linearWebhook.following,
+      ...linearFollowStatus(current.linearWebhook, secretPresent),
       conversationId: LINEAR_INBOX_CONVERSATION_ID,
+      wakeConversationId: "global-default",
     });
   });
 
@@ -2655,16 +2669,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     // Persist first; following controls model turns, not inbox delivery.
     // Anything his own account wrote, captain or worker, is kept but never wakes him.
     const own = await hook.ownAccount?.().catch(() => undefined);
-    const selfAuthored =
-      own !== undefined &&
-      outcome.activity.actorId === own.userId &&
-      outcome.activity.organizationId === own.workspaceId;
-    // A reply to his own post is someone asking about his work; the wake routes it (ADR 0191).
     const replyTo = linearReplyTo(outcome.activity, own, hook.writes, clock());
+    // Workspace webhooks are history. Only the connected account's actual Linear
+    // notifications wake him (linear-notifications.ts); self-authored activity
+    // therefore remains quiet regardless of webhook order or receipt timing.
     const ingested = dependencies.captain.receiveLinearActivity(
       replyTo ? { ...outcome.activity, replyTo } : outcome.activity,
-      (await settingsSource.load()).linearWebhook.following && !selfAuthored,
+      false,
     );
+    if (ingested !== false) hook.requestNotificationPoll?.();
     return context.json({ schemaVersion: 1 as const, ingested: ingested !== false });
   });
 
@@ -2672,21 +2685,35 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // response and is never logged; events carry only the non-secret offer id.
   // Public gateway wins when configured. Otherwise the existing owner-authored
   // direct LAN/Tailscale relay origin remains the advanced transport.
-  const advertisedRelayUrl = (): { relayUrl: string } | Record<never, never> => {
+  const advertisedDirectRoute = () => {
+    const parsed = DeviceDirectRouteSchema.safeParse({
+      controlPlaneUrl: process.env.CLANKIE_DIRECT_CONTROL_PLANE_URL?.trim(),
+      relayUrl: process.env.CLANKIE_RELAY_URL?.trim(),
+    });
+    return parsed.success ? { directRoute: parsed.data } : {};
+  };
+  const advertisedRelayUrl = () => {
     const raw = dependencies.publicGatewayHostBaseUrl ?? process.env.CLANKIE_RELAY_URL?.trim();
-    return raw === undefined || raw.length === 0 ? {} : { relayUrl: raw };
+    return {
+      ...(raw === undefined || raw.length === 0 ? {} : { relayUrl: raw }),
+      ...advertisedDirectRoute(),
+    };
   };
 
   app.post(HOSTED_PAIR_OFFER_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
     if (dependencies.hostedBody !== undefined && deviceSessionSigner === undefined)
       return context.json({ error: "device_authentication_unavailable" }, 503);
     if (dependencies.hostedPairing === undefined) return context.json({ error: "not_found" }, 404);
-    return dependencies.hostedPairing.offer(await readJson(context.req.raw), async () => {
+    return dependencies.hostedPairing.offer(await readJson(context.req.raw), async (purpose) => {
       const publisher = dependencies.pairingOfferPublisher;
       if (publisher?.protectPairingOffer === undefined) throw new Error("Encrypted pairing unavailable");
       const now = clock();
       pairingOffers.prune(now);
-      const offer = mintPairingOffer({ now, mintedBy: "hosted-account", idFactory });
+      const offer = mintPairingOffer({
+        now,
+        mintedBy: purpose === "operator" ? "hosted-account-operator" : "hosted-account",
+        idFactory,
+      });
       await publisher.publishPairingOffer(offer);
       const protectedOffer = publisher.protectPairingOffer(offer);
       pairingOffers.add(pairingOfferRecord(offer));
@@ -2729,9 +2756,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     // A configured doorway wins (ADR 0151), so an offer it cannot carry is a code
     // that can never be redeemed. Refusing beats printing a QR that fails on the
     // phone as "not recognized" with nothing on this Mac to say why.
+    // Every offer carries the configured direct route too, so it still pairs
+    // when the doorway cannot (ADR 0204). A review offer does not: App Review
+    // reaches this Mac only through the gateway, and needs no private address.
+    const direct =
+      parsed.data.review === undefined ? advertisedDirectRoute().directRoute?.controlPlaneUrl : undefined;
+    const directFallback = direct !== undefined;
     const doorway = dependencies.publicGatewayDoorway?.();
     if (dependencies.pairingOfferPublisher === undefined && doorway !== undefined) {
-      if (doorway.state !== "disabled") {
+      if (doorway.state !== "disabled" && !directFallback) {
         logger.warn({ doorway: doorway.state }, "pairing offer refused: the doorway carries nothing");
         return context.json({ error: "public_gateway_unavailable" }, 503);
       }
@@ -2744,15 +2777,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       idFactory,
       ...(parsed.data.review === undefined ? {} : { review: parsed.data.review }),
     });
-    if (dependencies.pairingOfferPublisher !== undefined) {
+    let publisher = dependencies.pairingOfferPublisher;
+    if (publisher !== undefined) {
       try {
-        await dependencies.pairingOfferPublisher.publishPairingOffer(offer);
+        await publisher.publishPairingOffer(offer);
       } catch (error) {
         logger.warn(
-          { offerId: offer.offerId, error: error instanceof Error ? error.name : "UnknownError" },
+          {
+            offerId: offer.offerId,
+            error: error instanceof Error ? error.name : "UnknownError",
+            directFallback,
+          },
           "pairing offer could not reach the public gateway",
         );
-        return context.json({ error: "public_gateway_unavailable" }, 503);
+        if (!directFallback) return context.json({ error: "public_gateway_unavailable" }, 503);
+        publisher = undefined;
       }
     }
     const record = pairingOfferRecord(offer);
@@ -2771,9 +2810,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       { offerId: offer.offerId, operatorId: operator.operatorId, expiresAt: offer.expiresAt },
       "pairing offer minted",
     );
-    return context.json(
-      dependencies.pairingOfferPublisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer),
-    );
+    const wire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    return context.json(direct === undefined ? wire : withDirectPairingRoute(wire, direct));
   });
 
   // Redeem an offer secret or typed code (the secret IS the capability, so the
@@ -2992,12 +3030,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const record = devices.get(identity.deviceId);
     if (record === undefined) return context.json({ error: "device_authentication_required" }, 401);
     return context.json({
+      ...advertisedDirectRoute(),
       deviceId: record.deviceId,
       name: record.name,
       platform: record.platform,
       grants: record.grants,
       host: { name: hostDisplayName },
       sessionExpiresAt: identity.sessionExpiresAt,
+      ...(dependencies.hostedPairing !== undefined || dependencies.hostedBody !== undefined
+        ? { controlScope: "hosted" as const }
+        : {}),
     } satisfies DeviceSelfResponse);
   });
 
@@ -3205,77 +3247,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  app.get(LOCAL_VOICE_CHAT_PATH, async (context) => {
-    const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
-    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-    if (captain.steerSourceLane !== "api")
-      return context.json({ error: "operator_voice_authority_required" }, 403);
-    if (dependencies.localVoiceRealtime === undefined) {
-      return context.json({ error: "local_voice_unavailable" }, 503);
-    }
-    let persona: ClankieSettings["persona"];
-    try {
-      persona = (await settingsSource.load()).persona;
-    } catch {
-      return context.json({ error: "local_voice_persona_unavailable" }, 503);
-    }
-    const sections = [
-      renderVoiceBriefingSelfState(
-        captainPresence.snapshot(),
-        discordPresenceSessions.list(),
-        discordStreamWatch.current(),
-      ),
-    ];
-    const embodimentCard = renderVoiceBriefingEmbodiment(embodiment.liveSession());
-    if (embodimentCard !== undefined) sections.push(embodimentCard);
-    const episodeCard = dependencies.memory?.episodeRecallCard({ lane: "operator" }) ?? "";
-    if (episodeCard.length > 0) sections.push(episodeCard);
-    let session: LocalVoiceChatSession;
-    try {
-      session = await LocalVoiceChatSession.open({
-        realtime: dependencies.localVoiceRealtime,
-        captain: dependencies.captain,
-        instructions: boundVoiceBriefingText(
-          [personaInstructions(persona, "social"), LOCAL_VOICE_REALTIME_SURFACE_RULES].join("\n\n"),
-          DISCORD_VOICE_BRIEFING_MAX_CHARACTERS,
-        ),
-        briefing: boundVoiceBriefingText(sections.join("\n\n"), DISCORD_VOICE_BRIEFING_MAX_CHARACTERS),
-      });
-    } catch {
-      return context.json({ error: "local_voice_upstream_unavailable" }, 503);
-    }
-    return upgradeWebSocket(context, {
-      onOpen(_event, ws) {
-        session.attach({
-          get bufferedAmount() {
-            const raw = ws.raw as { readonly bufferedAmount?: unknown } | undefined;
-            return typeof raw?.bufferedAmount === "number" ? raw.bufferedAmount : 0;
-          },
-          send: (data) => ws.send(data),
-          close: (code, reason) => ws.close(code, reason),
-        });
-      },
-      onMessage(event, ws) {
-        if (typeof event.data === "string") {
-          session.receiveText(event.data);
-          return;
-        }
-        if (event.data instanceof ArrayBuffer) {
-          session.receiveAudio(new Uint8Array(event.data));
-          return;
-        }
-        ws.close(1003, "unsupported_voice_frame");
-      },
-      onClose() {
-        session.close();
-      },
-      onError() {
-        session.close();
-      },
-    });
-  });
-
   app.get(CAPTAIN_LANE_OBSERVATION_PATH, async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
@@ -3377,7 +3348,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     captainPresence,
     presenceSessions: () => discordPresenceSessions.list(),
     streamWatch: () => discordStreamWatch.current(),
-    voiceHistory: (limit: number) => deriveDiscordVoiceHistory(storedEvents, limit),
+    voiceHistory: (limit: number) => discordVoiceHistory.list(limit),
     recentVoiceSpeech: (limit: number) => {
       const room = discordPresenceSessions
         .list()

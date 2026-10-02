@@ -1,0 +1,245 @@
+{
+  "schemaVersion": 1,
+  "id": "6eeaa38a-d1cd-475d-a262-b9a145d7be05",
+  "startedAt": "2026-09-30T08:15:34.864Z",
+  "sourceRevision": "204277ce0742f4695ed2cd463d3f1ed6af44c4e0",
+  "suiteSha256": "e76833435617d9dccc6a0b339b0277b010964a7c526fe2ccfa74016e4abe2768",
+  "options": {
+    "harness": "codex",
+    "configs": "current",
+    "cases": "memory-card",
+    "maxRuns": 1,
+    "timeout": 90,
+    "rework": 0,
+    "tokenBudget": 60000,
+    "model": "gpt-6-astra",
+    "dryRun": false,
+    "matrix": [
+      {
+        "caseId": "memory-card",
+        "config": "current"
+      }
+    ]
+  },
+  "version": "codex-cli 0.159.1",
+  "isolation": "macOS sandbox-exec; independent fixture git repository and worktree per attempt; fresh HOME; subscription OAuth copies only",
+  "results": [
+    {
+      "caseId": "memory-card",
+      "config": "current",
+      "attempt": 0,
+      "rework": 0,
+      "harness": "codex",
+      "model": "gpt-6-astra",
+      "source": "d0d0461a",
+      "kind": "bug",
+      "condition": {
+        "instructionsSha256": "4ac1d8ed343f45f3bfe7ad460ac80dbd556ce19c35cbed18dd6c1250f1011dc2",
+        "skills": [
+          {
+            "name": "blast-radius",
+            "class": "opinionated",
+            "sha256": "c40506927276459cac6decd26fc5590c942a987269f01258c16aac1eaa17c03c"
+          },
+          {
+            "name": "c",
+            "class": "opinionated",
+            "sha256": "729c996c784894eef59af0de3ff0502d51526f79a161264fc8d743e624c2d7f7"
+          },
+          {
+            "name": "co-w",
+            "class": "opinionated",
+            "sha256": "e9260bc802188ceb45792d1bfcb199f9ee9945780f96262d26e48132c9858017"
+          },
+          {
+            "name": "comparison-shopping",
+            "class": "product",
+            "sha256": "ecd1e7ddf5c44e29562b273f40cef893f09feb689c0e6a640f72d61cfae79970"
+          },
+          {
+            "name": "computer-use-delegation",
+            "class": "product",
+            "sha256": "d3433fae4d4b019f91e037e6c25f24b8a0edfe85857497844904029c5e32b17b"
+          },
+          {
+            "name": "conventions",
+            "class": "opinionated",
+            "sha256": "479bd810f927415453c250f9144c8bf846d042fb585f86506db5893798991014"
+          },
+          {
+            "name": "daily-digest",
+            "class": "product",
+            "sha256": "243a4c280377bf9968380c407a156d81aaf04ec9c6e0810261f90988cb08be60"
+          },
+          {
+            "name": "desktop-control",
+            "class": "product",
+            "sha256": "e1b9429382b830ec4be639e08b50469e667fc73cd6ec52c790f4ab57b660a0f1"
+          },
+          {
+            "name": "docs-review",
+            "class": "opinionated",
+            "sha256": "fcdaf90aed76a22e867d6ae9ba220673912ac8288270ad27c455cef4ca1919f9"
+          },
+          {
+            "name": "herdr",
+            "class": "product",
+            "sha256": "03855a7a1f9d0aa1ba6444fed2e4971adf796e91e73001d8f2472f5f9e5f659f"
+          },
+          {
+            "name": "herdr-handoff",
+            "class": "opinionated",
+            "sha256": "84bc2059ec8661da6740e1bf3fcd3efb2b670ce4a70a51cf2da28c33b87ab32b"
+          },
+          {
+            "name": "herdr-lead",
+            "class": "opinionated",
+            "sha256": "0f599e696058988fd1263b98fa563720621a94a2a1224c9cbc87ee606c9de19d"
+          },
+          {
+            "name": "inbox-triage",
+            "class": "product",
+            "sha256": "d6ab4729722605fe66891eafabf72a877c7aede2f58095b22f7504ba879a33f7"
+          },
+          {
+            "name": "interrogate",
+            "class": "opinionated",
+            "sha256": "4d6394992a38f261380caca090ef23aaff1b57debd0ddc8846a501bd1e83ef4a"
+          },
+          {
+            "name": "lead",
+            "class": "opinionated",
+            "sha256": "7229143f75ea41d0c85841d4bd1226735ea05ed596de78899b378b34381797c0"
+          },
+          {
+            "name": "linear-grind",
+            "class": "opinionated",
+            "sha256": "db338df0a3b14ea0d21b7177c9e1858b119b74ea2d410e6aec5dacd6825de02d"
+          },
+          {
+            "name": "linear-issues",
+            "class": "opinionated",
+            "sha256": "3c3a916cfc468883e315bc02d64fa2d1b06a9705a0405df4f6d56869d0896e9c"
+          },
+          {
+            "name": "linear-orient",
+            "class": "opinionated",
+            "sha256": "5dcfa69109df8b9f6b844335ace82d213df42b5364f983bad4b3f73ca8a8eeb2"
+          },
+          {
+            "name": "linear-plan",
+            "class": "opinionated",
+            "sha256": "e8c39b42b59a76293af656ddb0b1a4b512a69e56a6a74baaec013b08f982a9a5"
+          },
+          {
+            "name": "p",
+            "class": "opinionated",
+            "sha256": "a246bafc5e8d50a6db30005c56f8ad7f8cfb70c25bdbc21b64d3b02f4abfef0e"
+          },
+          {
+            "name": "perf-review",
+            "class": "opinionated",
+            "sha256": "4d164884d26e660abf3d19eea6e6e1a51ada7c43fd1eb34aa5a65d96c40a26be"
+          },
+          {
+            "name": "pokeagents",
+            "class": "product",
+            "sha256": "6872b4848ca45c4d1d5b3792ea093005c107d27cc01e3968462d919236882297"
+          },
+          {
+            "name": "pr-description",
+            "class": "opinionated",
+            "sha256": "5513274c6a77ee2eaeea45dbf9d7865d0c5b89b1500277fadd2c168dd2b58df9"
+          },
+          {
+            "name": "reflect",
+            "class": "opinionated",
+            "sha256": "e9b9589072270b1871aa870def45b11e9a36faff0d9c9909ad480084264c5594"
+          },
+          {
+            "name": "research-team",
+            "class": "product",
+            "sha256": "0d4d7cd2484a5b2fb69316c7b2c8f6e6ddedd3f24ac83cec4ee60642e2e2865b"
+          },
+          {
+            "name": "robust-review",
+            "class": "opinionated",
+            "sha256": "d37f195e95d6a9041f21327a74c3c4953f3f195e304bb4ab82775c5f5a5dc8df"
+          },
+          {
+            "name": "shared-checkout",
+            "class": "opinionated",
+            "sha256": "3678c696319617ebbad526ff47c8206028b777834f25dbf642663f05ee1fbc7b"
+          },
+          {
+            "name": "solution-space",
+            "class": "opinionated",
+            "sha256": "90dde606074bc85f39f9e74f1b75b6e352ed796d7ed55625c728e29eb6b40b5c"
+          },
+          {
+            "name": "swarm-lead",
+            "class": "opinionated",
+            "sha256": "95608424a840baa6b0461a01ea8052dc1654b5e2604a8ae21e04ca26465fd051"
+          },
+          {
+            "name": "swarm-mcp",
+            "class": "product",
+            "sha256": "325885bfff6306f07d639c60ae5646f39bbfefb138b3748a6941cadb902566b7"
+          },
+          {
+            "name": "testing-archive",
+            "class": "opinionated",
+            "sha256": "1b8eb80fe29e409d3e582090ce6d438d636f4f272ddce36ebd0575815bf195e5"
+          },
+          {
+            "name": "this-machine",
+            "class": "product",
+            "sha256": "2d6085d74dfe8ce951f196cea5fb070dd95cd4304e74d81d136abbc36ceb21f5"
+          },
+          {
+            "name": "trace-clankie",
+            "class": "product",
+            "sha256": "2e8b58fbd7af07dd6ee23f1c83a77b53f63e9a2754b1282711eeff0d05522d23"
+          },
+          {
+            "name": "trip-planning",
+            "class": "product",
+            "sha256": "3ea485cf71e8d51912536da00fba844074f25c058184970f7d8f5aec12811748"
+          },
+          {
+            "name": "work-items",
+            "class": "product",
+            "sha256": "7d943f01da8d5f1f6a9edd39223080370a2bc0ba8e59296ae1dfc7c8a1468cdf"
+          }
+        ],
+        "fixtureRevision": "36a1e8e3092d6753fe6e0e25d4e15e62e358e36b"
+      },
+      "passed": true,
+      "wallMs": 44243,
+      "tokens": {
+        "input": 101154,
+        "output": 881,
+        "cacheRead": 79488,
+        "cacheWrite": 0,
+        "total": 102035
+      },
+      "metricsSource": "CLI events (no service turn)",
+      "settled": [],
+      "exitCode": 0,
+      "timedOut": false,
+      "providerError": null,
+      "checkExitCode": 0,
+      "artifactDirectory": "codex-memory-card",
+      "toolCalls": 5,
+      "toolFailures": 1
+    }
+  ],
+  "stopped": null,
+  "finishedAt": "2026-09-30T08:16:19.336Z",
+  "totalTokens": 102035,
+  "calls": 1,
+  "completedCells": 1,
+  "missingCells": [],
+  "unknownUsage": 0,
+  "archiveNote": "Artifact paths made relative; tool counters recovered from the recorded CLI events. Other run metadata is unchanged."
+}

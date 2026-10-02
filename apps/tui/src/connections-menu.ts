@@ -18,7 +18,6 @@ export interface ConnectionsMenuServices {
   /** The existing `/herdr` menu, for the runtime Clankie runs his own workers in. */
   readonly openHerdrSettings?: () => Promise<void>;
   /** Injected for tests; how often a reply wait re-checks its run. */
-  readonly pollMs?: number;
   readonly now?: () => number;
 }
 
@@ -31,6 +30,9 @@ interface Runtime {
   readonly enabled?: boolean;
   readonly capacity?: number | null;
   readonly capacitySource?: string;
+  /** How Swarm runs the workers it dispatches here (ADR 0194); absent for an ssh fleet. */
+  readonly workerHarness?: "claude" | "codex" | "pi";
+  readonly workerMode?: "stream" | "interactive";
   readonly budget?: number | null;
   readonly budgetSource?: string;
   readonly capabilities?: readonly string[];
@@ -101,6 +103,8 @@ function runtimeHint(runtime: Runtime): string {
       : runtime.capacity === null
         ? "unlimited workers"
         : `${runtime.capacity} workers per coordinator${runtime.capacitySource === "default" ? " (default)" : ""}`,
+    runtime.workerHarness === undefined ? undefined : `${runtime.workerHarness} harness`,
+    runtime.workerMode === undefined ? undefined : `${runtime.workerMode} workers`,
   ];
   return parts.filter(Boolean).join(" · ");
 }
@@ -420,6 +424,12 @@ async function runtimeDetail(
     ...(runtime.capabilities?.length
       ? [{ value: "info:capabilities", label: "Capabilities", hint: runtime.capabilities.join(", ") }]
       : []),
+    ...(runtime.workerHarness === undefined
+      ? []
+      : [{ value: "harness", label: "Worker harness…", hint: runtime.workerHarness }]),
+    ...(runtime.workerMode === undefined
+      ? []
+      : [{ value: "mode", label: "Worker mode…", hint: runtime.workerMode }]),
   ];
   for (;;) {
     const action = await flow.readSelect({
@@ -434,6 +444,50 @@ async function runtimeDetail(
       allowBack: true,
     });
     if (action === undefined) return;
+    if (action === "harness") {
+      const harness = await flow.readSelect({
+        message: `Worker harness in ${runtime.id}`,
+        options: [
+          { value: "codex", label: "Codex", hint: "gpt-6-astra; native terminal" },
+          { value: "pi", label: "pi", hint: "native model preference; native terminal" },
+          { value: "claude", label: "Claude", hint: "native terminal; approved worker channel" },
+        ],
+        allowBack: true,
+      });
+      if (harness === undefined || harness === runtime.workerHarness) continue;
+      if (
+        await attempt(
+          flow,
+          () => services.runtime(["harness", runtime.id, harness]),
+          `${runtime.id} uses ${harness} workers.`,
+        )
+      )
+        return;
+      continue;
+    }
+    if (action === "mode") {
+      const mode = await flow.readSelect({
+        message: `How Swarm runs workers in ${runtime.id}`,
+        options: [
+          {
+            value: "interactive",
+            label: "Interactive",
+            hint: "native terminal; requires a supported Swarm runtime",
+          },
+        ],
+        allowBack: true,
+      });
+      if (mode === undefined || mode === runtime.workerMode) continue;
+      if (
+        await attempt(
+          flow,
+          () => services.runtime(["mode", runtime.id, mode]),
+          `${runtime.id} runs ${mode} workers.`,
+        )
+      )
+        return;
+      continue;
+    }
     if (action !== "disconnect") continue;
     if (!(await confirm(flow, `Disconnect ${runtime.id}?`, "Disconnect"))) continue;
     if (
@@ -607,92 +661,31 @@ async function sessionActions(
       message: title,
       options: [
         { value: "read", label: "Read latest", hint: "last 20 entries" },
-        { value: "send", label: "Send a message…", hint: "resumes it headless" },
+        { value: "resume", label: "Resume in native TUI", hint: "reuse its live seat or reopen in Herdr" },
       ],
       allowBack: true,
     });
     if (action === undefined) return;
-    if (action === "read") {
-      try {
-        const page = record(await services.agents(["read", session.ref, "--tail", "20"]));
+    try {
+      if (action === "resume") {
+        const result = record(await services.agents(["resume", session.ref]));
+        if (result.outcome !== "spawned")
+          throw new Error(String(result.detail ?? result.reason ?? "Could not resume session"));
         shell.insertCommandResult(
-          `/agents read ${session.ref}`,
-          formatTranscript(array(page.entries)),
+          `/agents resume ${session.ref}`,
+          `Native seat ${String(record(result.seat).seatId)} is ready.`,
           "success",
         );
-      } catch (error) {
-        flow.renderLine(message(error), "error");
+        return;
       }
-      continue;
+      const page = record(await services.agents(["read", session.ref, "--tail", "20"]));
+      shell.insertCommandResult(
+        `/agents read ${session.ref}`,
+        formatTranscript(array(page.entries)),
+        "success",
+      );
+    } catch (error) {
+      flow.renderLine(message(error), "error");
     }
-    await sendMessage(shell, services, session, title);
-  }
-}
-
-async function sendMessage(
-  shell: ClankieFaceShell,
-  services: ConnectionsMenuServices,
-  session: AgentSession,
-  title: string,
-): Promise<void> {
-  const flow = shell.setupFlow;
-  flow.renderLine(
-    "This starts a new headless turn on the saved history. A tab with this session open will not see it.",
-    "info",
-  );
-  const text = await flow.readText({
-    message: `Message ${title}`,
-    multiline: true,
-    allowBack: true,
-    validate: (value) => (value.trim() ? undefined : "Write a message."),
-  });
-  if (text === undefined) return;
-  let run: Json;
-  try {
-    run = record(await services.agents(["send", session.ref, text.trim()]));
-  } catch (error) {
-    flow.renderLine(message(error), "error");
-    return;
-  }
-  flow.renderLine(`Started run ${String(run.runId)}.`, "success");
-  const next = await flow.readSelect({
-    message: "Wait for the reply?",
-    options: [
-      { value: "wait", label: "Wait here", hint: "/cancel stops waiting, not the run" },
-      { value: "later", label: "Later", hint: "read it from this session any time" },
-    ],
-    allowBack: true,
-  });
-  if (next !== "wait") return;
-  const interrupt = flow.waitForInterrupt();
-  let stopped = false;
-  void interrupt.promise.then(() => (stopped = true));
-  try {
-    let state = run;
-    while (state.state === "running" && !stopped) {
-      flow.setStatus(`${title}: working… (/cancel to stop waiting)`);
-      await new Promise((resolve) => setTimeout(resolve, services.pollMs ?? 2000));
-      if (stopped) break;
-      state = record(await services.agents(["runs", String(run.runId)]));
-    }
-    if (stopped) {
-      flow.renderLine("Stopped waiting. The run continues; read the session later.", "info");
-      return;
-    }
-    flow.renderLine(
-      `Run ${String(state.state)}${state.exitCode === undefined || state.exitCode === null ? "" : ` (exit ${String(state.exitCode)})`}.`,
-      state.state === "finished" ? "success" : "warning",
-    );
-    const page = record(await services.agents(["read", session.ref, "--after", String(run.cursor)]));
-    shell.insertCommandResult(
-      `/agents send ${session.ref}`,
-      formatTranscript(array(page.entries)),
-      "success",
-    );
-    if (state.state !== "finished" && typeof state.output === "string" && state.output.trim())
-      flow.renderLine(state.output.trim().split("\n").at(-1)!, "warning");
-  } finally {
-    interrupt.dispose();
-    flow.setStatus(title);
   }
 }

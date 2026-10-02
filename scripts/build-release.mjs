@@ -1,3 +1,4 @@
+import { copySkillAssets } from "./release/skills.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -20,6 +21,7 @@ import { pipeline } from "node:stream/promises";
 import { build } from "esbuild";
 import { copySwarmRuntime } from "./release/swarm-runtime.mjs";
 import { buildHerdr, herdrPin, herdrSource } from "./build-herdr.mjs";
+import { bundleHerdrSkill } from "./release/herdr-skill.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const outputDir = join(repoRoot, "dist");
@@ -121,6 +123,11 @@ try {
     await installNodeRuntime(releaseRoot, temporaryRoot);
     await installNativeBinaries(releaseRoot);
   }
+  const herdrBinary = join(releaseRoot, "libexec/herdr");
+  // The hosted runtime runs as node, while assembly runs as root.
+  await chmod(herdrBinary, 0o755);
+  await bundleHerdrSkill(releaseRoot, herdrBinary, herdrPin.release.version);
+  await bundleHerdrSkill(releaseRoot, herdrBinary, herdrPin.release.version, true);
   await writeReleaseInventory(releaseRoot, metafile);
   await writeFile(join(releaseRoot, "VERSION"), `${releaseVersion}\n`);
   await writeFile(
@@ -178,11 +185,16 @@ function gitRevision() {
 }
 
 async function copyRuntimeAssets(targetRoot) {
+  await copySkillAssets(repoRoot, targetRoot);
   const files = [
     ["apps/clankie/src/captain/instructions.md", "apps/clankie/src/instructions.md"],
     ["apps/discord-activity/src/client.html", "apps/discord-activity/src/client.html"],
     ["LICENSE", "LICENSE"],
     ["README.md", "README.md"],
+    ["docs/bundled-skills.md", "docs/bundled-skills.md"],
+    ["vendor/opinionated-skills.json", "vendor/opinionated-skills.json"],
+    ["vendor/opinionated-skills/LICENSE", "vendor/opinionated-skills/LICENSE"],
+    ["vendor/opinionated-skills/LICENSE", "licenses/opinionated-skills-MIT.txt"],
     ["docs/cli.md", "docs/cli.md"],
     ["docs/worker-access.md", "docs/worker-access.md"],
     ["docs/model-keys.md", "docs/model-keys.md"],
@@ -201,7 +213,7 @@ async function copyRuntimeAssets(targetRoot) {
     await mkdir(dirname(target), { recursive: true });
     await copyFile(join(repoRoot, source), target);
   }
-  for (const directory of [".agents/skills", "integrations/herdr-plugin", "integrations/claude-plugin"]) {
+  for (const directory of ["integrations/herdr-plugin"]) {
     await cp(join(repoRoot, directory), join(targetRoot, directory), {
       recursive: true,
       dereference: true,

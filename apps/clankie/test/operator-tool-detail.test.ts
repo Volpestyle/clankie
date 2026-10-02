@@ -31,9 +31,7 @@ describe("operator tool detail", () => {
   });
 
   it("recognizes named skill reads without relabeling ordinary files", () => {
-    expect(operatorSkillName("read", { path: "/Users/james/.agents/skills/herdr-lead/SKILL.md" })).toBe(
-      "herdr-lead",
-    );
+    expect(operatorSkillName("read", { path: "/Users/james/.agents/skills/lead/SKILL.md" })).toBe("lead");
     expect(operatorSkillName("read", { file_path: ".agents/skills/trace-clankie/SKILL.md" })).toBe(
       "trace-clankie",
     );

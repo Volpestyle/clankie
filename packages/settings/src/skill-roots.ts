@@ -1,4 +1,10 @@
+import { existsSync, readdirSync } from "node:fs";
+import { bundledSkills } from "./bundled-skills.ts";
+import type { SkillsSettings } from "./schema.ts";
 import { join } from "node:path";
+
+// Retired leadership names must not reappear through owner/workspace copies.
+export const mergedLeadershipSkills = ["swarm-lead", "herdr-lead"] as const;
 
 /**
  * Where Clankie looks for skills: one rule for the list he is offered and the
@@ -9,16 +15,15 @@ import { join } from "node:path";
  * two that ship in this repo — so every personal skill autocompleted, and the
  * message submitted, and `resolveOperatorPrompt` found no such skill and
  * passed the text through as an ordinary prompt. No skill, no error. The same
- * gap kept his own instructions hedging "load `herdr-lead` … when that skill
+ * gap kept his own instructions hedging "load `lead` … when that skill
  * is present": it is present on disk, and it was never on his path.
  *
  * Order is precedence: `loadSkills` keeps the first skill of a given name and
  * reports the rest as collisions, so the skills that ship with this body win
  * over a personal skill that happens to share a name.
  *
- * Paths are returned whether or not they exist. Callers filter, because the
- * two consumers want opposite things from a missing one: the loader reports it
- * as a diagnostic, the catalog just skips it.
+ * Expand existing roots into selected entries so disabled or merged names cannot
+ * return via a second root. Callers handle missing roots.
  */
 export function clankieSkillRoots(input: {
   /** The checkout or installed release: the skills shipped with this body. */
@@ -33,8 +38,9 @@ export function clankieSkillRoots(input: {
    * a boot-time catalog has no workspace yet and omits this.
    */
   readonly cwd?: string;
+  readonly skills?: SkillsSettings;
 }): readonly string[] {
-  return [
+  const roots = [
     join(input.repoRoot, ".pi", "skills"),
     join(input.repoRoot, ".agents", "skills"),
     join(input.repoRoot, ".agents", "dev-skills"),
@@ -42,4 +48,19 @@ export function clankieSkillRoots(input: {
     join(input.agentDir, "skills"),
     join(input.home, ".agents", "skills"),
   ];
+  const excluded = new Set<string>([
+    ...mergedLeadershipSkills,
+    ...bundledSkills(input.repoRoot, input.skills)
+      .filter((skill) => !skill.included)
+      .map((skill) => skill.name),
+  ]);
+  // Enumerate each root so a disabled bundled name cannot sneak back through a
+  // workspace/global copy. Other owner skills remain available and untouched.
+  return [...new Set(roots)].flatMap((root) =>
+    existsSync(root)
+      ? readdirSync(root)
+          .filter((name) => !excluded.has(name.replace(/\.md$/u, "")))
+          .map((name) => join(root, name))
+      : [root],
+  );
 }

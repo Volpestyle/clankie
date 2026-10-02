@@ -117,6 +117,21 @@ describe("clankie mcp", () => {
       ),
     ).toBe(false);
     expect(parentArgvLoadsFleetChannel("claude --channels server:clankie-seat")).toBe(false);
+    // A hired seat's approved worker plugin channel (VUH-1458).
+    expect(
+      parentArgvLoadsFleetChannel(
+        'claude --settings {"enabledPlugins":{"clankie-worker@clankie":true}} --channels plugin:clankie-worker@clankie --model sonnet',
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      parentArgvLoadsFleetChannel("claude --channels=plugin:other@x,plugin:clankie-worker@clankie", true),
+    ).toBe(true);
+    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie-worker@clankie -p", true)).toBe(
+      false,
+    );
+    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie@clankie")).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude --model plugin:clankie-worker@clankie")).toBe(false);
     for (const print of ["--print", "-p"]) {
       expect(
         parentArgvLoadsFleetChannel(
@@ -323,6 +338,30 @@ describe("clankie mcp", () => {
     expect(written).toContain("channel not loaded for this session; not polling");
   });
 
+  it.each([false, true])(
+    "only the worker plugin polls when its channel is selected (plugin: %s)",
+    async (plugin) => {
+      const argv = "claude --channels plugin:clankie-worker@clankie --model haiku";
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      let connected = false;
+      const running = runMcpCommand(["--seat"], {
+        env: { HERDR_PANE_ID: "w1:p9", ...(plugin ? { CLANKIE_SEAT_PARENT_ARGV: argv } : {}) },
+        readParentArgv: async () => argv,
+        connectSeatUpstream: async () => {
+          connected = true;
+          return { pollEvents: async () => [], close: async () => undefined };
+        },
+        transport: serverTransport,
+        stderr: { write: () => undefined },
+      });
+      const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
+      await client.connect(clientTransport);
+      await client.close();
+      await expect(running).resolves.toBe(0);
+      expect(connected).toBe(plugin);
+    },
+  );
+
   it("retries a 404 fleet mailbox without throwing", async () => {
     let polls = 0;
     let closed = false;
@@ -356,30 +395,33 @@ describe("clankie mcp", () => {
   });
 });
 
-it("polls the selected operator conversation only when its plugin channel is loaded", async () => {
-  const upstream = fakeUpstream({ events: [[{ ...wakeEvent(), conversationId: "project-a" }]] });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const running = runMcpCommand(["--lane", "operator"], {
-    env: { CLANKIE_CONVERSATION_ID: "project-a" },
-    connectUpstream: async (input) => {
-      expect(input).toEqual({ lane: "operator", conversationId: "project-a" });
-      return upstream;
-    },
-    readParentArgv: async () => "claude --dangerously-load-development-channels plugin:clankie@clankie",
-    transport: serverTransport,
-    stderr: { write: () => undefined },
-  });
-  const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
-  const received = new Promise<string>((resolve) =>
-    client.setNotificationHandler(ChannelEventSchema, (event) => {
-      resolve(event.params.meta.conversation!);
-    }),
-  );
-  await client.connect(clientTransport);
-  expect(await received).toBe("project-a");
-  await client.close();
-  await expect(running).resolves.toBe(0);
-});
+it.each(["plugin:clankie@inline", "plugin:clankie@clankie"])(
+  "polls the selected operator conversation when %s is loaded as its channel",
+  async (entry) => {
+    const upstream = fakeUpstream({ events: [[{ ...wakeEvent(), conversationId: "project-a" }]] });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const running = runMcpCommand(["--lane", "operator"], {
+      env: { CLANKIE_CONVERSATION_ID: "project-a" },
+      connectUpstream: async (input) => {
+        expect(input).toEqual({ lane: "operator", conversationId: "project-a" });
+        return upstream;
+      },
+      readParentArgv: async () => `claude --dangerously-load-development-channels ${entry}`,
+      transport: serverTransport,
+      stderr: { write: () => undefined },
+    });
+    const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
+    const received = new Promise<string>((resolve) =>
+      client.setNotificationHandler(ChannelEventSchema, (event) => {
+        resolve(event.params.meta.conversation!);
+      }),
+    );
+    await client.connect(clientTransport);
+    expect(await received).toBe("project-a");
+    await client.close();
+    await expect(running).resolves.toBe(0);
+  },
+);
 
 it.each(["--print", "-p"])("keeps operator mail with the service in Claude %s mode", async (print) => {
   const upstream = fakeUpstream();

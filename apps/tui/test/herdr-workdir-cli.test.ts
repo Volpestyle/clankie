@@ -80,7 +80,7 @@ describe("clankie workdir", () => {
 });
 
 describe("clankie linear", () => {
-  it("uses authenticated service routes for issue ownership and scoped inbox reads", async () => {
+  it("reads legacy bindings and scoped inboxes without sending retired mutations", async () => {
     const calls: Array<{ path: string; method: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture");
@@ -93,31 +93,22 @@ describe("clankie linear", () => {
     });
     const options = { env: { CLANKIE_OPERATOR_TOKEN: "fixture" } };
     try {
-      await runLinearCommand(["work", "bind", "org", "issue", "project", "--from", "previous"], options);
+      await runLinearCommand(["work", "list"], options);
       await runLinearCommand(["inbox", "read", "--conversation", "project"], options);
       await runLinearCommand(["inbox", "ack", "000000000042", "--conversation", "project"], options);
-      await runLinearCommand(["work", "unbind", "org", "issue", "project"], options);
+      await expect(
+        runLinearCommand(["work", "bind", "org", "issue", "project", "--from", "previous"], options),
+      ).rejects.toThrow("bindings are retired");
+      await expect(runLinearCommand(["work", "unbind", "org", "issue", "project"], options)).rejects.toThrow(
+        "bindings are retired",
+      );
       expect(calls).toEqual([
-        {
-          path: "/v1/linear/work",
-          method: "PUT",
-          body: {
-            organizationId: "org",
-            issueId: "issue",
-            conversationId: "project",
-            expectedConversationId: "previous",
-          },
-        },
+        { path: "/v1/linear/work", method: "GET", body: undefined },
         { path: "/v1/linear/inbox?conversationId=project", method: "GET", body: undefined },
         {
           path: "/v1/linear/inbox",
           method: "POST",
           body: { ackCursor: "000000000042", conversationId: "project" },
-        },
-        {
-          path: "/v1/linear/work",
-          method: "DELETE",
-          body: { organizationId: "org", issueId: "issue", conversationId: "project" },
         },
       ]);
     } finally {
@@ -127,15 +118,48 @@ describe("clankie linear", () => {
 
   it("defaults off, persists live follow toggles, and rejects invalid commands", async () => {
     const settings = await tempStore();
-    expect(await runLinearCommand([], { settings })).toMatchObject({
+    const credentials = { get: async () => ({ type: "api" as const, key: "test-secret" }) };
+    const options = { settings, credentials };
+    expect(await runLinearCommand([], options)).toMatchObject({
       following: false,
       conversationId: "linear-inbox",
+      wakeConversationId: "global-default",
     });
-    expect(await runLinearCommand(["follow", "on"], { settings })).toMatchObject({ following: true });
+    expect(await runLinearCommand(["follow", "on"], options)).toMatchObject({
+      ok: false,
+      error: "linear_webhook_required",
+      missingWebhook: ["url"],
+    });
+    expect((await settings.load()).linearWebhook.following).toBe(false);
+    await runLinearCommand(
+      ["webhook", "set", "--url", "https://hooks.example.test/v1/hooks/linear"],
+      options,
+    );
+    expect(await runLinearCommand(["follow", "on"], options)).toMatchObject({
+      following: true,
+      active: true,
+    });
+    expect((await settings.load()).linearWebhook.url).toBe("https://hooks.example.test/v1/hooks/linear");
+    expect(
+      await runLinearCommand(["status"], { settings, credentials: { get: async () => undefined } }),
+    ).toMatchObject({
+      following: true,
+      active: false,
+      reason: "linear_webhook_required",
+      missingWebhook: ["secret"],
+    });
     expect((await settings.load()).linearWebhook.following).toBe(true);
-    expect(await runLinearCommand(["follow", "off"], { settings })).toMatchObject({ following: false });
-    await expect(runLinearCommand(["follow", "yes"], { settings })).rejects.toThrow("Usage:");
-    await expect(runLinearCommand(["status", "on"], { settings })).rejects.toThrow("Usage:");
+    expect(await runLinearCommand(["follow", "off"], options)).toMatchObject({ following: false });
+    await runLinearCommand(["webhook", "clear"], options);
+    expect(await runLinearCommand(["status"], options)).toMatchObject({
+      webhookConfigured: false,
+      missingWebhook: ["url"],
+    });
+    await expect(
+      runLinearCommand(["webhook", "set", "--url", "file:///tmp/hook"], options),
+    ).rejects.toThrow();
+    await expect(runLinearCommand(["follow", "yes"], options)).rejects.toThrow("Usage:");
+    await expect(runLinearCommand(["status", "on"], options)).rejects.toThrow("Usage:");
   });
 
   it("turns inbox read flags into the query the service expects", () => {

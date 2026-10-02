@@ -1,0 +1,18 @@
+RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  5 passed (5)
+      Tests  94 passed (94)
+   Start at  14:10:13
+   Duration  4.12s (transform 249ms, setup 0ms, import 1.57s, tests 2.19s, environment 0ms)
+
+
+MCP bridge tests:
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  1 passed (1)
+      Tests  15 passed (15)
+   Start at  14:10:46
+   Duration  392ms (transform 118ms, setup 0ms, import 235ms, tests 85ms, environment 0ms)

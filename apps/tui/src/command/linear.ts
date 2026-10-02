@@ -1,9 +1,19 @@
-import { resolveOperatorCredential } from "@clankie/credential-broker";
+import {
+  createDefaultCredentialStore,
+  LINEAR_WEBHOOK_PROVIDER_ID,
+  resolveOperatorCredential,
+  type CredentialStore,
+} from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
-import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
+import {
+  SettingsStore,
+  defaultSettingsPath,
+  linearFollowStatus,
+  LinearWebhookSettingsSchema,
+} from "@clankie/settings";
 
 const LINEAR_USAGE =
-  "Usage: clankie linear [status] | follow on|off | inbox [read [--limit N] [--before CURSOR] [--headlines] | ack CURSOR [--conversation ID]] | work [list | bind ORG ISSUE CONVERSATION [--from ID] | unbind ORG ISSUE CONVERSATION]";
+  "Usage: clankie linear [status] | follow on|off | webhook set --url URL | webhook clear | inbox [read [--limit N] [--before CURSOR] [--headlines] | ack CURSOR [--conversation ID]] | work [list]";
 
 /** The query string for `inbox read` flags; `undefined` when a flag is malformed. */
 export function parseInboxRead(flags: readonly string[]): string | undefined {
@@ -30,7 +40,11 @@ export function parseInboxRead(flags: readonly string[]): string | undefined {
 /** Follow is read for each delivery and queued turn; changing it needs no restart. */
 export async function runLinearCommand(
   args: readonly string[],
-  options: { readonly env?: NodeJS.ProcessEnv; readonly settings?: SettingsStore } = {},
+  options: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly settings?: SettingsStore;
+    readonly credentials?: Pick<CredentialStore, "get">;
+  } = {},
 ) {
   const request = async (path: string, method = "GET", body?: unknown) => {
     const env = options.env ?? process.env;
@@ -47,16 +61,8 @@ export async function runLinearCommand(
   };
   if (args[0] === "work") {
     if (args.length === 1 || (args.length === 2 && args[1] === "list")) return request("/v1/linear/work");
-    if (
-      (args[1] === "bind" && (args.length === 5 || (args.length === 7 && args[5] === "--from"))) ||
-      (args[1] === "unbind" && args.length === 5)
-    )
-      return request("/v1/linear/work", args[1] === "unbind" ? "DELETE" : "PUT", {
-        organizationId: args[2],
-        issueId: args[3],
-        conversationId: args[4],
-        ...(args[6] ? { expectedConversationId: args[6] } : {}),
-      });
+    if (args[1] === "bind" || args[1] === "unbind")
+      throw new Error("Linear issue bindings are retired. Use clankie linear work list to read old records.");
     throw new Error(LINEAR_USAGE);
   }
   const ack =
@@ -82,21 +88,42 @@ export async function runLinearCommand(
     );
   }
   const settings = options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
+  const credentials =
+    options.credentials ?? createDefaultCredentialStore({ env: options.env ?? process.env });
+  const secret = await credentials.get(LINEAR_WEBHOOK_PROVIDER_ID);
+  const secretPresent = secret?.type === "api" && secret.key.trim().length > 0;
   let current;
+  let refused = false;
   if (args.length === 0 || (args.length === 1 && args[0] === "status")) {
     current = await settings.load();
   } else if (args.length === 2 && args[0] === "follow" && (args[1] === "on" || args[1] === "off")) {
+    current = await settings.update((value) => {
+      if (args[1] === "on" && !linearFollowStatus(value.linearWebhook, secretPresent).webhookConfigured) {
+        refused = true;
+        return value;
+      }
+      return { ...value, linearWebhook: { ...value.linearWebhook, following: args[1] === "on" } };
+    });
+  } else if (args[0] === "webhook" && args[1] === "set" && args[2] === "--url" && args.length === 4) {
+    const { url } = LinearWebhookSettingsSchema.parse({ url: args[3] });
     current = await settings.update((value) => ({
       ...value,
-      linearWebhook: { following: args[1] === "on" },
+      linearWebhook: { ...value.linearWebhook, url },
+    }));
+  } else if (args[0] === "webhook" && args[1] === "clear" && args.length === 2) {
+    current = await settings.update((value) => ({
+      ...value,
+      linearWebhook: { following: value.linearWebhook.following },
     }));
   } else {
     throw new Error(LINEAR_USAGE);
   }
   return {
-    ok: true as const,
-    following: current.linearWebhook.following,
+    ok: !refused,
+    ...(refused ? { error: "linear_webhook_required" as const } : {}),
+    ...linearFollowStatus(current.linearWebhook, secretPresent),
     conversationId: "linear-inbox",
+    wakeConversationId: "global-default",
     settingsFile: settings.path,
   };
 }

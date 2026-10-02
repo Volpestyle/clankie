@@ -1,0 +1,11 @@
+{
+  "data": {
+    "value": {
+      "messageId": "7d065c95-62f4-4af7-a0a1-4f9686125ac9",
+      "state": "acknowledged",
+      "acknowledgedAt": 1790532201721
+    },
+    "cursor": 7567,
+    "replayed": false
+  }
+}

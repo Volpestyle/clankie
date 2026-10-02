@@ -3,24 +3,15 @@ import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import { z } from "zod";
 import {
   LinearWorkOwnerSchema,
-  linearIssueId,
   linearActivityPrompt,
   LINEAR_REPLY_MARK,
   type LinearActivityEvent,
   type LinearWorkOwner,
 } from "../linear-webhook.ts";
-import {
-  appendFileSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import {
+  operatorConversationWindow,
   OPERATOR_CHANNEL_MEMBER_MAX,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
@@ -56,6 +47,7 @@ import {
   type ChannelTranscriptEntry,
   type ChannelTurnRecord,
 } from "./channel-turns.ts";
+import { ConversationJournal } from "./conversation-journal.ts";
 import type {
   HerdrSeatTranscript,
   HerdrTranscriptEntry,
@@ -451,6 +443,7 @@ export class ConversationStore {
   private readonly activeInvocations = new Map<string, number>();
 
   private readonly root: string;
+  private readonly journal: ConversationJournal;
   private readonly runner: ConversationRunner;
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
   private readonly sendToSeat: SeatSender | undefined;
@@ -490,6 +483,7 @@ export class ConversationStore {
     personaRunner?: (personaId: string) => ConversationRunner | undefined,
   ) {
     this.root = root;
+    this.journal = new ConversationJournal(root);
     this.runner = runner;
     this.onPrune = onPrune;
     this.sendToSeat = sendToSeat;
@@ -855,49 +849,16 @@ export class ConversationStore {
     return this.linearOwners;
   }
 
-  public setLinearWorkOwner(owner: LinearWorkOwner, expectedConversationId?: string, remove = false): void {
-    owner = LinearWorkOwnerSchema.parse(owner);
-    owner.organizationId = owner.organizationId.toLowerCase();
-    owner.issueId = owner.issueId.toLowerCase();
-    const current = this.linearOwners.find(
-      (entry) => entry.organizationId === owner.organizationId && entry.issueId === owner.issueId,
-    );
-    if (expectedConversationId && current?.conversationId !== expectedConversationId)
-      throw new Error("Issue owner changed; refresh before rebinding");
-    if (
-      current &&
-      current.conversationId !== owner.conversationId &&
-      current.conversationId !== expectedConversationId
-    )
-      throw new Error("Issue already belongs to another conversation; provide its expected owner");
-    if (remove && current?.conversationId !== owner.conversationId) throw new Error("Issue owner changed");
-    const meta = this.metas.get(owner.conversationId);
-    if (!remove && (!meta || meta.parentConversationId || !["global", "workspace"].includes(meta.scope.kind)))
-      throw new Error("Issue owner must be an existing Clankie conversation");
-    const next = this.linearOwners.filter(
-      (entry) => entry.organizationId !== owner.organizationId || entry.issueId !== owner.issueId,
-    );
-    if (!remove) next.push(owner);
-    const path = join(this.root, "linear-work.json");
-    writeFileSync(path + ".tmp", JSON.stringify(next), { mode: 0o600 });
-    renameSync(path + ".tmp", path);
-    this.linearOwners = next;
-  }
-
   public receiveLinearActivity(input: string | LinearActivityEvent, following: boolean): boolean {
     const message = typeof input === "string" ? input : linearActivityPrompt(input);
-    const owner =
-      typeof input === "string"
-        ? undefined
-        : this.linearOwners.find(
-            (entry) =>
-              entry.organizationId === input.organizationId?.toLowerCase() &&
-              entry.issueId === linearIssueId(input),
-          );
     const id = this.linearInboxConversationId();
     const source =
       typeof input !== "string" && input.eventId
-        ? { eventId: input.eventId, conversationId: owner?.conversationId ?? id }
+        ? {
+            eventId: input.eventId,
+            notification: input.notification === true,
+            conversationId: input.notification === true ? this.defaultGlobalConversationId() : id,
+          }
         : undefined;
     const meta = this.metas.get(id)!;
     if (
@@ -920,7 +881,7 @@ export class ConversationStore {
     });
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
-    if (following) this.queueLinearActivity(source?.conversationId ?? id);
+    if (following) this.queueLinearActivity(this.defaultGlobalConversationId());
     return true;
   }
 
@@ -939,7 +900,12 @@ export class ConversationStore {
     const events = this.readEvents(this.linearInboxConversationId());
     for (const owner of new Set(
       events.flatMap((event) =>
-        event.type === "message" && event.linear?.following ? [event.linear.conversationId] : [],
+        event.type === "message" &&
+        event.linear?.following &&
+        event.linear.conversationId === this.defaultGlobalConversationId() &&
+        event.linear.notification === true
+          ? [event.linear.conversationId]
+          : [],
       ),
     )) {
       const meta = this.metas.get(owner);
@@ -949,6 +915,7 @@ export class ConversationStore {
           (event) =>
             event.type === "message" &&
             event.linear?.following &&
+            event.linear.notification === true &&
             event.linear.conversationId === owner &&
             event.cursor > (meta.linearWokeCursor ?? ZERO_CURSOR),
         )
@@ -962,15 +929,15 @@ export class ConversationStore {
    * wake, then nothing until more arrive. How to read deeper lives in his
    * standing instructions, not here. `undefined` when there is nothing new.
    */
-  public linearWakePrompt(id = this.linearInboxConversationId(), runId?: string): string | undefined {
+  public linearWakePrompt(id = this.defaultGlobalConversationId(), runId?: string): string | undefined {
     const meta = this.metas.get(id)!;
     const fresh = this.readEvents(this.linearInboxConversationId()).filter(
       (event): event is OperatorConversationStreamEvent & { type: "message" } =>
         event.type === "message" &&
         event.role === "external" &&
         (event.linear
-          ? event.linear.following && event.linear.conversationId === id
-          : id === LINEAR_INBOX_CONVERSATION_ID) &&
+          ? event.linear.following && event.linear.conversationId === id && event.linear.notification === true
+          : false) &&
         event.cursor > (meta.linearWokeCursor ?? ZERO_CURSOR),
     );
     if (fresh.length === 0) return undefined;
@@ -996,6 +963,7 @@ export class ConversationStore {
         : [
             `Read this work with clankie linear inbox read --conversation ${id}. Check current Swarm task ownership before dispatching or replying.`,
           ]),
+      "Most events need no tool call. The this-machine skill has the inbox read and acknowledgment protocol.",
     ].join("\n");
   }
 
@@ -1232,11 +1200,11 @@ export class ConversationStore {
     if (meta === undefined) return;
     const events = this.readEvents(meta.conversationId);
     if (body.type === "activity") {
-      const previous = events.reverse().find((event) => event.type === "activity");
+      const previous = events.findLast((event) => event.type === "activity");
       if (previous?.type === "activity" && previous.phase === body.phase) return;
     }
     if (body.type === "message" && body.role === "agent") {
-      const previous = events.reverse().find((event) => event.type === "message" && event.role === "agent");
+      const previous = events.findLast((event) => event.type === "message" && event.role === "agent");
       if (previous?.type === "message" && previous.role === "agent" && previous.text === body.text) return;
     }
     this.append(meta, body);
@@ -1875,7 +1843,8 @@ export class ConversationStore {
     const events = this.readEvents(meta.conversationId);
     const retainedFromCursor = meta.retainedFromCursor ?? ZERO_CURSOR;
     const safeCursor = events.length === 0 ? retainedFromCursor : events[events.length - 1]!.cursor;
-    const rawFrom = request.cursor ?? ZERO_CURSOR;
+    const backward = request.direction === "backward";
+    const rawFrom = request.cursor ?? (backward ? safeCursor : ZERO_CURSOR);
     if (!/^\d+$/u.test(rawFrom) || rawFrom.length > CURSOR_WIDTH) {
       return {
         schemaVersion: 1,
@@ -1911,9 +1880,34 @@ export class ConversationStore {
         message: "That cursor is ahead of this conversation; resume from its latest event.",
       };
     }
+    if (backward) {
+      const window = operatorConversationWindow(events, {
+        ...(request.cursor === undefined ? {} : { before: from }),
+        ...(request.limit === undefined ? {} : { limit: request.limit }),
+        ...(request.turnLimit === undefined ? {} : { turnLimit: request.turnLimit }),
+      });
+      return {
+        schemaVersion: 1,
+        status: "page",
+        conversationId: meta.conversationId,
+        surfaceClientId: request.surfaceClientId,
+        events: window.events,
+        retainedFromCursor,
+        previousCursor: window.events[0]?.cursor ?? retainedFromCursor,
+        nextCursor: window.events.at(-1)?.cursor ?? from,
+        safeCursor,
+        hasOlder: window.hasOlder,
+        hasMore: window.hasOlder,
+        ...(this.drafts.has(meta.conversationId) ? { live: this.drafts.get(meta.conversationId)! } : {}),
+      };
+    }
     const limit = request.limit ?? 200;
-    const remaining = events.filter((event) => event.cursor > from);
-    const page = remaining.slice(0, limit);
+    const { events: page, remaining } = this.journal.after(
+      meta.conversationId,
+      from,
+      limit,
+      meta.conversationId === LINEAR_INBOX_CONVERSATION_ID,
+    );
     return {
       schemaVersion: 1,
       status: "page",
@@ -1923,7 +1917,7 @@ export class ConversationStore {
       retainedFromCursor,
       nextCursor: page.length === 0 ? from : page[page.length - 1]!.cursor,
       safeCursor,
-      hasMore: page.length < remaining.length,
+      hasMore: page.length < remaining,
       // The volatile half of the page: what he is typing right now. A surface
       // that ignores it still gets every settled message from `events`.
       ...(this.drafts.has(meta.conversationId) ? { live: this.drafts.get(meta.conversationId)! } : {}),
@@ -2479,17 +2473,10 @@ export class ConversationStore {
       occurredAt: occurredAt ?? new Date().toISOString(),
       ...body,
     } as OperatorConversationStreamEvent;
-    const path = this.eventsPath(meta.conversationId);
     if (meta.conversationId === LINEAR_INBOX_CONVERSATION_ID) {
-      // ponytail: atomic inbox rewrites; use an indexed journal if unread histories make this costly.
-      const prior = this.readEvents(meta.conversationId);
-      writeFileSync(
-        path + ".tmp",
-        [...prior, event].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
-        { mode: 0o600 },
-      );
-      renameSync(path + ".tmp", path);
-    } else appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
+      // ponytail: atomic inbox rewrites; append in place if unread histories make this costly.
+      this.journal.rewrite(meta.conversationId, [...this.readEvents(meta.conversationId), event]);
+    } else this.journal.append(meta.conversationId, event);
     this.counts.set(meta.conversationId, retainedCount + 1);
     this.sequences.set(meta.conversationId, sequence);
     if (body.type === "context") {
@@ -2639,10 +2626,7 @@ export class ConversationStore {
       this.saveMeta(meta);
     }
     meta.retainedFromCursor = dropped[dropped.length - 1]?.cursor ?? meta.retainedFromCursor ?? ZERO_CURSOR;
-    const path = this.eventsPath(meta.conversationId);
-    const temporary = `${path}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${retained.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
-    renameSync(temporary, path);
+    this.journal.rewrite(meta.conversationId, retained);
     this.counts.set(meta.conversationId, retained.length);
     this.saveMeta(meta);
   }
@@ -2708,42 +2692,15 @@ export class ConversationStore {
         ...body,
       } as OperatorConversationStreamEvent;
     });
-    const path = this.eventsPath(meta.conversationId);
-    const temporary = `${path}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${rebuilt.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
-    renameSync(temporary, path);
+    this.journal.rewrite(meta.conversationId, rebuilt);
     this.counts.set(meta.conversationId, rebuilt.length);
     this.sequences.set(meta.conversationId, sequence);
     this.wakeTails(meta.conversationId);
   }
 
-  private readEvents(conversationId: string): OperatorConversationStreamEvent[] {
-    let raw: string;
-    try {
-      raw = readFileSync(this.eventsPath(conversationId), "utf8");
-    } catch (error) {
-      if (
-        conversationId === LINEAR_INBOX_CONVERSATION_ID &&
-        (error as NodeJS.ErrnoException).code !== "ENOENT"
-      )
-        throw error;
-      return [];
-    }
-    return raw
-      .split("\n")
-      .filter((line) => line.length > 0)
-      .flatMap((line) => {
-        try {
-          return [JSON.parse(line) as OperatorConversationStreamEvent];
-        } catch (error) {
-          if (conversationId === LINEAR_INBOX_CONVERSATION_ID) throw error;
-          return [];
-        }
-      });
-  }
-
-  private eventsPath(conversationId: string): string {
-    return join(this.root, conversationId, "events.jsonl");
+  private readEvents(conversationId: string): readonly OperatorConversationStreamEvent[] {
+    // Losing the inbox would silently drop unread Linear work, so it fails loudly.
+    return this.journal.read(conversationId, conversationId === LINEAR_INBOX_CONVERSATION_ID);
   }
 
   private saveMeta(meta: ConversationMeta): void {
@@ -2769,7 +2726,6 @@ export class ConversationStore {
           (meta) =>
             !meta.isDefault &&
             meta.conversationId !== LINEAR_INBOX_CONVERSATION_ID &&
-            !this.linearOwners.some((owner) => owner.conversationId === meta.conversationId) &&
             meta.sessionState !== "active" &&
             !this.seatSends.has(meta.conversationId) &&
             !sideParents.has(meta.conversationId) &&
@@ -2815,6 +2771,7 @@ export class ConversationStore {
     this.internalRuns.delete(meta.conversationId);
     this.counts.delete(meta.conversationId);
     this.sequences.delete(meta.conversationId);
+    this.journal.forget(meta.conversationId);
     this.onPrune?.(meta.conversationId, meta.scope);
   }
 
@@ -2877,6 +2834,7 @@ export class ConversationStore {
     }
     this.metas.set(conversationId, fresh);
     this.chains.delete(conversationId);
+    this.journal.forget(conversationId);
     this.counts.set(conversationId, 0);
     this.sequences.set(conversationId, boundary);
     this.drafts.delete(conversationId);
@@ -2890,7 +2848,6 @@ export class ConversationStore {
       meta === undefined ||
       meta.isDefault ||
       meta.scope.kind === "room" ||
-      this.linearOwners.some((owner) => owner.conversationId === conversationId) ||
       this.seatSends.has(conversationId) ||
       [...this.metas.values()].some((candidate) => candidate.parentConversationId === conversationId)
     ) {

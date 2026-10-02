@@ -7,12 +7,16 @@
     "./public-gateway": "./src/public-gateway.ts",
     "./gateway-encryption": "./src/gateway-encryption.ts",
     "./model-keys": "./src/model-keys.ts",
+    "./hosted-credits": "./src/hosted-credits.ts",
     "./accounts": "./src/accounts.ts",
     "./wake": "./src/wake.ts",
+    "./host-power": "./src/host-power.ts",
     "./work-items": "./src/work-items.ts",
     "./app-telemetry": "./src/app-telemetry.ts",
     "./discord-ingress": "./src/discord-ingress.ts",
-    "./discord-ingress-crypto": "./src/discord-ingress-crypto.ts"
+    "./discord-ingress-crypto": "./src/discord-ingress-crypto.ts",
+    "./hosted-pairing": "./src/hosted-pairing.ts",
+    "./hosted-operator": "./src/hosted-operator.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

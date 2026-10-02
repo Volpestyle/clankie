@@ -1,0 +1,26 @@
+{
+  "cwd": "/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-close-zW2GgN",
+  "paneId": "w2H:p6H",
+  "ref": {
+    "harness": "codex",
+    "sessionId": "01a0f1d9-a894-72c2-8bb1-7c335ac62d40",
+    "paneId": "w2H:p6H"
+  },
+  "completion": {
+    "type": "turn_completed",
+    "at": "2026-09-30T10:26:14.703Z",
+    "messageId": "01a0f1d9-aa50-7ed3-878b-511baf4c160a",
+    "ok": true,
+    "text": "CLOSE_PROBE_OK",
+    "stopReason": "completed"
+  },
+  "closed": {
+    "id": "cli:pane:close",
+    "result": {
+      "type": "ok"
+    }
+  },
+  "statusAfterPaneClose": "offline",
+  "registeredAfterClose": false,
+  "socketRemoved": true
+}

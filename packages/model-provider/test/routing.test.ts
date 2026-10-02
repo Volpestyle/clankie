@@ -54,12 +54,13 @@ describe("routeFor", () => {
     expect(routeFor(config, "discord_social")).toMatchObject({ tier: "work", ref: WORK });
   });
 
-  it("offers escalation only on routine routes, and only when the owner turned it on", () => {
+  it("gives routine routes every escalation trigger, and only when the owner turned it on", () => {
     expect(routeFor(routed, "discord_social").escalation).toBeUndefined();
     const escalating: ClankieConfig = { ...routed, routing: { routine_model: ROUTINE, escalate: true } };
     expect(routeFor(escalating, "discord_social").escalation).toEqual({
       ref: WORK,
       turnLimit: DEFAULT_ROUTINE_TURN_LIMIT,
+      onProviderError: true,
     });
     expect(routeFor(escalating, "operator").escalation).toBeUndefined();
     const elsewhere: ClankieConfig = {
@@ -74,6 +75,39 @@ describe("routeFor", () => {
     expect(routeFor(elsewhere, "discord_social").escalation).toEqual({
       ref: "clankie/escalation",
       turnLimit: 4,
+      onProviderError: true,
+    });
+  });
+
+  it("lets a work purpose escalate only to a different, named model, and only when he asks (VUH-1391)", () => {
+    const pro: ClankieConfig = {
+      model: "clankie/default",
+      routing: { routine_model: "clankie/default", escalate: true, escalation_model: "clankie/escalation" },
+    };
+    for (const purpose of ["operator", "discord_granted", "gameplay"] as const) {
+      expect(routeFor(pro, purpose)).toEqual({
+        purpose,
+        tier: "work",
+        ref: "clankie/default",
+        escalation: { ref: "clankie/escalation", onProviderError: false },
+      });
+    }
+    // Starter: escalation off. No escalation model, or the work model itself: nothing to move to.
+    expect(
+      routeFor({ ...pro, routing: { ...pro.routing, escalate: false } }, "operator").escalation,
+    ).toBeUndefined();
+    expect(routeFor({ model: WORK, routing: { escalate: true } }, "operator").escalation).toBeUndefined();
+    expect(
+      routeFor({ model: WORK, routing: { escalate: true, escalation_model: WORK } }, "operator").escalation,
+    ).toBeUndefined();
+    // Without routine routing, an owner can still let work turns escalate.
+    expect(
+      routeFor({ model: WORK, routing: { escalate: true, escalation_model: "openai/big" } }, "operator"),
+    ).toEqual({
+      purpose: "operator",
+      tier: "work",
+      ref: WORK,
+      escalation: { ref: "openai/big", onProviderError: false },
     });
   });
 

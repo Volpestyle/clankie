@@ -50,6 +50,16 @@ Two tiers and a fixed purpose table, plus one volitional escape hatch.
    broken routine setting should surface, not quietly spend the bigger model.
    Every escalation is written to the session file and logged.
 
+   **Amended 2026-09-26 (VUH-1391): work turns escalate too, when he asks.**
+   With escalation on and an escalation model other than the work model, an
+   operator, granted-Discord or gameplay turn gets the same `escalate` tool.
+   Only his call moves it; the turn limit and provider errors do not, because
+   long work is normal on the work tier and would spend a Pro plan's escalation
+   budget without a judgement behind it. On hosted Pro this is how a turn
+   reaches `clankie/escalation` (gpt-6-astra at low effort); the proxy serves it
+   from the default model at high effort once the plan's escalation budget is
+   spent.
+
 6. **Hosted bodies take routing from their bootstrap.** The fleet's optional
    `modelRouting` bootstrap field is written over the body's routing at every
    start. Plan gating (escalation on Pro only) is enforced by the fleet's model

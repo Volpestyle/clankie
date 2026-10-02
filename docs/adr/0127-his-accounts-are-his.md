@@ -138,12 +138,11 @@ logged-in profile when it does not.
 
 - He can say his own address, and mail he sends is signed with it rather than
   with a provider login.
-- A headed session is exempt from the browser's idle timeout, so a window he
-  opened stays open until something closes it. He can close it himself, and the
-  remote way out when the operator is away from the mac is a Discord turn from a
-  system actor ([ADR 0095](0095-discord-system-actors.md)). Nothing here blocks
-  a turn waiting for a human: a browser call times out and he reports the wall
-  he hit.
+- The original headed session was exempt from the daemon's default idle
+  timeout. The [2026-09-29 amendment to ADR 0082](0082-clankie-holds-the-browser.md#amendment-headless-bursts-2026-09-29-vuh-1448)
+  bounds takeover to a burst: after 60 seconds without a browser call, the host
+  saves any recording and closes the window, keeping persistent logins. The
+  next burst starts headless. A human can request another takeover if needed.
 - The blast radius of the shared browser grew: ADR 0082 already recorded that
   untrusted room text can steer a full-action browser and that content labels
   are not a security boundary. That browser is now signed into his accounts. The

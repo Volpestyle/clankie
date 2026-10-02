@@ -3,11 +3,18 @@
   "ignore": [
     "docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs",
     "docs/testing/2026-09-26-hosted-connections/flows/serve.mts",
-    "docs/testing/2026-09-26-work-items/flows/serve.mts"
+    "docs/testing/2026-09-26-work-items/flows/serve.mts",
+    "vendor/opinionated-skills/**",
+    "integrations/codex-plugin/skills/**"
   ],
   "workspaces": {
     ".": {
       "entry": [
+        "scripts/evals/run.mjs",
+        "scripts/evals/codex.mjs",
+        "scripts/evals/report.mjs",
+        "docs/testing/2026-09-27-remote-fleet/connect/enroll-clankie.mjs",
+        "docs/testing/2026-09-29-browser-bursts/flows/smoke.mjs",
         "docs/testing/2026-09-04-astra-terra-comparison/flows/assert-suite.mjs",
         "docs/testing/2026-09-04-linux-service-spike/flows/pairing-and-seat-dm.ts",
         "docs/testing/2026-09-04-linux-service-spike/flows/synthetic-provider.mjs",
@@ -16,7 +23,11 @@
         "docs/testing/2026-09-05-pokeagent-evidence-sweep/flows/sweep-play-archive.mjs",
         "docs/testing/2026-09-20-delivered-files-live/flows/build-presentation.mjs",
         "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs",
-        "docs/testing/2026-09-20-delivered-files-live/flows/run-isolated-proof.mjs"
+        "docs/testing/2026-09-20-delivered-files-live/flows/run-isolated-proof.mjs",
+        "docs/testing/2026-09-30-claude-worker-seat/live-hire.mts",
+        "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
+        "integrations/codex-plugin/hooks/run.mjs",
+        "integrations/claude-plugin/worker/bin/seat-hook.mjs"
       ],
       "paths": {
         "/clankie/*": ["./*"]

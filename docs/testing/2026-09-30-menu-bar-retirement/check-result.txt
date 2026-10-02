@@ -1,0 +1,36 @@
+ ❯ packages/credential-broker/test/account-credential.test.ts (20 tests | 1 failed) 22ms
+       × keeps a refresh that meets a bare 429 retryable instead of signing the Mac out 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > keeps a refresh that meets a bare 429 retryable instead of signing the Mac out
+AssertionError: expected ClankieAccountAuthError: Clankie account … { code: '…' } to match object { code: 'rate_limited' }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "code": "rate_limited",
++ ClankieAccountAuthError {
++   "code": "service_unavailable",
+  }
+
+ ❯ packages/credential-broker/test/account-credential.test.ts:420:21
+    418|           String(input).endsWith("/gateway/v1/config") ? Response.json…
+    419|       })().catch((reason: unknown) => reason);
+    420|       expect(error).toMatchObject({ code: "rate_limited" });
+       |                     ^
+    421|       expect(clankieAccountSignInRequired(error)).toBe(false);
+    422|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 359 passed (360)
+      Tests  1 failed | 3085 passed | 2 skipped (3088)
+   Start at  02:56:45
+   Duration  318.96s (transform 6.55s, setup 0ms, import 158.08s, tests 122.67s, environment 17ms)
+
+[ELIFECYCLE] Test failed. See above for more details.
+[ELIFECYCLE] Command failed with exit code 1.

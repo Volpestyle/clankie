@@ -1,4 +1,14 @@
+import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
+import {
+  connectHostedCli,
+  disconnectHostedCli,
+  hostedCommand,
+  hostedWhoami,
+  hostedTransportFor,
+  HOSTED_LOCAL_ONLY,
+} from "../src/command/hosted.ts";
 import { runRuntimeCommand } from "../src/command/runtime.ts";
+import { runSeatHookCommand } from "../src/command/seat-hook.ts";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 import { runSwarmCommand } from "../src/command/swarm.ts";
 import { runAgentsCommand } from "../src/command/agents.ts";
@@ -13,14 +23,16 @@ import { statusCommand } from "../src/command/status.ts";
 import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
 import { runBrowserCommand } from "../src/command/browser.ts";
+import { runSkillsCommand } from "../src/command/skills.ts";
 import { runGamesCommand } from "../src/command/games.ts";
 import { runLinearCommand } from "../src/command/linear.ts";
 import { runAccountsCommand } from "../src/command/accounts.ts";
 import { runWorkCommand } from "../src/command/work.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
-import { forwardsToFleetHerdr, runHerdrCommand } from "../src/command/herdr.ts";
+import { forwardsToFleetHerdr, herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 import { runEffortCommand } from "../src/command/effort.ts";
+import { runVoiceCommand } from "../src/command/voice.ts";
 import { runImageModelCommand } from "../src/command/image-model.ts";
 import { runVideoModelCommand } from "../src/command/video-model.ts";
 import { runDiscordCommand } from "../src/command/discord.ts";
@@ -43,10 +55,11 @@ import { runMcpCommand } from "../src/command/mcp.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
 import { runGatewayCommand } from "../src/command/gateway.ts";
 import { runAutostartCommand } from "../src/command/autostart.ts";
+import { runAwakeCommand } from "../src/command/awake.ts";
 import { commandHelp } from "../src/command/registry.ts";
 import { outputJson, type Writable } from "../src/command/io.ts";
 
-export { isHeadlessCaptainCommand } from "../src/command/registry.ts";
+export { isHeadlessCaptainCommand, unknownLauncherCommand } from "../src/command/registry.ts";
 
 export interface HeadlessCaptainCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -85,6 +98,48 @@ export async function runHeadlessCaptainCommand(
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   try {
+    const env = options.env ?? process.env;
+    if (command === "connect" || command === "login") {
+      await connectHostedCli(
+        command === "login" ? ["hosted", ...rest] : rest,
+        env,
+        stdout,
+        command === "login" ? { target: "auto" } : {},
+      );
+      return 0;
+    }
+    if ((command === "gateway" || command === "remote-access") && rest[0] === "on") {
+      await connectHostedCli(["hosted", ...rest.slice(1)], env, stdout, { target: "this-mac" });
+      return 0;
+    }
+    if (command === "whoami") {
+      outputJson(stdout, await hostedWhoami(env));
+      return 0;
+    }
+    if (command === "disconnect" || command === "logout") {
+      outputJson(stdout, await disconnectHostedCli(env));
+      return 0;
+    }
+    if (
+      !options.host &&
+      !options.fetchImpl &&
+      (await new SettingsStore(defaultSettingsPath(env)).load()).client?.mode === "hosted" &&
+      !["help", "--help", "-h"].includes(command ?? "")
+    ) {
+      if (HOSTED_LOCAL_ONLY.has(command ?? ""))
+        throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
+      const transport = await hostedTransportFor(env);
+      // These existing commands are HTTP-only. The transport replaces their local
+      // bearer inside the envelope; no Mac credential is read or transmitted.
+      if (["conversations", "conversation", "send"].includes(command ?? ""))
+        return runHeadlessCaptainCommand(args, {
+          ...options,
+          ...transport,
+          env: { ...env, CLANKIE_CAPTAIN_TOKEN: "hosted-device-transport" },
+        });
+      outputJson(stdout, await hostedCommand(args, transport));
+      return 0;
+    }
     if (command === "health" || command === "status") {
       const result = await statusCommand(options);
       outputJson(stdout, result);
@@ -109,10 +164,14 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result);
       return 0;
     }
+    if (command === "awake") {
+      outputJson(stdout, await runAwakeCommand(rest, options));
+      return 0;
+    }
     if (command === "pair") return await runPairCommand(rest, options);
     if (command === "devices") return await runDevicesCommand(rest, options);
     if (command === "operator-credential") return await runOperatorCredentialCommand(rest, options);
-    if (command === "gateway") {
+    if (command === "gateway" || command === "remote-access") {
       const result = await runGatewayCommand(rest, {
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.operatorCredentialStore === undefined
@@ -138,6 +197,10 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
+    if (command === "voice") {
+      outputJson(stdout, await runVoiceCommand(rest, options));
+      return 0;
+    }
     if (command === "image-model") {
       const result = await runImageModelCommand(rest, options);
       outputJson(stdout, result);
@@ -157,14 +220,19 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await runBrowserCommand(rest, options));
       return 0;
     }
+    if (command === "skills") {
+      outputJson(stdout, await runSkillsCommand(rest, options));
+      return 0;
+    }
     if (command === "games") {
       const result = await runGamesCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }
     if (command === "linear") {
-      outputJson(stdout, await runLinearCommand(rest, options));
-      return 0;
+      const result = await runLinearCommand(rest, options);
+      outputJson(stdout, result);
+      return result.ok === false ? 1 : 0;
     }
     if (command === "accounts") {
       outputJson(stdout, await runAccountsCommand(rest, options));
@@ -187,7 +255,7 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await runSwarmCommand(rest, options));
       return 0;
     }
-    if (command === "agents") {
+    if (command === "agents" || command === "sessions") {
       outputJson(stdout, await runAgentsCommand(rest, options));
       return 0;
     }
@@ -212,6 +280,14 @@ export async function runHeadlessCaptainCommand(
         return await runFleetHerdr(args, target);
       }
       if (rest.length === 1 && rest[0] === "open") return await openHerdr(options);
+      const fleetArgs = herdrFleetRuntimeArgs(rest);
+      if (fleetArgs !== undefined) {
+        outputJson(stdout, {
+          ...(await runRuntimeCommand(fleetArgs, options)),
+          restart: "clankie restart captain",
+        });
+        return 0;
+      }
       if (forwardsToFleetHerdr(rest)) return await runFleetHerdr(rest, options);
       const result = await runHerdrCommand(rest, options);
       outputJson(stdout, result);
@@ -257,6 +333,7 @@ export async function runHeadlessCaptainCommand(
     // The seat: Claude Code as Clankie (ADR 0152). `mcp` is its stdio side and
     // speaks JSON-RPC on stdout, so it never goes through outputJson.
     if (command === "seat-sync") return await runSeatSyncCommand(rest, options);
+    if (command === "seat-hook") return await runSeatHookCommand(rest, options);
     if (command === "seat") {
       return await runSeatCommand(rest, {
         repoRoot: options.repoRoot,

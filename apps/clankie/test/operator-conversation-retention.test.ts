@@ -187,6 +187,15 @@ describe("operator conversation retention", () => {
     const agedMeta = JSON.parse(await readFile(agedMetaPath, "utf8")) as { updatedAt: string };
     agedMeta.updatedAt = new Date(Date.now() - OPERATOR_CONVERSATION_RETENTION_MS - 1).toISOString();
     await writeFile(agedMetaPath, JSON.stringify(agedMeta), "utf8");
+    const legacyOwners = [
+      {
+        organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
+        issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
+        conversationId: aged.conversation.conversationId,
+      },
+    ];
+    const bindingFile = JSON.stringify(legacyOwners);
+    await writeFile(join(root, "linear-work.json"), bindingFile);
     await store.close();
     const restarted = new ConversationStore(
       root,
@@ -196,6 +205,8 @@ describe("operator conversation retention", () => {
       },
     );
     expect(pruned).toContain(aged.conversation.conversationId);
+    expect(restarted.linearWorkOwners()).toEqual(legacyOwners);
+    expect(await readFile(join(root, "linear-work.json"), "utf8")).toBe(bindingFile);
 
     const large = await restarted.serve({
       op: "create",

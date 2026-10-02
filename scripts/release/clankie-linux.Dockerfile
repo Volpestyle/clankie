@@ -44,6 +44,13 @@ ENV HOME=/state/home \
 ENV PATH=/opt/clankie/libexec:$PATH
 USER node
 WORKDIR /workspace
+# Verify as the actual runtime user, without an owner's global skill installation.
+RUN test "$(herdr --version)" = "herdr $(node -p 'require("/opt/clankie/release.json").herdr.release.version')" \
+ && herdr --skill > /tmp/herdr-skill \
+ && cmp /tmp/herdr-skill /opt/clankie/.agents/skills/herdr/SKILL.md \
+ && cmp /tmp/herdr-skill /opt/clankie/integrations/claude-plugin/skills/herdr/SKILL.md \
+ && cmp /tmp/herdr-skill /opt/clankie/integrations/worker-skills/skills/herdr/SKILL.md \
+ && rm /tmp/herdr-skill
 ENTRYPOINT ["clankie-hosted"]
 CMD ["node", "/opt/clankie/apps/clankie/src/index.js"]
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s \

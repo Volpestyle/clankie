@@ -17,7 +17,7 @@ what lets both bodies be one character
 | `voice-address`              | Phonetic name-mention: opens a session; the offered turn decides whether to speak (ADR 0119)          |
 | `voice-floor`                | Dormant ↔ engaged floor: wake, offer (silence-ok), listen, decay, volition (ADR 0119)                 |
 | `realtime-session`           | Injectable OpenAI/xAI realtime boundaries: transcription, conversation, and `ask_clankie` round trips |
-| `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                 |
+| `elevenlabs-tts`             | ElevenLabs legacy TTS and explicit v4 Turbo dialogue WebSocket boundary (ADR 0070)                    |
 | `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)   |
 | `voice-session`              | Vox-backed attributed speech/text input, shared group floor, deliberate barge-in and playback         |
 | `voice-composition`          | Shared voice dependency assembly for bot and user-session bodies                                      |
@@ -25,7 +25,7 @@ what lets both bodies be one character
 | `voice-music`                | Shared bounded queue and transport controls                                                           |
 | `voice-ingress`              | Routes one `ask_clankie` handoff to the continuing `discord_voice` captain lane                       |
 | `voice-consent`              | Ephemeral consent under explicit or owner-selected presence policy; opt-out always wins               |
-| `voice-audio`                | Shared provider/local-voice PCM helpers and content-free RMS measurement                              |
+| `voice-audio`                | Shared voice-provider PCM helpers and content-free RMS measurement                                    |
 | `receipt-store`              | Append-only, content-free receipts for both planes                                                    |
 
 Voice receipts use the `discord.voice.*` vocabulary — `joined`, `consent`,
@@ -58,8 +58,9 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
 - **Voice identity stays attached to a gateway stream.** Speakers use separate
   transcription inputs. Only attributed JSON transcript items converge into
   the shared engaged conversation; overlapping raw audio is never interleaved
-  and guessed after the fact. An open session hears consented speech; the floor
-  decides who gets a spoken turn
+  and guessed after the fact. Every finalized consented speech transcript gets
+  a contextual model decision, including nameless requests after a pause. The
+  model may stay silent; engagement controls interruption eligibility, not hearing
   ([ADR 0119](../../docs/adr/0119-the-room-is-heard-the-floor-is-who-he-answers.md)).
 - **Speaker listeners are bounded.** An inactive per-speaker transcription
   session closes after two minutes and reopens on demand. At 25 retained
@@ -84,3 +85,73 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
 - [`apps/discord-user-session`](../../apps/discord-user-session/README.md) —
   personal-lab user session, gated by
   [ADR 0048](../../docs/adr/0048-discord-user-session-transport.md).
+
+### Voice latency evidence
+
+Voice capture commits after 500ms without input audio. Transcription streams
+before that boundary, but replies wait for a final transcript. Captures that
+never reach 80 RMS (s16 full scale 32,768) are marked `filtered` and send no
+provider audio or commit; a bounded 200ms lead-in preserves quiet word onsets
+when speech arrives. This near-silence filter is separate from the unchanged
+1,200 RMS, transcript-confirmed interruption guard.
+
+`transcription.latencyMs` includes speaking time; `captureEndToFinalMs` measures
+finalization and `lastAudioToFinalMs` also includes endpoint delay. Response
+receipts retain input timing through wake and tool handoffs:
+`lastAudioToFirstAudioMs`, `captureEndToFirstAudioMs`,
+`transcriptToFirstAudioMs`, and `transcriptToRequestMs`. The existing
+`toFirstAudioMs` starts at the individual response request. External voice
+also reports `requestToFirstTextMs`; `requestToFirstAudioChunkMs` and
+`firstAudioChunkToPlaybackMs` distinguish synthesis delivery from playback.
+Missing measurements are omitted, not zero. Input PCM arrival and transmitted
+playback are transport evidence, not measurements of phoneme or headphone time.
+
+Voice receipts allow up to 32 scalar, content-free fields so correlation IDs,
+token counts, and timings survive together. Older 16-field writers could lose
+response receipts even when Vox logged a successful start and drain.
+
+### Chaotic group calls
+
+Voice ingress keeps different speakers' asks in separate handoffs, one active
+speaker per room. The active speaker's refinements can steer their live run;
+other speakers wait for their own answer. The realtime conversation and local
+voice tools keep running while that work waits. Tool results carry their
+recipient, and the mouth gives that person the gist, expanding when warranted. Responses serialize through
+provider completion and, for external voices, TTS drain.
+
+The floor retains up to five recently engaged speakers for 60 seconds each.
+Their unnamed follow-ups are offers Clankie may decline; unrelated chatter is
+offered for contextual judgment without forcing a response. Typed-input
+volition caps, consent, and machine grants are unchanged. See ADRs [0091](../../docs/adr/0091-a-mid-turn-message-steers-the-turn.md)
+and [0119](../../docs/adr/0119-the-room-is-heard-the-floor-is-who-he-answers.md).
+
+Voice playback paces synthesized PCM in 100ms chunks with at most one second
+of real-time lead before sending it to Vox. Provider completion waits for the
+local queue to empty before `finish_tts_playback`; stop, failure, leave, and
+timeout discard queued audio. Vox retains its fail-closed 15-second buffer cap.
+
+New speech replaces unheard replies across the room: bursts during opening
+collapse to one opportunity, provider/TTS queues drop stale response requests,
+and queued PCM is discarded before playback. Tool results stay in context;
+in-flight work retains its actor. Explicit “stop talking” cuts playback on the
+final transcript even below the ordinary barge-in loudness gate, drops queued
+speech, and keeps late handoff results silent.
+
+Repeated identical asks from the same person join pending work. For paraphrases,
+`ask_clankie.join_call_id` joins only that authenticated speaker's handoff;
+changed requests remain refinements. Slow work offers one brief acknowledgment
+after 1.2 seconds, canceled if the room moves on or work finishes. Voice matches
+the length to the moment: most turns are short, while stories, strong opinions,
+invested bits, and fuller answers have room. Handoff results follow the same
+proportion, with details available in text. OpenAI output is bounded to 4096
+audio / 1024 text tokens per response, and all Discord mouths have a 45-second
+PCM ceiling. These runaway backstops leave room for deliberate 20–30 second
+riffs; live taste and transcription latency still require a call.
+
+Opt-in voice transcripts include Clankie's generated wording from native audio
+transcripts or external TTS text, correlated with item/playback ids and outcomes.
+`subscribeSpokenTranscript` is separate from the consented human listener, so
+output cannot masquerade as room input. Without a subscriber the session does
+not accumulate output text. Interrupted/failed/truncated entries may include an
+unheard ending; suppressed entries never played. The private transcript store
+and authenticated API retain these labels; content-free receipts never carry text.

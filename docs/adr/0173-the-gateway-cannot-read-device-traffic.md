@@ -137,3 +137,75 @@ and perform fresh review pairing before reopening external testing.
 - [VUH-1112](https://linear.app/vuhlp/issue/VUH-1112/encrypt-device-to-host-traffic-across-the-shared-gateway)
 - [NIST SP 800-38D](https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=51288)
 - [Apple AES.GCM.SealedBox](https://developer.apple.com/documentation/cryptokit/aes/gcm/sealedbox)
+
+## Amendment: the Mac can be a hosted operator device (2026-09-27, VUH-1110)
+
+The launcher chooses local or hosted before starting any body. Existing installs
+retain local behavior; a fresh install offers both. Hosted mode opens only a
+client. The same service owns conversations, memory and accepted work after that
+client exits. Selected conversation and cursors are stored per host on the Mac.
+
+`login`/`logout`/`whoami` expose hosted identity alongside mode selection. The
+private fleet serves the signed-in account's machine list and pairing-offer
+endpoint. It resolves the selection through that account, signs an ephemeral
+key/nonce-bound operator ticket, and calls the machine's existing pair-offer
+route. It returns the body's signed ciphertext; it cannot decrypt the offer.
+The Node-free client in `packages/protocol/hosted-pairing` verifies through a
+platform crypto adapter before device redemption. Account tokens are discarded
+after login; the broker retains only device credentials and wake signing material.
+
+Second review narrows the original full-operator default: the single shared
+`hostedOperatorAllows` policy permits chat, fleet, terminal, model, keys, persona
+and connections. Restart, reset and deprovision stay with the account/control
+plane. Both the operator bridge and the legacy device relay enforce it. The
+body marks hosted device self-responses so the relay cannot bypass the policy.
+This is an API authority boundary, not interpretation of raw terminal input.
+The bridge additionally requires the durable `hosted-account-operator` marker
+and an active Take Control device. A claimed platform/header cannot grant it;
+no reusable local operator/captain bearer is exported.
+
+The fleet currently stores one optional tenant per account. The list contract
+supports a future picker; today selection is automatic. A saved device wakes
+an asleep host with the same P-256 signed challenge as the app. Initial login
+may wake using account authority. Status names This Mac or Hosted plus the
+machine and distinguishes sleep, expiration, revocation and unavailability.
+The Mac's wake private key lives in the credential broker; unlike the mobile
+app's native hardware key, this Node adapter does not claim non-exportability.
+
+`POST /v1/hosted/operator` carries a bounded inner GET/POST request through the
+existing authenticated envelope. After the device check, an in-process request
+receives operator authority; only the server's request identity carries it.
+Nested bridge, gateway and webhook routes are refused. The inner route retains
+its existing validation and trusted-caller checks. Persona has a typed operator
+API; model and account connections reuse their existing owner APIs. Interactive
+work inside the bridge counts as hosted activity; polling does not.
+
+```mermaid
+sequenceDiagram
+  participant T as Mac TUI
+  participant F as Account service
+  participant G as Opaque gateway
+  participant H as Hosted Clankie
+  T->>F: Login, select owned machine, ephemeral key and nonce
+  F->>G: Signed bound ticket and pair-offer request
+  G->>H: Pair-offer request
+  H-->>F: Signed encrypted offer
+  F-->>T: Ciphertext and trusted body public key
+  T->>H: Encrypted redeem and complete through gateway
+  H-->>T: Revocable device session
+  T->>H: Encrypted operator request through gateway
+  H->>H: Check live device, issuer and grants; dispatch
+```
+
+Local process, Herdr socket, autostart and body-token controls explicitly refuse
+in hosted mode. Disconnect forgets the client credential and returns the next
+launch to local mode; it does not stop hosted work. Account device revocation is
+the way to invalidate a lost Mac. `/remote-access` (`/gateway` alias) checks the account's tenant before
+configuring another local doorway and offers connection to the existing host.
+A failed account lookup refuses configuration rather than assuming no tenant.
+
+The fleet ticket issuer remains in private `clankie-ops` under ADR 0183. The Mac
+client, encrypted transport and reusable body authorization remain public.
+Local tests cover signing, tampering, encryption, ordinary-device denial,
+revocation, continuing conversation work and forbidden local process commands.
+A real hosted Mac/phone rehearsal and deployment remain separate gates.

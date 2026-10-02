@@ -1,10 +1,11 @@
 # Clankie TUI (`@clankie/tui`)
 
-The TUI is the primary workspace for Clankie as your persistent lead. Give him
-work here and choose which installed worker harnesses he uses in Herdr, such
-as Claude Code or Codex. Clankie's own pi-based runtime keeps the conversation,
-goals, and memory; workers run in their own inspectable terminal panes. The
-companion app reaches the same service through Messages, Terminal, and Commons.
+The terminal console is a full client for Clankie: conversation, project work,
+configuration, and inspection of connected agents. It can reach a local service
+or an existing hosted Clankie. The app reaches the same service through
+Messages, Commons, and Terminal. For first setup, use
+[Get started](https://docs.clankie.bot/get-started/); this README owns terminal
+interaction, workspace selection, and launcher behavior.
 
 The chat surface is pi's,
 in pi's fullscreen mode: messages, tool executions, the working indicator, and
@@ -18,7 +19,7 @@ the banner, slash-command typeahead, guided setup flows, and the `Ctrl+/`
 command workbench — dressed in pi's dark palette
 ([ADR 0137](../../docs/adr/0137-the-face-wears-pis-chat-surface.md)).
 
-It talks to one backend: the clankie service on port `4310`. Plain prompts use
+In local mode it talks to the Clankie service on port `4310`. Plain prompts use
 the shared operator-conversation dispatch contract at
 `POST /operator/v1/dispatch`; lane observation uses
 `GET /captain/v1/lanes`; health, devices, pairing, presence, embodiment,
@@ -26,6 +27,10 @@ activity, and memory use the operator APIs in the
 [HTTP catalog](../clankie/openapi.yaml). `CLANKIE_CONTROL_PLANE_URL` overrides
 the default `http://127.0.0.1:4310`; `CLANKIE_CAPTAIN_URL` remains a
 compatibility alias.
+
+Hosted mode uses the paired-device transport and a smaller command set; see
+[local and hosted modes](../../docs/cli.md#local-and-hosted-connection-modes).
+The following process and workspace details describe local mode unless noted.
 
 ## Run
 
@@ -35,7 +40,7 @@ launcher with `pnpm cli:install`. Flags, JSON stdout, exit codes, and the
 prints the same index.
 
 ```bash
-clankie                         # start the core service and open the console
+clankie                         # choose mode on first run; open the selected console
 clankie --chat <conversationId> # select a server-owned conversation
 clankie status                  # probe every launcher-owned service
 clankie doctor                  # this install: checkout vs release, models, credentials, optional herdr
@@ -47,7 +52,7 @@ clankie devices --json          # list paired devices
 clankie devices revoke <id> --json
 clankie operator-credential rotate --json
 clankie play status|stop
-clankie model status            # captain model + local providers (JSON)
+clankie model status            # Clankie model + local providers (JSON)
 clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set
 clankie model set provider/model
 clankie effort set high
@@ -136,10 +141,20 @@ credential holder.
   acknowledgement, **Delivery unconfirmed** asks you to check the conversation
   before retrying. Sends never retry automatically; an accepted turn's dropped
   observation reconnects without resending its message.
-- `/conversation` (aliases `/conversations`, `/chat`) opens a searchable dialog
-  for all retained conversations: Clankie's head and workspace threads, fleet
-  agents and channels, and Discord text/voice rooms. `/conversation <name-or-path>`
-  switches directly; a Discord channel id also selects its room.
+- `/chats` (aliases `/chat`, `/conversation`, `/conversations`) opens only
+  personal and workspace chats with Clankie. `/chats <name-or-path>` switches directly.
+- `/agents` opens the agents that are live now (a Herdr seat here or on a
+  remote fleet, or an available Swarm peer). Offline agents that kept a thread
+  sit behind one "Past agents" entry, newest first; offline agents without a
+  thread are not listed, since there is nothing to open.
+- `/rooms` opens group channels and Discord text/voice rooms. A Discord channel
+  ID also selects its room with `/rooms <id>`.
+- `/history` searches all retained threads, including agent threads. History
+  includes ongoing threads; it does not mean archived, completed, or online.
+  `/history <conversationId>` selects any retained thread directly.
+- `/sessions` browses saved harness sessions on local or SSH hosts; these are
+  execution records, distinct from agent identities. Existing `/agents` session
+  arguments remain supported. See the [product vocabulary](../../docs/product-vocabulary.md).
   Discord rooms are read-only inspection views, with expandable context and tool
   arguments/results (`Ctrl+O` toggles tools). Their transport still owns input;
   typing in the inspector cannot send to Discord or grant operator authority.
@@ -168,10 +183,17 @@ credential holder.
   the skill picker. The transcript records a compact `skill loaded` receipt.
 - `/activity` shows the current goal, commentary, intent, observed outcome, and
   the loopback watch URL without controlling the body.
+- `/skills` opens the working-skill picker (also in `/setup`). Opinionated skills
+  default on; product/tool skills always stay on. `/skills opinionated off` and
+  `/skills exclude NAME` apply to new sessions and local hires.
+- `/accounts codex list` shows local Codex homes and observed quota headroom.
+  `/accounts codex add HOME --label LABEL` registers an owner-signed-in home;
+  `/accounts codex remove LABEL` forgets it without deleting credentials.
 - `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
   disable it. `/games on|off` remains available for direct use. Restart Clankie
   to apply a change. Saves live with the world server, not here.
-- `/evaluator` opens a menu for the independent evaluator: turn it on or off,
+- `/evaluator` (developer diagnostic) opens a menu for the independent
+  evaluator, whose footer badge reads `evaluator on` while enabled: turn it on or off,
   switch harness, open its Herdr pane, read recent assessments, retry failures.
   `/evaluator status|enable --harness codex|claude|disable|open|retry ID` still work.
 - `/browser record on|off` saves each burst of Clankie's browsing as a WebM
@@ -180,7 +202,10 @@ credential holder.
 - `/memory` browses and edits episodes and permitted Discord person facts through
   operator-only APIs.
 - `/vt` (aliases `/voice-log`, `/voice-transcripts`) opens a live overlay of
-  retained Discord voice transcripts. `Ctrl+Shift+V` toggles the same view;
+  retained Discord voice transcripts, including Clankie's generated wording
+  labeled with playback outcome. Cut-off text may include an unheard ending.
+  `clankie discord transcripts` reads the same page headlessly.
+  `Ctrl+Shift+V` toggles the same view;
   Esc or `/vt off` closes it. Exact speech appears only when
   `discord.voiceTranscriptLoggingEnabled` is on ([ADR 0121](../../docs/adr/0121-development-voice-transcripts-are-explicit.md));
   otherwise the overlay points at `/discord`. This is not `/trace`: voice lanes
@@ -188,6 +213,8 @@ credential holder.
 - `/status` renders `clankie status`, then adds console presence, conversation,
   workspace, model context, activity availability, and the Herdr pane roster.
   `/doctor` renders the same install report as `clankie doctor`.
+- `/awake [on|off]` is `clankie awake`: the launcher's keep-awake while plugged in,
+  with the Mac's current power state ([always on](../../docs/always-on.md)).
 - `/herdr` offers **Use an existing Herdr session** or **Create a session for
   Clankie**, followed by **Restart now** or **Later**. `/herdr use NAME` and
   `/herdr create` are the direct equivalents. Clankie’s own session tracks
@@ -211,6 +238,9 @@ credential holder.
 - `/voice` selects OpenAI Realtime, Grok Voice, or OpenAI plus ElevenLabs and
   configures the active model, voice, xAI reasoning effort, and brokered API
   keys. `/voice status` shows the effective settings and environment overrides.
+  `eleven_v4_turbo` opts into dialogue synthesis; unset keeps legacy Flash.
+  Headless `clankie voice status`, `voice model set MODEL_ID`, and
+  `voice model clear` inspect, select, or restore the default without restarting.
 - YouTube music is an ordinary prompt, not a slash command. Audible playback is
   on the active Discord body's Vox primary-voice role; see the
   [Discord media guide](../../docs/discord-media.md).
@@ -275,3 +305,20 @@ node apps/tui/bench/transcript-render.ts 1000     # a specific scrollback size
 
 The launcher runs TypeScript through Node's native type stripping; the repo's
 `erasableSyntaxOnly` setting enforces the supported syntax.
+
+## Hosted mode
+
+The first launch offers This Mac or hosted; hosted mode starts no local body.
+`clankie login`, `logout`, and `whoami` sign in, forget this device, or show its
+machine/access status. `connect hosted` and `disconnect` remain aliases.
+`/settings` and `/connection` expose modes. The footer names the machine and
+reports Asleep/Waking, Sign-in expired, Access revoked, or Unavailable.
+
+Account pairing is private fleet work; the Node-free shared client is in
+`@clankie/protocol/hosted-pairing`. The current fleet model has one optional
+tenant per account. Chat, fleet, terminal, model, keys, persona and connections
+are device capabilities; restart/reset/deprovision remain account/control-plane
+operations. A paired Mac uses the app's signed wake protocol. `/remote-access`
+means self-hosted Remote access for this Mac; `/gateway` is an alias.
+See [connection modes](../../docs/cli.md#local-and-hosted-connection-modes) for
+commands, secret handling and live-verification limits.

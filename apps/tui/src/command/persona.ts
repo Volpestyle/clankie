@@ -1,7 +1,14 @@
+import {
+  loadPersonaImages,
+  personaImageCacheDir,
+  personaImageStatus,
+  resolvePersonaImagesDir,
+} from "@clankie/persona-images";
 import { SettingsStore, defaultSettingsPath, type PersonaSettings } from "@clankie/settings";
 
 const PERSONA_USAGE = [
   "Usage: clankie persona [status]",
+  "       clankie persona images status|set <folder>|clear",
   "       clankie persona set [--display-name NAME] [--aliases name,name]",
   "                           [--character-notes TEXT] [--chattiness quiet|balanced|chatty]",
   "                           [--reply-policy addressed|all] [--live-message-window N]",
@@ -17,6 +24,7 @@ export interface PersonaCommandResult {
   readonly persona: PersonaSettings;
   readonly settingsFile: string;
   readonly restart: string;
+  readonly images?: ReturnType<typeof personaImageStatus>;
 }
 
 function store(options: PersonaCommandOptions): SettingsStore {
@@ -29,6 +37,7 @@ export function formatPersonaLines(persona: PersonaSettings): string[] {
     `name: ${persona.displayName}`,
     `also answers to: ${persona.aliases.length === 0 ? "—" : persona.aliases.join(", ")}`,
     `chattiness: ${persona.chattiness}`,
+    `persona images: ${persona.imagesDir || "none"} (restart applies changes)`,
     `reads text channels: ${persona.replyPolicy === "all" ? "every admitted message" : "when addressed"}`,
     "",
     "character:",
@@ -98,6 +107,19 @@ export async function runPersonaCommand(
   options: PersonaCommandOptions = {},
 ): Promise<PersonaCommandResult> {
   const verb = args[0];
+  if (verb === "images") {
+    const action = args[1] ?? "status";
+    if (action === "set" && args.length === 3 && args[2]?.trim()) {
+      await personaUpdate({ imagesDir: resolvePersonaImagesDir(args[2]) }, options);
+    } else if (action === "clear" && args.length === 2) {
+      await personaUpdate({ imagesDir: "" }, options);
+    } else if (action !== "status" || args.length > 2) throw new Error(PERSONA_USAGE);
+    const status = await personaStatus(options);
+    const images = personaImageStatus(
+      await loadPersonaImages(status.persona.imagesDir, personaImageCacheDir(options.env)),
+    );
+    return { ...status, images, restart: "Restart Clankie to apply persona images: clankie restart captain" };
+  }
   if (verb === undefined || verb === "status") return await personaStatus(options);
   if (verb === "set") return await personaUpdate(parseSetArgs(args.slice(1)), options);
   throw new Error(PERSONA_USAGE);

@@ -14,6 +14,13 @@ export default defineConfig({
     include: packageTestPattern,
     exclude: ["**/node_modules/**", "**/.turbo/**", "**/dist/**", "artifacts/**"],
     fileParallelism: false,
+    retry: 0,
+    ...(process.env.CI
+      ? {
+          reporters: ["default", "junit"],
+          outputFile: { junit: ".data/qa/tests.xml" },
+        }
+      : {}),
     pool: "forks", // threads aborts on Node 26 worker isolate teardown; see ADR 0179
     testTimeout: 30_000,
     hookTimeout: 30_000,

@@ -102,6 +102,7 @@ export interface FaceShellCommand {
 }
 
 export interface FaceShellOptions {
+  readonly allowLocalShell?: boolean;
   readonly onHerdrJump?: (target: string) => Promise<HerdrJumpResult>;
   readonly commands: readonly FaceShellCommand[];
   /** Initial working directory for the `!` shell escape and path autocomplete; {@link ClankieFaceShell.setCwd} moves it. */
@@ -1206,6 +1207,10 @@ export class ClankieFaceShell {
     // (typed fast or recalled from history). Runs locally in cwd, independent of
     // any in-flight turn, and stays in bash mode for the next command.
     if (this.bashMode || prompt.startsWith("!")) {
+      if (this.options.allowLocalShell === false) {
+        this.insertMarkdown("Shell commands are local-only. Use the hosted terminal in the paired app.");
+        return;
+      }
       const command = (prompt.startsWith("!") ? prompt.slice(1) : prompt).trim();
       if (command.length === 0) return;
       this.rememberPrompt(`!${command}`);

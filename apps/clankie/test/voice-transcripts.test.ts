@@ -23,6 +23,22 @@ it("keeps retained voice transcripts captain-authenticated and unreadable while 
     displayName: "James",
     text: "private exact line",
   });
+  await store.append("bot", {
+    occurredAt: "2026-08-18T04:24:22.550Z",
+    guildId: "866430493889134672",
+    channelId: "866430493889134676",
+    deliveryId: "delivery-1",
+    role: "assistant",
+    speakerId: "clankie",
+    displayName: "Clankie",
+    itemId: "answer",
+    text: "private generated reply",
+    textSource: "tts_text",
+    textComplete: true,
+    outcome: "played",
+    audioStarted: true,
+    playbackMs: 700,
+  });
   let enabled = false;
   const settings = () =>
     ClankieSettingsSchema.parse({ schemaVersion: 1, discord: { voiceTranscriptLoggingEnabled: enabled } });
@@ -47,6 +63,9 @@ it("keeps retained voice transcripts captain-authenticated and unreadable while 
   const visible = await app.request("/v1/discord/voice-transcripts", { headers });
   expect(await visible.json()).toMatchObject({
     enabled: true,
-    entries: [{ displayName: "James", text: "private exact line" }],
+    entries: [
+      { displayName: "James", text: "private exact line" },
+      { role: "assistant", text: "private generated reply", outcome: "played" },
+    ],
   });
 });

@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "clankie",
-  "description": "Clankie's own marketplace: one plugin, this checkout or the installed release.",
+  "description": "Clankie's own marketplace: the operator seat and the Swarm worker channel, from this checkout or the installed release.",
   "owner": {
     "name": "James Volpe",
     "url": "https://github.com/Volpestyle"
@@ -11,6 +11,12 @@
       "name": "clankie",
       "description": "Sit in Claude Code as Clankie: identity, persona, tools over MCP, memory card per turn, and skills.",
       "source": "./",
+      "category": "productivity"
+    },
+    {
+      "name": "clankie-worker",
+      "description": "A Swarm-dispatched interactive worker's Swarm mail as a Claude Code channel. Separate from the operator seat; enable only through a worker launch.",
+      "source": "./worker",
       "category": "productivity"
     }
   ]

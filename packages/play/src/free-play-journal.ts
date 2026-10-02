@@ -171,11 +171,6 @@ const FreePlayJournalSummaryV2Schema = FreePlayJournalSummaryV1Schema.extend({
   schemaVersion: z.literal(2),
   screenshot: FreePlayJournalScreenshotSchema.optional(),
 });
-export const FreePlayJournalSummarySchema = z.union([
-  FreePlayJournalSummaryV1Schema,
-  FreePlayJournalSummaryV2Schema,
-]);
-
 const FreePlayJournalLineSchema = z.union([
   FreePlayJournalHeaderV1Schema,
   FreePlayJournalHeaderV2Schema,

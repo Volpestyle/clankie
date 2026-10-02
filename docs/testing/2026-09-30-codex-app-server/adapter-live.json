@@ -1,0 +1,80 @@
+{
+  "cwd": "/private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj",
+  "paneId": "w2H:p6N",
+  "env": {
+    "CODEX_HOME": "/private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj/worker-codex/seat-nYlyLt"
+  },
+  "events": [
+    {
+      "type": "turn_completed",
+      "at": "2026-09-30T10:35:26.585Z",
+      "messageId": "01a0f1e2-212c-7841-9b1a-979dcb80bebe",
+      "ok": true,
+      "text": "VUH1459_HIRE_COMPLETE",
+      "stopReason": "completed"
+    },
+    {
+      "type": "turn_completed",
+      "at": "2026-09-30T10:35:30.605Z",
+      "messageId": "01a0f1e2-2c03-73a3-b924-8f6d001bd802",
+      "ok": true,
+      "text": "VUH1459_MESSAGE_COMPLETE",
+      "stopReason": "completed"
+    },
+    {
+      "type": "turn_completed",
+      "at": "2026-09-30T10:35:34.694Z",
+      "messageId": "01a0f1e2-3e8a-7e83-ab13-ed197b08477a",
+      "ok": true,
+      "text": "VUH1459_OWNER_TAKEOVER.",
+      "stopReason": "completed"
+    }
+  ],
+  "ref": {
+    "harness": "codex",
+    "sessionId": "01a0f1e2-16c1-7fc0-a4ff-ca63705ebf39",
+    "paneId": "w2H:p6N"
+  },
+  "message": {
+    "outcome": "accepted",
+    "messageId": "01a0f1e2-2c03-73a3-b924-8f6d001bd802",
+    "state": "started"
+  },
+  "herdr": {
+    "id": "cli:agent:get",
+    "result": {
+      "agent": {
+        "agent": "codex",
+        "agent_session": {
+          "agent": "codex",
+          "kind": "id",
+          "source": "herdr:codex",
+          "value": "01a0f1e2-16c1-7fc0-a4ff-ca63705ebf39"
+        },
+        "agent_status": "working",
+        "cwd": "/private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj",
+        "focused": false,
+        "foreground_cwd": "/private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj",
+        "interactive_ready": true,
+        "name": "vuh1459-native",
+        "pane_id": "w2H:p6N",
+        "revision": 69,
+        "state_change_seq": 3554,
+        "tab_id": "w2H:t4V",
+        "terminal_id": "term_65cb0db13a26c142",
+        "terminal_title": "⠧ | vuh1459-live-8XKSHj",
+        "terminal_title_stripped": "| vuh1459-live-8XKSHj",
+        "workspace_id": "w2H"
+      },
+      "type": "agent_info"
+    }
+  },
+  "view": "\n  >_ OpenAI Codex (v0.159.1)\n     /private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj\n  permissions: YOLO mode\n\n  Speak, friend, and enter a prompt.\n\n  To get started, describe a task or try one of these commands:\n\n  /init - create an AGENTS.md file with instructions for Codex\n  /status - show current session configuration\n  /permissions - choose what Codex is allowed to do\n  /model - choose what model and reasoning effort to use\n  /review - review any changes and find issues\n\n\n› Reply with exactly VUH1459_HIRE_COMPLETE. Do not use tools.\n\n\n• VUH1459_HIRE_COMPLETE\n\n  Worked for 2s • 5:35 AM\n\n\n› Reply with exactly VUH1459_MESSAGE_COMPLETE. Do not use tools.\n\n\n• VUH1459_MESSAGE_COMPLETE\n\n  Worked for 3s • 5:35 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n› Ask Codex to do anything\n\n  GPT-6-Astra medium · /private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj · ⠇ · Context 4% used\n  ? for shortcuts                                                                                          ⚠ 1 warning · f2 to view",
+  "viewAfterTakeover": "\n  >_ OpenAI Codex (v0.159.1)\n     /private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj\n  permissions: YOLO mode\n\n  Speak, friend, and enter a prompt.\n\n  To get started, describe a task or try one of these commands:\n\n  /init - create an AGENTS.md file with instructions for Codex\n  /status - show current session configuration\n  /permissions - choose what Codex is allowed to do\n  /model - choose what model and reasoning effort to use\n  /review - review any changes and find issues\n\n\n› Reply with exactly VUH1459_HIRE_COMPLETE. Do not use tools.\n\n\n• VUH1459_HIRE_COMPLETE\n\n  Worked for 2s • 5:35 AM\n\n\n› Reply with exactly VUH1459_MESSAGE_COMPLETE. Do not use tools.\n\n\n• VUH1459_MESSAGE_COMPLETE\n\n  Worked for 3s • 5:35 AM\n\n\n› Reply with exactly VUH1459_OWNER_TAKEOVER. Do not use tools.\n\n\n• VUH1459_OWNER_TAKEOVER.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n› Ask Codex to do anything\n\n  GPT-6-Astra medium · /private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj · Return VUH1459_HIRE_COMPLETE …\n  ? for shortcuts                                                                                          ⚠ 1 warning · f2 to view",
+  "closed": {
+    "id": "cli:pane:close",
+    "result": {
+      "type": "ok"
+    }
+  }
+}

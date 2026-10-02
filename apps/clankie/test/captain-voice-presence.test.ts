@@ -46,10 +46,15 @@ describe("captain voice presence tools", () => {
       const join = captainTools(deps, {}, {} as LaneLog, lane).find((tool) => tool.name === "voice_join");
       if (join === undefined) throw new Error(`voice_join is missing on ${lane}`);
       const description = join.description ?? "";
-      // The situation: what consent blocks, and what the room does not know.
+      // The situation: what consent blocks, and that telling the room is the
+      // owner's settled arrangement (ADR 0071), not an arrival announcement.
       expect(description).toContain("/clankie voice-consent opt-in");
       expect(description).toContain("you are transcribing them");
-      expect(description).toContain("they have not been told");
+      expect(description).toContain("owner chose presence as consent and handles telling people");
+      expect(description).toContain("None of it is news you owe on arrival");
+      expect(description).toContain("text reply after joining is optional");
+      expect(description).toContain("[[stay-silent]]");
+      expect(description).toContain("greet in voice instead or stay quiet");
       // No sentence he can lift into the room, and no order to say one.
       expect(description).not.toMatch(/their audio is transcribed/i);
       expect(description).not.toMatch(/may remain with|may stay with/i);
@@ -83,7 +88,7 @@ describe("captain voice presence tools", () => {
     } as unknown as CaptainDeps;
     const tools = captainTools(
       deps,
-      { guildId: "guild-1", actorId: "user-1" },
+      { guildId: "guild-1", actorId: "user-1", requestText: "hop in vc clankie" + "x".repeat(2_000) },
       {} as LaneLog,
       "discord_presence",
     );
@@ -92,13 +97,20 @@ describe("captain voice presence tools", () => {
 
     await join.execute("call-1", {}, undefined, undefined, {} as never);
 
-    expect(calls).toEqual([{ guildId: "guild-1", actorId: "user-1" }]);
+    expect(calls).toEqual([
+      {
+        guildId: "guild-1",
+        actorId: "user-1",
+        requestText: ("hop in vc clankie" + "x".repeat(2_000)).slice(0, 1_000),
+      },
+    ]);
+    expect(JSON.stringify(join.parameters)).not.toMatch(/requestText|actorId/);
     const operatorJoin = captainTools(deps, {}, {} as LaneLog, "operator").find(
       (tool) => tool.name === "voice_join",
     );
     if (operatorJoin === undefined) throw new Error("operator voice_join is missing");
     await operatorJoin.execute("call-2", {}, undefined, undefined, {} as never);
-    expect(calls).toEqual([{ guildId: "guild-1", actorId: "user-1" }, {}]);
+    expect(calls[1]).toEqual({});
   });
 
   it("host-stamps the asker on play intents", async () => {

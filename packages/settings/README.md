@@ -14,19 +14,20 @@ Operator and captain bearers retain explicit test/CI overrides.
 The [credential guide](../../docs/credentials.md) lists the concrete account and
 local bearer identities.
 
-This package stores values that are **public identifiers** — application ids,
-guild and channel ids, role ids, allowlists, booleans. An operator reads them off
-the Discord UI and legitimately wants to see them plainly when checking their
-config, so broker redaction would hide exactly what makes settings useful.
+This package stores **non-secret preferences and connection metadata**: persona,
+Discord identifiers and allowlists, voice and game settings, runtime endpoints,
+and coordinator references. Non-secret does not mean public: names, paths, and
+account identifiers can still be private. Status views show the configuration
+needed to operate the service; credentials stay in the broker.
 
 Same directory, same permissions, different file, different rules:
 
-|               | credential broker                    | settings           |
-| ------------- | ------------------------------------ | ------------------ |
-| Holds         | secrets                              | public identifiers |
-| Display       | redacted                             | plain              |
-| macOS storage | Keychain                             | 0600 file          |
-| Env supplied  | provider-specific compatibility only | **override wins**  |
+|               | credential broker                    | settings            |
+| ------------- | ------------------------------------ | ------------------- |
+| Holds         | secrets                              | non-secret settings |
+| Display       | redacted                             | plain               |
+| macOS storage | Keychain                             | 0600 file           |
+| Env supplied  | provider-specific compatibility only | **override wins**   |
 
 The write path calls `assertNoSecretShapedValue` and refuses anything
 token-shaped, so a secret cannot land here by accident. `.strict()` on the schema
@@ -54,10 +55,10 @@ enable a plane.
 
 ## Editing
 
-Use `/discord`, `/voice`, `/connect`, `/games`, or `/browser` in the Clankie TUI. Tokens and API keys
-go to the credential broker (same destination as `/auth`). Public identifiers —
-Discord ids, an IMAP host and username, MCP server commands and URLs — and
-gameplay enablement, and browser recording write here.
+Use the matching TUI flow or headless CLI command: `/persona`, `/discord`,
+`/voice`, `/connect`, `/games`, `/browser`, or `/connections`. Tokens and API
+keys go to the broker. Non-secret configuration writes here. The [CLI reference](../../docs/cli.md)
+owns command syntax; do not edit generated settings by hand.
 
 `voice.realtimeProvider` selects `openai` or `xai`. Provider-specific model and
 voice fields are retained when switching, so trying Grok does not erase the
@@ -113,7 +114,10 @@ owner changes it in Discord with `/clankie tools mode:on|off|status`.
 ## Swarm connections
 
 `swarm.connections` retains named coordinator endpoints, verified actor/scope,
-conversation ownership, enabled state and a broker reference. Capabilities are
+conversation ownership, enabled state and a broker reference. An optional `ssh`
+names an enabled execution fleet; `endpoint` then names its remote coordinator
+socket or Windows pipe. The fleet and remote endpoint are pinned; ephemeral
+local relay sockets are never persisted as coordinator identity. Capabilities are
 absent from settings. Configure through `clankie swarm connect PRIVATE.json` or
 `disconnect ID` (the TUI exposes the same commands); the service verifies identity
 and prevents a retained connection ID from redirecting outstanding work.
@@ -126,3 +130,15 @@ default fleet keeps its existing `herdr` settings. Configure through the operato
 API or `clankie runtime`; `/runtime` exposes the same commands. Connection IDs
 cannot redirect retained work, and disconnect never stops the external runtime.
 See [runtime commands](../../docs/cli.md#connections-and-runtime).
+
+## Codex account homes
+
+`codexAccounts` stores extra `{label, home}` records only. `default` remains implicit
+from `CODEX_HOME` or `~/.codex`. The CLI/TUI and owner API register canonical paths;
+Codex owns authentication and hook consent. `codexAccounts` and `codexAccountStatus`
+supply the registry and saved rollout status. `readCodexAccountStatus` and
+`selectLiveCodexAccount` query current quota through an owned Codex app-server
+(no login or model turn), falling back to rollouts after a bounded failure.
+Selection uses the minimum remaining fraction across reported windows, including
+weekly-only plans. Hires and evals share that selector; session discovery uses
+the registry. Unknown telemetry is not zero use.

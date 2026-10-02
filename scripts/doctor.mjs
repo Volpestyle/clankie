@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, lstat, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -27,7 +27,6 @@ for (const check of [
   ["git", true, ["--version"], "Install Git."],
   ["cargo", true, ["--version"], "Install the Rust 1.88+ toolchain to build @clankie/vox.", "1.88"],
   ["cmake", true, ["--version"], "Install CMake to build Vox's bundled native codecs."],
-  ["swift", true, ["--version"], "Install Swift to build @clankie/menu-bar."],
   ["ffmpeg", false, ["-version"], "Required for Vox URL/video playback and VP8 decode."],
   ["yt-dlp", false, ["--version"], "Required for Vox playback from indirect media URLs."],
   ["herdr", false, ["--version"], "Optional: install Herdr as an external pane host."],
@@ -92,6 +91,39 @@ if (shellFallback.length > 0) {
     true,
     `exported in shell: ${shellFallback.join(", ")} (broker credentials take precedence)`,
     "",
+  );
+}
+
+// A clankie-app checkout lists this repo's shared packages in its own pnpm
+// workspace, so its install repoints their node_modules into that checkout's
+// store. Deleting the checkout then breaks `clankie` and every seat hook.
+{
+  const foreign = [];
+  for (const group of ["packages", "apps"]) {
+    for (const pkg of await readdir(join(root, group)).catch(() => [])) {
+      const modules = join(root, group, pkg, "node_modules");
+      for (const name of await readdir(modules).catch(() => [])) {
+        const entries = name.startsWith("@")
+          ? (await readdir(join(modules, name)).catch(() => [])).map((child) => `${name}/${child}`)
+          : [name];
+        for (const entry of entries) {
+          const link = join(modules, entry);
+          if (!(await lstat(link)).isSymbolicLink()) continue;
+          const target = await realpath(link).catch(() => null);
+          if (!target || !target.startsWith(`${root}/`))
+            foreign.push(`${group}/${pkg}/node_modules/${entry}`);
+        }
+      }
+    }
+  }
+  result(
+    "workspace links",
+    true,
+    foreign.length === 0,
+    foreign.length === 0
+      ? "every package dependency resolves inside this checkout"
+      : `${foreign.length} broken or foreign: ${foreign.slice(0, 3).join(", ")}${foreign.length > 3 ? ", …" : ""}`,
+    "Run pnpm install --frozen-lockfile --offline here to relink them (a clankie-app checkout's install repointed them).",
   );
 }
 

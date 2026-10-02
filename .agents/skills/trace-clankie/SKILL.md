@@ -31,14 +31,14 @@ through the trail map below.
 | The pi session behind a conversation      | `~/.clankie/captain/conversations/<conversationId>/pi/`                                                                                        | pi JSONL session trees; durable room sessions live the same way — voice under `~/.clankie/captain/voice/<sessionKey>/`, Discord text under `~/.clankie/captain/rooms/<sessionKey>/` (ADR 0118).                                                                                                                                                                                                                                                            |
 | What he heard/said per room               | `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`                                                                                       | One JSONL file per lane+target; `observe_room` and the TUI lanes view read the same files.                                                                                                                                                                                                                                                                                                                                                                 |
 | Tool calls he made in a room              | `~/.clankie/captain/rooms/<sessionKey>/`, `~/.clankie/captain/voice/<sessionKey>/`, `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl` | Social and trusted system lanes are durable under `rooms/` or `voice/`; system-lane keys end in `:authority:system` (ADR 0133). `turns/` holds one pi tree per actor-level privileged one-shot in a shared, untrusted room, with full `toolCall`/`toolResult` args and results. ADR 0107.                                                                                                                                                                  |
-| Presence + system events                  | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                                                                                      | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence.                                                                                                                                                                                                                                                                                                                             |
+| Presence + system events                  | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                                                                                      | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence, and compacted then: Discord presence phase changes survive only for each binding's latest session and the sessions behind the newest 32 voice stays, so an older ended session's phases are gone.                                                                                                                           |
 | Goal decision journal                     | `~/.clankie/captain/goal-journal/<encoded-conversation>.jsonl`                                                                                 | One entry per real choice made while working a goal: `at`, `goalCreatedAt`, `decision`, `why`, optional `evidence` and `autonomous`. Append-only; survives goal clearing and conversation prune. `get_goal` returns only the current goal's tail (filtered by `goalCreatedAt`) — read the file for earlier goals. ADR 0132.                                                                                                                                |
 | Durable memory                            | `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`                                                                          | Approved person facts grouped by guild/user plus one global bounded episode ring stored across source-lane files. `/memory status` reads the same store through the operator-only API.                                                                                                                                                                                                                                                                     |
 | Play sessions (GBA)                       | `~/.local/state/clankie/gba-play/*.jsonl`, `.screenshots/<journal-stem>/*.png`                                                                 | V1/V2/V3 headers and V1/V2 turn lines. V3 adds the stable journey, environment, and venue that join sittings; V2 binds causal evidence. Selected turns and summaries may reference bounded PNGs by relative path, dimensions, byte size, hash, and capture reason.                                                                                                                                                                                         |
 | Historical shared-body artifacts          | `~/.local/state/clankie/gba-body/possession-events.jsonl` and `body.lock`, when left by an older build                                         | Inert historical files only. Current play and GBA MCP neither read nor write them; do not infer current ownership from them.                                                                                                                                                                                                                                                                                                                               |
 | Official-bot Discord actions              | `~/.local/state/clankie/discord-live-receipts.jsonl` (override: `DISCORD_BRIDGE_RECEIPT_PATH`)                                                 | What the bot bridge actually did, including text and bot voice — content-free receipts, never message bodies.                                                                                                                                                                                                                                                                                                                                              |
 | User-session Discord actions              | `~/.local/state/clankie/discord-user-session-receipts.jsonl` (override: `DISCORD_USER_SESSION_RECEIPT_PATH`)                                   | What the personal-lab body actually did, including voice, screen watch, and Go Live publish — content-free receipts, never message bodies or media.                                                                                                                                                                                                                                                                                                        |
-| Opt-in development voice transcript       | `~/.local/state/clankie/discord-voice-transcripts.jsonl`                                                                                       | Exists only when `discord.voiceTranscriptLoggingEnabled` is on. Exact consented final speech with body, guild/channel, stay/delivery ids, speaker id/display name, and timestamp. Mode 0600; receipts remain content-free.                                                                                                                                                                                                                                 |
+| Opt-in development voice transcript       | `~/.local/state/clankie/discord-voice-transcripts.jsonl`                                                                                       | Exists only when `discord.voiceTranscriptLoggingEnabled` is on. Consented final speech and Clankie’s generated wording with body, room/stay/delivery ids, identity, and timestamp. Assistant entries also carry item/playback ids and outcomes. Mode 0600; receipts remain content-free.                                                                                                                                                                   |
 | Browser recordings (opt-in)               | `~/.clankie/runner/browser/recordings/*.webm`, named by start time                                                                             | Exists only while `browser.recordSessions` is on (`clankie browser record on`). One WebM per burst of browsing, closed after 60 s idle; newest 50 kept. Join a video to its turn by timestamp against the room's `browser_*` tool calls, or by `browser.recording.saved` in `clankie.log`. Pixels only — the accessibility snapshots he actually read are in the pi tree.                                                                                  |
 | Service stdout + lifecycle                | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                                                                                         | Service ids: `clankie`, `discord-bridge`, `discord-user-session`, `activity`, `tunnel`.                                                                                                                                                                                                                                                                                                                                                                    |
 | Live status                               | `clankie status` / `/trace` in the face                                                                                                        | `/trace` lists rooms and tails their bounded `heard`/`said` lane logs through the service.                                                                                                                                                                                                                                                                                                                                                                 |
@@ -52,11 +52,16 @@ Vox. Role-scoped voice, DAVE, watch, publish, and leave receipts prove behavior
 without storing message bodies or media.
 
 Linear activity uses `~/.clankie/captain/conversations/linear-inbox/`.
+What he did about it, when no seat is bound, is one pi tree per wake under
+`~/.clankie/captain/conversations/global-default/linear-wakes/`; its messages
+and tool cards publish into `global-default/events.jsonl` (the app's thread).
 `events.jsonl` retains incoming `message` events with role `external`, including
 while following is off. Read unread messages with `clankie linear inbox read`;
 they are untrusted context, not operator instructions. `pi/` holds context from
-actual model turns. `clankie linear status` reports whether new deliveries wake
-that inbox. A shared Linear account name does not establish human authorship.
+actual model turns. `clankie linear status` reports whether the connected bot’s
+new Linear notifications wake `global-default`. Workspace webhooks stay passive.
+The durable notification checkpoint is `~/.clankie/linear-notifications.json`;
+notification-scoped inbox reads use `--conversation global-default`. A shared Linear account name does not establish human authorship.
 
 `clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
 in `items`: the oldest unread events, 20 by default (`--limit N`, up to 100),
@@ -77,7 +82,20 @@ Following controls waking, not collection.
   delivery id to `discord.text.reply` and its `responseMessageId`. The official
   bot keeps unfinished deliveries in `discord-text-inbox.sqlite` beside its
   receipt log; read `deliveries` and `channels` read-only to inspect pending
-  ids and scan cursors. A saved result can await posting after the model finished.
+  ids and scan cursors. `channel_activity` records participation and the
+  messages-since-reply counter; history catch-up uses live admission, including
+  unaddressed follow-ups there. On upgrade, one prior history page can establish
+  participation, but an already-advanced cursor does not rewind. A saved result
+  can await posting after the model finished.
+
+- **A reconnect is not proof of Discord-side failure.** Match `gateway_reconnecting`
+  and READY/RESUMED timestamps with macOS `pmset -g log` sleep/DarkWake entries.
+  A sleeping host cannot receive live messages; Vox audio tick slippage on wake
+  is not proof the separate Node gateway loop stalled. `Discord gateway diagnostic`
+  logs allowlisted close/heartbeat/invalid-session/replay facts, never raw debug
+  or message bodies. `Discord gateway reconnecting` includes maximum Node loop
+  delay since boot or the preceding reconnect. Older logs lack those diagnostics;
+  do not infer a specific close code from a presence phase alone.
 
 - **The TUI is fullscreen** — `herdr pane read` returns only the currently
   rendered screen. The chat transcript is _not_ in terminal scrollback; read
@@ -85,6 +103,13 @@ Following controls waking, not collection.
 - **Conversation metadata is not a liveness clock.** `meta.json.updatedAt` may
   stay at turn acceptance while activity and tools keep appending. Judge a live
   turn by the newest `events.jsonl` event and its accepted/completed pair.
+- **An empty play transcript receipt does not prove a broken wire.** Older
+  `play_transcript_delivery` receipts include idle room input with
+  `attachedCount: 0, deliveredCount: 0`. The play consumer connects only during
+  a session; current listeners discard idle input without a delivery receipt.
+  Positive delivered counts prove socket writes, not consumption by the mind:
+  join those to the play journal’s interjection. The play host now starts on
+  the first join or explicit observation, not service boot.
 - **A play journal does not prove which code revision ran.** Its header has no
   source revision, and service logs carry the package version rather than the
   commit. Compare process/restart and commit times, then use fields actually
@@ -149,6 +174,11 @@ Following controls waking, not collection.
   never its arguments or result — the content fence applies. To see arguments,
   follow `ask_clankie` into the captain: the durable channel tree under
   `~/.clankie/captain/voice/`, or `turns/` when that handoff was privileged.
+  A voice handoff's captain delivery id is `<room-deliveryId>:<callId>`;
+  join both fields from `realtime_tool`. Different speakers wait for separate
+  handoffs; only the active speaker's refinements can be absorbed. A long
+  handoff should not stop fast-path room responses. Recipient labels travel
+  with each result; audible naming still requires listening evidence.
 - **A voice capability denial may never have reached the captain.** Join the
   room delivery to `model_response`, `realtime_tool`, and `response`. A settled
   fast-path response with no `ask_clankie` receipt means the realtime mouth
@@ -173,7 +203,14 @@ Following controls waking, not collection.
   the GBA journal line and the same `deliveryId` on the submission / response /
   suppressed receipts. Human words persist only in the opt-in transcript log;
   otherwise they live in the bridge's in-memory window and live provider call.
-  Fast-path model text and exact audible wording are not added to that log. A journal
+  With logging enabled, assistant entries now include generated wording from native
+  audio transcripts or external TTS text. `role: assistant` / `speakerId: clankie`
+  identifies his own output; older inbound entries have no role. Use `itemId`
+  and `playbackId`, not delivery alone, to distinguish an acknowledgment from
+  its answer. `outcome` is played, interrupted, suppressed, failed, or truncated;
+  `textComplete` records whether a complete provider text arrived, and
+  `audioStarted`/`playbackMs` describe playback. After a cutoff the text may
+  include an unheard ending: exact audible word alignment is unknown. A journal
   `speechDeliveryId` is only a join key: only a matching response, suppression,
   refusal, or settled `model_response` receipt proves the outcome. Absence of
   `discord.voice.response` does not mean the narration was lost — that receipt
@@ -182,14 +219,73 @@ Following controls waking, not collection.
   else. V2 `narrationEvent` is the bounded game
   event offered to the room, not generated voice wording; exact audible wording
   remains unknown by policy.
-- **Words with no audio is the mute-mouth signature.** A `model_response`
-  `phase: "completed"` carrying `textCharacters > 0` whose `deliveryId` never
-  reaches a `discord.voice.response` is a reply the room never heard: he wrote
-  it, synthesis dropped it. `discord.voice.failed` with stage
-  `speech_synthesis` names the throw. Join by `deliveryId`, never by adjacency
-  — an `ask_clankie` round trip spends **one** `deliveryId` on two responses
-  (the "let me check" and the answer), so a naive join credits the answer with
-  the filler's audio and hides exactly the turn worth looking at.
+- **Measure each voice stage, not just the printed first-audio number.**
+  `transcription.latencyMs` starts at capture start and includes the person's
+  speaking time. `captureEndToFinalMs` isolates finalization;
+  `lastAudioToFinalMs` also includes endpoint silence. On `response`,
+  `toFirstAudioMs` starts at this response request, while
+  `lastAudioToFirstAudioMs` and `transcriptToFirstAudioMs` retain the original
+  room input across wake setup and `ask_clankie`. `transcriptToRequestMs`
+  includes that setup/queue/handoff time. `requestToFirstTextMs`,
+  `requestToFirstAudioChunkMs`, and `firstAudioChunkToPlaybackMs` split text
+  generation, synthesis, and playback; first-text timing is available for the
+  external voice path. Absent fields mean unmeasured, never zero. Last input
+  PCM is a transport boundary, not the last spoken phoneme or headphone time.
+  `utterance.filtered: true` means a near-silent capture was withheld from
+  transcription; it should have no matching provider transcript. The 500ms
+  capture endpoint commits streamed input; only final transcripts trigger replies.
+- **Missing response receipts are not sufficient proof of a mute mouth.**
+  First join by delivery and playback ids, and inspect the bridge's Vox
+  `Started`/`Drained` log. Older writers capped receipt data at 16 fields,
+  dropping fully attributed responses despite successful playback. Voice
+  receipts now allow 32 scalar fields, with the same content fence. A
+  `model_response` completion with `textCharacters > 0` and no playback
+  evidence is suspicious; `speech_synthesis` or playback failures establish
+  the failing boundary. `audioBytes: 0` on an external text-model completion
+  does not measure the separate TTS audio stream. An `ask_clankie` round trip
+  uses one `deliveryId` for both acknowledgment and answer: never credit the
+  answer with its acknowledgment's playback.
+- **Cutoffs correlate by playback, not just delivery.** New `interrupted`,
+  `response`, and `failed` (`speech_synthesis`) receipts carry `playbackId` and
+  provider `itemId` when a playback exists. Pre-audio failures have no playback
+  id; idle socket failures have no utterance to attribute. Intentional close
+  suppresses late socket errors. `discord.voice.participant` records gateway
+  joins/leaves and human headcounts; its `deliveryId` joins the offered model
+  turn. Bursts may coalesce into the latest event's turn after current work.
+  His own arrival also offers a `membership` turn after `discord.voice.joined`,
+  without a participant event or incoming speech. A silent text reply or a
+  silent voice arrival is a valid choice; joining does not promise either reply.
+  Invitation text is bounded untrusted model context and is absent from receipts.
+  A `left` reason of `self_decided` follows the realtime `voice_leave` tool.
+  There is no empty-room leave timer. Membership observations carry no human
+  authority; they do not become privileged captain requests.
+- **Hearing and answering are separate evidence.** An accepted transcription
+  with `floor_decision: listen` means the old floor withheld a model turn, not
+  a bad microphone. Finalized consented speech now always receives an offer
+  (including reason `transcript`). Compare provider audio/text counts with
+  audible receipts to distinguish model silence from unheard output. A queued
+  request dropped before dispatch settles silently without a provider response
+  id. Typed room text retains its existing reply policy. When an
+  interruption seems ineffective, join playback IDs: stopping one reply is
+  insufficient if an older queued reply begins immediately afterward. New room
+  speech now supersedes unheard replies before provider dispatch or playback;
+  a burst can have several heard lines but one audible response. Tool output
+  remains context even when its speech goes stale. `realtime_tool` code
+  `handoff_joined` means a same-speaker repeat reused pending work; only the
+  original call returns a spoken result. A slow handoff offers at most one
+  brief status beat after 1.2 seconds. Explicit stop bypasses the normal
+  loudness gate once transcribed; `speech_stopped` means its late result was
+  retained silently. OpenAI output has a token cap and every Discord response
+  has a 45-second PCM ceiling; a cutoff at that boundary is the runaway
+  backstop, not evidence of Vox overflow. Most turns should be short, but an
+  earned 20–30 second story, opinion, bit, or answer is within the voice register.
+- **A Vox buffer overflow cuts off an already audible answer.**
+  `discord.voice.failed` with stage `playback` and code `tts_buffer_overflow`
+  means Vox discarded that playback after its PCM queue exceeded the cap.
+  Join `playbackId` to native `Started` / `Failed` logs; older receipts may
+  require joining by delivery and timestamp. The sender now paces PCM before
+  Vox, and sends finish only after its local queue empties. A successful tool
+  result does not prove its spoken answer survived playback.
 - **An ElevenLabs byte-limit failure can follow audible speech.**
   `discord.voice.failed` with code
   `elevenlabs_context_audio_exceeded_the_byte_limit` means synthesized PCM hit
@@ -333,10 +429,16 @@ Did he speak this stay, and are play reports dropped:
 jq -c 'select(.type == "discord.voice.response" or .type == "discord.voice.play_narration_suppressed" or .type == "discord.voice.left") | {type, at: .occurredAt, stayId: .data.stayId, deliveryId: .data.deliveryId, trigger: .data.trigger, reason: .data.reason, spoken: .data.spokenCount, suppressed: .data.narrationSuppressed, tokens: {in: .data.inputTokens, out: .data.outputTokens}}' ~/.local/state/clankie/discord-live-receipts.jsonl | tail -n 40
 ```
 
-What exact consented speech did Discord transcribe in development:
+What did the room and Clankie say in development (private, opt-in):
 
 ```bash
-tail -n 40 ~/.local/state/clankie/discord-voice-transcripts.jsonl | jq -c '{at: .occurredAt, body, guildId, channelId, stayId, deliveryId, speakerId, displayName, text}'
+clankie discord transcripts --limit 40
+```
+
+Raw file inspection keeps output outcomes alongside generated text:
+
+```bash
+tail -n 40 ~/.local/state/clankie/discord-voice-transcripts.jsonl | jq -c '{at: .occurredAt, body, guildId, channelId, stayId, deliveryId, role, speakerId, displayName, itemId, playbackId, outcome, textComplete, audioStarted, playbackMs, text}'
 ```
 
 Where did one voice/music turn stop:

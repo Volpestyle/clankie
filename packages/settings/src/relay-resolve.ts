@@ -20,6 +20,7 @@ export function resolveRelaySettings(
   const merged: Record<string, unknown> = { ...stored };
   const { overridden, takeString } = envOverrideReaders(env);
   takeString(merged, "url", "CLANKIE_RELAY_URL");
+  takeString(merged, "controlPlaneUrl", "CLANKIE_DIRECT_CONTROL_PLANE_URL");
   return {
     settings: RelaySettingsSchema.parse(merged),
     overriddenByEnvironment: overridden,
@@ -36,8 +37,16 @@ export function applyRelaySettingsToEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   const effective = resolveRelaySettings(settings, env).settings;
-  const existing = env.CLANKIE_RELAY_URL;
-  if (effective.url === undefined || (existing !== undefined && existing.length > 0)) return [];
-  env.CLANKIE_RELAY_URL = effective.url;
-  return ["CLANKIE_RELAY_URL"];
+  const filled: string[] = [];
+  for (const [field, name] of [
+    ["url", "CLANKIE_RELAY_URL"],
+    ["controlPlaneUrl", "CLANKIE_DIRECT_CONTROL_PLANE_URL"],
+  ] as const) {
+    const value = effective[field];
+    if (value !== undefined && !env[name]) {
+      env[name] = value;
+      filled.push(name);
+    }
+  }
+  return filled;
 }

@@ -135,12 +135,13 @@ describe("Linear follow setup", () => {
     readonly selections: readonly string[];
     readonly secret?: string | undefined;
     readonly following?: boolean;
+    readonly url?: string | undefined;
     readonly stored?: Record<string, unknown>;
     readonly gatewayHook?: ConnectServices["gatewayHook"];
   }) {
     let settings: ClankieSettings = {
       ...emptySettings(),
-      linearWebhook: { following: options.following ?? false },
+      linearWebhook: { following: options.following ?? false, url: options.url },
     };
     const selections = [...options.selections];
     const stored = new Map<string, string>();
@@ -150,7 +151,10 @@ describe("Linear follow setup", () => {
     const flow = {
       begin: () => undefined,
       end: () => undefined,
-      readSelect: async () => selections.shift(),
+      readSelect: async (input: { message: string }) => {
+        lines.push(input.message);
+        return selections.shift();
+      },
       readSecret: async () => options.secret,
       renderLine: (line: string) => lines.push(line),
     } as unknown as SetupFlow;
@@ -168,6 +172,10 @@ describe("Linear follow setup", () => {
         },
       } as unknown as SettingsStore,
       listCredentials: async () => (options.stored ?? {}) as never,
+      getCredential: async (id) =>
+        !removed.includes(id) && (stored.has(id) || options.stored?.[id])
+          ? { type: "api", key: stored.get(id) ?? "fixture-secret" }
+          : undefined,
       setCredential: async (providerId: string, key: string) => {
         stored.set(providerId, key);
       },
@@ -195,6 +203,7 @@ describe("Linear follow setup", () => {
     // into /auth, and a settings key.
     expect(h.stored.get("linear-webhook")).toBe("sec-1234567890");
     expect(h.settings().linearWebhook.following).toBe(false);
+    expect(h.settings().linearWebhook.url).toBe("https://api.clankie.bot/h/host-abc/v1/hooks/linear");
     expect(h.lines.join("\n")).toContain("Select all available activity events");
     expect(h.lines.join("\n")).toContain("https://api.clankie.bot/h/host-abc/v1/hooks/linear");
   });
@@ -213,16 +222,24 @@ describe("Linear follow setup", () => {
     const removeRun = harness({ selections: ["follow", "setup", "remove"], stored, following: true });
     await removeRun.connect.run("linear", removeRun.shell);
     expect(removeRun.removed).toEqual(["linear-webhook"]);
+    expect(removeRun.results.join("\n")).toContain("Following is on but blocked: linear_webhook_required");
 
     const keepRun = harness({ selections: ["follow", "setup", "keep"], stored });
     await keepRun.connect.run("linear", keepRun.shell);
     expect(keepRun.removed).toEqual([]);
     expect(keepRun.settings().linearWebhook.following).toBe(false);
-    expect(removeRun.settings().linearWebhook.following).toBe(false);
+    expect(removeRun.settings().linearWebhook.following).toBe(true);
   });
-  it("toggles follow without rotating a credential or needing a doorway", async () => {
-    const stored = { "linear-webhook": { type: "api", redacted: "sec…" } };
-    const on = harness({ selections: ["follow", "on"], stored, gatewayHook: async () => undefined });
+  it("toggles follow with a registered webhook without rotating its credential", async () => {
+    const stored = {
+      linear: { type: "oauth", expires: 0 },
+      "linear-webhook": { type: "api", redacted: "sec…" },
+    };
+    const on = harness({
+      selections: ["follow", "on"],
+      stored,
+      url: "https://hooks.example.test/v1/hooks/linear",
+    });
     await on.connect.run("linear", on.shell);
     expect(on.settings().linearWebhook.following).toBe(true);
     expect(on.stored.size).toBe(0);
@@ -235,10 +252,38 @@ describe("Linear follow setup", () => {
     expect(off.settings().linearWebhook.following).toBe(false);
   });
 
-  it("requires webhook setup before starting from the wizard", async () => {
+  it.each([
+    { url: undefined, secret: false, missing: "url, secret" },
+    { url: "https://hooks.example.test/v1/hooks/linear", secret: false, missing: "secret" },
+    { url: undefined, secret: true, missing: "url" },
+  ])("refuses to follow with missing $missing", async ({ url, secret, missing }) => {
+    const h = harness({
+      selections: ["follow", "on"],
+      url,
+      stored: { linear: { type: "oauth" }, ...(secret ? { "linear-webhook": { type: "api" } } : {}) },
+    });
+    await h.connect.run("linear", h.shell);
+    expect(h.settings().linearWebhook.following).toBe(false);
+    expect(h.results.join("\n")).toContain("linear_webhook_required");
+    expect(h.results.join("\n")).toContain(`missing: ${missing}`);
+  });
+
+  it("shows blocked status when a configured follow loses its webhook", async () => {
+    const h = harness({
+      selections: ["follow"],
+      following: true,
+      url: "https://hooks.example.test/v1/hooks/linear",
+      stored: { linear: { type: "oauth" } },
+    });
+    await h.connect.run("linear", h.shell);
+    expect(h.lines.join("\n")).toContain("on but blocked");
+    expect(h.lines.join("\n")).toContain("linear_webhook_required");
+  });
+
+  it("requires a connected Linear account before starting from the wizard", async () => {
     const h = harness({ selections: ["follow", "on"] });
     await h.connect.run("linear", h.shell);
     expect(h.settings().linearWebhook.following).toBe(false);
-    expect(h.results.join("\n")).toContain("Configure the Linear webhook first");
+    expect(h.results.join("\n")).toContain("Connect Clankie’s Linear account first");
   });
 });

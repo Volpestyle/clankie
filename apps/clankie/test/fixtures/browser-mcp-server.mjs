@@ -1,6 +1,24 @@
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 
 const options = JSON.parse(process.argv[2] ?? "{}");
+function log(event) {
+  if (options.eventsPath) appendFileSync(options.eventsPath, `${JSON.stringify(event)}\n`);
+}
+const cli = process.argv.slice(3);
+if (cli.length) {
+  log({ cli, headed: process.env.AGENT_BROWSER_HEADED, profile: process.env.AGENT_BROWSER_PROFILE });
+  if (options.failClose && cli[0] === "close") process.exit(1);
+  if (options.failRecording && cli[0] === "record") process.exit(1);
+  if (cli[0] === "record" && cli[1] === "start") writeFileSync(cli[2], "fake video");
+  process.exit(0);
+}
+log({
+  server: true,
+  headed: process.env.AGENT_BROWSER_HEADED,
+  idle: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS,
+  restore: process.env.AGENT_BROWSER_RESTORE,
+  restoreSave: process.env.AGENT_BROWSER_RESTORE_SAVE,
+});
 let buffer = "";
 let activeCalls = 0;
 let maxActiveCalls = 0;
@@ -27,11 +45,13 @@ async function handle(message) {
     return;
   }
   if (message.method === "tools/call") {
+    log({ call: message.params });
     activeCalls += 1;
     maxActiveCalls = Math.max(maxActiveCalls, activeCalls);
     if (options.callDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, options.callDelayMs));
     }
+    log({ finished: message.params.name });
     activeCalls -= 1;
     if (options.statsPath) writeFileSync(options.statsPath, JSON.stringify({ maxActiveCalls }));
     reply(message.id, options.callResult ?? { content: [{ type: "text", text: "ok" }] });

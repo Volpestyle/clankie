@@ -28,8 +28,9 @@ the cost of conversational latency.
 
 ## Decision
 
-The realtime session owns the ears, mouth, and room conversation. Anything that
-acts outside that conversation crosses one `ask_clankie` handoff to the existing
+The realtime session owns the ears, mouth, room conversation, and its own
+departure through the local `voice_leave` tool. Machine actions outside that
+conversation cross one `ask_clankie` handoff to the existing
 `discord_voice` captain lane. The realtime model receives no system shell or
 other machine-authority tool.
 
@@ -88,15 +89,137 @@ chatter. The repository therefore owns the floor machine:
   Clankie decides whether an offered turn produces speech; and
 - floor release is inactivity decay, not a brittle goodbye phrase.
 
-Barge-in is deliberate: the floor holder speaking over Clankie or addressing
+Barge-in is deliberate: a recently engaged speaker talking over Clankie or addressing
 him again truncates playback; unrelated crosstalk does not.
 
-"Speaking over" is measured, not assumed. An open mic streams room tone
-continuously, so a capture only counts toward barge-in once it carries 350 ms of
-audio above a speech-level RMS floor (`BARGE_IN_SPEECH_RMS` in
-`voice-session.ts`). Duration alone cut him off mid-sentence on fans and
-keystrokes whose transcripts came back empty. The floor is a calibration knob:
-mics and noise suppression move both the room tone and the speech level.
+"Speaking over" requires 350 ms of speech-level audio overlapping the current
+playback, plus a substantive final transcript from a recently engaged speaker. Brief
+fragments (such as “What I”) and acknowledgements do not truncate. Short
+intentional controls (“stop”, “wait”, “hold on”) do; so do longer utterances
+with at least three words beyond acknowledgements and fillers. Direct
+re-address remains immediate on transcription. A delayed transcript cannot
+interrupt a later playback. This waits for transcription rather than guessing
+intent from loudness; tuning that latency needs a consented live test.
+
+### Overlapping asks and the one mouth (2026-09-28)
+
+[ADR 0091](0091-a-mid-turn-message-steers-the-turn.md) now admits one speaker's
+captain work at a time per room, allowing that person's refinements to steer.
+Other speakers get independent handoffs in order. The session no longer puts
+`ask_clankie` on the local music/screen tool queue. Work heartbeats are tracked
+per call, so one settled refinement cannot stop another pending ask's heartbeat.
+
+Realtime responses are serialized at the provider boundary until `response.done`,
+not until captain work completes. Each room response carries a speaker-bound
+opportunity, injected when its queued response actually starts, so later
+crosstalk cannot replace the actor whose request it may hand off. External TTS additionally waits for the prior
+speech to drain before starting another response, preserving audio attribution.
+Banter can therefore finish while a handoff remains unresolved. Each tool result
+carries its recipient, so Clankie can make the addressee clear in his own wording.
+Playback remains one ordered voice; consent, grants, and approval handling do
+not change.
+
+```mermaid
+flowchart LR
+  Room[Attributed room speech] --> Fast[Realtime conversation]
+  Fast --> Mouth[Ordered responses and playback]
+  Fast --> Ask[ask_clankie]
+  Ask --> Admission{Active speaker?}
+  Admission -->|same person| Steer[Refine live work]
+  Admission -->|different person| Wait[Wait for own handoff]
+  Steer --> Result[Recipient plus result]
+  Wait --> Work[Next independent run]
+  Work --> Result
+  Result --> Fast
+```
+
+The dated diagram export above predates this amendment. Synthetic multi-speaker
+checks do not pass ADR 0045's three-human live gate; audible naming, crosstalk
+behavior, and queue delay still need that ceremony.
+
+### A call matches the moment and absorbs bursts (2026-09-29)
+
+Clankie is a friend in the call: match the length to the moment; most turns
+are short, sometimes just a few words. Stories, strong opinions, invested bits,
+and questions that need real answers can earn more room. James's calibration
+replaces the initial sentence-level brevity target: remove assistant padding
+and constant performing, not personality. No lists, request restatements, or
+menus. Text stays thorough. Spoken handoff results follow the same proportion:
+give the gist, expand when warranted, and offer details in text when useful.
+
+OpenAI realtime sessions cap output at 4096 tokens for native audio or 1024
+for text feeding an external mouth. Every Discord mouth also caps each response
+at 45 seconds of PCM, including xAI. These generous runaway backstops leave
+headroom for an earned 20–30 second riff; the register makes ordinary turns
+snappy. They replace the initial 160/80-token and six-second limits.
+
+Every admitted utterance stays in room context, but newer room speech replaces
+responses that have not become audible. Bursts during session opening collapse
+to the latest opportunity; provider and external-TTS queues check freshness at
+actual dispatch. Already generated stale PCM is discarded without losing its
+response slot until completion. Function outputs remain context even if their
+spoken continuation is dropped. In-flight actions keep their original actor.
+
+A repeat ask joins an in-flight handoff for that same speaker. Identical
+normalized requests join automatically; the realtime model can use
+`join_call_id` for a paraphrase, checked against the authenticated speaker.
+Changed requests still refine the work through ADR 0091. After 1.2 seconds a
+pending handoff offers one brief acknowledgment in Clankie's own words, unless
+he already spoke or the room moved on. That opportunity expires when work
+settles; there is no repeated filler loop.
+
+An explicit stop cuts local playback as soon as its final transcript arrives,
+without the normal loudness/overlap gate, and discards all queued speech.
+Late handoff results remain available silently. Ordinary crosstalk retains the
+existing deliberate barge-in rules. Transcription latency, conversational taste,
+and paraphrase joining still need James's live activation and call.
+
+```mermaid
+flowchart LR
+  Speech[Attributed speech] --> Context[Keep all room context]
+  Context --> Latest[Latest reply opportunity]
+  Latest --> Fresh{Still current at dispatch?}
+  Fresh -->|yes| Voice[Brief response and paced audio]
+  Fresh -->|no| Drop[Drop unheard speech]
+  Voice --> Ask[Attributed handoff]
+  Ask --> Join[Join same-speaker repeats]
+  Ask --> Result[Result retained as context]
+  Result --> Fresh
+```
+
+### Room membership is context, departure is his decision (2026-09-28)
+
+The gateway supplies participant joins and leaves, display names, and the
+current human headcount as ordinary room observations. Bots do not count as
+humans; consent and audio subscription counts do not establish membership.
+The realtime session sees the current roster and recent events. Captain
+handoffs carry those observations and the original attributed utterance as
+context alongside the model's request, preserving compound requests that its
+summary might omit. Names and quoted speech remain untrusted data.
+
+His own arrival also offers a membership turn after transport, DAVE, and the
+transcription probe are ready. It carries the current roster, resolved asker,
+and up to 1,000 characters of invitation text marked as untrusted data. This
+opens a conversation, not an audio capture or consent grant; he may greet or
+stay silent. The asker is context only, not an actor for `ask_clankie`.
+
+A membership event offers a realtime turn even with no spoken utterance. Events
+arrive while he is speaking or awaiting work; their turn waits for the response
+and playback, and uses the latest roster. He may speak, stay silent, remain, or
+call the local `voice_leave` tool. That tool takes no target and ends only his
+own current stay, receipted as `reason: self_decided`. It grants no machine
+powers. A membership turn has no human actor and cannot borrow a departed
+participant's authority through `ask_clankie`.
+
+Departure revokes the person's capture but preserves the conversation and its
+in-flight captain exchange. Explicit consent revocation still invalidates the
+conversation. The existing captain `voice_leave` route remains available for
+attributed requests, but the realtime model can end its own stay directly.
+
+There is no empty-room grace timer or hours-alone leave backstop. The briefly
+implemented timer was rejected by James: context and tools belong to the body;
+the choice to leave belongs to Clankie. Existing idle listener and conversation
+expiry already bound unused provider sessions without forcing a departure.
 
 ### Evidence retained from implementation
 

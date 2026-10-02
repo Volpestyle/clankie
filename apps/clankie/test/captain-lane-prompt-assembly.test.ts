@@ -30,12 +30,29 @@ describe("lane prompt assembly", () => {
     expect(prompt).not.toMatch(/\n\n\n/u);
   });
 
+  it("tells him long code and documents belong in files, not inline (VUH-1391)", () => {
+    const prompt = assembleLanePrompt("operator", true, settings);
+    expect(prompt).toContain("Long code and long documents go in files");
+  });
+
   it("tells a social lane it holds no shell and leaves the address out when no mailbox is connected", () => {
     const bare = ClankieSettingsSchema.parse({ schemaVersion: 1 });
     const prompt = assembleLanePrompt("discord_presence", false, bare);
     expect(prompt).toContain("# This room");
     expect(prompt).not.toContain("# Machine access");
     expect(prompt).not.toContain("# Your address");
+  });
+
+  it("tells only Discord rooms how a reply carries media (VUH-1456)", () => {
+    for (const lane of ["discord_presence", "discord_voice"] as const) {
+      for (const systemTools of [false, true]) {
+        const prompt = assembleLanePrompt(lane, systemTools, settings);
+        expect(prompt).toContain("# In Discord");
+        expect(prompt).toContain("only the last one of a turn rides");
+      }
+    }
+    expect(assembleLanePrompt("operator", true, settings)).not.toContain("# In Discord");
+    expect(assembleLanePrompt("gameplay", false, settings)).not.toContain("# In Discord");
   });
 
   it("carries the owner's routing preference only where a fleet can actually be reached", () => {

@@ -10,6 +10,28 @@ fleets instead of one session. The seat contract of
 [ADR 0161](0161-a-fleet-seat-reads-its-mail-instead-of-its-keyboard.md), and
 the socket rule of [ADR 0157](0157-herdr-is-an-owned-runtime.md) are unchanged.
 
+Implementation, in part (2026-09-27, [VUH-1381](https://linear.app/vuhlp/issue/VUH-1381)).
+Acceptance remains the owner's. What landed differs from the text below in these ways:
+
+- **Fleets are runtime connections.** A fleet is an `execution.connections` entry
+  with an `ssh` transport, not a separate `herdr.fleets` list, so the VUH-1377
+  grants and inventory apply to it
+  ([ADR 0193](0193-runtime-workspaces-are-owner-approved.md)). The local default
+  stays `herdr`.
+- **Remote grants are exact directories on that machine**, stored as written.
+- **Watching and census.** Remote panes are polled through one shared `pane list`
+  instead of a long `agent wait` per pane. The census, watches, messages and
+  hires carry the `<fleet>/` prefix.
+- **Allow-listed verbs.** Only read and pane verbs cross the link.
+- **Not built yet:**
+  - terminal observe/control over ssh;
+  - the reverse-forward mailbox;
+  - ssh-config discovery;
+  - the app's fleet dropdown.
+
+The coordinator every fleet reaches is
+[ADR 0198](0198-one-coordinator-reaches-every-fleet.md).
+
 ## Context
 
 The owner runs Herdr on more than one machine — the Mac and a Windows PC — and
@@ -45,7 +67,11 @@ name no fleet.
 - **Seat identity carries the fleet.** A seat id is `<fleet>/<terminal id>`;
   the census, the terminal catalog, and the fleet snapshot carry a `fleet`
   coordinate above workspace, tab, and pane. The local default fleet keeps
-  bare ids, so existing conversations keep their seats.
+  bare ids, so existing conversations keep their seats. The roster also carries
+  the host's display `machine` and named `herdrSession`, independent of the
+  harness-session occupant identity. Remote workspace/tab placement comes from
+  that fleet's snapshot; a failed snapshot preserves its agent roster without
+  claiming placement. Older hosts may omit these presentation fields.
 - **An unreachable fleet is a state, not a failure.** The census reports it
   `unreachable` with the last-seen time and every other fleet answers normally.
 - **Every lead is a contact.** A pane on any fleet is a seat, so the lead

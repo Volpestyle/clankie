@@ -8,6 +8,50 @@ import {
 } from "../src/gateway.ts";
 
 describe("DiscordUserGateway", () => {
+  it("projects humans and bots from the gateway roster, excluding self", () => {
+    const socket = new FakeSocket();
+    const gateway = new DiscordUserGateway({ token: "user-token", connect: () => socket.asWebSocket() });
+    gateway.open();
+    socket.deliver({
+      op: 0,
+      t: "READY",
+      d: { user: { id: "self-1", username: "clankie" }, session_id: "s" },
+    });
+    socket.deliver({
+      op: 0,
+      t: "GUILD_CREATE",
+      d: {
+        id: "guild-1",
+        members: [{ user: { id: "bot-1", bot: true }, nick: "Music" }],
+        voice_states: ["self-1", "bot-1", "human-1"].map((user_id) => ({ user_id, channel_id: "voice-1" })),
+      },
+    });
+    expect(gateway.voiceOccupants("guild-1", "voice-1")).toEqual([
+      { userId: "bot-1", isBot: true, displayName: "Music" },
+      { userId: "human-1", isBot: false },
+    ]);
+    socket.deliver({
+      op: 0,
+      t: "VOICE_STATE_UPDATE",
+      d: { guild_id: "guild-1", user_id: "human-1", channel_id: null },
+    });
+    socket.deliver({
+      op: 0,
+      t: "VOICE_STATE_UPDATE",
+      d: {
+        guild_id: "guild-1",
+        user_id: "bot-2",
+        channel_id: "voice-1",
+        member: { user: { id: "bot-2", bot: true } },
+      },
+    });
+    expect(gateway.voiceOccupants("guild-1", "voice-1")).toEqual([
+      { userId: "bot-1", isBot: true, displayName: "Music" },
+      { userId: "bot-2", isBot: true },
+    ]);
+    gateway.close();
+  });
+
   it("identifies with a bare user token and no bot intents", () => {
     const socket = new FakeSocket();
     const gateway = new DiscordUserGateway({ token: "user-token", connect: () => socket.asWebSocket() });

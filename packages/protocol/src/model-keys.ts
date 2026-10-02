@@ -17,6 +17,8 @@ export const MODEL_KEY_SET_PATH = "/v1/model-keys/set";
 export const MODEL_KEY_VALIDATE_PATH = "/v1/model-keys/validate";
 export const MODEL_SELECT_PATH = "/v1/model-keys/select";
 export const MODEL_KEY_REMOVE_PATH = "/v1/model-keys/remove";
+/** A separate read so clients built against the strict catalog never see a new field. */
+export const MODEL_SUBSCRIPTIONS_PATH = "/v1/model-keys/subscriptions";
 
 const ProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,127}$/u);
 const ModelIdSchema = z
@@ -68,6 +70,17 @@ export const ModelKeysResponseSchema = z
   })
   .strict();
 export type ModelKeysResponse = z.infer<typeof ModelKeysResponseSchema>;
+
+/**
+ * Providers the body is signed in to through their own account (OAuth or a
+ * subscription) rather than a stored API key. Names only; no token metadata.
+ */
+export const ModelSubscriptionsResponseSchema = z
+  .object({
+    subscriptions: z.array(z.object({ providerId: ProviderIdSchema, name: z.string() }).strict()).max(64),
+  })
+  .strict();
+export type ModelSubscriptionsResponse = z.infer<typeof ModelSubscriptionsResponseSchema>;
 
 /** Validation deliberately collapses upstream messages (which can echo credentials). */
 export const ModelKeyResultSchema = z.discriminatedUnion("ok", [

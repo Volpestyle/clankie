@@ -10,6 +10,7 @@ import type {
   DiscordChannelProjectionMessage,
   DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
+  FleetSeatHook,
   ObservableCaptainLane,
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
@@ -45,14 +46,16 @@ export interface LaneTool {
 /**
  * A hire with the captain's wiring around it: persona adoption, conversation
  * binding, and a watch from the first breath (ADR 0187) — never a bare
- * `herdr agent start`, which lands a stranger the roster has to notice.
+ * `herdr agent start`, which lands a stranger the roster has to notice. The
+ * brief is submitted after startup readiness and verified against the native
+ * transcript before the hire succeeds; an unverifiable receipt fails typed.
  */
-export type HireSeat = (seat: SpawnOperatorSeat) => Promise<OperatorSeatSpawnResult>;
+export type HireSeat = (seat: SpawnOperatorSeat, brief?: string) => Promise<OperatorSeatSpawnResult>;
 
 /**
  * The captain's own message into a hired seat, down the same lane an operator
  * DM takes (mailbox, else the pane). A herdr seat is not a Swarm actor, so this
- * is the only way his brief reaches one (VUH-1373). `seat` is the seatId,
+ * is how he follows up with one (VUH-1373). `seat` is the seatId,
  * personaId, or conversationId `hire_agent` returned.
  */
 export type MessageSeat = (seat: string, message: string) => Promise<SeatMessageResult>;
@@ -148,6 +151,11 @@ export interface CaptainPort {
     waitMs: number,
     signal?: AbortSignal,
   ): Promise<readonly OperatorSeatEvent[] | undefined>;
+  /**
+   * One lifecycle hook from a hired seat's worker plugin (VUH-1458). False
+   * when the pane holds no seat with that session.
+   */
+  recordSeatHook(paneId: string, hook: FleetSeatHook): Promise<boolean>;
   /** The seat's answer to an escalation; false when nothing waits on that id. */
   replySeatEvent(eventId: string, text: string, conversationId?: string): Promise<boolean>;
   /**
@@ -168,7 +176,6 @@ export interface CaptainPort {
   readLinearInbox(options?: LinearInboxReadOptions): LinearInboxPage;
   acknowledgeLinearInbox(cursor: string, conversationId?: string): boolean;
   linearWorkOwners(): readonly LinearWorkOwner[];
-  setLinearWorkOwner(owner: LinearWorkOwner, expectedConversationId?: string, remove?: boolean): void;
   resumeLinearActivity(): void;
   /** Store verified context in the Linear inbox and optionally queue a model turn. */
   receiveLinearActivity(activity: LinearActivityEvent, following: boolean): boolean | void;
@@ -223,6 +230,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     laneMemoryCard: async () => "",
     pollSeatEvents: async () => [],
     pollFleetSeatEvents: async () => undefined,
+    recordSeatHook: async () => false,
     replySeatEvent: async () => false,
     laneToolBank: async (lane) => ({ lane, tools: [] }),
     // A stub writes no transcripts, so it has nothing to announce. A test that
@@ -239,7 +247,6 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     acknowledgeLinearInbox: () => false,
     receiveLinearActivity: () => true,
     linearWorkOwners: () => [],
-    setLinearWorkOwner: () => {},
     resumeLinearActivity: () => {},
     close: async () => {},
     ...overrides,

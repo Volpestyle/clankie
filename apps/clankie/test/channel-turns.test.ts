@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OperatorChannelMember } from "@clankie/protocol";
 import {
-  channelRoundComplete,
-  channelRoundCost,
-  channelTurnPrompt,
   channelRoundNotice,
   channelTurnReply,
   isChannelTurnPass,
@@ -54,39 +51,11 @@ describe("nextChannelTurn", () => {
       outcome: "spoke" as const,
     }));
     expect(nextChannelTurn({ members: MEMBERS, taken })).toBeUndefined();
-    expect(channelRoundComplete({ members: MEMBERS, taken })).toBe(true);
   });
 
   it("is deterministic when two members share a position", () => {
     const tied = [member("dev", 0), member("atlas", 0)];
     expect(nextChannelTurn({ members: tied, taken: [] })?.personaId).toBe("atlas");
-  });
-});
-
-describe("channelTurnPrompt", () => {
-  it("tells a member who already answered, and whether it is first", () => {
-    const first = channelTurnPrompt({ members: MEMBERS, taken: [] }, MEMBERS[0]!);
-    expect(first).toMatchObject({ personaId: "atlas", spokeBefore: [], firstResponder: true });
-
-    const later = channelTurnPrompt(
-      {
-        members: MEMBERS,
-        taken: [
-          { personaId: "atlas", outcome: "spoke" },
-          { personaId: "dev", outcome: "passed" },
-        ],
-      },
-      MEMBERS[2]!,
-    );
-    // A member that passed is not presented as having answered.
-    expect(later).toMatchObject({ spokeBefore: ["atlas"], firstResponder: false });
-  });
-});
-
-describe("channelRoundCost", () => {
-  it("charges for every member offered a turn, speaking or not", () => {
-    expect(channelRoundCost({ members: MEMBERS, taken: [] })).toBe(3);
-    expect(channelRoundCost({ members: MEMBERS, taken: [], lastSpeakerPersonaId: "atlas" })).toBe(2);
   });
 });
 

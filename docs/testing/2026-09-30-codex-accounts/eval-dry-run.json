@@ -1,0 +1,24 @@
+{
+  "harness": "codex",
+  "configs": "current",
+  "cases": "memory-card",
+  "reps": 1,
+  "maxRuns": 1,
+  "timeout": 120,
+  "rework": 0,
+  "tokenBudget": 2000000,
+  "pause": 0,
+  "stopAt": {
+    "five_hour": 0.8,
+    "seven_day": 0.5
+  },
+  "dryRun": true,
+  "matrix": [
+    {
+      "caseId": "memory-card",
+      "config": "current",
+      "rep": 0
+    }
+  ],
+  "account": "second"
+}

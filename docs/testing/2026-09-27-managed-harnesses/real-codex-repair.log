@@ -1,0 +1,16 @@
+bun test v1.3.14 (d1632b29)
+
+test/coordination-herdr.test.ts:
+2026-09-27T18:20:59.755657Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (http://127.0.0.1:8000/mcp)")))
+2026-09-27T18:21:00.009819Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (http://127.0.0.1:8000/mcp)")))
+2026-09-27T18:21:01.027045Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (http://127.0.0.1:8000/mcp)")))
+I’ll call Swarm sync now and then end this turn.REAL dispatch {"status":"bound","taskId":"abaf23ca-dd83-4547-86b4-810ad35103e3","harness":"codex","attemptId":"30996eed-a6fa-4fa2-86e9-ddd67fc0ba1b","fence":1,"existing":true}
+Swarm sync succeeded. Ready for the fenced assignment.I’m using the Swarm skill to read the assignment instructions and complete the read-only smoke check.REAL task {"taskId":"abaf23ca-dd83-4547-86b4-810ad35103e3","uri":"swarm://tasks/abaf23ca-dd83-4547-86b4-810ad35103e3","waitState":"terminal","task":{"id":"abaf23ca-dd83-4547-86b4-810ad35103e3","scope":"44669e0ab247e33220987e6daa2ce3702b39cd3c9449bbfe673eb87822dd5e20","creator":"dc16a6b3-b696-4bf2-9566-01bbcc0b97f6","title":"Work","status":"completed","version":3,"created_at":1790533255394,"updated_at":1790533311258,"current_attempt":null,"attempt_counter":1,"result":"{\"summary\":\"Read-only harness smoke completed using Codex / GPT-6; requester notified before finish. No files edited.\",\"evidence\":[\"SWARM_REAL_SNAPSHOT_OK\",\"Read complete instruction artifact swarm://artifacts/c85678fd-2266-4511-b17c-5d07b3b43078 (281 bytes), digest dbed057f0f6dd33516763d7eb550d876dec028e129bea312cb9542347a23fa9a.\",\"Read supplied Swarm SKILL.md; bootstrap compatibility swarm-coordination/1, API 1, schema 15, server 2.0.0-rc.1.\",\"Verified active assigned owner, attempt and fence 1; assignment envelope acknowledged; progress accepted before deadline.\"],\"limitations\":[\"Exact model variant is not exposed in session; GPT-6 identification comes from developer context.\",\"Smoke evidence covers this session only.\"]}","reason":null,"expires_at":null,"contract":"{\"objective\":\"Read the Swarm skill and all instruction artifacts, acknowledge the assigned envelope, report progress and compatibility, then finish this read-only harness smoke task as completed with evidence. Do not edit files. Use your assigned taskId/attemptId/fence. Send the requester a completion notice.\",\"worktree\":\"/private/tmp/swarm-herdr-test-S9T9kd\",\"acceptanceCriteria\":[\"Done\"],\"expectedArtifacts\":[],\"constraints\":[],\"instructions\":[\"swarm://artifacts/c85678fd-2266-4511-b17c-5d07b3b43078\"]}","retentionState":"retained"}}
+REAL release {"status":"released","taskId":"abaf23ca-dd83-4547-86b4-810ad35103e3","harness":"codex","existing":false}
+(pass) Herdr reconciles one token (lost response: false, receipt: true, project: false, mismatch: false, stream: true, harness: codex, complete: true, real: true) [57017.16ms]
+
+ 1 pass
+ 11 filtered out
+ 0 fail
+ 17 expect() calls
+Ran 1 test across 1 file. [57.46s]

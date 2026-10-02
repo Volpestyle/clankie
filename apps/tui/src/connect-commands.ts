@@ -58,6 +58,7 @@ export const EMAIL_PRESETS: Readonly<Record<Exclude<EmailPresetId, "custom">, Pa
 export interface ConnectCommandServices {
   settings: SettingsStore;
   listCredentials: () => Promise<Record<string, RedactedCredential>>;
+  getCredential: (providerId: string) => Promise<ProviderCredential | undefined>;
   setCredential: (providerId: string, key: string) => Promise<void>;
   storeProviderCredential: (providerId: string, credential: ProviderCredential) => Promise<void>;
   removeCredential: (providerId: string) => Promise<unknown>;
@@ -294,8 +295,7 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
   const listed = await services.listCredentials();
   const existing = listed[LINEAR_PROVIDER_ID];
   const following = (await services.settings.load()).linearWebhook.following;
-  const followHint =
-    listed[LINEAR_WEBHOOK_PROVIDER_ID] === undefined ? "set up webhook" : following ? "on" : "off";
+  const followHint = existing === undefined ? "connect account" : following ? "on" : "off";
   if (existing !== undefined) {
     const decision = await flow.readSelect({
       message: `Linear is already stored — ${describeRedactedCredential(existing)}`,
@@ -358,19 +358,24 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
   else if (method === "follow") await runLinearFollowFlow(shell, services);
 }
 
-/** Configure the webhook independently of the switch that wakes the Linear inbox. */
+/** Configure the webhook independently of the switch that wakes the operator conversation. */
 async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const following = (await services.settings.load()).linearWebhook.following;
+  const options = { settings: services.settings, credentials: { get: services.getCredential } };
+  const status = await runLinearCommand(["status"], options);
+  const following = status.following;
   const action = await flow.readSelect({
-    message: `Follow Linear is ${following ? "on" : "off"}`,
+    message:
+      status.reason && following
+        ? `Follow Linear is on but blocked: ${status.detail} [${status.reason}]`
+        : `Follow Linear is ${following ? "on" : "off"}`,
     options: [
       {
         value: following ? "off" : "on",
         label: following ? "Stop following" : "Start following",
         hint: following
           ? "Keep receiving inbox messages without waking him"
-          : "Wake on new inbox activity; replies are optional",
+          : "Wake the operator conversation on the connected account’s Linear notifications",
       },
       { value: "setup", label: "Configure webhook", hint: "URL, all activity events, signing secret" },
     ],
@@ -378,15 +383,19 @@ async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCom
   });
   if (action === undefined) return;
   if (action === "on" || action === "off") {
-    if (action === "on" && (await services.listCredentials())[LINEAR_WEBHOOK_PROVIDER_ID] === undefined) {
-      shell.insertCommandResult("/connect linear", "Configure the Linear webhook first.", "error");
+    if (action === "on" && (await services.listCredentials())[LINEAR_PROVIDER_ID] === undefined) {
+      shell.insertCommandResult("/connect linear", "Connect Clankie’s Linear account first.", "error");
       return;
     }
-    const result = await runLinearCommand(["follow", action], { settings: services.settings });
+    const result = await runLinearCommand(["follow", action], options);
+    if (!result.ok) {
+      shell.insertCommandResult("/connect linear", `${result.error}: ${result.detail}`, "error");
+      return;
+    }
     shell.insertCommandResult(
       "/connect linear",
       result.following
-        ? "Following Linear in the Linear inbox. Routine updates can pass silently."
+        ? "Following the connected account’s Linear notifications in the operator conversation."
         : "Stopped following Linear. New activity stays in the inbox without waking him.",
       "success",
     );
@@ -428,9 +437,14 @@ async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCom
     });
     if (decision === undefined) return;
     if (decision === "remove") {
-      await runLinearCommand(["follow", "off"], { settings: services.settings });
       await services.removeCredential(LINEAR_WEBHOOK_PROVIDER_ID);
-      shell.insertCommandResult("/connect linear", "Removed the Linear webhook secret.", "success");
+      shell.insertCommandResult(
+        "/connect linear",
+        following
+          ? "Removed the Linear webhook secret. Following is on but blocked: linear_webhook_required. Configure the webhook again to resume wakes."
+          : "Removed the Linear webhook secret.",
+        "success",
+      );
       return;
     }
     if (decision === "replace") {
@@ -450,6 +464,7 @@ async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCom
     await services.setCredential(LINEAR_WEBHOOK_PROVIDER_ID, secret.trim());
   }
 
+  await runLinearCommand(["webhook", "set", "--url", webhookUrl], options);
   shell.insertCommandResult(
     "/connect linear",
     [

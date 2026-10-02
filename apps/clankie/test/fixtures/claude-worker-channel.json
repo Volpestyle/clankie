@@ -1,0 +1,29 @@
+{
+  "parentUuid": null,
+  "isSidechain": false,
+  "promptId": "6f120c8e-dd39-4be8-82a5-8db0bb9fe4a1",
+  "type": "user",
+  "message": {
+    "role": "user",
+    "content": "<channel source=\"plugin:clankie-worker:swarm\" kind=\"message\" conversation=\"term_65cb8e09ffb5b15e\" source=\"captain\" event_id=\"seat-7f88a9cd-e317-4a8d-9244-99e3e5d3a824\" created_at=\"2026-09-30T20:11:15.427Z\">\nChannel delivery probe. Reply with exactly: PROBE OK. Do not run any commands or edit anything.\n</channel>"
+  },
+  "isMeta": true,
+  "uuid": "367864c3-d582-448e-a7c6-75f42f41a136",
+  "timestamp": "2026-09-30T20:11:15.439Z",
+  "permissionMode": "default",
+  "origin": {
+    "kind": "channel",
+    "server": "plugin:clankie-worker:swarm"
+  },
+  "promptSource": "system",
+  "turnOrigin": "peer",
+  "turnPosition": {
+    "promptIndex": 0,
+    "turnIndex": 1
+  },
+  "queueSkipAttachments": true,
+  "userType": "external",
+  "entrypoint": "cli",
+  "sessionId": "3bbe31d0-ad96-4e9a-8e8d-ccf3520f8c7a",
+  "version": "2.1.286"
+}

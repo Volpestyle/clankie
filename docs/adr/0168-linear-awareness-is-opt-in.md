@@ -3,6 +3,95 @@
 Status: accepted (James, 2026-09-08, operator conversation). Amended by
 [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
 
+## Amendment — 2026-09-30
+
+Legacy issue binding mutations are retired. The CLI rejects `work bind` and
+`work unbind`; authenticated PUT/DELETE on `/v1/linear/work` return 410. The
+existing `linear-work.json` remains readable through `work list` and GET, without
+rewriting it. Inert bindings no longer pin conversations against normal retention
+or explicit deletion. This removes a second ownership control surface after
+notifications moved to the operator conversation; notification routing and inbox
+acknowledgment are unchanged.
+
+## Amendment — the connected account's inbox, 2026-09-27
+
+The owner-connected tracker identity is the identity of Clankie and his whole
+swarm, including every hired worker. No particular account, email or display
+name is a product default. Following means that connected identity’s notification
+inbox, with no issue-by-issue conversation binding.
+This supersedes the workspace-wide and issue-routed wake behavior below and
+ADR 0191's binding route. Existing bindings remain stored and inspectable but
+are inert for wakes; no automatic deletion or rebinding occurs.
+
+Signed workspace webhooks remain passive, durable external history. The service
+reads `get_notifications` through its own verified Linear MCP connection once at
+startup and after newly persisted signed webhook events, even while following
+is off. There is no periodic poll or safety interval. Webhooks request a refresh
+after a 1.5-second debounce. A refresh waits for any active read; deliveries during
+it coalesce into a subsequent refresh. An empty or duplicate-only webhook result
+gets at most one delayed retry after another 1.5 seconds to allow notification
+creation to catch up. A failed startup or manual read also gets one delayed
+catch-up attempt. Retries do not recursively retry: after another failure, the
+checkpoint stays intact for the next webhook or restart. Shutdown cancels pending
+debounce and retry work. Invalid,
+ignored, duplicate or failed webhook ingests do not request a refresh.
+Following requires both the registered webhook URL (`linearWebhook.url`) and its
+broker-held signing secret. This is James's final decision and supersedes the
+30-second fallback amendment. CLI/API attempts to enable without either return
+`linear_webhook_required` with `missingWebhook` naming `url`, `secret`, or both;
+the API returns HTTP 409 and the CLI exits nonzero. The switch remains unchanged.
+Status separates the requested `following` switch from effective `active` state.
+Removing either prerequisite while following is on reports `following: true`,
+`active: false`, the typed reason and setup guidance. Startup and queued wakes
+recheck readiness. There is no silent timer fallback. This tests local setup,
+not Linear's remote webhook configuration or delivery health.
+
+Setup stores the public URL after the owner registers it in Linear. Existing
+installations whose old setup stored only the secret must run **Configure
+webhook** once more (keeping the existing secret) or use
+`clankie linear webhook set --url URL` to record their registered URL.
+
+Only new notification IDs may wake
+`global-default` or its attached seat. The same inbox stores both sources;
+notification-scoped reads and acknowledgments use `--conversation global-default`.
+Linear selects the recipient, covering mentions, assignments, subscriptions and
+replies without guessing names or parsing comment text. The verified connection used for the read-only check had MCP-audience OAuth,
+not a GraphQL credential. Linear's `AppUserNotification`
+webhook is for OAuth app users, so it cannot represent an ordinary connected user's
+inbox without changing the account model. The live connected account was checked
+read-only and supports paginated `get_notifications`.
+
+A private atomic checkpoint starts at first connection time, advances only after
+successful inbox persistence, and keeps IDs at its timestamp boundary. Restart
+retries use stable event IDs; changing read state does not wake again. Account
+changes during pagination discard that read. A new account starts a new baseline.
+Old notifications can still be read directly; enabling following does not replay
+passive backlog. Poll failures leave the checkpoint intact for the next poll.
+Collection samples following before and after a read, and queued turns recheck
+it. Existing workspace-event wake flags are not resumed after this amendment.
+
+Self-authored webhook activity never wakes. Linear's recipient inbox is the
+notification source; when it supplies an actor ID, the existing self-authored
+filter also applies there. The notification MCP response currently omits actor
+IDs, so normal recipient/self-notification semantics are owned by Linear.
+All payloads stay untrusted context and retain explicit cursor acknowledgment.
+The seat denies `mcp__linear-server`, using Claude Code's documented server
+prefix syntax, and uses only Clankie's connected Linear tools.
+
+The rule applies to `hire_agent` and `swarm_assign` workers on Claude, Codex and
+pi, and to future tracker connectors. Writes must use Clankie's connected tools
+or explicit worker grants. Missing access goes back to the lead; it does not
+select a harness's own account. Worker-side automatic isolation is not yet
+complete: managed launches add the broker bridge but inherit other harness
+configuration, and native hires do not install that bridge. The staged
+[worker enforcement proposal](../worker-tracker-identity.md) records the current
+paths, exact owning files and acceptance checks. This amendment does not claim
+that instructions alone enforce account isolation.
+
+Sources: [Linear notifications](https://linear.app/docs/notifications),
+[app-user notification webhooks](https://linear.app/developers/agent-best-practices#inbox-notifications-webhooks),
+[Claude Code MCP permissions](https://code.claude.com/docs/en/permissions#mcp).
+
 ## Context
 
 James sometimes wants Clankie to follow the swarm live and usually wants him
@@ -75,20 +164,24 @@ anything deserves action; silence is ordinary. A shared account name does not
 establish human authorship. His own echoes require no reply. A webhook grants
 no new authority and requires no acknowledgment on Linear.
 
+The current flow after the 2026-09-27 amendment is:
+
 ```mermaid
 flowchart TD
-    Linear[Linear activity] --> Verify[Verify signature, freshness and delivery]
-    Verify --> Receipt{Exact returned revision?}
-    Receipt -->|Captain write| QuietEcho[Ignore self echo]
-    Receipt -->|Worker write| Provenance[Attach worker and work IDs]
-    Receipt -->|No match| Inbox[Store external message in Linear inbox]
-    Provenance --> Inbox
-    Inbox --> Owner[Pin explicit issue owner or Linear inbox]
-    Owner --> Follow{Follow Linear?}
-    Follow -->|Off| Quiet[Retain without a model turn]
-    Follow -->|On| Queue[Queue one turn per owner]
+    Webhook[Workspace activity] --> Verify[Verify signed delivery]
+    Verify --> History[Persist passive activity and write provenance]
+    History --> Debounce[Debounce recipient inbox refresh]
+    Debounce --> Poll[Read recipient notifications]
+    Startup[One startup catch-up read] --> Poll
+    Account[Verified connected Linear account] --> Poll
+    Poll --> Fresh{New notification ID?}
+    Fresh -->|Yes| Inbox[Persist notification as untrusted context]
+    Fresh -->|No| Done[No new delivery]
+    Inbox --> Follow{Following, webhook configured and not self-authored?}
+    Follow -->|No| Quiet[Retain without a model turn]
+    Follow -->|Yes| Queue[Queue operator conversation global-default]
     Queue --> Recheck{Still following?}
-    Recheck -->|No| Skip[Skip queued turn]
+    Recheck -->|No| Quiet
     Recheck -->|Yes| Clankie[Read context and decide whether to act]
 ```
 

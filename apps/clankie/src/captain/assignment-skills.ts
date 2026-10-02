@@ -1,3 +1,4 @@
+import type { SkillsSettings } from "@clankie/settings";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, readdir, realpath, stat } from "node:fs/promises";
@@ -10,6 +11,7 @@ export async function assignmentSkills(input: {
   cwd: string;
   repoRoot: string;
   names: readonly string[];
+  skills?: SkillsSettings;
 }): Promise<string> {
   if (!input.names.length) return "";
   const available = captainSkills(input);

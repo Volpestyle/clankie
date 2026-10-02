@@ -1,14 +1,21 @@
 # The console
 
-The console is the primary place to work with Clankie as your persistent lead.
-Give him an objective and tell him which installed worker harnesses to use,
-such as Claude Code or Codex. He can work directly or delegate through Herdr;
-you can inspect the worker panes and steer him as the work develops. The app's
-Messages, Terminal, and Commons views reach the same service.
+The console is a full conversation with Clankie in your terminal. Ask for help,
+work on a project, configure his connections, or inspect an agent's progress.
+For the first installation, follow [Get started](/get-started/); for models,
+skills, and worker setup, use [Customize Clankie](/diy/).
 
-`clankie` with no arguments starts the service if it is not already running and opens the fullscreen operator console. The chat surface is pi's own: a scrollable transcript of messages and tool executions above an editor docked to the bottom of the terminal, with Clankie's chrome around it — the banner, slash-command typeahead, guided setup flows, and the `Ctrl+/` command workbench. It runs in an ordinary terminal or inside a terminal multiplexer; Herdr is the supported fleet integration.
+In local mode, `clankie` starts the service if needed and opens the console.
+In hosted mode it connects to your existing remote Clankie. First launch asks
+which mode you want. The transcript shows messages and tool work above the
+editor; `/` opens command suggestions and `Ctrl+/` opens the workbench.
+An ordinary terminal works; Herdr is optional for viewing the built-in workers.
 
-The console talks to one backend, the local service on `127.0.0.1:4310`, over the same [HTTP API](/api/) every other surface uses. Plain prompts go through the operator-conversation contract; the slash commands below configure, observe, and navigate. Every configuration command is also a headless [CLI](/cli/) command with JSON on stdout, so anything the console can set, an agent or script can set too.
+The local console uses the service's [HTTP API](/api/). Hosted mode uses the
+paired-device transport and supports a smaller command set; see
+[connection modes](/cli/#local-and-hosted-connection-modes). The tables below
+describe the local console. The [CLI](/cli/) is the headless configuration and
+control reference, including its output formats and exceptions.
 
 ## Slash commands
 
@@ -36,6 +43,13 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 {{TUI_README_WORKSPACES}}
 
 {{TUI_README_OPERATOR_BEHAVIOR}}
+
+## Follow Linear
+
+Connecting an account and following its notifications are separate choices.
+Use `/connect linear` for the account and the follow setup. The
+[Linear reference](/cli/#linear-status-linear-follow-on-off) owns webhook
+configuration, enabling following, status, and recovery.
 
 ## Headless
 

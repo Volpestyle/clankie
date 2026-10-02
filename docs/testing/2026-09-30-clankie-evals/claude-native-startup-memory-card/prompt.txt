@@ -1,0 +1,3 @@
+Fix shouldInject(session, hash, reset=false). Inject once per session and content hash; reset re-arms that session. Empty session IDs must not share dedup state. Preserve the boolean API.
+
+Edit the deliverable files in this worktree. Keep the result small. 

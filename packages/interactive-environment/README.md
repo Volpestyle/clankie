@@ -5,6 +5,11 @@ surfaces, and activity observation. The package defines session phases, leases,
 action results, concrete GBA commands and observations, semantic events, bounded
 telemetry references, and Discord presence tool exposure.
 
+Some schema names retain `gba_emulator` for compatibility. They do not imply an
+emulator ships here: Clankie's current game body is his own PokeAgents world
+seat. [Play](../play/README.md) owns that product path; this package owns the
+wire contracts and legacy record readers.
+
 Semantic event data is a closed, bounded union of state-transition payloads.
 Raw ticks, chunks, packets, audio, and video are rejected from the semantic
 plane and travel only as bounded `EnvironmentTelemetryReferenceSchema` artifact

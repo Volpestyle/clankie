@@ -1,16 +1,11 @@
+import { SettingsStore } from "@clankie/settings";
 import type { CredentialStore } from "@clankie/credential-broker";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
-import {
-  parseSeatArgs,
-  pluginInstalled,
-  planSeat,
-  runSeatCommand,
-  SEAT_PLUGIN_ID,
-} from "../src/command/seat.ts";
+import { parseSeatArgs, planSeat, runSeatCommand, SEAT_PLUGIN_ID } from "../src/command/seat.ts";
 
 const tempDirs: string[] = [];
 const repoRoot = join(import.meta.dirname, "..", "..", "..");
@@ -34,7 +29,7 @@ function outputBuffer(): { readonly stream: { write(chunk: string): void }; read
 async function stateEnv(extra: NodeJS.ProcessEnv = {}): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-test-"));
   tempDirs.push(root);
-  return { XDG_STATE_HOME: root, ...extra };
+  return { XDG_STATE_HOME: root, CLANKIE_SETTINGS_FILE: join(root, "settings.json"), ...extra };
 }
 
 /** A fake `claude` and `herdr`: which plugins are listed, and what herdr says about the pane. */
@@ -80,47 +75,32 @@ describe("clankie seat", () => {
     expect(() => parseSeatArgs(["status"])).toThrow("Usage: clankie seat");
   });
 
-  it("reads the plugin registry for the installed seat, enabled or not", () => {
-    expect(pluginInstalled(JSON.stringify([{ id: SEAT_PLUGIN_ID, enabled: true }]))).toBe(true);
-    expect(pluginInstalled(JSON.stringify([{ id: SEAT_PLUGIN_ID, enabled: false }]))).toBe(true);
-    expect(pluginInstalled(JSON.stringify([{ id: "other@market", enabled: true }]))).toBe(false);
-    expect(pluginInstalled("not json")).toBe(false);
-  });
-
-  it("falls back to the bundled plugin dir without the channel, and uses the marketplace install with it", async () => {
+  it.each([
+    { opinionated: true, exclude: [], lead: true },
+    { opinionated: false, exclude: [], lead: false },
+    { opinionated: true, exclude: ["lead"], lead: false },
+  ])("selects the seat plugin and keeps channels with %j", async (selection) => {
     const env = await stateEnv();
-    const bundled = await planSeat(
+    await new SettingsStore(env.CLANKIE_SETTINGS_FILE!).update((current) => ({
+      ...current,
+      skills: { opinionated: selection.opinionated, exclude: selection.exclude },
+    }));
+    const plan = await planSeat(
       { resume: false, dryRun: true },
-      { repoRoot, env, execFileImpl: fakeExec({}) },
+      { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: true }] }) },
     );
-    expect(bundled.plugin).toEqual({
-      source: "plugin-dir",
-      path: join(repoRoot, "integrations", "claude-plugin"),
-    });
-    expect(bundled.channel).toBe(false);
-    expect(bundled.args).toContain("--plugin-dir");
-    expect(bundled.args).not.toContain("--dangerously-load-development-channels");
-    expect(bundled.args).toContain("--session-id");
-    // Permission allowlist rides as --settings JSON: the one thing a plugin cannot carry.
-    const settings = bundled.args[bundled.args.indexOf("--settings") + 1];
-    expect(JSON.parse(settings ?? "{}")).toEqual({
-      permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"] },
-    });
-
-    const installed = await planSeat(
-      { resume: false, dryRun: true },
-      { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: false }] }) },
-    );
-    expect(installed.plugin).toEqual({ source: "installed" });
-    expect(installed.channel).toBe(true);
-    expect(installed.args).toContain(`plugin:${SEAT_PLUGIN_ID}`);
-    expect(installed.args).not.toContain("--plugin-dir");
-    // The plugin stays disabled at user scope (its forced style would take every
-    // session); the seat enables it for this session only.
-    const seatSettings = installed.args[installed.args.indexOf("--settings") + 1];
-    expect(JSON.parse(seatSettings ?? "{}")).toEqual({
-      permissions: { allow: ["Bash(clankie)", "Bash(clankie *)"] },
-      enabledPlugins: { [SEAT_PLUGIN_ID]: true },
+    expect(plan.plugin.source).toBe("plugin-dir");
+    const names = await readdir(join(plan.plugin.path, "skills"));
+    expect(names.includes("lead")).toBe(selection.lead);
+    expect(names).toContain("this-machine");
+    expect(names).not.toContain("linear-write");
+    expect(plan.channel).toBe(true);
+    expect(plan.args).toContain("plugin:clankie@inline");
+    const settings = JSON.parse(plan.args[plan.args.indexOf("--settings") + 1]!);
+    expect(settings.enabledPlugins).toEqual({ [SEAT_PLUGIN_ID]: false, "clankie@inline": true });
+    expect(settings.permissions).toEqual({
+      allow: ["Bash(clankie)", "Bash(clankie *)"],
+      deny: ["mcp__linear-server"],
     });
   });
 
@@ -164,6 +144,8 @@ describe("clankie seat", () => {
       HERDR_SOCKET_PATH: "/tmp/fleet.sock",
       SWARM_SESSION_CAPABILITY: "inherited-worker",
       SWARM_COORDINATOR_ENDPOINT: "/tmp/other-coordinator.sock",
+      CLANKIE_SEAT_HARNESS: "codex",
+      CLANKIE_CODEX_SEAT_BINDING: "/another/seat.json",
     });
     const calls: string[][] = [];
     const spawned: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv | undefined }[] = [];
@@ -183,6 +165,8 @@ describe("clankie seat", () => {
     });
     expect(exit).toBe(0);
     expect(calls).toContainEqual(["herdr", "agent", "rename", "w1:p2", "clankie"]);
+    expect(spawned[0]!.env?.CLANKIE_SEAT_HARNESS).toBe("claude");
+    expect(spawned[0]!.env?.CLANKIE_CODEX_SEAT_BINDING).toBeUndefined();
     expect(calls.at(-1)).toEqual(["herdr", "agent", "rename", "w1:p2", "--clear"]);
     expect(stderr.text()).toContain("this seat is his head");
     const record = JSON.parse(await readFile(join(env.XDG_STATE_HOME!, "clankie", "seat.json"), "utf8")) as {

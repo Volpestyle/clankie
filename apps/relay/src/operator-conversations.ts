@@ -1,3 +1,4 @@
+import { hostedOperatorAllows } from "../../../packages/protocol/src/hosted-operator.ts";
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { once } from "node:events";
@@ -127,6 +128,13 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest = OperatorConversationServiceRequestSchema.parse(await readJson(request));
     } catch {
       writeJson(response, 400, { error: "invalid_conversation_request" });
+      return true;
+    }
+    if (
+      authorization.device.controlScope === "hosted" &&
+      !hostedOperatorAllows("POST", "/operator/v1/dispatch", JSON.stringify(serviceRequest))
+    ) {
+      writeJson(response, 403, { error: "account_authority_required" });
       return true;
     }
     // A stance is safe to reach from the agent side for exactly one reason: the

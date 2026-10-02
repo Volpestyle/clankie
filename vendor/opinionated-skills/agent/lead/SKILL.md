@@ -1,0 +1,277 @@
+---
+name: lead
+description: Lead authorized agent work through ownership, review, integration and delivery. Swarm first, with an explicit Herdr fallback; a status question alone does not authorize dispatch.
+---
+
+# Lead
+
+The lead earns its place by making a delivery decision, resolving an ownership
+conflict, or getting accepted work to its destination. A busier roster, another
+handoff packet, or a longer status report is not progress.
+
+Use the user's current division of responsibility. When a planner owns priority
+and a tracker owns ticket maintenance, consume their decisions and exceptions;
+do not repeat their queue audit, rewrite their tickets, or make every worker
+report through all three roles. Keep one dispatch/integration authority.
+
+Leadership is independent of the conversation portal and execution runtime.
+Compose the selected communication workflow with the available process tools and
+optional tracker; do not require the user to create agents in a particular host.
+Discover actual access before assigning work: visible terminals alone establish
+neither peer communication nor process-control authority.
+
+## Ready work comes first
+
+**A ready handoff preempts fleet administration.** Start with the next deliverable
+that needs your judgment. Use the evidence already supplied, inspect the actual
+result and the relevant delta, then approve it or name the specific required fix.
+Route an approval straight to landing/delivery. Do not leave it waiting while you
+recensus the fleet, arrange more capacity, rewrite the plan or request another
+review of unchanged work.
+
+Use this order during an authorized delivery push:
+
+1. Decide and land ready work. Independent lanes need not finish together.
+2. Unblock an actual ownership, interface, resource or acceptance problem.
+3. Assign spare capacity to a concrete independent deliverable when useful.
+
+A user asking to allocate capacity explicitly can change that order. Each added
+worker must remove a concrete bottleneck by owning a separable result; another
+conversation is not capacity. Reuse suitable workers and keep unrelated work out
+of the chosen delivery's critical path. Headcount follows useful boundaries.
+
+Before another coordination action, name what it will change. If no decision,
+implementation or delivery depends on it, skip it. If two updates contain only
+preparation, receipts or harness work, identify the actual blocker and shorten
+the path to the attempt. Do not commission another audit of the same plan.
+
+## Size to the owner's budget
+
+The owner's budget is two targets, never caps: a **swarm size** and a **model
+mode**. Read them where the runtime states them (Clankie: his "Your fleet" prompt
+section, or `clankie fleet status` as `fleet.size` and `fleet.models`); otherwise
+use what the user said. With neither, assume `max` and `optimal`.
+
+| Size | Fits | Aim for |
+| --- | --- | --- |
+| `max` | several top-tier plans | one worker per separable deliverable plus independent reviewers; no ceiling |
+| `large` | one or two top-tier plans | around six concurrent workers, reviewers included |
+| `small` | one mid-tier plan | one or two workers at a time; sequence the rest |
+| `solo` | pay-per-token API | no standing workers: work yourself or through short native children; ask before a long or parallel run |
+
+- **`optimal`:** the strongest model and the effort each job needs; cost is not a
+  reason to downgrade.
+- **`efficient`:** the smallest model and lowest effort that still meet the job's acceptance.
+  The consequential boundaries in [roles and effort](reference/roles.md)
+  keep the top model.
+
+Size toward the target, and go past it when the work clearly warrants; say so.
+The budget never adds a worker without a separable result, never removes a
+required review, and never lowers a consequential boundary's model floor.
+
+## Inspect enough to decide
+
+Read the affected worker, checkout and resource owner before changing its work.
+Use a fleet census only when ownership or capacity is unclear; otherwise read
+only the relevant lane. A pasted historical handoff can already be landed:
+check current state before reopening it.
+
+Use current evidence already in context. Refresh it when inputs, ownership or
+state may have changed in a way that affects the decision, not merely to obtain
+a new receipt for a report. Accepted work stays accepted until a relevant change,
+concrete failure or explicit requirement gives a reason to inspect it again.
+
+Respect the repository's review gate. Where one independent review is required,
+give one bounded pass after the producer's checks. Inspect the artifact itself;
+for code, review its scoped diff. Check the integration boundary that could break,
+without repeating the producer's entire suite or becoming a second implementer.
+
+When correctness depends on interpreting external observations (pixels, audio,
+sensor readings or extracted labels), pair the first producer change with a small
+inspected source sample and valid controls before scaling extraction. Passing
+synthetic tests proves code behavior, not the measurement. Give a specialist this
+bounded evidence check early when it can prevent a full review or batch redo;
+respect the source's access and holdout restrictions.
+
+Reuse valid proof for unchanged relevant inputs. A rebase, tracker split or doc
+edit alone does not justify another build, suite, recording or package. A real
+failure needs investigation; waived or deferred verification stays labelled as
+such and is never a PASS. When the user authorizes partial closure, close the
+accepted slice and retain missing behavior or verification in the existing
+focused follow-up, creating one only when needed. Keep known failures explicit.
+
+## Dispatch an owned result
+
+Use the transport sections below for launch, delivery and waits. Verify the
+worker's actual capability and effort against the responsibility before dispatch.
+Consequential security, concurrency and integration work needs a top-capability
+model at high effort unless the user explicitly chooses otherwise.
+
+Keep one current brief: result, owner, owned checkout/paths, acceptance,
+destination and next action. Name who can change its scope. **Done stays fixed
+across handoffs:** a recipient or ticket split cannot add a recording, review or
+other gate. A discovery can justify a change, but the authorized scope owner must
+decide it explicitly and update that same contract.
+
+Use existing task/claim tooling for ownership and scope authority, and the actual
+scheduler/lease for shared editor or capture occupancy. Inspect what the tools
+support; do not invent a parallel registry. Skills guide judgment; remembered
+paragraphs must not substitute for a resource lock or an enforceable ownership
+check. Repair a demonstrated gap in the existing tool instead of adding warnings.
+
+Preserve existing owners. Give each shared dependency one producer and one
+integration boundary. Search actual callers/implementors before changing an
+interface, coordinate the affected owners and avoid leaving a shared tree broken.
+Workers must not stub or edit another owner's files to bypass a dependency.
+A fixture or prerequisite is useful work, but does not establish the real feature.
+
+Workers publish inspected evidence to the deliverable's configured canonical record
+using its applicable skills and write permissions, and land their own paths when
+repository policy permits. Bring the lead a ready
+review, shared integration, decision, actionable blocker or ownership conflict.
+Routine progress, acknowledgments and duplicate broadcasts need no lead relay.
+
+## Harvest once, carry through
+
+Each deliverable has one harvest owner. That owner carries its completion watcher
+and follows through to the destination; the lead and tracker do not add parallel
+watchers or re-report the same completion. Reuse an existing watcher. For a new
+assignment, verify pickup and use the selected transport's completion subscription.
+Read on the completion event or a concrete new finding, not worker output on a timer.
+
+The lead owns getting the separable results working together. Check the actual
+integrated consumer as soon as the parts can join, not only at the end. On
+completion, inspect, decide and act: a branch is not a landed change, and landing
+alone does not deliver the requested result. Use the existing integration/delivery
+owner to finish the boundary with one retained evidence set.
+
+Exercise coordination on one bounded delivery with fixed acceptance. Afterwards,
+inspect where it actually waited, repeated work or lost ownership, and fix that
+specific failure before widening the setup. The user chooses what to build and
+judges the result; they should not have to relay messages between workers.
+
+Dispatch alone does not finish delivery. Keep the accepted next action and
+harvest owner explicit. When nothing needs judgment, let workers work and wait
+for the event, or do useful work within your own scope. Do not manufacture
+supervision to keep a lead turn active. A user pause or redirect stops new fleet
+work from this thread while existing productive jobs remain safe.
+
+## Keep the durable record small
+
+Use the work tracker preferred or configured by the user, session or repository.
+Follow its applicable skills for workflow and write mechanics; this skill does
+not choose a tracker, workspace or product. If none is configured, use the existing
+work record or conversation without introducing a tracker. Give each shared record
+one editing owner; workers must not overwrite it from their own snapshots.
+
+For Clankie's swarm, the owner-connected tracker account is the identity of the
+whole swarm, including every hired worker. Tracker writes use Clankie's connected
+tools or explicitly granted worker bridge, never an independently authenticated
+harness connector. Without delegated access, have the lead make the write. This
+rule selects no fixed email, account name, workspace or tracker provider.
+
+Keep one canonical record per deliverable, carrying its acceptance, accountable
+owner, dependencies, current result and evidence, remaining gaps and next action.
+Link it from the live brief instead of copying its status into another queue.
+Worker completion, acceptance, landing and integrated delivery are distinct facts;
+record the stage actually established. A dropped requirement needs the scope
+owner's decision and an explicit disposition, not a quieter definition of done.
+
+The durable record holds product, engineering and design decisions, accepted
+results and remaining gaps. Pane assignments, leadership changes, local queues
+and usage limits belong in live messages or the existing local continuation.
+Tracker assignment does not acquire a file claim or shared-resource lease.
+For record sizing, Linear mapping or a tracker cutover, read
+[durable trackers](reference/durable-trackers.md).
+
+Honor the current tracker owner. Send a landed result or material closure blocker
+once; do not also edit the same record. Update only the docs/decisions affected by
+your own change. A role transfer is a live handoff that retires the old routing,
+not a new long-lived tracker entry.
+
+Report the usable result and link, a material blocker, or a changed priority.
+Use evidence already obtained; the report does not need a fresh census, hash
+list, PID inventory or acknowledgment chain. Name a pane and its topic only when
+the recipient needs to act on that pane.
+
+## Preserve ownership and live work
+
+- Census and read-only triage need no approval. Dispatch is authorized when the
+  user asks to lead, dispatch or harvest-and-continue; a status question alone
+  is not that authorization.
+- Give writers owned worktrees where the repo requires them. If a lane must
+  commit in a shared checkout, tell it to load `shared-checkout`. Never remove,
+  prune, rebase or force-update a worktree/branch the lane did not create.
+- Close only panes you created or the user identified for cleanup. Stop new
+  dispatch when a lane is retired, preserve ignored evidence, and check its
+  actual producers before closure. A separate process group or missing TTY does
+  not establish independent lifetime; descendants can still die with the pane.
+- Route only authorized one-way decisions and result judgment to the user.
+  Carry the artifact and exact question. Verify vendor facts against first-party
+  sources before using them to justify an architectural gate.
+- Open optional dashboards or rearrange terminals only when requested.
+
+## Swarm first
+
+Load `swarm-mcp` for the installed protocol. Discover the available tools and
+sync the current scope before dispatch.
+
+Use Swarm for assignments, questions, blockers, decisions and completion notices.
+Every participating worker loads `swarm-mcp`; leadership alone cannot establish a
+shared protocol. Address stable actor IDs, not pane IDs or role labels. Keep the
+message thread when replying. The configured work tracker holds deliverables and
+evidence; no tracker is required for coordination. Execution runtimes such as
+Herdr own terminals and processes. Use Swarm for communication even inside Herdr.
+User-started agents can participate in the same reachable, authorized coordinator
+scope; installing the same MCP alone does not connect separate coordinators.
+
+Persist the objective, worktree, acceptance criteria, expected artifacts and
+constraints in the task contract. Use `swarm_assign` with a configured route;
+missing capability or uncertain dispatch is a condition to resolve under the same
+intent, never permission to spawn again through a shell. Keep stable command IDs
+on retries. Shared files require explicit ownership; workers preserve others' work.
+
+Read the actual completion evidence and carry accepted work to its destination.
+A task finish, processing acknowledgment, accepted review and integrated delivery
+are different facts. Use runtime inbox delivery or bounded waits to receive work;
+no model polling loop. Acknowledge a leased envelope only after processing it,
+and deduplicate effects when the runtime redelivers it. After accepting a terminal
+dispatched result, release its allocation through `swarm_task` cancel with its
+original `intentId` and `taskId`; the provider verifies the fenced outcome. A
+completed task alone does not release dispatch capacity.
+
+Native children remain useful for private bounded work that fits their host and
+lifetime. Cross-session ownership and handoffs use Swarm. Do not manufacture a
+second task or relay every private child message through the lead.
+
+If Swarm is unavailable, state the limitation and use the Herdr fallback only
+under the conditions below.
+
+## Herdr fallback
+
+Use this workflow when explicitly selected or the relevant agents lack Swarm
+integration; name that fallback once. Never duplicate an uncertain assignment
+across transports.
+
+Load `herdr` for the CLI; prefer `herdr --skill` from the running binary. A
+socket-attached lead uses its configured socket and explicit pane identity, never
+the UI-focused pane. Use `herdr-handoff` for a real context transfer.
+
+### Dispatch and receive
+
+Create a worker in its own named tab in the lead's workspace by default, preserving
+the working directory and the user's focus. Reuse existing owners where they are.
+Before an assignment or scope change, use [roles and effort](reference/roles.md)
+to verify the actual model and effort. Set both on launch; changing `/model` in a
+running pane can rewrite the user's global default.
+
+Read the receiving pane's full visible composer immediately before every send.
+Idle/done does not establish an empty composer. Preserve drafts, questions, menus
+and history views; wait for the operator to finish, then read again. Never clear or
+submit their input. Use [dispatch and waits](reference/operations.md#dispatch-and-waits)
+and confirm pickup once.
+
+One harvest owner holds the completion watcher. Use the
+[watch sequence](reference/operations.md#watch-dispatched-work); Clankie's service
+uses its own `herdr_watch` wake path. Completion is a cue to inspect the artifact,
+not acceptance. Do not read pane output on a timer.

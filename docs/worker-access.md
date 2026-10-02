@@ -31,7 +31,7 @@ sequenceDiagram
 `/connect linear` verifies an API key using stable user/workspace IDs, email and
 workspace name. For an existing API key or OAuth connection, run `clankie access linear verify`;
 `clankie access linear` and `/access linear` show the recorded identity. Confirm
-the intended automation account before delegating. No email is a product default.
+the intended account before delegating. No email is a product default.
 The verification command addresses the built-in `linear` broker entry.
 
 OAuth verification calls `get_user` with `query: "me"` and `get_workspace` at
@@ -188,7 +188,7 @@ provider credentials in issue comments, Swarm messages or shared transcripts.
   token expiry. `renewable` identifies authority that can continue while its
   assignment remains active; the worker's private file holds its current expiry.
 - Host call logs and observers retain worker, work and grant IDs. Exact tracker
-  write correlation and durable issue-owner routing use the
+  write correlation and notification-based wakes use the
   [Linear inbox contract](adr/0168-linear-awareness-is-opt-in.md).
   [Two-worker bot-account evidence](testing/2026-09-23-swarm-integration/README.md#linear-bot-account-and-two-workers)
   verifies live provider writes and independent revocation. The
@@ -198,6 +198,11 @@ provider credentials in issue comments, Swarm messages or shared transcripts.
 Provider permissions still apply. Grants do not isolate workers that already
 have direct access to the owner's OS account, broker or operator bearer. Worker
 runtimes must expose only their intended credentials.
+
+Automatic isolation from inherited tracker connectors is still planned. See
+[the whole-swarm identity proposal](worker-tracker-identity.md) for the current
+launch paths and required enforcement. Until then, workers must use granted
+tools or ask the lead to write through Clankie’s connected account.
 
 Remaining integration: [Swarm host plan](../packages/swarm/README.md#shared-connected-accounts-slices-35).
 

@@ -1,10 +1,13 @@
+import { createPersonaImageSource } from "./persona-images.ts";
+import { createHostPowerMonitor } from "./host-power.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
+import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
-import { watchHostedHerdrWork } from "./hosted-work.ts";
-import { SwarmHost } from "@clankie/swarm";
+import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
+import { interactiveWorkersSupported, managedWorkersSupported, SwarmHost } from "@clankie/swarm";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
 /**
@@ -17,14 +20,12 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { serve, type WebSocketServerLike } from "@hono/node-server";
-import {
-  MAX_REALTIME_AUDIO_APPEND_BYTES,
-  createVoiceRealtimePorts,
-  parseVoiceRealtimeEnv,
-} from "@clankie/discord-presence-core";
+import { MAX_REALTIME_AUDIO_APPEND_BYTES } from "@clankie/discord-presence-core";
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
+  CLANKIE_ACCOUNT_PROVIDER_ID,
+  ClankieAccountAuthError,
   LINEAR_WEBHOOK_PROVIDER_ID,
   clankieAccountSignInRequired,
   createClankieAccountTokenProvider,
@@ -54,19 +55,23 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
+import { ExternalCoordinatorRelays, FleetRelays } from "./fleet-coordinator-relay.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "./world/session.ts";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
+import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
+import { linearFollowStatus } from "@clankie/settings";
 import { createRivalsClient } from "./rivals.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
+import { LinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -82,6 +87,7 @@ import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
   applyHostedModelPolicy,
   configureHostedModels,
+  hostedWorkerLimit,
   readHostedBodyBootstrap,
   createHostedBodyClient,
   HostedBodyDeniedError,
@@ -209,13 +215,14 @@ const hostedHeartbeat =
         onError: () =>
           logger.warn({ event: "hosted.heartbeat.unavailable" }, "hosted fleet heartbeat failed"),
       });
-let herdrWorking = false,
-  headlessWorking = false;
-const updateHostedWorkers = () =>
-  hostedHeartbeat?.setExternal("herdr-agent", herdrWorking || headlessWorking);
 let publicGatewayConnector: PublicGatewayConnector | undefined;
 /** Set when the account credential is rejected before a connector can even exist. */
 let publicGatewaySignInRequiredSince: string | undefined;
+// A sleeping host is a normal condition (ADR 0203): report it, never treat it as a fault.
+const hostPower = createHostPowerMonitor({
+  keepAwakeRequested: async () => (await settingsStore.load()).host.keepAwake,
+  onSleep: (sleep) => logger.info({ event: "host.slept", ...sleep }, "the host slept underneath the service"),
+});
 if (hostedBody !== undefined) {
   publicGatewayConnector = new PublicGatewayConnector({
     encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
@@ -286,8 +293,13 @@ if (
       gatewayUrl: startupSettings.publicGateway.url,
       store: operatorCredentialStore,
     });
-    const initial = await resolveAccountToken();
-    const hostId = derivePublicGatewayHostId(initial.accountId, startupSettings.publicGateway.installationId);
+    // Derive the stable route locally. Network/token resolution belongs to the
+    // connector's retry loop, so an offline startup can recover after wake.
+    const stored = await operatorCredentialStore.get(CLANKIE_ACCOUNT_PROVIDER_ID);
+    if (stored?.type !== "oauth" || stored.accountId === undefined) {
+      throw new ClankieAccountAuthError("account_not_invited", "Sign in to your Clankie account first");
+    }
+    const hostId = derivePublicGatewayHostId(stored.accountId, startupSettings.publicGateway.installationId);
     publicGatewayConnector = new PublicGatewayConnector({
       encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
       gatewayUrl: startupSettings.publicGateway.url,
@@ -316,21 +328,6 @@ if (
     );
   }
 }
-const localVoiceConfig = parseVoiceRealtimeEnv(process.env);
-const localVoiceCredential = await operatorCredentialStore.get(localVoiceConfig.realtimeProvider);
-const localVoiceElevenLabsCredential =
-  localVoiceConfig.ttsProvider === "elevenlabs" ? await operatorCredentialStore.get("elevenlabs") : undefined;
-const localVoiceRealtime =
-  localVoiceCredential?.type === "api" &&
-  (localVoiceConfig.ttsProvider !== "elevenlabs" || localVoiceElevenLabsCredential?.type === "api")
-    ? createVoiceRealtimePorts({
-        apiKey: localVoiceCredential.key,
-        ...(localVoiceElevenLabsCredential?.type === "api"
-          ? { elevenLabsApiKey: localVoiceElevenLabsCredential.key }
-          : {}),
-        config: localVoiceConfig,
-      })
-    : undefined;
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,
   store: operatorCredentialStore,
@@ -410,7 +407,19 @@ function capacityAware<T>(
 // that serves the bytes back resolves the same directory this wrote them to.
 const attachmentRoot = discordAttachmentRoot(process.env);
 const deliveredFiles = new DeliveredFileStore(attachmentRoot);
+const personaImages = createPersonaImageSource(settingsStore, repoRoot);
+// Snapshot on startup without holding service readiness behind a caption call.
+void personaImages()
+  .then((board) => {
+    if (board.error || board.descriptionError)
+      logger.warn(
+        { detail: board.error ?? board.descriptionError },
+        "Persona image context partially unavailable",
+      );
+  })
+  .catch((error: unknown) => logger.warn({ error }, "Persona image settings unavailable"));
 const mediaGenerator = new ConfiguredMediaGenerator({
+  personaImages,
   credentials: operatorCredentialStore,
   attachmentRoot,
   configCwd: repoRoot,
@@ -496,10 +505,22 @@ const email = createEmailPort({
 
 const rivals = createRivalsClient({ settings: settingsStore, credentials: operatorCredentialStore });
 const compiledWorkerCli = join(repoRoot, "apps/tui/bin/clankie.js");
-const runtimes = new ExecutionConnections({ settings: settingsStore, primary: herdr });
+const runtimes = new ExecutionConnections({
+  settings: settingsStore,
+  primary: herdr,
+  sshControlDirectory: join(stateRoot, "ssh"),
+  interactiveWorkers: interactiveWorkersSupported,
+  managedWorkers: managedWorkersSupported,
+});
+// Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
+const herdrFleets = await runtimes.fleets();
+const externalRelays = new ExternalCoordinatorRelays({
+  fleets: () => runtimes.fleets(),
+  log: (message) => logger.info({ event: "swarm.relay" }, message),
+});
 const swarm = new SwarmHost({
   stateDirectory: join(stateRoot, "swarm"),
-  connections: { settings: settingsStore, credentials: operatorCredentialStore },
+  connections: { settings: settingsStore, credentials: operatorCredentialStore, transport: externalRelays },
   socketPath: herdr.binding()?.socketPath,
   runtimeConnections: () => runtimes.list(),
   dispatchBudget: () => runtimes.dispatchBudget(),
@@ -514,13 +535,7 @@ const swarm = new SwarmHost({
   },
   warn: (message) => logger.warn({ event: "swarm.unavailable" }, message),
 });
-const agentSessions = createAgentSessions(settingsStore, undefined, {
-  runsPath: join(stateRoot, "agent-session-runs.json"),
-  onWorkingChanged: (working) => {
-    headlessWorking = working;
-    updateHostedWorkers();
-  },
-});
+const agentSessions = createAgentSessions(settingsStore);
 // Work items in each repo's own convention (ADR 0191): Linear rides his
 // connected account, GitHub the owner's GitHub connection or gh login (a
 // hosted body has only the connection, ADR 0196), files the repo itself.
@@ -531,9 +546,15 @@ const workItems = createWorkItemsService({
   githubToken: () => githubConnectionToken(operatorCredentialStore),
   hosted: hostedBody !== undefined,
 });
+// Computer-use harnesses drive the owner's own Mac apps and Chrome (ADR 0199).
+// A hosted body has no owner desktop, and the probes read macOS paths, so
+// detection is only wired where both hold.
+const computerUseHarnesses =
+  hostedBody === undefined && process.platform === "darwin" ? cachedComputerUseHarnesses() : undefined;
 const captain = createCaptain(
   {
     workItems,
+    ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses: computerUseHarnesses.current }),
     // Hosted pi workers follow the captain's model path (VUH-1373).
     ...(hostedModelForwarder === undefined
       ? {}
@@ -546,6 +567,15 @@ const captain = createCaptain(
               },
             }),
         }),
+    // A hosted body runs at most its plan's number of hired agents (VUH-1388).
+    ...(hostedBootstrap === undefined
+      ? {}
+      : {
+          hireCapacity: hostedHireCapacity({
+            limit: hostedWorkerLimit(hostedBootstrap),
+            available: herdr.available,
+          }),
+        }),
     ...(hostedHeartbeat === undefined ? {} : { onWorkStarted: (reason) => hostedHeartbeat.begin(reason) }),
     ...(bodyTelemetry === undefined
       ? {}
@@ -553,6 +583,11 @@ const captain = createCaptain(
     herdrAvailable: herdr.available,
     agentSessions,
     runtimes,
+    fleets: {
+      list: herdrFleets,
+      run: (fleet) => runtimes.fleetRun(fleet),
+      remoteWorkspace: (fleet, directory) => runtimes.remoteWorkspace(fleet, directory),
+    },
     mcp: mcpHost,
     email,
     rivals,
@@ -581,12 +616,12 @@ const captain = createCaptain(
     ...(tldrawHost === undefined ? {} : { diagrams: tldrawHost }),
     embodiment: {
       submitIntent: (intent) => boundApp().embodiment.submit(intent),
-      getSession: (sessionId) => Promise.resolve(boundApp().embodiment.getSession(sessionId)),
-      getLiveSession: () => Promise.resolve(boundApp().embodiment.liveSession()),
+      getSession: (sessionId) => boundApp().embodiment.observe(sessionId),
+      getLiveSession: () => boundApp().embodiment.observe(),
     },
     activity: {
       current: async () => {
-        const live = boundApp().embodiment.liveSession();
+        const live = await boundApp().embodiment.observe();
         if (live === undefined) return { schemaVersion: 1 as const, outcome: "not_playing" as const };
         const snapshot = await activityObservations.current();
         return snapshot === undefined
@@ -602,8 +637,14 @@ const captain = createCaptain(
       },
     },
     playSight: {
-      still: () => Promise.resolve(playSight.still()),
-      story: () => Promise.resolve(playSight.story()),
+      still: async () => {
+        await boundApp().embodiment.observe();
+        return playSight.still();
+      },
+      story: async () => {
+        await boundApp().embodiment.observe();
+        return playSight.story();
+      },
     },
     hostedWorld: {
       inspect: () => hostedWorld.inspect(),
@@ -701,6 +742,8 @@ const captain = createCaptain(
     stateDir: join(stateRoot, "captain"),
     swarm,
     settings: settingsStore,
+    personaImages,
+    linearFollowing,
     deliveredFiles,
     discordEnvironment: captainDiscordEnvironment,
     // The same trusted module that owns the bot token owns making a channel's
@@ -719,6 +762,67 @@ const hostedDiscord =
         captain,
         onWork: () => hostedHeartbeat?.interactive(),
       });
+// One coordinator reachable from every fleet (VUH-1381): each ssh fleet pinned
+// to a conversation gets a supervised relay into that conversation's owner.
+const fleetOwnerEndpoint = async (conversationId: string) => {
+  const binding = captain.seatContext(conversationId);
+  if (!binding) throw new Error("Unknown Clankie conversation");
+  return swarm.ownerEndpoint(conversationId, binding.cwd);
+};
+const fleetRelays = new FleetRelays({
+  fleets: () => runtimes.fleets(),
+  relayConversation: (fleet) => runtimes.relayConversation(fleet),
+  ownerEndpoint: fleetOwnerEndpoint,
+  log: (message) => logger.info({ event: "fleet.relay" }, message),
+});
+runtimes.relayStatus = (fleet) => fleetRelays.status(fleet);
+void fleetRelays.restore();
+const fleetPeers = {
+  async enroll(input: { conversationId: string; fleet: string; name: string }) {
+    const fleet = (await runtimes.fleets()).find((entry) => entry.id === input.fleet);
+    if (fleet === undefined) throw new Error(`No enabled ssh fleet ${input.fleet}`);
+    const binding = captain.seatContext(input.conversationId);
+    if (!binding) throw new Error("Unknown Clankie conversation");
+    await runtimes.setRelay(fleet.id, input.conversationId);
+    const relay = await (await fleetRelays.ensure(fleet, input.conversationId)).ready();
+    if (relay.state !== "ready")
+      throw new Error(`Fleet ${fleet.id} relay is ${relay.state}: ${"error" in relay ? relay.error : ""}`);
+    const peer = await swarm.enrollFleetPeer(input.conversationId, binding.cwd, {
+      fleet: fleet.id,
+      name: input.name,
+    });
+    return {
+      fleet: fleet.id,
+      name: input.name,
+      actor: peer.actor,
+      scope: peer.scope,
+      relay,
+      // What the peer's swarm-mcp adapter on that machine needs, and nothing else.
+      environment: {
+        SWARM_COORDINATOR_ENDPOINT: relay.endpoint,
+        SWARM_SESSION_CAPABILITY: peer.capability,
+        SWARM_SCOPE: peer.scope,
+      },
+    };
+  },
+};
+
+async function linearFollowing(): Promise<boolean> {
+  const current = await settingsStore.load();
+  const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
+  return linearFollowStatus(
+    current.linearWebhook,
+    credential?.type === "api" && credential.key.trim().length > 0,
+  ).active;
+}
+
+const linearNotifications = new LinearNotifications({
+  path: join(stateRoot, "linear-notifications.json"),
+  host: mcpHost,
+  following: linearFollowing,
+  receive: (activity, following) => captain.receiveLinearActivity(activity, following),
+  onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
+});
 const clankie = await createClankieApp({
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({
@@ -738,6 +842,7 @@ const clankie = await createClankieApp({
     ? {}
     : {
         hostedBody,
+        hostedCredits: hostedBody,
         hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
       }),
   agentSessions,
@@ -750,23 +855,27 @@ const clankie = await createClankieApp({
   }),
   captain,
   swarm,
+  fleetPeers,
   deliveredFiles,
   herdrRuntime: herdr.status,
   herdrBinding: herdr.binding,
   runtimes,
   memory,
   settings: settingsStore,
+  personaImages,
   mediaGenerator,
-  ...(localVoiceRealtime === undefined ? {} : { localVoiceRealtime }),
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
   ...(browserHost === undefined ? {} : { browserTools: browserHost }),
+  ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses }),
   activityObservations: {
     current: (_signal) => Promise.resolve(activityObservations.current()),
   },
   playSight,
+  startPlayHost: () => playHost.start(playAbort.signal),
   rivals,
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
+  hostPower: () => hostPower.report(),
   publicGatewayDoorway: () => {
     if (publicGatewayConnector !== undefined) return publicGatewayConnector.doorway;
     if (publicGatewaySignInRequiredSince !== undefined) {
@@ -807,7 +916,8 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
-    // Unverified or disconnected means unknown authorship, which still wakes him.
+    requestNotificationPoll: () => linearNotifications.requestPoll(),
+    // Unverified identity leaves webhook history passive.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
   },
 });
@@ -815,15 +925,12 @@ clankieRef = clankie;
 const stopHostedWork =
   hostedHeartbeat === undefined
     ? undefined
-    : watchHostedHerdrWork(
-        (working) => {
-          herdrWorking = working;
-          updateHostedWorkers();
-        },
-        { available: herdr.available },
-      );
+    : watchHostedHerdrWork((working) => hostedHeartbeat.setExternal("herdr-agent", working), {
+        available: herdr.available,
+      });
 hostedHeartbeat?.start();
-if (startupSettings.linearWebhook.following) captain.resumeLinearActivity();
+if (await linearFollowing()) captain.resumeLinearActivity();
+linearNotifications.start();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.
@@ -839,17 +946,10 @@ const embodimentClient: EmbodimentClientPort = {
 const playHost = new PlayHost({
   client: embodimentClient,
   environmentIds: ["pokemon-firered", "pokemon-emerald"],
-  execute: createConfiguredPlayExecution(),
+  execute: (...args) => createConfiguredPlayExecution()(...args),
   logger,
 });
 const playAbort = new AbortController();
-void playHost.runForever(playAbort.signal).catch((error: unknown) => {
-  logger.error(
-    { err: error instanceof Error ? error.message : String(error) },
-    "embodiment play host stopped unexpectedly",
-  );
-});
-logger.info({ environmentIds: ["pokemon-firered", "pokemon-emerald"] }, "embodiment play host started");
 
 const listenHost = "127.0.0.1";
 const webSocketServer = new WebSocketServer({
@@ -862,6 +962,19 @@ const server = serve({
   hostname: listenHost,
   websocket: { server: webSocketServer as unknown as WebSocketServerLike },
 });
+// ADR 0204: opt-in LAN door for a self-hosted phone, device routes only.
+const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
+const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
+const deviceDoorway = deviceDoorwayHost
+  ? serve({
+      fetch: deviceDoorwayFetch(clankie.app.fetch),
+      port: deviceDoorwayPort,
+      hostname: deviceDoorwayHost,
+    })
+  : undefined;
+if (deviceDoorway !== undefined) {
+  logger.info({ hostname: deviceDoorwayHost, port: deviceDoorwayPort }, "device doorway listening");
+}
 if (publicGatewayConnector !== undefined) {
   if (server.listening) publicGatewayConnector.start();
   else server.once("listening", () => publicGatewayConnector?.start());
@@ -873,7 +986,6 @@ logger.info(
     eventLogPath,
     memoryDir: defaultMemoryDir(process.env),
     settingsFilledNames,
-    localVoiceAvailable: localVoiceRealtime !== undefined,
   },
   "clankie listening",
 );
@@ -887,16 +999,20 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
+  hostPower.stop();
   hostedHeartbeat?.close();
   stopHostedWork?.();
   publicGatewayConnector?.close();
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
+  deviceDoorway?.close();
   server.close();
   hostedDiscord?.close();
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
+    await linearNotifications.close();
     await captain.close().catch(() => undefined);
+    fleetRelays.close();
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
     await mcpHost.close().catch(() => undefined);

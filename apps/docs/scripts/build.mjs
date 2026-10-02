@@ -27,29 +27,46 @@ const REPO_BLOB = `${REPO}/blob/main`;
 
 /** One header for every page; `optional` links hide on narrow screens, `narrow` links show only there. */
 const NAV = [
-  { href: "/#start", label: "Start" },
-  { href: "/#app", label: "App" },
+  { href: "/get-started/", label: "Start" },
+  { href: "/using-clankie/", label: "Using Clankie", optional: true },
+  { href: "/diy/", label: "DIY" },
   { href: "/how-it-works/", label: "How he works", optional: true },
-  { href: "/console/", label: "Console", optional: true },
-  { href: "/cli/", label: "CLI", optional: true },
-  { href: "/api/", label: "API", optional: true },
-  { href: "/network/", label: "Network", optional: true },
-  { href: "/#reference", label: "Reference", narrow: true },
-  { href: "https://clankie.bot/support/", label: "Support" },
+  { href: "/reference/", label: "Reference" },
+  { href: "https://clankie.bot/support/", label: "Support", optional: true },
 ];
 
 /** Every page the site publishes, in sitemap and llms.txt order. */
 const PAGES = [
   {
     path: "/",
-    title: "Start",
-    description: "Install Clankie on your machine, give him a model, reach him from your phone.",
+    title: "Clankie field guide",
+    description: "Everyday help and deeper possibilities, with clear paths for hosted and DIY users.",
+  },
+  {
+    path: "/get-started/",
+    title: "Get started",
+    description: "Start with hosted Clankie in the app, or install and configure your own Mac.",
+  },
+  {
+    path: "/using-clankie/",
+    title: "Using Clankie",
+    description: "Everyday requests, memory, creative work, helper agents, and the app.",
+  },
+  {
+    path: "/diy/",
+    title: "Customize Clankie",
+    description:
+      "Choose models, skills, coding agents, services, Discord, voice, and play on your own machine.",
+  },
+  {
+    path: "/reference/",
+    title: "Reference",
+    description: "Find the console, CLI, API, and canonical technical references by task.",
   },
   {
     path: "/how-it-works/",
     title: "How he works",
-    description:
-      "One service on your machine, the rooms he lives in, how a message becomes a turn, and what stays where.",
+    description: "One persistent service, its conversations, memory, models, tools, and connections.",
   },
   {
     path: "/console/",
@@ -97,6 +114,10 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
   const template = await readFile(resolve(templateDir, "page.html"), "utf8");
   const architecture = await readFile(resolve(repoRoot, "docs/architecture.md"), "utf8");
   const sources = {
+    "/get-started/": await readContent("get-started.md"),
+    "/using-clankie/": await readContent("using-clankie.md"),
+    "/diy/": await readContent("diy.md"),
+    "/reference/": await readContent("reference.md"),
     "/how-it-works/": await readContent("how-it-works.md"),
     "/console/": await consoleMarkdown(),
     "/cli/": absolutizeLinks(
@@ -104,7 +125,8 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
       resolve(repoRoot, "docs"),
     ),
     "/api/": await apiMarkdown(),
-    "/network/": network.markdown,
+    "/": await staticPageContent(resolve(outputDir, "index.html")),
+    "/network/": await staticPageContent(resolve(outputDir, "network/index.html")),
   };
   for (const page of PAGES) {
     if (page.path === "/" || page.path === "/network/") continue;
@@ -130,6 +152,11 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
   await writeFile(
     resolve(outputDir, "llms-full.txt"),
     llmsFull([
+      sources["/"],
+      sources["/get-started/"],
+      sources["/using-clankie/"],
+      sources["/diy/"],
+      sources["/reference/"],
       sources["/how-it-works/"],
       sources["/console/"],
       sources["/cli/"],
@@ -152,7 +179,8 @@ function buildNetworkRows() {
       "GET /v1/model-keys",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
-        purpose: "Read the supported model catalog, captain selection and stored-key status, never keys.",
+        purpose:
+          "Read the supported model catalog, Clankie model selection and stored-key status, never keys.",
       },
     ],
     [
@@ -174,7 +202,15 @@ function buildNetworkRows() {
       "POST /v1/model-keys/select",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
-        purpose: "Choose the captain model for its next turn using the shared CLI config.",
+        purpose: "Choose Clankie’s model for its next turn using the shared CLI config.",
+      },
+    ],
+    [
+      "GET /v1/model-keys/subscriptions",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Name the providers signed in through an account (OAuth or subscription), without token details.",
       },
     ],
     [
@@ -278,10 +314,26 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/hosted/credits",
+      {
+        access: "Encrypted live device bearer; managed bodies only",
+        purpose:
+          "Read the account’s AI credits (pack, top-ups, low-balance flag, top-up page) from the fleet. Self-hosted bodies return 404.",
+      },
+    ],
+    [
       "POST /v1/discord/ingress",
       {
         purpose: "A trusted Discord connection delivers a sealed addressed turn",
         access: "Fleet-signed scoped permit and P-256 encrypted request and response",
+      },
+    ],
+    [
+      "POST /v1/hosted/operator",
+      {
+        access: "Encrypted live device bearer with account-paired operator authority",
+        purpose:
+          "Run a bounded operator request on the hosted body; device revocation and inner route validation remain authoritative.",
       },
     ],
     [
@@ -323,7 +375,7 @@ function buildNetworkRows() {
       "POST /operator/v1/dispatch",
       {
         access: "Device bearer plus the operation’s grant",
-        purpose: "Send a chat, fleet, steer, or terminal-control operation to your machine.",
+        purpose: "Send a chat, fleet, steer, or terminal-control operation to Clankie’s host.",
       },
     ],
     [
@@ -337,7 +389,7 @@ function buildNetworkRows() {
       "POST /operator/v1/terminal-tail",
       {
         access: "Device bearer with terminal-observe access",
-        purpose: "Read terminal frames from your machine’s supported Herdr integration.",
+        purpose: "Read terminal frames from the host’s supported Herdr integration.",
       },
     ],
   ]);
@@ -400,27 +452,7 @@ function buildNetworkRows() {
     throw new Error(`Public docs describe removed routes: ${[...routeDetails.keys()].join(", ")}`);
   }
 
-  const markdown = [
-    "# Public network surface",
-    "",
-    "`api.clankie.bot` accepts only the routes below. The gateway carries bounded exchanges to an authenticated machine; your machine still owns devices, grants, conversations, and terminal authority. It does not run Clankie, a model, a terminal, or a Herdr fleet, and it retains no forwarded content bodies, message content, or terminal frames.",
-    "",
-    "```",
-    "iPhone or iPad ── HTTPS ── api.clankie.bot ── outbound WebSocket ── your machine",
-    "```",
-    "",
-    "The first pairing redemption uses the stable public origin. Successful redemption returns an opaque, host-scoped origin (`/h/{hostId}`). Normal app calls use that origin and a device credential minted by your machine.",
-    "",
-    "When push is configured, the gateway stores APNs tokens, routing identifiers, delivery-key hashes and versioned revocations. Only the app’s key can move or clear an existing delivery registration. Wakes contain a fixed alert and host/conversation identifiers, never message text. Apple receives the token, timing and those identifiers. An unconfigured gateway refuses push without changing pairing or messaging.",
-    "",
-    "| Method | Route | Access | Purpose |",
-    "| --- | --- | --- | --- |",
-    ...rows.map((row) => `| ${row.method} | \`${row.route}\` | ${row.access} | ${row.purpose} |`),
-    "",
-    "These routes are the product’s observable internet boundary, not a general third-party API. Clients pair through Clankie and use credentials and grants issued by the user’s machine. The full local contract is the [HTTP API](/api/).",
-  ].join("\n");
-
-  return { rows, markdown };
+  return { rows };
 }
 
 function networkRow({ method, route, access, purpose }) {
@@ -451,6 +483,19 @@ async function slashCommands() {
   let registered = 0;
   for await (const file of glob("**/*.ts", { cwd: tuiSrc })) {
     const source = await readFile(resolve(tuiSrc, file), "utf8");
+    // Hosted mode has a deliberately smaller command set, documented in the CLI
+    // connection contract. Its duplicate /model, /persona, etc. are not local
+    // console registrations. The shared connection picker is its sole addition.
+    if (file === "hosted-console.ts") {
+      registered += 1;
+      commands.push({
+        name: "connection",
+        aliases: ["settings"],
+        description: "Choose local or hosted Clankie",
+        argument: "",
+      });
+      continue;
+    }
     registered += (source.match(/^\s*takesArgument: (?:true|false),/gm) ?? []).length;
     for (const match of source.matchAll(literal)) {
       commands.push({
@@ -574,7 +619,7 @@ async function apiMarkdown() {
     "",
     `Base URL \`${spec.servers[0].url}\` · version ${spec.info.version} · the raw document is [openapi.yaml](/api/openapi.yaml).`,
     "",
-    "> This is the local contract on your machine. From the internet only the [public network surface](/network/) is reachable, through `api.clankie.bot`, and your machine still decides every grant.",
+    "> This is the service contract on Clankie’s host. The [public network surface](/network/) exposes a bounded subset through `api.clankie.bot`; the host still decides every device grant. Hosted account and billing endpoints are separate contracts.",
     "",
     "## Bearers",
     "",
@@ -663,6 +708,15 @@ function schemaSummary(schema) {
 
 // --- markdown ----------------------------------------------------------------
 
+// Static pages stay canonical too: Markdown permits their semantic HTML.
+// Export only the main content, with absolute links, without duplicating prose.
+async function staticPageContent(path) {
+  const html = await readFile(path, "utf8");
+  const main = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)?.[1];
+  if (main === undefined) throw new Error(`${path} has no main content`);
+  return main.trim().replace(/\b(href|src)="\/(?!\/)/g, `$1="${SITE}/`);
+}
+
 async function readContent(name) {
   return absolutizeLinks(await readFile(resolve(contentDir, name), "utf8"), contentDir);
 }
@@ -745,9 +799,9 @@ function llmsIndex() {
   return [
     "# Clankie",
     "",
-    "> A persistent agent with a life of his own. Clankie runs on your machine, an Apple-silicon Mac: he chats in Discord (text and voice), plays Pokémon live on a watch surface, makes images and videos, browses the web, remembers people, codes, and leads a fleet of coding agents through herdr panes. Your machine is authoritative; nothing of his runs in the cloud. An iPhone and iPad app reaches your machine through a narrow public gateway (`api.clankie.bot`) and does not require Tailscale.",
+    "> Clankie is a persistent personal assistant with a personality, memory, and tools for everyday help, creative projects, and work with helper agents. He can run on a managed private machine or a machine you maintain. The iPhone and iPad app reaches that service. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
     "",
-    "He is one local service (`apps/clankie`, HTTP on `127.0.0.1:4310`) plus the surfaces that reach it: the operator console (TUI), the companion app, one active Discord body, a Claude Code seat, and a macOS menu bar. The captain is a pi-based agent with durable sessions per room; persona is owner-authored; model output and Discord content are untrusted input. `clankie <noun> <verb>` is the headless control layer and prints one JSON document per command.",
+    "The service (`apps/clankie`, HTTP on `127.0.0.1:4310` on its host) owns conversations, goals, memory, tools, and access. Clankie's built-in runtime is pi. Swarm carries agent coordination; Herdr supplies the built-in worker terminals. The CLI, API, and MCP projection serve technical users. The CLI reference documents JSON output and its exceptions. Hosted plans and availability live on clankie.bot; this library does not infer shipping support from a source-code capability.",
     "",
     "## Docs",
     "",

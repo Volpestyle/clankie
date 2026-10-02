@@ -124,27 +124,32 @@ interface Harness {
     done: RealtimeResponseMeta[];
     closes: string[];
     errors: string[];
+    errorItems: (string | null | undefined)[];
   };
   failNextTtsOpen: { value: boolean };
 }
 
-async function openHarness(): Promise<
-  Harness & { port: Awaited<ReturnType<typeof openExternalVoiceConversation>> }
-> {
+async function openHarness(
+  onFirstText?: (itemId: string) => void,
+): Promise<Harness & { port: Awaited<ReturnType<typeof openExternalVoiceConversation>> }> {
   const realtime = new FakeRealtimePort();
   const ttsPorts: FakeTtsPort[] = [];
   const timers = new FakeTimers();
   const ttsHandlers: ExternalVoiceTtsHandlers[] = [];
   const failNextTtsOpen = { value: false };
   let realtimeHandlers: ExternalVoiceRealtimeHandlers | undefined;
-  const events: Harness["events"] = { audio: [], done: [], closes: [], errors: [] };
+  const events: Harness["events"] = { audio: [], done: [], closes: [], errors: [], errorItems: [] };
   const input: VoiceConversationOpenInput = {
     instructions: "Be Clankie.",
+    ...(onFirstText === undefined ? {} : { onFirstText }),
     onAudioDelta: (pcm, itemId) => events.audio.push({ pcm: Buffer.from(pcm), itemId }),
     onFunctionCall: () => undefined,
     onResponseDone: (meta) => events.done.push(meta),
     onClose: (reason) => events.closes.push(reason),
-    onError: (message) => events.errors.push(message),
+    onError: (message, itemId) => {
+      events.errors.push(message);
+      events.errorItems.push(itemId);
+    },
   };
   const factories: ExternalVoiceSessionFactories = {
     openRealtime: (handlers) => {
@@ -168,6 +173,32 @@ async function openHarness(): Promise<
 }
 
 describe("external voice conversation", () => {
+  it("reports first text before clause buffering without exposing its content", async () => {
+    const firstItems: string[] = [];
+    const harness = await openHarness((itemId) => firstItems.push(itemId));
+    harness.realtimeHandlers.onTextDelta("A quiet", "item-timing");
+    await settle();
+    expect(firstItems).toEqual(["item-timing"]);
+    expect(harness.ttsPorts[0]?.frames.filter((frame) => frame.kind === "append")).toEqual([]);
+    harness.realtimeHandlers.onTextDelta(" sentence.", "item-timing");
+    await settle();
+    expect(firstItems).toEqual(["item-timing"]);
+    expect(harness.ttsPorts[0]?.frames.filter((frame) => frame.kind === "append")).toHaveLength(1);
+    harness.port.close();
+  });
+
+  it("correlates live synthesis failures and suppresses errors from intentional teardown", async () => {
+    const { port, realtimeHandlers, ttsHandlers, events } = await openHarness();
+    realtimeHandlers.onTextDelta("Still speaking.", "failed_item");
+    await settle();
+    ttsHandlers[0]?.onError("ElevenLabs transport error");
+    expect(events.errors).toEqual(["ElevenLabs transport error"]);
+    expect(events.errorItems).toEqual(["failed_item"]);
+    port.close();
+    ttsHandlers[0]?.onError("ElevenLabs transport error");
+    expect(events.errors).toHaveLength(1);
+  });
+
   it("closes the ears when the mouth cannot open", async () => {
     const realtime = new FakeRealtimePort();
     const factories: ExternalVoiceSessionFactories = {
@@ -400,9 +431,11 @@ describe("external voice conversation", () => {
     port.createTextItem("Speaker: james");
     port.createResponse();
     port.submitFunctionResult("call_1", "done");
+    expect(realtime.functionResults).toHaveLength(1);
+    realtimeHandlers.onResponseDone(doneMeta("tool-call"));
     port.appendAudio(Buffer.from([1, 0]));
     expect(realtime.textItems).toEqual(["Speaker: james"]);
-    expect(realtime.responseCreates).toBe(1);
+    expect(realtime.responseCreates).toBe(2);
     expect(realtime.functionResults).toEqual([{ callId: "call_1", output: "done" }]);
     expect(realtime.appended).toHaveLength(1);
 
@@ -450,4 +483,48 @@ describe("splitSpeakableUnits", () => {
       rest: "first",
     });
   });
+});
+
+it("keeps queued room responses and handoff answers behind the previous TTS drain", async () => {
+  const { port, realtime, realtimeHandlers, ttsHandlers, events } = await openHarness();
+  port.createResponse();
+  realtimeHandlers.onTextDelta("Room banter.", "banter");
+  await settle();
+  port.submitFunctionResult("alice-result", "For Alice: the game");
+  port.createResponse();
+  realtimeHandlers.onResponseDone(doneMeta("banter-response"));
+  expect(realtime.functionResults).toHaveLength(1);
+  expect(realtime.responseCreates).toBe(1);
+  expect(events.done).toEqual([]);
+  ttsHandlers[0]!.onContextDone("banter");
+  expect(events.done).toEqual([doneMeta("banter-response")]);
+  expect(realtime.functionResults).toEqual([{ callId: "alice-result", output: "For Alice: the game" }]);
+  expect(realtime.responseCreates).toBe(2);
+  realtimeHandlers.onResponseDone(doneMeta("alice-answer"));
+  expect(realtime.responseCreates).toBe(3);
+  port.createResponse();
+  port.close();
+  realtimeHandlers.onResponseDone(doneMeta("closed"));
+  expect(realtime.responseCreates).toBe(3);
+});
+
+it("absorbs a burst behind TTS and retains stale function results without speaking them", async () => {
+  const { port, realtime, realtimeHandlers, ttsHandlers } = await openHarness();
+  let revision = 0;
+  port.createResponse();
+  realtimeHandlers.onTextDelta("Already speaking.", "first");
+  await settle();
+  port.submitFunctionResult("old", "Useful context", () => revision === 0);
+  for (let index = 1; index <= 3; index += 1) {
+    revision = index;
+    port.createResponse(`turn ${index}`, () => revision === index);
+  }
+  realtimeHandlers.onResponseDone(doneMeta("first"));
+  expect(realtime.responseCreates).toBe(1);
+  ttsHandlers[0]!.onContextDone("first");
+  expect(realtime.responseCreates).toBe(2);
+  expect(realtime.functionResults).toEqual([{ callId: "old", output: "Useful context" }]);
+  realtimeHandlers.onResponseDone(doneMeta("latest"));
+  expect(realtime.responseCreates).toBe(2);
+  port.close();
 });

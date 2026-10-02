@@ -46,6 +46,17 @@ describe("PersonaStore", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
+  it("retains the hired account across roster refresh and restart, but not a replacement occupant", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-account-"));
+    roots.push(root);
+    const account = { label: "second", home: "/owner/codex-second" };
+    const seat = observed("term-1");
+    expect(new PersonaStore(root).adoptSpawn({ ...seat, account }, "Worker").account).toEqual(account);
+    const restarted = new PersonaStore(root);
+    expect(restarted.reconcile([seat])[0]?.account).toEqual(account);
+    expect(restarted.reconcile([{ ...seat, occupantId: OCCUPANT_TWO }])[0]?.account).toBeUndefined();
+  });
+
   it("carries the character across a Herdr rename instead of minting a stranger", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
     roots.push(root);
@@ -202,4 +213,52 @@ describe("PersonaStore", () => {
     const listed = store.all(seats, (personaId) => threads.get(byName.get(personaId) ?? ""));
     expect(listed.map((persona) => persona.name)).toEqual(["Zed", "Atlas", "Mute"]);
   });
+});
+
+it("hides saved coordinator contacts without deleting their identity or thread access", () => {
+  const root = mkdtempSync(join(tmpdir(), "clankie-internal-personas-"));
+  try {
+    const peer = (actor: string, label: string) => ({
+      label,
+      contact: {
+        conversationId: "global-default",
+        connectionId: "embedded",
+        coordinator: "a".repeat(64),
+        scope: "project",
+        actor,
+        generation: 1,
+      },
+    });
+    const store = new PersonaStore(root);
+    store.reconcileSwarm([peer("worker", "Clankie app reviewer")]);
+    const worker = store.all([], () => undefined)[0]!;
+    // Simulate a contact persisted by an older build, including operator edits.
+    const legacy = { ...worker, personaId: "swarm-legacy", name: "clankie:global-default" };
+    writeFileSync(
+      join(root, "personas.json"),
+      JSON.stringify({ schemaVersion: 1, personas: [worker, legacy] }),
+    );
+    const restored = new PersonaStore(root);
+    restored.reconcileSwarm([
+      peer("captain", "clankie:linear-inbox"),
+      peer("runtime", "runtime:claude-code transport:herdr"),
+      peer("worker", "Clankie app reviewer"),
+    ]);
+    expect(restored.all([], () => conversation("saved-thread")).map((p) => p.name)).toEqual([
+      "Clankie app reviewer",
+    ]);
+    expect(restored.swarmContact("swarm-legacy")).toEqual(
+      legacy.swarm && {
+        conversationId: legacy.swarm.conversationId,
+        connectionId: legacy.swarm.connectionId,
+        coordinator: legacy.swarm.coordinator,
+        scope: legacy.swarm.scope,
+        actor: legacy.swarm.actor,
+        generation: legacy.swarm.generation,
+      },
+    );
+    expect(JSON.parse(readFileSync(join(root, "personas.json"), "utf8")).personas).toHaveLength(2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

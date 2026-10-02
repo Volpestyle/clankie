@@ -25,12 +25,12 @@ This repository is public. Both neighbors are private and consume
 - `apps/clankie` — the service: pi-based captain (sessions, tools, persona),
   HTTP API, game body, browser host, media generation, presence, memory.
 - `apps/tui` — the operator console (`clankie` launcher lives here).
-- `apps/menu-bar` — native macOS menu bar: private local voice and operator
-  conversation tails.
 - `apps/discord-bridge`, `apps/discord-user-session` — his Discord bodies
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/relay` — remote access for the phone/desktop app.
+- `apps/docs` — public field guide and generated technical references. The
+  [library index](docs/README.md) maps current guides, proposals, and history.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
 - `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
   actions); all other herdr integration is vanilla CLI/socket (ADR 0139).
@@ -46,10 +46,13 @@ This repository is public. Both neighbors are private and consume
   reads the workspace's own `.agents/skills`, Pi's agent directory, and
   `~/.agents/skills`, the roots he shares with every other agent on the
   machine; `clankieSkillRoots` in `@clankie/settings` is the one list, so what
-  the composer offers is what a session can load.
+  the composer offers is what a session can load. Only his own and the
+  workspace's skills are listed each turn; the machine-wide ones are found
+  with `skill_search` (`captain/skill-catalog.ts`).
 - `packages/play` — his play mind above one body seam; the body itself is his
   seat in a hosted PokeAgents world (ADR 0145). No emulator lives in this repo.
-- `packages/` — shared contracts and adapters; `protocol` depends on nothing.
+- `packages/` — shared contracts and adapters; `protocol` has no other workspace
+  dependencies.
   `vox-client` is the Apache process boundary for the AGPL Vox executable;
   `play-voice` connects only Clankie's own play to his active Discord body.
 
@@ -63,10 +66,12 @@ This repository is public. Both neighbors are private and consume
   `~/dev/clankie-app` follows the same rule for TestFlight (`release-app`).
 - Build every feature API- and CLI-first, expose any settings it needs in the
   TUI, and update the relevant agent-facing skill and human-facing docs.
-- Reusable lessons about how Clankie works belong in
-  `apps/clankie/src/captain/instructions.md` or the relevant shipped skill;
-  regenerate the Claude seat with `node integrations/claude-plugin/build.mjs`
-  after instruction changes. Episode memory preserves experiences, not standing
+- Reusable lessons about how Clankie works belong in the relevant shipped skill
+  or the tool description that needs them. `apps/clankie/src/captain/instructions.md`
+  is re-read on every model call, so it holds only identity, trust boundaries and
+  where things live (ADR 0203); regenerate both seats with
+  `node integrations/claude-plugin/build.mjs` and `node integrations/codex-plugin/build.mjs`
+  after changing it. Episode memory preserves experiences, not standing
   operating instructions. Keep project-specific procedures in that project's repo.
 - Keep the public/private boundary: code that runs only on Clankie's hosted
   service (gateway, accounts, managed-hosting control plane), its deployment,
@@ -98,7 +103,11 @@ This repository is public. Both neighbors are private and consume
   where volition would do. The only limits are the trust and safety
   boundaries above, never timidity.
 - Agents prefer swarm-mcp for cross-session assignments, messages and handoffs.
-  Load `swarm-lead` for leadership and `swarm-mcp` for participation; `lead` owns
-  shared judgment. Use the selected runtime for terminals and process control;
-  `herdr-lead` is the explicit Herdr fallback for unenrolled agents. Never
+  Load `lead` for leadership and `swarm-mcp` for participation. `lead` includes
+  the explicit Herdr fallback for unenrolled agents. Use the selected runtime
+  for terminals and process control. Never
   duplicate uncertain dispatch.
+- No headless agents ([ADR 0203](docs/adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
+  Every worker, hired or Swarm-dispatched, runs its harness's native TUI in a
+  Herdr pane the owner can watch and type into. Swarm stream mode violates
+  this until interactive workers replace it; prefer `hire_agent` meanwhile.

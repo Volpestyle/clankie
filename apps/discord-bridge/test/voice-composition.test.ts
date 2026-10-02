@@ -209,10 +209,14 @@ describe("voice evidence receipts and the response line", () => {
         trigger: "room",
         wake: "waking",
         toFirstAudioMs: 420.4,
+        lastAudioToFirstAudioMs: 2300,
+        transcriptToFirstAudioMs: 1300,
         handoffMs: 0,
         playbackMs: 900,
       }),
-    ).toBe("voice turn (waking, room, fast path): 420ms to first audio, then 900ms speaking");
+    ).toBe(
+      "voice turn (waking, room, fast path): 2300ms since last input audio; 1300ms since final transcript; 420ms from response request to first audio, then 900ms speaking",
+    );
     expect(
       describeVoiceResponse({
         type: "response",
@@ -228,7 +232,7 @@ describe("voice evidence receipts and the response line", () => {
         playbackMs: 2000,
       }),
     ).toBe(
-      "voice turn (continuing, room, clankie handoff 1100ms): 1500ms to first audio, then 2000ms speaking",
+      "voice turn (continuing, room, clankie handoff 1100ms): 1500ms from response request to first audio, then 2000ms speaking",
     );
   });
 
@@ -249,7 +253,9 @@ describe("voice evidence receipts and the response line", () => {
         handoffMs: 0,
         playbackMs: 39022,
       }),
-    ).toBe("voice turn (waking, narration, fast path): 803ms to first audio, then 39022ms speaking");
+    ).toBe(
+      "voice turn (waking, narration, fast path): 803ms from response request to first audio, then 39022ms speaking",
+    );
   });
 
   it("reads a record written before the trigger existed as a room turn", () => {
@@ -265,7 +271,9 @@ describe("voice evidence receipts and the response line", () => {
         handoffMs: 0,
         playbackMs: 1000,
       }),
-    ).toBe("voice turn (continuing, room, fast path): 500ms to first audio, then 1000ms speaking");
+    ).toBe(
+      "voice turn (continuing, room, fast path): 500ms from response request to first audio, then 1000ms speaking",
+    );
   });
 });
 

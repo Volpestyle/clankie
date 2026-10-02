@@ -31,12 +31,21 @@ export interface LaneReadCommandOptions {
   readonly stdout?: Writable;
 }
 
-/** Shared by `prompt` and `memory-card`: same bearer, same lane query, same verbatim stdout. */
-export async function readLaneText(
+async function readLaneText(
   path: string,
   query: Readonly<Record<string, string>>,
   options: LaneReadCommandOptions,
 ): Promise<number> {
+  (options.stdout ?? process.stdout).write(await fetchLaneText(path, query, options));
+  return 0;
+}
+
+/** Shared by `prompt` and `memory-card`: same bearer, same lane query, the text verbatim. */
+export async function fetchLaneText(
+  path: string,
+  query: Readonly<Record<string, string>>,
+  options: LaneReadCommandOptions,
+): Promise<string> {
   const env = options.env ?? process.env;
   const url = new URL(path, commandHost({ ...options, env }));
   for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
@@ -55,8 +64,7 @@ export async function readLaneText(
   });
   // The body may name a lane that is not this bearer's; the status is the whole report.
   if (!response.ok) throw new Error(`clankie service returned ${String(response.status)}`);
-  (options.stdout ?? process.stdout).write(await response.text());
-  return 0;
+  return await response.text();
 }
 
 /** Flags are parsed here rather than in the dispatcher so the usage error is one string. */

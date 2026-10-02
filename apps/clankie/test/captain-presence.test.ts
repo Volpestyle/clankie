@@ -41,6 +41,31 @@ function harness(replayEvents: readonly CaptainPresenceEvent[] = []) {
 }
 
 describe("CaptainPresenceManager", () => {
+  it("bounds heartbeat and lifecycle redelivery windows while keeping recent reports idempotent", async () => {
+    const test = harness();
+    await test.manager.receive("captain-eve", report("heartbeat-old"));
+    for (let index = 0; index < 1_024; index += 1) {
+      await test.manager.receive("captain-eve", report(`heartbeat-${index}`));
+    }
+    test.advance(10_000);
+    expect((await test.manager.receive("captain-eve", report("heartbeat-1023"))).emitted).toEqual([]);
+    expect((await test.manager.receive("captain-eve", report("heartbeat-old"))).emitted).toEqual([
+      expect.objectContaining({ type: "captain.heartbeat" }),
+    ]);
+
+    await test.manager.receive("captain-eve", report("turn-old", "captain.turn.started"));
+    for (let index = 0; index < 4_096; index += 1) {
+      await test.manager.receive("captain-eve", report(`turn-${index}`, "captain.turn.started"));
+    }
+    expect(
+      (await test.manager.receive("captain-eve", report("turn-4095", "captain.turn.started"))).emitted,
+    ).toEqual([]);
+    expect(
+      (await test.manager.receive("captain-eve", report("turn-old", "captain.turn.started"))).emitted,
+    ).toEqual([expect.objectContaining({ type: "captain.turn.started" })]);
+    test.manager.close();
+  });
+
   it("registers and renews idempotently while recording heartbeats sparsely", async () => {
     const test = harness();
     const started = await test.manager.receive("captain-eve", report("turn-1", "captain.turn.started"));

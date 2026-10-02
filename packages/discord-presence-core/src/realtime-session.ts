@@ -125,6 +125,7 @@ export const DEFAULT_REALTIME_TRUNCATION_RETENTION_RATIO = 0.7;
 export const DEFAULT_REALTIME_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
 
 export const ASK_CLANKIE_TOOL_NAME = "ask_clankie";
+export const VOICE_LEAVE_TOOL_NAME = "voice_leave";
 /** Read-only glance at his own live play screen. Not a controller (ADR 0099). */
 export const LOOK_AT_SCREEN_TOOL_NAME = "look_at_screen";
 export const YOUTUBE_SEARCH_TOOL_NAME = "youtube_search";
@@ -153,11 +154,17 @@ const ASK_CLANKIE_TOOL = {
     "the story of this playthrough, facts the briefing does not cover, or something from the " +
     "conversation you choose to remember as part of your own experience. Do not wait for someone to ask you to remember it. " +
     "Never say you cannot do or see something without asking through this first — it decides what each speaker may have. " +
+    "Your own departure is available directly through voice_leave. " +
     "Do not use it just to look at your screen. " +
     "Do not use it for songs or YouTube — those are youtube_search and music_play.",
   parameters: {
     type: "object",
     properties: {
+      join_call_id: {
+        type: "string",
+        description:
+          "Join this speaker's still-pending handoff when they repeat the same ask, even in different words. Use its call id from the pending-work context. A changed request is a new request instead.",
+      },
       request: {
         type: "string",
         description: "What is being asked of Clankie, as one plain-language request.",
@@ -166,6 +173,16 @@ const ASK_CLANKIE_TOOL = {
     required: ["request"],
     additionalProperties: false,
   },
+} as const;
+
+const VOICE_LEAVE_TOOL = {
+  type: "function",
+  name: VOICE_LEAVE_TOOL_NAME,
+  description:
+    "Leave your current Discord voice channel when you decide to end your stay. " +
+    "This closes only your own voice connection, including its speech and listening. " +
+    "It takes no target and grants no machine authority.",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
 } as const;
 
 const LOOK_AT_SCREEN_TOOL = {
@@ -353,7 +370,7 @@ export interface RealtimeConversationSessionOptions extends RealtimeSessionCommo
   /**
    * Response text deltas, only in `"text"` modality. This is what Clankie is
    * about to say out loud through the external voice — bounded per response
-   * by {@link MAX_REALTIME_RESPONSE_TEXT_CHARACTERS} and never logged.
+   * by {@link MAX_REALTIME_RESPONSE_TEXT_CHARACTERS}; retained only by the opt-in private transcript sink.
    */
   readonly onTextDelta?: (delta: string, itemId: string) => void;
   readonly onResponseDone?: (meta: RealtimeResponseMeta) => void;
@@ -720,6 +737,8 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private currentResponseId = "";
   private currentResponseAudioBytes = 0;
   private currentResponseTextCharacters = 0;
+  private responseActive = false;
+  private readonly queuedResponses: { start: () => void; shouldStart?: () => boolean }[] = [];
   private readonly provider: "openai" | "xai";
 
   public constructor(socket: RealtimeSocket, options: RealtimeConversationSessionOptions) {
@@ -766,12 +785,15 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               // becoming a second, conflicting floor owner.
               turn_detection: null,
               audio: { output: { format: REALTIME_PCM_FORMAT } },
-              tools: [ASK_CLANKIE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
             }
           : {
               type: "realtime",
               model,
               output_modalities: [outputModality],
+              // Runaway backstops with room for a deliberate 20–30 second riff.
+              // Audio tokens also consume this budget; text feeds an external mouth.
+              max_output_tokens: outputModality === "audio" ? 4_096 : 1_024,
               instructions,
               audio: {
                 input: {
@@ -796,7 +818,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
                     }
                   : {}),
               },
-              tools: [ASK_CLANKIE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
               tool_choice: "auto",
               truncation: {
                 type: "retention_ratio",
@@ -812,8 +834,36 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
    * items, transcripts, and audio never trigger a response on their own —
    * {@link submitFunctionResult} resumes a tool round trip by calling this.
    */
-  public createResponse(): void {
-    this.sendFrame({ type: "response.create" });
+  public createResponse(context?: string, shouldStart?: () => boolean): void {
+    const bounded =
+      context === undefined
+        ? undefined
+        : boundedText(context, MAX_REALTIME_TEXT_ITEM_CHARACTERS, "Realtime response context");
+    this.queueResponse(() => {
+      if (bounded !== undefined) this.createTextItem(bounded);
+      this.sendFrame({ type: "response.create" });
+    }, shouldStart);
+  }
+
+  private queueResponse(start: () => void, shouldStart?: () => boolean): void {
+    if (!this.isOpen) throw new Error("Realtime session is closed");
+    this.queuedResponses.push({ start, ...(shouldStart === undefined ? {} : { shouldStart }) });
+    this.startNextResponse();
+  }
+
+  private startNextResponse(): void {
+    while (!this.responseActive && this.isOpen) {
+      const next = this.queuedResponses.shift();
+      if (next === undefined) return;
+      if (next.shouldStart?.() === false) continue;
+      this.responseActive = true;
+      try {
+        next.start();
+      } catch (error) {
+        this.responseActive = false;
+        throw error;
+      }
+    }
   }
 
   /** User-role text item: speaker-change markers, transcript seeding, briefing refresh. */
@@ -886,14 +936,15 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
    * back as a `function_call_output` item and the session resumes speaking it
    * via an explicit response.
    */
-  public submitFunctionResult(callId: string, output: string): void {
+  public submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void {
     const id = nonEmpty(callId, "Realtime function call id");
     const bounded = boundedText(output, MAX_REALTIME_TEXT_ITEM_CHARACTERS, "Realtime function result");
+    // Resolve every tool call, even when its spoken continuation has gone stale.
     this.sendFrame({
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: id, output: bounded },
     });
-    this.createResponse();
+    if (shouldRespond !== false) this.createResponse(undefined, shouldRespond);
   }
 
   protected override handleServerEvent(type: string, event: Record<string, unknown>): void {
@@ -922,6 +973,8 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       }
       case "response.done": {
         this.handleResponseDone(event);
+        this.responseActive = false;
+        this.startNextResponse();
         return;
       }
       case "response.output_item.done": {
@@ -942,8 +995,8 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     if (text.length === 0) return;
     this.onTranscriptCallback?.({
       itemId: asString(event.item_id) ?? "",
-      text: text.slice(0, MAX_TRANSCRIPT_CHARACTERS),
-      final,
+      text: text.slice(0, MAX_REALTIME_RESPONSE_TEXT_CHARACTERS),
+      final: final && text.length <= MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
     });
   }
 

@@ -307,6 +307,7 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       ] satisfies ToolDefinition[],
   );
   const settled = vi.fn();
+  let webhookReady = true;
   const ownerSettings = new SettingsStore(join(root, "settings.json"));
   await ownerSettings.update((settings) => ({
     ...settings,
@@ -320,6 +321,7 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       stateDir: root,
       workingDirectory: root,
       settings: ownerSettings,
+      linearFollowing: async () => webhookReady,
       swarm: {
         start: async (input: typeof callbacks) => {
           callbacks = input;
@@ -342,6 +344,20 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       (await captain.laneToolBank("discord_presence")).tools.some((tool) => tool.name === "swarm_sync"),
     ).toBe(false);
     expect(tools).toHaveBeenCalledTimes(1);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      tools.mockRejectedValueOnce(new Error("Not connected"));
+      const degraded = await captain.laneToolBank("operator");
+      expect(degraded.tools.map((tool) => tool.name)).toContain("hire_agent");
+      expect(degraded.tools.map((tool) => tool.name)).not.toContain("swarm_sync");
+      expect(warning).toHaveBeenCalledWith(
+        "Swarm tools unavailable; continuing with the local lane tool bank",
+        expect.objectContaining({ message: "Not connected" }),
+      );
+      expect((await captain.laneToolBank("operator")).tools.map((tool) => tool.name)).toContain("swarm_sync");
+    } finally {
+      warning.mockRestore();
+    }
     const id = binding[0].conversationId;
     expect(callbacks.ready(id)).toBe(false);
     const waiting = captain.pollSeatEvents(1000);
@@ -413,12 +429,12 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
       conversationId: a,
     };
-    captain.setLinearWorkOwner(owner);
     const activity = {
       eventId: "a".repeat(64),
-      deliveryId: "linear-project-seat",
-      type: "Comment" as const,
-      action: "create" as const,
+      notification: true,
+      deliveryId: "linear-operator-notification",
+      type: "Notification" as const,
+      action: "issueNewComment" as const,
       actorName: "Human",
       actorEmail: undefined,
       actorId: "human",
@@ -428,13 +444,18 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       updatedFrom: undefined,
       data: { id: "comment", issueId: owner.issueId, body: "Check the existing work" },
     };
-    const linearWake = captain.pollSeatEvents(1000, undefined, a);
+    const linearWake = captain.pollSeatEvents(1000);
     expect(captain.receiveLinearActivity(activity, true)).toBe(true);
     expect(await linearWake).toMatchObject([
-      { conversationId: a, kind: "wake", content: expect.stringContaining(`--conversation ${a}`) },
+      { conversationId: id, kind: "wake", content: expect.stringContaining(`--conversation ${id}`) },
     ]);
-    await captain.pollSeatEvents(0, undefined, a);
+    await captain.pollSeatEvents(0);
+    expect(await captain.pollSeatEvents(0, undefined, a)).toEqual([]);
     expect(captain.receiveLinearActivity(activity, true)).toBe(false);
+    webhookReady = false;
+    const blockedWake = captain.pollSeatEvents(100);
+    expect(captain.receiveLinearActivity({ ...activity, eventId: "b".repeat(64) }, true)).toBe(true);
+    expect(await blockedWake).toEqual([]);
     expect(await captain.pollSeatEvents(0, undefined, b)).toEqual([]);
     expect(await captain.pollSeatEvents(0)).toEqual([]);
     expect(captain.seatContext("missing-project")).toBeUndefined();
@@ -444,5 +465,40 @@ it("binds native tools, project doctrine and channel delivery to selected servic
   } finally {
     await captain.close();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("initializes an operator MCP session with local tools while Swarm is disconnected", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-offline-"));
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const captain = createCaptain(bankDeps(), {
+    repoRoot: root,
+    stateDir: root,
+    workingDirectory: root,
+    swarm: {
+      start: async () => {},
+      tools: async () => {
+        throw new Error("Not connected");
+      },
+      close: async () => {},
+    } as unknown as SwarmHost,
+  });
+  const app = await createClankieApp({
+    captain,
+    authenticateOperator: async () => ({ operatorId: "operator-james" }),
+  });
+  try {
+    const sessionId = await connect(app, "operator");
+    expect(await toolNames(app, "operator", sessionId)).toContain("hire_agent");
+    expect(warning).toHaveBeenCalledWith(
+      "Swarm tools unavailable; continuing with the local lane tool bank",
+      expect.objectContaining({ message: "Not connected" }),
+    );
+  } finally {
+    app.close();
+    await captain.close();
+    warning.mockRestore();
+    // The session store can still be flushing after close; retry ENOTEMPTY.
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });

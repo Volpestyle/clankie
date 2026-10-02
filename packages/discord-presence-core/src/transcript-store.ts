@@ -9,7 +9,7 @@ import {
   DiscordVoiceTranscriptLogEntrySchema,
   type DiscordVoiceTranscriptLogEntry,
 } from "@clankie/protocol";
-import type { DiscordVoiceTranscript } from "./voice-session.ts";
+import type { DiscordVoiceSpokenTranscript, DiscordVoiceTranscript } from "./voice-session.ts";
 
 export { DiscordVoiceTranscriptLogEntrySchema, type DiscordVoiceTranscriptLogEntry } from "@clankie/protocol";
 
@@ -38,7 +38,7 @@ export class DiscordVoiceTranscriptStore {
 
   public append(
     body: DiscordVoiceTranscriptLogEntry["body"],
-    transcript: DiscordVoiceTranscript,
+    transcript: DiscordVoiceTranscript | DiscordVoiceSpokenTranscript,
   ): Promise<DiscordVoiceTranscriptLogEntry> {
     const entry = DiscordVoiceTranscriptLogEntrySchema.parse({ schemaVersion: 1, body, ...transcript });
     const result = this.queue.then(async () => {

@@ -198,6 +198,14 @@ describe("clankie app smoke", () => {
     expect(briefing.instructions).toContain("part of your own experience or developing personality");
     expect(briefing.instructions).toContain("your own captain mind");
     expect(briefing.instructions).toContain("web browsing and research");
+    expect(briefing.instructions).toContain("friend hanging out in a call");
+    expect(briefing.instructions).toContain("Match the length to the moment; most turns are short");
+    expect(briefing.instructions).toContain("A story, a strong opinion, a bit you are invested in");
+    expect(briefing.instructions).toContain("a real question that needs a real answer can earn more room");
+    expect(briefing.instructions).toContain("Keep your personality without constantly performing");
+    expect(briefing.instructions).not.toContain("rarely more than two sentences");
+    expect(briefing.instructions).toContain("Text can be thorough");
+    expect(briefing.instructions).toContain("Handoff results follow the same proportion");
     clankie.close();
   });
 

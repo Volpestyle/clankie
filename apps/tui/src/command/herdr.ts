@@ -3,7 +3,21 @@ import type { HerdrBinding } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath, type HerdrSettings } from "@clankie/settings";
 
 const HERDR_USAGE =
-  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled";
+  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled\n       clankie herdr fleets\n       clankie herdr add NAME --ssh HOST --session SESSION [--shell posix|powershell]\n       clankie herdr remove NAME";
+
+/**
+ * Remote fleets are runtime connections with an ssh transport (ADR 0184,
+ * ADR 0193), so `herdr add/remove/fleets` are spellings of `runtime`. Returns
+ * the runtime arguments, or undefined for any other verb.
+ */
+export function herdrFleetRuntimeArgs(args: readonly string[]): string[] | undefined {
+  const [verb, name, ...rest] = args;
+  if (verb === "fleets" && args.length === 1) return ["list"];
+  if (verb === "remove" && args.length === 2 && name !== undefined) return ["disconnect", name];
+  if (verb === "add" && name !== undefined && rest.includes("--ssh")) return ["connect", name, ...rest];
+  if (verb === "add" || verb === "remove" || verb === "fleets") throw new Error(HERDR_USAGE);
+  return undefined;
+}
 
 export interface HerdrCommandOptions extends Partial<HerdrConnectionOptions> {
   readonly env?: NodeJS.ProcessEnv;
@@ -79,7 +93,10 @@ export function forwardsToFleetHerdr(args: readonly string[]): boolean {
     verb !== "open" &&
     verb !== "create" &&
     verb !== "disable" &&
-    verb !== "use"
+    verb !== "use" &&
+    verb !== "add" &&
+    verb !== "remove" &&
+    verb !== "fleets"
   );
 }
 

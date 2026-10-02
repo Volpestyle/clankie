@@ -49,11 +49,11 @@ async function drain(): Promise<void> {
 }
 
 describe("operator conversation context", () => {
-  it("pins issue deliveries to explicit owners and recovers interrupted wakes without replaying passive backlog", async () => {
+  it("ignores old bindings and recovers operator notifications without replaying passive backlog", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-linear-owners-"));
     const snapshot = await mkdtemp(join(tmpdir(), "clankie-linear-restart-"));
     roots.push(root, snapshot);
-    const store = new ConversationStore(root, async () => {});
+    let store = new ConversationStore(root, async () => {});
     const created = await store.serve({
       op: "create",
       schemaVersion: 1,
@@ -67,12 +67,13 @@ describe("operator conversation context", () => {
       issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
       conversationId: project,
     };
-    store.setLinearWorkOwner(owner);
-    expect(() => store.setLinearWorkOwner({ ...owner, conversationId: "global-default" })).toThrow(
-      "expected owner",
-    );
+    const bindingFile = JSON.stringify([owner]);
+    await writeFile(join(root, "linear-work.json"), bindingFile);
+    await store.close();
+    store = new ConversationStore(root, async () => {});
     const activity = (n: number): LinearActivityEvent => ({
       eventId: n.toString(16).padStart(64, "0"),
+      notification: true,
       deliveryId: `delivery-${n}`,
       type: "Comment",
       action: "create",
@@ -87,9 +88,9 @@ describe("operator conversation context", () => {
     });
     expect(store.receiveLinearActivity(activity(1), false)).toBe(true);
     expect(store.receiveLinearActivity(activity(2), true)).toBe(true);
-    const interrupted = store.linearWakePrompt(project);
+    const interrupted = store.linearWakePrompt("global-default");
     expect(interrupted).toContain("1 new event");
-    expect(interrupted).toContain(`--conversation ${project}`);
+    expect(interrupted).toContain("--conversation global-default");
     cpSync(root, snapshot, { recursive: true }); // A crash after checkpointing, before the turn settles.
     await store.close();
     const wakes: Array<{ owner: string; prompt: string | undefined }> = [];
@@ -99,20 +100,20 @@ describe("operator conversation context", () => {
     expect(reopened.linearWorkOwners()).toEqual([owner]);
     reopened.resumeLinearActivity();
     await drain();
-    expect(wakes).toMatchObject([{ owner: project, prompt: expect.stringContaining("1 new event") }]);
+    expect(wakes).toMatchObject([
+      { owner: "global-default", prompt: expect.stringContaining("1 new event") },
+    ]);
     expect(reopened.receiveLinearActivity(activity(2), true)).toBe(false);
-    reopened.setLinearWorkOwner({ ...owner, conversationId: "global-default" }, project);
-    expect(reopened.receiveLinearActivity(activity(2), true)).toBe(false); // A rebind does not move an admitted event.
     reopened.receiveLinearActivity(activity(3), true);
     reopened.receiveLinearActivity({ ...activity(4), organizationId: "another-workspace" }, true);
     await reopened.close();
-    expect(wakes.map((entry) => entry.owner)).toEqual([project, "global-default", "linear-inbox"]);
-    const page = reopened.readLinearInbox({ conversationId: project });
-    expect(page.unreadCount).toBe(2);
-    expect(reopened.readLinearInbox({ conversationId: "global-default" }).unreadCount).toBe(1);
-    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, "global-default")).toBe(false);
-    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, project)).toBe(true);
-    expect(() => reopened.setLinearWorkOwner(owner, project)).toThrow("changed");
+    expect(wakes.map((entry) => entry.owner)).toEqual(["global-default", "global-default"]);
+    const page = reopened.readLinearInbox({ conversationId: "global-default" });
+    expect(page.unreadCount).toBe(4);
+    expect(reopened.readLinearInbox({ conversationId: project }).unreadCount).toBe(0);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, project)).toBe(false);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, "global-default")).toBe(true);
+    expect(await readFile(join(snapshot, "linear-work.json"), "utf8")).toBe(bindingFile);
     // A completed turn already in the log wins over a stale checkpoint after a crash.
     const metaPath = join(snapshot, "global-default", "meta.json");
     const meta = JSON.parse(await readFile(metaPath, "utf8"));
@@ -132,6 +133,12 @@ describe("operator conversation context", () => {
       finalWakes.push(id);
     });
     settled.resumeLinearActivity();
+    expect(await settled.serve({ op: "close", schemaVersion: 1, conversationId: project })).toMatchObject({
+      op: "close",
+      closed: true,
+    });
+    expect(settled.linearWorkOwners()).toEqual([owner]);
+    expect(await readFile(join(snapshot, "linear-work.json"), "utf8")).toBe(bindingFile);
     await settled.close();
     expect(finalWakes).toEqual([]);
   });
@@ -220,7 +227,7 @@ describe("operator conversation context", () => {
     release();
     await store.close();
     // The first delivery ran; the five behind it share one queued turn.
-    expect(runs).toEqual(["linear-inbox", "linear-inbox"]);
+    expect(runs).toEqual(["global-default", "global-default"]);
     expect(store.readLinearInbox().unreadCount).toBe(6);
   });
 
@@ -229,15 +236,32 @@ describe("operator conversation context", () => {
     roots.push(root);
     const store = new ConversationStore(root, async () => {});
     expect(store.linearWakePrompt()).toBeUndefined();
-    store.receiveLinearActivity("Linear Comment create · VUH-1 title · James\nquoted payload", false);
-    store.receiveLinearActivity("Linear Issue update · VUH-2 other\nquoted payload", false);
+    const notice = (id: string): LinearActivityEvent => ({
+      eventId: id.charCodeAt(0).toString(16).padStart(64, "0"),
+      notification: true,
+      type: "Notification",
+      action: "issueMention",
+      deliveryId: undefined,
+      actorName: undefined,
+      actorEmail: undefined,
+      createdAt: undefined,
+      url: undefined,
+      updatedFrom: undefined,
+      data: { title: `Issue ${id}`, body: "quoted payload" },
+    });
+    store.receiveLinearActivity("Legacy workspace backlog", false);
+    store.receiveLinearActivity(notice("passive"), false);
+    store.receiveLinearActivity(notice("one"), true);
+    store.receiveLinearActivity(notice("two"), true);
     const prompt = store.linearWakePrompt();
     expect(prompt).toContain("2 new events");
-    expect(prompt).toContain("Linear Comment create · VUH-1 title · James");
-    expect(prompt).toContain("Linear Issue update · VUH-2 other");
+    expect(prompt).toContain("Issue one");
+    expect(prompt).toContain("Issue two");
     expect(prompt).not.toContain("quoted payload");
+    expect(prompt).not.toContain("Legacy");
+    expect(prompt).not.toContain("passive");
     expect(store.linearWakePrompt()).toBeUndefined();
-    store.receiveLinearActivity("Linear Issue create · VUH-3\nbody", false);
+    store.receiveLinearActivity(notice("last"), true);
     expect(store.linearWakePrompt()).toContain("1 new event in");
     await store.close();
   });

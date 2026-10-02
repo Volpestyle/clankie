@@ -18,9 +18,10 @@ export async function runSeatSyncCommand(
     stdin?: AsyncIterable<string | Buffer>;
   } = {},
 ): Promise<number> {
-  if (args.length) throw new Error("Usage: clankie seat-sync (Claude hook JSON on stdin)");
+  if (args.length) throw new Error("Usage: clankie seat-sync (native seat hook JSON on stdin)");
   const env = options.env ?? process.env;
   const sessionId = env.CLANKIE_SEAT_SESSION_ID;
+  const harness = env.CLANKIE_SEAT_HARNESS === "codex" ? "codex" : "claude";
   // Ordinary plugin use and child agents do not inherit a conversation claim.
   if (!sessionId) return 0;
   let input = "";
@@ -35,18 +36,27 @@ export async function runSeatSyncCommand(
   };
   if (hook.session_id !== sessionId) return 0;
   if (
-    !["SessionStart", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd", "PreCompact"].includes(
-      String(hook.hook_event_name),
-    )
+    ![
+      "SessionStart",
+      "UserPromptSubmit",
+      "Stop",
+      "StopFailure",
+      "SessionEnd",
+      "PreCompact",
+      "Interrupt",
+    ].includes(String(hook.hook_event_name))
   )
     throw new Error("Unsupported seat transcript hook");
   if (
     typeof hook.transcript_path !== "string" ||
     !isAbsolute(hook.transcript_path) ||
-    basename(hook.transcript_path) !== `${sessionId}.jsonl`
+    !(harness === "codex"
+      ? basename(hook.transcript_path).startsWith("rollout-") &&
+        basename(hook.transcript_path).endsWith(`-${sessionId}.jsonl`)
+      : basename(hook.transcript_path) === `${sessionId}.jsonl`)
   )
     throw new Error("Seat transcript does not match the launched session");
-  const transcript = readHerdrSeatTranscript("claude", {
+  const transcript = readHerdrSeatTranscript(harness, {
     source: "native-seat",
     kind: "path",
     value: hook.transcript_path,
@@ -65,7 +75,10 @@ export async function runSeatSyncCommand(
   if (!credential) throw new Error("Seat transcript needs the operator credential");
   const url = new URL("/v1/seat/transcript", commandHost({ ...options, env }));
   if (env.CLANKIE_CONVERSATION_ID) url.searchParams.set("conversationId", env.CLANKIE_CONVERSATION_ID);
+  // One upload budget for the whole transcript, not ten seconds per page.
+  const signal = AbortSignal.timeout(10_000);
   const send = async (entries: SeatTranscriptUpload["entries"], final = false) => {
+    signal.throwIfAborted();
     const body = SeatTranscriptUploadSchema.parse({
       sessionId,
       entries,
@@ -75,8 +88,10 @@ export async function runSeatSyncCommand(
       method: "POST",
       headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
+      signal,
     });
+    // Release the response connection before uploading another page.
+    await response.body?.cancel();
     if (response.status === 409)
       throw new Error(
         "Seat session is bound elsewhere or retired by reset; launch a new seat for this conversation",

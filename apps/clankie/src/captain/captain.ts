@@ -1,8 +1,17 @@
+import { personaImageBriefing } from "@clankie/persona-images";
+import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
+import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
+import {
+  createPersonaImageSource,
+  personaImagesExtension,
+  type PersonaImageSource,
+} from "../persona-images.ts";
 import { trackHostedConversationRunner } from "../hosted-work.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
+import { splitFleetQualified } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
-import type { SwarmHost } from "@clankie/swarm";
+import type { SwarmHost, SwarmTaskView } from "@clankie/swarm";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -10,6 +19,7 @@ import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import {
   clankieSkillRoots,
+  codexAccounts,
   FLEET_MODEL_GUIDANCE,
   FLEET_SIZE_GUIDANCE,
   personaInstructions,
@@ -20,6 +30,7 @@ import {
 } from "@clankie/settings";
 import {
   CAPTAIN_SILENT_REPLY_SENTINEL,
+  operatorFleetHome,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   OPERATOR_SEAT_HARNESSES,
   type CaptainChannelTurnResult,
@@ -55,6 +66,7 @@ import { Evaluator, type EvaluationCapture } from "./evaluator.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
   readFleet,
+  type HerdrCensusFleet,
   readHerdrSessionCensus,
   readSeatIdForHerdrPane,
   type HerdrSessionCensus,
@@ -67,8 +79,27 @@ import { createStanceStore } from "./stances.ts";
 import { assignmentSkills } from "./assignment-skills.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
-import { HerdrWatchStore, type DiscordWatchOrigin } from "./herdr-watch.ts";
+import {
+  HerdrWatchStore,
+  createHerdrWatchRunner,
+  type DiscordWatchOrigin,
+  type HerdrAgentSnapshot,
+} from "./herdr-watch.ts";
+import {
+  SeatHookLog,
+  claudeWorkerChannelConsent,
+  createClaudeWorkerSeatAdapter,
+} from "./claude-worker-seat.ts";
+import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
+import {
+  invocableSkills,
+  listedSkillRoots,
+  quietMachineSkills,
+  skillSearchExtension,
+} from "./skill-catalog.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
+import { fleetTasks } from "./fleet-tasks.ts";
+import { savedSessionFleet } from "./native-session-resume.ts";
 import {
   deriveFleetEdges,
   parentSeatIds,
@@ -97,6 +128,7 @@ import type { CaptainPort, CaptainPromptSection, HireSeat, MessageSeat } from ".
 import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
+import { renderComputerUseReach, type ComputerUseHarness } from "../computer-use-harnesses.ts";
 import {
   contextTokenCount,
   recordPiTurnEvent,
@@ -125,6 +157,12 @@ const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>>
   gameplay: "gameplay",
 };
 
+const DISCORD_LANES: ReadonlySet<CaptainSessionLaneV2> = new Set(["discord_voice", "discord_presence"]);
+const DISCORD_ROOM = [
+  "# In Discord",
+  "A picture, video, diagram or screenshot you make or take attaches itself to the reply you are writing; only the last one of a turn rides. Take it, then talk about what is on it. Never write a markdown image, a `sandbox:` URI or a file path as though it were the attachment. In a room that cannot show pictures, describe it or quote what you read.",
+].join("\n");
+
 const TOOL_DETAIL_TRUNCATED = "\n… truncated";
 const SIDE_CONVERSATION_INSTRUCTIONS = `
 
@@ -140,27 +178,6 @@ Everything before this boundary is inherited history from the parent conversatio
 Only messages submitted after this boundary are active operator instructions for this side conversation. If there is no message after the boundary yet, wait for one.`;
 
 /** Pi's native current-leaf clone, with one hidden boundary appended to the child. */
-/** Above this the Linear inbox compacts before a wake, keeping each headline cheap. */
-export const LINEAR_INBOX_CONTEXT_TOKENS = 30_000;
-
-/**
- * The inbox is one durable room woken by one-line headlines; unbounded, every
- * wake would resend its whole history (VUH-1362). Pi compacts it before the
- * wake, so what he tracks carries over as a summary. A failed compaction still
- * wakes him, with the full context.
- */
-export async function boundLinearInboxContext(
-  session: Pick<AgentSession, "getContextUsage" | "compact">,
-  conversationId: string,
-  origin: ConversationTurnContext["origin"],
-): Promise<void> {
-  if (origin !== "hook" || conversationId !== LINEAR_INBOX_CONVERSATION_ID) return;
-  if ((contextTokenCount(session.getContextUsage()) ?? 0) <= LINEAR_INBOX_CONTEXT_TOKENS) return;
-  await session.compact().catch((error: unknown) => {
-    console.warn("Linear inbox compaction failed; waking with the full context", error);
-  });
-}
-
 export function cloneSideConversationSession(
   source: string,
   cwd: string,
@@ -289,18 +306,33 @@ export function assembleLanePrompt(
   currentSettings: ClankieSettings,
   selected: readonly CaptainPromptSection[] = SESSION_PROMPT_SECTIONS,
   extra: Readonly<Partial<Record<CaptainPromptSection, string>>> = {},
+  computerUse: readonly ComputerUseHarness[] = [],
 ): string {
   const identity = readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
   const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
   // Machine access says only whether this room has a shell. The herdr contract —
   // joining, the census, the bare-`herdr-lead` hang — is identity, stated once in
   // instructions.md, and every lane that gets this section gets that one too.
-  const reach = systemTools
-    ? ["# Machine access", "You have shell and filesystem tools in this authorized context."].join("\n")
+  // Computer-use harnesses drive the owner's own apps and sessions, so they are
+  // named only where a hire could happen at all: a room with the machine grant
+  // (ADR 0199). The owner can take them off the card to save those plans.
+  const harnessReach =
+    systemTools && currentSettings.browser.harnessDelegation ? renderComputerUseReach(computerUse) : "";
+  const machine = systemTools
+    ? [
+        "# Machine access",
+        "You have shell and filesystem tools in this authorized context.",
+        // VUH-1391: a reply has an output limit and a long one is cut off mid-file.
+        "Long code and long documents go in files: put a whole script, module or write-up in one and say where it is rather than pasting it into a reply that can be cut off.",
+        ...(harnessReach.length > 0 ? ["", harnessReach] : []),
+      ].join("\n")
     : [
         "# This room",
         "You do not have a shell or filesystem tools in this room. If someone asks you to inspect herdr, run a command, or read a file, say you cannot from here. Do not imply you chose not to look.",
       ].join("\n");
+  // How a Discord reply carries media is true only in a Discord room, so the
+  // console and the seats never pay for it (VUH-1456).
+  const reach = DISCORD_LANES.has(lane) ? `${machine}\n\n${DISCORD_ROOM}` : machine;
   // Owner-authored routing preference, and only where a fleet can be reached: a
   // room with no shell cannot dispatch, so the section would be dead weight
   // there. Unset renders nothing rather than an empty heading. Stated as
@@ -478,6 +510,9 @@ export function resolveOperatorPrompt(
 }
 
 export interface CaptainOptions {
+  /** Override local harness control adapters (including deterministic test adapters). */
+  readonly seatAdapters?: readonly HarnessSeatAdapter[];
+  readonly personaImages?: PersonaImageSource;
   readonly swarm?: SwarmHost;
   /** Repo root: instructions.md lives here, skills are discovered here. */
   readonly repoRoot: string;
@@ -491,6 +526,8 @@ export interface CaptainOptions {
   readonly stateDir: string;
   /** Settings store; defaults to the owner-authored file. Reloaded per turn. */
   readonly settings?: SettingsStore;
+  /** Live webhook readiness, rechecked before a queued Linear wake starts. */
+  readonly linearFollowing?: () => Promise<boolean>;
   /** Real process-level overrides captured before stored settings are projected into child env. */
   readonly discordEnvironment?: NodeJS.ProcessEnv;
   /** Conversation-scoped file publication; bytes share the conversation retention lifecycle. */
@@ -512,6 +549,8 @@ export interface CaptainOptions {
 interface LaneSession {
   readonly session: AgentSession;
   readonly capture: TurnContext;
+  /** Machine-wide skills left out of the listing; `/name` still expands them. */
+  readonly quietSkills: ReadonlySet<string>;
   readonly purpose: ModelPurpose;
   /** This purpose's route as of the last sync; the routing extension reads it per run. */
   readonly route: { current: RoutedSelection };
@@ -768,9 +807,68 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.runtimes ? { connections: deps.runtimes } : {}),
     ...(deps.herdrAvailable ? { defaultAvailable: deps.herdrAvailable } : {}),
   });
+  // One runner over the local fleet and every registered remote one (ADR 0184).
+  const remoteFleets = deps.fleets?.list ?? [];
+  const censusFleets: readonly HerdrCensusFleet[] = remoteFleets.map((fleet) => ({
+    id: fleet.id,
+    session: fleet.session,
+    host: fleet.ssh.host,
+    run: (args) => deps.fleets!.run(fleet)(args),
+  }));
+  const herdrRunner = routeHerdrFleets(
+    createHerdrWatchRunner(deps.herdrAvailable),
+    new Map(remoteFleets.map((fleet) => [fleet.id, createRemoteHerdrRunner(fleet, deps.fleets!.run(fleet))])),
+  );
+  // Claude seats stay interactive in their pane and are driven through the
+  // clankie-worker plugin: its channel carries the mailbox, its hooks report
+  // each settled turn (VUH-1458).
+  const seatHooks = new SeatHookLog(join(options.stateDir, "claude-worker-hooks.json"));
+  const claudeWorkerSeats = createClaudeWorkerSeatAdapter({
+    consent: () => claudeWorkerChannelConsent(),
+    hooks: seatHooks,
+    agent: (paneId) => herdrRunner.get(paneId),
+    transcript: async (agent) => herdrRunner.transcript?.(agent as HerdrAgentSnapshot),
+    mailbox: {
+      bound: (seatId) => fleetMailboxes.get(seatId)?.bound() === true,
+      deliver: async (seatId, text) =>
+        (
+          await fleetSeatMailbox(fleetMailboxes, seatId).deliver({
+            kind: "message",
+            conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
+            source: "captain",
+            content: text,
+            wantsReply: false,
+          })
+        ).outcome === "delivered",
+    },
+  });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
-    ...(deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable }),
+    codexAccounts: async () => codexAccounts(await settings()),
+    skillBundle: {
+      repoRoot: options.repoRoot,
+      stateDir: options.stateDir,
+      settings: async () => (await settings()).skills,
+    },
+    runner: herdrRunner,
+    resumeInventory: async (fleetId) => {
+      if (herdrRunner.list === undefined) throw new Error("Complete Herdr inventory is unavailable");
+      if (fleetId === undefined) return herdrRunner.list();
+      const selected = remoteFleets.find((fleet) => fleet.id === fleetId);
+      if (selected === undefined) throw new Error(`Unknown Herdr fleet ${fleetId}`);
+      const sameHost = remoteFleets.filter(
+        (fleet) => fleet.ssh.host === selected.ssh.host && fleet.ssh.shell === selected.ssh.shell,
+      );
+      return (await Promise.all(sameHost.map((fleet) => herdrRunner.list!(fleet.id)))).flat();
+    },
+    ...(deps.fleets === undefined
+      ? {}
+      : {
+          remoteWorkspace: (fleet: string, directory: string) =>
+            deps.fleets!.remoteWorkspace(fleet, directory),
+        }),
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
+    ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
+    seatAdapters: options.seatAdapters ?? [createCodexSeatAdapter(), claudeWorkerSeats],
   });
   const evaluator = new Evaluator(
     join(options.stateDir, "evaluator"),
@@ -827,6 +925,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return shown;
   };
   const settingsStore = options.settings ?? new SettingsStore();
+  const personaImages = options.personaImages ?? createPersonaImageSource(settingsStore, options.repoRoot);
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
   const seatByPersona = new Map<string, string>();
@@ -890,9 +989,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     systemTools: boolean,
     currentSettings: ClankieSettings,
     sideConversation: boolean,
+    computerUse: readonly ComputerUseHarness[],
   ): string {
-    const prompt = assembleLanePrompt(lane, systemTools, currentSettings);
+    const prompt = assembleLanePrompt(lane, systemTools, currentSettings, undefined, {}, computerUse);
     return `${prompt}${sideConversation ? SIDE_CONVERSATION_INSTRUCTIONS : ""}`;
+  }
+
+  /** Detection never holds a session back: a failed probe is an empty card. */
+  function harnessesForPrompt(): Promise<readonly ComputerUseHarness[]> {
+    return deps.computerUseHarnesses?.().catch(() => []) ?? Promise.resolve([]);
   }
 
   async function projectInstructions(cwd: string) {
@@ -939,19 +1044,39 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     const { runtime: models, resolveRoute } = await runtime();
     const currentSettings = await settings();
+    const computerUse = systemTools ? await harnessesForPrompt() : [];
     const purpose = sessionPurpose(lane, systemTools);
     const route = { current: await resolveRoute(purpose) };
     const budget = { compactBeforeNextRun: false };
     const selection = route.current.selection;
+    const hasPersonaImages = (await personaImages()).images.length > 0;
     const piSettings = SettingsManager.inMemory();
-    const loader = new DefaultResourceLoader({
+    const quietSkills = new Set<string>();
+    const loader: DefaultResourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: getAgentDir(),
-      systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation),
+      systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
       noExtensions: true,
       extensionFactories: [
-        captainMemoryExtension(deps.memory, lane),
-        captainModelExtension(async () => (await resolveRoute(purpose)).selection),
+        ...(hasPersonaImages
+          ? [
+              personaImagesExtension(personaImages, async () => {
+                const card = await deps.memory.recallEpisodeCard(lane).catch(() => undefined);
+                const selection = await resolveRoute(purpose)
+                  .then((route) => route.selection)
+                  .catch(() => undefined);
+                return [
+                  card === undefined ? "" : renderEpisodeCard(card),
+                  selection === undefined ? "" : modelCard(selection),
+                ]
+                  .filter(Boolean)
+                  .join("\n\n");
+              }),
+            ]
+          : [
+              captainMemoryExtension(deps.memory, lane),
+              captainModelExtension(async () => (await resolveRoute(purpose)).selection),
+            ]),
         captainRequestExtension({
           lane,
           cacheSalt,
@@ -965,6 +1090,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }),
         browserExtension(deps, capture),
         mcpExtension(deps, lane),
+        ...(systemTools ? [skillSearchExtension(() => loader.getSkills().skills, quietSkills)] : []),
         ...(lane === "operator" && conversationId !== undefined && options.swarm !== undefined
           ? [options.swarm.extension({ conversationId, cwd })]
           : []),
@@ -973,12 +1099,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // Every root explicitly: the loader is given in-memory settings and
       // resolves no defaults of its own, so a path absent here is a skill he
       // cannot load however plainly it is named.
+      noSkills: true,
       additionalSkillPaths: clankieSkillRoots({
+        skills: currentSettings.skills,
         repoRoot: options.repoRoot,
         agentDir: getAgentDir(),
         home: homedir(),
         cwd,
       }).filter((path) => existsSync(path)),
+      skillsOverride: (base) => ({
+        ...base,
+        skills: quietMachineSkills(base.skills, listedSkillRoots(options.repoRoot, cwd), quietSkills),
+      }),
       settingsManager: piSettings,
     });
     await loader.reload();
@@ -1013,6 +1145,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const laneSession: LaneSession = {
       session,
       capture,
+      quietSkills,
       purpose,
       route,
       budget,
@@ -1105,7 +1238,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     join(options.stateDir, "conversations"),
     trackHostedConversationRunner(async (conversationId, incoming, publish, context) => {
       // Turning follow off also drops activity still queued behind a live turn.
-      if (context.origin === "hook" && !(await settings()).linearWebhook.following) return;
+      if (
+        context.origin === "hook" &&
+        (!(await settings()).linearWebhook.following ||
+          (options.linearFollowing !== undefined && !(await options.linearFollowing())))
+      )
+        return;
       // A hook wake is worded when it starts, from whatever arrived until now.
       const message =
         context.origin === "hook" ? conversations.linearWakePrompt(conversationId, context.runId) : incoming;
@@ -1128,18 +1266,40 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // over. Only a seat that vanished before taking it hands the turn to pi.
         if (delivery.outcome !== "unbound") return;
       }
-      const lane = await durableSession(
-        `operator:${conversationId}`,
-        "operator",
-        join(options.stateDir, "conversations", conversationId, "pi"),
-        true,
-        context.workspace ?? workingDirectory,
-        context.side === true,
-      );
+      // A Linear wake is a one-shot: a fresh session sees only the new
+      // headlines, so it never resends the conversation it reports into
+      // (VUH-1382). It publishes there like any turn, and its own tree stays
+      // on disk as the record of what it ran.
+      // ponytail: one tree per wake, unbounded; prune by mtime if it grows.
+      const oneShot = context.origin === "hook";
+      const cwd = context.workspace ?? workingDirectory;
+      const lane = oneShot
+        ? await buildSession(
+            "operator",
+            SessionManager.create(
+              cwd,
+              join(options.stateDir, "conversations", conversationId, "linear-wakes"),
+            ),
+            true,
+            cwd,
+            false,
+            conversationId,
+          )
+        : await durableSession(
+            `operator:${conversationId}`,
+            "operator",
+            join(options.stateDir, "conversations", conversationId, "pi"),
+            true,
+            cwd,
+            context.side === true,
+          );
       // Operator interrupt: stop the live model turn. Aborting mid-stream makes
       // pi settle the message as aborted; partial text still publishes below so
       // the transcript shows what he had said before the interrupt.
-      if (context.signal.aborted) return;
+      if (context.signal.aborted) {
+        if (oneShot) lane.session.dispose();
+        return;
+      }
       const onInterrupt = (): void => {
         void lane.session.abort().catch(() => undefined);
       };
@@ -1158,7 +1318,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
 
       const live = lane.running !== undefined || lane.session.isStreaming;
-      if (!live) await boundLinearInboxContext(lane.session, conversationId, context.origin);
       const operatorTokensStart = contextTokenCount(lane.session.getContextUsage());
       const metrics = live
         ? undefined
@@ -1235,7 +1394,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               publishActivity("waiting");
             } else if (event.type === "compaction_end") {
               publishActivity("waiting");
-              const usage = lane.session.getContextUsage();
+              const usage = oneShot ? undefined : lane.session.getContextUsage();
               if (usage !== undefined) {
                 publish({
                   type: "context",
@@ -1252,7 +1411,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               const said = assistantText(event.message).trim();
               if (said.length > 0)
                 publish({ type: "message", role: "captain", text: said, streaming: false });
-              const usage = lane.session.getContextUsage();
+              const usage = oneShot ? undefined : lane.session.getContextUsage();
               if (usage !== undefined) {
                 publish({
                   type: "context",
@@ -1278,12 +1437,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // nothing rather than herdr noise. The Linear inbox is a reading room,
         // not a lead room (ADR 0168): no census there.
         const census =
-          live || deps.herdrAvailable?.() === false || conversationId === LINEAR_INBOX_CONVERSATION_ID
+          live ||
+          oneShot ||
+          deps.herdrAvailable?.() === false ||
+          conversationId === LINEAR_INBOX_CONVERSATION_ID
             ? undefined
-            : await readHerdrSessionCensus(paneId);
+            : await readHerdrSessionCensus(paneId, { fleets: censusFleets });
         const prompt = resolveOperatorPrompt(
           message,
-          lane.session.resourceLoader.getSkills().skills,
+          invocableSkills(lane.session.resourceLoader.getSkills().skills, lane.quietSkills),
           paneId,
           census,
         );
@@ -1336,6 +1498,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           lane.starting = undefined;
         }
         unsubscribe();
+        if (oneShot) lane.session.dispose();
       }
     }, deps.onWorkStarted),
     (conversationId, scope) => {
@@ -1427,17 +1590,45 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
   // persona thread created through `create` is — otherwise its first reply
   // lands in a thread nothing is listening to.
-  const hireSeat: HireSeat = async (request) => {
-    const result = await herdrWatches.spawnSeat(request);
+  const hireSeat: HireSeat = async (request, brief) => {
+    if (
+      brief !== undefined &&
+      (!brief.trim() || brief.includes("\0") || Buffer.byteLength(brief) > 32 * 1024)
+    )
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: "brief must be 1 to 32768 UTF-8 bytes with no NUL",
+      };
+    let resume;
+    if (request.resume !== undefined) {
+      try {
+        if (deps.agentSessions?.resolve === undefined)
+          throw new Error("Saved-session resolution is unavailable");
+        resume = await deps.agentSessions.resolve(request.resume);
+        if (request.harness !== resume.file.harness || request.workingDirectory !== resume.workingDirectory)
+          throw new Error("Harness and workingDirectory must match the saved transcript");
+        const fleet = savedSessionFleet(resume, request.fleet, remoteFleets);
+        request = { ...request, ...(fleet === undefined ? {} : { fleet }) };
+      } catch (error) {
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    const result = await herdrWatches.spawnSeat(request, undefined, brief, resume);
     if (result.outcome !== "spawned") return result;
-    const seat = personas.adoptSpawn(result.seat, request.title);
-    conversations.bindPersona(seat.personaId, seat.seatId, request.title);
+    const title = resume === undefined ? request.title : result.seat.title;
+    const seat = personas.adoptSpawn(result.seat, title);
+    conversations.bindPersona(seat.personaId, seat.seatId, title);
     liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
     seatByPersona.set(seat.personaId, seat.seatId);
     herdrWatches.trackSeat(seat.seatId);
     seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
     fleetChanges.touch();
-    return { outcome: "spawned", seat };
+    return { ...result, seat };
   };
 
   /**
@@ -1450,13 +1641,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     message: string,
     context: FleetSeatMessageContext,
   ): Promise<boolean> {
+    // An adapter-driven seat takes its message through the adapter, which
+    // waits for the harness's own receipt; any other seat, its mailbox or pane.
     const deliver = () =>
-      deliverFleetSeatMessage(
-        fleetMailboxes,
-        (id, text) => herdrWatches.sendToSeat(id, text),
-        seatId,
-        message,
-        context,
+      herdrWatches.sendToSeat(seatId, message, () =>
+        deliverFleetSeatMessage(
+          fleetMailboxes,
+          (id, text) => herdrWatches.sendToSeat(id, text),
+          seatId,
+          message,
+          context,
+        ),
       );
     const sent =
       context.source === "room"
@@ -1505,8 +1700,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   let swarmRoster = "";
+  let swarmTasks: readonly SwarmTaskView[] = [];
+  let swarmTaskBoard = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
-    const fleet = deps.herdrAvailable?.() === false ? { seats: [], head: undefined } : await readFleet();
+    const binding = await deps.runtimes?.configuredBinding("default");
+    const fleet =
+      deps.herdrAvailable?.() === false
+        ? { seats: [], head: undefined }
+        : await readFleet({ fleets: censusFleets, ...(binding ? { herdrSession: binding.session } : {}) });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const seats = personas.reconcile(fleet.seats);
@@ -1515,6 +1716,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const nextSwarmRoster = JSON.stringify(peers);
     if (swarmRoster !== nextSwarmRoster) {
       swarmRoster = nextSwarmRoster;
+      fleetChanges.touch();
+    }
+    // Task state lives in the coordinator, so a board change has to wake the
+    // long poll the same way a roster change does (ADR 0205).
+    swarmTasks = (await options.swarm?.tasks()) ?? [];
+    const nextTaskBoard = JSON.stringify(swarmTasks);
+    if (swarmTaskBoard !== nextTaskBoard) {
+      swarmTaskBoard = nextTaskBoard;
       fleetChanges.touch();
     }
     liveEdgeSeats = fleet.seats.map((observed) => ({
@@ -1567,6 +1776,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const channelsResult = await conversations.serve({ op: "channels", schemaVersion: 1 });
       if (channelsResult.op !== "channels") throw new Error("Fleet channel read returned the wrong result");
       if (cursor !== fleetChanges.current()) continue;
+      const fleetPersonas = [
+        ...personas.all(seats, (personaId) => conversations.conversationForPersona(personaId)),
+      ];
       return {
         op: "fleet",
         schemaVersion: 1,
@@ -1574,12 +1786,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           schemaVersion: 1,
           cursor,
           seats: [...seats],
-          personas: [...personas.all(seats, (personaId) => conversations.conversationForPersona(personaId))],
+          personas: fleetPersonas,
           channels: [...channelsResult.channels],
           // Bounded by the roster it is read against, so the day's counts can
           // never outnumber the seats the snapshot carries.
           tallies: [...seatLedger.tallies(seats.map((seat) => seat.seatId))],
           edges: [...deriveFleetEdges(liveEdgeSeats, promptEdges.recent(), seatMessages.recent())],
+          ...(options.swarm === undefined ? {} : { tasks: fleetTasks(swarmTasks, fleetPersonas) }),
         },
       };
     }
@@ -1648,7 +1861,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           `# Owner preferences: fleet.notes\n${current.fleet.notes}`,
           ...files.map((file) => `# Instructions: ${file.path}\n${file.content}`),
           WORK_TRACKING_BRIEF,
-          await assignmentSkills({ cwd: selected.cwd, repoRoot: options.repoRoot, names: skills }),
+          await assignmentSkills({
+            cwd: selected.cwd,
+            repoRoot: options.repoRoot,
+            names: skills,
+            skills: (await settings()).skills,
+          }),
         ]
           .filter(Boolean)
           .join("\n\n");
@@ -1873,6 +2091,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane.capture.guildId = normalized.guildId;
     lane.capture.channelId = normalized.channelId;
     lane.capture.messageId = normalized.messageId;
+    lane.capture.requestText = normalized.heard;
     lane.capture.discordOrigin = normalized.lane === "discord_presence" ? origin : undefined;
     const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
     await laneLog.append(normalized.lane, normalized.targetId, {
@@ -2132,7 +2351,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // to be told. A one-shot never owns history, even when the social lane in
       // the same room is warm. A lane resumed after restart reads as cold and
       // gets one redundant bounded backlog once per boot.
+      const owner =
+        authority?.verifiedOwner === true ||
+        (discord.ownerUserId !== undefined && discord.ownerUserId === request.trigger.actorId);
+      const sender = owner
+        ? ("owner" as const)
+        : plan.systemTools && discord.systemActorUserIds.includes(request.trigger.actorId)
+          ? ("granted" as const)
+          : undefined;
       const heard = await normalizeDiscordTurn(request, deps, {
+        ...(sender === undefined ? {} : { sender }),
         carriesHistory: plan.durable && sessions.has(plan.sessionKey),
         ...(plan.durable ? { shownContextVisuals: shownContextVisualsFor(plan.sessionKey) } : {}),
       });
@@ -2221,6 +2449,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             op: "composer_catalog",
             schemaVersion: 1,
             catalog: captainComposerCatalog({
+              skills: (await settings()).skills,
               cwd:
                 conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : workingDirectory,
               repoRoot: options.repoRoot,
@@ -2253,7 +2482,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       if (request.op === "fleet") {
         await fleetChanges.wait(request.cursor, request.waitMs ?? 0);
-        return fleetSnapshot();
+        const result = await fleetSnapshot();
+        return request.view === "home" ? { ...result, snapshot: operatorFleetHome(result.snapshot) } : result;
       }
       if (request.op === "state_stance") {
         // The pane is the whole claim of identity, and it is checked against the
@@ -2349,7 +2579,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
       if (request.op === "spawn_seat") {
-        return { op: "spawn_seat", schemaVersion: 1, result: await hireSeat(request.seat) };
+        const result = await hireSeat(request.seat, request.brief);
+        return { op: "spawn_seat", schemaVersion: 1, result };
       }
       if (request.op === "move_seat") {
         const seat = liveSeats.find((current) => current.seatId === request.move.seatId);
@@ -2451,7 +2682,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 snapshot.transcript,
                 snapshot.agent.status,
                 input,
-                cwd === undefined || options.deliveredFiles === undefined
+                cwd === undefined || options.deliveredFiles === undefined || splitFleetQualified(seatId)
                   ? undefined
                   : (path) =>
                       options.deliveredFiles!.publish({
@@ -2526,8 +2757,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     voiceLaneInstructions(): string {
       return (
         "You are present in a Discord voice channel. You hear only participants permitted by the room's consent policy and you speak " +
-        "aloud: keep replies short, conversational, and free of markdown, links, file paths, or anything " +
-        "that only makes sense on a screen. You are a participant in the room, not an assistant on call."
+        "aloud as a friend hanging out in a call. Match the length to the moment; most turns are short, " +
+        "sometimes just a few words. A story, a strong opinion, a bit you are invested in, or a real " +
+        "question that needs a real answer can earn more room. Keep your personality without constantly " +
+        "performing. No lists, assistant padding, menus of options, or restating the request. Handoff " +
+        "results follow the same proportion: give the gist, expand when the substance warrants it, " +
+        "and you can offer details in text chat. Text can be thorough. Leave room for people and absorb the latest conversation " +
+        "instead of answering each fragment. No markdown, links, or file paths spoken aloud."
       );
     },
 
@@ -2548,13 +2784,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const selection = sections.includes("model")
         ? await (await runtime()).resolveSelection().catch(() => undefined)
         : undefined;
-      const prompt = assembleLanePrompt(
+      let prompt = assembleLanePrompt(
         lane,
         laneHoldsSystemTools(lane),
         currentSettings,
         sections,
         selection === undefined ? {} : { model: modelCard(selection) },
+        laneHoldsSystemTools(lane) && sections.includes("reach") ? await harnessesForPrompt() : [],
       );
+      if (sections.includes("persona")) prompt += "\n\n" + personaImageBriefing(await personaImages());
       if (conversationId === undefined) return prompt;
       const binding = lane === "operator" ? seatContext(conversationId) : undefined;
       if (binding === undefined) throw new Error("Unknown captain conversation");
@@ -2597,9 +2835,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         hireSeat,
         messageSeat,
         lane === "operator" && options.swarm !== undefined
-          ? await options.swarm.tools({
-              ...seatContext(conversationId)!,
-            })
+          ? await options.swarm
+              .tools({
+                ...seatContext(conversationId)!,
+              })
+              .catch((error: unknown) => {
+                console.warn("Swarm tools unavailable; continuing with the local lane tool bank", error);
+                return [];
+              })
           : [],
       );
     },
@@ -2610,6 +2853,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const events = seatOutbox(binding.conversationId).poll(waitMs, signal);
       options.swarm?.settled(binding.conversationId);
       return events;
+    },
+
+    async recordSeatHook(paneId, hook) {
+      if (deps.herdrAvailable?.() === false) return false;
+      // Only the Claude session herdr says sits in that pane may report for it.
+      const agent = await herdrRunner.get(paneId).catch(() => undefined);
+      const session = agent?.session;
+      const sessionId =
+        session === undefined
+          ? undefined
+          : session.kind === "id"
+            ? session.value
+            : basename(session.value, ".jsonl");
+      if (agent?.agent !== "claude" || sessionId !== hook.sessionId) return false;
+      seatHooks.record(paneId, hook);
+      return true;
     },
 
     async pollFleetSeatEvents(paneId, waitMs, signal) {
@@ -2634,8 +2893,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     acknowledgeLinearInbox: (cursor, conversationId) =>
       conversations.acknowledgeLinearInbox(cursor, conversationId),
     linearWorkOwners: () => conversations.linearWorkOwners(),
-    setLinearWorkOwner: (owner, expected, remove) =>
-      conversations.setLinearWorkOwner(owner, expected, remove),
     resumeLinearActivity: () => conversations.resumeLinearActivity(),
     receiveLinearActivity: (activity, following) => conversations.receiveLinearActivity(activity, following),
 

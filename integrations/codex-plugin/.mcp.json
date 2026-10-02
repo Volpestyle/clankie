@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "clankie": {
+      "command": "clankie",
+      "args": ["mcp", "--lane", "operator"],
+      "env_vars": [
+        "CLANKIE_CONVERSATION_ID",
+        "CLANKIE_CONTROL_PLANE_URL",
+        "CLANKIE_CAPTAIN_URL",
+        "CLANKIE_STATE_HOME",
+        "CLANKIE_OPERATOR_TOKEN",
+        "CLANKIE_CAPTAIN_TOKEN",
+        "XDG_STATE_HOME"
+      ]
+    }
+  }
+}

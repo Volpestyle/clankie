@@ -51,6 +51,11 @@ export interface DiscordTextIngressConfig {
   readonly maxPendingPerChannel?: number;
   /** Channels tracked for catch-up at once. */
   readonly maxTrackedChannels?: number;
+  /** Optional durable attention metadata; message bodies remain in the delivery journal. */
+  readonly channelActivity?: {
+    load(): readonly { channelId: string; sinceReply: number }[];
+    save(channels: readonly { channelId: string; sinceReply: number }[]): void;
+  };
   readonly deliveryRetentionMs?: number;
   readonly maxRetainedDeliveries?: number;
 }
@@ -387,6 +392,9 @@ export class DiscordTextIngress {
     this.config = config;
     this.evidence = evidence;
     this.clock = clock;
+    for (const activity of config.channelActivity?.load() ?? []) {
+      this.channels.set(activity.channelId, { sinceReply: activity.sinceReply, pending: [] });
+    }
     if (
       !Number.isInteger(config.contextMessageLimit) ||
       config.contextMessageLimit < 0 ||
@@ -417,7 +425,7 @@ export class DiscordTextIngress {
         ...details,
       });
 
-    const refusal = this.refusalReason(message);
+    const refusal = this.admissionRefusal(message);
     if (refusal !== undefined) {
       event("dropped", { reason: refusal });
       return { state: "dropped", reason: refusal };
@@ -466,13 +474,19 @@ export class DiscordTextIngress {
       // waits until he next looks, which is what a person does with a room they
       // are no longer watching.
       const activity = this.channels.get(message.channelId);
-      if (activity !== undefined) activity.sinceReply += 1;
+      if (activity !== undefined) {
+        activity.sinceReply += 1;
+        this.saveActivity();
+      }
       this.buffer(message);
       event("buffered");
       return { state: "buffered" };
     }
     const active = this.channels.get(message.channelId);
-    if (active !== undefined) active.sinceReply += 1;
+    if (active !== undefined) {
+      active.sinceReply += 1;
+      this.saveActivity();
+    }
 
     const result = this.runTurn(message, body, presenceSessionId, correlationId, event);
     this.deliveries.set(message.id, {
@@ -686,7 +700,8 @@ export class DiscordTextIngress {
     return true;
   }
 
-  private refusalReason(message: DiscordInboundMessage): string | undefined {
+  /** Shared live/history admission; catch-up never bypasses trust or addressing. */
+  public admissionRefusal(message: DiscordInboundMessage): string | undefined {
     if (message.authorIsBot) return "self_or_bot_message";
     if (message.guildId === undefined) {
       if (this.config.dmPolicy === "deny") return "dm_denied";
@@ -829,10 +844,20 @@ export class DiscordTextIngress {
    * present than before.
    */
   private rememberReply(message: DiscordInboundMessage): void {
-    const existing = this.channels.get(message.channelId);
+    this.observeChannelReply(message.channelId);
+  }
+
+  public hasSpokenInChannel(channelId: string): boolean {
+    return this.channels.has(channelId);
+  }
+
+  /** A reply observed in Discord history is also proof he has spoken here. */
+  public observeChannelReply(channelId: string): void {
+    const existing = this.channels.get(channelId);
     if (existing !== undefined) {
       existing.sinceReply = 0;
       existing.pending.length = 0;
+      this.saveActivity();
       return;
     }
     const cap = this.config.maxTrackedChannels ?? DEFAULT_MAX_TRACKED_CHANNELS;
@@ -840,7 +865,14 @@ export class DiscordTextIngress {
       const oldest = this.channels.keys().next().value;
       if (oldest !== undefined) this.channels.delete(oldest);
     }
-    this.channels.set(message.channelId, { sinceReply: 0, pending: [] });
+    this.channels.set(channelId, { sinceReply: 0, pending: [] });
+    this.saveActivity();
+  }
+
+  private saveActivity(): void {
+    this.config.channelActivity?.save(
+      [...this.channels].map(([channelId, activity]) => ({ channelId, sinceReply: activity.sinceReply })),
+    );
   }
 
   private pruneDeliveries(): void {

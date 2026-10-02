@@ -233,13 +233,8 @@ describe("play voice listener", () => {
     socket.close();
     await vi.waitFor(() => expect(listener?.attachedCount).toBe(0));
     listener.publishUtterance("james: nobody attached");
-    await vi.waitFor(() =>
-      expect(evidence.filter((event) => event.type === "play_transcript_delivery")).toHaveLength(3),
-    );
-    expect(evidence.filter((event) => event.type === "play_transcript_delivery").at(-1)).toMatchObject({
-      attachedCount: 0,
-      deliveredCount: 0,
-    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(evidence.filter((event) => event.type === "play_transcript_delivery")).toHaveLength(2);
   });
 
   it("emits only content-free seam lifecycle and delivery evidence", async () => {

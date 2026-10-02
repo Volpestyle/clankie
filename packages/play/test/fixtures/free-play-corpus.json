@@ -1,0 +1,1336 @@
+[
+  {
+    "id": "movement-with-missing-voice-evidence",
+    "journal": [
+      {
+        "kind": "header",
+        "schemaVersion": 2,
+        "runId": "qa-run",
+        "environmentSessionId": "qa-session",
+        "scenarioId": "world:pokemon-firered",
+        "startedAt": "2026-09-01T12:00:00.000Z",
+        "resumedFromCheckpointId": null
+      },
+      {
+        "kind": "turn",
+        "schemaVersion": 2,
+        "at": "2026-09-01T12:00:00.000Z",
+        "speechDeliveryId": "qa-delivery",
+        "narrationEvent": "walking east",
+        "evidence": {
+          "decision": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "immediatePreAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "postAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 8,
+                "observationId": "scene-8",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 8,
+                "observationId": "position-8",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 8,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "actionResult": {
+            "source": "environment",
+            "result": {
+              "schemaVersion": 1,
+              "actionId": "qa-action",
+              "sessionId": "qa-session",
+              "updatedAt": "2026-09-01T12:00:00.000Z",
+              "status": "completed",
+              "acceptedGoalVersion": 1,
+              "outcome": {
+                "steps": 3,
+                "arrived": true
+              }
+            }
+          },
+          "progressBefore": {
+            "distinctTiles": 1,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "progressAfter": {
+            "distinctTiles": 2,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "signals": {
+            "refusedHere": [],
+            "stalledForTurns": null,
+            "repeatingForTurns": null,
+            "recurringForTurns": null,
+            "objectiveForTurns": null,
+            "localeForTurns": null,
+            "previousObjective": null,
+            "previousNotes": null,
+            "retiredObjective": null,
+            "objectiveRecovery": false,
+            "verifiedInteractions": [],
+            "decisionPreemptions": 0
+          },
+          "timing": {
+            "decisionStartedAt": "2026-09-01T12:00:00.000Z",
+            "decisionSettledAt": "2026-09-01T12:00:02.000Z",
+            "actionStartedAt": "2026-09-01T12:00:02.000Z",
+            "actionSettledAt": "2026-09-01T12:00:03.000Z"
+          }
+        },
+        "turn": {
+          "turn": 0,
+          "observationSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "framebufferSha256": null,
+          "monologue": "walk east",
+          "intent": "walk east",
+          "notes": "",
+          "objective": "walk east",
+          "objectiveRetired": null,
+          "interjection": null,
+          "reply": null,
+          "speak": null,
+          "speakSuppressed": false,
+          "speakWanted": true,
+          "action": {
+            "kind": "walk_to",
+            "x": 8,
+            "y": 6
+          },
+          "outcome": "accepted",
+          "detail": "accepted",
+          "effect": "walked east",
+          "effectAdvice": null
+        }
+      }
+    ],
+    "voiceReceipts": [],
+    "lifecycleEvents": [],
+    "expected": {
+      "narration": "attempted_no_receipt",
+      "movement": "effective",
+      "terminalSource": "unknown"
+    }
+  },
+  {
+    "id": "joined-playback-receipt",
+    "journal": [
+      {
+        "kind": "header",
+        "schemaVersion": 2,
+        "runId": "qa-run",
+        "environmentSessionId": "qa-session",
+        "scenarioId": "world:pokemon-firered",
+        "startedAt": "2026-09-01T12:00:00.000Z",
+        "resumedFromCheckpointId": null
+      },
+      {
+        "kind": "turn",
+        "schemaVersion": 2,
+        "at": "2026-09-01T12:00:00.000Z",
+        "speechDeliveryId": "qa-delivery",
+        "narrationEvent": "walking east",
+        "evidence": {
+          "decision": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "immediatePreAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "postAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 8,
+                "observationId": "scene-8",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 8,
+                "observationId": "position-8",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 8,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "actionResult": {
+            "source": "environment",
+            "result": {
+              "schemaVersion": 1,
+              "actionId": "qa-action",
+              "sessionId": "qa-session",
+              "updatedAt": "2026-09-01T12:00:00.000Z",
+              "status": "completed",
+              "acceptedGoalVersion": 1,
+              "outcome": {
+                "steps": 3,
+                "arrived": true
+              }
+            }
+          },
+          "progressBefore": {
+            "distinctTiles": 1,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "progressAfter": {
+            "distinctTiles": 2,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "signals": {
+            "refusedHere": [],
+            "stalledForTurns": null,
+            "repeatingForTurns": null,
+            "recurringForTurns": null,
+            "objectiveForTurns": null,
+            "localeForTurns": null,
+            "previousObjective": null,
+            "previousNotes": null,
+            "retiredObjective": null,
+            "objectiveRecovery": false,
+            "verifiedInteractions": [],
+            "decisionPreemptions": 0
+          },
+          "timing": {
+            "decisionStartedAt": "2026-09-01T12:00:00.000Z",
+            "decisionSettledAt": "2026-09-01T12:00:02.000Z",
+            "actionStartedAt": "2026-09-01T12:00:02.000Z",
+            "actionSettledAt": "2026-09-01T12:00:03.000Z"
+          }
+        },
+        "turn": {
+          "turn": 0,
+          "observationSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "framebufferSha256": null,
+          "monologue": "walk east",
+          "intent": "walk east",
+          "notes": "",
+          "objective": "walk east",
+          "objectiveRetired": null,
+          "interjection": null,
+          "reply": null,
+          "speak": null,
+          "speakSuppressed": false,
+          "speakWanted": true,
+          "action": {
+            "kind": "walk_to",
+            "x": 8,
+            "y": 6
+          },
+          "outcome": "accepted",
+          "detail": "accepted",
+          "effect": "walked east",
+          "effectAdvice": null
+        }
+      }
+    ],
+    "voiceReceipts": [
+      {
+        "type": "discord.voice.response",
+        "occurredAt": "2026-09-01T12:00:00.000Z",
+        "data": {
+          "deliveryId": "qa-delivery",
+          "trigger": "narration",
+          "playbackMs": 800
+        }
+      }
+    ],
+    "lifecycleEvents": [],
+    "expected": {
+      "narration": "played",
+      "movement": "effective",
+      "terminalSource": "unknown"
+    }
+  },
+  {
+    "id": "unrelated-playback-is-not-evidence",
+    "journal": [
+      {
+        "kind": "header",
+        "schemaVersion": 2,
+        "runId": "qa-run",
+        "environmentSessionId": "qa-session",
+        "scenarioId": "world:pokemon-firered",
+        "startedAt": "2026-09-01T12:00:00.000Z",
+        "resumedFromCheckpointId": null
+      },
+      {
+        "kind": "turn",
+        "schemaVersion": 2,
+        "at": "2026-09-01T12:00:00.000Z",
+        "speechDeliveryId": "qa-delivery",
+        "narrationEvent": "walking east",
+        "evidence": {
+          "decision": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "immediatePreAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "postAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 8,
+                "observationId": "scene-8",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 8,
+                "observationId": "position-8",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 8,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "actionResult": {
+            "source": "environment",
+            "result": {
+              "schemaVersion": 1,
+              "actionId": "qa-action",
+              "sessionId": "qa-session",
+              "updatedAt": "2026-09-01T12:00:00.000Z",
+              "status": "completed",
+              "acceptedGoalVersion": 1,
+              "outcome": {
+                "steps": 3,
+                "arrived": true
+              }
+            }
+          },
+          "progressBefore": {
+            "distinctTiles": 1,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "progressAfter": {
+            "distinctTiles": 2,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "signals": {
+            "refusedHere": [],
+            "stalledForTurns": null,
+            "repeatingForTurns": null,
+            "recurringForTurns": null,
+            "objectiveForTurns": null,
+            "localeForTurns": null,
+            "previousObjective": null,
+            "previousNotes": null,
+            "retiredObjective": null,
+            "objectiveRecovery": false,
+            "verifiedInteractions": [],
+            "decisionPreemptions": 0
+          },
+          "timing": {
+            "decisionStartedAt": "2026-09-01T12:00:00.000Z",
+            "decisionSettledAt": "2026-09-01T12:00:02.000Z",
+            "actionStartedAt": "2026-09-01T12:00:02.000Z",
+            "actionSettledAt": "2026-09-01T12:00:03.000Z"
+          }
+        },
+        "turn": {
+          "turn": 0,
+          "observationSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "framebufferSha256": null,
+          "monologue": "walk east",
+          "intent": "walk east",
+          "notes": "",
+          "objective": "walk east",
+          "objectiveRetired": null,
+          "interjection": null,
+          "reply": null,
+          "speak": null,
+          "speakSuppressed": false,
+          "speakWanted": true,
+          "action": {
+            "kind": "walk_to",
+            "x": 8,
+            "y": 6
+          },
+          "outcome": "accepted",
+          "detail": "accepted",
+          "effect": "walked east",
+          "effectAdvice": null
+        }
+      }
+    ],
+    "voiceReceipts": [
+      {
+        "type": "discord.voice.response",
+        "occurredAt": "2026-09-01T12:00:00.000Z",
+        "data": {
+          "deliveryId": "another-delivery",
+          "trigger": "narration",
+          "playbackMs": 800
+        }
+      }
+    ],
+    "lifecycleEvents": [],
+    "expected": {
+      "narration": "attempted_no_receipt",
+      "movement": "effective",
+      "terminalSource": "unknown"
+    }
+  },
+  {
+    "id": "explicitly-suppressed-narration",
+    "journal": [
+      {
+        "kind": "header",
+        "schemaVersion": 2,
+        "runId": "qa-run",
+        "environmentSessionId": "qa-session",
+        "scenarioId": "world:pokemon-firered",
+        "startedAt": "2026-09-01T12:00:00.000Z",
+        "resumedFromCheckpointId": null
+      },
+      {
+        "kind": "turn",
+        "schemaVersion": 2,
+        "at": "2026-09-01T12:00:00.000Z",
+        "speechDeliveryId": "qa-delivery",
+        "narrationEvent": "walking east",
+        "evidence": {
+          "decision": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "immediatePreAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "postAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 8,
+                "observationId": "scene-8",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 8,
+                "observationId": "position-8",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 8,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "actionResult": {
+            "source": "environment",
+            "result": {
+              "schemaVersion": 1,
+              "actionId": "qa-action",
+              "sessionId": "qa-session",
+              "updatedAt": "2026-09-01T12:00:00.000Z",
+              "status": "completed",
+              "acceptedGoalVersion": 1,
+              "outcome": {
+                "steps": 3,
+                "arrived": true
+              }
+            }
+          },
+          "progressBefore": {
+            "distinctTiles": 1,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "progressAfter": {
+            "distinctTiles": 2,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "signals": {
+            "refusedHere": [],
+            "stalledForTurns": null,
+            "repeatingForTurns": null,
+            "recurringForTurns": null,
+            "objectiveForTurns": null,
+            "localeForTurns": null,
+            "previousObjective": null,
+            "previousNotes": null,
+            "retiredObjective": null,
+            "objectiveRecovery": false,
+            "verifiedInteractions": [],
+            "decisionPreemptions": 0
+          },
+          "timing": {
+            "decisionStartedAt": "2026-09-01T12:00:00.000Z",
+            "decisionSettledAt": "2026-09-01T12:00:02.000Z",
+            "actionStartedAt": "2026-09-01T12:00:02.000Z",
+            "actionSettledAt": "2026-09-01T12:00:03.000Z"
+          }
+        },
+        "turn": {
+          "turn": 0,
+          "observationSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "framebufferSha256": null,
+          "monologue": "walk east",
+          "intent": "walk east",
+          "notes": "",
+          "objective": "walk east",
+          "objectiveRetired": null,
+          "interjection": null,
+          "reply": null,
+          "speak": null,
+          "speakSuppressed": false,
+          "speakWanted": true,
+          "action": {
+            "kind": "walk_to",
+            "x": 8,
+            "y": 6
+          },
+          "outcome": "accepted",
+          "detail": "accepted",
+          "effect": "walked east",
+          "effectAdvice": null
+        }
+      }
+    ],
+    "voiceReceipts": [
+      {
+        "type": "discord.voice.play_narration_suppressed",
+        "data": {
+          "deliveryId": "qa-delivery",
+          "reason": "rate_limited"
+        }
+      }
+    ],
+    "lifecycleEvents": [],
+    "expected": {
+      "narration": "suppressed",
+      "movement": "effective",
+      "terminalSource": "unknown"
+    }
+  },
+  {
+    "id": "claimed-movement-without-position-change",
+    "journal": [
+      {
+        "kind": "header",
+        "schemaVersion": 2,
+        "runId": "qa-run",
+        "environmentSessionId": "qa-session",
+        "scenarioId": "world:pokemon-firered",
+        "startedAt": "2026-09-01T12:00:00.000Z",
+        "resumedFromCheckpointId": null
+      },
+      {
+        "kind": "turn",
+        "schemaVersion": 2,
+        "at": "2026-09-01T12:00:00.000Z",
+        "speechDeliveryId": "qa-delivery",
+        "narrationEvent": "walking east",
+        "evidence": {
+          "decision": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "immediatePreAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "postAction": {
+            "observations": [
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "scene-5",
+                "kind": "scene",
+                "data": {
+                  "mode": "overworld",
+                  "inputReady": true,
+                  "waitingForDialogAdvance": false
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "sessionId": "qa-session",
+                "characterId": "clankie",
+                "worldId": "kanto",
+                "goalVersion": 1,
+                "capturedAt": "2026-09-01T12:00:00.000Z",
+                "frame": 5,
+                "observationId": "position-5",
+                "kind": "overworld",
+                "data": {
+                  "position": {
+                    "mapId": "PALLET_TOWN",
+                    "x": 5,
+                    "y": 6
+                  },
+                  "facing": "east",
+                  "surroundings": null,
+                  "mapSize": null,
+                  "minimap": null,
+                  "exits": null,
+                  "ramStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "provenance": {
+              "body": "world",
+              "sessionId": "qa-session",
+              "worldId": "kanto",
+              "bodyGeneration": 1
+            }
+          },
+          "actionResult": {
+            "source": "environment",
+            "result": {
+              "schemaVersion": 1,
+              "actionId": "qa-action",
+              "sessionId": "qa-session",
+              "updatedAt": "2026-09-01T12:00:00.000Z",
+              "status": "completed",
+              "acceptedGoalVersion": 1,
+              "outcome": {
+                "steps": 3,
+                "arrived": true
+              }
+            }
+          },
+          "progressBefore": {
+            "distinctTiles": 1,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "progressAfter": {
+            "distinctTiles": 2,
+            "maps": ["PALLET_TOWN"],
+            "turnsSinceNewTile": 0,
+            "actionsPerNewTile": null
+          },
+          "signals": {
+            "refusedHere": [],
+            "stalledForTurns": null,
+            "repeatingForTurns": null,
+            "recurringForTurns": null,
+            "objectiveForTurns": null,
+            "localeForTurns": null,
+            "previousObjective": null,
+            "previousNotes": null,
+            "retiredObjective": null,
+            "objectiveRecovery": false,
+            "verifiedInteractions": [],
+            "decisionPreemptions": 0
+          },
+          "timing": {
+            "decisionStartedAt": "2026-09-01T12:00:00.000Z",
+            "decisionSettledAt": "2026-09-01T12:00:02.000Z",
+            "actionStartedAt": "2026-09-01T12:00:02.000Z",
+            "actionSettledAt": "2026-09-01T12:00:03.000Z"
+          }
+        },
+        "turn": {
+          "turn": 0,
+          "observationSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "framebufferSha256": null,
+          "monologue": "walk east",
+          "intent": "walk east",
+          "notes": "",
+          "objective": "walk east",
+          "objectiveRetired": null,
+          "interjection": null,
+          "reply": null,
+          "speak": null,
+          "speakSuppressed": false,
+          "speakWanted": true,
+          "action": {
+            "kind": "walk_to",
+            "x": 8,
+            "y": 6
+          },
+          "outcome": "accepted",
+          "detail": "accepted",
+          "effect": "walked east",
+          "effectAdvice": null
+        }
+      }
+    ],
+    "voiceReceipts": [],
+    "lifecycleEvents": [],
+    "expected": {
+      "narration": "attempted_no_receipt",
+      "movement": "ineffective",
+      "terminalSource": "unknown"
+    }
+  },
+  {
+    "id": "legacy-missing-position-evidence",
+    "journal": [
+      {
+        "kind": "header",
+        "schemaVersion": 2,
+        "runId": "qa-run",
+        "environmentSessionId": "qa-session",
+        "scenarioId": "world:pokemon-firered",
+        "startedAt": "2026-09-01T12:00:00.000Z",
+        "resumedFromCheckpointId": null
+      },
+      {
+        "kind": "turn",
+        "schemaVersion": 1,
+        "at": "2026-09-01T12:00:00.000Z",
+        "speechDeliveryId": "qa-delivery",
+        "turn": {
+          "turn": 0,
+          "observationSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "framebufferSha256": null,
+          "monologue": "walk east",
+          "intent": "walk east",
+          "notes": "",
+          "objective": "walk east",
+          "objectiveRetired": null,
+          "interjection": null,
+          "reply": null,
+          "speak": null,
+          "speakSuppressed": false,
+          "speakWanted": true,
+          "action": {
+            "kind": "walk_to",
+            "x": 8,
+            "y": 6
+          },
+          "outcome": "accepted",
+          "detail": "accepted",
+          "effect": "walked east",
+          "effectAdvice": null
+        }
+      }
+    ],
+    "voiceReceipts": [],
+    "lifecycleEvents": [],
+    "expected": {
+      "narration": "attempted_no_receipt",
+      "movement": "unknown",
+      "terminalSource": "unknown"
+    }
+  }
+]

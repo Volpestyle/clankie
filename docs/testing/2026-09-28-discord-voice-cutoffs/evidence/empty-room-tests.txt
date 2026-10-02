@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  2 passed (2)
+      Tests  113 passed (113)
+   Start at  18:23:08
+   Duration  412ms (transform 132ms, setup 0ms, import 206ms, tests 80ms, environment 0ms)
+

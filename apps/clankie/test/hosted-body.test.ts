@@ -12,6 +12,7 @@ import {
   HOSTED_DEFAULT_MODEL,
   HostedBodyClient,
   HostedBodyDeniedError,
+  hostedWorkerLimit,
   readHostedBodyBootstrap,
 } from "../src/hosted-body.ts";
 
@@ -514,6 +515,11 @@ describe("included model and customer model paths (VUH-1371)", () => {
         npm: "@ai-sdk/openai",
         options: { baseURL: "http://127.0.0.1:4319/v1" },
       });
+      // The proxy bounds output per plan at 32,768 (VUH-1391); the body must not ask for less,
+      // or long code answers are cut off mid-file at the old 8,192.
+      for (const model of Object.values(config.provider?.clankie?.models ?? {})) {
+        expect(model).toMatchObject({ limit: { output: 32_768 } });
+      }
       expect(Object.keys(config.provider?.clankie?.models ?? {}).sort()).toEqual([
         "default",
         "escalation",
@@ -589,5 +595,32 @@ describe("included model and customer model paths (VUH-1371)", () => {
         escalation_model: "clankie/escalation",
       });
     });
+  });
+});
+
+describe("a hosted body's hire limit (VUH-1388)", () => {
+  it("takes the plan's limit from the bootstrap, else two per vCPU", () => {
+    expect(hostedWorkerLimit({ maxHiredWorkers: 6 }, 2)).toBe(6);
+    expect(hostedWorkerLimit({}, 2)).toBe(4);
+    expect(hostedWorkerLimit({}, 4)).toBe(8);
+    expect(hostedWorkerLimit({}, 0)).toBe(1);
+  });
+
+  it("accepts the plan's limit in the bootstrap within bounds", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hosted-bootstrap-"));
+    try {
+      const path = join(dir, "bootstrap.json");
+      const { bootstrap } = hostedFixture();
+      writeFileSync(path, JSON.stringify({ ...bootstrap, maxHiredWorkers: 8 }));
+      expect(readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })?.maxHiredWorkers).toBe(8);
+      for (const bad of [0, 65, 2.5]) {
+        writeFileSync(path, JSON.stringify({ ...bootstrap, maxHiredWorkers: bad }));
+        expect(() => readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toThrow(
+          "Invalid hosted body bootstrap file",
+        );
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

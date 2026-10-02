@@ -51,12 +51,23 @@ voice state. Raw user, guild, channel, and message ids are never tool arguments.
   idempotent so consent state is not reset.
 - **Typed truth.** The tool returns `joined`, `join_refused`, `left`, or
   `leave_refused` with a bounded reason. A successful join also says whether
-  this operation auto-opted the speaker into capture, so the captain can give
-  the required consent guidance in his own reply.
+  the speaker can be heard and whether local transcript logging is enabled.
+  These are context, not an obligation to announce anything.
+- **Arrival is his choice (2026-09-28).** A successful join needs no text
+  acknowledgement. The tool describes the choices: text, the existing silent
+  sentinel, or a greeting in voice. Once ready, his own arrival offers the
+  voice session a `membership` turn with the gateway roster and invitation.
+  The host copies at most 1,000 characters of the asking message; both bodies
+  stamp the resolved asker separately from consent. Names and invitation text
+  are quoted untrusted data, never instructions or a new grant. The voice model
+  may speak or stay quiet. An idempotent join offers no second arrival.
 - **Consent remains separate.** An official-bot asked join opts in nobody;
   participants use `/clankie voice-consent opt-in`. The owner-only lab body
-  auto-opts its authenticated owner when it creates the media session, and the
-  captain discloses live speaker-attributed transcription in the reply.
+  auto-opts its authenticated owner when it creates the media session.
+  (Amended 2026-09-28: the join no longer asks him to announce transcription.
+  The owner chose that setting, and ADR 0071 puts telling a presence-policy
+  room on the owner; he answers plainly when asked instead of reciting a
+  disclaimer on arrival.)
 - **Grounded catalog coverage.** Replies, generated media, and typing already
   happen as consequences of a captain turn. Reactions and threads target that
   turn's trigger; live-watch targets fresh voice state. Arbitrary

@@ -54,7 +54,9 @@ than false success.
 ## Loss And Evidence
 
 Narration refuses while disconnected instead of queueing stale commentary.
-Utterances published with nobody attached are dropped, never replayed. Current
+Utterances published with nobody attached are dropped without a delivery
+receipt, never replayed. The consumer connects only during a play session;
+ordinary room traffic while play is idle is not a failed delivery. Current
 room state is sent once on attach and on every change.
 
 The listener's optional evidence contains only connection phase,

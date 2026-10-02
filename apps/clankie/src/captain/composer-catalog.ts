@@ -8,7 +8,7 @@ import {
   type OperatorComposerCatalog,
   type OperatorFleetSeat,
 } from "@clankie/protocol";
-import { clankieSkillRoots } from "@clankie/settings";
+import { clankieSkillRoots, type SkillsSettings } from "@clankie/settings";
 import { getAgentDir, loadSkills } from "@earendil-works/pi-coding-agent";
 
 const SKILL_NAME = /^[a-z0-9][a-z0-9:_-]*$/u;
@@ -141,7 +141,11 @@ function discoverCodexSkills(cwd: string): Promise<OperatorComposerCatalog["skil
   });
 }
 
-export function captainSkills(input: { readonly cwd: string; readonly repoRoot: string }) {
+export function captainSkills(input: {
+  readonly cwd: string;
+  readonly repoRoot: string;
+  readonly skills?: SkillsSettings;
+}) {
   const agentDir = getAgentDir();
   // The same roots his session loads, so the composer offers what he can run.
   const skillPaths = clankieSkillRoots({
@@ -149,6 +153,7 @@ export function captainSkills(input: { readonly cwd: string; readonly repoRoot: 
     agentDir,
     home: homedir(),
     cwd: input.cwd,
+    ...(input.skills ? { skills: input.skills } : {}),
   }).filter(existsSync);
   const { skills } = loadSkills({
     cwd: input.cwd,
@@ -162,6 +167,7 @@ export function captainSkills(input: { readonly cwd: string; readonly repoRoot: 
 export function captainComposerCatalog(input: {
   readonly cwd: string;
   readonly repoRoot: string;
+  readonly skills?: SkillsSettings;
 }): OperatorComposerCatalog {
   return {
     schemaVersion: 1,

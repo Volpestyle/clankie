@@ -1,10 +1,16 @@
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import {
+  createCaptainOperatorConversationClient,
+  createCaptainRouteClient,
+  resolveCaptainRouteToken,
+} from "../session/operator-conversations.ts";
 import { commandHost } from "./io.ts";
 
 const AGENTS_USAGE =
-  "Usage: clankie agents [list] [--host ID] [--limit N]\n" +
+  "Usage: clankie agents contacts\n" +
+  "       clankie agents [list] [--host ID] [--limit N]\n" +
   "       clankie agents read HOST:SESSION [--tail N | --after CURSOR]\n" +
-  "       clankie agents send HOST:SESSION MESSAGE | runs [RUN] | cancel RUN | release RUN\n" +
+  "       clankie agents resume HOST:SESSION [--fleet ID] [--brief TEXT]\n" +
   "       clankie agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID";
 
 /** Read `--flag value` pairs; anything else is a usage error. */
@@ -28,6 +34,17 @@ export async function runAgentsCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "contacts" && args.length === 1) {
+    const token = await resolveCaptainRouteToken({ env: options.env ?? process.env });
+    const client = createCaptainOperatorConversationClient(
+      createCaptainRouteClient({
+        host: commandHost(options),
+        ...(token ? { captainToken: token } : {}),
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      }),
+    );
+    return (await client.fleet!()).personas;
+  }
   let path: string,
     method = "GET",
     body: string | undefined;
@@ -45,18 +62,15 @@ export async function runAgentsCommand(
     if (values.has("--tail")) query.set("tail", values.get("--tail")!);
     if (values.has("--after")) query.set("after", values.get("--after")!);
     path = `/v1/agent-sessions/read?${query}`;
-  } else if (verb === "send" && args[1] !== undefined && args.length > 2) {
-    path = "/v1/agent-sessions/send";
+  } else if (verb === "resume" && args[1] !== undefined) {
+    const values = flags(args.slice(2), ["--fleet", "--brief"]);
+    path = "/v1/agent-sessions/resume";
     method = "POST";
-    body = JSON.stringify({ ref: args[1], message: args.slice(2).join(" ") });
-  } else if (verb === "runs" && args.length <= 2) {
-    path = `/v1/agent-sessions/runs${args[1] === undefined ? "" : `/${encodeURIComponent(args[1])}`}`;
-  } else if (verb === "cancel" && args[1] !== undefined && args.length === 2) {
-    path = `/v1/agent-sessions/runs/${encodeURIComponent(args[1])}`;
-    method = "DELETE";
-  } else if (verb === "release" && args[1] !== undefined && args.length === 2) {
-    path = `/v1/agent-sessions/runs/${encodeURIComponent(args[1])}/release`;
-    method = "POST";
+    body = JSON.stringify({
+      ref: args[1],
+      ...(values.has("--fleet") ? { fleet: values.get("--fleet") } : {}),
+      ...(values.has("--brief") ? { brief: values.get("--brief") } : {}),
+    });
   } else if (verb === "hosts" && args.length === 1) {
     path = "/v1/agent-hosts";
   } else if (verb === "hosts" && args[1] === "add" && args[2] !== undefined) {

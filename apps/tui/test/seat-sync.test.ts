@@ -3,8 +3,82 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
+
+test("Codex hooks project only their bound native rollout and redact tools", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-seat-sync-"));
+  const sessionId = randomUUID();
+  const path = join(root, `rollout-2026-09-30T00-00-00-${sessionId}.jsonl`);
+  const token = "clankie_op_" + "a".repeat(43);
+  const requests: Array<Record<string, unknown>> = [];
+  try {
+    await writeFile(
+      path,
+      [
+        {
+          type: "response_item",
+          payload: {
+            id: "u1",
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Hello seat" }],
+            internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] },
+          },
+        },
+        {
+          type: "response_item",
+          payload: {
+            id: "a1",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Hello operator" }],
+          },
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            call_id: "tool1",
+            name: "exec_command",
+            arguments: JSON.stringify({ command: `Authorization: Bearer ${token}` }),
+          },
+        },
+      ]
+        .map((item) => JSON.stringify(item))
+        .join("\n") + "\n",
+    );
+    await runSeatSyncCommand([], {
+      env: {
+        CLANKIE_SEAT_HARNESS: "codex",
+        CLANKIE_SEAT_SESSION_ID: sessionId,
+        CLANKIE_CONVERSATION_ID: "scratch",
+        CLANKIE_OPERATOR_TOKEN: token,
+      },
+      stdin: Readable.from([
+        JSON.stringify({ session_id: sessionId, transcript_path: path, hook_event_name: "Stop" }),
+      ]),
+      fetchImpl: async (url, init) => {
+        expect(String(url)).toContain("conversationId=scratch");
+        expect(String(init?.body)).not.toContain(token);
+        requests.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true });
+      },
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      sessionId,
+      activity: "waiting",
+      entries: [
+        { type: "message", text: "Hello seat" },
+        { type: "message", text: "Hello operator" },
+        { type: "tool" },
+      ],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("seat hook uploads redacted native records to its selected conversation and never a child session", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-sync-"));
@@ -174,6 +248,47 @@ test("seat sync omits internal channel deliveries but keeps queued human prompts
     expect(await sync()).toBe(0);
     expect(bodies[1]).toMatchObject({ entries: [], activity: "waiting" });
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("seat sync stops paging when the shared upload deadline expires", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-deadline-"));
+  const sessionId = randomUUID();
+  const path = join(root, `${sessionId}.jsonl`);
+  const deadline = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+  let requests = 0;
+  try {
+    await writeFile(
+      path,
+      Array.from({ length: 101 }, (_, index) =>
+        JSON.stringify({
+          uuid: `message-${index}`,
+          parentUuid: index ? `message-${index - 1}` : null,
+          type: "user",
+          message: { content: `Message ${index}` },
+        }),
+      ).join("\n") + "\n",
+    );
+    await expect(
+      runSeatSyncCommand([], {
+        env: { CLANKIE_SEAT_SESSION_ID: sessionId, CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43) },
+        stdin: Readable.from([
+          JSON.stringify({ session_id: sessionId, transcript_path: path, hook_event_name: "Stop" }),
+        ]),
+        fetchImpl: async (_url, options) => {
+          requests++;
+          expect(options?.signal).toBe(deadline.signal);
+          deadline.abort(new Error("upload deadline"));
+          return Response.json({ ok: true });
+        },
+      }),
+    ).rejects.toThrow("upload deadline");
+    expect(requests).toBe(1);
+    expect(timeout).toHaveBeenCalledTimes(1);
+  } finally {
+    timeout.mockRestore();
     await rm(root, { recursive: true, force: true });
   }
 });

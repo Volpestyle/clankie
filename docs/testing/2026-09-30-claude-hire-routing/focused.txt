@@ -1,0 +1,18 @@
+RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  6 passed (6)
+      Tests  97 passed (97)
+   Start at  13:50:22
+   Duration  6.17s (transform 295ms, setup 0ms, import 2.00s, tests 3.76s, environment 0ms)
+
+
+Follow-up: folder-trust expectation updated to the typed outcome.
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  13:55:44
+   Duration  745ms (transform 155ms, setup 0ms, import 644ms, tests 20ms, environment 0ms)

@@ -97,6 +97,27 @@ paths:
         "401": { description: authentication_required }
         "403": { description: forbidden — terminalControl required }
         "503": { description: unavailable }
+  /v1/model-keys/subscriptions:
+    get:
+      tags: [Operator]
+      operationId: listModelSubscriptions
+      summary: List providers signed in through an account (OAuth or subscription) instead of an API key
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. Returns provider ids and
+        names only; no tokens, expiry or account metadata. A separate read so
+        clients parsing the strict model catalog never meet a new field.
+        Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Providers signed in through an account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelSubscriptionsResponse" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
   /v1/model-keys/set:
     post:
       tags: [Operator]
@@ -225,6 +246,53 @@ paths:
         "403": { description: forbidden — terminalControl required }
         "413": { description: malformed — body exceeds 16 KiB }
         "503": { description: unavailable }
+  /v1/accounts/codex:
+    get:
+      tags: [Operator]
+      operationId: listCodexAccounts
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      summary: List registered local Codex homes and observed headroom
+      description: Owner-authorized. Reports credential-file presence, never credential contents. Queries current quota without a model turn, with recent rollouts as fallback. Missing or stale usage is unknown.
+      responses:
+        "200":
+          description: Default and registered account labels, paths, rate windows and headroom
+        "401":
+          description: Authentication required
+        "403":
+          description: Owner authority required
+    post:
+      tags: [Operator]
+      operationId: updateCodexAccounts
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      summary: Register or remove an owner's local Codex home
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [op, home, label]
+                  additionalProperties: false
+                  properties:
+                    op: { type: string, enum: [add] }
+                    home: { type: string }
+                    label: { type: string }
+                - type: object
+                  required: [op, label]
+                  additionalProperties: false
+                  properties:
+                    op: { type: string, enum: [remove] }
+                    label: { type: string }
+      responses:
+        "200":
+          description: Registration updated; credentials and home are unchanged
+        "400":
+          description: Invalid or duplicate account
+        "401":
+          description: Authentication required
+        "403":
+          description: Owner authority required
   /v1/accounts:
     get:
       tags: [Operator]
@@ -582,7 +650,7 @@ paths:
     get:
       tags: [Operator]
       operationId: listLinearWorkOwners
-      summary: List explicit organization and issue ownership
+      summary: Read legacy organization and issue bindings
       security: [{ operatorBearer: [] }]
       responses:
         "200": { description: Owners in an owners array }
@@ -590,34 +658,21 @@ paths:
     put:
       tags: [Operator]
       operationId: bindLinearWorkOwner
-      summary: Bind new issue activity to an existing Clankie conversation
-      description: Rebinding requires the expected current conversation. Already admitted events keep their original owner.
+      summary: Retired issue binding mutation
+      deprecated: true
       security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/LinearWorkOwnerRequest" }
       responses:
-        "200": { description: Updated owners array }
-        "400": { description: Invalid UUIDs or request shape }
         "401": { description: Operator authentication required }
-        "409": { description: Unknown conversation or ownership conflict }
+        "410": { description: Issue binding mutations are retired; existing records remain readable }
     delete:
       tags: [Operator]
       operationId: unbindLinearWorkOwner
-      summary: Unbind the current issue owner for future deliveries
+      summary: Retired issue binding mutation
+      deprecated: true
       security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/LinearWorkOwnerRequest" }
       responses:
-        "200": { description: Updated owners array }
-        "400": { description: Invalid request }
         "401": { description: Operator authentication required }
-        "409": { description: Current owner does not match }
+        "410": { description: Issue binding mutations are retired; existing records remain readable }
   /v1/linear/inbox:
     get:
       tags: [Operator]
@@ -664,16 +719,25 @@ paths:
     get:
       tags: [Operator]
       operationId: inspectLinearFollowing
-      summary: Inspect whether Linear activity can wake Clankie
+      summary: Inspect notification following and required webhook readiness
       security: [{ operatorBearer: [] }]
       responses:
-        "200": { description: Following switch and canonical inbox conversation }
+        "200":
+          {
+            description: Following switch,
+            active readiness,
+            webhookConfigured,
+            reason,
+            missingWebhook,
+            detail,
+            canonical inbox conversation and operator wake conversation,
+          }
         "401": { description: Operator authentication required }
     put:
       tags: [Operator]
       operationId: setLinearFollowing
-      summary: Enable or disable event-triggered turns
-      description: Enabling resumes previously accepted pending wakes; it does not wake passive backlog. Disabling leaves inbox delivery enabled.
+      summary: Enable or disable turns from the bot notification inbox
+      description: Enabling requires a stored webhook URL and signing secret. It resumes previously accepted pending wakes, never passive backlog. Disabling leaves inbox delivery enabled. Status distinguishes the requested following switch from active readiness, with linear_webhook_required and missingWebhook when setup is removed. There is no periodic poll.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -686,9 +750,34 @@ paths:
               properties:
                 following: { type: boolean }
       responses:
-        "200": { description: Following switch and canonical inbox conversation }
+        "200":
+          {
+            description: Following switch,
+            active readiness,
+            webhookConfigured,
+            reason,
+            missingWebhook,
+            detail,
+            canonical inbox conversation and operator wake conversation,
+          }
         "400": { description: Invalid request }
         "401": { description: Operator authentication required }
+        "409":
+          description: Following requires the registered webhook URL and broker-held signing secret; the switch is unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, reason, missingWebhook, following, active, detail]
+                properties:
+                  error: { const: linear_webhook_required }
+                  reason: { const: linear_webhook_required }
+                  missingWebhook:
+                    type: array
+                    items: { enum: [url, secret] }
+                  following: { type: boolean }
+                  active: { const: false }
+                  detail: { type: string }
   /v1/swarm:
     get:
       tags: [Operator]
@@ -704,7 +793,7 @@ paths:
       tags: [Operator]
       operationId: connectSwarmCoordinator
       summary: Connect an externally enrolled Clankie session
-      description: Verifies the actor and scope at an explicit local socket, including an owner-managed SSH socket forward. Capabilities stay in the broker. A retained ID cannot change coordinator identity or owning conversation. Maximum body size is 16 KiB.
+      description: Verifies the actor and scope at an explicit local socket, or a remote socket/named pipe through the optional registered SSH fleet. The service supervises that private SSH relay without managing the external owner. Capabilities stay in the broker. A retained ID cannot change endpoint, fleet, coordinator identity or owning conversation. Maximum body size is 16 KiB.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -722,7 +811,18 @@ paths:
                     description: External name; embedded is reserved,
                   }
                 conversationId: { type: string, minLength: 1, maxLength: 256 }
-                endpoint: { type: string, pattern: "^/", maxLength: 4096 }
+                endpoint:
+                  {
+                    type: string,
+                    maxLength: 4096,
+                    description: Absolute Unix socket path or Windows named pipe (the latter requires ssh). Remote when ssh is supplied.,
+                  }
+                ssh:
+                  {
+                    type: string,
+                    pattern: "^[a-z][a-z0-9-]{0,63}$",
+                    description: Registered enabled SSH fleet; omit for a local endpoint.,
+                  }
                 capability: { type: string, minLength: 32, maxLength: 512, writeOnly: true }
       responses:
         "200": { description: Verified actor, scope, endpoint, conversation and non-secret broker reference }
@@ -949,19 +1049,83 @@ paths:
       responses:
         "200": { description: Session closed }
         "403": { description: Worker grant unavailable }
+  /v1/hosted/operator:
+    post:
+      tags: [Operator]
+      operationId: hostedOperatorRequest
+      summary: Dispatch as an account-paired hosted operator device
+      description: Encrypted gateway carrier required remotely. Checks active device session, server-recorded operator pairing purpose and Take Control grant. No operator bearer is exported. The shared hosted-device allowlist permits chat, fleet, terminal, model, keys, persona and connections. Restart, reset and deprovision require account authority, including through the legacy device relay. The inner route keeps its own validation. Revocation is rechecked before returning a parked page.
+      security: [{ deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [method, path]
+              properties:
+                method: { type: string, enum: [GET, POST] }
+                path: { type: string, description: Inner health, operator dispatch or v1 route }
+                body: { type: string, maxLength: 1048576, description: JSON request body for POST }
+      responses:
+        "200": { description: Inner operator route response }
+        "400": { description: Invalid inner request or forbidden route }
+        "401": { description: Missing, expired or revoked device session }
+        "403": { description: Not an account-paired operator device }
+  /v1/operator/persona:
+    get:
+      tags: [Operator]
+      operationId: getOperatorPersona
+      summary: Read the hosted or local owner-authored persona
+      description: Includes persona image diagnostics (files, roles, counts, sizes, video timestamps, viewable cached sheet paths, load errors), never image bytes. Status previews the current folder; the running image snapshot changes on restart.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Persona settings }
+        "401": { description: Operator authentication required }
+    post:
+      tags: [Operator]
+      operationId: updateOperatorPersona
+      summary: Apply a validated partial persona update
+      description: Accepts imagesDir as a folder on the service host (empty string clears). Top-level images and sampled videos are vibe; appearance/ holds physical character references. Returns image status and a restart reminder.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Partial PersonaSettings; unknown fields are refused
+      responses:
+        "200": { description: Updated persona settings }
+        "400": { description: Invalid persona patch }
+        "401": { description: Operator authentication required }
+        "503": { description: Settings persistence unavailable }
   /health:
     get:
       tags: [Health]
       operationId: getHealth
       summary: Public liveness
-      description: Optional Herdr or gateway failures are reported separately and do not change service liveness.
+      description: Optional Herdr, gateway or host-power findings are reported separately and do not change service liveness. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md).
       security: []
       responses:
         "200":
           description: Service is up
           content:
             application/json:
-              example: { ok: true, service: clankie }
+              example:
+                {
+                  ok: true,
+                  service: clankie,
+                  power:
+                    {
+                      state: sleep_allowed,
+                      source: battery,
+                      sleepAfterMinutes: 1,
+                      heldAwakeBy: [],
+                      keepAwakeRequested: false,
+                    },
+                }
 
   /v1/herdr:
     get:
@@ -1153,7 +1317,13 @@ paths:
       description: |
         Captain bearer only. Exact speech is returned only while
         `discord.voiceTranscriptLoggingEnabled` is enabled; otherwise the route
-        returns an empty page with `enabled: false`.
+        returns an empty page with `enabled: false`. Includes legacy human
+        recognition and assistant generated wording (`role: assistant`,
+        `speakerId: clankie`, `itemId`, optional `playbackId`/`responseId`,
+        `textSource`, `textComplete`, `audioStarted`, `playbackMs`, `outcome`).
+        Outcomes are played, interrupted, suppressed, failed, or truncated.
+        Generated text may include an unheard ending after a cutoff; no raw
+        audio or word-aligned audible transcript is retained.
       security: [{ captainBearer: [] }]
       parameters:
         - in: query
@@ -1301,6 +1471,20 @@ paths:
         returns 409 without changing a worker. Seat-control operations
         return 503 with herdr_unavailable when the default runtime is unavailable;
         ordinary conversations and their durable records remain accessible.
+        `fleet` returns one cursor-coherent snapshot. Optional `view: home`
+        omits historical personas that are neither seated, reachable Swarm
+        contacts nor channel participants. Seats, channels, tallies and edges
+        are unchanged. Omitting the selector preserves the full directory;
+        `personas` and conversation IDs still address retained history.
+        `replay` optionally takes `direction: backward`, `turnLimit` (1..40,
+        default 20) and `limit` (1..500, default 500 for backward). Omit `cursor`
+        to open the newest window; pass the page's `previousCursor` as the next
+        exclusive upper bound to load older history. Events remain chronological.
+        `hasOlder` and `hasMore` say whether more retained history precedes the
+        backward page. `nextCursor` is still the newest event in that page and
+        can resume an ordinary forward `tail`. The event ceiling wins when one
+        turn exceeds 500 events. Omitted direction preserves forward replay and
+        tail behavior. Clients keep distinct older-history and live-tail cursors.
         `terminal_catalog` lists up to 48 panes per execution connection (16 connections).
         Each row carries runtime identity separately from Herdr workspace/tab IDs.
         Named terminal addresses pin their endpoint; tail, control and input refuse
@@ -1377,6 +1561,18 @@ paths:
                     conversationId: replace-me
                     surfaceClientId: yaak
                     limit: 50
+              replay_latest:
+                summary: Open the newest 20 turns
+                value:
+                  op: replay
+                  schemaVersion: 1
+                  replay:
+                    schemaVersion: 1
+                    conversationId: replace-me
+                    surfaceClientId: yaak
+                    direction: backward
+                    turnLimit: 20
+                    limit: 500
               autonomy:
                 summary: Read autonomy state for one conversation
                 value:
@@ -1387,28 +1583,6 @@ paths:
       responses:
         "200":
           description: Discriminated result
-
-  /operator/v1/voice-chat:
-    get:
-      tags: [Operator]
-      operationId: openOperatorVoiceChat
-      summary: Open a private local voice chat
-      description: |
-        Upgrades to a WebSocket for captain bearers whose source lane is `api`.
-        Binary client frames are 24 kHz mono signed 16-bit little-endian PCM;
-        `{"schemaVersion":1,"type":"commit"}` ends one utterance. Binary
-        server frames use the same PCM format. JSON server frames report
-        `status`, attributed `transcript`, `response_done`, or `error` events.
-        Raw audio is not retained. The realtime room can call the captain through
-        the shared operator-conversation service when work is required.
-      security: [{ captainBearer: [] }]
-      responses:
-        "101":
-          description: WebSocket opened
-        "403":
-          description: Bearer is not an operator API captain
-        "503":
-          description: Local realtime voice is unavailable
 
   /captain/v1/lanes:
     get:
@@ -1831,6 +2005,44 @@ paths:
         "404":
           description: No messageable agent in that pane
 
+  /v1/fleet/seats/{paneId}/hook:
+    post:
+      tags: [Captain, Operator]
+      operationId: recordFleetSeatHook
+      summary: Report a hired seat's lifecycle hook
+      description: |
+        The clankie-worker plugin's hooks, forwarded by `clankie seat-hook`
+        from inside the seat's pane (VUH-1458). A Stop or StopFailure settles
+        the seat's turn for its adapter and any completion watch, with the
+        harness's own final text as `lastMessage`. The session must be the
+        Claude session herdr reports in that pane. Operator bearer only.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              {
+                schemaVersion: 1,
+                event: Stop,
+                sessionId: "10000000-0000-4000-8000-000000000001",
+                lastMessage: "Tests pass.",
+              }
+      responses:
+        "200":
+          description: Recorded
+        "400":
+          description: Not a seat hook
+        "403":
+          description: Not the operator lane
+        "404":
+          description: That pane holds no Claude seat with this session
+
   /v1/memory:
     get:
       tags: [Memory, Operator]
@@ -2181,6 +2393,37 @@ paths:
         "404":
           description: Unknown
 
+  /v1/browser/harnesses:
+    get:
+      tags: [Browser]
+      operationId: getBrowserHarnesses
+      summary: Computer-use harnesses on this machine
+      description: >-
+        Re-probes which installed harnesses (Codex computer use, Claude in
+        Chrome) are signed in and can drive the owner's apps or Chrome (ADR
+        0199). Detection only; nothing is started. `detected` is false on a
+        body with no owner desktop.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Harness list
+          content:
+            application/json:
+              example:
+                schemaVersion: 1
+                detected: true
+                harnesses:
+                  - harness: codex
+                    signedIn: true
+                    surfaces: [desktop, chrome]
+                    chromeNeedsHireFlag: false
+                  - harness: claude
+                    signedIn: true
+                    surfaces: [chrome]
+                    chromeNeedsHireFlag: true
+        "401":
+          description: Operator bearer required
+
   /v1/browser/tools:
     get:
       tags: [Browser]
@@ -2217,6 +2460,7 @@ paths:
       tags: [Media]
       operationId: postGenerateImage
       summary: Generate or edit an image
+      description: Set personaReference true for self-depiction using only owner appearance references, never vibe images or frames. Mutually exclusive with sourceRef. OpenAI and Google support multiple references; the current Grok adapter supports one.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       requestBody:
         required: true
@@ -2298,7 +2542,7 @@ paths:
                 terminalControl: false
       responses:
         "200":
-          description: Device token issued; relayUrl is the host-scoped gateway base when configured
+          description: Device token issued; relayUrl is the host-scoped gateway base when configured; optional directRoute carries explicitly configured controlPlaneUrl and relayUrl origins
 
   /v1/devices:
     get:
@@ -2338,7 +2582,7 @@ paths:
       security: [{ deviceBearer: [] }]
       responses:
         "200":
-          description: Self row
+          description: Self row, including optional directRoute with explicitly configured controlPlaneUrl and relayUrl origins
 
   /v1/hosted/pair-offer:
     post:
@@ -2458,7 +2702,7 @@ paths:
       security: [{ deviceBearer: [] }]
       responses:
         "200":
-          description: New token; relayUrl republishes the host-scoped gateway base when configured
+          description: New token; relayUrl republishes the host-scoped gateway base when configured; optional directRoute carries explicitly configured controlPlaneUrl and relayUrl origins
 
 components:
   schemas:
@@ -2541,6 +2785,21 @@ components:
               provider_rejected,
               unavailable,
             ]
+    ModelSubscriptionsResponse:
+      type: object
+      additionalProperties: false
+      required: [subscriptions]
+      properties:
+        subscriptions:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [providerId, name]
+            properties:
+              providerId: { type: string }
+              name: { type: string }
     ModelKeysResponse:
       type: object
       additionalProperties: false
@@ -2598,15 +2857,6 @@ components:
                   validation_timeout,
                   unavailable,
                 ]
-    LinearWorkOwnerRequest:
-      type: object
-      additionalProperties: false
-      required: [organizationId, issueId, conversationId]
-      properties:
-        organizationId: { type: string, format: uuid }
-        issueId: { type: string, format: uuid }
-        conversationId: { type: string, maxLength: 256, pattern: "^[a-zA-Z0-9_-]+$" }
-        expectedConversationId: { type: string, minLength: 1, maxLength: 256 }
   parameters:
     guildId:
       in: path

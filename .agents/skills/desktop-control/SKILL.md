@@ -15,6 +15,10 @@ directly. `peekaboo agent` and `--analyze` start separate model reasoning and ar
 unnecessary for this workflow. Operator and authenticated Discord machine grants
 own machine access; social rooms do not.
 
+When your reach card lists a computer-use harness, a long flow in your
+person's apps usually goes better as a hired seat. `computer-use-delegation`
+has that pattern. This skill is for driving the desktop yourself.
+
 ## Discover the target
 
 ```sh

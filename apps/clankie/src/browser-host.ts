@@ -17,9 +17,11 @@
  * - **A recording, when the owner wants one.** With `browser.recordSessions`
  *   on, each burst of browsing is saved as a WebM under
  *   `<stateRoot>/browser/recordings/`: recording starts before the first call
- *   and stops once the browser has been idle for {@link RECORDING_IDLE_MS}.
+ *   and stops before the browser closes after {@link BROWSER_IDLE_MS} idle.
  */
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -63,7 +65,9 @@ const ARTIFACT_SUBDIRECTORY = "browser";
 const REQUEST_TIMEOUT_MS = 60_000;
 const STARTUP_TIMEOUT_MS = 30_000;
 /** A burst of browsing ends, and its recording is saved, after this long without a call. */
-const RECORDING_IDLE_MS = 60_000;
+const BROWSER_IDLE_MS = 60_000;
+/** Backstop if the service dies; longer than a call plus the normal idle cleanup. */
+const DAEMON_IDLE_MS = 300_000;
 // ponytail: count cap, not bytes; switch to a size budget if long bursts fill the disk.
 const MAX_RECORDINGS = 50;
 
@@ -92,6 +96,8 @@ export interface BrowserHostOptions {
   args?: readonly string[];
   /** Read before each burst starts; true saves that burst as a WebM. Defaults to off. */
   recordSessions?: () => Promise<boolean>;
+  /** Burst idle interval; defaults to 60 seconds. Shortened by lifecycle tests. */
+  idleMs?: number;
 }
 
 export interface BrowserHost {
@@ -122,6 +128,9 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   await mkdir(socketDirectory, { recursive: true, mode: 0o700 });
   await mkdir(homeDirectory, { recursive: true, mode: 0o700 });
   await mkdir(tempDirectory, { recursive: true, mode: 0o700 });
+  const configPath = join(homeDirectory, "agent-browser.json");
+  // Ignore working-directory launch defaults; this browser belongs to the service.
+  await writeFile(configPath, "{}\n", { mode: 0o600 });
   const recordingsDirectory = join(options.stateRoot, "browser", "recordings");
 
   // Artifacts land under the root the Discord attachment resolver already
@@ -142,6 +151,11 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     TMPDIR: tempDirectory,
     AGENT_BROWSER_SOCKET_DIR: socketDirectory,
     AGENT_BROWSER_PROFILE: profileDirectory,
+    AGENT_BROWSER_CONFIG: configPath,
+    AGENT_BROWSER_RESTORE: "clankie",
+    AGENT_BROWSER_RESTORE_SAVE: "always",
+    AGENT_BROWSER_HEADED: "0",
+    AGENT_BROWSER_IDLE_TIMEOUT_MS: String(DAEMON_IDLE_MS),
     AGENT_BROWSER_NAMESPACE: "clankie",
     AGENT_BROWSER_SESSION: "clankie",
     AGENT_BROWSER_CONTENT_BOUNDARIES: "1",
@@ -171,6 +185,9 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   let callTail = Promise.resolve();
 
   try {
+    // A daemon survives its MCP transport and may have inherited headed mode.
+    // Retire only our private session before trusting any of its launch state.
+    await closeBrowser();
     await client.connect(transport, { timeout: STARTUP_TIMEOUT_MS });
     options.logger.info(
       { event: "browser.host.ready", command, profileDirectory, blocked: blockedTools.size },
@@ -227,10 +244,34 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   }
 
   let recording: string | undefined;
-  let recordingIdle: NodeJS.Timeout | undefined;
+  let browserIdle: NodeJS.Timeout | undefined;
+  let headed = false;
+  let burstActive = false;
+  let closing = false;
 
   function runBrowserCli(args: readonly string[]): Promise<unknown> {
-    return execFileAsync(command, [...args], { env: browserEnvironment, timeout: REQUEST_TIMEOUT_MS });
+    return execFileAsync(command, [...args, "--headed", String(headed)], {
+      env: browserEnvironment,
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+  }
+
+  async function closeBrowser(): Promise<void> {
+    // `close` needs only the socket identity. Launch options would first open
+    // a browser just to close it (or relaunch one whose recording is finishing).
+    const { AGENT_BROWSER_PROFILE: _profile, ...closeEnvironment } = browserEnvironment;
+    await execFileAsync(command, ["close"], {
+      env: closeEnvironment,
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+    // `close` replies before daemon teardown removes its socket. A new burst
+    // must not connect to that dying daemon or race its replacement's cleanup.
+    const daemonPidPath = join(socketDirectory, "namespaces", "clankie", "run", "clankie.pid");
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+    while (existsSync(daemonPidPath)) {
+      if (Date.now() >= deadline) throw new Error("browser_daemon_close_timeout");
+      await delay(25);
+    }
   }
 
   // Recording is a record of the burst, never a condition of it: every failure
@@ -241,8 +282,15 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       if (!(await options.recordSessions())) return;
       await mkdir(recordingsDirectory, { recursive: true, mode: 0o700 });
       const path = join(recordingsDirectory, `${new Date().toISOString().replace(/[:.]/gu, "-")}.webm`);
+      // agent-browser records in a fresh context, copying cookies but not
+      // local storage. Transfer native storage state into it; restore-save
+      // then carries logins made while recording across daemon shutdowns.
+      const storagePath = join(homeDirectory, "recording-state.json");
+      await runBrowserCli(["state", "save", storagePath]);
       await runBrowserCli(["record", "start", path]);
       recording = path;
+      await runBrowserCli(["state", "load", storagePath]);
+      await rm(storagePath, { force: true });
       options.logger.info({ event: "browser.recording.started", path }, "browser recording started");
     } catch (error) {
       options.logger.warn(
@@ -257,8 +305,6 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   }
 
   async function stopRecording(): Promise<void> {
-    clearTimeout(recordingIdle);
-    recordingIdle = undefined;
     const path = recording;
     if (path === undefined) return;
     recording = undefined;
@@ -282,14 +328,33 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     }
   }
 
-  function stopRecordingWhenIdle(): void {
-    if (recording === undefined) return;
-    clearTimeout(recordingIdle);
-    // Queued behind in-flight calls so a stop never lands in the middle of one.
-    recordingIdle = setTimeout(() => {
-      callTail = callTail.then(stopRecording);
-    }, RECORDING_IDLE_MS);
-    recordingIdle.unref();
+  async function finishBurst(): Promise<void> {
+    clearTimeout(browserIdle);
+    browserIdle = undefined;
+    if (!burstActive) return;
+    await stopRecording();
+    headed = false;
+    try {
+      await closeBrowser();
+      burstActive = false;
+      options.logger.info({ event: "browser.burst.closed" }, "browser burst closed");
+    } catch (error) {
+      options.logger.warn(
+        { event: "browser.burst.close_failed", detail: mcpErrorDetail(error, "browser_close_failed") },
+        "browser burst close failed",
+      );
+      // Retry cleanup without poisoning the serialized call queue.
+      closeWhenIdle();
+    }
+  }
+
+  function closeWhenIdle(): void {
+    clearTimeout(browserIdle);
+    browserIdle = setTimeout(() => {
+      browserIdle = undefined;
+      callTail = callTail.then(finishBurst);
+    }, options.idleMs ?? BROWSER_IDLE_MS);
+    browserIdle.unref();
   }
 
   async function call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult> {
@@ -317,16 +382,33 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         detail: unavailableReason ?? "browser_host_closed",
       });
     }
-    clearTimeout(recordingIdle);
-    await startRecording();
+    clearTimeout(browserIdle);
+    // Only the server's actual takeover tool can change the burst's mode.
+    if (request.tool === "agent_browser_open" && typeof request.arguments.headed === "boolean") {
+      if (headed !== request.arguments.headed) await stopRecording();
+      headed = request.arguments.headed;
+    }
+    burstActive = true;
+    const closesBrowser = request.tool === "agent_browser_close";
+    if (closesBrowser) await stopRecording();
+    else await startRecording();
     let result: {
       content?: { type?: unknown; text?: unknown; data?: unknown; mimeType?: unknown }[];
       isError?: unknown;
     };
     try {
-      const called = await client.callTool({ name: request.tool, arguments: request.arguments }, undefined, {
-        timeout: REQUEST_TIMEOUT_MS,
-      });
+      const called = await client.callTool(
+        {
+          name: request.tool,
+          // Caller-supplied raw args remain forbidden. These host-owned flags
+          // override stale daemon/config defaults and keep takeover calls headed.
+          arguments: { ...request.arguments, extraArgs: ["--headed", String(headed)] },
+        },
+        undefined,
+        {
+          timeout: REQUEST_TIMEOUT_MS,
+        },
+      );
       result = {
         content: Array.isArray(called.content) ? called.content : [],
         isError: called.isError,
@@ -339,7 +421,12 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         detail: mcpErrorDetail(error, "browser_call_failed").slice(0, 500),
       });
     } finally {
-      stopRecordingWhenIdle();
+      closeWhenIdle();
+    }
+    if (closesBrowser && result.isError !== true) {
+      clearTimeout(browserIdle);
+      burstActive = false;
+      headed = false;
     }
     const text = (result.content ?? [])
       .filter((block) => block.type === "text" && typeof block.text === "string")
@@ -403,6 +490,15 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     },
 
     call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult> {
+      if (closing)
+        return Promise.resolve(
+          CallBrowserToolResultSchema.parse({
+            outcome: "refused",
+            tool: request.tool,
+            reason: "browser_unavailable",
+            detail: "browser_host_closed",
+          }),
+        );
       const queued = callTail.then(() => call(request));
       callTail = queued.then(
         () => undefined,
@@ -412,9 +508,11 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     },
 
     async close(): Promise<void> {
-      if (closed) return;
+      closing = true;
+      clearTimeout(browserIdle);
       await callTail;
-      await stopRecording();
+      await finishBurst();
+      clearTimeout(browserIdle);
       closed = true;
       await client.close();
     },

@@ -1,0 +1,77 @@
+{
+  "description": "Clankie identity, session context, once-per-change memory and transcript sync. Review in /hooks before use.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/run.mjs\"",
+            "timeout": 60,
+            "additionalContextLimit": 65536
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/run.mjs\"",
+            "timeout": 60,
+            "additionalContextLimit": 65536
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/run.mjs\"",
+            "timeout": 60,
+            "additionalContextLimit": 65536
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/run.mjs\"",
+            "timeout": 60,
+            "additionalContextLimit": 65536
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/run.mjs\"",
+            "timeout": 60,
+            "additionalContextLimit": 65536
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/run.mjs\"",
+            "timeout": 60,
+            "additionalContextLimit": 65536
+          }
+        ]
+      }
+    ]
+  }
+}

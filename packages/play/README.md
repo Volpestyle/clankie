@@ -38,8 +38,18 @@ roll counted in the trace. Open-ended play never dies at a receipt-sized cap.
 
 ## Running it
 
+Clankie can start an installed local world through his machine tools, including
+an authorized Discord voice handoff. The shipped
+[`pokeagents` skill](../../.agents/skills/pokeagents/SKILL.md) covers checking
+the endpoint, keeping `pokeagents start` in a persistent terminal, and joining
+after readiness. The host, cartridges, and his own credentialed seat remain
+separate prerequisites; joining alone does not start the world.
+
 The captain is the parent of a sitting; this package is the driver. The
-service's play host joins the world and hands the seat to the loop here. To
+service's play host starts on the first join or explicit play observation,
+reconciles any stale session, and joins the world when asked. Service boot does
+not start its polling loop; observing alone does not join a world. The host
+hands the joined seat to the loop here. To
 watch a playthrough without a Discord ask, start
 [`@clankie/discord-activity`](../../apps/discord-activity/README.md), point
 `WORLD_ADDRESS` at a running world, and run:

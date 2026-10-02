@@ -1,0 +1,32 @@
+{
+  "runtime": {
+    "apiVersion": 1,
+    "skillContract": "swarm-coordination/1",
+    "schemaVersion": 14,
+    "serverVersion": "2.0.0-rc.1",
+    "modernProtocol": "2026-07-28",
+    "build": {
+      "revision": "0981253fc4b81fb4794ceaa706aeec363d900a32",
+      "sourceDigest": "f769c75577f832ad1073d51e4715837edfce5e1f988a43d8c7bb790d98616769",
+      "packageVersion": "2.0.0-rc.1",
+      "sdkVersion": "2.0.0"
+    }
+  },
+  "macManagedCanary": {
+    "intent_id": "lead-p2G-canary-0981253-1",
+    "task_id": "9778bfa3-b26a-40d4-829b-57b9cd000cd0",
+    "state": "released",
+    "status": "completed"
+  },
+  "cleanPackage": {
+    "mac": {
+      "tools": 9,
+      "acknowledged": 1
+    },
+    "windows": {
+      "tools": 9,
+      "acknowledged": 1
+    }
+  },
+  "databaseBackupIntegrity": ["ok", "ok"]
+}

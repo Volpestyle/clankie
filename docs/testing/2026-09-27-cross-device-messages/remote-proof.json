@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-27T17:11:07.735Z",
+  "host": "pc",
+  "observedAgents": 13,
+  "eligibleAgents": 12,
+  "receipts": [
+    {
+      "harness": "claude",
+      "sessionLocatorKind": "id",
+      "matched": true,
+      "entryCount": 500,
+      "operatorMessages": 53,
+      "agentMessages": 66,
+      "tools": 381
+    },
+    {
+      "harness": "claude",
+      "sessionLocatorKind": "id",
+      "matched": true,
+      "entryCount": 500,
+      "operatorMessages": 41,
+      "agentMessages": 77,
+      "tools": 382
+    },
+    {
+      "harness": "claude",
+      "sessionLocatorKind": "id",
+      "matched": true,
+      "entryCount": 331,
+      "operatorMessages": 18,
+      "agentMessages": 61,
+      "tools": 252
+    }
+  ]
+}

@@ -1,6 +1,10 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import type { DiscordVoiceTranscriptLogEntry, DiscordVoiceTranscriptPage } from "@clankie/protocol";
+import {
+  DiscordVoiceTranscriptLogEntrySchema,
+  type DiscordVoiceTranscriptLogEntry,
+  type DiscordVoiceTranscriptPage,
+} from "@clankie/protocol";
 import { buildConsoleCommands } from "../src/commands.ts";
 import { ClankieVoiceTranscriptOverlay } from "../src/face/clankie-voice-transcripts.ts";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
@@ -18,7 +22,7 @@ function entry(
   overrides: Partial<DiscordVoiceTranscriptLogEntry> &
     Pick<DiscordVoiceTranscriptLogEntry, "deliveryId" | "text">,
 ): DiscordVoiceTranscriptLogEntry {
-  return {
+  return DiscordVoiceTranscriptLogEntrySchema.parse({
     schemaVersion: 1,
     body: "bot",
     occurredAt: "2026-08-29T16:16:02.964Z",
@@ -27,7 +31,7 @@ function entry(
     speakerId: "830574404453793842",
     displayName: "vuhlp",
     ...overrides,
-  };
+  });
 }
 
 function page(
@@ -392,4 +396,27 @@ describe("voice transcript keys", () => {
   it("joins body and delivery so bot and lab lines do not collide", () => {
     expect(voiceTranscriptEntryKey(entry({ deliveryId: "d1", text: "x" }))).toBe("bot:d1");
   });
+});
+
+it("keeps human, acknowledgment and answer entries distinct and labels incomplete speech", () => {
+  const human = entry({ deliveryId: "same", text: "question" });
+  const assistant = (itemId: string) =>
+    DiscordVoiceTranscriptLogEntrySchema.parse({
+      ...human,
+      role: "assistant",
+      speakerId: "clankie",
+      displayName: "Clankie",
+      itemId,
+      text: "Generated ending.",
+      textSource: "tts_text",
+      textComplete: true,
+      outcome: "interrupted",
+      audioStarted: true,
+      playbackMs: 500,
+    });
+  const entries = [human, assistant("ack"), assistant("answer")];
+  expect(new Set(entries.map(voiceTranscriptEntryKey)).size).toBe(3);
+  expect(formatVoiceTranscriptLines(entries, { now: NOW })).toContain(
+    "interrupted · generated text; audible cutoff unknown",
+  );
 });

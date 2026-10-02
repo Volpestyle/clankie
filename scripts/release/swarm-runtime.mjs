@@ -35,8 +35,7 @@ export async function copySwarmRuntime(repoRoot, targetRoot) {
       await copy(dependency, root, join(destination, "node_modules", dependency));
     }
   }
-  for (const name of ["swarm-mcp", "@volpestyle/lead-skills"]) {
-    await copy(name, join(repoRoot, "packages/swarm"), join(targetRoot, "node_modules", name));
-  }
+  // Skills are assembled from the current catalog, not the legacy npm archive.
+  await copy("swarm-mcp", join(repoRoot, "packages/swarm"), join(targetRoot, "node_modules/swarm-mcp"));
   return [...copied.keys()];
 }

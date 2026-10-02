@@ -193,3 +193,46 @@ it("interrupts an over-budget assessment once and keeps the pane inspectable", a
   expect(evaluator.status().jobs[0]?.status).toBe("failed");
   expect(vi.mocked(runner.closePane!).mock.calls).toHaveLength(closes);
 });
+
+it("keeps its pane after the harness clears the managed name, via the session id", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const { evaluator, runner, agent } = setup();
+  runner.paneProcesses = async () => []; // only the session can identify the pane
+  agent().session = { source: "herdr:claude", kind: "id", value: "session-1" };
+  await evaluator.command({ action: "enable" });
+  delete agent().name; // Claude Code and Codex session reports clear it
+  evaluator.capture({ conversationId: "c1", runId: "r1", context: {} });
+  vi.setSystemTime(Date.now() + 61_000);
+  await evaluator.tick();
+  expect(evaluator.status().jobs[0]?.status).toBe("running");
+  expect(runner.closePane).toHaveBeenCalledWith("w1:p1");
+});
+
+it("leaves a pane it cannot prove is its own and dispatches into a fresh one", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const { evaluator, runner, agent } = setup();
+  runner.paneProcesses = async () => [];
+  await evaluator.command({ action: "enable" });
+  delete agent().name; // no name, session or process left to match
+  evaluator.capture({ conversationId: "c1", runId: "r1", context: {} });
+  vi.setSystemTime(Date.now() + 61_000);
+  await evaluator.tick();
+  expect(runner.closePane).not.toHaveBeenCalled();
+  expect(runner.createTab).toHaveBeenCalledTimes(2);
+  expect(evaluator.status().jobs[0]?.status).toBe("running");
+});
+
+it("keeps work queued while its own pane is busy", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const { evaluator, runner, agent } = setup();
+  await evaluator.command({ action: "enable" });
+  agent().status = "working";
+  evaluator.capture({ conversationId: "c1", runId: "r1", context: {} });
+  vi.setSystemTime(Date.now() + 61_000);
+  await evaluator.tick();
+  expect(evaluator.status()).toMatchObject({ queued: 1, error: expect.stringContaining("busy") });
+  expect(runner.closePane).not.toHaveBeenCalled();
+  agent().status = "idle";
+  await evaluator.tick();
+  expect(evaluator.status().jobs[0]?.status).toBe("running");
+});

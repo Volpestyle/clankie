@@ -1,5 +1,11 @@
 # Discord media and visual surfaces
 
+This guide covers configured DIY Discord integrations. It does not promise
+that the managed hosted product enables them. Start with the
+[official bot setup](credentials.md#configure-discord) and select a voice
+provider through `/voice`; the table below helps match a request to the right
+surface.
+
 Clankie has three distinct ways to show or inspect moving pictures and one
 shared native voice path. They use different Discord capabilities and should
 not be described as one generic stream.
@@ -137,6 +143,13 @@ That proof requires the user body to be ready, a watch transport with
 `decoder=ready`, and a decoded still from the same user. Watch and publish are
 separate roles and require separate proofs. The official bot can report that
 someone is sharing but cannot receive the pixels.
+
+With an attachment root configured (`CLANKIE_DISCORD_ATTACHMENT_ROOT`), each
+distinct still is also written to `<root>/shares/` so `observe_share` can attach
+it to a reply. Those files are transient: a still is removed once it is 15
+minutes past its last capture or the directory exceeds 64 MiB, oldest first,
+never while it is one of the four samples currently shown. Stills an earlier
+process left behind are adopted into the same budget at start.
 
 ## Readiness and ownership proof
 

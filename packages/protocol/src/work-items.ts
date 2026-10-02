@@ -108,6 +108,14 @@ export const WorkRepoSchema = z
     /** Stable id for the device contract; never a raw path a device chose. */
     id: z.string().regex(/^[a-z0-9-]{1,64}$/u),
     name: z.string().max(200),
+    /**
+     * The repo's root working directory on the body, so a surface keyed by the
+     * directory a seat works in (the app's commons districts) can join this
+     * repo's work without guessing from the name. A host fact for display and
+     * matching only; a device still names the repo by `id`. Absent from bodies
+     * that predate it.
+     */
+    root: z.string().trim().min(1).max(4096).optional(),
     backend: WorkBackendKindSchema.optional(),
     /** True when no convention is recorded yet and discovery found several. */
     needsDecision: z.boolean(),

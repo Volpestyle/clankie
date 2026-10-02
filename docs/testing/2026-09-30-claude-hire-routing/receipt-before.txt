@@ -1,0 +1,30 @@
+RUN  v4.1.10 /Users/james/dev/clankie
+
+ ❯ apps/clankie/test/claude-worker-seat.test.ts (10 tests | 2 failed | 8 skipped) 48ms
+   × verifies native Claude channel receipts marked as system metadata (string) 26ms
+   × verifies native Claude channel receipts marked as system metadata (blocks) 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/claude-worker-seat.test.ts > verifies native Claude channel receipts marked as system metadata (string)
+ FAIL  apps/clankie/test/claude-worker-seat.test.ts > verifies native Claude channel receipts marked as system metadata (blocks)
+AssertionError: expected 'failed' to be 'started' // Object.is equality
+
+Expected: "started"
+Received: "failed"
+
+ ❯ apps/clankie/test/claude-worker-seat.test.ts:269:29
+    267|       view,
+    268|     );
+    269|     expect(started.outcome).toBe("started");
+       |                             ^
+    270|     if (started.outcome !== "started") throw new Error(JSON.stringify(…
+    271|     expect(await started.control.send("Reply exactly PROBE OK.")).toMa…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 8 skipped (10)
+   Start at  14:09:53
+   Duration  657ms (transform 136ms, setup 0ms, import 538ms, tests 48ms, environment 0ms)

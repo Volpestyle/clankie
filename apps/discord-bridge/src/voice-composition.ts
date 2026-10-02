@@ -18,10 +18,20 @@ export function describeVoiceResponse(evidence: Extract<DiscordVoiceEvidence, { 
     ? "fast path"
     : `clankie handoff ${String(Math.round(evidence.handoffMs))}ms`;
   const trigger = evidence.trigger === "narration" ? "narration" : "room";
+  const total =
+    evidence.lastAudioToFirstAudioMs === undefined
+      ? ""
+      : `${String(Math.round(evidence.lastAudioToFirstAudioMs))}ms since last input audio; `;
+  const transcript =
+    evidence.transcriptToFirstAudioMs === undefined
+      ? ""
+      : `${String(Math.round(evidence.transcriptToFirstAudioMs))}ms since final transcript; `;
   return (
     `voice turn (${evidence.wake}, ${trigger}, ${path}): ` +
+    total +
+    transcript +
     `${String(Math.round(evidence.toFirstAudioMs))}ms ` +
-    `to first audio, then ${String(Math.round(evidence.playbackMs))}ms speaking`
+    `from response request to first audio, then ${String(Math.round(evidence.playbackMs))}ms speaking`
   );
 }
 
@@ -54,7 +64,7 @@ export function renderVoiceJoinDisclosure(
 
 function describeLocalTranscriptRetention(enabled: boolean): string {
   return enabled
-    ? " Exact consented speech and speaker attribution are retained in a private local development transcript log."
+    ? " Exact consented speech and speaker attribution are retained in a private local development transcript log, along with Clankie’s reply text and playback outcomes."
     : "";
 }
 
@@ -126,7 +136,7 @@ export function renderVoiceStatusReply(
     `Voice is active with DAVE protocol ${String(status.daveProtocolVersion)}; ` +
     `${who}, ${String(status.activeCaptureCount)} bounded capture(s) active, currently ${posture}. ` +
     (transcriptLoggingEnabled
-      ? "A private local development log retains exact consented speech and speaker attribution. "
+      ? "A private local development log retains exact consented speech and speaker attribution, plus Clankie’s reply text and playback outcomes. "
       : "") +
     `I hold a short bounded transcript window in memory, and the live ${provider} session ` +
     `holds this call's conversation context server-side for the duration of the call.`

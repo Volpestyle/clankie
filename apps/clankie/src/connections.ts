@@ -71,15 +71,19 @@ async function connectionInventory(deps: Dependencies): Promise<OperatorConnecti
   }
   return OperatorConnectionInventorySchema.parse({
     observedAt: new Date().toISOString(),
-    runtimes: runtimes.map(({ id, kind, session, state, enabled, capacity, capabilities }) => ({
-      id,
-      kind,
-      session,
-      state,
-      enabled,
-      capacity,
-      capabilities,
-    })),
+    runtimes: runtimes.map(
+      ({ id, kind, session, state, enabled, capacity, workerMode, workerHarness, capabilities }) => ({
+        id,
+        kind,
+        session,
+        state,
+        enabled,
+        capacity,
+        ...(workerMode ? { workerMode } : {}),
+        ...(workerHarness ? { workerHarness } : {}),
+        capabilities,
+      }),
+    ),
     swarms: rows.slice(0, 64).map((row) => {
       const live = swarm.conversations.find(
         (entry) => entry.connection === row.id && entry.conversationId === row.conversationId,
@@ -130,7 +134,8 @@ export async function manageConnections(deps: Dependencies, command: OperatorCon
   if (command.action === "reconnect_runtime") {
     const runtime = (await deps.runtimes?.list())?.find((entry) => entry.id === command.id);
     if (!runtime || runtime.id === "default") throw new Error("Unknown named runtime");
-    const { id, kind, session, socketPath, capacity, capabilities, workspaces } = runtime;
+    const { id, kind, session, socketPath, capacity, capabilities, workspaces, workerMode, workerHarness } =
+      runtime;
     await changeRuntime(deps, "connect", {
       id,
       kind,
@@ -139,9 +144,13 @@ export async function manageConnections(deps: Dependencies, command: OperatorCon
       ...(runtime.capacitySource === "default" ? {} : { capacity }),
       capabilities,
       workspaces,
+      ...(workerMode === "interactive" ? { workerMode } : {}),
+      ...(workerHarness ? { workerHarness } : {}),
     });
   }
   if (command.action === "disconnect_runtime") await changeRuntime(deps, "disconnect", command.id);
+  if (command.action === "set_runtime_capacity")
+    await changeRuntime(deps, "connect", { action: "capacity", id: command.id, capacity: command.capacity });
   if (command.action === "disconnect_swarm") {
     if (!deps.swarm?.disconnect) throw new Error("Swarm connections unavailable");
     await deps.swarm.disconnect(command.id);

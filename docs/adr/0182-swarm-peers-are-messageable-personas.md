@@ -69,3 +69,13 @@ Commons placement and shared channel rounds still require execution seats.
 Contact discovery does not infer a peer's terminal or grant provider access;
 [worker account grants](../worker-access.md) remain a separate authorization.
 Coordinator upgrades require a deliberate restart of existing owners.
+
+## Contact-list refinement
+
+James's September 27 Messages cleanup excludes reserved captain and runtime
+controller labels (`clankie:<conversation>` and
+`runtime:<harness> transport:<transport>`) from persona discovery and the catalog.
+They are coordination infrastructure, not extra Clankie contacts. Previously
+saved records remain available by ID; no conversation or identity is deleted or
+merged. This is a presentation filter, not an authorization decision. See
+[VUH-1408 verification](../testing/2026-09-27-cross-device-messages/README.md).

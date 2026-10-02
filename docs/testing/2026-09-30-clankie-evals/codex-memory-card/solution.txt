@@ -1,0 +1,10 @@
+const seen = new Map();
+export function shouldInject(session, hash, reset = false) {
+  if (!session) return true;
+  if (reset) seen.delete(session);
+  let hashes = seen.get(session);
+  if (!hashes) seen.set(session, hashes = new Set());
+  if (hashes.has(hash)) return false;
+  hashes.add(hash);
+  return true;
+}

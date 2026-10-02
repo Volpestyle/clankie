@@ -1,5 +1,6 @@
 import { createHash, createPublicKey, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
@@ -7,6 +8,7 @@ import {
   PublicGatewayInstallationIdSchema,
   PublicGatewayHostIdSchema,
 } from "@clankie/protocol/public-gateway";
+import { HostedCreditsSchema, type HostedCredits } from "@clankie/protocol/hosted-credits";
 import type { CredentialStore } from "@clankie/credential-broker";
 import {
   loadConfig,
@@ -39,6 +41,8 @@ const BootstrapSchema = z
       .string()
       .regex(/^[A-Za-z0-9_-]{43}$/u)
       .optional(),
+    /** The plan's limit on hired agents running at once (VUH-1388); absent, two per vCPU. */
+    maxHiredWorkers: z.number().int().min(1).max(64).optional(),
     /**
      * The plan's task-based model routing. Absent leaves the body's own
      * routing untouched; present, it is written over the body's routing
@@ -89,7 +93,9 @@ const HOSTED_ALIAS_MODEL = {
   attachment: true,
   temperature: false,
   modalities: { input: ["text", "image"], output: ["text"] },
-  limit: { context: 272_000, output: 8_192 },
+  // The proxy bounds output per plan at 32,768 (VUH-1391); Pi sends this as the
+  // request's output cap, so it must match or long answers stop at the old 8,192.
+  limit: { context: 272_000, output: 32_768 },
   reasoning_options: [{ type: "effort", values: ["none", "low", "medium", "high", "xhigh", "max"] }],
 };
 
@@ -187,6 +193,17 @@ export async function applyHostedModelPolicy(
   return "included";
 }
 
+/**
+ * How many hired agents a hosted body runs at once (VUH-1388): the plan's
+ * limit from the bootstrap, else two per vCPU (Starter 4, Pro 8).
+ */
+export function hostedWorkerLimit(
+  bootstrap: Pick<HostedBodyBootstrap, "maxHiredWorkers">,
+  cpus: number = availableParallelism(),
+): number {
+  return bootstrap.maxHiredWorkers ?? Math.max(1, 2 * cpus);
+}
+
 /** Unset is a self-hosted body. Invalid managed configuration fails startup closed. */
 export function readHostedBodyBootstrap(env: NodeJS.ProcessEnv): HostedBodyBootstrap | undefined {
   const path = env.CLANKIE_HOSTED_BOOTSTRAP_FILE?.trim();
@@ -250,6 +267,7 @@ const PairClaimsSchema = z
   .object({
     ...ClaimsBase,
     aud: z.literal("clankie-body"),
+    purpose: z.literal("operator").optional(),
     jti: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
     bkh: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
     non: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
@@ -689,6 +707,20 @@ export class HostedBodyClient {
       }
       return response;
     }
+  }
+  /**
+   * This tenant's AI credits (VUH-1403), from the fleet: `POST
+   * /fleet/v1/body/credits`, signed like every body call. The answer is the
+   * fleet's, parsed and returned unchanged; neither it nor the request is logged.
+   */
+  async readCredits(): Promise<HostedCredits> {
+    const credential = await this.resolveHostToken();
+    const response = await this.request(
+      "credits",
+      { installationId: this.bootstrap.installationId },
+      credential.token,
+    );
+    return HostedCreditsSchema.parse(await response.json());
   }
   async registerWakeKey(deviceId: string, publicKey: string): Promise<void> {
     await this.post("wake-keys", { deviceId, publicKey });

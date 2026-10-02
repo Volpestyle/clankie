@@ -1,3 +1,6 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type CredentialStore } from "@clankie/credential-broker";
 import { describe, expect, it } from "vitest";
 import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
@@ -40,6 +43,10 @@ function options(fetchImpl: typeof fetch, written: string[]): LaneReadCommandOpt
     stdout: { write: (chunk: string) => written.push(chunk) },
     fetchImpl,
   };
+}
+
+async function* hookStdin(input: string): AsyncIterable<string> {
+  yield input;
 }
 
 describe("clankie prompt", () => {
@@ -135,7 +142,55 @@ describe("clankie memory-card", () => {
     expect(written.join("")).toBe("");
   });
 
-  it("takes no flag but the lane", async () => {
+  it("as a hook, prints the card once per session and again only when it changes", async () => {
+    const hookStateDir = join(await mkdtemp(join(tmpdir(), "clankie-memory-card-test-")), "state");
+    let card = "## Recent\n\n- fixed the gateway\n";
+    const fetchImpl = (() => Promise.resolve(new Response(card, { status: 200 }))) as unknown as typeof fetch;
+    const hook = async (sessionId: string, event = "UserPromptSubmit") => {
+      const written: string[] = [];
+      const stdin = hookStdin(JSON.stringify({ session_id: sessionId, hook_event_name: event }));
+      expect(
+        await runMemoryCardCommand(["--lane", "operator", "--hook"], {
+          ...options(fetchImpl, written),
+          stdin,
+          hookStateDir,
+        }),
+      ).toBe(0);
+      return written.join("");
+    };
+
+    expect(await hook("session-a")).toBe(card);
+    expect(await hook("session-a")).toBe("");
+    // Another session, a /clear or a resume under a new id, gets its own copy.
+    expect(await hook("session-b")).toBe(card);
+    card = "## Recent\n\n- fixed the gateway\n- wrote a new note\n";
+    expect(await hook("session-a")).toBe(card);
+    expect(await hook("session-a")).toBe("");
+    // Compaction summarizes the earlier copy away; SessionStart re-arms it.
+    expect(await hook("session-a", "SessionStart")).toBe("");
+    expect(await hook("session-a")).toBe(card);
+  });
+
+  it("as a hook, prints the card every turn when it cannot tell which session asked", async () => {
+    const hookStateDir = await mkdtemp(join(tmpdir(), "clankie-memory-card-test-"));
+    const { fetchImpl } = recorder("## Recent\n");
+    for (const input of ["not json", "null", JSON.stringify({ session_id: "../escape" })]) {
+      const written: string[] = [];
+      await runMemoryCardCommand(["--hook"], {
+        ...options(fetchImpl, written),
+        stdin: hookStdin(input),
+        hookStateDir,
+      });
+      await runMemoryCardCommand(["--hook"], {
+        ...options(fetchImpl, written),
+        stdin: hookStdin(input),
+        hookStateDir,
+      });
+      expect(written.join("")).toBe("## Recent\n## Recent\n");
+    }
+  });
+
+  it("takes no flag but the lane and --hook", async () => {
     const written: string[] = [];
     const { fetchImpl, requests } = recorder("unused");
 

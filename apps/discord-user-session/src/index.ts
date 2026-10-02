@@ -298,6 +298,7 @@ const voiceSession =
           config: voiceConfig,
         }),
         briefing: createVoiceBriefingProvider(voiceApi),
+        channelOccupants: (guildId, channelId) => gateway.voiceOccupants(guildId, channelId),
         lookAtScreen: createVoiceLookAtScreenProvider(voiceApi),
         floor: {
           names: characterNames(storedSettings.persona),
@@ -331,6 +332,11 @@ const streamWatch = startStreamWatch({
 });
 const voiceTranscriptStore = voiceTranscriptLoggingEnabled ? new DiscordVoiceTranscriptStore() : undefined;
 if (voiceSession !== undefined && voiceTranscriptStore !== undefined) {
+  voiceSession.subscribeSpokenTranscript((transcript) => {
+    void voiceTranscriptStore.append("user_session", transcript).catch(() => {
+      console.error({ deliveryId: transcript.deliveryId }, "Discord spoken transcript append failed");
+    });
+  });
   voiceSession.subscribeTranscript((_line, transcript) => {
     void voiceTranscriptStore.append("user_session", transcript).catch((error: unknown) => {
       console.error(
@@ -613,6 +619,10 @@ async function executeCaptainVoicePresenceNow(
       guildId: target.guildId,
       channelId: target.channelId,
       invokingUserId: target.actorId,
+      arrival: {
+        requestedBy: target.actorId,
+        ...(input.requestText === undefined ? {} : { requestText: input.requestText }),
+      },
     }),
   );
   if (!confirmed) {

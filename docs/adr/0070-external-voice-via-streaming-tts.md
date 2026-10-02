@@ -67,6 +67,31 @@ context, then keeps accepting its audio until the provider's final frame;
 closing without that drain is reserved for interruption. First-audio receipts
 keep measuring the whole decision-to-audible path, including the TTS hop.
 
+### Explicit Eleven v4 Turbo selection (2026-09-28)
+
+`eleven_v4_turbo` uses the provider's Text to Dialogue multi-context WebSocket,
+with one owner-selected voice registered per context and dialogue `inputs`.
+Legacy models retain the TTS transport and Flash remains the unset default.
+Both protocols share the existing PCM, bounds, consent and late-audio handling.
+Dialogue contexts receive keep-alives every ten seconds while accepting text;
+only context `is_final`, not a prosody-turn marker, completes an utterance.
+The existing context interface avoids a second conversation architecture.
+
+The [dialogue guide](https://elevenlabs.io/docs/eleven-api/guides/how-to/websockets/realtime-tdd)
+names v4 support; the [multi-context reference](https://elevenlabs.io/docs/api-reference/text-to-dialogue/ttd-multi-websocket)
+still describes v3. A real provider canary is required to verify model access.
+The reference defines `close_context` as flushing remaining generation. Thus
+local interruption is guaranteed by dropping late output, not by a claim that
+the provider cancels billing immediately.
+
+### Teardown and cutoff attribution (2026-09-28)
+
+Intentional conversation close suppresses late TTS socket errors. Genuine
+synthesis failures retain the provider item id, delivery id, and playback id
+when PCM has reached a playback job; before first audio there is no playback id.
+Interruption and completed-playback receipts carry those same join keys. A
+socket failure with no live utterance must not borrow the previous reply's ids.
+
 ## Alternatives considered
 
 - **Voice-change realtime audio** was rejected because it doubles synthesis and
@@ -82,8 +107,8 @@ keep measuring the whole decision-to-audible path, including the TTS hop.
 
 - The captain remains off the conversational critical path; external synthesis
   adds one measured hop.
-- Barge-in stops synthesis as well as playback, avoiding late paid output nobody
-  hears.
+- Barge-in stops local playback and drops late synthesis output; provider-side
+  generation cancellation depends on the transport.
 - A second provider credential and session lifecycle exist only when selected.
 - TTS failure settles a turn rather than wedging the room floor, and is
   receipted under the `speech_synthesis` stage. An utterance that dies in

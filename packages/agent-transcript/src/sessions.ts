@@ -110,28 +110,6 @@ function projectFromPath(file: AgentSessionFile): string | undefined {
   }
 }
 
-/**
- * The directory the session ran in, which a resumed turn must start from: Grok
- * encodes it in the path; the others record it as `cwd` near the top of the file.
- */
-export async function agentSessionCwd(
-  host: AgentTranscriptHost,
-  file: AgentSessionFile,
-): Promise<string | undefined> {
-  if (file.harness === "grok") return projectFromPath(file);
-  const { bytes } = await host.readBytes(file.path, 0, 64 * 1024);
-  for (const line of bytes.toString("utf8", 0, bytes.lastIndexOf(0x0a) + 1).split("\n")) {
-    try {
-      const record = JSON.parse(line) as { cwd?: unknown; payload?: { cwd?: unknown } };
-      const cwd = record.cwd ?? record.payload?.cwd;
-      if (typeof cwd === "string" && cwd.length > 0) return cwd;
-    } catch {
-      // a torn or foreign line
-    }
-  }
-  return undefined;
-}
-
 function summarize(host: AgentTranscriptHost, file: AgentSessionFile): AgentSessionSummary {
   const sessionId = sessionIdFromPath(file);
   const project = projectFromPath(file);

@@ -1,0 +1,11 @@
+Command: pnpm exec vitest run packages/discord-presence-core/test/voice-session.test.ts packages/discord-presence-core/test/realtime-session.test.ts packages/discord-presence-core/test/voice-ingress.test.ts packages/discord-presence-core/test/external-voice.test.ts packages/discord-presence-core/test/elevenlabs-tts.test.ts packages/protocol/test/discord-voice-evidence.test.ts apps/discord-user-session/test/gateway.test.ts apps/clankie/test/captain-loadout-tools.test.ts
+Exit code: 0
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  8 passed (8)
+      Tests  207 passed (207)
+   Start at  18:45:00
+   Duration  1.49s (transform 238ms, setup 0ms, import 782ms, tests 226ms, environment 0ms)
+

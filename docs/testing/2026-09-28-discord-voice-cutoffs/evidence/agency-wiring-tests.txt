@@ -1,0 +1,11 @@
+Command: pnpm exec vitest run apps/discord-bridge/test/voice-realtime-wiring.test.ts
+Exit code: 0
+
+ RUN  v4.1.10 /Users/james/dev/clankie
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  18:49:57
+   Duration  342ms (transform 172ms, setup 0ms, import 256ms, tests 20ms, environment 0ms)
+

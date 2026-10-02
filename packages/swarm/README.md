@@ -9,12 +9,16 @@ processing. Social conversations have no Swarm connection.
 the inbox after a turn; `close` closes clients. The coordinator retains durable
 state under `CLANKIE_STATE/swarm` and outlives individual host clients.
 
+A disconnected Swarm MCP transport is reopened on the next tool-bank request.
+If Swarm cannot supply its tools, the operator lane logs the failure and still
+serves its local tools. Mutating Swarm calls are never automatically replayed.
+
 `tools` supplies the same registrations to Pi and the operator MCP bank. The
 native Claude seat uses its explicitly selected service conversation (the default
 global conversation when omitted) through
 Clankie's MCP server; its launch directory and inherited worker environment do
 not select another actor. The owner's configured Herdr connections supply local
-Claude dispatch routes, each with a capacity and an owned workspace for each
+harness-selectable dispatch routes, each with a capacity and an owned workspace for each
 worker. The default route has capacity 16 per coordinator scope. Uncertain starts
 retain their provisioning token and capacity
 reservation. Herdr's native `layout.apply` API replaces only the new workspace's
@@ -24,30 +28,68 @@ receipt; binding also requires an authenticated runtime observation. A lost API
 response is reconciled through that receipt and the same provisioning token.
 
 `clankie swarm status`, `/swarm`, and operator-authenticated `GET /v1/swarm` expose
-the coordinator's diagnostics. If no Herdr/Claude executable is available,
+the coordinator's diagnostics. If Herdr or the selected harness executable is unavailable,
 communication still works and provisioning reports unavailable. A native Claude
 seat with the plugin channel enabled receives Swarm envelopes through the service's
 existing seat outbox. Opening the channel rechecks pending inbox messages, including
-before the first Pi turn. Owned stream workers also wake when idle. Owners and workers require a deliberate restart to load a
+before the first Pi turn. Native managed workers also wake when idle when the installed runtime supports them. Owners and workers require a deliberate restart to load a
 new runtime package; replacing files does not upgrade running processes. Do not
 replace the installed Swarm artifact while its dispatched workers may still run:
 fresh MCP/hook subprocesses can load a different build from the owner in memory.
 Hold dispatch through the coordinated upgrade and verify worker MCP readiness
-afterward. The current wrapper can report available even when its MCP failed;
-[the incident and proposed readiness gate](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
-document this gap.
+afterward. The managed wrapper requires an authenticated harness MCP call and fenced
+claim before binding. It reports MCP loss independently, and its POSIX stop latch
+can terminate owned work even when MCP is unavailable. Legacy launches retain
+uncertain capacity until stop proof exists. [The original incident](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
+records the failure that led to these safeguards.
 
-The bundled skills are `lead`, `swarm-lead`, `herdr-lead`, and `swarm-mcp`.
+The opinionated leadership skill is `lead`, with Swarm-first and Herdr fallback sections;
+`swarm-mcp` is the always-on tool/protocol reference. `clankie skills opinionated
+off` disables leadership guidance while retaining the captain's own leadership
+instructions and tool references.
+Clankie also ships a [process-skill bundle](../../docs/bundled-skills.md) for local
+hires; Swarm assignments still use the explicit portable selection below.
 Their sources live in the skills and Swarm repositories; distribution artifacts
 and provenance are in [vendor](../../vendor/README.md). Architecture:
 [ADR 0180](../../docs/adr/0180-swarm-is-the-coordination-layer.md).
+
+## Managed worker harnesses
+
+`clankie runtime harness ID claude|codex|pi` selects the worker for a local runtime;
+the operator API and TUI Connections menu expose the same setting. Omitted settings
+retain Claude. Codex launches `gpt-6-astra` through app-server; pi uses RPC and a
+separate worker extension. These adapters have their own per-session enrollment,
+not the operator conversation's actor or global host configuration. The installed
+runtime advertises its support; older packages reject Codex/pi selection.
+
+`swarm_assign` accepts `harness` as an explicit constraint, translated to
+`routing.host` (`claude` maps to `claude-code`). Default/named runtime settings
+supply the host when the call does not. The resolved harness is stored in the
+immutable intent and physical launch receipt. Each non-Claude runtime route has
+a distinct ID, so changing a setting retains disabled prior routes for recovery.
+Missing executables return `harness_unavailable`; unsupported combinations return
+`harness_mode_unsupported`. No selection silently substitutes Claude.
+
+Assignments retain the existing instruction snapshots. The shared wrapper owns
+leased inbox delivery and explicit ack, progress monitoring, renewal, cancellation
+and release. An actual model call
+to Swarm commits the fenced claim; process startup or tool enumeration cannot do
+so. Codex's MCP configuration and pi's extension are supplied only at launch.
+The integrated upstream source runs all three in their native TUI: Claude through
+its channel, Codex through a private app-server paired with its native UI, and Pi
+through native extension follow-up turns. Clankie probes the installed owner's
+parser for the selected harness and disables unsupported native routes. The old
+vendored build is not upgraded by these source edits; the package requires a
+coordinated drain and rollout ([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
+Remote PC peers continue to enroll through the shared-coordinator
+relay; this does not add remote managed spawning.
 
 ## Connection contract status
 
 [ADR 0181](../../docs/adr/0181-clankie-is-independent-of-his-connections.md)
 defines the accepted product architecture. The current implementation includes
 the embedded coordinator, per-conversation actors, bundled leadership skills,
-named Herdr/Claude dispatch routes, explicit startup selection independent of the
+named Herdr managed dispatch routes, explicit startup selection independent of the
 launch terminal, and combined runtime/Swarm/account inventory in API, CLI and TUI.
 The service runs without Herdr when disabled or when runtime startup fails.
 Communication and task records remain available; unavailable Herdr routes cannot
@@ -60,14 +102,15 @@ captain, Swarm/Herdr worker environment and relay independently of an owner's de
 
 ### Support at a glance
 
-| Capability         | Current support and reference                                                                                                                       |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Coordination       | Embedded coordinator and [named external coordinators](#named-external-coordinators); peer communication works without Herdr                        |
-| Managed execution  | Named Herdr routes with [owner-approved workspaces](#owner-approved-execution-workspaces); capacity and budget default to 16 per scope              |
-| Connected accounts | Explicit restricted worker grants; [account verification and delivery](../../docs/worker-access.md)                                                 |
-| Worker context     | [Owner preferences and selected skills](#working-preferences-and-portable-skills-slices-36) travel with the assignment                              |
-| Runtime readiness  | [Current startup limits](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md) and upgrade precautions apply to live workers |
-| Plans and evidence | [Implementation sequence](#implementation-sequence) records acceptance boundaries and retained proofs; it is not a separate work queue              |
+| Capability         | Current support and reference                                                                                                                                                                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coordination       | Embedded coordinator and [named external coordinators](#named-external-coordinators); peer communication works without Herdr                                                                                                                                                          |
+| Other machines     | ssh fleets ([ADR 0184](../../docs/adr/0184-clankie-leads-more-than-one-fleet.md)); their peers reach the embedded coordinator through a [relay](../../docs/cli.md#peers-on-another-machine-swarm-fleet-peer) ([ADR 0198](../../docs/adr/0198-one-coordinator-reaches-every-fleet.md)) |
+| Managed execution  | Named Herdr routes with [owner-approved workspaces](#owner-approved-execution-workspaces); capacity and budget default to 16 per scope                                                                                                                                                |
+| Connected accounts | Explicit restricted worker grants; [account verification and delivery](../../docs/worker-access.md)                                                                                                                                                                                   |
+| Worker context     | [Owner preferences and selected skills](#working-preferences-and-portable-skills-slices-36) travel with the assignment                                                                                                                                                                |
+| Runtime readiness  | [Current startup limits](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md) and upgrade precautions apply to live workers                                                                                                                                   |
+| Plans and evidence | [Implementation sequence](#implementation-sequence) records acceptance boundaries and retained proofs; it is not a separate work queue                                                                                                                                                |
 
 ## Owner-approved execution workspaces
 
@@ -84,20 +127,38 @@ policy changes. Existing owners must advertise `executionWorkspaces` before rout
 configuration is updated. [ADR 0193](../../docs/adr/0193-runtime-workspaces-are-owner-approved.md)
 records authority and recovery semantics.
 
+Each local runtime defaults to native interactive workers (`clankie runtime mode
+ID interactive`). The selected harness runs its TUI in the Herdr pane; its route
+carries `workerMode`. Claude also carries `channelPlugin: "clankie-worker@clankie"`, the owner-approved plugin Claude Code's
+managed settings must allow ([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
+Clankie enables native dispatch only when the installed swarm-mcp parses that harness's route;
+an older owner would reject the whole dispatch configuration. A saved interactive
+runtime whose Swarm cannot run it has a disabled worker route, and a blocked or
+uncertain native start stays retained. Old stream settings remain readable for
+recovery but cannot launch workers. New stream settings are rejected. Runtime
+connections and existing peers remain available independently of native dispatch.
+
 ## Named external coordinators
 
 `clankie swarm connect PRIVATE.json` verifies a dedicated enrolled Clankie session
 at an existing coordinator. Settings retain its ID, actor, scope, owning
-conversation and local endpoint; the broker retains the capability. The external
-owner and its agents need no Herdr integration with Clankie. Local Unix sockets
-and operator-managed SSH socket forwards use the same existing authenticated
-transport; no network server or speculative transport framework is added.
+conversation, endpoint and optional SSH fleet; the broker retains the capability.
+The external owner and its agents need no Herdr integration with Clankie. Local
+Unix sockets and operator-managed forwards still work. With `ssh: "pc"`, the
+endpoint is a remote Unix socket or Windows named pipe. The service owns a
+private local socket forwarded through SSH to a temporary remote loopback-only
+Node splice, started by that same SSH connection. Nothing is installed, and the
+splice holds no credentials or owner authority. It exits with the link; the
+service retries with backoff and removes its sockets on disconnect/shutdown.
+Remote loopback is accessible to other local processes; Swarm capability checks
+remain the authentication boundary. A named connection can join a project lead
+as an oversight peer while that lead keeps its coordinator, workers and dispatch.
 [CLI setup](../../docs/cli.md#swarm-coordination) owns the import-file contract.
 
 Each of the nine mounted tools accepts `connection: "id"`. The default is the
 embedded coordinator. One conversation can lead several named connections, each
 with its own actor/inbox and retained assignment instruction snapshots. A name
-cannot redirect existing work to another endpoint, actor, scope or conversation.
+cannot redirect existing work to another endpoint, SSH fleet, actor, scope or conversation.
 Credentials and configured identity are rechecked before calls and wake admission;
 connection loss never creates or selects another owner. Disconnect retains the
 identity and work binding, closes local sessions and removes the capability.
@@ -289,13 +350,22 @@ Shared-account delivery and verification:
    live bot proof verifies two independently enrolled workers writing through the
    intended account, issue restrictions, create-only comment access and independent
    revocation. Verification does not switch the authenticated user.
-4. Durable inbox admission, explicit issue-owner routing and pending-wake recovery
-   are implemented. The live Linear/Discord proof uses the intended human and bot
+4. Durable inbox admission and pending-wake recovery are implemented. The
+   [notification-inbox amendment](../../docs/adr/0168-linear-awareness-is-opt-in.md)
+   now sends connected-account notifications to the operator conversation; stored
+   issue bindings are inert. The earlier live Linear/Discord proof uses human and bot
    accounts, one existing real worker, and an actual delivered Discord reply. Revision receipts cover
    structured, verified-account writes; unsupported or incomplete results remain
    visible rather than being guessed into an echo. External side effects require
    reconciliation after a process stops mid-turn; event deduplication alone cannot
    establish exactly-once provider writes.
+
+The owner-connected tracker identity is the identity of Clankie and every hired
+worker. The bridge enforces its grants, but managed runtimes still inherit other
+harness configuration and native hires do not automatically get the bridge.
+[Whole-swarm tracker enforcement](../../docs/worker-tracker-identity.md) records
+these gaps and the exact implementation proposal; instructions alone do not
+isolate credentials.
 
 ### Working preferences and portable skills (slices 3–6)
 
@@ -386,3 +456,5 @@ coordinators sharing one Herdr runtime can together exceed its configured limit.
 Settings are reconciled into existing owners without replacing in-flight receipts.
 `runtime status` reports each effective value and its source: default, owner or unlimited.
 These controls use the operator API; no Swarm tool or captain bearer can change them.
+
+Managed pi uses OpenRouter Kimi K3 explicitly. Codex preapproves only the enrolled Swarm `swarm_inbox` and `swarm_task` tools for unattended lifecycle work; other MCP and shell approvals retain their policy. A same-version vendor update must refresh the dependency snapshot as well as the tarball integrity. The release test imports the pi extension to catch missing production dependencies.

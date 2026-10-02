@@ -1,9 +1,9 @@
 import { createHmac } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProviderAccount } from "@clankie/credential-broker";
 import { ClankieSettingsSchema, type ClankieSettings } from "@clankie/settings";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { seatEventKindFor } from "../src/captain/captain.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -65,6 +65,7 @@ async function hookApp(
   const store = new ConversationStore(root, async () => {});
   const wakes: LinearActivityEvent[] = [];
   const inbox: LinearActivityEvent[] = [];
+  const requestNotificationPoll = vi.fn();
   const clankie = await createClankieApp({
     captain: createStubCaptain({
       receiveLinearActivity: (comment, following) => {
@@ -87,6 +88,7 @@ async function hookApp(
     },
     linearWebhook: {
       secret: () => Promise.resolve(SECRET),
+      requestNotificationPoll,
       ...(writes === undefined ? {} : { writes }),
       ...(ownAccount === undefined ? {} : { ownAccount }),
     },
@@ -105,20 +107,35 @@ async function hookApp(
       body,
     });
   hookStores.push({ root, store, close: () => clankie.close() });
-  return { post, wakes, inbox, root, store };
+  return { post, wakes, inbox, root, store, requestNotificationPoll };
 }
 
 describe("linear activity ingress", () => {
-  it("admits a signed comment while following", async () => {
-    const { post, wakes } = await hookApp();
+  it("requests a notification refresh only after verified, newly persisted activity, even while off", async () => {
+    const f = await hookApp(false);
+    expect((await f.post(commentBody(), { "linear-signature": "bad" })).status).toBe(401);
+    expect((await f.post(commentBody({ webhookTimestamp: NOW.getTime() - 61_000 }))).status).toBe(401);
+    expect((await f.post(commentBody({ data: "bad" }))).status).toBe(400);
+    await f.post(commentBody({ action: "test" }));
+    expect(f.requestNotificationPoll).not.toHaveBeenCalled();
+    await f.post(commentBody());
+    expect(f.inbox).toHaveLength(1);
+    expect(f.requestNotificationPoll).toHaveBeenCalledTimes(1);
+    await f.post(commentBody());
+    expect(f.requestNotificationPoll).toHaveBeenCalledTimes(1);
+    expect(f.wakes).toEqual([]);
+  });
+  it("persists a signed comment without waking even while following", async () => {
+    const { post, wakes, inbox } = await hookApp();
     const body = commentBody();
 
     const response = await post(body);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ingested: true });
-    expect(wakes).toHaveLength(1);
-    expect(wakes[0]).toMatchObject({
+    expect(wakes).toHaveLength(0);
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]).toMatchObject({
       type: "Comment",
       actorEmail: OWNER,
       data: { body: "This one is blocked on the gateway header allowlist." },
@@ -250,7 +267,7 @@ describe("linear activity ingress", () => {
       "FutureResource",
     ]) {
       for (const action of ["create", "update", "remove"]) {
-        const { post, wakes } = await hookApp();
+        const { post, inbox } = await hookApp();
         const response = await post(
           commentBody({
             type,
@@ -261,14 +278,14 @@ describe("linear activity ingress", () => {
           }),
         );
         expect(response.status).toBe(200);
-        expect(wakes).toMatchObject([
+        expect(inbox).toMatchObject([
           { type, action, data: { id: "entity-1", title: "new title" }, updatedFrom: { title: "old title" } },
         ]);
       }
     }
-    const { post, wakes } = await hookApp();
+    const { post, inbox } = await hookApp();
     await post(commentBody({ actor: { name: "Worker", email: "worker@example.com" } }));
-    expect(wakes[0]?.actorName).toBe("Worker");
+    expect(inbox[0]?.actorName).toBe("Worker");
   });
 
   it("acknowledges unsupported actions without retrying them", async () => {
@@ -298,8 +315,10 @@ describe("linear activity ingress", () => {
     first.store.linearInboxConversationId();
     await mkdir(path);
     expect((await first.post(commentBody())).status).toBe(500);
+    expect(first.requestNotificationPoll).not.toHaveBeenCalled();
     await rm(path, { recursive: true });
     expect(await (await first.post(commentBody())).json()).toMatchObject({ ingested: true });
+    expect(first.requestNotificationPoll).toHaveBeenCalledTimes(1);
     await first.store.close();
     const second = await hookApp(false, undefined, first.root);
     expect(
@@ -340,15 +359,15 @@ describe("linear activity ingress", () => {
       "comment-james",
       "comment-elsewhere",
     ]);
-    expect(wakes.map((event) => event.data.id)).toEqual(["comment-james", "comment-elsewhere"]);
+    expect(wakes).toEqual([]);
   });
 
-  it("wakes him when his own identity cannot be verified", async () => {
+  it("keeps history passive when his own identity cannot be verified", async () => {
     const clankie = { id: "user-clankie", name: "clankie" };
     for (const ownAccount of [async () => undefined, () => Promise.reject(new Error("disconnected"))]) {
       const { post, wakes } = await hookApp(true, undefined, undefined, ownAccount);
       await post(commentBody({ organizationId: "org-1", actor: clankie }));
-      expect(wakes).toHaveLength(1);
+      expect(wakes).toHaveLength(0);
     }
   });
 
@@ -405,13 +424,13 @@ describe("linear activity ingress", () => {
         updatedFrom: { health: "onTrack" },
       });
 
-    it("names the update, marks the reply and wakes him to route it", async () => {
+    it("names the update and marks the reply in passive history", async () => {
       const { post, wakes, inbox, store } = await hookApp(true, undefined, undefined, own);
       await post(question());
 
       expect(inbox).toHaveLength(1);
       expect(inbox[0]!.replyTo).toEqual({ type: "ProjectUpdate", id: UPDATE });
-      expect(wakes).toHaveLength(1);
+      expect(wakes).toHaveLength(0);
       expect(linearActivityHeadline(inbox[0]!)).toBe(
         "Linear Comment create · Rivals Agent update 5087a961 · reply to your post · James Volpe",
       );
@@ -419,9 +438,7 @@ describe("linear activity ingress", () => {
       expect(prompt).toContain("whoever owns the work");
       expect(prompt).not.toContain("Routine updates can pass silently");
       expect(prompt).not.toContain("no obligation");
-      const wake = store.linearWakePrompt()!;
-      expect(wake).toContain("Rivals Agent update 5087a961 · reply to your post");
-      expect(wake).toContain("hand it with its link to whoever owns the work");
+      expect(store.linearWakePrompt()).toBeUndefined();
     });
 
     it("names the worker whose write receipt posted the update", async () => {
@@ -467,17 +484,17 @@ describe("linear activity ingress", () => {
 
       await post(statusEdit({ id: JAMES, name: "James Volpe" }));
       expect(inbox[2]!.replyTo).toBeUndefined();
-      expect(store.linearWakePrompt()).not.toContain("reply to your post");
+      expect(store.linearWakePrompt()).toBeUndefined();
 
       const unknown = await hookApp(true, undefined, undefined, async () => undefined);
       await unknown.post(question());
       expect(unknown.inbox[0]!.replyTo).toBeUndefined();
-      expect(unknown.wakes).toHaveLength(1);
+      expect(unknown.wakes).toHaveLength(0);
     });
   });
 
-  it("wakes him once when Linear retries the same delivery", async () => {
-    const { post, wakes } = await hookApp();
+  it("persists once without waking when Linear retries the same delivery", async () => {
+    const { post, wakes, inbox } = await hookApp();
     const body = commentBody();
 
     const first = await post(body);
@@ -486,7 +503,8 @@ describe("linear activity ingress", () => {
     expect(first.status).toBe(200);
     expect(retry.status).toBe(200);
     await expect(retry.json()).resolves.toMatchObject({ ingested: false });
-    expect(wakes).toHaveLength(1);
+    expect(inbox).toHaveLength(1);
+    expect(wakes).toHaveLength(0);
   });
 
   it("reports itself unavailable until the owner has pasted the signing secret", async () => {
@@ -533,47 +551,42 @@ describe("linear activity ingress", () => {
   });
 });
 
-it("requires operator authority and an expected owner to rebind Linear work", async () => {
-  const fixture = await hookApp(false);
-  const store = fixture.store;
-  store.linearInboxConversationId();
-  const app = await createClankieApp({
-    captain: createStubCaptain({
-      linearWorkOwners: () => store.linearWorkOwners(),
-      setLinearWorkOwner: (owner, expected, remove) => store.setLinearWorkOwner(owner, expected, remove),
-    }),
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
-  });
+it("keeps legacy bindings readable while authenticated mutations are retired", async () => {
+  const root = await mkdtemp("/tmp/clankie-linear-bindings-");
   const binding = {
     organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
     issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
     conversationId: "global-default",
   };
-  const request = (body: unknown, method = "PUT", token = "owner") =>
+  const stored = JSON.stringify([binding]);
+  const path = join(root, "linear-work.json");
+  await writeFile(path, stored);
+  const fixture = await hookApp(false, undefined, root);
+  const store = fixture.store;
+  const app = await createClankieApp({
+    captain: createStubCaptain({
+      linearWorkOwners: () => store.linearWorkOwners(),
+    }),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+  });
+  const request = (method: string, token = "owner") =>
     app.app.request("/v1/linear/work", {
       method,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
+      ...(method === "GET" ? {} : { body: JSON.stringify(binding) }),
     });
   try {
-    expect((await request(binding, "PUT", "social")).status).toBe(401);
-    expect((await request({ ...binding, issueId: "VUH-123" })).status).toBe(400);
-    expect((await request({ ...binding, conversationId: "missing" })).status).toBe(409);
-    expect((await request(binding)).status).toBe(200);
-    expect((await request({ ...binding, conversationId: "linear-inbox" })).status).toBe(409);
-    expect(
-      (
-        await request({
-          ...binding,
-          conversationId: "linear-inbox",
-          expectedConversationId: "global-default",
-        })
-      ).status,
-    ).toBe(200);
-    expect((await request(binding, "DELETE")).status).toBe(409);
-    expect((await request({ ...binding, conversationId: "linear-inbox" }, "DELETE")).status).toBe(200);
-    expect(store.linearWorkOwners()).toEqual([]);
+    for (const method of ["GET", "PUT", "DELETE"]) expect((await request(method, "social")).status).toBe(401);
+    for (const method of ["PUT", "DELETE"]) {
+      const response = await request(method);
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({ error: "linear_work_bindings_retired" });
+    }
+    const response = await request("GET");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ owners: [binding] });
+    expect(await readFile(path, "utf8")).toBe(stored);
   } finally {
     app.close();
   }
@@ -652,8 +665,11 @@ describe("where a hook is delivered", () => {
 });
 
 describe("Linear follow control", () => {
-  it("requires the operator, validates writes, and applies them to the next delivery", async () => {
-    let settings = ClankieSettingsSchema.parse({ schemaVersion: 1 });
+  it("requires the operator and changes follow without promoting workspace deliveries", async () => {
+    let settings = ClankieSettingsSchema.parse({
+      schemaVersion: 1,
+      linearWebhook: { url: "https://hooks.example.test/v1/hooks/linear" },
+    });
     const wakes: LinearActivityEvent[] = [];
     const { app } = await createClankieApp({
       captain: createStubCaptain({
@@ -718,7 +734,7 @@ describe("Linear follow control", () => {
             body: JSON.stringify({ following }),
           })
         ).json(),
-      ).toMatchObject({ following, conversationId: "linear-inbox" });
+      ).toMatchObject({ following, conversationId: "linear-inbox", wakeConversationId: "global-default" });
       const body = commentBody({ type: "Issue", action: "create" });
       const response = await app.request("/v1/hooks/linear", {
         method: "POST",
@@ -727,6 +743,77 @@ describe("Linear follow control", () => {
       });
       expect(await response.json()).toMatchObject({ ingested: true });
     }
-    expect(wakes).toHaveLength(1);
+    expect(wakes).toHaveLength(0);
   });
+});
+
+it.each([
+  { url: undefined, secret: undefined, missing: ["url", "secret"] },
+  { url: "https://hooks.example.test/v1/hooks/linear", secret: undefined, missing: ["secret"] },
+  { url: undefined, secret: SECRET, missing: ["url"] },
+  { url: "https://hooks.example.test/v1/hooks/linear", secret: "  ", missing: ["secret"] },
+])("refuses following without the webhook prerequisites: $missing", async ({ url, secret, missing }) => {
+  let settings = ClankieSettingsSchema.parse({ schemaVersion: 1, linearWebhook: { url } });
+  const resume = vi.fn();
+  const { app } = await createClankieApp({
+    captain: createStubCaptain({ resumeLinearActivity: resume }),
+    authenticateOperator: async () => ({ operatorId: "test" }),
+    settings: { load: async () => settings, update: async (mutate) => (settings = mutate(settings)) },
+    linearWebhook: { secret: async () => secret },
+  });
+  const response = await app.request("/v1/linear/follow", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ following: true }),
+  });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error: "linear_webhook_required",
+    reason: "linear_webhook_required",
+    missingWebhook: missing,
+    following: false,
+    active: false,
+  });
+  expect(settings.linearWebhook.following).toBe(false);
+  expect(resume).not.toHaveBeenCalled();
+});
+
+it("reports blocked following when its webhook secret or URL is removed, and permits stopping", async () => {
+  let settings = ClankieSettingsSchema.parse({
+    schemaVersion: 1,
+    linearWebhook: { url: "https://hooks.example.test/v1/hooks/linear" },
+  });
+  let secret: string | undefined = SECRET;
+  const resume = vi.fn();
+  const { app } = await createClankieApp({
+    captain: createStubCaptain({ resumeLinearActivity: resume }),
+    authenticateOperator: async () => ({ operatorId: "test" }),
+    settings: { load: async () => settings, update: async (mutate) => (settings = mutate(settings)) },
+    linearWebhook: { secret: async () => secret },
+  });
+  const toggle = (following: boolean) =>
+    app.request("/v1/linear/follow", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ following }),
+    });
+  expect(await (await toggle(true)).json()).toMatchObject({ following: true, active: true, reason: null });
+  expect(resume).toHaveBeenCalledTimes(1);
+  expect(settings.linearWebhook.url).toBe("https://hooks.example.test/v1/hooks/linear");
+  secret = undefined;
+  expect(await (await app.request("/v1/linear/follow")).json()).toMatchObject({
+    following: true,
+    active: false,
+    reason: "linear_webhook_required",
+    missingWebhook: ["secret"],
+  });
+  secret = SECRET;
+  settings.linearWebhook = { following: true };
+  expect(await (await app.request("/v1/linear/follow")).json()).toMatchObject({
+    following: true,
+    active: false,
+    missingWebhook: ["url"],
+  });
+  expect(await (await toggle(false)).json()).toMatchObject({ following: false, active: false });
+  expect(resume).toHaveBeenCalledTimes(1);
 });

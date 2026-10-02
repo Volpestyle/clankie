@@ -1,0 +1,97 @@
+{
+  "codexVersion": "0.159.1",
+  "conversation": {
+    "schemaVersion": 1,
+    "conversationId": "conv-607f7c31-6b36-47a3-b6bf-120ab9ce75f1",
+    "scope": {
+      "kind": "global"
+    },
+    "title": "VUH-1468 Codex plugin scratch verification",
+    "isDefault": false,
+    "createdAt": "2026-09-30T10:43:58.756Z",
+    "updatedAt": "2026-09-30T10:43:58.756Z",
+    "sessionState": "unbound",
+    "revision": 0
+  },
+  "pane": "w2H:p6S",
+  "status": "blocked_on_owner_hook_trust",
+  "processes": [
+    {
+      "pid": 24340,
+      "name": "codex",
+      "argv": [
+        "codex",
+        "-c",
+        "marketplaces.clankie-seat={source_type=\"local\",source=\"/Users/james/dev/clankie/integrations/codex-plugin\"}",
+        "-c",
+        "plugins.\"clankie@clankie-seat\".enabled=true",
+        "--remote",
+        "unix:///var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/clankie-codex-NLfM3L/rpc.sock"
+      ]
+    },
+    {
+      "pid": 24337,
+      "name": "codex",
+      "argv": [
+        "codex",
+        "-c",
+        "marketplaces.clankie-seat={source_type=\"local\",source=\"/Users/james/dev/clankie/integrations/codex-plugin\"}",
+        "-c",
+        "plugins.\"clankie@clankie-seat\".enabled=true",
+        "app-server",
+        "--listen",
+        "unix:///var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/clankie-codex-NLfM3L/rpc.sock"
+      ]
+    }
+  ],
+  "trustedHooks": false,
+  "outboxBound": false,
+  "completedLiveChecks": [
+    "native plugin installed",
+    "real interactive Codex TUI attached to owned app-server",
+    "native hook review displayed"
+  ],
+  "pendingLiveChecks": ["identity", "memory card", "MCP tool call", "transcript in app", "wake"],
+  "cleanup": {
+    "nativeTuiExited": true,
+    "ownedAppServerExited": true,
+    "paneClosed": true,
+    "scratchConversationClosed": true,
+    "foregroundAfterExit": [
+      {
+        "argv": ["-zsh"],
+        "argv0": "zsh",
+        "cmdline": "-zsh",
+        "cwd": "/Users/james/dev/clankie",
+        "name": "zsh",
+        "pid": 5030
+      }
+    ],
+    "temporaryAuthLinkRemoved": true,
+    "workerPluginRemoved": true
+  },
+  "scratchConversationBeforeTrust": {
+    "conversation": {
+      "schemaVersion": 1,
+      "conversationId": "conv-607f7c31-6b36-47a3-b6bf-120ab9ce75f1",
+      "scope": {
+        "kind": "global"
+      },
+      "title": "VUH-1468 Codex plugin scratch verification",
+      "isDefault": false,
+      "createdAt": "2026-09-30T10:43:58.756Z",
+      "updatedAt": "2026-09-30T10:43:58.756Z",
+      "sessionState": "unbound",
+      "revision": 0
+    },
+    "schemaVersion": 1,
+    "status": "page",
+    "conversationId": "conv-607f7c31-6b36-47a3-b6bf-120ab9ce75f1",
+    "surfaceClientId": "clankie-cli",
+    "events": [],
+    "retainedFromCursor": "000000000000",
+    "nextCursor": "000000000000",
+    "safeCursor": "000000000000",
+    "hasMore": false
+  }
+}

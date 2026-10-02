@@ -1,0 +1,8 @@
+RUN  v4.1.10 /Users/james/dev/clankie
+
+{"level":30,"time":"2026-09-29T04:33:03.624Z","service":"clankie","version":"0.2.0","correlationId":"discord-message:smoke-message-1","deliveryId":"smoke-message-1","state":"settled","msg":"Discord channel captain turn settled"}
+
+ Test Files  5 passed (5)
+      Tests  216 passed (216)
+   Start at  23:32:58
+   Duration  5.06s (transform 465ms, setup 0ms, import 1.10s, tests 3.65s, environment 0ms)

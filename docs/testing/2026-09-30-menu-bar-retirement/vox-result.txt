@@ -1,0 +1,6 @@
+
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+$ node test/ipc-smoke.ts debug
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox

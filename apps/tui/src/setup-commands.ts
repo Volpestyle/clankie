@@ -188,6 +188,7 @@ export function checklistEntries(
   const discordOn = discord.textIngressEnabled || discord.voiceEnabled || discord.userSessionEnabled;
   const workers = ["codex", "claude"].filter((name) => report.commands[name]?.present === true);
   return [
+    { value: "connection", label: "Local or hosted Clankie", hint: "local", command: "connection" },
     {
       value: "think",
       label: "How he thinks",
@@ -218,7 +219,7 @@ export function checklistEntries(
         report.doorway.state === "connected"
           ? "This Mac is signed in; pair a phone or iPad."
           : "Sign this Mac in to api.clankie.bot, then pair the app.",
-      command: report.doorway.state === "connected" ? "pair" : "gateway",
+      command: report.doorway.state === "connected" ? "pair" : "remote-access",
     },
     {
       value: "discord",
@@ -245,6 +246,13 @@ export function checklistEntries(
       label: "Video",
       hint: report.videoModel === null ? "off" : `✓ ${report.videoModel}`,
       command: "video-model",
+    },
+    {
+      value: "skills",
+      label: "Working skills",
+      hint: report.skills.selection.opinionated ? "opinionated on" : "product/tools only",
+      description: "Toggle opinionated guidance or exclude individual skills; product/tool skills stay on.",
+      command: "skills",
     },
     {
       value: "games",

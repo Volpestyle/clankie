@@ -67,6 +67,14 @@ it("lists and messages Swarm personas through the authenticated conversation API
     revision: 0,
     sessionState: "unbound",
   };
+  const task = {
+    taskId: "task-1",
+    title: "Review this",
+    status: "running",
+    lead: { name: "Clankie", clankie: true },
+    owner: { name: "Peer", personaId: "swarm-peer" },
+    updatedAt: now,
+  };
   const calls: Array<Record<string, unknown>> = [];
   const options = {
     env: { CLANKIE_CAPTAIN_TOKEN: "captain" },
@@ -78,7 +86,14 @@ it("lists and messages Swarm personas through the authenticated conversation API
         return Response.json({
           op: "fleet",
           schemaVersion: 1,
-          snapshot: { schemaVersion: 1, cursor: "0", seats: [], personas: [persona], channels: [] },
+          snapshot: {
+            schemaVersion: 1,
+            cursor: "0",
+            seats: [],
+            personas: [persona],
+            channels: [],
+            tasks: [task],
+          },
         });
       if (request.op === "create") return Response.json({ op: "create", schemaVersion: 1, conversation });
       return Response.json({
@@ -96,6 +111,8 @@ it("lists and messages Swarm personas through the authenticated conversation API
     }) as typeof fetch,
   };
   expect(await runSwarmCommand(["contacts"], options)).toEqual([persona]);
+  expect(await runSwarmCommand(["tasks"], options)).toEqual([task]);
+  await expect(runSwarmCommand(["tasks", "extra"], options)).rejects.toThrow("Usage");
   expect(await runSwarmCommand(["message", "swarm-peer", "Review", "this"], options)).toMatchObject({
     status: "accepted",
   });

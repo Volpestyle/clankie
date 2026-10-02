@@ -13,6 +13,7 @@ import {
   MODEL_KEY_VALIDATE_PATH,
   MODEL_SELECT_PATH,
   MODEL_KEY_REMOVE_PATH,
+  MODEL_SUBSCRIPTIONS_PATH,
 } from "./model-keys.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -23,6 +24,7 @@ import {
   PublicGatewayPushWakeResultFrameSchema,
 } from "./device-push.ts";
 import { DEVICE_WAKE_KEY_PATH } from "./wake.ts";
+import { HOSTED_CREDITS_PATH } from "./hosted-credits.ts";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
 export const PUBLIC_GATEWAY_SCHEMA_VERSION = 1 as const;
@@ -42,13 +44,17 @@ export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
 /** A hosted body seals a fresh pairing link for its owner's signed-in web page. */
 export const HOSTED_PAIR_OFFER_PATH = "/v1/hosted/pair-offer";
 
+export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
+
 export const PUBLIC_GATEWAY_ROUTES = [
+  { method: "POST", path: HOSTED_OPERATOR_PATH, target: "control" },
   { method: "POST", path: DISCORD_INGRESS_PATH, target: "control" },
   { method: "GET", path: MODEL_KEYS_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_SET_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_VALIDATE_PATH, target: "control" },
   { method: "POST", path: MODEL_SELECT_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_REMOVE_PATH, target: "control" },
+  { method: "GET", path: MODEL_SUBSCRIPTIONS_PATH, target: "control" },
   { method: "GET", path: ACCOUNTS_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GITHUB_START_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GITHUB_POLL_PATH, target: "control" },
@@ -65,6 +71,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
   { method: "POST", path: LINEAR_WEBHOOK_PATH, target: "control" },
   { method: "POST", path: DEVICE_WAKE_KEY_PATH, target: "control" },
+  { method: "GET", path: HOSTED_CREDITS_PATH, target: "control" },
   { method: "POST", path: HOSTED_PAIR_OFFER_PATH, target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },

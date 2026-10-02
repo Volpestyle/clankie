@@ -1,0 +1,15 @@
+[
+  {
+    "event": "browser.recording.failed",
+    "phase": "stop",
+    "path": "/tmp/vuh1448-j6uZnT/browser/recordings/2026-09-29T21-16-44-323Z.webm",
+    "detail": "Command failed: agent-browser record stop --headed true\n\u2717 ffmpeg failed: ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers\n  built with Apple clang version 21.0.0 (clang-2100.0.123.102)\n  configuration: --prefix=/opt/homebrew/Cellar/ffmpeg/8.1.2_1 --enable-shared --enable-pthreads -",
+    "time": "2026-09-29T21:17:16.483Z"
+  },
+  {
+    "event": "browser.recording.failed",
+    "phase": "start",
+    "detail": "Command failed: agent-browser state save /tmp/vuh1448-j6uZnT/browser/home/recording-state.json --headed false\n\u2717 Could not configure browser: Failed to connect: No such file or directory (os error 2)\n",
+    "time": "2026-09-29T21:17:16.953Z"
+  }
+]

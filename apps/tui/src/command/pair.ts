@@ -1,4 +1,5 @@
 import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { directOriginTransport } from "@clankie/protocol";
 import QRCode from "qrcode";
 import {
   pairingFailureMessage,
@@ -8,6 +9,8 @@ import {
   type PairingOfferStatus,
 } from "../../bin/pairing-offer.ts";
 import { createServiceOptions, startOne, type CreateServiceOptionsInput } from "../../bin/services.ts";
+import { nextStepLine } from "../next-step.ts";
+import { probeDoorway } from "./gateway.ts";
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
 /** One deadline for the whole command: starting the relay counts against it. */
@@ -72,6 +75,65 @@ async function ensureRelayForPairing(
   }
 }
 
+/**
+ * Which routes an offer's link carries (ADR 0204), so the operator knows who it
+ * can pair: the gateway reaches any network, the direct route pairs the App
+ * Store app with no account, and neither pairs only a source build.
+ */
+function routeLines(offer: PairingOffer): string[] {
+  const direct = offer.direct;
+  const routes = [
+    ...(offer.gateway ? ["remote access (gateway)"] : []),
+    ...(direct === undefined ? [] : [`direct (${direct})`]),
+  ];
+  if (routes.length === 0) {
+    return [
+      "Route: this Mac only — pairs a source build pointed here, not the App Store app.",
+      "Configure a direct route with `clankie gateway direct` to pair the App Store app with no account.",
+    ];
+  }
+  return [
+    `Routes: ${routes.join(" + ")}`,
+    ...(direct !== undefined && directOriginTransport(direct) === "blocked"
+      ? [
+          `The App Store app cannot reach ${direct}: plain HTTP works only for LAN addresses. Serve it over HTTPS (e.g. \`tailscale serve --https\`).`,
+        ]
+      : []),
+  ];
+}
+
+/**
+ * A code without the gateway route while remote access is signed out works only
+ * on the direct route. Say so, and name the fix, rather than let it read as
+ * remote access being fine. A failed probe says nothing: it is advisory.
+ */
+async function probeSignedOut(
+  options: PairCommandOptions & { readonly env: NodeJS.ProcessEnv },
+): Promise<{ readonly since: string } | undefined> {
+  const doorway = await probeDoorway({
+    env: options.env,
+    ...(options.host === undefined ? {} : { host: options.host }),
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  return doorway.state === "sign_in_required" ? { since: doorway.since } : undefined;
+}
+
+function signedOutNote(offer: PairingOffer, signedOut: { readonly since: string } | undefined) {
+  if (signedOut === undefined || offer.gateway === true) return undefined;
+  return `Remote access is signed out, so this code will not work away from the direct route. ${nextStepLine({ doorway: { state: "sign_in_required", since: signedOut.since }, remoteAccessConfigured: true, directRouteConfigured: true })}`;
+}
+
+/** The routes an agent reads back beside the offer; absent means this Mac only. */
+function routeJson(offer: PairingOffer): { routes?: { gateway: boolean; direct?: string } } {
+  if (offer.gateway !== true && offer.direct === undefined) return {};
+  return {
+    routes: {
+      gateway: offer.gateway === true,
+      ...(offer.direct === undefined ? {} : { direct: offer.direct }),
+    },
+  };
+}
+
 /** QR + code + link per offer; the one place secret display data is rendered. */
 async function offerBlocks(offers: readonly PairingOffer[]): Promise<string[]> {
   const lines: string[] = [];
@@ -81,6 +143,7 @@ async function offerBlocks(offers: readonly PairingOffer[]): Promise<string[]> {
       `Code ${index + 1}: ${offer.code}`,
       offer.deepLink,
       `Expires ${offer.expiresAt}`,
+      ...routeLines(offer),
       "",
     );
   }
@@ -93,6 +156,7 @@ function offerJson(offers: readonly PairingOffer[]): unknown[] {
     code: offer.code,
     deepLink: offer.deepLink,
     expiresAt: offer.expiresAt,
+    ...routeJson(offer),
   }));
 }
 
@@ -177,6 +241,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
   const deadline = Date.now() + timeoutMs;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const offers: PairingOffer[] = [];
+  let signedOut: { readonly since: string } | undefined;
   try {
     // Authenticate before any side effect: an unauthenticated caller must not
     // be able to start a service, so this precedes the relay guarantee.
@@ -188,6 +253,10 @@ export async function runPairCommand(args: readonly string[], options: PairComma
       { ...options, env },
       { controlPlaneUrl, timeoutMs: Math.max(1, deadline - Date.now()) },
     );
+    // Before the mint, so the offer stays the last request. It only decides
+    // whether the finished code gets a sign-in note; a failed probe says nothing.
+    if (review === undefined && !controller.signal.aborted)
+      signedOut = await probeSignedOut({ ...options, env, host: controlPlaneUrl });
     // Review mode mints a small set of independent single-use offers, so a
     // second reviewer attempt takes the next code instead of failing `consumed`.
     for (let index = 0; index < (review?.count ?? 1); index += 1) {
@@ -269,8 +338,16 @@ export async function runPairCommand(args: readonly string[], options: PairComma
 
   const offer = offers[0];
   if (offer === undefined) throw new Error("No pairing offer was minted.");
+  const signedOutNoteText = signedOutNote(offer, signedOut);
   if (json) {
-    outputJson(stdout, { ok: true, code: offer.code, deepLink: offer.deepLink, expiresAt: offer.expiresAt });
+    outputJson(stdout, {
+      ok: true,
+      code: offer.code,
+      deepLink: offer.deepLink,
+      expiresAt: offer.expiresAt,
+      ...routeJson(offer),
+      ...(signedOutNoteText === undefined ? {} : { nextStep: signedOutNoteText }),
+    });
     return 0;
   }
 
@@ -284,6 +361,8 @@ export async function runPairCommand(args: readonly string[], options: PairComma
       "Or open this link on the device:",
       offer.deepLink,
       `Expires ${offer.expiresAt} · single use — run \`clankie pair\` again for a new offer.`,
+      ...routeLines(offer),
+      ...(signedOutNoteText === undefined ? [] : [signedOutNoteText]),
       "",
     ].join("\n"),
   );

@@ -1,0 +1,23 @@
+Persona video verification, 2026-09-28 (America/Chicago)
+Implementation: 452f78e795ebf7f87e72c22a1f883e0266f8139a
+
+Command: pnpm check
+Exit code: 0
+Checked 421 markdown files; local links resolve.
+Built public docs: 10 pages, 35 network routes, 110 API operations, 52 slash commands.
+Checked 10 public docs pages; links and anchors resolve.
+ Tasks:    28 successful, 28 total
+ Test Files  358 passed (358)
+      Tests  3002 passed | 2 skipped (3004)
+   Duration  196.95s (transform 2.71s, setup 0ms, import 77.97s, tests 95.94s, environment 13ms)
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+Vox IPC ready: /Users/james/dev/clankie/apps/vox/target/debug/clankvox
+
+Focused command: pnpm exec vitest run packages/persona-images/test apps/clankie/test/persona-images.test.ts apps/clankie/test/persona-caption.test.ts apps/clankie/test/media-generation.test.ts
+Exit code: 0; 5 test files, 36 tests passed, no skips
+
+Live evaluation: 36/36 model calls; see video-abc-report.md.
+Live caption: see video-caption.json.
+Actual CLI set/status/clear with isolated settings: see video-cli.json.
+No private videos or extracted frames were copied into the repo.
+No real owner-setting changes, service restarts, or git pushes.

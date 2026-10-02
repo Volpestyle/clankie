@@ -1,10 +1,8 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import type { PresenceSnapshot } from "../src/observation/presence.ts";
 import {
   ClankieFooterComponent,
   formatCaptainContextUsage,
-  formatCaptainPresenceStatus,
   formatFooterContext,
   formatFooterTokens,
   type ClankieFooterState,
@@ -16,16 +14,6 @@ const ansi = createClankieFaceAnsiTheme({ color: false, trueColor: false });
 function footer(state: Partial<ClankieFooterState>): ClankieFooterComponent {
   return new ClankieFooterComponent(ansi, () => ({ cwd: "/tmp", extras: [], ...state }));
 }
-
-describe("presence status", () => {
-  it("formats every phase and the unavailable fallback", () => {
-    for (const phase of ["online", "voice_connected", "starting"]) {
-      const presence = { phase } as unknown as PresenceSnapshot;
-      expect(formatCaptainPresenceStatus(presence)).toBe(`discord ${phase.replaceAll("_", " ")}`);
-    }
-    expect(formatCaptainPresenceStatus(undefined)).toBe("discord unavailable");
-  });
-});
 
 describe("context usage", () => {
   it("formats the /status readout with compact token counts", () => {

@@ -1,0 +1,35 @@
+{
+  "checkedAt": "2026-09-30T15:59:24.709Z",
+  "accounts": [
+    {
+      "label": "default",
+      "rateLimits": {
+        "five_hour": null,
+        "seven_day": 0.02,
+        "resets": {
+          "five_hour": null,
+          "seven_day": 1791387283
+        },
+        "limited": false
+      },
+      "observedAt": "2026-09-30T15:59:22.728Z",
+      "headroom": 0.98
+    },
+    {
+      "label": "jamescvolpe",
+      "rateLimits": {
+        "five_hour": null,
+        "seven_day": 0.92,
+        "resets": {
+          "five_hour": null,
+          "seven_day": 1791046977
+        },
+        "limited": false
+      },
+      "observedAt": "2026-09-30T15:59:23.675Z",
+      "headroom": 0.07999999999999996
+    }
+  ],
+  "automatic": "default",
+  "override": "jamescvolpe"
+}

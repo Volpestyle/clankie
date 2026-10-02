@@ -1,5 +1,7 @@
+import { VOICE_JOIN_REQUEST_MAX_CHARS } from "@clankie/discord-presence-core";
 import {
   CAPTAIN_EPISODE_SUMMARY_MAX,
+  CAPTAIN_SILENT_REPLY_SENTINEL,
   DrawErDiagramRequestSchema,
   DrawSequenceDiagramRequestSchema,
   OPERATOR_SEAT_DIRECTORY_MAX,
@@ -56,6 +58,8 @@ export interface TurnContext {
   /** Discord channel and trigger message for grounded social actions. */
   channelId?: string | undefined;
   messageId?: string | undefined;
+  /** Host-copied asking message; untrusted context for a voice arrival. */
+  requestText?: string | undefined;
   /** Host-stamped: this session holds shell tools under its authority plan. */
   shell?: boolean | undefined;
   /** Host-stamped Discord message a `herdr_watch` from this turn answers. */
@@ -185,6 +189,12 @@ export function captainTools(
         "'no_model_configured' means nobody has picked an image model yet (/image-model), 'credential_unavailable' " +
         "means there is no API key stored for it. A refusal is something to mention, not retry.",
       parameters: Type.Object({
+        personaReference: Type.Optional(
+          Type.Boolean({
+            description:
+              "Use only the owner appearance/ references when depicting yourself. Vibe references never define your look. Do not combine with sourceRef.",
+          }),
+        ),
         prompt: Type.String({ minLength: 1, maxLength: 4000 }),
         aspectRatio: Type.Optional(
           Type.String({ description: "Shape like 16:9 or 1:1. Omit to let the model choose." }),
@@ -236,7 +246,9 @@ export function captainTools(
         "can say out loud (play_session_active means a play session is already active or winding down, " +
         "no_credential means nobody provisioned you a seat, world_unreachable means the host " +
         "is down, world_full means there is no room, region_not_hosted means that game is not up, world_refused " +
-        "means the world said no); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
+        "means the world said no); 'pending' means it is still spinning up — say so, never claim to be playing yet. " +
+        "Joining does not start the host: with machine tools, the pokeagents skill starts an installed local world, " +
+        "then retry — a host-down refusal is a diagnosis, not the end of a request to play.",
       parameters: Type.Object({
         environmentId: Type.Union([Type.Literal("pokemon-firered"), Type.Literal("pokemon-emerald")], {
           default: "pokemon-firered",
@@ -459,7 +471,8 @@ export function captainTools(
       description:
         "Read the recent conversation in one of your other rooms. Entries come marked — 'heard' is what someone " +
         "said to you there, 'said' is your own reply. Say when a room has been quiet rather than inventing " +
-        "activity, and never describe a room you did not actually read. Call with no arguments to list rooms.",
+        "activity, and never describe a room you did not actually read. Call with no arguments to list rooms. " +
+        "On discord_voice it holds only handoffs to you, not the voice conversation; get_self_state covers voice.",
       parameters: Type.Object({
         lane: Type.Optional(
           Type.String({ description: "Room lane, e.g. discord_presence, discord_voice, operator." }),
@@ -496,7 +509,8 @@ export function captainTools(
         "A present-tense card of what you are doing right now: live play session, Discord presence, closed " +
         "voice stays, and recent voice speech scalars (spoken vs suppressed — never words). " +
         "Read it before answering questions about yourself. voiceHistory is closed stays only and is empty " +
-        "while you are still in the channel; recentVoiceSpeech.currentStay is whether you have been talking.",
+        "while you are still in the channel, not proof of silence; recentVoiceSpeech.currentStay is whether you have " +
+        "been talking, and play commentary is trigger 'narration'.",
       parameters: Type.Object({}),
       execute: async () => {
         const [live, sessions, voiceHistory, voiceSpeech, renders, shares, rivals] = await Promise.all([
@@ -594,11 +608,31 @@ function hireAgentTool(
       "(pi, claude and codex take --model; effort is pi's --thinking, claude's --effort, codex's " +
       "model_reasoning_effort); omit both for the harness default. Outcomes are typed: unknown_directory, " +
       "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
-      "spelling or never came up), herdr_unreachable. A hired seat is not a Swarm peer: pass brief to hand it " +
-      "its first prompt through its conversation lane (the result says whether it was delivered), follow up " +
+      "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, at_capacity (this body already runs as many hired agents " +
+      "as its plan allows; close or reuse one). A hired seat is not a Swarm peer: pass brief to hand it " +
+      "its first prompt (codex needs one, since its session starts with its first turn). A briefed local seat is " +
+      "driven through its harness when possible (claude: the clankie-worker plugin's channel and Stop hooks) and " +
+      "stays interactive in its pane. control.mode says how: channel for Claude, adapter for Codex, terminal for " +
+      "a pasted brief with control.reason explaining why; control.fix, when present, is the owner's one-time step. A brief is delivered only after its complete native transcript " +
+      "receipt; not_ready with brief_delivery_unverified means receipt could not be confirmed and the new pane was closed. " +
+      "Use a brief file and a short pointer when transcript limits or redaction prevent verification. Follow up " +
       "with message_seat, and watch it with herdr_watch on the returned seatId.",
     parameters: Type.Object({
       harness: StringEnum(OPERATOR_SEAT_HARNESSES),
+      resume: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 128,
+          description:
+            "Saved transcript ref (host:sessionId). Reuse its live native seat, or reopen the exact session interactively. Harness and workingDirectory must match; remote fleet must point to the same SSH host. Never starts a headless continuation.",
+        }),
+      ),
+      account: Type.Optional(
+        Type.String({
+          pattern: "^[a-z][a-z0-9_-]{0,63}$",
+          description: "Registered local Codex account label; omit to choose by headroom.",
+        }),
+      ),
       title: Type.String({ minLength: 1, maxLength: 80, description: "What the roster calls it." }),
       workingDirectory: Type.String({
         minLength: 1,
@@ -607,6 +641,27 @@ function hireAgentTool(
       }),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
       effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+      skills: Type.Optional(
+        StringEnum(["bundled", "plain"], {
+          description:
+            "Override the owner's opinionated skill setting for this local hire. Product/tool skills always remain; bundled still respects exclusions. Result records the condition. Other harness/global/project skills are unchanged.",
+        }),
+      ),
+      chrome: Type.Optional(
+        Type.Boolean({
+          description:
+            "Start it with the owner's Chrome integration on, for browser work in their own signed-in Chrome " +
+            "(claude's --chrome; codex follows its own settings). Your reach card says which harness needs it.",
+        }),
+      ),
+      fleet: Type.Optional(
+        Type.String({
+          pattern: "^[a-z][a-z0-9-]{0,63}$",
+          description:
+            "A registered remote fleet (machine) from the census's HERDR FLEET sections; omit for this machine. " +
+            "workingDirectory must be one of that fleet's granted workspaces, spelled the way that machine spells it.",
+        }),
+      ),
       ...(message === undefined
         ? {}
         : {
@@ -624,9 +679,13 @@ function hireAgentTool(
       if (turn.autonomous === true) throw new Error("Autonomous turns may propose a hire, not execute one");
       if (available?.() === false) return json({ outcome: "failed", reason: "herdr_unreachable" });
       const { brief, ...seat } = params as typeof params & { brief?: string };
-      const result = await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }));
+      const result = await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }), brief);
       if (result.outcome !== "spawned" || brief === undefined || message === undefined) return json(result);
-      return json({ ...result, brief: await message(result.seat.seatId, brief) });
+      // spawnSeat submits once after readiness and verifies the complete receipt.
+      return json({
+        ...result,
+        brief: { outcome: "delivered", seatId: result.seat.seatId, status: result.seat.status },
+      });
     },
   });
 }
@@ -842,51 +901,6 @@ function agentSessionTools(sessions: NonNullable<CaptainDeps["agentSessions"]>):
         return json(await sessions.read(ref, options));
       },
     }),
-    defineTool({
-      name: "agent_session_send",
-      label: "Message agent session",
-      description:
-        "Continue an agent session with a message by starting a new headless turn of that harness " +
-        "(Claude, Codex, Grok or Pi) resumed onto its saved history, in the directory it ran in. This is not " +
-        "delivered into a tab that has the session open: that tab will not see it and may later fork the " +
-        "history. Refused while the transcript was written in the last minute. Returns at once with a runId " +
-        "and a cursor; read the reply with agent_session_read after that cursor, and check the run with " +
-        "agent_session_run. The turn gets the harness's default permissions, so it may decline tools that " +
-        "need approval. Prefer Swarm for agents enrolled in it.",
-      parameters: Type.Object({
-        ref: Type.String({
-          minLength: 1,
-          maxLength: 200,
-          description: "host:sessionId from agent_sessions.",
-        }),
-        message: Type.String({ minLength: 1, maxLength: 32_768 }),
-      }),
-      executionMode: "sequential",
-      execute: async (_id, params) => json(await sessions.send(params.ref, params.message)),
-    }),
-    defineTool({
-      name: "agent_session_run",
-      label: "Check agent session run",
-      description:
-        "State of a turn started with agent_session_send: running, finished, failed, aborted, timeout, or " +
-        "unknown (the connection was lost, so the turn may still be running and the session stays locked), " +
-        "or released. action cancel aborts a running turn. action release unlocks an unknown run once the " +
-        "transcript shows it settled; it does not stop anything.",
-      parameters: Type.Object({
-        runId: Type.String({ minLength: 1, maxLength: 64 }),
-        action: Type.Optional(
-          Type.Union([Type.Literal("status"), Type.Literal("cancel"), Type.Literal("release")]),
-        ),
-      }),
-      execute: async (_id, params) =>
-        json(
-          params.action === "cancel"
-            ? sessions.cancel(params.runId)
-            : params.action === "release"
-              ? sessions.release(params.runId)
-              : sessions.run(params.runId),
-        ),
-    }),
   ];
 }
 
@@ -917,7 +931,9 @@ function herdrWatchTools(
         agent: Type.String({
           minLength: 1,
           maxLength: 128,
-          description: "Live Herdr agent name or pane id from the current census, such as w18:p1.",
+          description:
+            "Live Herdr agent name or pane id from the current census, such as w18:p1, or a remote fleet's " +
+            "qualified pane id such as pc/w2:p1J.",
         }),
         reason: Type.String({
           minLength: 1,
@@ -1036,20 +1052,21 @@ function turnActor(turn: TurnContext, lane: CaptainSessionLaneV2): string {
 /**
  * The consent situation a join lands him in — not a line about it.
  *
- * ADR 0062 puts the consent disclosure in Clankie's own reply, so this text is
- * read by the character who has to speak it. Written as a finished sentence it
- * stopped being context and became a cue card: he read "your audio is
- * transcribed live and may stay with the configured provider for this call"
- * into a group chat, placeholder and all. Describe what is true of the room and
- * what the people in it do not know yet; he can see for himself that it is
- * theirs to hear.
+ * A finished disclosure sentence once became a cue card that he read into a
+ * group chat, placeholder and all. Describe consent and arrival choices as
+ * context, leaving whether and where to speak to him (ADR 0062).
  */
 const VOICE_JOIN_CONSENT_STATE =
   "When actorCanBeHeard is false, nothing they say reaches you at all until they run /clankie voice-consent opt-in. " +
   "When it is true, you are transcribing them from the moment you arrive. When transcriptLoggingEnabled is true, " +
   "exact consented speech and speaker attribution are also retained in the owner's private local development log; " +
-  "when false, exact speech is not retained locally; they have not been told — the join disclosure reaches only " +
-  "whoever ran the slash command, and this join was not that.";
+  "when false, exact speech is not retained locally. Both are the owner's own settings, and so is who tells the " +
+  "room: people either opted in themselves through the slash command, which told them, or are in a room whose " +
+  "owner chose presence as consent and handles telling people. None of it is news you owe on arrival; " +
+  "you are someone joining a call. If anyone asks what you hear or keep, answer plainly. " +
+  "A text reply after joining is optional: you can reply here, or use " +
+  `${CAPTAIN_SILENT_REPLY_SENTINEL} to send nothing here. Your arrival also gives your voice side ` +
+  "the room and invitation context and a turn, so you can greet in voice instead or stay quiet there too.";
 
 function discordVoicePresenceTools(
   deps: CaptainDeps,
@@ -1070,7 +1087,15 @@ function discordVoicePresenceTools(
     if (guildId === undefined || actorId === undefined) {
       return json({ action: action === "join" ? "join_refused" : "leave_refused", reason: "failed" });
     }
-    return json(await voice[action]({ guildId, actorId }));
+    return json(
+      await voice[action]({
+        guildId,
+        actorId,
+        ...(action !== "join" || turn.requestText === undefined
+          ? {}
+          : { requestText: turn.requestText.slice(0, VOICE_JOIN_REQUEST_MAX_CHARS) }),
+      }),
+    );
   };
   const fromOperator = lane === "operator";
   return [
@@ -1096,11 +1121,9 @@ function discordVoicePresenceTools(
     defineTool({
       name: "voice_leave",
       label: "Leave voice",
-      description: fromOperator
-        ? "Leave your active Discord voice channel when the operator asks you to leave, hang up, or dip. The live " +
-          "Discord body enforces authority and prevents one server from ending a call in another."
-        : "Leave your active Discord voice channel when someone asks you to leave, hang up, or dip. The live " +
-          "Discord body enforces authority and prevents one server from ending a call in another.",
+      description:
+        "Leave your active Discord voice channel when you decide to end your stay. The live " +
+        "Discord body enforces authority and prevents one server from ending a call in another.",
       parameters: Type.Object({}),
       execute: () => call("leave"),
     }),
@@ -1372,7 +1395,8 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
         "'edges' draws the relationships — name the two tables and the exact fields the keys sit on, and label " +
         "each with its cardinality. Tables lay out in columns of three in the order you list them, so put " +
         "related entities next to each other and prefer short hops; a foreign key you draw no edge for still " +
-        "reads fine from its type cell. In a Discord channel the picture attaches to your reply automatically, " +
+        "reads fine from its type cell. Draw only fields and relations you read or were told, and say what you " +
+        "left out. In a Discord channel the picture attaches to your reply automatically, " +
         "so draw it and then talk about it normally. 'refused' with 'canvas_unavailable' means the tldraw app " +
         "is not open on the mac — say so, that is something a human can fix and not something to retry.",
       parameters: Type.Object({
@@ -1423,7 +1447,8 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
         "('client', 'postgres', 'the worker'). 'steps' is the exchange, one per line: '== phase name' rules off " +
         "a section, 'a->b: message' is a call, 'a-->b: message' is a reply, 'a->a: message' is something a " +
         "participant does to itself, and 'note over a,b: text' is an aside spanning those lanes. End a step " +
-        "with '[red]' to mark the failure path. Keep to five or six lanes; past that it reads as a wall. In a " +
+        "with '[red]' to mark the failure path. Keep to five or six lanes; past that it reads as a wall. Draw only " +
+        "exchanges you read or were told. In a " +
         "Discord channel the picture attaches to your reply automatically. 'refused' with 'canvas_unavailable' " +
         "means the tldraw app is not open on the mac — say so rather than retrying.",
       parameters: Type.Object({

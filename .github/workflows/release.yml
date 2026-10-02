@@ -29,6 +29,13 @@ jobs:
           version: 0.15.2
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-results
+          path: .data/qa/
+          include-hidden-files: true
+          retention-days: 7
       - run: pnpm release:build
       - run: pnpm release:smoke
       - uses: actions/upload-artifact@v4

@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import {
   defaultOperatorAgentAppearance,
+  isInternalSwarmContact,
   OperatorAgentNameSchema,
+  OperatorCodexAccountSchema,
   OperatorAgentPersonaIdSchema,
   OperatorAgentPersonaSchema,
   OperatorSwarmContactSchema,
@@ -24,6 +26,7 @@ const LegacyPersonaFileSchema = z
   .strict();
 const PersonaBindingSchema = z
   .object({
+    account: OperatorCodexAccountSchema.optional(),
     subject: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/u),
     personaId: OperatorAgentPersonaIdSchema,
     occupantId: z.string().regex(/^session-[a-f0-9]{64}$/u),
@@ -149,6 +152,7 @@ export class PersonaStore {
   ): readonly OperatorAgentPersona[] {
     const active = new Map(seats.map((seat) => [seat.personaId, seat.seatId]));
     return [...this.records.values()]
+      .filter((persona) => !isInternalSwarmContact(persona))
       .map((persona) => {
         const activeSeatId = active.get(persona.personaId);
         const conversation = conversationForPersona(persona.personaId);
@@ -176,6 +180,7 @@ export class PersonaStore {
     const previous = new Map(this.records);
     const live = new Set<string>();
     for (const peer of peers) {
+      if (isInternalSwarmContact({ name: peer.label, swarm: peer.contact })) continue;
       const contact = OperatorSwarmContactSchema.parse(peer.contact);
       const personaId = `swarm-${createHash("sha256").update(JSON.stringify(contact)).digest("hex")}`;
       live.add(personaId);
@@ -267,7 +272,13 @@ export class PersonaStore {
       const previous = this.bindings.get(observed.renamed.from);
       if (previous !== undefined) {
         this.bindings.delete(observed.renamed.from);
-        binding = { ...previous, subject: observed.subject, occupantId: observed.occupantId };
+        const { account, ...identity } = previous;
+        binding = {
+          ...identity,
+          ...(previous.occupantId === observed.occupantId && account ? { account } : {}),
+          subject: observed.subject,
+          occupantId: observed.occupantId,
+        };
         this.bindings.set(observed.subject, binding);
         changed = true;
         renamed = true;
@@ -282,11 +293,19 @@ export class PersonaStore {
       this.bindings.set(observed.subject, binding);
       changed = true;
     } else if (binding.occupantId !== observed.occupantId) {
-      binding = { ...binding, occupantId: observed.occupantId };
+      binding = { subject: binding.subject, personaId: binding.personaId, occupantId: observed.occupantId };
       this.bindings.set(observed.subject, binding);
       changed = true;
     }
 
+    if (
+      observed.account &&
+      (binding.account?.label !== observed.account.label || binding.account?.home !== observed.account.home)
+    ) {
+      binding = { ...binding, account: observed.account };
+      this.bindings.set(observed.subject, binding);
+      changed = true;
+    }
     // A name the operator typed outranks a title the harness happened to write.
     const chosen =
       observed.renamed === undefined ? undefined : OperatorAgentNameSchema.safeParse(observed.renamed.name);
@@ -329,7 +348,14 @@ export class PersonaStore {
       parentPaneId: _parentPaneId,
       ...seat
     } = observed;
-    return { seat: { ...seat, personaId: binding.personaId }, changed };
+    return {
+      seat: {
+        ...seat,
+        ...(binding.account ? { account: binding.account } : {}),
+        personaId: binding.personaId,
+      },
+      changed,
+    };
   }
 
   private writeAvatar(personaId: string, revision: string, image: Buffer): void {

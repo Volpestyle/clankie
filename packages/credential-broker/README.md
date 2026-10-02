@@ -9,6 +9,24 @@ The operator-facing [credential guide](../../docs/credentials.md) owns token
 names, bot-versus-user setup, rotation, and the distinction between Discord
 account credentials and local Clankie bearers.
 
+## Clankie account refresh
+
+The public gateway account provider coalesces concurrent token reads. Before
+refreshing, it probes the Cognito endpoint with an unauthenticated `HEAD`; a
+network failure or unavailable endpoint leaves the token untouched for connector
+backoff. The refresh request has a ten-second timeout. Uncertain delivery,
+including a lost response body or HTTP 5xx, gets three retries after 250, 500,
+and 1,000 ms with the same refresh token. A 50-second wall-clock deadline reserves
+margin inside the account client's 60-second rotation grace; timers resumed
+past that deadline return to normal reconnect backoff. This cannot recover a
+rotation lost across sleep longer than the grace period.
+
+A received replacement is persisted before validating the access token. Rate
+limits remain retryable without the quick retry burst; explicit refresh rejection
+requires owner sign-in. The connector publishes that state once and exposes it
+through gateway status and doctor. Offline startup derives the route from the
+stored account identity and resolves tokens inside the connector's retry loop.
+
 ## Credential storage
 
 - `KeychainCredentialStore` stores one generic-password item per provider and a
@@ -36,6 +54,11 @@ Disconnect waits for an admitted refresh, then deletes its result. Once disconne
 completes, that refresh cannot restore the account. Replacement follows the same
 ordering. Token requests have a 20-second deadline. One lock covers the whole file
 or Keychain service, so a refresh can briefly delay unrelated credential writes.
+Single-item Keychain reads do not acquire that write lock: Keychain atomically
+publishes each item, so a hook reading the operator bearer need not wait for an
+unrelated OAuth network refresh. A read can observe the previous or next complete
+credential; callers that refresh or modify credentials must still use `update`.
+Index enumeration and mutations remain serialized.
 `proper-lockfile` (also used by Pi) maintains and releases the lock; Keychain lock
 directories under `~/.config/clankie/credential-locks` contain no credentials.
 All writer processes must run this implementation; restart older CLI/service

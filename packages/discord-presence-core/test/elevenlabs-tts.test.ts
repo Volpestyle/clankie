@@ -119,6 +119,17 @@ async function openSession(overrides: Partial<ElevenLabsTtsSessionOptions> = {})
 }
 
 describe("elevenlabs tts session", () => {
+  it.each(["eleven_flash_v2_5", "eleven_v4_turbo"])(
+    "ignores socket errors after intentional %s teardown",
+    async (modelId) => {
+      const { session, socket, errors, closes } = await openSession({ modelId });
+      session.close();
+      socket.emitError(new Error("late close error"));
+      expect(errors).toEqual([]);
+      expect(closes).toEqual(["closed"]);
+    },
+  );
+
   it("connects to the multi-context endpoint with the pinned 24 kHz format and the key in headers only", async () => {
     const { session, socket, factory } = await openSession();
     expect(factory[0]?.headers).toEqual({ "xi-api-key": "xi-test-secret" });
@@ -310,5 +321,121 @@ describe("elevenlabs tts session", () => {
     const third = await openSession();
     third.socket.close();
     expect(third.closes).toEqual(["socket"]);
+  });
+});
+
+describe("Eleven v4 Turbo dialogue transport", () => {
+  const modelId = "eleven_v4_turbo";
+
+  it("registers the existing voice and streams dialogue inputs with no legacy query knobs", async () => {
+    const { session, socket, factory } = await openSession({ modelId, voiceSettings: { stability: 0.4 } });
+    const url = new URL(factory[0]!.url);
+    expect(url.pathname).toBe("/v1/text-to-dialogue/multi-stream-input");
+    expect(Object.fromEntries(url.searchParams)).toEqual({ model_id: modelId, output_format: "pcm_24000" });
+    expect(factory[0]!.headers).toEqual({ "xi-api-key": "xi-test-secret" });
+    session.openContext("answer-1");
+    session.appendText("answer-1", "Hello James.");
+    session.flush("answer-1");
+    expect(frames(socket)).toEqual([
+      { context_id: "answer-1", voices: ["voice_abc123"], voice_settings: { stability: 0.4 } },
+      { context_id: "answer-1", inputs: [{ text: "Hello James.", voice_id: "voice_abc123" }] },
+      { context_id: "answer-1", flush: true },
+      { context_id: "answer-1", close_context: true },
+    ]);
+    expect(socket.sentRaw.join(" ")).not.toContain("xi-test-secret");
+    session.close();
+  });
+
+  it("drains short replies through is_final, not the prosody-turn marker, then reuses the socket", async () => {
+    const { session, socket, audio, done } = await openSession({ modelId });
+    session.openContext("one");
+    session.appendText("one", "Hi.");
+    session.flush("one");
+    socket.emit({ context_id: "one", audio: "AQAC" });
+    socket.emit({ context_id: "one", is_final_audio_for_turn: true });
+    expect(done).toEqual([]);
+    socket.emit({ context_id: "one", audio: "AA==" });
+    socket.emit({ context_id: "one", is_final: true });
+    expect(Buffer.concat(audio.map((x) => x.pcm))).toEqual(Buffer.from([1, 0, 2, 0]));
+    expect(done).toEqual(["one"]);
+    expect(session.isOpen).toBe(true);
+    session.openContext("two");
+    session.close();
+  });
+
+  it("drops canceled context audio and final markers without ending another context", async () => {
+    const { session, socket, audio, done } = await openSession({ modelId });
+    session.openContext("interrupted");
+    session.openContext("next");
+    session.closeContext("interrupted");
+    socket.emit({ context_id: "interrupted", audio: "AQACAA==", is_final: false });
+    socket.emit({ context_id: "interrupted", is_final: true });
+    socket.emit({ context_id: "unknown", is_final: true });
+    socket.emit({ context_id: "next", audio: "AwAEAA==" });
+    expect(audio.map((x) => x.contextId)).toEqual(["next"]);
+    expect(done).toEqual([]);
+    expect(session.isOpen).toBe(true);
+    session.close();
+  });
+
+  it("keeps active contexts alive, skips draining contexts and clears every timer at close", async () => {
+    const { session, socket, timers } = await openSession({ modelId });
+    session.openContext("thinking");
+    session.openContext("draining");
+    session.flush("draining");
+    const keepAlive = timers.scheduled.find((x) => x.delayMs === 10_000)!;
+    keepAlive.handler();
+    expect(frames(socket).filter((x) => x.keep_alive)).toEqual([
+      { context_id: "thinking", keep_alive: true },
+    ]);
+    session.close();
+    const count = socket.sentRaw.length;
+    keepAlive.handler();
+    expect(socket.sentRaw).toHaveLength(count);
+    expect(timers.scheduled.at(-1)?.cleared).toBe(true);
+  });
+
+  it("fails closed on provider refusal and transport loss without exposing provider prose", async () => {
+    const refused = await openSession({ modelId });
+    refused.session.openContext("one");
+    refused.socket.emit({ error: "quota_exceeded", message: "private text xi-test-secret" });
+    expect(refused.errors).toEqual(["ElevenLabs session error (quota_exceeded)"]);
+    expect(refused.closes).toEqual(["error"]);
+    expect(refused.session.isOpen).toBe(false);
+    const lost = await openSession({ modelId });
+    lost.socket.emitError(new Error("xi-test-secret"));
+    expect(lost.errors).toEqual(["ElevenLabs transport error"]);
+    expect(lost.closes).toEqual(["error"]);
+    await expect(
+      openSession({ modelId, socketFactory: () => Promise.reject(new Error("xi-test-secret")) }),
+    ).rejects.toThrow("ElevenLabs connection failed");
+  });
+
+  it("retains context, text, audio and lifetime bounds on the dialogue path", async () => {
+    const { session, socket, timers, errors, closes } = await openSession({ modelId });
+    for (let i = 0; i < MAX_ELEVENLABS_OPEN_CONTEXTS; i++) session.openContext(`ctx-${i}`);
+    expect(() => session.openContext("overflow")).toThrow("open-context limit");
+    expect(() => session.appendText("ctx-0", "x".repeat(MAX_ELEVENLABS_TEXT_APPEND_CHARACTERS + 1))).toThrow(
+      "character limit",
+    );
+    socket.emit({
+      context_id: "ctx-0",
+      audio: Buffer.alloc(MAX_ELEVENLABS_CONTEXT_AUDIO_BYTES + 2).toString("base64"),
+    });
+    expect(errors).toEqual(["ElevenLabs context audio exceeded the byte limit"]);
+    expect(closes).toEqual(["error"]);
+    expect(timers.scheduled.every((x) => x.cleared)).toBe(true);
+    const expired = await openSession({ modelId, maxLifetimeMs: 10_000 });
+    expired.timers.fire();
+    expect(expired.closes).toEqual(["lifetime"]);
+  });
+
+  it("allows only secure or loopback dialogue endpoints", async () => {
+    await expect(openSession({ modelId, baseUrl: "ws://example.com/v1/text-to-dialogue" })).rejects.toThrow(
+      "WSS",
+    );
+    const local = await openSession({ modelId, baseUrl: "ws://127.0.0.1:8788/v1/text-to-dialogue" });
+    expect(local.factory[0]?.url).toContain("ws://127.0.0.1:8788/v1/text-to-dialogue/multi-stream-input");
+    local.session.close();
   });
 });

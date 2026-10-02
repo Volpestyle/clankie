@@ -63,3 +63,35 @@ export type WakeErrorCode = z.infer<typeof WakeErrorCodeSchema>;
 /** UTF-8 bytes the device signs. */
 export const wakeSigningInput = (hostId: string, deviceId: string, challenge: string) =>
   `${WAKE_SIGNING_DOMAIN}\n${hostId}\n${deviceId}\n${challenge}`;
+
+/** Same device-signed wake used by the app; no account token or bearer crosses this route. */
+export async function requestDeviceWake(input: {
+  baseUrl: string;
+  hostId: string;
+  deviceId: string;
+  sign: (message: string) => Promise<string>;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+}): Promise<WakeResponse> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  async function post(path: string, body: unknown) {
+    const response = await fetchImpl(`${input.baseUrl}${path}`, {
+      method: "POST",
+      redirect: "error",
+      signal: input.signal ?? AbortSignal.timeout(15_000),
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result: unknown = await response.json();
+    if (!response.ok)
+      throw new Error(
+        `Wake: ${z.object({ error: z.string() }).safeParse(result).data?.error ?? response.status}`,
+      );
+    return result;
+  }
+  const { challenge } = WakeChallengeResponseSchema.parse(await post(GATEWAY_WAKE_CHALLENGE_PATH, {}));
+  const signature = await input.sign(wakeSigningInput(input.hostId, input.deviceId, challenge));
+  return WakeResponseSchema.parse(
+    await post(GATEWAY_WAKE_PATH, { deviceId: input.deviceId, challenge, signature }),
+  );
+}

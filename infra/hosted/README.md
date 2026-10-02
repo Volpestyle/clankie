@@ -1,6 +1,11 @@
-# Hosted Clankie
+# Self-hosted Clankie on Linux
 
-This Compose deployment runs one owner's captain, embedded Swarm coordinator,
+This is the advanced deployment guide for operators maintaining their own
+Linux host. For the managed product and app onboarding, use
+[Get started](https://docs.clankie.bot/get-started/). Running this image does not
+provision a managed account or promise the same enabled features.
+
+This Compose deployment runs one owner's Clankie service, embedded Swarm coordinator,
 Herdr workers and app relay on a Linux host. It does not need an owner's desktop
 or an open TUI. Each Compose project has separate state and workspace volumes;
 use a dedicated VM for mutually untrusted owners. Containers within one deployment
@@ -11,12 +16,12 @@ flowchart LR
   Operator[Operator] -->|SSH / docker compose exec| CLI[CLI / TUI / Claude seat]
   App[Clankie app] --> Gateway[Optional public gateway]
   subgraph Owner[One owner deployment]
-    CLI --> Captain[Persistent captain]
+    CLI --> Captain[Clankie's persistent service]
     Gateway <-->|Authenticated outbound connection| Captain
     Captain <--> Relay[App relay]
     Captain <--> Swarm[Swarm coordinator]
     Captain --> Herdr[Bundled Herdr]
-    Herdr --> Workers[Claude workers]
+    Herdr --> Workers[Configured worker harnesses]
     Workers <--> Swarm
     Workers -->|Explicit tool grants| Captain
     Captain --> Broker[Owner credential broker]
@@ -108,7 +113,7 @@ isolation remain deployment work.
 ## Scope and verification
 
 This is the headless coding bundle. Browser/tldraw hosts are disabled by default;
-Vox, screen capture, local voice and media binaries are not included. Discord body
+Vox, screen capture and media binaries are not included. Discord body
 processes require their own configured deployment; the image retains compiled
 entrypoints but the base Compose file starts captain and relay only. Additional
 capabilities need their actual executables and platform support.
@@ -152,14 +157,21 @@ environment, command arguments or logs. Its exact fields are:
 }
 ```
 
+The optional `maxHiredWorkers` is the plan's limit on hired agents running at
+once (see "Included model usage"). Absent, the body allows two per vCPU.
+
 The optional `tenantTelemetryKey` is the fleet-derived 32-byte tenant telemetry
 key, encoded as 43 base64url characters. Treat it as a secret with the other
 bootstrap fields.
 
 The optional `modelRouting` is the plan's task-based model routing
 ([ADR 0192](../../docs/adr/0192-model-routing-by-kind-of-task.md)):
-`{ "routineModel": "clankie/routine", "escalate": false }`, with an optional
-`escalationModel`. It applies only while the body runs on included usage (see
+`{ "routineModel": "clankie/default", "escalate": false }`, with an optional
+`escalationModel`. The fleet writes it per plan (VUH-1391): Starter as shown, Pro
+with `"escalate": true, "escalationModel": "clankie/escalation"`. Routine
+purposes run on `clankie/default` because luna is already the cheapest good
+model measured; the proxy's `routine` alias is unused on purpose. A Pro turn
+reaches the escalation model only when Clankie calls `escalate`. It applies only while the body runs on included usage (see
 "Included model usage" below). Then, at every start and whenever the body
 returns to included usage, the body writes it over its own routing settings
 (routine model, escalation and escalation model; the owner's purpose
@@ -220,6 +232,16 @@ live session chooses the device id; device revocation immediately denies local
 access and retries fleet key removal on failure and after restart. Self-hosted
 bodies answer 404, including through the encrypted gateway.
 
+The owner's app reads the account's AI credits with `GET /v1/hosted/credits`
+([VUH-1403](https://linear.app/vuhlp/issue/VUH-1403)), inside the encrypted
+device channel. Any live paired device or the operator may read it; it is
+account data, not a secret. The body asks the fleet with a signed
+`POST /fleet/v1/body/credits` carrying only `{ installationId }` and returns
+the answer unchanged once it matches `HostedCreditsSchema`
+(`@clankie/protocol/hosted-credits`), with `cache-control: no-store`. A fleet
+failure or an answer outside the contract is `503 unavailable`; self-hosted
+bodies answer `404 not_hosted`. Neither the request nor the answer is logged.
+
 Idle accounting reports actual work to `/fleet/v1/body/heartbeat`: human and
 owner-configured external-event captain turns, running owner-goal continuations,
 and working Herdr/headless seats. Self-wakes, presence and polling earn no busy
@@ -244,7 +266,8 @@ Registration completes before heartbeat, wake-key writes or credential renewal.
 A lost registration response or `5xx` retries with the same token and public
 key (three attempts). Once registered, that same Ed25519 private key signs
 every POST to `/fleet/v1/body/heartbeat`, `/fleet/v1/body/wake-keys`,
-`/fleet/v1/body/wake-keys/revoke` and `/fleet/v1/body/host-credential`.
+`/fleet/v1/body/wake-keys/revoke`, `/fleet/v1/body/credits` and
+`/fleet/v1/body/host-credential`.
 Renewal sends `{}`. Registration itself is unsigned.
 
 Signed requests retain the bearer credential and add `x-clankie-body-timestamp`
@@ -315,6 +338,18 @@ Hired pi workers follow the same path ([ADR 0197](../../docs/adr/0197-hosted-wor
   - It refuses any other path, anything but POST, browser requests and calls
     with no customer model selected.
   - Pi never holds the credential, and OAuth refresh stays in the broker.
+
+A hosted body runs at most `maxHiredWorkers` hired agents at once, an optional
+bootstrap field of 1 to 64 that defaults to two per vCPU (Starter 4, Pro 8).
+A hire past it (`hire_agent` or the app's `spawn_seat`) fails as `at_capacity`
+before anything starts, and a move never counts as a new hire.
+
+The limit comes from measurement on the real image
+([VUH-1388](https://linear.app/vuhlp/issue/VUH-1388)). An idle hired pi worker
+costs about 95 MiB, so memory would hold about 60 on Starter and 140 on Pro.
+The real bound is the builds and tests working agents start, which take far
+more memory and CPU than pi itself, and the model proxy's four in-flight calls
+per tenant.
 
 `POST /v1/hosted/pair-offer` accepts only protocol v2:
 `{ version: 2, pairTicket, browserPublicKey, nonce }`. The body verifies the

@@ -4,6 +4,7 @@ import {
   connectionTarget,
   connectExternal,
   inspectConnection,
+  resolveConnectionEndpoint,
   type ConnectionStores,
 } from "./connections.ts";
 export { SwarmConnectSchema } from "./connections.ts";
@@ -13,7 +14,8 @@ import type { SwarmConnection } from "@clankie/settings";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile, rename, link, unlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rename, link, unlink, rm, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,6 +35,71 @@ const exec = promisify(execFile);
 const packageRoot = dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json"));
 const executable = (name: string) => join(packageRoot, "dist", "coordination", name);
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+/** The owner-approved installed worker plugin that carries Swarm mail to an interactive worker (ADR 0194). */
+const INTERACTIVE_WORKER_CHANNEL_PLUGIN = "clankie-worker@clankie";
+
+const interactiveWorkers = new Map<string, Promise<boolean>>();
+/**
+ * Whether the installed swarm-mcp accepts an interactive worker route
+ * (ADR 0194). An older owner parses routes strictly and would reject the
+ * whole dispatch configuration, so this asks the installed parser itself: a
+ * throwaway owner config carrying one interactive route either reads back or
+ * it does not. Answered once per process, the lifetime of the loaded runtime.
+ */
+export function interactiveWorkersSupported(harness: "claude" | "codex" | "pi" = "claude"): Promise<boolean> {
+  const prior = interactiveWorkers.get(harness);
+  if (prior) return prior;
+  const probe = (async () => {
+    const directory = await realpath(await mkdtemp(join(tmpdir(), "clankie-swarm-probe-")));
+    try {
+      const absolute = join(directory, "probe");
+      await writeFile(
+        join(directory, "owner.json"),
+        JSON.stringify({
+          version: 1,
+          databasePath: join(directory, "coordination.db"),
+          launcherSecret: "0".repeat(64),
+          dispatch: {
+            observationMaxAgeMs: 60000,
+            peers: [],
+            herdr: {
+              id: "probe",
+              stateDirectory: directory,
+              profile: "probe",
+              socketPath: absolute,
+              herdrPath: absolute,
+              ...(harness === "claude"
+                ? { claudePath: absolute, channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
+                : { harness, harnessPath: absolute }),
+              nodePath: absolute,
+              workerPath: absolute,
+              capabilities: [],
+              workerMode: "interactive",
+            },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      const route = (await ownerState(directory)).dispatch?.herdr as
+        | { workerMode?: unknown; harness?: unknown }
+        | undefined;
+      return route?.workerMode === "interactive" && (harness === "claude" || route.harness === harness);
+    } catch {
+      return false;
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  })();
+  interactiveWorkers.set(harness, probe);
+  return probe;
+}
+/** Feature discovery uses the installed runtime, without enrolling or changing a live owner. */
+export async function managedWorkersSupported(): Promise<boolean> {
+  const runtime = await import("swarm-mcp/runtime");
+  const supported = (runtime as unknown as { managedWorkerHarnesses?: unknown }).managedWorkerHarnesses;
+  return Array.isArray(supported) && supported.includes("codex") && supported.includes("pi");
+}
+
 interface Binding {
   conversationId: string;
   cwd: string;
@@ -48,7 +115,12 @@ const SavedBindingSchema = z
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
       .optional(),
     target: z
-      .object({ endpoint: z.string().min(1), scope: z.string().min(1), actor: z.string().min(1) })
+      .object({
+        endpoint: z.string().min(1),
+        scope: z.string().min(1),
+        actor: z.string().min(1),
+        ssh: z.string().optional(),
+      })
       .strict()
       .optional(),
   })
@@ -70,6 +142,46 @@ interface Session {
   observe(runtime: "available" | "busy" | "unavailable"): Promise<void>;
   kick(): void;
   close(): Promise<void>;
+}
+const SwarmPeerPageSchema = z.object({
+  cursor: z.number(),
+  items: z.array(z.object({ agentId: z.string(), label: z.string() })),
+});
+const SwarmTaskPageSchema = z.object({
+  cursor: z.number(),
+  items: z.array(z.object({ id: z.string().min(1), version: z.number().int() })),
+});
+const SwarmTaskDetailSchema = z.object({
+  taskId: z.string().min(1),
+  title: z.string(),
+  creator: z.string().min(1),
+  updatedAt: z.number(),
+  contract: z.object({ objective: z.string(), worktree: z.string() }).nullable(),
+  reason: z.string().nullish(),
+  owner: z
+    .object({ actor: z.string().min(1), active: z.boolean(), progressDeadline: z.number().nullable() })
+    .nullable(),
+});
+/** Bounded like the snapshot that carries it. */
+const SWARM_TASK_VIEW_MAX = 128;
+export interface SwarmTaskAgent {
+  actor: string;
+  name: string;
+  clankie?: true;
+}
+/** One unfinished task, named for a board; the captain resolves actors to contacts. */
+export interface SwarmTaskView {
+  taskId: string;
+  scope: string;
+  title: string;
+  status: "open" | "blocked" | "running" | "cancel_requested";
+  lead: SwarmTaskAgent;
+  owner?: SwarmTaskAgent;
+  objective?: string;
+  worktree?: string;
+  reason?: string;
+  stale?: true;
+  updatedAt: string;
 }
 interface PeerMessage {
   id: string;
@@ -95,6 +207,9 @@ interface Options {
       capacity: number | null;
       capabilities: string[];
       workspaces?: { kind: "repository" | "directory"; path: string }[] | undefined;
+      /** Native interactive by default; stream is retained legacy metadata and cannot launch. */
+      workerMode?: "stream" | "interactive" | undefined;
+      workerHarness?: "claude" | "codex" | "pi" | undefined;
     }[]
   >;
   /** Trusted embedding bridge; contains no provider or operator credential. */
@@ -105,6 +220,10 @@ export class SwarmHost {
   private readonly sessions = new Map<string, Promise<Session>>();
   private bindings: Binding[] = [];
   private readonly incarnation = randomUUID();
+  private readonly taskDetails = new Map<
+    string,
+    { version: number; task: z.infer<typeof SwarmTaskDetailSchema> }
+  >();
   private closed = false;
   private wake?: (conversationId: string, prompt: string) => Promise<void>;
   private ready?: (conversationId: string) => boolean;
@@ -183,10 +302,19 @@ export class SwarmHost {
       throw new Error("Swarm connection identity changed; outstanding work cannot be redirected");
     const credential = await stores.credentials.get(connection.credential);
     if (credential?.type !== "api") throw new Error("Swarm connection credential unavailable");
+    const endpoint = await resolveConnectionEndpoint(stores, connection);
     return {
       connection,
+      endpoint,
       capability: credential.key,
-      signature: hash(JSON.stringify([connectionTarget(connection), credential.key])),
+      signature: hash(
+        JSON.stringify([
+          connectionTarget(connection),
+          credential.key,
+          endpoint,
+          stores.transport?.generation?.(connection.id),
+        ]),
+      ),
     };
   }
 
@@ -216,6 +344,7 @@ export class SwarmHost {
       };
     });
     await this.closeConnection(id);
+    stores.transport?.close(id);
     if (credential) await stores.credentials.delete(credential);
   }
 
@@ -235,14 +364,14 @@ export class SwarmHost {
   ): Promise<Session> {
     let enrolled;
     if (external) {
-      const { connection, capability } = external;
-      const identity = await inspectConnection(connection.endpoint, capability);
+      const { connection, capability, endpoint } = external;
+      const identity = await inspectConnection(endpoint, capability);
       if (!isDeepStrictEqual(identity, { actor: connection.actor, scope: connection.scope }))
         throw new Error("Swarm connection identity does not match its configured actor and scope");
       enrolled = {
         ...identity,
         environment: {
-          SWARM_COORDINATOR_ENDPOINT: connection.endpoint,
+          SWARM_COORDINATOR_ENDPOINT: endpoint,
           SWARM_SESSION_CAPABILITY: capability,
           SWARM_SCOPE: connection.scope,
           SWARM_SKILL_PATH: join(packageRoot, "skills/swarm-mcp/SKILL.md"),
@@ -413,7 +542,9 @@ export class SwarmHost {
     const current = this.sessions.get(key);
     if (current) {
       const session = await current;
-      if (session.signature === external?.signature) return session;
+      // A closed MCP transport must not poison every future bank for this lane.
+      // Reopen on the next request; never replay a possibly mutating tool call.
+      if (session.signature === external?.signature && session.client.transport !== undefined) return session;
       if (this.sessions.get(key) === current) this.sessions.delete(key);
       await session.close();
       return this.get(binding);
@@ -464,6 +595,12 @@ export class SwarmHost {
           },
           ...(tool.name === "swarm_assign"
             ? {
+                harness: {
+                  type: "string",
+                  enum: ["claude", "codex", "pi"],
+                  description:
+                    "Require this managed worker harness; no fallback. Runtime harness settings must agree.",
+                },
                 runtime: {
                   type: "string",
                   pattern: "^[a-z][a-z0-9-]{0,63}$",
@@ -487,7 +624,21 @@ export class SwarmHost {
       } as TSchema,
       executionMode: "sequential",
       execute: async (_id, args) => {
-        const { connection, runtime, ...forwarded } = args as Record<string, unknown>;
+        const { connection, runtime, harness, ...forwarded } = args as Record<string, unknown>;
+        if (harness !== undefined) {
+          if (
+            tool.name !== "swarm_assign" ||
+            !["claude", "codex", "pi"].includes(String(harness)) ||
+            !forwarded.routing ||
+            typeof forwarded.routing !== "object"
+          )
+            throw new Error("Harness selection requires routed work");
+          const routing = forwarded.routing as Record<string, unknown>;
+          const host = harness === "claude" ? "claude-code" : harness;
+          if (routing.host !== undefined && routing.host !== host)
+            throw new Error("Conflicting harness and routing.host");
+          forwarded.routing = { ...routing, host };
+        }
         if (runtime !== undefined) {
           if (
             tool.name !== "swarm_assign" ||
@@ -526,13 +677,30 @@ export class SwarmHost {
         ) {
           await this.requireRuntimeReload(active);
           const prepared = await this.prepareOwner(selected.cwd);
+          const selectedRuntime = prepared.runtimes?.find((entry) => entry.id === (runtime ?? "default"));
+          const routing = forwarded.routing as Record<string, unknown>;
+          if (routing.host === undefined && selectedRuntime?.workerHarness)
+            forwarded.routing = {
+              ...routing,
+              host:
+                selectedRuntime.workerHarness === "claude" ? "claude-code" : selectedRuntime.workerHarness,
+            };
           if (
-            runtime !== undefined &&
-            !prepared.runtimes?.some(
-              (entry) => entry.enabled && entry.state === "healthy" && runtime === entry.id,
-            )
-          )
-            throw new Error("Selected worker runtime unavailable; no dispatch intent created");
+            (runtime !== undefined && !selectedRuntime?.enabled) ||
+            (runtime !== undefined && selectedRuntime?.state !== "healthy")
+          ) {
+            if (!selectedRuntime?.state.startsWith("harness_"))
+              throw new Error("Selected worker runtime unavailable; no dispatch intent created");
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ data: { status: "blocked", reasons: [selectedRuntime.state] } }),
+                },
+              ],
+              details: {},
+            };
+          }
         }
         if (
           tool.name === "swarm_assign" &&
@@ -773,6 +941,105 @@ export class SwarmHost {
     return contacts;
   }
 
+  /**
+   * Unfinished work on every connected coordinator (ADR 0205), read fresh on
+   * each call. A coordinator shared by several conversations is read once.
+   * Details are cached by task version, so a quiet board costs one summary
+   * page per state rather than one detail per task.
+   */
+  async tasks(): Promise<SwarmTaskView[]> {
+    await this.initialized;
+    const tasks: SwarmTaskView[] = [];
+    const seen = new Set<string>();
+    const cached = new Set<string>();
+    const ownActors = new Set<string>();
+    const sessions: Session[] = [];
+    for (const binding of this.bindings) {
+      try {
+        const session = await this.get(binding);
+        ownActors.add(`${session.scope}\n${session.actor}`);
+        sessions.push(session);
+      } catch {
+        // An unreachable coordinator simply has no work on the board.
+      }
+    }
+    const read = new Set<string>();
+    for (const session of sessions) {
+      const coordinator = JSON.stringify([session.endpoint, session.scope]);
+      if (read.has(coordinator)) continue;
+      read.add(coordinator);
+      const start = tasks.length;
+      try {
+        const labels = new Map<string, string>();
+        for (let cursor = 0; ;) {
+          const page = SwarmPeerPageSchema.parse(
+            await session.connection.request({ op: "peers", filter: { cursor, limit: 50 } }),
+          );
+          for (const peer of page.items) labels.set(peer.agentId, peer.label);
+          if (page.items.length < 50 || page.cursor <= cursor) break;
+          cursor = page.cursor;
+        }
+        const name = (actor: string): SwarmTaskAgent => {
+          if (ownActors.has(`${session.scope}\n${actor}`)) return { actor, name: "Clankie", clankie: true };
+          const label = labels.get(actor)?.trim() ?? "";
+          const runtime = /^runtime:(\S+) transport:\S+$/u.exec(label);
+          if (runtime) return { actor, name: `${runtime[1]!} worker` };
+          return { actor, name: label || "Swarm agent" };
+        };
+        for (const status of ["open", "blocked", "running", "cancel_requested"] as const) {
+          for (let cursor = 0; tasks.length < SWARM_TASK_VIEW_MAX;) {
+            const page = SwarmTaskPageSchema.parse(
+              await session.connection.request({ op: "tasks", filter: { status, cursor, limit: 50 } }),
+            );
+            for (const summary of page.items) {
+              const key = JSON.stringify([coordinator, summary.id]);
+              if (seen.has(key) || tasks.length >= SWARM_TASK_VIEW_MAX) continue;
+              seen.add(key);
+              let detail = this.taskDetails.get(key);
+              if (detail?.version !== summary.version) {
+                detail = {
+                  version: summary.version,
+                  task: SwarmTaskDetailSchema.parse(
+                    await session.connection.request({ op: "task_detail", taskId: summary.id }),
+                  ),
+                };
+                this.taskDetails.set(key, detail);
+              }
+              cached.add(key);
+              const task = detail.task;
+              const owner = task.owner ?? undefined;
+              tasks.push({
+                taskId: task.taskId,
+                scope: session.scope,
+                title: task.title,
+                status,
+                lead: name(task.creator),
+                ...(owner ? { owner: name(owner.actor) } : {}),
+                ...(task.contract
+                  ? { objective: task.contract.objective, worktree: task.contract.worktree }
+                  : {}),
+                ...(task.reason ? { reason: task.reason } : {}),
+                ...(status === "running" &&
+                owner &&
+                (!owner.active || (owner.progressDeadline !== null && owner.progressDeadline <= Date.now()))
+                  ? { stale: true as const }
+                  : {}),
+                updatedAt: new Date(task.updatedAt).toISOString(),
+              });
+            }
+            if (page.items.length < 50 || page.cursor <= cursor) break;
+            cursor = page.cursor;
+          }
+        }
+      } catch {
+        // A coordinator that cannot answer takes only its own work off the board.
+        tasks.splice(start);
+      }
+    }
+    for (const key of this.taskDetails.keys()) if (!cached.has(key)) this.taskDetails.delete(key);
+    return tasks;
+  }
+
   async sendContact(
     contact: OperatorSwarmContact,
     message: string,
@@ -921,6 +1188,54 @@ export class SwarmHost {
     }
   }
 
+  /**
+   * Enroll a peer that runs on a remote Herdr fleet into this conversation's
+   * embedded scope (VUH-1381). It is a separate actor, keyed by fleet and name,
+   * so a re-enrollment resumes the same identity with a new generation. The
+   * capability goes only to that peer; the owner endpoint is what the fleet's
+   * relay forwards to. External coordinators are not re-exported.
+   */
+  async enrollFleetPeer(conversationId: string, cwd: string, peer: { fleet: string; name: string }) {
+    await this.initialized;
+    if (this.closed) throw new Error("Swarm host closed");
+    if (!/^[a-z][a-z0-9-]{0,63}$/u.test(peer.fleet) || !/^[a-z][a-z0-9-]{0,63}$/u.test(peer.name))
+      throw new Error("Fleet and peer names are lowercase identifiers");
+    const session = await this.get({ conversationId, cwd });
+    const { projectRoot, stateDirectory } = await this.prepareOwner(session.binding.cwd);
+    const enrolled = await enrollRuntime({
+      stateDirectory,
+      nodePath: process.execPath,
+      ownerPath: executable("owner-cli.js"),
+      host: "claude-code",
+      hostSessionId: `fleet:${peer.fleet}:${peer.name}`,
+      incarnation: randomUUID(),
+      identity: {
+        directory: session.binding.cwd,
+        fileRoot: session.binding.cwd,
+        projectRoot,
+        profile: "clankie",
+      },
+      label: `fleet:${peer.fleet}/${peer.name}`,
+      skillPath: join(packageRoot, "skills/swarm-mcp/SKILL.md"),
+    });
+    if (enrolled.scope !== session.scope)
+      throw new Error("Fleet peer enrolled outside the conversation's scope");
+    return {
+      actor: enrolled.actor,
+      scope: enrolled.scope,
+      ownerEndpoint: enrolled.environment.SWARM_COORDINATOR_ENDPOINT,
+      capability: enrolled.environment.SWARM_SESSION_CAPABILITY,
+    };
+  }
+
+  /** The embedded owner endpoint for a conversation, which a fleet relay forwards to. */
+  async ownerEndpoint(conversationId: string, cwd: string): Promise<string> {
+    await this.initialized;
+    const session = await this.get({ conversationId, cwd });
+    if (session.binding.connectionId) throw new Error("An external coordinator is not relayed");
+    return session.endpoint;
+  }
+
   /** Scope selects a known service connection, never a worker-supplied destination. */
   async workerInScope(scope: string, capability: string, connectionId?: string) {
     await this.initialized;
@@ -942,6 +1257,7 @@ export class SwarmHost {
     this.closed = true;
     await Promise.allSettled([...this.sessions.values()].map(async (pending) => (await pending).close()));
     await this.saveTail;
+    this.options.connections?.transport?.close();
   }
 }
 
@@ -973,6 +1289,10 @@ async function prepareOwner(cwd: string, options: Options) {
           peers: [],
           herdr: {
             id: "herdr-claude",
+            enabled: await interactiveWorkersSupported(),
+            ...((await interactiveWorkersSupported())
+              ? { workerMode: "interactive", channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
+              : {}),
             stateDirectory,
             profile: "clankie",
             socketPath: options.socketPath,
@@ -998,24 +1318,66 @@ async function prepareOwner(cwd: string, options: Options) {
     const prior = configured.dispatch?.herdr;
     const routes = prior === undefined ? [] : Array.isArray(prior) ? prior : [prior];
     const which = async (name: string) => (await exec("/usr/bin/which", [name])).stdout.trim();
-    const paths = await Promise.all([which("herdr"), which("claude")]).catch(() => undefined);
-    if (!paths) runtimes = runtimes.map((entry) => ({ ...entry, state: "unavailable" }));
+    const [herdrPath, claudePath, codexPath, piPath] = await Promise.all(
+      ["herdr", "claude", "codex", "pi"].map((name) => which(name).catch(() => undefined)),
+    );
+    const supported = await managedWorkersSupported();
+    const native = Object.fromEntries(
+      await Promise.all(
+        (["claude", "codex", "pi"] as const).map(async (harness) => [
+          harness,
+          await interactiveWorkersSupported(harness),
+        ]),
+      ),
+    );
+    const harnessPath = (harness: "claude" | "codex" | "pi") =>
+      ({ claude: claudePath, codex: codexPath, pi: piPath })[harness];
+    runtimes = runtimes.map((entry) => {
+      const harness = entry.workerHarness ?? "claude";
+      const state =
+        !herdrPath || !harnessPath(harness)
+          ? "harness_unavailable"
+          : harness !== "claude" && !supported
+            ? "harness_unsupported"
+            : entry.workerMode === "stream"
+              ? "harness_mode_unsupported"
+              : !native[harness]
+                ? "harness_mode_unsupported"
+                : entry.state;
+      return { ...entry, state };
+    });
     const desired = runtimes
       .filter((entry) => entry.socketPath)
       .map((entry) => ({
-        id: `clankie-runtime-${entry.id}-${hash(entry.socketPath!).slice(0, 12)}`,
-        enabled: !!paths && entry.enabled && entry.state === "healthy",
+        id: `clankie-runtime-${entry.id}-${hash(entry.socketPath!).slice(0, 12)}${entry.workerHarness && entry.workerHarness !== "claude" ? `-${entry.workerHarness}` : ""}`,
+        enabled: entry.enabled && entry.state === "healthy",
         stateDirectory,
         profile: "clankie",
         socketPath: entry.socketPath!,
-        herdrPath: paths?.[0] ?? process.execPath,
-        claudePath: paths?.[1] ?? process.execPath,
+        herdrPath: herdrPath ?? process.execPath,
+        ...(entry.workerHarness && entry.workerHarness !== "claude" && supported
+          ? {
+              harness: entry.workerHarness,
+              harnessPath: harnessPath(entry.workerHarness) ?? process.execPath,
+              model: entry.workerHarness === "codex" ? "gpt-6-astra" : "openrouter/moonshotai/kimi-k3",
+            }
+          : { claudePath: claudePath ?? process.execPath }),
         nodePath: process.execPath,
         workerPath: executable("herdr-worker-cli.js"),
         capabilities: [...entry.capabilities, `runtime:${entry.id}`],
         capacity: entry.capacity,
         ...(entry.workspaces ? { workspaces: entry.workspaces } : {}),
         ...(options.workerMcp ? { mcpServers: { clankie_worker: options.workerMcp } } : {}),
+        // Never enable a headless route. An old strict parser sees only disabled
+        // legacy fields; retained routes still carry stop authority for old tokens.
+        ...(native[entry.workerHarness ?? "claude"]
+          ? {
+              workerMode: "interactive" as const,
+              ...((entry.workerHarness ?? "claude") === "claude"
+                ? { channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
+                : {}),
+            }
+          : {}),
       }));
     // Retain old routes for their receipts; disabled routes cannot acquire new work.
     const merged = routes.map((route) => {

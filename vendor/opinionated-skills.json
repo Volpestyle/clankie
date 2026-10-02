@@ -1,0 +1,30 @@
+{
+  "repository": "https://github.com/Volpestyle/skills",
+  "revision": "6529450f0b10ec4039d056f51309e1a26dd3d8cb",
+  "license": "MIT",
+  "skills": {
+    "blast-radius": "review/blast-radius",
+    "c": "agent/c",
+    "co-w": "agent/co-w",
+    "conventions": "review/conventions",
+    "docs-review": "review/docs-review",
+    "herdr-handoff": "agent/herdr-handoff",
+    "interrogate": "review/interrogate",
+    "lead": "agent/lead",
+    "linear-grind": "agent/linear-grind",
+    "linear-issues": "agent/linear-issues",
+    "linear-orient": "agent/linear-orient",
+    "linear-plan": "agent/linear-plan",
+    "p": "agent/p",
+    "perf-review": "review/perf-review",
+    "pr-description": "agent/pr-description",
+    "reflect": "agent/reflect",
+    "robust-review": "review/robust-review",
+    "shared-checkout": "agent/shared-checkout",
+    "solution-space": "agent/solution-space",
+    "testing-archive": "review/testing-archive"
+  },
+  "localChanges": [
+    "VUH-1457: merge leadership into agent/lead (including Herdr references); remove the vendored dashboard and update linear-grind leadership reference."
+  ]
+}

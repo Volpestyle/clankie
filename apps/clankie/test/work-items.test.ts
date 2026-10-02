@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
@@ -27,7 +27,7 @@ async function fixture(repoFiles: Record<string, string> = {}) {
 
 describe("the work-items service", () => {
   it("lists the working directory as workspace and registers repos a local caller names", async () => {
-    const { service, repo } = await fixture();
+    const { service, repo, workspace } = await fixture();
     const before = await service.handle({ action: "repos" }, true);
     expect(before).toEqual({ repos: [expect.objectContaining({ id: "workspace", needsDecision: true })] });
     const created = await service.handle(
@@ -37,7 +37,9 @@ describe("the work-items service", () => {
     expect(created).toMatchObject({ item: { status: "todo", criteria: [{ text: "iPhone", done: false }] } });
     const repos = await service.handle({ action: "repos" }, true);
     const registered = "repos" in repos ? repos.repos.find((entry) => entry.id !== "workspace") : undefined;
-    expect(registered).toMatchObject({ backend: "default", needsDecision: false });
+    expect(registered).toMatchObject({ backend: "default", needsDecision: false, root: repo });
+    // The root is what joins a repo's work to the directory a seat works in.
+    expect("repos" in before ? before.repos[0]?.root : undefined).toBe(resolve(workspace));
     const listed = await service.handle({ action: "list", repo: registered!.id }, false);
     expect("items" in listed ? listed.items.map((item) => item.title) : []).toEqual(["Board view"]);
     expect(JSON.parse(await readFile(join(repo, ".clankie/tracking.json"), "utf8"))).toMatchObject({

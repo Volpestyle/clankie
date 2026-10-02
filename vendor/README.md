@@ -5,7 +5,7 @@ runtime and skills. The public `swarm-mcp` npm release is the legacy runtime;
 Clankie uses the v2 candidate plus its embedding and Herdr integration.
 
 - `swarm-mcp-2.0.0-rc.1.tgz`: built source from `~/dev/swarm-mcp`.
-- `volpestyle-lead-skills-0.1.0.tgz`: `lead`, `swarm-lead`, `herdr-lead` and its
+- `volpestyle-lead-skills-0.1.2.tgz`: `lead`, `swarm-lead`, `herdr-lead` and its
   references, from `~/dev/skills/agent`, with the source repository's MIT license.
 - [provenance.json](provenance.json): base revisions and artifact SHA-256 digests.
 - `swarm-mcp.patch`: the complete source delta against the pinned Swarm base,
@@ -32,16 +32,31 @@ skill links continue to resolve to the original source repositories. Release
 assembly dereferences product links and copies Swarm's dependency graph; an
 installed release needs no sibling checkout or globally installed npm package.
 
-The workspace-routing update (VUH-1377) pins upstream `e93dc70` and carries only
-`672eb6f` (workspace routing), `6637756` (explicit unlimited budgets), and
-`dff68e3` (stream-worker readiness, MCP health and stale-progress signals) as its source patch. This also advances the older bundled candidate past
-`bf910a1` / `e93dc70`: legacy v1 CLI, legacy-import/migration-cutover tools and their
-skill references are removed; the compact coordinator and offline maintenance CLI
-remain. Clankie's consumers use the coordinator entries, never the retired ones.
+The candidate artifact is built from Swarm `a72a2d3`, based on pushed upstream
+`0981253`. `swarm-mcp.patch` reproduces the complete committed source delta;
+`provenance.json` pins both revisions and checksums. This candidate adds managed
+Codex (`gpt-6-astra`) and pi worker adapters, per-launch MCP configuration, and
+persisted harness selection. The first installed candidate (`b62a68f`) failed both
+live canaries. This repair corrects Codex override keys, explicitly preapproves only
+its enrolled `swarm_inbox`/`swarm_task` lifecycle tools, and preserves stop authority
+for disabled routes. Pi's missing client dependency is now included in the lockfile
+snapshot; the former hash-only update retained an incomplete dependency graph.
+Clean production-package and real-binary fixtures are separate from the required
+live Clankie canaries; install and owner/service restart remain lead-controlled.
 
-This advances coordination databases from schema 13 to 14. Back up each live DB
-with SQLite's backup API before a coordinated owner/service upgrade; do not copy
-a live WAL database file or replace running workers. Verify migration on a backup
-copy. Old binaries refuse schema 14, so rollback requires the pre-upgrade backup
-and reconciling any later work, not just replacing the binary. VUH-1344's older
-legacy-migration/rollback acceptance requires an explicit upstream decision.
+This candidate advances schema 14 to schema 15 with `dispatch_intents.harness`.
+Back up each live DB with SQLite's backup API before the coordinated upgrade;
+never copy a live WAL database. The separate, unmerged interactive-worker branch
+also labels its mode-column migration schema 15. These schema-15 builds are NOT
+interchangeable: integration must sequence both migrations under distinct versions.
+The interactive-worker branch is not part of this artifact. Remote peers continue
+to enroll through the shared coordinator relay; this adds no private PC owner.
+
+## Opinionated process bundle
+
+`opinionated-skills/` is an MIT-licensed export from Volpestyle/skills.
+`opinionated-skills.json` pins its base revision, selected source paths and local
+changes. VUH-1457 consolidates leadership in `lead` and removes the vendored
+dashboard; the legacy npm archive above is retained as historical provenance,
+not the current skill catalog.
+See [the bundle guide](../docs/bundled-skills.md) for inventory and refresh steps.

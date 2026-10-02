@@ -71,3 +71,13 @@ export function resolveCodexSessionId(
   if (codexProcess(processes) === undefined) return undefined;
   return ROLLOUT_SESSION.exec(openFiles)?.[1];
 }
+
+/** The rollout's actual home also owns Codex's queue and session database. */
+export function resolveCodexHome(openFiles: string, sessionId: string): string | undefined {
+  const path = openFiles
+    .split("\n")
+    .find((line) => line.startsWith("n/") && line.endsWith(`-${sessionId}.jsonl`))
+    ?.slice(1);
+  const boundary = path?.lastIndexOf("/sessions/") ?? -1;
+  return path && boundary > 0 ? path.slice(0, boundary) : undefined;
+}

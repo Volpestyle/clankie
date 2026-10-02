@@ -1,3 +1,4 @@
+import type { HerdrFleet, HerdrFleetRun } from "../herdr-fleet.ts";
 import type { HostedWorkStarted } from "../hosted-work.ts";
 import type { PiSeatModel } from "./herdr-watch.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
@@ -30,6 +31,7 @@ import type { createDiscordCaptainActionClient } from "../discord-captain-action
 import type { createDiscordMusicClient } from "../discord-music.ts";
 import type { createDiscordVoicePresenceClient } from "../discord-voice-presence.ts";
 import type { EmailPort } from "../email.ts";
+import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
 import type { FinishedRender } from "../media-generation.ts";
 import type { TldrawHost } from "../tldraw-host.ts";
@@ -49,10 +51,26 @@ export interface CaptainDeps {
   readonly herdrAvailable?: () => boolean;
   /** A hosted body's model for the pi workers it hires (VUH-1373); absent, pi keeps its own. */
   readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
+  /**
+   * Harnesses on this machine that can drive the owner's apps and browser
+   * (ADR 0199). Absent on a hosted body, which has no owner desktop.
+   */
+  readonly computerUseHarnesses?: () => Promise<readonly ComputerUseHarness[]>;
+  /** A hosted body's hire limit (VUH-1388); absent, hires are not counted. */
+  readonly hireCapacity?: () => Promise<{ readonly live: number; readonly limit: number } | undefined>;
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
+  /**
+   * Registered remote Herdr fleets (ADR 0184), as they stood when the captain
+   * started; changes take effect on `clankie restart captain`.
+   */
+  readonly fleets?: {
+    readonly list: readonly HerdrFleet[];
+    run(fleet: HerdrFleet): HerdrFleetRun;
+    remoteWorkspace(fleet: string, directory: string): Promise<boolean>;
+  };
   readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */
-  readonly agentSessions?: Pick<AgentSessions, "list" | "read" | "send" | "run" | "cancel" | "release">;
+  readonly agentSessions?: Pick<AgentSessions, "list" | "read"> & Partial<Pick<AgentSessions, "resolve">>;
   /** Work items in each repo's own tracking convention (ADR 0191). */
   readonly workItems?: Pick<WorkItemsService, "handle">;
   /** Tools on his connected MCP servers. The lane is passed on every call. */

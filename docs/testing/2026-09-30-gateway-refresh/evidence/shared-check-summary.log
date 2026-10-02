@@ -1,0 +1,127 @@
+Excerpt of VUH-1455 worker pnpm check, started 2026-09-30 02:56:45 America/Chicago.
+Source: /tmp/vuh-1455-check.log
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.1 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 550ms on 1336 files using 18 threads.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.13s
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+$ node scripts/check-doc-links.mjs && pnpm docs:public:check
+Checked 283 markdown files; local links resolve.
+$ pnpm --filter @clankie/docs check
+$ node scripts/check.mjs
+Built public docs: 10 pages, 35 network routes, 109 API operations, 52 slash commands.
+Checked 10 public docs pages; links and anchors resolve.
+$ infra/aws/public-docs/check.sh
+$ turbo run typecheck
+• turbo 2.10.4
+
+   • Packages in scope: @clankie/agent-hosts, @clankie/agent-transcript, @clankie/api-client, @clankie/clankie, @clankie/credential-broker, @clankie/discord-activity, @clankie/discord-bridge, @clankie/discord-presence-core, @clankie/discord-user-session, @clankie/docs, @clankie/environment-runtime, @clankie/interactive-environment, @clankie/media-connector, @clankie/model-provider, @clankie/model-registry, @clankie/observability, @clankie/persona-images, @clankie/play, @clankie/play-voice, @clankie/protocol, @clankie/relay, @clankie/rendered-surface-client, @clankie/settings, @clankie/swarm, @clankie/tui, @clankie/vox, @clankie/vox-client, @clankie/work-items
+   • Running typecheck in 28 packages
+   • Remote caching disabled
+
+@clankie/protocol:typecheck: cache miss, executing 1424f1f8bd1bace7
+@clankie/settings:typecheck: cache hit, replaying logs d04f2951c6acf51e
+@clankie/settings:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/media-connector:typecheck: cache hit, replaying logs 8a2ad0a41dcb2d5f
+@clankie/agent-hosts:typecheck: cache hit, replaying logs 0e3bca5552eb90b1
+@clankie/media-connector:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/vox:typecheck: cache hit, replaying logs 4b1ce02dc66d012f
+@clankie/model-registry:typecheck: cache hit, replaying logs 090cf92513b56e2f
+@clankie/vox-client:typecheck: cache hit, replaying logs e9007a753229d324
+@clankie/agent-hosts:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/observability:typecheck: cache hit, replaying logs f92d5e7fe1a5b249
+@clankie/vox:typecheck: $ cargo check --locked --all-targets --all-features
+@clankie/vox:typecheck:     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+@clankie/model-registry:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/vox-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/observability:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/persona-images:typecheck: cache hit, replaying logs fed08ab7074008fc
+@clankie/persona-images:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/protocol:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/interactive-environment:typecheck: cache miss, executing 1ba132800a151482
+@clankie/work-items:typecheck: cache miss, executing ff5d4420d222a759
+@clankie/agent-transcript:typecheck: cache miss, executing 791037be9cd86bcf
+@clankie/credential-broker:typecheck: cache miss, executing eda9662a1973b4ff
+@clankie/work-items:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-transcript:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/credential-broker:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/interactive-environment:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/swarm:typecheck: cache miss, executing 4a5a28f645e4d249
+@clankie/relay:typecheck: cache miss, executing 74e294c5dcadbf41
+@clankie/play-voice:typecheck: cache miss, executing 3b673a96a9dd7242
+@clankie/model-provider:typecheck: cache miss, executing 43882d96f6049d86
+@clankie/environment-runtime:typecheck: cache miss, executing b5b3b0454c279d34
+@clankie/discord-activity:typecheck: cache miss, executing fd220b373971fa9a
+@clankie/discord-presence-core:typecheck: cache miss, executing 8d8d3163cc43bc1b
+@clankie/api-client:typecheck: cache miss, executing 633812410745847b
+@clankie/rendered-surface-client:typecheck: cache miss, executing b8e355f7a7f596c3
+@clankie/relay:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play-voice:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/model-provider:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/swarm:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/environment-runtime:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-activity:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/rendered-surface-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-presence-core:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/api-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play:typecheck: cache miss, executing e91ebada964300cf
+@clankie/play:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-user-session:typecheck: cache miss, executing 19264e5a5bea8d27
+@clankie/discord-bridge:typecheck: cache miss, executing 9b6978c1d9b090e8
+@clankie/discord-bridge:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-user-session:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/tui:typecheck: cache miss, executing f9075cc47fdc3ce3
+@clankie/tui:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/clankie:typecheck: cache miss, executing eb7f6ae7263d4e23
+@clankie/clankie:typecheck: $ tsc --noEmit -p tsconfig.json
+
+ Tasks:    27 successful, 27 total
+Cached:    8 cached, 27 total
+  Time:    11.428s
+
+$ vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug
+
+[service test logs omitted]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/credential-broker/test/account-credential.test.ts > Clankie account credential > sign-up and sign-in limits (clankie-ops accounts stack) > keeps a refresh that meets a bare 429 retryable instead of signing the Mac out
+AssertionError: expected ClankieAccountAuthError: Clankie account … { code: '…' } to match object { code: 'rate_limited' }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "code": "rate_limited",
++ ClankieAccountAuthError {
++   "code": "service_unavailable",
+  }
+
+ ❯ packages/credential-broker/test/account-credential.test.ts:420:21
+    418|           String(input).endsWith("/gateway/v1/config") ? Response.json…
+    419|       })().catch((reason: unknown) => reason);
+    420|       expect(error).toMatchObject({ code: "rate_limited" });
+       |                     ^
+    421|       expect(clankieAccountSignInRequired(error)).toBe(false);
+    422|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 359 passed (360)
+      Tests  1 failed | 3085 passed | 2 skipped (3088)
+   Start at  02:56:45
+   Duration  318.96s (transform 6.55s, setup 0ms, import 158.08s, tests 122.67s, environment 17ms)
+
+[ELIFECYCLE] Test failed. See above for more details.
+[ELIFECYCLE] Command failed with exit code 1.

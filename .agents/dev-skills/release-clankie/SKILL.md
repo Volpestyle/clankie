@@ -28,9 +28,10 @@ and the files being changed before editing. The active implementation lives in:
 - Keep the artifact's repository-shaped paths. Bundled code derives runtime
   roots from `import.meta`, and flattening the tree silently breaks assets and
   native children.
-- Interactive conversations use the directory where the operator invokes
-  `clankie`. Supervised services use the installed release root. Mutable state,
-  settings, and credentials stay outside immutable release directories.
+- The console resumes its saved main conversation; each conversation carries
+  its own workspace. `/cd` chooses another project. Supervised services use the
+  installed release root. Mutable state, settings, and credentials stay outside
+  immutable release directories.
 - A source checkout continues to launch workspace services through pnpm. An
   installed release uses `libexec/node` and compiled `.js` entrypoints. Require
   both the bundled Node binary and entrypoint before selecting the installed
@@ -107,6 +108,10 @@ shipping publishes one without asking (James, 2026-09-25): bump the root
 `package.json` version in a release commit, then tag. Churn with nothing an
 operator would notice waits. Otherwise, publish only when asked. Replacing an
 installed version or an existing release always needs explicit authorization.
+
+Before the release commit, run the drift audit in
+[`maintain-docs`](../maintain-docs/SKILL.md) over the changes since the last
+tag, so the docs site and README describe what the release ships.
 
 Every release requires a clean, committed release change and a tag exactly
 matching `v` plus the root `package.json` version. Push the new tag once. Watch

@@ -65,16 +65,24 @@ describe("voice presence control", () => {
     const follow = await fetch(url, { method: "POST", body: JSON.stringify({}) });
     const stamped = await fetch(url, {
       method: "POST",
-      body: JSON.stringify({ guildId: "guild-1", actorId: "user-1" }),
+      body: JSON.stringify({ guildId: "guild-1", actorId: "user-1", requestText: "hop in vc clankie" }),
     });
     const invalid = await fetch(url, { method: "POST", body: JSON.stringify({ guildId: 1 }) });
+
+    for (const requestText of [42, "x".repeat(1_001)]) {
+      const invalidContext = await fetch(url, {
+        method: "POST",
+        body: JSON.stringify({ requestText }),
+      });
+      expect(invalidContext.status).toBe(400);
+    }
 
     expect(follow.status).toBe(200);
     expect(stamped.status).toBe(200);
     expect(invalid.status).toBe(400);
     expect(calls).toEqual([
       { action: "join", input: {} },
-      { action: "join", input: { guildId: "guild-1", actorId: "user-1" } },
+      { action: "join", input: { guildId: "guild-1", actorId: "user-1", requestText: "hop in vc clankie" } },
     ]);
   });
 });

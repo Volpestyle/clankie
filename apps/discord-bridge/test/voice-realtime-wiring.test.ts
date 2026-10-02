@@ -91,7 +91,7 @@ const CHANNEL = "333333333333333333";
 const OWNER = "444444444444444444";
 
 describe("bridge realtime wiring (dormant → engaged, offline)", () => {
-  it("wakes on an addressed transcript and opens the engaged session with the briefing", async () => {
+  it("offers arrival with the briefing, then hears an addressed transcript", async () => {
     const sockets: FakeRealtimeSocket[] = [];
     const socketFactory: RealtimeSocketFactory = (url, headers) => {
       const socket = new FakeRealtimeSocket(url, headers);
@@ -179,11 +179,19 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     expect(listenerUpdate.session.type).toBe("transcription");
     expect(listenerUpdate.session.audio.input.transcription.model).toBe("gpt-realtime-whisper");
 
+    await flush();
+    const arrivalSession = sockets[1] as FakeRealtimeSocket;
+    expect(arrivalSession.frames().some((frame) => frame.type === "response.create")).toBe(true);
+    expect(JSON.stringify(arrivalSession.frames())).toContain("self_joined");
+    expect(vox.subscriptions).toHaveLength(0);
+    arrivalSession.serverEvent({ type: "response.done", response: { id: "arrival", status: "completed" } });
+    await flush();
+
     // One consented utterance: capture opens (gateway attribution span), PCM
     // streams into the listener, then the final transcript addresses him.
     vox.emit({ type: "speaking_start", userId: OWNER });
     await flush();
-    const listener = sockets[1] as FakeRealtimeSocket;
+    const listener = sockets[2] as FakeRealtimeSocket;
     const captureId = vox.subscriptions.at(-1)?.captureId;
     if (captureId === undefined) throw new Error("Vox did not open the speaker capture");
     vox.emitAudio(OWNER, Buffer.alloc(3_840, 1));
@@ -200,7 +208,7 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
 
     // The wake opened the engaged session on the conversation model...
     expect(sockets).toHaveLength(3);
-    const engaged = sockets[2] as FakeRealtimeSocket;
+    const engaged = sockets[1] as FakeRealtimeSocket;
     expect(engaged.headers.authorization).toBe("Bearer brokered-openai-key");
     expect(engaged.url).toContain("model=gpt-realtime-2.1");
     const frames = engaged.frames();
@@ -220,9 +228,10 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     // ...group-room turn-taking (no auto-response, no auto-interrupt)...
     expect(sessionUpdate.session.audio.input.turn_detection.create_response).toBe(false);
     expect(sessionUpdate.session.audio.input.turn_detection.interrupt_response).toBe(false);
-    // ...ask_clankie stays the privileged tool; music tools are local to the call...
+    // ...ask_clankie stays privileged; departure and music are local to the call...
     expect(sessionUpdate.session.tools.map((tool) => tool.name)).toEqual([
       "ask_clankie",
+      "voice_leave",
       "look_at_screen",
       "youtube_search",
       "music_play",
@@ -245,18 +254,14 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       { schemaVersion: 1, guildId: GUILD, channelId: CHANNEL, consentedUserIds: [OWNER] },
     ]);
 
-    // Seeding order: the gateway-attributed transcript ring, then the briefing
-    // projection and explicit response decision.
+    // Arrival seeds room context before anyone speaks; speech follows with attribution.
     const textItems = frames
       .filter((frame) => frame.type === "conversation.item.create")
       .map((frame) => (frame as { item: { content: { text: string }[] } }).item.content[0]?.text ?? "");
-    expect(textItems[0]).toContain("Recent room conversation (JSONL;");
-    expect(textItems[0]).toContain(
-      JSON.stringify({ speakerId: OWNER, text: "clankie, you there?", source: "speech" }),
-    );
+    expect(textItems[0]).toContain('"event":"self_joined"');
     expect(textItems[1]).toBe("Right now: tending the garden.");
-    expect(textItems[2]).toBe(ADDRESSED_OFFER_TURN_ITEM);
-    expect(textItems).toHaveLength(3);
+    expect(textItems.join("\n")).toContain("clankie, you there?");
+    expect(textItems).toContain(ADDRESSED_OFFER_TURN_ITEM);
     expect(frames.some((frame) => frame.type === "response.create")).toBe(true);
 
     // The wake is receipt-visible: floor evidence reports engaged/addressed.
@@ -267,136 +272,212 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     await session.leave();
   });
 
-  it("speaks through ElevenLabs when the external voice is configured (ADR 0070)", async () => {
-    const sockets: FakeRealtimeSocket[] = [];
-    const socketFactory: RealtimeSocketFactory = (url, headers) => {
-      const socket = new FakeRealtimeSocket(url, headers);
-      sockets.push(socket);
-      return Promise.resolve(socket);
-    };
-    const timers = new TestTimers();
-    const config = parseVoiceRealtimeEnv({
-      CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
-      CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_abc123",
-      CLANKIE_VOICE_ELEVENLABS_MODEL_ID: "eleven_flash_v2_5",
-    });
-    const voiceApi = new ClankieApiClient({
-      baseUrl: "http://127.0.0.1:9",
-      captainToken: "voice-bridge-token",
-      fetchImpl: (() =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              schemaVersion: 1,
-              instructions: "Be Clankie, in the social register, on the realtime surface.",
-              briefing: "Right now: tending the garden.",
-              refreshedAt: "2026-07-25T17:00:00.000Z",
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
-        )) as typeof fetch,
-    });
-    const evidence: DiscordVoiceEvidence[] = [];
-    const clock = { now: 0 };
-    const vox = new FakeVox();
-    const session = new DiscordVoiceSession({
-      vox,
-      ingress: new DiscordVoiceIngress(voiceApi, {
-        characterId: "clankie",
-        credentialRef: "discord_bot",
-        transportKind: "bot",
-      }),
-      realtime: createVoiceRealtimePorts({
-        apiKey: "brokered-openai-key",
-        elevenLabsApiKey: "brokered-elevenlabs-key",
-        config,
-        socketFactory,
+  it.each(["eleven_flash_v2_5", "eleven_v4_turbo"])(
+    "speaks through ElevenLabs %s via the Discord voice composition",
+    async (modelId) => {
+      const sockets: FakeRealtimeSocket[] = [];
+      const socketFactory: RealtimeSocketFactory = (url, headers) => {
+        const socket = new FakeRealtimeSocket(url, headers);
+        sockets.push(socket);
+        return Promise.resolve(socket);
+      };
+      const timers = new TestTimers();
+      const config = parseVoiceRealtimeEnv({
+        CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+        CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_abc123",
+        CLANKIE_VOICE_ELEVENLABS_MODEL_ID: modelId,
+      });
+      const voiceApi = new ClankieApiClient({
+        baseUrl: "http://127.0.0.1:9",
+        captainToken: "voice-bridge-token",
+        fetchImpl: (() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                schemaVersion: 1,
+                instructions: "Be Clankie, in the social register, on the realtime surface.",
+                briefing: "Right now: tending the garden.",
+                refreshedAt: "2026-07-25T17:00:00.000Z",
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            ),
+          )) as typeof fetch,
+      });
+      const evidence: DiscordVoiceEvidence[] = [];
+      const clock = { now: 0 };
+      const vox = new FakeVox();
+      const session = new DiscordVoiceSession({
+        vox,
+        ingress: new DiscordVoiceIngress(voiceApi, {
+          characterId: "clankie",
+          credentialRef: "discord_bot",
+          transportKind: "bot",
+        }),
+        realtime: createVoiceRealtimePorts({
+          apiKey: "brokered-openai-key",
+          elevenLabsApiKey: "brokered-elevenlabs-key",
+          config,
+          socketFactory,
+          timers,
+        }),
+        briefing: createVoiceBriefingProvider(voiceApi),
+        floor: { names: ["clankie"], replyPolicy: "addressed", chattiness: "balanced" },
+        presenceSessionId: () => "presence-1",
+        emit: (event) => {
+          DiscordVoiceEvidenceSchema.parse(event);
+          evidence.push(event);
+          return Promise.resolve();
+        },
+        clock: () => clock.now,
         timers,
-      }),
-      briefing: createVoiceBriefingProvider(voiceApi),
-      floor: { names: ["clankie"], replyPolicy: "addressed", chattiness: "balanced" },
-      presenceSessionId: () => "presence-1",
-      emit: (event) => {
-        DiscordVoiceEvidenceSchema.parse(event);
-        evidence.push(event);
-        return Promise.resolve();
-      },
-      clock: () => clock.now,
-      timers,
-    });
+      });
 
-    await session.join({
-      guildId: GUILD,
-      channelId: CHANNEL,
-      invokingUserId: OWNER,
-    });
+      const spoken: unknown[] = [];
+      session.subscribeSpokenTranscript((entry) => spoken.push(entry));
+      await session.join({
+        guildId: GUILD,
+        channelId: CHANNEL,
+        invokingUserId: OWNER,
+      });
 
-    // Wake him with an addressed transcript.
-    vox.emit({ type: "speaking_start", userId: OWNER });
-    await flush();
-    const listener = sockets[1] as FakeRealtimeSocket;
-    listener.serverEvent({
-      type: "conversation.item.input_audio_transcription.completed",
-      item_id: "item_1",
-      transcript: "clankie, you there?",
-    });
-    await flush(12);
+      // Settle the independent arrival opportunity before asking a question.
+      // Otherwise the simulated reply belongs to arrival and is correctly stale.
+      await flush(12);
+      const arrival = sockets[1] as FakeRealtimeSocket;
+      arrival.serverEvent({ type: "response.done", response: { id: "arrival", status: "completed" } });
+      await flush(12);
 
-    // The engaged pair opened: text-modality realtime ears plus the
-    // ElevenLabs mouth, each over its own brokered key.
-    expect(sockets).toHaveLength(4);
-    const engaged = sockets[2] as FakeRealtimeSocket;
-    const mouth = sockets[3] as FakeRealtimeSocket;
-    expect(engaged.headers.authorization).toBe("Bearer brokered-openai-key");
-    expect(engaged.url).toContain("model=gpt-realtime-2.1");
-    const engagedUpdate = engaged.frames().find((frame) => frame.type === "session.update") as {
-      session: { output_modalities: string[]; audio: { input?: unknown; output?: unknown } };
-    };
-    expect(engagedUpdate.session.output_modalities).toEqual(["text"]);
-    expect(engagedUpdate.session.audio.input).toBeDefined();
-    expect(engagedUpdate.session.audio.output).toBeUndefined();
-    expect(mouth.headers).toEqual({ "xi-api-key": "brokered-elevenlabs-key" });
-    expect(mouth.url).toContain("/voice_abc123/multi-stream-input");
-    expect(mouth.url).toContain("model_id=eleven_flash_v2_5");
-    expect(mouth.url).toContain("output_format=pcm_24000");
+      // Wake him with an addressed transcript.
+      vox.emit({ type: "speaking_start", userId: OWNER });
+      await flush();
+      const listener = sockets[3] as FakeRealtimeSocket;
+      listener.serverEvent({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "item_1",
+        transcript: "clankie, you there?",
+      });
+      await flush(12);
 
-    // Model text streams into one TTS context per item, then flushes and closes on done.
-    engaged.serverEvent({
-      type: "response.output_text.delta",
-      response_id: "resp_1",
-      item_id: "item_say",
-      delta: "Right here.",
-    });
-    await flush(12);
-    engaged.serverEvent({ type: "response.done", response: { id: "resp_1", status: "completed" } });
-    await flush(12);
-    expect(mouth.frames()).toEqual([
-      { text: " ", context_id: "item_say" },
-      { text: "Right here.", context_id: "item_say" },
-      { context_id: "item_say", flush: true },
-      { context_id: "item_say", close_context: true },
-    ]);
+      // The engaged pair opened: text-modality realtime ears plus the
+      // ElevenLabs mouth, each over its own brokered key.
+      expect(sockets).toHaveLength(4);
+      const engaged = sockets[1] as FakeRealtimeSocket;
+      const mouth = sockets[2] as FakeRealtimeSocket;
+      expect(engaged.headers.authorization).toBe("Bearer brokered-openai-key");
+      expect(engaged.url).toContain("model=gpt-realtime-2.1");
+      const engagedUpdate = engaged.frames().find((frame) => frame.type === "session.update") as {
+        session: { output_modalities: string[]; audio: { input?: unknown; output?: unknown } };
+      };
+      expect(engagedUpdate.session.output_modalities).toEqual(["text"]);
+      expect(engagedUpdate.session.audio.input).toBeDefined();
+      expect(engagedUpdate.session.audio.output).toBeUndefined();
+      expect(mouth.headers).toEqual({ "xi-api-key": "brokered-elevenlabs-key" });
+      expect(mouth.url).toContain(
+        modelId === "eleven_v4_turbo"
+          ? "/text-to-dialogue/multi-stream-input"
+          : "/voice_abc123/multi-stream-input",
+      );
+      expect(mouth.url).toContain(`model_id=${modelId}`);
+      expect(mouth.url).toContain("output_format=pcm_24000");
 
-    // Synthesized PCM plays back through the unchanged path, and the receipt
-    // cut for the turn is the ordinary fast-path response receipt.
-    clock.now = 120;
-    mouth.serverEvent({ audio: Buffer.from([1, 0, 2, 0]).toString("base64"), contextId: "item_say" });
-    mouth.serverEvent({ isFinal: true, contextId: "item_say" });
-    await flush(12);
-    const responses = evidence.filter((event) => event.type === "response");
-    expect(responses).toHaveLength(1);
-    expect(responses[0]).toMatchObject({ fastPath: true, wake: "waking", toFirstAudioMs: 120 });
+      // Model text streams into one TTS context per item, then flushes and closes on done.
+      engaged.serverEvent({
+        type: "response.output_text.delta",
+        response_id: "resp_1",
+        item_id: "item_say",
+        delta: "Right here.",
+      });
+      await flush(12);
+      engaged.serverEvent({ type: "response.done", response: { id: "resp_1", status: "completed" } });
+      await flush(12);
+      expect(mouth.frames()).toEqual([
+        ...(modelId === "eleven_v4_turbo"
+          ? [
+              { voices: ["voice_abc123"], context_id: "item_say" },
+              { inputs: [{ text: "Right here.", voice_id: "voice_abc123" }], context_id: "item_say" },
+            ]
+          : [
+              { text: " ", context_id: "item_say" },
+              { text: "Right here.", context_id: "item_say" },
+            ]),
+        { context_id: "item_say", flush: true },
+        { context_id: "item_say", close_context: true },
+      ]);
 
-    // Nothing spoken or heard ever reached a frame with the wrong key on it.
-    for (const socket of [engaged, mouth]) {
-      for (const raw of socket.sent) {
-        expect(raw).not.toContain("brokered-openai-key");
-        expect(raw).not.toContain("brokered-elevenlabs-key");
+      // Synthesized PCM plays back through the unchanged path, and the receipt
+      // cut for the turn is the ordinary fast-path response receipt.
+      clock.now = 120;
+      mouth.serverEvent({ audio: Buffer.from([1, 0, 2, 0]).toString("base64"), contextId: "item_say" });
+      mouth.serverEvent({ is_final_audio_for_turn: true, context_id: "item_say" });
+      expect(evidence.filter((event) => event.type === "response")).toHaveLength(0);
+      mouth.serverEvent({ is_final: true, context_id: "item_say" });
+      await flush(12);
+      const responses = evidence.filter((event) => event.type === "response");
+      expect(responses).toHaveLength(1);
+      expect(responses[0]).toMatchObject({ fastPath: true, wake: "continuing", toFirstAudioMs: 120 });
+      expect(spoken).toEqual([
+        expect.objectContaining({
+          text: "Right here.",
+          textSource: "tts_text",
+          itemId: "item_say",
+          textComplete: true,
+          outcome: "played",
+        }),
+      ]);
+
+      // A three-utterance burst while the provider is thinking becomes one
+      // further audible answer through the real session and both response queues.
+      const beforeBurst = engaged.frames().filter((frame) => frame.type === "response.create").length;
+      for (const transcript of ["make that tomorrow", "actually Friday", "Friday afternoon"]) {
+        const captureId = vox.subscriptions.at(-1)!.captureId;
+        vox.emit({ type: "user_audio_end", userId: OWNER, captureId });
+        await flush();
+        vox.emit({ type: "speaking_start", userId: OWNER });
+        await flush();
+        listener.serverEvent({
+          type: "conversation.item.input_audio_transcription.completed",
+          item_id: transcript,
+          transcript,
+        });
+        await flush(12);
       }
-    }
+      expect(engaged.frames().filter((frame) => frame.type === "response.create")).toHaveLength(
+        beforeBurst + 1,
+      );
+      engaged.serverEvent({ type: "response.done", response: { id: "stale-burst", status: "completed" } });
+      await flush(12);
+      expect(engaged.frames().filter((frame) => frame.type === "response.create")).toHaveLength(
+        beforeBurst + 2,
+      );
+      engaged.serverEvent({
+        type: "response.output_text.delta",
+        response_id: "latest",
+        item_id: "latest",
+        delta: "Friday it is.",
+      });
+      await flush(12);
+      engaged.serverEvent({ type: "response.done", response: { id: "latest", status: "completed" } });
+      await flush(12);
+      mouth.serverEvent({ audio: Buffer.from([3, 0, 4, 0]).toString("base64"), contextId: "latest" });
+      mouth.serverEvent({ is_final: true, context_id: "latest" });
+      await flush(12);
+      expect(evidence.filter((event) => event.type === "response")).toHaveLength(2);
+      expect(evidence.filter((event) => event.type === "response").at(-1)?.userId).toBe(OWNER);
+      expect(engaged.frames().filter((frame) => frame.type === "response.create")).toHaveLength(
+        beforeBurst + 2,
+      );
 
-    await session.leave();
-  });
+      // Nothing spoken or heard ever reached a frame with the wrong key on it.
+      for (const socket of [engaged, mouth]) {
+        for (const raw of socket.sent) {
+          expect(raw).not.toContain("brokered-openai-key");
+          expect(raw).not.toContain("brokered-elevenlabs-key");
+        }
+      }
+
+      await session.leave();
+    },
+  );
 
   it("composes xAI streaming STT and Grok Voice behind the shared ports", async () => {
     const sockets: FakeRealtimeSocket[] = [];
@@ -442,3 +523,45 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     });
   });
 });
+
+it.each(["openai", "xai"])(
+  "forwards %s native spoken transcript deltas and finals with item identity",
+  async (provider) => {
+    const sockets: FakeRealtimeSocket[] = [];
+    const output: unknown[] = [];
+    const ports = createVoiceRealtimePorts({
+      apiKey: "test-key",
+      config: parseVoiceRealtimeEnv({ CLANKIE_VOICE_REALTIME_PROVIDER: provider }),
+      socketFactory: async (url, headers) => {
+        const socket = new FakeRealtimeSocket(url, headers);
+        sockets.push(socket);
+        return socket;
+      },
+      timers: new TestTimers(),
+    });
+    const conversation = await ports.openConversation({
+      instructions: "Test",
+      onAudioDelta: (pcm) => pcm.fill(0),
+      onFunctionCall: () => undefined,
+      onResponseDone: () => undefined,
+      onClose: () => undefined,
+      onError: () => undefined,
+      onOutputTranscript: (event, source) => output.push({ ...event, source }),
+    });
+    sockets[0]!.serverEvent({
+      type: "response.output_audio_transcript.delta",
+      item_id: "native",
+      delta: "Right ",
+    });
+    sockets[0]!.serverEvent({
+      type: "response.audio_transcript.done",
+      item_id: "native",
+      transcript: "Right here.",
+    });
+    expect(output).toEqual([
+      { itemId: "native", text: "Right ", final: false, source: "native_audio" },
+      { itemId: "native", text: "Right here.", final: true, source: "native_audio" },
+    ]);
+    conversation.close();
+  },
+);

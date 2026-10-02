@@ -1,5 +1,5 @@
 import { SettingsStore, type PersonaSettings } from "@clankie/settings";
-import { formatPersonaLines, personaStatus, personaUpdate } from "./command/persona.ts";
+import { formatPersonaLines, personaStatus, personaUpdate, runPersonaCommand } from "./command/persona.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface PersonaCommandServices {
@@ -78,6 +78,7 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
             label: "How much he talks",
             hint: "chattiness and reply policy",
           },
+          { value: "images", label: "Persona images", hint: "mood board folder" },
           { value: "status", label: "Show status" },
           { value: "done", label: "Done" },
         ],
@@ -88,7 +89,32 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
         await showPersonaStatus(shell, services);
         continue;
       }
-      if (choice === "character") await editCharacter(shell, services);
+      if (choice === "images") {
+        const action = await flow.readSelect({
+          message: "Persona images",
+          options: [
+            { value: "set", label: "Set folder" },
+            { value: "status", label: "Show image status" },
+            { value: "clear", label: "Clear images" },
+          ],
+          allowBack: true,
+        });
+        if (!action) continue;
+        const folder =
+          action === "set"
+            ? await flow.readText({
+                message: "Persona folder (root = vibe; appearance/ = how you look)",
+                defaultValue: (await services.settings.load()).persona.imagesDir ?? "",
+                allowBack: true,
+              })
+            : undefined;
+        if (action === "set" && !folder?.trim()) continue;
+        const result = await runPersonaCommand(["images", action, ...(folder ? [folder] : [])], {
+          settings: services.settings,
+        });
+        flow.renderLine(JSON.stringify(result.images, null, 2), "success");
+        flow.renderLine(result.restart, "success");
+      } else if (choice === "character") await editCharacter(shell, services);
       else if (choice === "names") await editNames(shell, services);
       else if (choice === "voice") await editVoice(shell, services);
     }

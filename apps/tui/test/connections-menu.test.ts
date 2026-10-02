@@ -102,8 +102,7 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
     if (args[0] === "read" && args[2] === "--tail")
       return { entries: [{ type: "message", role: "agent", text: "last words" }] };
     if (args[0] === "read") return { entries: [{ type: "message", role: "agent", text: "ACK" }] };
-    if (args[0] === "send") return { runId: "r1", state: "running", cursor: "c0" };
-    if (args[0] === "runs") return { runId: "r1", state: "finished", exitCode: 0, cursor: "c0" };
+    if (args[0] === "resume") return { outcome: "spawned", seat: { seatId: "pc/term_native" } };
     return {};
   });
   return {
@@ -120,7 +119,6 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
       swarm: async () => ({}),
       agents,
       now: () => NOW,
-      pollMs: 1,
       ...overrides,
     } satisfies ConnectionsMenuServices,
   };
@@ -155,22 +153,6 @@ it("drills from the hub to a remote session and shows its latest turns", async (
   ]);
 });
 
-it("sends a message, waits for the run, and shows only the reply", async () => {
-  const { shell, results, lines } = fakeShell(
-    ["host:pc", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "send", "wait", undefined, undefined, undefined],
-    ["are you done?"],
-  );
-  const { services: deps, agentsCalls } = services();
-  await runConnectionsSection("agents", shell, deps);
-  expect(agentsCalls).toContainEqual(["send", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "are you done?"]);
-  expect(agentsCalls).toContainEqual(["read", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "--after", "c0"]);
-  expect(lines).toContain("Run finished (exit 0).");
-  expect(results.at(-1)).toEqual({
-    prompt: "/agents send pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
-    message: "agent: ACK",
-  });
-});
-
 it("adds an SSH host from three answers", async () => {
   const { shell } = fakeShell(["add", "powershell", undefined], ["pc", "volpe@supedupsilly"]);
   const { services: deps, agentsCalls } = services();
@@ -186,19 +168,42 @@ it("adds an SSH host from three answers", async () => {
   ]);
 });
 
-it("reports a refused send in place instead of leaving the modal", async () => {
-  const { shell, lines } = fakeShell(
-    ["host:pc", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "send", undefined, undefined, undefined],
-    ["hi"],
-  );
+it("resumes a saved session through the ordinary native hire endpoint", async () => {
+  const { shell, results } = fakeShell([
+    "host:pc",
+    "pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
+    "resume",
+    undefined,
+    undefined,
+  ]);
+  const { services: deps, agentsCalls } = services();
+  await runConnectionsSection("agents", shell, deps);
+  expect(agentsCalls).toContainEqual(["resume", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d"]);
+  expect(results).toEqual([
+    {
+      prompt: "/agents resume pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
+      message: "Native seat pc/term_native is ready.",
+    },
+  ]);
+});
+
+it("reports a refused read in place instead of leaving the modal", async () => {
+  const { shell, lines } = fakeShell([
+    "host:pc",
+    "pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
+    "read",
+    undefined,
+    undefined,
+    undefined,
+  ]);
   const { services: deps } = services();
   const agents = deps.agents;
   deps.agents = vi.fn(async (args: readonly string[]) => {
-    if (args[0] === "send") throw new Error("Session was written 12s ago; it may be open and working.");
+    if (args[0] === "read") throw new Error("Transcript path outside allowed roots");
     return agents(args);
   });
   await runConnectionsSection("agents", shell, deps);
-  expect(lines).toContain("Session was written 12s ago; it may be open and working.");
+  expect(lines).toContain("Transcript path outside allowed roots");
 });
 
 it("puts an error that ends the menu into the chat, where it outlives the status line", async () => {
@@ -213,4 +218,50 @@ it("puts an error that ends the menu into the chat, where it outlives the status
   expect(results).toEqual([
     { prompt: "/connections", message: "Runtime connections need the operator credential" },
   ]);
+});
+
+it("shows each runtime's worker mode and changes it through the runtime command", async () => {
+  const { shell, readSelect, lines } = fakeShell(["runtime:named", "mode", "interactive", undefined]);
+  const calls: string[][] = [];
+  const { services: deps } = services({
+    runtime: async (args: readonly string[]) => {
+      calls.push([...args]);
+      return args[0] === "list"
+        ? {
+            connections: [
+              { id: "named", state: "healthy", enabled: true, capacity: 2, workerMode: "stream" },
+              { id: "pc", state: "healthy", enabled: true, transport: "ssh" },
+            ],
+          }
+        : { id: "named", workerMode: "interactive" };
+    },
+  });
+  await runConnectionsSection("runtimes", shell, deps);
+  const list = (readSelect.mock.calls[0] as unknown[])[0] as { options: { value: string; hint?: string }[] };
+  expect(list.options[0]!.hint).toBe("healthy · 2 workers per coordinator · stream workers");
+  // An ssh fleet's peers enroll themselves: no worker mode to show or change.
+  expect(list.options[1]!.hint).toBe("healthy");
+  expect(values(readSelect.mock.calls[1]!)).toContain("mode");
+  expect(values(readSelect.mock.calls[2]!)).toEqual(["interactive"]);
+  expect(calls).toContainEqual(["mode", "named", "interactive"]);
+  expect(lines).toContain("named runs interactive workers.");
+});
+
+it("selects a managed harness through the runtime CLI", async () => {
+  const { shell, readSelect, lines } = fakeShell(["runtime:default", "harness", "codex", undefined]);
+  const calls: string[][] = [];
+  const { services: deps } = services({
+    runtime: async (args: readonly string[]) => {
+      calls.push([...args]);
+      return args[0] === "list"
+        ? {
+            connections: [{ id: "default", state: "healthy", workerHarness: "claude", workerMode: "stream" }],
+          }
+        : { id: "default", workerHarness: "codex" };
+    },
+  });
+  await runConnectionsSection("runtimes", shell, deps);
+  expect(values(readSelect.mock.calls[2]!)).toEqual(["codex", "pi", "claude"]);
+  expect(calls).toContainEqual(["harness", "default", "codex"]);
+  expect(lines).toContain("default uses codex workers.");
 });

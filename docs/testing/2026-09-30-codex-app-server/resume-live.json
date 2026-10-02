@@ -1,0 +1,82 @@
+{
+  "paneId": "w2H:p6R",
+  "resumeThreadId": "01a0f1e2-16c1-7fc0-a4ff-ca63705ebf39",
+  "events": [
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "01a0f1e2-16c1-7fc0-a4ff-ca63705ebf39",
+        "turn": {
+          "id": "01a0f1e2-3e8a-7e83-ab13-ed197b08477a",
+          "items": [
+            {
+              "type": "userMessage",
+              "id": "01a0f1e2-3efc-7ac0-9b30-e80e74e51279",
+              "clientId": "63f3ce55-2a36-409f-8ba6-51479f3aadd4",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Reply with exactly VUH1459_OWNER_TAKEOVER. Do not use tools.",
+                  "text_elements": []
+                }
+              ]
+            },
+            {
+              "type": "agentMessage",
+              "id": "msg_0e370034705b306b016abce5f624a887d1b6dc0d1e9316744a",
+              "text": "VUH1459_OWNER_TAKEOVER.",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          ],
+          "itemsView": "full",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1790764531,
+          "completedAt": 1790764534,
+          "durationMs": 3328
+        }
+      }
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "01a0f1e2-16c1-7fc0-a4ff-ca63705ebf39",
+        "turn": {
+          "id": "01a0f1e8-ec43-7460-80e8-5fe6673a3dfc",
+          "items": [
+            {
+              "type": "agentMessage",
+              "id": "msg_033c52d7858a6df1016abce7ab947c87d19400d28e05ccbab5",
+              "text": "VUH1459_RESUME_OK",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          ],
+          "itemsView": "summary",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1790764969,
+          "completedAt": 1790764972,
+          "durationMs": 3607
+        }
+      }
+    }
+  ],
+  "threadId": "01a0f1e2-16c1-7fc0-a4ff-ca63705ebf39",
+  "sent": {
+    "turnId": "01a0f1e8-ec43-7460-80e8-5fe6673a3dfc",
+    "state": "started"
+  },
+  "view": "\n  >_ OpenAI Codex (v0.159.1)\n     /private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj\n  permissions: YOLO mode\n\n  To get started, describe a task or try one of these commands:\n\n  /init - create an AGENTS.md file with instructions for Codex\n  /status - show current session configuration\n  /permissions - choose what Codex is allowed to do\n  /model - choose what model and reasoning effort to use\n  /review - review any changes and find issues\n\n\n› Reply with exactly VUH1459_HIRE_COMPLETE. Do not use tools.\n\n\n• VUH1459_HIRE_COMPLETE\n\n  Worked for 2s • 5:35 AM\n\n\n› Reply with exactly VUH1459_MESSAGE_COMPLETE. Do not use tools.\n\n\n• VUH1459_MESSAGE_COMPLETE\n\n  Worked for 3s • 5:35 AM\n\n\n› Reply with exactly VUH1459_OWNER_TAKEOVER. Do not use tools.\n\n\n• VUH1459_OWNER_TAKEOVER.\n\n  Worked for 3s • 5:35 AM\n\n\n› Reply with exactly VUH1459_RESUME_OK. Do not use tools.\n\n\n• VUH1459_RESUME_OK\n\n  Worked for 3s • 5:42 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n› Ask Codex to do anything\n\n  GPT-6-Astra low · /private/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/vuh1459-live-8XKSHj · Return VUH1459_HIRE_COMPLETE · C…\n  ? for shortcuts                                                                                          ⚠ 1 warning · f2 to view",
+  "closed": {
+    "id": "cli:pane:close",
+    "result": {
+      "type": "ok"
+    }
+  }
+}

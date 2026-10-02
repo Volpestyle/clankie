@@ -243,6 +243,34 @@ describe("clankie pair — success", () => {
     expect(stdout.text().split("\n").length).toBeGreaterThan(10);
   });
 
+  it("says a gatewayless code needs the sign-in when remote access is signed out", async () => {
+    const offer = validOffer();
+    const doorway = { state: "sign_in_required", since: "2026-09-29T13:27:00Z" };
+    const fetchImpl = (async (input: unknown) =>
+      requestUrl(input).endsWith("/health")
+        ? Response.json({ ok: true, doorway })
+        : Response.json({ ...offer, direct: "https://mac.tailnet.ts.net" })) as typeof fetch;
+    const stdout = outputBuffer();
+    expect(await runPair([], { fetchImpl, stdout: stdout.stream })).toBe(0);
+    expect(stdout.text()).toContain("Remote access is signed out");
+    expect(stdout.text()).toContain('"Sign this Mac back in"');
+
+    const json = outputBuffer();
+    expect(await runPair(["--json"], { fetchImpl, stdout: json.stream })).toBe(0);
+    expect(JSON.parse(json.text()).nextStep).toContain("Sign this Mac back in");
+  });
+
+  it("adds no sign-in note when the code carries the gateway", async () => {
+    const offer = validOffer();
+    const fetchImpl = (async (input: unknown) =>
+      requestUrl(input).endsWith("/health")
+        ? Response.json({ ok: true, doorway: { state: "sign_in_required", since: "x" } })
+        : Response.json({ ...offer, gateway: true })) as typeof fetch;
+    const stdout = outputBuffer();
+    expect(await runPair([], { fetchImpl, stdout: stdout.stream })).toBe(0);
+    expect(stdout.text()).not.toContain("signed out");
+  });
+
   it("emits strict ANSI-free JSON whose deep link matches the encoded one", async () => {
     const offer = validOffer();
     const stdout = outputBuffer();
@@ -295,6 +323,21 @@ describe("clankie pair — fail closed", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.status).toBe(status);
     expect(typeof parsed.error).toBe("string");
+  });
+
+  it("names the Mac sign-in when the service says the doorway cannot take the offer", async () => {
+    const stdout = outputBuffer();
+    const stderr = outputBuffer();
+    const exit = await runPair([], {
+      fetchImpl: jsonFetch({ error: "public_gateway_unavailable" }, { status: 503 }),
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+    expect(exit).toBe(1);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain("No pairing code was made");
+    expect(stderr.text()).toContain("/remote-access");
+    expect(stderr.text()).toContain("Sign this Mac back in");
   });
 
   it("treats an already-expired valid offer as expired", async () => {

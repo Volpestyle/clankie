@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "passed": false,
+  "receiptCount": 28364,
+  "checks": [
+    {
+      "name": "Vox media owner",
+      "ok": true,
+      "detail": "the bridge process declared ready with Vox as its media owner"
+    },
+    {
+      "name": "DAVE voice session",
+      "ok": true,
+      "detail": "latest DAVE session selected at receipt 28261 but it has no matching leave"
+    },
+    {
+      "name": "three explicit participants",
+      "ok": false,
+      "detail": "0 unique participant consent receipt(s) observed"
+    },
+    {
+      "name": "three attributed speakers",
+      "ok": false,
+      "detail": "1 unique explicitly consented speaker(s) produced bounded utterances"
+    },
+    {
+      "name": "speech round trips",
+      "ok": false,
+      "detail": "0 speaker(s) received a spoken response; 0 failure receipt(s)"
+    },
+    {
+      "name": "overlap and barge-in",
+      "ok": false,
+      "detail": "a matching overlap and interruption receipt pair is absent"
+    },
+    {
+      "name": "clean leave",
+      "ok": false,
+      "detail": "no matching gateway-confirmed Vox-owned leave receipt"
+    },
+    {
+      "name": "play room state",
+      "ok": false,
+      "detail": "no attach; 0 listening room-state delivery receipt(s)"
+    },
+    {
+      "name": "play two-way delivery",
+      "ok": false,
+      "detail": "0 transcript delivery counter(s); 0 accepted narration submission(s); 0 refusal(s)"
+    },
+    {
+      "name": "DAVE reconnect",
+      "ok": false,
+      "detail": "no complete leave/rejoin/leave DAVE recovery sequence"
+    }
+  ]
+}

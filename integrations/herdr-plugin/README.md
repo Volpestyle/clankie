@@ -24,7 +24,7 @@ board, console, and status report one keystroke from any herdr workspace.
 Requirements: macOS (the manifest declares `platforms = ["macos"]`), herdr
 0.7.3 or newer, and two commands on `PATH` — `clankie` (`pnpm cli:install`
 symlinks it into `~/.local/bin`) and `herdr-lead` (the board CLI from the
-`herdr-lead` skill).
+separately installed dashboard; it is no longer bundled with `lead`).
 
 Link this directory from the root of your checkout:
 

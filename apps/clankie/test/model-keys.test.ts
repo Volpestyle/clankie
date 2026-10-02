@@ -430,4 +430,33 @@ describe("owner model keys", () => {
     const device = await (await setup()).pair(SUPERVISE_GRANTS);
     expect((await call("/v1/model-keys", undefined, device.deviceToken)).status).toBe(401);
   });
+
+  it("names account sign-ins separately from API keys, without any token detail", async () => {
+    const { call, store } = await setup();
+    await store.set("openai", { type: "api", key: "sk-marker" });
+    await store.set("oauth-only", {
+      type: "oauth",
+      access: "oauth-secret",
+      refresh: "refresh",
+      expires: Date.now() + 60000,
+    });
+    await store.set("disabled", {
+      type: "oauth",
+      access: "hidden",
+      refresh: "refresh",
+      expires: Date.now() + 60000,
+    });
+    const response = await call("/v1/model-keys/subscriptions");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ subscriptions: [{ providerId: "oauth-only", name: "OAuth" }] });
+    expect(text).not.toMatch(/secret|refresh|sk-marker|expires/u);
+    // The strict catalog is unchanged, so older apps keep parsing it.
+    expect(
+      (await (await call("/v1/model-keys")).json()).providers.find(
+        (p: { id: string }) => p.id === "oauth-only",
+      ),
+    ).toEqual({ id: "oauth-only", name: "OAuth", acceptsApiKey: false, keyConfigured: false, models: [] });
+    expect((await call("/v1/model-keys/subscriptions", undefined, "captain")).status).toBe(401);
+  });
 });

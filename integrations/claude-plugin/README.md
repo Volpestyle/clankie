@@ -15,8 +15,8 @@ selected skill files from that conversation's catalog to the worker's immutable
 context. See [portable skill selection](../../packages/swarm/README.md#working-preferences-and-portable-skills-slices-36).
 
 Running Claude Code as a worker in Clankie's Herdr fleet does not require
-replacing the lead with this seat. Linear activity follows the issue's owning
-conversation into its bound Claude seat as a wake; with no bound seat, Pi handles
+replacing the lead with this seat. Linear notifications follow the connected account's inbox into the operator
+conversation's bound Claude seat as a wake; with no bound seat, Pi handles
 the turn. Goal continuations remain with their service Pi loop.
 
 Like the [herdr plugin](../herdr-plugin/README.md), this carries only what a
@@ -25,13 +25,13 @@ plugin can uniquely declare. Everything else lives in the service and the
 
 ## What the plugin carries
 
-| Piece                                                                                                                                         | File                       | What it does                                                                                                                 |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Output style `Clankie`                                                                                                                        | `output-styles/clankie.md` | His identity in place of the coding assistant's; forced on while the plugin is enabled. Generated from `instructions.md`.    |
-| `SessionStart` hook                                                                                                                           | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card |
-| `UserPromptSubmit` hook                                                                                                                       | `hooks/hooks.json`         | `clankie memory-card --lane operator`: the newest memory card, every turn                                                    |
-| MCP server `clankie`                                                                                                                          | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file               |
-| Skills `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:swarm-lead`, `/clankie:herdr-lead`, `/clankie:swarm-mcp` | `skills/`                  | Links to the shipped skills, available from any working directory                                                            |
+| Piece                                                                                                                                                                                | File                       | What it does                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Output style `Clankie`                                                                                                                                                               | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`. |
+| `SessionStart` hook                                                                                                                                                                  | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card                                 |
+| `UserPromptSubmit` hook                                                                                                                                                              | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card, once per session and again when it changes                                             |
+| MCP server `clankie`                                                                                                                                                                 | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                               |
+| Skills `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:swarm-mcp`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                            |
 
 The output style is generated: edit `apps/clankie/src/captain/instructions.md`
 and run `node integrations/claude-plugin/build.mjs`. `node
@@ -48,24 +48,31 @@ before new sessions receive the change.
 ## Launch
 
 ```bash
-clankie seat              # sit down; a checkout loads this directory with --plugin-dir
+clankie seat              # sit down with a projection of the selected skills
 clankie seat --conversation ID  # select an existing service project conversation
 clankie seat --resume     # reopen the last seat's conversation
 clankie seat --dry-run    # print the launch plan as JSON without starting Claude Code
 ```
 
-`clankie seat` needs Claude Code on `PATH` and a TTY. It passes `--settings`
-with the permission allowlist for `clankie` commands and, when the plugin is
-installed, `enabledPlugins` for this session only; names the herdr pane
-`clankie` when it is one; and starts Claude Code with `--name Clankie`. With
-the plugin installed from the repo's marketplace it also passes the channel
-development flag, so wakes and escalations reach the session. The launcher's
-`--plugin-dir` path currently gets tools and skills without enabling wakes.
-That is a launcher constraint, not a universal plugin-only channel requirement:
-[an isolated probe](../../docs/testing/2026-09-26-interactive-swarm-workers/README.md)
-on Claude Code 2.1.283 received events through a bare MCP server with the development
-channel flag. That probe does not change the operator-seat launch path or establish
-`--plugin-dir` channel support.
+`clankie seat` needs Claude Code on `PATH` and a TTY. It projects this plugin into
+a fresh private directory, linking the same identity, hooks and MCP config with
+only skills included by `skills.opinionated` and `skills.exclude`. This supports
+arbitrary exclusions as well as a product-only seat without generating a separate
+build for every combination. The output-style generator remains the single source
+for both settings.
+
+The launcher passes the permission allowlist for `clankie` commands, disables an
+older installed `clankie@clankie` for this session, enables the projected
+`clankie@inline`, and addresses that identity with the development channel flag.
+Claude's [session plugin identity and precedence](https://code.claude.com/docs/en/plugins/loading)
+keep the old marketplace skill catalog from leaking into this seat. The session
+keeps its MCP tools, hooks and wake channel with either skill setting. It starts
+with `--name Clankie` and names the Herdr pane `clankie` when appropriate.
+`--plugin-dir` chooses the component source while retaining skill filtering.
+
+Use `clankie skills opinionated off` or `/skills` to change the selection.
+`--dry-run` shows the plugin projection and catalog; start a fresh session when
+changing conditions because resumed history can contain previously loaded skills.
 
 `--conversation ID` resolves an existing global/workspace conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and
@@ -91,26 +98,68 @@ plugin's operator bearer belongs to this trusted seat; it is not a worker creden
 Scoped access for other workers is tracked in the
 [shared-account plan](../../packages/swarm/README.md#shared-connected-accounts-slices-35).
 
-Install from a checkout or an installed release (`clankie doctor` names
-`repoRoot`), then disable it at user scope: the forced output style applies to
-every Claude Code session while the plugin is enabled there, and the seat is
-the only session that should be him.
+The bundled seat needs no marketplace installation. If an older seat plugin is
+installed, leave it disabled at user scope: its forced style otherwise applies
+to ordinary Claude sessions too. The launcher only changes session settings.
 
 ```bash
-claude plugin marketplace add "$PWD/integrations/claude-plugin"
-claude plugin install clankie@clankie
-claude plugin disable clankie@clankie
-```
-
-Then confirm it took:
-
-```bash
-claude plugin details clankie          # output style, context/transcript hooks, one MCP server, six skills
-clankie seat --dry-run                 # "plugin": { "source": "installed" }, "channel": true
+claude plugin disable clankie@clankie  # if previously installed
+clankie seat --dry-run                # projected plugin, selected skills, channel: true
 ```
 
 In the session, `/mcp` lists the `clankie` server, `/clankie:this-machine`
 loads his install skill, and `clankie model status` runs without a prompt.
+
+## Worker channel plugin (`clankie-worker`)
+
+[`worker/`](worker/) is a second plugin in the same marketplace,
+`clankie-worker@clankie`, for Swarm-dispatched **interactive** workers
+([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
+It is not the seat and carries none of the seat's identity, skills or operator
+MCP. Its one MCP server, `swarm`, has two launches:
+
+- **Swarm-dispatched worker**: runs the Swarm MCP that the Herdr launcher names
+  in `SWARM_WORKER_MCP`, in channel mode, with the worker's own enrolled
+  capability, so its leased Swarm mail arrives as channel events.
+- **Seat Clankie hired** (VUH-1458): inside the hire's herdr pane it runs
+  `clankie mcp --seat`, so the seat's mailbox (brief, `message_seat`, DMs)
+  arrives as channel events. The bridge polls only when the Claude session that
+  launched it loaded `plugin:clankie-worker@clankie` under `--channels`.
+  The wrapper's `CLANKIE_SEAT_PARENT_ARGV` identifies that plugin bridge. A
+  separately registered `clankie-seat` bridge cannot consume its mailbox just
+  because Claude loaded the plugin; it needs its own selected channel.
+
+Either launch enables the plugin for that session only (`enabledPlugins`) and
+starts Claude Code with `--channels plugin:clankie-worker@clankie`. Outside
+both it refuses to start. Its hooks (`SessionStart`, `UserPromptSubmit`,
+`Stop`, `StopFailure`) call `clankie seat-hook` only in a Clankie hire's pane, so
+Clankie learns each settled turn and its final text; for a Swarm worker they do
+nothing.
+
+Claude Code only runs a non-official channel plugin unattended when the owner's
+managed settings allow it. That is the owner's action, never the dispatcher's:
+the exact `allowedChannelPlugins` entry and probe are in
+[managed consent](../../docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md).
+Install it disabled, like the seat:
+
+```bash
+claude plugin install clankie-worker@clankie
+claude plugin disable clankie-worker@clankie
+```
+
+Until both steps are done, a Claude hire reports `consent_required` with the
+missing step and takes the terminal lane (typed brief, verified in the
+transcript) instead.
+
+With consent approved, a briefed local Claude hire reports `control.mode: "channel"`,
+including when other execution fleets are registered. Every hire logs its lane;
+terminal results include `control.reason`. A folder-trust prompt fails with
+`trust_required` and closes the new pane. Review trust yourself in that directory
+before retrying.
+
+Select the Swarm mode per runtime with `clankie runtime mode ID interactive|stream`;
+stream stays the default. An interactive startup that blocks stays visibly
+blocked in its pane and never falls back to stream.
 
 ## Codex
 
@@ -132,7 +181,8 @@ bank, not the harness.
 ## Native transcript projection
 
 Launched seats publish settled messages and tools to their selected Clankie
-conversation through `clankie seat-sync`. Native hook activity settles the app
+conversation through `clankie seat-sync`. The Stop, StopFailure and PreCompact
+syncs run `async`, so projection never adds latency to the seat's turns. Native hook activity settles the app
 after a stop, including when transcript records arrive after the channel reply.
 This works outside Herdr and with
 `--plugin-dir`; it does not require the Claude channel preview. The hook reads
@@ -140,6 +190,28 @@ and redacts on the Claude host, while the service deduplicates retries and pins
 the native session to one conversation. Ordinary plugin use without the launcher
 session binding does not publish. See [CLI sync contract](../../docs/cli.md#native-seat-transcript-sync)
 and [Claude hook input](https://code.claude.com/docs/en/hooks#common-input-fields).
+
+### Memory card injection
+
+Claude Code keeps every hook injection in the conversation, so an unchanged
+card printed each turn would only pile up copies. With `--hook`, `clankie
+memory-card` reads the hook's `session_id` from stdin and prints the card on the
+session's first prompt, then again only when its content changes (a new or
+corrected episode). A sha256 of the last card each session saw lives in
+`$TMPDIR/clankie-memory-card/`. `SessionStart` (startup, resume, `/clear`,
+compact) clears that record so the next prompt injects the card again; this
+covers compaction summarizing the earlier copy away. Input without a usable
+`session_id` gets the card every turn, as before.
+
+### Hook latency
+
+Memory and transcript hooks read the operator bearer without waiting behind an
+unrelated Keychain OAuth refresh. Transcript uploads share one ten-second HTTP
+budget across all pages; the next hook retries retained records if an upload
+fails. The memory-card request also has a ten-second HTTP timeout. These budgets
+start after credential lookup and do not bound CLI startup or native transcript
+parsing. Claude gives each hook 60 seconds overall to allow CLI startup and scheduling
+on a loaded machine. Raising that outer limit alone does not fix credential contention.
 
 ### Service restarts
 
@@ -153,3 +225,19 @@ A failed wait is not treated as agent completion.
 An already-running bridge must be reloaded once to pick up this implementation:
 reconnect the plugin's **operator** MCP server (`clankie mcp --lane operator`),
 not only the separate fleet mailbox (`clankie mcp --seat`).
+
+The seat denies the inherited `linear-server` MCP connector, whose identity may
+differ from the owner-connected account. That connected tracker identity is
+Clankie’s and his whole swarm’s identity. Tracker writes use Clankie’s connected
+tools or a granted worker bridge; a worker lacking access asks the lead to write. Follow Linear wakes the operator conversation
+from that account's actual notifications; stored issue bindings do not route wakes.
+
+### Persona image folders
+
+The output style and SessionStart hook carry text. When the owner selects a
+[persona image folder](../../docs/persona-images.md), `clankie prompt --sections persona`
+includes its cached visual description. Automatic image prefix injection is
+available in Pi sessions, not in this Claude Code seat. The seat's `generate_image`
+MCP tool still accepts `personaReference: true` to use only the owner's `appearance/` references for
+self-depiction. Top-level images and sampled video frames supply vibe, never
+physical appearance; the caption preserves that distinction. A restart of Clankie applies changes to the board.

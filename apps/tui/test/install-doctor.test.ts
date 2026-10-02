@@ -47,10 +47,20 @@ describe("install doctor", () => {
     await writeFile(join(root, "package.json"), `${JSON.stringify({ version: "0.2.0" })}\n`);
     await mkdir(join(root, "integrations", "herdr-plugin"), { recursive: true });
     await writeFile(join(root, "integrations", "herdr-plugin", "herdr-plugin.toml"), 'id = "clankie"\n');
+    await mkdir(join(root, "vendor"));
+    await writeFile(
+      join(root, "vendor/opinionated-skills.json"),
+      JSON.stringify({ skills: { lead: "agent/lead" } }),
+    );
+    for (const name of ["lead", "this-machine"]) {
+      await mkdir(join(root, ".agents/skills", name), { recursive: true });
+      await writeFile(join(root, ".agents/skills", name, "SKILL.md"), "test");
+    }
     const settings = new SettingsStore(join(configHome, "clankie", "settings.json"));
     await settings.update((current) => ({
       ...current,
       schemaVersion: SETTINGS_SCHEMA_VERSION,
+      skills: { opinionated: false, exclude: [] },
       discord: { ...current.discord, activeBody: "bot", textIngressEnabled: true },
     }));
     const store = new FileCredentialStore(join(root, "credentials.json"));
@@ -65,6 +75,13 @@ describe("install doctor", () => {
       fetchImpl: offline,
     });
 
+    expect(report.skills.selection).toEqual({ opinionated: false, exclude: [] });
+    expect(report.skills.catalog).toContainEqual(
+      expect.objectContaining({ name: "lead", class: "opinionated", included: false }),
+    );
+    expect(report.skills.catalog).toContainEqual(
+      expect.objectContaining({ name: "this-machine", class: "product", included: true }),
+    );
     expect(report.kind).toBe("checkout");
     expect(report.version).toBe("0.2.0");
     expect(report.model).toBeNull();
@@ -259,8 +276,10 @@ describe("install doctor", () => {
 
     expect(signedOut.doorway).toMatchObject({ state: "sign_in_required" });
     expect(signedOut.remediations).toContain(
-      "This Mac has been signed out of the public doorway since 2026-09-14T10:11:40.689Z; no app reaches him until you sign it back in with /gateway.",
+      "This Mac has been signed out of the public doorway since 2026-09-14T10:11:40.689Z; no app reaches him until you sign it back in with /remote-access.",
     );
+    expect(signedOut.nextStep).toContain("Sign this Mac back in");
+    expect(open.nextStep).toContain("clankie pair");
     expect(open.doorway).toEqual({ state: "connected" });
     expect(open.remediations.join(" ")).not.toContain("doorway");
   });

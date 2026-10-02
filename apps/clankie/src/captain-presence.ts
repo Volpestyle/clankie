@@ -51,6 +51,13 @@ interface MutableCaptainPresenceLease {
 
 const DEFAULT_LEASE_DURATION_MS = 30_000;
 const DEFAULT_RECORDED_HEARTBEAT_INTERVAL_MS = 10_000;
+/**
+ * Heartbeat reports remembered for duplicate detection. A retried report
+ * arrives within seconds; one older than this many newer reports is new again.
+ */
+const RECENT_REPORT_IDS_MAX = 1_024;
+/** Lifecycle redelivery has the same finite window as the durable event log. */
+const RECENT_LIFECYCLE_IDS_MAX = 4_096;
 
 export class CaptainPresenceLeaseConflictError extends Error {
   public constructor() {
@@ -67,8 +74,10 @@ export class CaptainPresenceManager {
   private readonly recordedHeartbeatIntervalMs: number;
   private readonly scheduleExpiry: boolean;
   private readonly onBackgroundError: (error: unknown) => void;
+  /** Lifecycle reports include every turn; retain a finite redelivery window. */
   private readonly recordedEventIds = new Set<string>();
-  private readonly acceptedReportIds = new Set<string>();
+  /** Accepted reports and recorded heartbeats, one per beat: bounded, oldest out. */
+  private readonly recentReportIds = new Set<string>();
   private current: MutableCaptainPresenceLease | undefined;
   private lastRecordedHeartbeatAt: string | undefined;
   private expirationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -105,7 +114,7 @@ export class CaptainPresenceManager {
     return this.enqueue(async () => {
       const report = CaptainPresenceReportSchema.parse(input);
       const reportId = reportEventId(report);
-      const duplicate = this.acceptedReportIds.has(reportId) || this.recordedEventIds.has(reportId);
+      const duplicate = this.recentReportIds.has(reportId) || this.recordedEventIds.has(reportId);
       const now = this.clock();
       await this.expireAt(now);
       const emitted: CaptainPresenceEvent[] = [];
@@ -117,7 +126,7 @@ export class CaptainPresenceManager {
           emitted.push(event);
         }
       }
-      this.acceptedReportIds.add(reportId);
+      this.rememberReport(reportId);
       this.schedule();
       return { lease: copyLease(lease), emitted };
     });
@@ -312,9 +321,9 @@ export class CaptainPresenceManager {
   }
 
   private async emit(event: CaptainPresenceEvent, eventKey: string): Promise<void> {
-    if (this.recordedEventIds.has(event.id)) return;
+    if (this.recordedEventIds.has(event.id) || this.recentReportIds.has(event.id)) return;
     await this.emitEvent({ event, eventKey });
-    this.recordedEventIds.add(event.id);
+    this.remember(event);
   }
 
   private replay(events: readonly DomainEvent[]): void {
@@ -322,7 +331,7 @@ export class CaptainPresenceManager {
       const parsed = CaptainPresenceEventSchema.safeParse(candidate);
       if (!parsed.success) continue;
       const event = parsed.data;
-      this.recordedEventIds.add(event.id);
+      this.remember(event);
       if (event.type === "captain.presence.online" || event.type === "captain.heartbeat") {
         this.current = {
           captainId: event.data.captainId,
@@ -341,6 +350,25 @@ export class CaptainPresenceManager {
           this.current.state = "offline";
         }
       }
+    }
+  }
+
+  private remember(event: CaptainPresenceEvent): void {
+    if (event.type === "captain.heartbeat") this.rememberReport(event.id);
+    else {
+      this.recordedEventIds.delete(event.id);
+      this.recordedEventIds.add(event.id);
+      if (this.recordedEventIds.size > RECENT_LIFECYCLE_IDS_MAX) {
+        this.recordedEventIds.delete(this.recordedEventIds.values().next().value!);
+      }
+    }
+  }
+
+  private rememberReport(id: string): void {
+    this.recentReportIds.delete(id);
+    this.recentReportIds.add(id);
+    if (this.recentReportIds.size > RECENT_REPORT_IDS_MAX) {
+      this.recentReportIds.delete(this.recentReportIds.values().next().value!);
     }
   }
 

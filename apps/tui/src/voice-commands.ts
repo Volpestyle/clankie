@@ -296,7 +296,7 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
   }
 
   const modelId = await flow.readText({
-    message: "ElevenLabs model id (blank keeps the runtime default)",
+    message: "ElevenLabs model id (eleven_v4_turbo for dialogue; blank keeps current/default)",
     placeholder: current.elevenLabsModelId ?? "eleven_flash_v2_5",
     validate: (value: string) => (value.trim().length === 0 ? undefined : validateVendorIdentifier(value)),
   });

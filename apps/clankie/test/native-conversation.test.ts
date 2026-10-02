@@ -162,3 +162,39 @@ it("hides channel envelopes and retains explicit reactions without persisting na
     events: [{ type: "reaction", emoji: "👍" }, { type: "activity" }],
   });
 });
+
+it("never emits a seat reply twice when a surface replays or resumes (VUH-1027)", async () => {
+  const messages = (result: Awaited<ReturnType<typeof nativeConversationPage>>) => {
+    if (result.status !== "page") throw new Error("page expected");
+    return result.events.flatMap((event) =>
+      event.type === "message" ? [`${event.cursor} ${event.role}: ${event.text}`] : [],
+    );
+  };
+  // Two cold replays of one settled turn name the reply by the same cursor, so
+  // a surface that dedups by cursor shows one bubble.
+  const first = await nativeConversationPage(conversation, transcript, "idle", request);
+  const again = await nativeConversationPage(conversation, transcript, "idle", request);
+  expect(messages(again)).toEqual(messages(first));
+  expect(messages(first).filter((line) => line.endsWith("agent: Reply"))).toHaveLength(1);
+  if (first.status !== "page") throw new Error("page expected");
+
+  // Resuming while the pane was still working, then after it settled and
+  // answered again, yields only the new reply.
+  const working = await nativeConversationPage(conversation, transcript, "working", request);
+  if (working.status !== "page") throw new Error("page expected");
+  const next = {
+    ...transcript,
+    entries: [
+      ...transcript.entries,
+      { type: "message" as const, id: "u2", role: "operator" as const, text: "Again" },
+      { type: "message" as const, id: "a2", role: "agent" as const, text: "Second reply" },
+    ],
+  };
+  for (const from of [first.nextCursor, working.nextCursor]) {
+    const resumed = await nativeConversationPage(conversation, next, "idle", { ...request, cursor: from });
+    expect(messages(resumed).map((line) => line.replace(/^\S+ /u, ""))).toEqual([
+      "operator: Again",
+      "agent: Second reply",
+    ]);
+  }
+});

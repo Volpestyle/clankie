@@ -16,6 +16,17 @@ async function checkPublicDocs(outputDir) {
   for await (const file of glob("**/*.html", { cwd: outputDir })) htmlFiles.push(file);
 
   const failures = [];
+  const allDocs = await readFile(resolve(outputDir, "llms-full.txt"), "utf8");
+  // Static pages must travel with the generated references and authored guides.
+  // Compare their rendered titles rather than keeping another copy of the prose.
+  for (const file of htmlFiles) {
+    const html = await readFile(resolve(outputDir, file), "utf8");
+    const title = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/)?.[1];
+    if (title === undefined) failures.push(`${file}: missing page heading`);
+    else if (file === "index.html" || file === "network/index.html") {
+      if (!allDocs.includes(title)) failures.push(`${file}: missing from llms-full.txt`);
+    }
+  }
   const network = await readFile(resolve(outputDir, "network/index.html"), "utf8");
   for (const path of ["/v1/hosted/pair-offer", "/v1/discord/ingress", "/v1/gateway/push-authorize"]) {
     if (!network.includes(`/h/{hostId}${path}`) || network.includes(`${path} (inside encrypted exchange)`)) {

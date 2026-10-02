@@ -674,7 +674,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
         value: "true",
         label: "Enabled",
         hint: "private local JSONL",
-        description: "Retain exact consented speech with speaker attribution for debugging.",
+        description: "Retain consented speech and Clankie’s reply text with playback outcomes for debugging.",
       },
     ],
   });

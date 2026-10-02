@@ -40,6 +40,7 @@ const report: InstallDoctorReport = {
   },
   voice: { realtimeProvider: "openai", ttsProvider: "openai" },
   gameplay: { pokeagentMmoEnabled: false },
+  skills: { selection: { opinionated: true, exclude: [] }, catalog: [] },
   emailConfigured: false,
   mcpServers: [],
   credentials: [{ id: "openai", type: "api" }],
@@ -47,7 +48,15 @@ const report: InstallDoctorReport = {
   herdrPlugin: { bundled: false },
   laneTools: { url: "http://127.0.0.1:4310/v1/mcp", reachable: true },
   doorway: { state: "disabled" },
+  power: {
+    state: "always_on",
+    source: "ac",
+    sleepAfterMinutes: 0,
+    heldAwakeBy: [],
+    keepAwakeRequested: false,
+  },
   selectedModel: null,
+  nextStep: "Pair a phone or tablet: run `clankie pair` (or /pair).",
   remediations: [],
 };
 
@@ -103,7 +112,7 @@ async function fixture(options: {
   } as unknown as ProviderServices;
   const opened: string[] = [];
   const autostartCalls: string[] = [];
-  const commands: FaceShellCommand[] = ["persona", "gateway", "discord"].map((name) => ({
+  const commands: FaceShellCommand[] = ["persona", "remote-access", "discord"].map((name) => ({
     name,
     aliases: [],
     description: name,
@@ -226,7 +235,7 @@ describe("/setup", () => {
       );
     expect(phone({ state: "connected" })?.command).toBe("pair");
     expect(phone({ state: "sign_in_required", since: "2026-09-01" })).toMatchObject({
-      command: "gateway",
+      command: "remote-access",
       hint: "signed out",
     });
   });

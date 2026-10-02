@@ -5,8 +5,11 @@ import {
   PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID,
   createDefaultCredentialStore,
   derivePublicGatewayHostId,
+  generatePublicGatewayInstallationId,
   type CredentialStore,
+  type ProviderCredential,
 } from "@clankie/credential-broker";
+import { HostPowerReportSchema, type HostPowerReport } from "@clankie/protocol/host-power";
 import {
   PublicGatewayDoorwayStateSchema,
   type PublicGatewayDoorwayState,
@@ -18,6 +21,7 @@ import {
   type PublicGatewaySettings,
 } from "@clankie/settings";
 import { z } from "zod";
+import { DeviceDirectRouteSchema, type DeviceDirectRoute } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
 const DOORWAY_PROBE_TIMEOUT_MS = 5_000;
@@ -27,8 +31,12 @@ const HealthSchema = z.object({ doorway: PublicGatewayDoorwayStateSchema.optiona
 export type GatewayDoorwayReport = PublicGatewayDoorwayState | { readonly state: "unreachable" };
 
 const GATEWAY_USAGE = [
-  "Usage: clankie gateway [status]",
+  "Usage: clankie remote-access [status]",
+  "       clankie remote-access on [--email EMAIL --code-stdin]",
+  "       clankie remote-access off | rotate-key",
+  "       clankie gateway [status]",
   "       clankie gateway set --url URL --host-id ID",
+  "       clankie gateway direct --control-plane-url URL --relay-url URL",
   "       clankie gateway disable",
   "       clankie gateway rotate-encryption-key",
   "Enter the host bearer with the interactive /gateway wizard; secrets are never flags.",
@@ -45,6 +53,7 @@ export interface GatewayCommandOptions {
 export interface GatewayCommandResult {
   readonly ok: true;
   readonly publicGateway: PublicGatewaySettings;
+  readonly directRoute?: DeviceDirectRoute;
   readonly credentialPresent: boolean;
   readonly enabled: boolean;
   readonly hostId?: string;
@@ -67,7 +76,12 @@ function stores(options: GatewayCommandOptions): {
 
 async function result(options: GatewayCommandOptions): Promise<GatewayCommandResult> {
   const { settings, credentials } = stores(options);
-  const publicGateway = (await settings.load()).publicGateway;
+  const stored = await settings.load();
+  const publicGateway = stored.publicGateway;
+  const directRoute = DeviceDirectRouteSchema.safeParse({
+    controlPlaneUrl: stored.relay.controlPlaneUrl,
+    relayUrl: stored.relay.url,
+  });
   const listed = await credentials.list();
   const account = await credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID);
   const accountReady =
@@ -83,6 +97,7 @@ async function result(options: GatewayCommandOptions): Promise<GatewayCommandRes
   return {
     ok: true,
     publicGateway,
+    ...(directRoute.success ? { directRoute: directRoute.data } : {}),
     credentialPresent,
     enabled: publicGateway.url !== undefined && credentialPresent,
     ...(hostId === undefined ? {} : { hostId }),
@@ -98,6 +113,17 @@ async function result(options: GatewayCommandOptions): Promise<GatewayCommandRes
  * credential's word for it.
  */
 export async function probeDoorway(options: GatewayCommandOptions = {}): Promise<GatewayDoorwayReport> {
+  return (await probeHealth(options)).doorway;
+}
+
+/**
+ * One read of the captain's `/health`: the doorway, and the last time the host
+ * slept underneath him (which only he can notice). Either is absent when he is
+ * down or older than the field.
+ */
+export async function probeHealth(
+  options: GatewayCommandOptions = {},
+): Promise<{ readonly doorway: GatewayDoorwayReport; readonly lastSleep?: HostPowerReport["lastSleep"] }> {
   const env = options.env ?? process.env;
   const url = `${commandHost({ ...options, env }).replace(/\/+$/u, "")}/health`;
   try {
@@ -105,9 +131,14 @@ export async function probeDoorway(options: GatewayCommandOptions = {}): Promise
       signal: AbortSignal.timeout(DOORWAY_PROBE_TIMEOUT_MS),
     });
     const body = HealthSchema.safeParse(await response.json());
-    return body.success && body.data.doorway !== undefined ? body.data.doorway : { state: "unreachable" };
+    if (!body.success || body.data.doorway === undefined) return { doorway: { state: "unreachable" } };
+    const power = HostPowerReportSchema.safeParse(body.data.power);
+    return {
+      doorway: body.data.doorway,
+      ...(power.success && power.data.lastSleep !== undefined ? { lastSleep: power.data.lastSleep } : {}),
+    };
   } catch {
-    return { state: "unreachable" };
+    return { doorway: { state: "unreachable" } };
   }
 }
 
@@ -119,6 +150,43 @@ export async function gatewayConfigure(
   const { settings } = stores(options);
   await settings.update((current) => ({ ...current, publicGateway: parsed }));
   return await result(options);
+}
+
+export async function gatewayConfigureDirect(
+  route: DeviceDirectRoute,
+  options: GatewayCommandOptions = {},
+): Promise<GatewayCommandResult> {
+  const parsed = DeviceDirectRouteSchema.parse(route);
+  await stores(options).settings.update((current) => ({
+    ...current,
+    relay: { ...current.relay, controlPlaneUrl: parsed.controlPlaneUrl, url: parsed.relayUrl },
+  }));
+  return await result(options);
+}
+
+/**
+ * Stores a signed-in Clankie account as this Mac's remote-access credential and
+ * points settings at the gateway. `/remote-access`, `clankie login` and
+ * `clankie remote-access on` all end here, so a signed-out Mac re-signs in
+ * under the same installation id and keeps its host id. The captain still has
+ * to restart to open the doorway.
+ */
+export async function gatewayEnableWithAccount(
+  input: {
+    readonly gatewayUrl: string;
+    readonly credential: Extract<ProviderCredential, { type: "oauth" }>;
+  },
+  options: GatewayCommandOptions = {},
+): Promise<GatewayCommandResult> {
+  const { settings, credentials } = stores(options);
+  const current = (await settings.load()).publicGateway;
+  const publicGateway = PublicGatewaySettingsSchema.parse({
+    url: input.gatewayUrl,
+    installationId: current.installationId ?? generatePublicGatewayInstallationId(),
+  });
+  await credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, input.credential);
+  await credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
+  return await gatewayConfigure(publicGateway, options);
 }
 
 export async function gatewayDisable(options: GatewayCommandOptions = {}): Promise<GatewayCommandResult> {
@@ -139,14 +207,28 @@ export async function runGatewayCommand(
 ): Promise<GatewayCommandResult> {
   const verb = args[0];
   if (verb === undefined || verb === "status") return await gatewayStatus(options);
-  if (verb === "rotate-encryption-key" && args.length === 1) {
+  if ((verb === "rotate-encryption-key" || verb === "rotate-key") && args.length === 1) {
     await stores(options).credentials.set(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID, {
       type: "api",
       key: randomBytes(32).toString("hex"),
     });
     return await result(options);
   }
-  if (verb === "disable" && args.length === 1) return await gatewayDisable(options);
+  if ((verb === "disable" || verb === "off") && args.length === 1) return await gatewayDisable(options);
+  if (verb === "direct" && args.length === 5) {
+    const values = new Map<string, string>();
+    for (let index = 1; index < args.length; index += 2) {
+      const name = args[index];
+      const value = args[index + 1];
+      if (!name || !value || (name !== "--control-plane-url" && name !== "--relay-url") || values.has(name))
+        throw new Error(GATEWAY_USAGE);
+      values.set(name, value);
+    }
+    const controlPlaneUrl = values.get("--control-plane-url");
+    const relayUrl = values.get("--relay-url");
+    if (!controlPlaneUrl || !relayUrl) throw new Error(GATEWAY_USAGE);
+    return await gatewayConfigureDirect({ controlPlaneUrl, relayUrl }, options);
+  }
   if (verb === "set" && args.length === 5) {
     const values = new Map<string, string>();
     for (let index = 1; index < args.length; index += 2) {

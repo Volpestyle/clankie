@@ -1,0 +1,40 @@
+{
+  "hash": "64bf140dd8a8676c0bb88ae893ca98b5f44ce498fbe875393845fc3633faf631",
+  "count": 2,
+  "vibeCount": 2,
+  "appearanceCount": 0,
+  "encodedBytes": 218572,
+  "note": "Actual CLI status, with private source names, directory and absolute sheet paths omitted. Each returned sheetPath was opened locally and verified readable.",
+  "files": [
+    {
+      "role": "vibe",
+      "kind": "video",
+      "status": "loaded",
+      "duration": 29.711667,
+      "timestamps": [1.486, 4.457, 7.428, 10.399, 13.37, 16.341, 19.313, 22.284, 25.255, 28.226],
+      "frames": 10,
+      "encodedBytes": 108276,
+      "width": 1500,
+      "height": 330,
+      "columns": 5,
+      "rows": 2,
+      "sheetPathVerified": true
+    },
+    {
+      "role": "vibe",
+      "kind": "video",
+      "status": "loaded",
+      "duration": 13.316667,
+      "timestamps": [0.666, 1.998, 3.329, 4.661, 5.993, 7.324, 8.656, 9.988, 11.319, 12.651],
+      "frames": 10,
+      "encodedBytes": 110296,
+      "width": 2000,
+      "height": 442,
+      "columns": 5,
+      "rows": 2,
+      "sheetPathVerified": true
+    }
+  ],
+  "clearCount": 0,
+  "restart": "Restart Clankie to apply persona images: clankie restart captain"
+}

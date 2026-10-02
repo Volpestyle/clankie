@@ -1,0 +1,240 @@
+{
+  "pc-sync.json": {
+    "data": {
+      "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+      "actor": "491df383-b9c6-45ae-a7db-2cb2db1c4075",
+      "eventCursor": 7321,
+      "tasks": {
+        "items": [],
+        "cursor": 0
+      },
+      "inbox": [],
+      "compatibility": {
+        "apiVersion": 1,
+        "skillContract": "swarm-coordination/1",
+        "schemaVersion": 14,
+        "serverVersion": "2.0.0-rc.1",
+        "modernProtocol": "2026-07-28",
+        "build": {
+          "revision": "0981253fc4b81fb4794ceaa706aeec363d900a32",
+          "sourceDigest": "f769c75577f832ad1073d51e4715837edfce5e1f988a43d8c7bb790d98616769",
+          "packageVersion": "2.0.0-rc.1",
+          "sdkVersion": "2.0.0"
+        }
+      },
+      "recipientGeneration": true,
+      "messageSessionIdentity": true,
+      "dispatchConfigReload": true,
+      "executionWorkspaces": true,
+      "unlimitedDispatch": true
+    }
+  },
+  "mac-send.json": {
+    "data": {
+      "value": {
+        "messageId": "f410ef37-b3fc-44cf-b411-7e8c597df443",
+        "recipients": ["491df383-b9c6-45ae-a7db-2cb2db1c4075"],
+        "idempotencyKey": "vuh1381-mac-pc-nonce-20260927"
+      },
+      "cursor": 7324,
+      "replayed": false
+    }
+  },
+  "pc-fetch.json": {
+    "data": {
+      "value": {
+        "deliveries": [
+          {
+            "message": {
+              "version": 1,
+              "id": "f410ef37-b3fc-44cf-b411-7e8c597df443",
+              "sender": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+              "senderGeneration": 15,
+              "recipient": "491df383-b9c6-45ae-a7db-2cb2db1c4075",
+              "kind": "question",
+              "body": "VUH1381-0981253-ROUNDTRIP: verify this nonce and reply with the same nonce after processing acknowledgment.",
+              "taskId": null,
+              "threadId": "vuh1381-pc-relay-20260927",
+              "createdAt": 1790527523332,
+              "expiresAt": null,
+              "idempotencyKey": "vuh1381-mac-pc-nonce-20260927",
+              "audience": "direct"
+            },
+            "leaseUntil": 1790527554822,
+            "attempt": 1
+          }
+        ]
+      },
+      "cursor": 7325,
+      "replayed": false
+    }
+  },
+  "pc-ack.json": {
+    "data": {
+      "value": {
+        "messageId": "f410ef37-b3fc-44cf-b411-7e8c597df443",
+        "state": "acknowledged",
+        "acknowledgedAt": 1790527539969
+      },
+      "cursor": 7333,
+      "replayed": false
+    }
+  },
+  "pc-reply.json": {
+    "data": {
+      "value": {
+        "messageId": "5e61e444-b3ef-40cd-88b6-459452d3310f",
+        "recipients": ["4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0"],
+        "idempotencyKey": "vuh1381-pc-reply-1"
+      },
+      "cursor": 7334,
+      "replayed": false
+    }
+  },
+  "mac-events-final.json": {
+    "data": {
+      "items": [
+        {
+          "id": 7340,
+          "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+          "actor": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+          "type": "delivery.retry_scheduled",
+          "entity_id": "5e61e444-b3ef-40cd-88b6-459452d3310f",
+          "payload": {
+            "attempts": 1,
+            "nextAttemptAt": 1790527572611,
+            "recipient": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0"
+          },
+          "created_at": 1790527571615
+        },
+        {
+          "id": 7341,
+          "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+          "actor": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+          "type": "delivery.leased",
+          "entity_id": "5e61e444-b3ef-40cd-88b6-459452d3310f",
+          "payload": {
+            "attempt": 2,
+            "consumer": "clankie",
+            "generation": 15,
+            "leaseUntil": 1790527602613,
+            "recipient": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+            "sessionId": "f526a7ec-c337-4d72-9827-ce113eb11110"
+          },
+          "created_at": 1790527572613
+        },
+        {
+          "id": 7342,
+          "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+          "actor": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+          "type": "runtime.wake",
+          "entity_id": "5e61e444-b3ef-40cd-88b6-459452d3310f",
+          "payload": {
+            "attemptId": null,
+            "deliveryAttempt": 2,
+            "generation": 15,
+            "recipient": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+            "sessionId": "f526a7ec-c337-4d72-9827-ce113eb11110",
+            "status": "accepted",
+            "taskId": null
+          },
+          "created_at": 1790527572620
+        },
+        {
+          "id": 7345,
+          "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+          "actor": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+          "type": "message.accepted",
+          "entity_id": "f650df4d-6334-43c2-89aa-6ed753be8ff3",
+          "payload": {
+            "audience": "direct",
+            "kind": "reply",
+            "recipients": ["491df383-b9c6-45ae-a7db-2cb2db1c4075"]
+          },
+          "created_at": 1790527579914
+        },
+        {
+          "id": 7346,
+          "scope": "b4eda7695b7d7c210992bcc0e4012b85474c71f62464dcc805c19d2ddc1d6e89",
+          "actor": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+          "type": "delivery.acknowledged",
+          "entity_id": "5e61e444-b3ef-40cd-88b6-459452d3310f",
+          "payload": {
+            "attempt": 2,
+            "generation": 15,
+            "recipient": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+            "sessionId": "f526a7ec-c337-4d72-9827-ce113eb11110"
+          },
+          "created_at": 1790527585101
+        }
+      ],
+      "cursor": 7347
+    }
+  },
+  "pc-fetch2.json": {
+    "data": {
+      "value": {
+        "deliveries": [
+          {
+            "message": {
+              "version": 1,
+              "id": "f650df4d-6334-43c2-89aa-6ed753be8ff3",
+              "sender": "4af2b1ea-8a0f-42cf-bdaf-00d95cf710c0",
+              "senderGeneration": 15,
+              "recipient": "491df383-b9c6-45ae-a7db-2cb2db1c4075",
+              "kind": "reply",
+              "body": "Mac lead seat (w2H:p2G) received VUH1381-0981253-ROUNDTRIP and acknowledged it (message 5e61e444). Round trip confirmed from the Mac side.",
+              "taskId": null,
+              "threadId": "vuh1381-pc-relay-20260927",
+              "createdAt": 1790527579914,
+              "expiresAt": null,
+              "idempotencyKey": "vuh1381-pc-roundtrip-lead-ack-1",
+              "audience": "direct"
+            },
+            "leaseUntil": 1790527646517,
+            "attempt": 1
+          }
+        ]
+      },
+      "cursor": 7348,
+      "replayed": false
+    }
+  },
+  "pc-ack2.json": {
+    "error": {
+      "code": "stale_delivery",
+      "message": "Delivery lease is not current; fetch with a new command ID",
+      "retryable": false
+    }
+  },
+  "listener": {
+    "LocalAddress": "127.0.0.1",
+    "LocalPort": 64775,
+    "State": 2
+  },
+  "fleet": {
+    "id": "pc",
+    "kind": "herdr",
+    "session": "default",
+    "ssh": {
+      "host": "volpe@supedupsilly",
+      "shell": "powershell"
+    },
+    "relay": {
+      "conversationId": "global-default"
+    },
+    "capabilities": ["code", "review", "research"],
+    "enabled": true,
+    "capacity": 16,
+    "capacitySource": "default",
+    "transport": "ssh",
+    "state": "healthy",
+    "lastSeenAt": "2026-09-27T16:48:09.404Z",
+    "relayState": {
+      "state": "ready",
+      "since": "2026-09-27T16:44:08.611Z",
+      "endpoint": "\\\\.\\pipe\\clankie-swarm-pc",
+      "port": 64775
+    }
+  }
+}

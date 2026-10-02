@@ -24,7 +24,9 @@ function routineRoute(options: { escalate: boolean; turnLimit?: number }): Route
       purpose: "discord_social",
       tier: "routine",
       ref: ROUTINE.ref,
-      ...(options.escalate ? { escalation: { ref: WORK.ref, turnLimit: options.turnLimit ?? 3 } } : {}),
+      ...(options.escalate
+        ? { escalation: { ref: WORK.ref, turnLimit: options.turnLimit ?? 3, onProviderError: true } }
+        : {}),
     },
     selection: ROUTINE,
     ...(options.escalate ? { resolveEscalation: () => Promise.resolve(WORK) } : {}),
@@ -34,6 +36,20 @@ function routineRoute(options: { escalate: boolean; turnLimit?: number }): Route
 const WORK_ROUTE: RoutedSelection = {
   route: { purpose: "operator", tier: "work", ref: WORK.ref },
   selection: WORK,
+};
+
+const STRONGER = selection("clankie/escalation");
+
+/** A Pro work turn that may escalate (VUH-1391): only when he asks. */
+const ESCALATING_WORK_ROUTE: RoutedSelection = {
+  route: {
+    purpose: "operator",
+    tier: "work",
+    ref: WORK.ref,
+    escalation: { ref: STRONGER.ref, onProviderError: false },
+  },
+  selection: WORK,
+  resolveEscalation: () => Promise.resolve(STRONGER),
 };
 
 type Handler = (event: unknown) => Promise<unknown>;
@@ -72,6 +88,8 @@ async function harness(current: () => RoutedSelection | undefined) {
     startRun: async () =>
       (await emit("before_agent_start", { systemPrompt: "base" })) as { systemPrompt: string } | undefined,
     modelCall: async () => await emit("turn_end"),
+    stoppedAt: async (stopReason: string) =>
+      await emit("message_end", { message: { role: "assistant", stopReason } }),
     failedCall: async (errorMessage: string) =>
       await emit("message_end", { message: { role: "assistant", stopReason: "error", errorMessage } }),
     askToEscalate: async () => {
@@ -86,7 +104,7 @@ async function harness(current: () => RoutedSelection | undefined) {
 describe("RoutineRunBudget", () => {
   it("escalates at most once per run, at the call limit", () => {
     const budget = new RoutineRunBudget();
-    budget.start(3);
+    budget.start({ turnLimit: 3, onProviderError: true });
     expect(budget.modelCallEnded()).toBeUndefined();
     expect(budget.modelCallEnded()).toBeUndefined();
     expect(budget.modelCallEnded()).toBe("looping");
@@ -95,7 +113,7 @@ describe("RoutineRunBudget", () => {
     expect(budget.modelCallEnded()).toBeUndefined();
     expect(budget.modelCallFailed(true)).toBeUndefined();
 
-    budget.start(3);
+    budget.start({ turnLimit: 3, onProviderError: true });
     expect(budget.canEscalate).toBe(true);
   });
 
@@ -106,7 +124,7 @@ describe("RoutineRunBudget", () => {
     expect(budget.modelCallFailed(true)).toBeUndefined();
     expect(budget.claim()).toBe(false);
 
-    budget.start(3);
+    budget.start({ turnLimit: 3, onProviderError: true });
     expect(budget.modelCallFailed(false)).toBeUndefined();
     expect(budget.modelCallFailed(true)).toBe("provider_error");
   });
@@ -131,6 +149,33 @@ describe("captainRoutingExtension", () => {
     expect(pi.active()).not.toContain(ESCALATE_TOOL_NAME);
     for (let call = 0; call < 20; call += 1) await pi.modelCall();
     expect(pi.setModel).not.toHaveBeenCalled();
+  });
+
+  it("never escalates because an answer ran out of output room (VUH-1391)", async () => {
+    for (const route of [routineRoute({ escalate: true }), ESCALATING_WORK_ROUTE]) {
+      const pi = await harness(() => route);
+      await pi.startRun();
+      await pi.stoppedAt("length");
+      expect(pi.setModel).not.toHaveBeenCalled();
+    }
+  });
+
+  it("lets a work turn escalate only when he asks, never on a long run or a provider error", async () => {
+    const pi = await harness(() => ESCALATING_WORK_ROUTE);
+    const prompt = await pi.startRun();
+    expect(prompt?.systemPrompt).toContain("## A stronger model, when you need it");
+    expect(prompt?.systemPrompt).toContain("`clankie/escalation`");
+    expect(pi.active()).toContain(ESCALATE_TOOL_NAME);
+    for (let call = 0; call < 40; call += 1) await pi.modelCall();
+    await pi.failedCall("503 Service Unavailable: overloaded");
+    expect(pi.setModel).not.toHaveBeenCalled();
+
+    expect(await pi.askToEscalate()).toBe("The rest of this turn runs on clankie/escalation.");
+    expect(pi.setModel).toHaveBeenCalledWith(STRONGER.model);
+    expect(pi.escalations).toEqual([
+      { purpose: "operator", from: WORK.ref, to: STRONGER.ref, trigger: "asked" },
+    ]);
+    expect(await pi.askToEscalate()).toBe("This turn has already escalated.");
   });
 
   it("escalates once when he asks, recording the move", async () => {

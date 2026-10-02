@@ -141,6 +141,7 @@ it("pages through offline history, queues directed messages, and reconciles exis
       id,
       content,
       author: { id: bot ? "bot" : "human", bot },
+      guildId: "guild",
       mentions: { users: new Collection() },
       ...(reference === undefined ? {} : { reference: { messageId: reference } }),
       fetchReference: async () => ({ author: { id: "bot" } }),
@@ -167,13 +168,34 @@ it("pages through offline history, queues directed messages, and reconciles exis
   first[2] = item("102", "reply without a ping", false, "99");
   const fetch = vi
     .fn()
+    .mockResolvedValueOnce(new Collection())
     .mockResolvedValueOnce(new Collection(first.map((m) => [m.id, m])))
     .mockResolvedValueOnce(new Collection([["200", item("200", "clankie are you there?")]]));
   const channel = { id: "room", messages: { fetch }, isDMBased: () => false } as unknown as TextBasedChannel;
   try {
-    await scanDiscordTextChannel(inbox, channel, "bot", ["clankie"]);
-    expect(fetch.mock.calls).toEqual([[{ after: "0", limit: 100 }], [{ after: "199", limit: 100 }]]);
-    expect(inbox.pending().map((row) => row.id)).toEqual(["102", "200"]);
+    const ingress = new DiscordTextIngress(
+      inbox.port({
+        getHealth: vi.fn(),
+        submitDiscordCaptainChannelTurn: vi.fn(),
+        executeDiscordPresenceAction: vi.fn(),
+      }),
+      {
+        ...config,
+        guildIds: new Set(["guild"]),
+        replyPolicy: "addressed",
+        characterNames: ["clankie"],
+        channelActivity: inbox.channelActivity,
+      },
+    );
+    await scanDiscordTextChannel(inbox, channel, "bot", ingress);
+    expect(fetch.mock.calls).toEqual([
+      [{ before: "1", limit: 100 }],
+      [{ after: "0", limit: 100 }],
+      [{ after: "199", limit: 100 }],
+    ]);
+    expect(inbox.pending().map((row) => row.id)).toEqual(
+      Array.from({ length: 99 }, (_, i) => String(102 + i)),
+    );
     expect(inbox.after("room")).toBe("200");
   } finally {
     inbox.close();
@@ -232,3 +254,196 @@ it.each([true, false])(
     }
   },
 );
+
+const guildConfig: DiscordTextIngressConfig = {
+  ...config,
+  guildIds: new Set(["guild"]),
+  replyPolicy: "addressed",
+  characterNames: ["clankie"],
+  liveMessageWindow: 1,
+};
+function historyMessage(id: string, authorId = "human", content = "a follow-up"): Message {
+  return {
+    id,
+    content,
+    guildId: "guild",
+    channelId: "room",
+    author: { id: authorId, bot: authorId === "bot" },
+    mentions: { users: new Collection() },
+  } as unknown as Message;
+}
+function replyPort() {
+  return {
+    getHealth: async () => ({ profileHash: "profile" }),
+    submitDiscordCaptainChannelTurn: vi.fn<DiscordTextIngressPort["submitDiscordCaptainChannelTurn"]>(
+      async () => ({
+        state: "settled",
+        captainSessionId: "session",
+        turnId: "turn",
+        response: "fixture answer",
+      }),
+    ),
+    executeDiscordPresenceAction: vi.fn<DiscordTextIngressPort["executeDiscordPresenceAction"]>(
+      async (write) => ({
+        id: write.idempotencyKey,
+        action: write.action,
+        transportKind: "bot",
+        messageId: "300",
+      }),
+    ),
+  } satisfies DiscordTextIngressPort;
+}
+const followUp = { ...message, id: "201", guildId: "guild", mentionsBot: false, body: "a follow-up" };
+
+it.each(["persisted", "prior-page", "current-page"])(
+  "replays a missed unaddressed follow-up through a restarted ingress and replies (%s)",
+  async (source) => {
+    const directory = mkdtempSync(join(tmpdir(), "clankie-activity-"));
+    const path = join(directory, "inbox.sqlite");
+    let inbox = new DiscordTextInbox(path, "0");
+    const delegate = replyPort();
+    const open = () =>
+      new DiscordTextIngress(inbox.port(delegate), {
+        ...guildConfig,
+        channelActivity: inbox.channelActivity,
+      });
+    try {
+      let ingress = open();
+      if (source === "persisted") {
+        expect((await ingress.handle({ ...message, guildId: "guild" })).state).toBe("settled");
+        // Consume the live window without another reply, then restart.
+        delegate.submitDiscordCaptainChannelTurn.mockResolvedValueOnce({
+          state: "silent",
+          captainSessionId: "session",
+          turnId: "silent",
+        });
+        expect((await ingress.handle({ ...followUp, id: "199" })).state).toBe("declined");
+        inbox.finish("199");
+      }
+      inbox.scanned("room", "200");
+      inbox.close();
+      inbox = new DiscordTextInbox(path, "0");
+      ingress = open();
+      if (source === "persisted") {
+        expect(ingress.hasSpokenInChannel("room")).toBe(true);
+        expect(ingress.engagedInChannel("room")).toBe(false);
+      }
+      const fetch = vi.fn(async (options: { before?: string; after?: string }) => {
+        const messages = options.before
+          ? source === "prior-page"
+            ? [historyMessage("200", "bot")]
+            : []
+          : source === "current-page"
+            ? [historyMessage("201", "bot"), historyMessage("202")]
+            : [historyMessage("201")];
+        return new Collection(messages.map((m) => [m.id, m]));
+      });
+      const channel = {
+        id: "room",
+        messages: { fetch },
+        isDMBased: () => false,
+      } as unknown as TextBasedChannel;
+      await scanDiscordTextChannel(inbox, channel, "bot", ingress);
+      const id = source === "current-page" ? "202" : "201";
+      expect(inbox.pending().map((row) => row.id)).toEqual([id]);
+      // Crash after scanning but before delivery: activity and pending work both survive.
+      inbox.close();
+      inbox = new DiscordTextInbox(path, "0");
+      ingress = open();
+      if (source === "persisted") expect((await ingress.handle({ ...followUp, id })).state).toBe("buffered");
+      expect((await ingress.handle({ ...followUp, id, catchingUp: true })).state).toBe("settled");
+      expect(
+        delegate.executeDiscordPresenceAction.mock.calls.some(
+          ([write]) => write.payload.kind === "reply" && write.payload.messageId === id,
+        ),
+      ).toBe(true);
+      expect(inbox.pending()).toEqual([]);
+    } finally {
+      inbox.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each([
+  { policy: "addressed", active: false, guild: "guild", expected: [] },
+  { policy: "all", active: false, guild: "guild", expected: ["201"] },
+  { policy: "addressed", active: true, guild: "blocked", expected: [] },
+] as const)(
+  "uses live admission for policy=$policy active=$active guild=$guild",
+  async ({ policy, active, guild, expected }) => {
+    const inbox = new DiscordTextInbox(":memory:", "200");
+    try {
+      const ingress = new DiscordTextIngress(inbox.port(replyPort()), {
+        ...guildConfig,
+        replyPolicy: policy,
+      });
+      if (active) ingress.observeChannelReply("room");
+      const item = { ...historyMessage("201"), guildId: guild } as Message;
+      const fetch = vi.fn(
+        async ({ before }: { before?: string }) => new Collection(before ? [] : [[item.id, item]]),
+      );
+      await scanDiscordTextChannel(
+        inbox,
+        { id: "room", messages: { fetch }, isDMBased: () => false } as unknown as TextBasedChannel,
+        "bot",
+        ingress,
+      );
+      expect(inbox.pending().map((row) => row.id)).toEqual(expected);
+      expect(inbox.after("room")).toBe("201");
+    } finally {
+      inbox.close();
+    }
+  },
+);
+
+it("keeps the cursor when a reply's addressing lookup fails transiently", async () => {
+  const inbox = new DiscordTextInbox(":memory:", "200");
+  try {
+    const ingress = new DiscordTextIngress(inbox.port(replyPort()), guildConfig);
+    const item = {
+      ...historyMessage("201"),
+      reference: { messageId: "190" },
+      fetchReference: async () => {
+        throw new Error("offline");
+      },
+    } as unknown as Message;
+    const fetch = vi.fn(
+      async ({ before }: { before?: string }) => new Collection(before ? [] : [[item.id, item]]),
+    );
+    await expect(
+      scanDiscordTextChannel(
+        inbox,
+        { id: "room", messages: { fetch }, isDMBased: () => false } as unknown as TextBasedChannel,
+        "bot",
+        ingress,
+      ),
+    ).rejects.toThrow("offline");
+    expect(inbox.after("room")).toBe("200");
+  } finally {
+    inbox.close();
+  }
+});
+
+it("does not reset live attention when history sees an already-known reply", async () => {
+  const inbox = new DiscordTextInbox(":memory:", "200");
+  try {
+    inbox.channelActivity.save([{ channelId: "room", sinceReply: 5 }]);
+    const ingress = new DiscordTextIngress(inbox.port(replyPort()), {
+      ...guildConfig,
+      channelActivity: inbox.channelActivity,
+    });
+    const ownReply = historyMessage("201", "bot");
+    const fetch = vi.fn(async () => new Collection([[ownReply.id, ownReply]]));
+    await scanDiscordTextChannel(
+      inbox,
+      { id: "room", messages: { fetch }, isDMBased: () => false } as unknown as TextBasedChannel,
+      "bot",
+      ingress,
+    );
+    expect(ingress.engagedInChannel("room")).toBe(false);
+    expect(inbox.channelActivity.load()).toEqual([{ channelId: "room", sinceReply: 5 }]);
+  } finally {
+    inbox.close();
+  }
+});

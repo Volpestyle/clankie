@@ -11,6 +11,13 @@ The [desktop-control skill](../.agents/skills/desktop-control/SKILL.md) is the
 agent-facing workflow. Use browser tools for web pages and purpose-built APIs
 when they directly cover a task.
 
+Peekaboo is Clankie's own hands. Where a computer-use harness is installed and
+signed in (Codex computer use, Claude in Chrome), hard multi-step work in the
+owner's apps usually goes to a hired seat instead; see
+[ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md) and
+the [computer-use-delegation skill](../.agents/skills/computer-use-delegation/SKILL.md).
+`clankie browser harnesses` lists what this machine has.
+
 ## Execution and authority
 
 ```mermaid
@@ -34,10 +41,12 @@ projects text results only, so direct image-returning MCP integration requires
 image preservation before it can replace this path. `peekaboo agent` and
 `--analyze` are not needed: Clankie already supplies the reasoning loop.
 
-## Installed provider
+## Recorded provider installation
 
-The official Peekaboo **4.3.0** universal CLI archive is installed intact, with
-its Swift compatibility library and MIT license.
+The installation examined for this guide used the official Peekaboo **4.3.0**
+universal CLI archive, with its Swift compatibility library and MIT license.
+This is evidence for that installation, not a claim about every Clankie host
+or the latest upstream release. Inspect the target machine before using it.
 
 | Item             | Value                                                              |
 | ---------------- | ------------------------------------------------------------------ |
@@ -47,7 +56,7 @@ its Swift compatibility library and MIT license.
 | Archive SHA-256  | `fec965e4bd6371b8fb017fb582e8d31c6a59628f77e266878f45cf1d4844836f` |
 | Signing identity | `Developer ID Application: OpenClaw Foundation (FWJYW4S8P8)`       |
 
-Strict signature and notarization verification pass for this release. The
+Strict signature and notarization verification passed for that archive. The
 [installation guide](https://github.com/openclaw/Peekaboo/blob/v4.3.0/docs/install.md)
 and [release](https://github.com/openclaw/Peekaboo/releases/tag/v4.3.0) describe
 supported installation. Preserve the signed executable and adjacent libraries.
@@ -95,12 +104,13 @@ Observation does not request foreground focus. Preserve task restrictions:
 `--foreground`. Neither is an automatic fallback for a refused background
 operation. Do not infer a no-focus guarantee for an untested interaction.
 
-## Current capture readiness
+## Recorded capture readiness
 
 Default and explicit classic capture through the installed 4.3.0 remote host
 refuse before dispatch with an ownership-capability error despite granted
 permissions. [Upstream #684](https://github.com/openclaw/Peekaboo/pull/684) is
-merged but is not in the latest published 4.3.0 release. It separates implemented
+the subsequent fix referenced by this investigation, outside the examined 4.3.0
+archive. It separates implemented
 support from startup readiness and restores proven same-host classic recovery.
 The current remote refusal is not evidence that the selected host is old or
 that another application actually captured the screen.

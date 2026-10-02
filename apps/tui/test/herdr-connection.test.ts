@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { HERDR_SOCKET_HEADER } from "@clankie/protocol";
-import { herdrConnection, readHerdrBinding } from "../src/session/herdr-connection.ts";
+import { herdrConnection, readHerdrBinding, runFleetHerdr } from "../src/session/herdr-connection.ts";
 import { forwardsToFleetHerdr } from "../src/command/herdr.ts";
 import { clankieStateHome } from "../src/state-home.ts";
 import { herdrPaneIdFromEnv, jumpToHerdrAgent, sourceHerdrSocket } from "../src/session/herdr-report.ts";
@@ -115,4 +115,25 @@ it("keeps Clankie's own herdr verbs local and forwards the rest to the fleet (AD
   ]) {
     expect(forwardsToFleetHerdr(forwarded)).toBe(true);
   }
+});
+
+it("routes an ssh connection through the remote allow-list instead of requiring a local socket", async () => {
+  const urls: string[] = [];
+  await expect(
+    runFleetHerdr(["server", "stop"], {
+      repoRoot: "/checkout",
+      connectionId: "pc",
+      env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+      fetchImpl: (async (url, init) => {
+        urls.push(String(url));
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer owner");
+        return Response.json({
+          connections: [
+            { id: "pc", enabled: true, session: "default", ssh: { host: "pc", shell: "powershell" } },
+          ],
+        });
+      }) as typeof fetch,
+    }),
+  ).rejects.toThrow("not available on a remote fleet");
+  expect(urls).toEqual(["http://127.0.0.1:4310/v1/runtime-connections"]);
 });

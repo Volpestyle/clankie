@@ -31,12 +31,10 @@ try {
   for (const path of [
     join(extracted, ".agents", "skills", "this-machine", "SKILL.md"),
     join(extracted, ".agents", "skills", "trace-clankie", "SKILL.md"),
-    ...["lead", "swarm-lead", "herdr-lead", "swarm-mcp"].map((name) =>
-      join(extracted, ".agents/skills", name, "SKILL.md"),
-    ),
+    ...["lead", "swarm-mcp"].map((name) => join(extracted, ".agents/skills", name, "SKILL.md")),
     join(extracted, "node_modules/swarm-mcp/dist/coordination/owner-cli.js"),
     join(extracted, "node_modules/swarm-mcp/dist/coordination/herdr-worker-cli.js"),
-    join(extracted, "integrations/claude-plugin/skills/swarm-lead/SKILL.md"),
+    join(extracted, "integrations/claude-plugin/skills/lead/SKILL.md"),
     ...["cli.md", "worker-access.md", "model-keys.md", "rivals.md", "discord-ingress.md"].map((name) =>
       join(extracted, "docs", name),
     ),
@@ -169,7 +167,8 @@ try {
   await stop(directService);
   directService = undefined;
 
-  // Auto adopts the launch session without persisting that incidental binding.
+  // Auto selects the bundled default, even inside a different live Herdr session
+  // (ADR 0181). The launch terminal must not silently select an execution fleet.
   const runtimeModule = await import(
     pathToFileURL(join(extracted, "apps/clankie/src/herdr-runtime.js")).href
   );
@@ -191,8 +190,8 @@ try {
   directService = start(node, [join(extracted, "apps/clankie/src/index.js")], adoptedEnv, workspace);
   await waitFor(`${env.CLANKIE_CONTROL_PLANE_URL}/health`, directService);
   const adopted = herdrStatus();
-  assert.equal(adopted.active.runtime, "external");
-  assert.equal(adopted.active.socketPath, externalEnv.HERDR_SOCKET_PATH);
+  assert.deepEqual(adopted.active, chosen.active);
+  assert.notEqual(adopted.active.socketPath, externalEnv.HERDR_SOCKET_PATH);
   assert.equal(adopted.herdr.runtime, "auto");
   assert.equal(adopted.herdr.socketPath, undefined);
   await stop(directService);

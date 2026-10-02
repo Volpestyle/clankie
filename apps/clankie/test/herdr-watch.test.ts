@@ -1,11 +1,11 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OPERATOR_CONVERSATION_TEXT_MAX, OPERATOR_CONVERSATION_TOOL_DETAIL_MAX } from "@clankie/protocol";
 import { parseHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
-import { fleetSeatClaudeStartArgs } from "../src/captain/fleet-seat.ts";
+import { fleetSeatCodexStartArgs } from "../src/captain/fleet-seat.ts";
 import {
   createHerdrWatchRunner,
   distillHerdrSeatReply,
@@ -237,7 +237,7 @@ describe("HerdrWatchStore", () => {
     );
     let current = working;
     const changed = deferred<HerdrAgentSnapshot>();
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const closePane = vi.fn((_target: string) => Promise.resolve());
     const read = vi.fn((_target: string, _harness: string, source: string) =>
@@ -254,7 +254,7 @@ describe("HerdrWatchStore", () => {
               signal.addEventListener("abort", () => reject(new Error("aborted"))),
             ),
       read,
-      sendText,
+      promptAgent,
       pressEnter,
       closePane,
     };
@@ -274,8 +274,8 @@ describe("HerdrWatchStore", () => {
       expect(project).toHaveBeenCalledWith("term-potato", { kind: "summary", text: "Initial" }),
     );
     await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(true);
-    expect(sendText).toHaveBeenCalledWith("w18:p1", "hello");
-    expect(pressEnter).toHaveBeenCalledWith("w18:p1");
+    expect(promptAgent).toHaveBeenCalledWith("w18:p1", "hello");
+    expect(pressEnter).not.toHaveBeenCalled();
     await expect(store.closeSeat("term-potato")).resolves.toBe(true);
     expect(closePane).toHaveBeenCalledWith("w18:p1");
 
@@ -318,7 +318,7 @@ describe("HerdrWatchStore", () => {
       ),
     );
     const codexQueue = vi.fn(() => Promise.resolve(true));
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
@@ -328,7 +328,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        sendText,
+        promptAgent,
         pressEnter,
       },
     });
@@ -336,8 +336,12 @@ describe("HerdrWatchStore", () => {
     await expect(store.sendToSeat("term-codex", "please ship it")).resolves.toBe(true);
     expect(paneProcesses).toHaveBeenCalledWith("w18:p2");
     expect(openFiles).toHaveBeenCalledWith(21290);
-    expect(codexQueue).toHaveBeenCalledWith("01a0740e-ea76-7aa2-8795-524c00368e71", "please ship it");
-    expect(sendText).not.toHaveBeenCalled();
+    expect(codexQueue).toHaveBeenCalledWith(
+      "01a0740e-ea76-7aa2-8795-524c00368e71",
+      "please ship it",
+      "/Users/james/.codex",
+    );
+    expect(promptAgent).not.toHaveBeenCalled();
     expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
@@ -355,7 +359,7 @@ describe("HerdrWatchStore", () => {
     const paneProcesses = vi.fn(() => Promise.resolve([{ pid: 21290, name: "codex", argv0: "codex" }]));
     const openFiles = vi.fn(() => Promise.resolve("p21290\nfcwd\nn/Users/james\n"));
     const codexQueue = vi.fn(() => Promise.resolve(true));
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
@@ -365,15 +369,15 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        sendText,
+        promptAgent,
         pressEnter,
       },
     });
 
     await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(true);
     expect(codexQueue).not.toHaveBeenCalled();
-    expect(sendText).toHaveBeenCalledWith("w18:p2", "hello");
-    expect(pressEnter).toHaveBeenCalledWith("w18:p2");
+    expect(promptAgent).toHaveBeenCalledWith("w18:p2", "hello");
+    expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
 
@@ -387,7 +391,7 @@ describe("HerdrWatchStore", () => {
       status: "idle",
       title: "Codex seat",
     };
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
@@ -400,14 +404,14 @@ describe("HerdrWatchStore", () => {
             "n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-01a0740e-ea76-7aa2-8795-524c00368e71.jsonl\n",
           ),
         codexQueue: vi.fn(() => Promise.resolve(false)),
-        sendText,
+        promptAgent,
         pressEnter,
       },
     });
 
     await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(true);
-    expect(sendText).toHaveBeenCalledWith("w18:p2", "hello");
-    expect(pressEnter).toHaveBeenCalledWith("w18:p2");
+    expect(promptAgent).toHaveBeenCalledWith("w18:p2", "hello");
+    expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
 
@@ -417,7 +421,7 @@ describe("HerdrWatchStore", () => {
     const paneProcesses = vi.fn(() => Promise.resolve([]));
     const openFiles = vi.fn(() => Promise.resolve(""));
     const codexQueue = vi.fn(() => Promise.resolve(true));
-    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
@@ -427,7 +431,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        sendText,
+        promptAgent,
         pressEnter,
       },
     });
@@ -436,8 +440,8 @@ describe("HerdrWatchStore", () => {
     expect(paneProcesses).not.toHaveBeenCalled();
     expect(openFiles).not.toHaveBeenCalled();
     expect(codexQueue).not.toHaveBeenCalled();
-    expect(sendText).toHaveBeenCalledWith("w18:p1", "hello");
-    expect(pressEnter).toHaveBeenCalledWith("w18:p1");
+    expect(promptAgent).toHaveBeenCalledWith("w18:p1", "hello");
+    expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
 
@@ -1210,6 +1214,15 @@ it("parses Herdr's foreground agent process", () => {
 });
 
 describe("hiring a seat", () => {
+  let codexHome: string;
+  beforeEach(async () => {
+    codexHome = await mkdtemp(join(tmpdir(), "clankie-hire-account-"));
+    roots.push(codexHome);
+    await writeFile(join(codexHome, "auth.json"), "fixture presence only");
+    vi.stubEnv("CODEX_HOME", codexHome);
+    vi.stubEnv("CLANKIE_SETTINGS_FILE", join(codexHome, "settings.json"));
+  });
+  afterEach(() => vi.unstubAllEnvs());
   const hired: HerdrAgentSnapshot = {
     paneId: "w1C:p9",
     terminalId: "term-hired",
@@ -1224,6 +1237,61 @@ describe("hiring a seat", () => {
     roots.push(root);
     return join(root, "herdr-watches.json");
   }
+
+  it.each([
+    { opinionated: true, override: undefined, mode: "bundled", lead: true },
+    { opinionated: false, override: undefined, mode: "plain", lead: false },
+    { opinionated: true, override: "plain" as const, mode: "plain", lead: false },
+    { opinionated: false, override: "bundled" as const, mode: "bundled", lead: true },
+  ])("records the hire's skill condition: %j", async (condition) => {
+    const path = await storePath();
+    const startAgent = vi.fn(async () => {});
+    const store = new HerdrWatchStore(path, {
+      skillBundle: {
+        repoRoot: join(import.meta.dirname, "../../.."),
+        stateDir: path + ".state",
+        settings: async () => ({ opinionated: condition.opinionated, exclude: ["reflect"] }),
+      },
+      runner: {
+        get: async () => ({
+          ...hired,
+          agent: "pi",
+          session: { source: "herdr:pi", kind: "id", value: "session-pi" },
+        }),
+        resolveTerminal: async () => hired,
+        wait: async () => hired,
+        createTab: async () => "w1C:p9",
+        startAgent,
+      },
+    });
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "Test skills",
+      workingDirectory: tmpdir(),
+      ...(condition.override ? { skills: condition.override } : {}),
+    });
+    expect(result.outcome).toBe("spawned");
+    if (result.outcome === "spawned") {
+      expect(result.skills).toMatchObject({
+        mode: condition.mode,
+        source: condition.override ? "override" : "setting",
+        applied: true,
+      });
+      expect(result.skills!.included.includes("lead")).toBe(condition.lead);
+      expect(result.skills!.included).toContain("this-machine");
+      expect(result.skills!.excluded).toContain("reflect");
+    }
+    const refused = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "grok",
+      title: "Test",
+      workingDirectory: tmpdir(),
+      skills: "plain",
+    });
+    expect(refused).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    store.close();
+  });
 
   it("opens a tab in the directory, starts the harness, and returns the seat", async () => {
     const createTab = vi.fn((_options: { cwd: string; label: string }) => Promise.resolve("w1C:p9"));
@@ -1246,7 +1314,9 @@ describe("hiring a seat", () => {
 
     expect(result).toEqual({
       outcome: "spawned",
+      control: { mode: "terminal", reason: "no_brief", detail: "No harness adapter selected: no_brief." },
       seat: {
+        account: { label: "default", home: codexHome },
         seatId: "term-hired",
         paneId: "w1C:p9",
         subject: expect.stringMatching(/^release-prep-[a-f0-9]{4}$/u),
@@ -1257,7 +1327,11 @@ describe("hiring a seat", () => {
         workingDirectory: tmpdir(),
       },
     });
-    expect(createTab).toHaveBeenCalledWith({ cwd: tmpdir(), label: "Release prep" });
+    expect(createTab).toHaveBeenCalledWith({
+      cwd: tmpdir(),
+      label: "Release prep",
+      env: { CODEX_HOME: codexHome },
+    });
     expect(startAgent.mock.calls[0]?.[0]).toMatchObject({ kind: "codex", paneId: "w1C:p9" });
     if (result.outcome === "spawned") {
       expect(startAgent.mock.calls[0]?.[0].name).toBe(result.seat.subject);
@@ -1295,7 +1369,11 @@ describe("hiring a seat", () => {
 
     // The old chair goes first, so a hire that fails leaves one seat, not two.
     expect(closePane).toHaveBeenCalledWith("w1C:p9");
-    expect(createTab).toHaveBeenCalledWith({ cwd: tmpdir(), label: "Release prep" });
+    expect(createTab).toHaveBeenCalledWith({
+      cwd: tmpdir(),
+      label: "Release prep",
+      env: { CODEX_HOME: codexHome },
+    });
     // Hired under the name it already had: that name is the persona's binding
     // key, so the same character sits down in the new district.
     expect(startAgent.mock.calls[0]?.[0]).toMatchObject({
@@ -1336,7 +1414,7 @@ describe("hiring a seat", () => {
     store.close();
   });
 
-  it("starts a claude hire with the seat channel and a codex hire without", async () => {
+  it("starts a claude hire with the seat channel and a codex hire off the shared daemon", async () => {
     const startAgent = vi.fn(
       (_options: { name: string; kind: string; paneId: string; args?: readonly string[] }) =>
         Promise.resolve(),
@@ -1362,7 +1440,8 @@ describe("hiring a seat", () => {
       title: "Release prep",
       workingDirectory: tmpdir(),
     });
-    expect(startAgent.mock.calls[0]?.[0].args).toEqual(fleetSeatClaudeStartArgs());
+    // No development-channel flag: its warning is the owner's to accept (ADR 0194).
+    expect(startAgent.mock.calls[0]?.[0].args).toBeUndefined();
 
     agent = hired;
     await store.spawnSeat({
@@ -1371,7 +1450,7 @@ describe("hiring a seat", () => {
       title: "Release prep",
       workingDirectory: tmpdir(),
     });
-    expect(startAgent.mock.calls[1]?.[0].args).toBeUndefined();
+    expect(startAgent.mock.calls[1]?.[0].args).toEqual(fleetSeatCodexStartArgs());
     store.close();
   });
 
@@ -1447,6 +1526,7 @@ describe("hiring a seat", () => {
       effort: "high",
     });
     expect(startAgent.mock.calls[1]?.[0].args).toEqual([
+      ...fleetSeatCodexStartArgs(),
       "--model",
       "gpt-5.3-codex",
       "-c",
@@ -1483,33 +1563,39 @@ describe("hiring a seat", () => {
     store.close();
   });
 
-  it("registers clankie-seat at user scope before a claude hire", async () => {
-    const addClaudeMcp = vi.fn(() => Promise.resolve());
-    const startAgent = vi.fn(() => Promise.resolve());
+  it("starts a Chrome hire with the harness's own integration flag, or fails it typed (ADR 0199)", async () => {
+    const startAgent = vi.fn(
+      (_options: { name: string; kind: string; paneId: string; args?: readonly string[] }) =>
+        Promise.resolve(),
+    );
     const claudeHired: HerdrAgentSnapshot = {
       ...hired,
       agent: "claude",
       session: { source: "herdr:claude", kind: "id", value: "session-claude" },
     };
+    let agent: HerdrAgentSnapshot = claudeHired;
     const runner: HerdrWatchRunner = {
-      get: vi.fn(() => Promise.resolve(claudeHired)),
-      resolveTerminal: vi.fn(() => Promise.resolve(claudeHired)),
+      get: vi.fn(() => Promise.resolve(agent)),
+      resolveTerminal: vi.fn(() => Promise.resolve(agent)),
       wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
       createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+      closePane: vi.fn(() => Promise.resolve()),
       startAgent,
-      addClaudeMcp,
     };
     const store = new HerdrWatchStore(await storePath(), { runner });
+    const seat = { schemaVersion: 1 as const, title: "Checkout", workingDirectory: tmpdir(), chrome: true };
 
-    await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "claude",
-      title: "Release prep",
-      workingDirectory: tmpdir(),
-    });
+    await store.spawnSeat({ ...seat, harness: "claude" });
+    expect(startAgent.mock.calls[0]?.[0].args?.at(-1)).toBe("--chrome");
 
-    expect(addClaudeMcp).toHaveBeenCalledWith("clankie-seat");
-    expect(startAgent).toHaveBeenCalledOnce();
+    // Codex reaches Chrome through its own settings: no flag, and no failure.
+    agent = { ...hired, agent: "codex" };
+    await store.spawnSeat({ ...seat, harness: "codex" });
+    expect(startAgent.mock.calls[1]?.[0].args).toEqual(fleetSeatCodexStartArgs());
+
+    const result = await store.spawnSeat({ ...seat, harness: "gemini" });
+    expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    expect(startAgent).toHaveBeenCalledTimes(2);
     store.close();
   });
 
@@ -1546,6 +1632,77 @@ describe("hiring a seat", () => {
     await store.spawnSeat({ schemaVersion: 1, harness: "codex", title: "Other", workingDirectory: tmpdir() });
     expect(installPiIntegration).toHaveBeenCalledOnce();
     store.close();
+  });
+
+  describe("a hosted body's hire limit (VUH-1388)", () => {
+    function capacityStore(capacity: () => Promise<{ live: number; limit: number } | undefined>) {
+      const createTab = vi.fn(() => Promise.resolve("w1C:p9"));
+      const startAgent = vi.fn(() => Promise.resolve());
+      const piHired: HerdrAgentSnapshot = {
+        ...hired,
+        agent: "pi",
+        session: { source: "herdr:pi", kind: "path", value: "/state/home/.pi/agent/sessions/one.jsonl" },
+      };
+      const runner: HerdrWatchRunner = {
+        get: vi.fn(() => Promise.resolve(piHired)),
+        resolveTerminal: vi.fn(() => Promise.resolve(piHired)),
+        wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+        createTab,
+        startAgent,
+        closePane: vi.fn(() => Promise.resolve()),
+        installPiIntegration: vi.fn(() => Promise.resolve()),
+      };
+      return { createTab, startAgent, runner, hireCapacity: vi.fn(capacity) };
+    }
+    const hire = {
+      schemaVersion: 1 as const,
+      harness: "pi" as const,
+      title: "Worker",
+      workingDirectory: tmpdir(),
+    };
+
+    it("refuses a hire past the limit, typed, before anything starts", async () => {
+      const { createTab, runner, hireCapacity } = capacityStore(async () => ({ live: 4, limit: 4 }));
+      const store = new HerdrWatchStore(await storePath(), { runner, hireCapacity });
+      const result = await store.spawnSeat(hire);
+      store.close();
+      expect(result).toEqual({
+        outcome: "failed",
+        reason: "at_capacity",
+        detail: "4 of 4 hired agents are running on this Clankie; close one before hiring another.",
+      });
+      expect(createTab).not.toHaveBeenCalled();
+    });
+
+    it("hires below the limit, and when the count is unknown or fails", async () => {
+      for (const capacity of [
+        async () => ({ live: 3, limit: 4 }),
+        async () => undefined,
+        async () => {
+          throw new Error("herdr down");
+        },
+      ]) {
+        const { runner, hireCapacity } = capacityStore(capacity);
+        const store = new HerdrWatchStore(await storePath(), { runner, hireCapacity });
+        expect(await store.spawnSeat(hire)).toMatchObject({ outcome: "spawned" });
+        store.close();
+      }
+    });
+
+    it("never refuses a move for capacity: it re-hires a seat it just closed", async () => {
+      const { runner, hireCapacity } = capacityStore(async () => ({ live: 4, limit: 4 }));
+      const store = new HerdrWatchStore(await storePath(), { runner, hireCapacity });
+      const moved = await store.moveSeat({
+        seatId: "term_1",
+        subject: "worker-1a2b",
+        harness: "pi",
+        title: "Worker",
+        workingDirectory: tmpdir(),
+      });
+      store.close();
+      expect(moved).toMatchObject({ outcome: "spawned" });
+      expect(hireCapacity).not.toHaveBeenCalled();
+    });
   });
 
   describe("a hosted body's pi workers (VUH-1373)", () => {
@@ -1647,49 +1804,57 @@ describe("hiring a seat", () => {
     });
   });
 
-  it("clears the development-channels dialog and proceeds as if start succeeded", async () => {
-    const claudeHired: HerdrAgentSnapshot = {
+  it("never answers the development-channel warning: the hire fails consent_required and closes the pane", async () => {
+    const blockedClaude: HerdrAgentSnapshot = {
       ...hired,
       agent: "claude",
-      status: "idle",
+      status: "blocked",
       session: { source: "herdr:claude", kind: "id", value: "session-claude" },
     };
-    const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
+    const startAgent = vi.fn(() => Promise.reject(new Error("agent is blocked during startup")));
     const read = vi.fn(() =>
       Promise.resolve("WARNING: Loading development channels\n❯ 1. I am using this for local development"),
     );
     const sendKeys = vi.fn(() => Promise.resolve());
-    const waitUntilIdle = vi.fn(() => Promise.resolve(claudeHired));
+    const pressEnter = vi.fn(() => Promise.resolve());
+    const sendText = vi.fn(() => Promise.resolve());
+    const promptAgent = vi.fn(() => Promise.resolve());
+    const waitUntilIdle = vi.fn(() => Promise.resolve(blockedClaude));
     const closePane = vi.fn(() => Promise.resolve());
     const runner: HerdrWatchRunner = {
-      get: vi.fn(() => Promise.resolve(claudeHired)),
-      resolveTerminal: vi.fn(() => Promise.resolve(claudeHired)),
+      get: vi.fn(() => Promise.resolve(blockedClaude)),
+      resolveTerminal: vi.fn(() => Promise.resolve(blockedClaude)),
       wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
       waitUntilIdle,
       read,
       sendKeys,
+      pressEnter,
+      sendText,
+      promptAgent,
       closePane,
       createTab: vi.fn(() => Promise.resolve("w1C:p9")),
       startAgent,
     };
     const store = new HerdrWatchStore(await storePath(), { runner });
 
-    const result = await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "claude",
-      title: "Release prep",
-      workingDirectory: tmpdir(),
-    });
+    const result = await store.spawnSeat(
+      { schemaVersion: 1, harness: "claude", title: "Release prep", workingDirectory: tmpdir() },
+      undefined,
+      "the brief",
+    );
 
-    expect(result).toMatchObject({ outcome: "spawned", seat: { seatId: "term-hired", harness: "claude" } });
-    expect(read).toHaveBeenCalledWith("w1C:p9", "claude", "visible");
-    expect(sendKeys).toHaveBeenCalledWith("w1C:p9", "enter");
-    expect(waitUntilIdle).toHaveBeenCalledWith("w1C:p9", expect.any(AbortSignal));
-    expect(closePane).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(result.outcome === "failed" && result.detail).toMatch(
+      /^consent_required: .*managed-settings\.json/u,
+    );
+    // Nothing reaches the pane: no key, no Enter, no text, no brief.
+    for (const input of [sendKeys, pressEnter, sendText, promptAgent, waitUntilIdle])
+      expect(input).not.toHaveBeenCalled();
+    expect(closePane).toHaveBeenCalledWith("w1C:p9");
     store.close();
   });
 
-  it("leaves a different blocked dialog as a failed hire and closes the pane", async () => {
+  it("reports a folder trust blocker as a typed failure and closes the pane", async () => {
     const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
     const read = vi.fn(() => Promise.resolve("Do you trust the files in this folder?"));
     const sendKeys = vi.fn(() => Promise.resolve());
@@ -1713,175 +1878,15 @@ describe("hiring a seat", () => {
       workingDirectory: tmpdir(),
     });
 
-    expect(result).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
     expect(sendKeys).not.toHaveBeenCalled();
-    expect(closePane).toHaveBeenCalledWith("w1C:p9");
-    store.close();
-  });
-
-  it("does not confirm the channels dialog when a different option is selected", async () => {
-    const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
-    const read = vi.fn(() =>
-      Promise.resolve(
-        [
-          "WARNING: Loading development channels",
-          "❯ 2. I am an Anthropic employee",
-          "  1. I am using this for local development",
-        ].join("\n"),
-      ),
-    );
-    const sendKeys = vi.fn(() => Promise.resolve());
-    const closePane = vi.fn(() => Promise.resolve());
-    const runner: HerdrWatchRunner = {
-      get: vi.fn(() => Promise.resolve(hired)),
-      resolveTerminal: vi.fn(() => Promise.resolve(hired)),
-      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
-      read,
-      sendKeys,
-      closePane,
-      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
-      startAgent,
-    };
-    const store = new HerdrWatchStore(await storePath(), { runner });
-
-    const result = await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "claude",
-      title: "Release prep",
-      workingDirectory: tmpdir(),
-    });
-
-    expect(result).toMatchObject({ outcome: "failed", reason: "not_ready" });
-    expect(sendKeys).not.toHaveBeenCalled();
-    expect(closePane).toHaveBeenCalledWith("w1C:p9");
-    store.close();
-  });
-
-  it("a working pane after the channels dialog is a live hire", async () => {
-    const workingClaude: HerdrAgentSnapshot = {
-      ...hired,
-      agent: "claude",
-      status: "working",
-      session: { source: "herdr:claude", kind: "id", value: "session-claude" },
-    };
-    const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
-    const read = vi.fn(() =>
-      Promise.resolve("WARNING: Loading development channels\n❯ 1. I am using this for local development"),
-    );
-    const sendKeys = vi.fn(() => Promise.resolve());
-    const waitUntilIdle = vi.fn(() => Promise.resolve(workingClaude));
-    const closePane = vi.fn(() => Promise.resolve());
-    const runner: HerdrWatchRunner = {
-      get: vi.fn(() => Promise.resolve(workingClaude)),
-      resolveTerminal: vi.fn(() => Promise.resolve(workingClaude)),
-      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
-      waitUntilIdle,
-      read,
-      sendKeys,
-      closePane,
-      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
-      startAgent,
-    };
-    const store = new HerdrWatchStore(await storePath(), { runner });
-
-    const result = await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "claude",
-      title: "Release prep",
-      workingDirectory: tmpdir(),
-    });
-
-    expect(result).toMatchObject({
-      outcome: "spawned",
-      seat: { seatId: "term-hired", harness: "claude", status: "working" },
-    });
-    expect(sendKeys).toHaveBeenCalledWith("w1C:p9", "enter");
-    expect(waitUntilIdle).toHaveBeenCalledWith("w1C:p9", expect.any(AbortSignal));
-    expect(closePane).not.toHaveBeenCalled();
-    store.close();
-  });
-
-  it("keeps a claude occupant if the dialog wait times out after leaving blocked", async () => {
-    const workingClaude: HerdrAgentSnapshot = {
-      ...hired,
-      agent: "claude",
-      status: "working",
-      session: { source: "herdr:claude", kind: "id", value: "session-claude" },
-    };
-    const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
-    const read = vi.fn(() =>
-      Promise.resolve("WARNING: Loading development channels\n❯ 1. I am using this for local development"),
-    );
-    const sendKeys = vi.fn(() => Promise.resolve());
-    const waitUntilIdle = vi.fn(() => Promise.reject(new Error("timeout waiting for idle")));
-    const closePane = vi.fn(() => Promise.resolve());
-    const runner: HerdrWatchRunner = {
-      get: vi.fn(() => Promise.resolve(workingClaude)),
-      resolveTerminal: vi.fn(() => Promise.resolve(workingClaude)),
-      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
-      waitUntilIdle,
-      read,
-      sendKeys,
-      closePane,
-      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
-      startAgent,
-    };
-    const store = new HerdrWatchStore(await storePath(), { runner });
-
-    const result = await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "claude",
-      title: "Release prep",
-      workingDirectory: tmpdir(),
-    });
-
-    expect(result).toMatchObject({ outcome: "spawned", seat: { harness: "claude", status: "working" } });
-    expect(closePane).not.toHaveBeenCalled();
-    store.close();
-  });
-
-  it("tears down a pane still blocked after the dialog wait times out", async () => {
-    const blockedClaude: HerdrAgentSnapshot = {
-      ...hired,
-      agent: "claude",
-      status: "blocked",
-      session: { source: "herdr:claude", kind: "id", value: "session-claude" },
-    };
-    const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
-    const read = vi.fn(() =>
-      Promise.resolve("WARNING: Loading development channels\n❯ 1. I am using this for local development"),
-    );
-    const sendKeys = vi.fn(() => Promise.resolve());
-    const waitUntilIdle = vi.fn(() => Promise.reject(new Error("timeout waiting for idle")));
-    const closePane = vi.fn(() => Promise.resolve());
-    const runner: HerdrWatchRunner = {
-      get: vi.fn(() => Promise.resolve(blockedClaude)),
-      resolveTerminal: vi.fn(() => Promise.resolve(blockedClaude)),
-      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
-      waitUntilIdle,
-      read,
-      sendKeys,
-      closePane,
-      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
-      startAgent,
-    };
-    const store = new HerdrWatchStore(await storePath(), { runner });
-
-    const result = await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "claude",
-      title: "Release prep",
-      workingDirectory: tmpdir(),
-    });
-
-    expect(result).toMatchObject({ outcome: "failed", reason: "not_ready" });
     expect(closePane).toHaveBeenCalledWith("w1C:p9");
     store.close();
   });
 
   it("names a missing claude binary as harness_unavailable instead of throwing", async () => {
     const closePane = vi.fn(() => Promise.resolve());
-    const startAgent = vi.fn(() => Promise.resolve());
+    const startAgent = vi.fn(() => Promise.reject(new Error("claude: command not found")));
     const runner: HerdrWatchRunner = {
       get: vi.fn(() => Promise.resolve(hired)),
       resolveTerminal: vi.fn(() => Promise.resolve(hired)),
@@ -1889,7 +1894,6 @@ describe("hiring a seat", () => {
       createTab: vi.fn(() => Promise.resolve("w1C:p9")),
       startAgent,
       closePane,
-      addClaudeMcp: vi.fn(() => Promise.reject(new Error("claude: command not found"))),
     };
     const store = new HerdrWatchStore(await storePath(), { runner });
 
@@ -1901,7 +1905,7 @@ describe("hiring a seat", () => {
     });
 
     expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
-    expect(startAgent).not.toHaveBeenCalled();
+    expect(startAgent).toHaveBeenCalledOnce();
     expect(closePane).toHaveBeenCalledWith("w1C:p9");
     store.close();
   });
@@ -2131,3 +2135,7 @@ it("keeps channel delivery prompts internal while allowing an explicit reply wat
   );
   store.close();
 });
+
+vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexRateLimits: vi.fn(async () => null),
+}));

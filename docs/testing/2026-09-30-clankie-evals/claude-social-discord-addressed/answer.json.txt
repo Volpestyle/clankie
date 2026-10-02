@@ -1,0 +1,6 @@
+{
+  "action": "reply",
+  "text": "How about \"Crimson Comet\" or \"Ruby Rider\"? If you want something more playful, \"Big Red\" has a classic ring to it, or \"Cherry Bomb\" if it's fast.",
+  "machineTools": false,
+  "recipient": null
+}

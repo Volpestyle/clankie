@@ -175,6 +175,52 @@ describe("incremental seat transcript tailing", () => {
     expect(textsOf(readHerdrSeatTranscript("codex", sessionAt(file)))).toEqual(["BBB"]);
   });
 
+  it("folds a long cold read in bounded chunks, matching a whole-file parse", () => {
+    // ~10 MB of history: more than one 8 MiB read, with one record wider than
+    // a normal line so a chunk boundary lands inside it.
+    const lines = Array.from({ length: 5_000 }, (_, index) => codexLine(`m${index}`, "x".repeat(2_000)));
+    lines[2_000] = codexLine("wide", "y".repeat(64 * 1024));
+    const file = seatFile(lines.join(""));
+    const tailed = readHerdrSeatTranscript("codex", sessionAt(file));
+
+    expect(io.reads.length).toBeGreaterThan(1);
+    expect(Math.max(...io.reads.map((read) => read.length))).toBeLessThanOrEqual(8 * 1024 * 1024);
+    expect(tailed?.entries).toEqual(parseHerdrSeatTranscript("codex", lines.join("")));
+  });
+
+  it("forgets call names past its bound the same way incrementally and whole-file", () => {
+    const call = (id: string) =>
+      `${JSON.stringify({
+        timestamp: "2026-09-05T00:00:00Z",
+        type: "response_item",
+        payload: { id: `c-${id}`, type: "function_call", call_id: id, name: `named_${id}`, arguments: "{}" },
+      })}\n`;
+    const output = (id: string) =>
+      `${JSON.stringify({
+        timestamp: "2026-09-05T00:00:01Z",
+        type: "response_item",
+        payload: { id: `o-${id}`, type: "function_call_output", call_id: id, output: "ok" },
+      })}\n`;
+    const first = call("old") + call("recent");
+    const file = seatFile(first);
+    readHerdrSeatTranscript("codex", sessionAt(file));
+    // 18,000 newer calls push "old" out of memory; "recent" is rewritten last.
+    const newer = Array.from({ length: 18_000 }, (_, index) => call(`n${index}`)).join("") + call("recent");
+    appendFileSync(file, newer + output("old") + output("recent"));
+
+    const tailed = readHerdrSeatTranscript("codex", sessionAt(file));
+    const results = (tailed?.entries ?? []).filter(
+      (entry) => entry.type === "tool" && entry.phase === "completed",
+    );
+    expect(results.map((entry) => (entry.type === "tool" ? entry.name : ""))).toEqual([
+      "tool",
+      "named_recent",
+    ]);
+    expect(tailed?.entries).toEqual(
+      parseHerdrSeatTranscript("codex", first + newer + output("old") + output("recent")).slice(-9_000),
+    );
+  });
+
   it("reports the identity of the session asked for, not the one that filled the tail", () => {
     const file = seatFile(codexLine("m1", "one"));
 

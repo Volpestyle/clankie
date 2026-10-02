@@ -1,0 +1,43 @@
+VUH-1479 offline verification, 2026-09-30
+
+Focused command:
+pnpm exec vitest run apps/clankie/test/play-host.test.ts apps/clankie/test/play-voice.test.ts apps/clankie/test/embodiment.test.ts apps/clankie/test/embodiment-operator.test.ts packages/play-voice/test/listener.test.ts
+ Test Files  5 passed (5)
+      Tests  54 passed (54)
+   Start at  13:51:18
+   Duration  5.86s (transform 1.04s, setup 0ms, import 2.56s, tests 2.96s, environment 0ms)
+
+After extending the assertion to the recorded journal turn:
+pnpm exec vitest run apps/clankie/test/play-voice.test.ts
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  13:53:32
+   Duration  5.09s (transform 1.37s, setup 0ms, import 2.43s, tests 2.57s, environment 0ms)
+
+pnpm --filter @clankie/clankie typecheck: exit 0
+
+All transcript wording and world responses in these tests are synthetic fixtures.
+Historical content-free receipt samples are in recorded-receipts.json.
+
+Final pnpm check output (exit 1):
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.1 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 875ms on 1450 files using 18 threads.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+Configuration hints (2)
+vendor/opinionated-skills/**           knip.json  Remove from ignore
+integrations/codex-plugin/skills/**    knip.json  Remove from ignore
+$ node scripts/check-doc-links.mjs && pnpm docs:public:check
+Broken local markdown links:
+- docs/testing/2026-09-30-claude-hire-routing/README.md → check.txt
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.

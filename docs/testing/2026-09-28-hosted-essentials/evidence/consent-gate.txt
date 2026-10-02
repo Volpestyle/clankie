@@ -1,0 +1,25 @@
+
+ RUN  v4.1.10 <checkout>
+
+ ❯ apps/clankie/test/gmail-mcp-canary.test.ts (2 tests | 1 failed) 12ms
+   × reads test-account labels through the real broker and Google MCP transport 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/gmail-mcp-canary.test.ts > reads test-account labels through the real broker and Google MCP transport
+Error: consent_required: a fresh test-account Google OAuth grant is missing or expired
+ ❯ apps/clankie/test/gmail-mcp-canary.test.ts:61:13
+     59|     // Never print credential values or provider content in assertion …
+     60|     if (credential?.type !== "oauth" || !credential.access || credenti…
+     61|       throw new Error("consent_required: a fresh test-account Google O…
+       |             ^
+     62|     }
+     63|     const catalog = await host.catalog("operator");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  23:11:53
+   Duration  638ms (transform 243ms, setup 0ms, import 508ms, tests 12ms, environment 0ms)

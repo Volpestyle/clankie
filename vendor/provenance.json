@@ -1,17 +1,22 @@
 {
   "swarmSource": "https://github.com/Volpestyle/swarm-mcp",
-  "swarmBase": "e93dc700b0e0ff1c3a78960a4128d1a8cce68a02",
+  "swarmBase": "0981253fc4b81fb4794ceaa706aeec363d900a32",
   "swarmPatch": "swarm-mcp.patch",
   "skillsSource": "https://github.com/Volpestyle/skills",
-  "skillsBase": "2ee8c52135ff9f7817aa3b4013f0c367fb7332ef",
+  "skillsBase": "d31026f3676c180ed30b7f71b9d99ebf45f04b17",
   "artifacts": {
-    "volpestyle-lead-skills-0.1.0.tgz": "c9262c5f4e14d7b179bfe96855bacef8aea38356bccd6f6092e7875a3cd00edf",
-    "swarm-mcp-2.0.0-rc.1.tgz": "b276e0346038a7912718b3aab9f89ffcc99dd60b207138ee26dad65eef55f8b6"
+    "volpestyle-lead-skills-0.1.1.tgz": "b4d9bc5267b4569d0228c8f85608c15f11781936eea9f252434797fac7c52508",
+    "swarm-mcp-2.0.0-rc.1.tgz": "dfa3f9d1a33b93da5b6373adbd4963d93fa6536e87067ad070fc457a144ff029",
+    "volpestyle-lead-skills-0.1.2.tgz": "f26dd51b501d1750ed2c14e7952000bc02fff6366ccbd7e367cb3c0076ff69a5"
   },
-  "patchSha256": "918c0689661378bb0101572a251a955008cad8cfd8b085a9f461b41d08e46d87",
-  "swarmRevision": "dff68e3a8e42e8b1cb479b9c10722a1b0f2cacfe",
+  "patchSha256": "02c42ac1a04c03d483df090351e9bed0e1f0a9115b724c6272af8da452d74d5c",
+  "swarmRevision": "a72a2d3afa88274a60747216b8d401ab279204b5",
   "swarmIncludes": [
-    "bf910a1: retire legacy Swarm; coordinator is sole API",
-    "e93dc70: remove legacy migration/cutover tooling; add offline maintenance"
+    "a6ca8df: worker stop proof, control expiry, progress deadlines, idle owner retirement and diagnostics",
+    "de071a1: long-transcript and subagent hook delivery fixes",
+    "0981253: supported Claude and Codex launcher CLIs",
+    "b62a68f: managed Codex app-server and pi RPC workers, immutable harness selection and per-session MCP",
+    "f91cd49: real-binary-proven MCP mount, scoped lifecycle approval and disabled-route stop reconciliation",
+    "a72a2d3: conservative permission-denied stop handling and packaged real-harness lifecycle/clean-exit fixtures"
   ]
 }

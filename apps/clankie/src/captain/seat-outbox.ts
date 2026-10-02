@@ -61,13 +61,11 @@ export class SeatOutbox {
   public constructor(
     options: {
       readonly boundGraceMs?: number;
-      /** @deprecated alias of `boundGraceMs` for callers that have not moved yet. */
-      readonly boundTtlMs?: number;
       readonly replyTimeoutMs?: number;
       readonly now?: () => number;
     } = {},
   ) {
-    this.boundGraceMs = options.boundGraceMs ?? options.boundTtlMs ?? BOUND_GRACE_MS;
+    this.boundGraceMs = options.boundGraceMs ?? BOUND_GRACE_MS;
     this.replyTimeoutMs = options.replyTimeoutMs ?? REPLY_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
   }

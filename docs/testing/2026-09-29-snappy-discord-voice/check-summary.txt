@@ -1,0 +1,15 @@
+Command: pnpm check
+Result: passed (exit 0)
+
+Herdr bundled skill verification: passed
+Formatting (TypeScript/Markdown and Rust): passed
+Lint (oxlint and clippy): passed
+Dependency/dead-code check: passed
+Documentation/public docs links: passed
+Infrastructure check: passed
+Workspace typechecks: 28 successful
+Vitest: 358 test files passed; 3031 tests passed, 2 skipped
+Vox Rust: 123 passed, 0 failed
+Vox IPC smoke: passed
+
+No service restart, live Discord join, or push performed.

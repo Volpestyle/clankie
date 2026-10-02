@@ -1,0 +1,16 @@
+{
+  "terminal-bench/terminal-bench-2-1": {
+    "note": "Terminal-Bench 2.1 (May 2026 maintenance release of 2.0, 89 tasks). Current headline is 4.0, but its tasks carry 8-hour agent timeouts; 2.1 keeps 15-minute tasks that repeated subscription A/B trials can afford. `ab` is five hard tasks with a 900-second agent timeout and at most 1 CPU / 2 GB, from different categories, fixed before any Clankie trial ran. regex-log was excluded after Sonnet 5.5 solved it in 20 seconds of agent time.",
+    "ab": [
+      "cancel-async-tasks",
+      "configure-git-webserver",
+      "fix-code-vulnerability",
+      "polyglot-rust-c",
+      "sparql-university"
+    ]
+  },
+  "terminal-bench/terminal-bench@4.0.0": {
+    "note": "Terminal-Bench 4.0 (August 2026, 66 tasks, 8-hour agent timeouts, 0.75-60 expert hours). Supported for single-rep checks with an explicit --max-trials; a repeated A/B needs API budget, not a consumer subscription.",
+    "ab": ["html-js-filter", "photonic-waveguide-routing", "music-harmony"]
+  }
+}

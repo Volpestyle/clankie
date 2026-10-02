@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -29,3 +33,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm --filter @clankie/vox build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-results
+          include-hidden-files: true
+          path: .data/qa/
+          retention-days: 7

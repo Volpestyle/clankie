@@ -50,8 +50,8 @@ export interface ExternalVoiceRealtimePort {
   appendAudio(pcm: Buffer): void;
   createTextItem(text: string): void;
   createImageItem(pngBase64: string, mimeType?: "image/png"): void;
-  createResponse(): void;
-  submitFunctionResult(callId: string, output: string): void;
+  createResponse(context?: string, shouldStart?: () => boolean): void;
+  submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void;
   close(): void;
 }
 
@@ -129,6 +129,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   private readonly pendingText = new Map<string, string>();
   private lastTextItemId = "";
   private closed = false;
+  private responseActive = false;
+  private readonly responseQueue: { start: () => void; shouldStart?: () => boolean }[] = [];
 
   public constructor(
     input: VoiceConversationOpenInput,
@@ -183,12 +185,44 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     this.requireRealtime().createImageItem(pngBase64, mimeType);
   }
 
-  public createResponse(): void {
-    this.requireRealtime().createResponse();
+  public createResponse(context?: string, shouldStart?: () => boolean): void {
+    this.queueResponse(() => this.requireRealtime().createResponse(context), shouldStart);
   }
 
-  public submitFunctionResult(callId: string, output: string): void {
-    this.requireRealtime().submitFunctionResult(callId, output);
+  public submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void {
+    this.requireRealtime().submitFunctionResult(callId, output, false);
+    if (shouldRespond !== false) this.createResponse(undefined, shouldRespond);
+  }
+
+  private queueResponse(start: () => void, shouldStart?: () => boolean): void {
+    this.requireRealtime();
+    this.responseQueue.push({ start, ...(shouldStart === undefined ? {} : { shouldStart }) });
+    this.startNextResponse();
+  }
+
+  private startNextResponse(): void {
+    while (!this.responseActive && !this.closed) {
+      const next = this.responseQueue.shift();
+      if (next === undefined) return;
+      if (next.shouldStart?.() === false) continue;
+      this.responseActive = true;
+      try {
+        next.start();
+      } catch (error) {
+        this.responseActive = false;
+        throw error;
+      }
+    }
+  }
+
+  private finishResponse(meta: RealtimeResponseMeta): void {
+    this.input.onResponseDone(meta);
+    this.responseActive = false;
+    if (this.closed) {
+      this.responseQueue.length = 0;
+      return;
+    }
+    this.startNextResponse();
   }
 
   /**
@@ -219,6 +253,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     if (this.closed || this.droppedItemIds.has(itemId)) return;
     if (!this.liveItemIds.has(itemId)) {
       this.liveItemIds.add(itemId);
+      this.input.onFirstText?.(itemId);
       this.lastTextItemId = itemId;
       this.queueItemStep(itemId, async () => {
         await this.ensureTts();
@@ -246,7 +281,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
 
   private handleResponseDone(meta: RealtimeResponseMeta): void {
     if (this.closed) {
-      this.input.onResponseDone(meta);
+      this.finishResponse(meta);
       return;
     }
     const itemId = this.lastTextItemId;
@@ -254,12 +289,12 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     // trip, a truncated utterance, or a silent model — owes the media owner
     // its done event immediately.
     if (itemId.length === 0 || !this.liveItemIds.has(itemId)) {
-      this.input.onResponseDone(meta);
+      this.finishResponse(meta);
       return;
     }
     this.lastTextItemId = "";
     const handle = this.timers.setTimeout(() => {
-      this.input.onError("External voice synthesis did not drain in time");
+      this.input.onError("External voice synthesis did not drain in time", itemId);
       // A context that missed the drain window is abandoned, not merely
       // un-held. Left open it keeps its ElevenLabs context slot forever, and
       // the still-live item pins `discardMouth` shut — so the next utterances
@@ -310,7 +345,11 @@ class ExternalVoiceConversation implements VoiceConversationPort {
         }
         for (const itemId of this.heldDone.keys()) this.releaseHeldDone(itemId);
       },
-      onError: this.input.onError,
+      onError: (message) => {
+        if (this.closed) return;
+        if (this.liveItemIds.size === 0) this.input.onError(message, null);
+        else for (const itemId of this.liveItemIds) this.input.onError(message, itemId);
+      },
     };
   }
 
@@ -345,10 +384,14 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       try {
         await step();
       } catch (error) {
+        if (!this.closed)
+          this.input.onError(
+            error instanceof Error ? error.message : "External voice synthesis failed",
+            itemId,
+          );
         this.markSpeechFailure(itemId);
         this.dropItem(itemId);
         this.discardMouth();
-        throw error;
       }
     });
   }
@@ -358,7 +401,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     if (held === undefined) return;
     this.heldDone.delete(itemId);
     this.timers.clearTimeout(held.handle);
-    this.input.onResponseDone(held.meta);
+    this.finishResponse(held.meta);
   }
 
   /**
@@ -398,7 +441,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       .catch((error: unknown) => {
         // Boundary errors are already sanitized one-liners; anything else is
         // reduced to a fixed string so socket detail never escapes here.
-        this.input.onError(error instanceof Error ? error.message : "External voice synthesis failed");
+        if (!this.closed)
+          this.input.onError(error instanceof Error ? error.message : "External voice synthesis failed");
       });
   }
 

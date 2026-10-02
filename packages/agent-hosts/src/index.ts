@@ -1,11 +1,5 @@
-import {
-  runLocalAgentTurn,
-  runSshAgentTurn,
-  type AgentTurnInput,
-  type AgentTurnResult,
-  type TurnOptions,
-} from "./turn.ts";
-export type { AgentTurnInput, AgentTurnResult } from "./turn.ts";
+import { codexAccounts } from "@clankie/settings";
+export type * from "./seat.ts";
 import { execFile } from "node:child_process";
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -20,7 +14,6 @@ export interface AgentSessionFile {
 }
 export interface AgentHost {
   id: string;
-  runAgentTurn(input: AgentTurnInput, signal?: AbortSignal): Promise<AgentTurnResult>;
   list(opts?: { limit?: number }): Promise<AgentSessionFile[]>;
   readBytes(path: string, from: number, maxBytes: number): Promise<{ bytes: Buffer; size: number }>;
 }
@@ -48,17 +41,21 @@ function within(root: string, path: string) {
     !isAbsolute(rel)
   );
 }
-export function createLocalAgentHost(options: { home?: string } & TurnOptions = {}): AgentHost {
+export function createLocalAgentHost(
+  options: { home?: string; codexHomes?: readonly string[] } = {},
+): AgentHost {
   const home = options.home ?? homedir();
   const roots = [
     { harness: "claude" as const, path: join(home, ".claude", "projects") },
-    { harness: "codex" as const, path: join(home, ".codex", "sessions") },
+    ...(
+      options.codexHomes ??
+      (options.home ? [join(home, ".codex")] : codexAccounts().map((account) => account.home))
+    ).map((codexHome) => ({ harness: "codex" as const, path: join(codexHome, "sessions") })),
     { harness: "grok" as const, path: join(home, ".grok", "sessions") },
     { harness: "pi" as const, path: join(home, ".pi", "agent", "sessions") },
   ];
   return {
     id: "local",
-    runAgentTurn: (input, signal) => runLocalAgentTurn(input, signal, options),
     async list(opts) {
       const count = limit(opts?.limit);
       const files: AgentSessionFile[] = [];
@@ -176,7 +173,7 @@ tail -c +${from + 1} "$p" | head -c ${max} | base64`);
 }
 export function createSshAgentHost(
   config: AgentHostConfig,
-  options: TurnOptions & {
+  options: {
     run?: (command: string, args: string[]) => Promise<string>;
   } = {},
 ): AgentHost {
@@ -199,7 +196,6 @@ export function createSshAgentHost(
     run("ssh", ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", config.ssh, command]);
   return {
     id: config.id,
-    runAgentTurn: (input, signal) => runSshAgentTurn(config, input, signal, options),
     async list(opts) {
       const count = limit(opts?.limit);
       const output = await call(listCommand(config.shell, count));

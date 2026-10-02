@@ -22,6 +22,26 @@ export async function runRuntimeCommand(
   } else if (args[0] === "connect" && args.length === 4 && ["--session", "--socket"].includes(args[2]!)) {
     method = "POST";
     body = JSON.stringify({ id: args[1], [args[2] === "--session" ? "session" : "socketPath"]: args[3] });
+  } else if (args[0] === "connect" && args.includes("--ssh")) {
+    // An ssh fleet (ADR 0184): a host from the owner's ssh config and the
+    // remote session already running there.
+    const flags = new Map<string, string>();
+    for (let index = 2; index < args.length; index += 2) {
+      const flag = args[index],
+        value = args[index + 1];
+      if (!["--ssh", "--session", "--shell"].includes(flag!) || value === undefined || flags.has(flag!))
+        throw new Error("Use connect ID --ssh HOST --session NAME [--shell posix|powershell]");
+      flags.set(flag!, value);
+    }
+    const shell = flags.get("--shell") ?? "posix";
+    if (!flags.has("--session") || !["posix", "powershell"].includes(shell))
+      throw new Error("Use connect ID --ssh HOST --session NAME [--shell posix|powershell]");
+    method = "POST";
+    body = JSON.stringify({
+      id: args[1],
+      session: flags.get("--session"),
+      ssh: { host: flags.get("--ssh"), shell },
+    });
   } else if ((args[0] === "capacity" && args.length === 3) || (args[0] === "budget" && args.length === 2)) {
     const raw = args.at(-1)!;
     if (raw !== "--clear" && (!/^\d+$/u.test(raw) || !Number.isSafeInteger(Number(raw))))
@@ -33,15 +53,25 @@ export async function runRuntimeCommand(
         ? { action: "budget", budget: limit }
         : { action: "capacity", id: args[1], capacity: limit },
     );
+  } else if (args[0] === "harness" && args.length === 3) {
+    if (!["claude", "codex", "pi"].includes(args[2]!)) throw new Error("Use harness ID claude|codex|pi");
+    method = "POST";
+    body = JSON.stringify({ action: "harness", id: args[1], harness: args[2] });
+  } else if (args[0] === "mode" && args.length === 3) {
+    // How Swarm runs the workers it dispatches here (ADR 0194).
+    if (args[2] !== "interactive") throw new Error("Headless workers are retired; use mode ID interactive");
+    method = "POST";
+    body = JSON.stringify({ action: "mode", id: args[1], mode: args[2] });
   } else if (args[0] === "workspaces" && args.length >= 3) {
     const workspaces: Array<{ kind: "repository" | "directory"; path: string }> = [];
     if (!(args.length === 3 && args[2] === "--clear")) {
       for (let index = 2; index < args.length; index += 2) {
         const kind = args[index],
           target = args[index + 1];
-        if (!["--repo", "--dir"].includes(kind!) || !target?.startsWith("/"))
+        // A Windows fleet's grants are drive paths on that machine (ADR 0184).
+        if (!["--repo", "--dir"].includes(kind!) || !/^(?:\/|[A-Za-z]:[\\/])/u.test(target ?? ""))
           throw new Error("Use workspaces ID (--repo /checkout | --dir /directory)... or --clear");
-        workspaces.push({ kind: kind === "--repo" ? "repository" : "directory", path: target });
+        workspaces.push({ kind: kind === "--repo" ? "repository" : "directory", path: target! });
       }
     }
     method = "POST";
@@ -51,7 +81,7 @@ export async function runRuntimeCommand(
     path += `/${encodeURIComponent(args[1]!)}`;
   } else if (args.length > 1 || (args[0] && !["list", "status"].includes(args[0]))) {
     throw new Error(
-      "Usage: clankie runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID | workspaces ID (--repo PATH | --dir PATH)... | workspaces ID --clear | capacity ID N|--clear | budget N|--clear (limits count per coordinator scope)",
+      "Usage: clankie runtime [list|status] | connect ID (--session NAME | --socket PATH) | connect ID --ssh HOST --session NAME [--shell posix|powershell] | disconnect ID | workspaces ID (--repo PATH | --dir PATH)... | workspaces ID --clear | capacity ID N|--clear | budget N|--clear (limits count per coordinator scope) | mode ID interactive | harness ID claude|codex|pi",
     );
   }
   const credential = await resolveOperatorCredential({

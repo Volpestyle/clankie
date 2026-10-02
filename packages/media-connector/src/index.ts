@@ -47,6 +47,7 @@ export const ImageGenerationRequestSchema = z
      * keeps this package from ever reading a path it was not handed.
      */
     sourceImage: z.string().trim().min(1).max(20_000_000).optional(),
+    referenceImages: z.array(z.string().min(1).max(200_000)).min(1).max(8).optional(),
   })
   .strict();
 
@@ -171,7 +172,7 @@ export class OpenAiImageAdapter extends FetchMediaAdapter {
     // both, source as a typed object), which is exactly why the wire format
     // lives per adapter rather than in one shared request builder.
     const response =
-      request.sourceImage === undefined
+      request.sourceImage === undefined && !request.referenceImages?.length
         ? await this.send(`${base}/generations`, {
             method: "POST",
             headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
@@ -199,17 +200,21 @@ export class OpenAiImageAdapter extends FetchMediaAdapter {
 
 /** `image[]` is the array form the edits endpoint expects, even for one source. */
 function editForm(request: ImageGenerationRequest): FormData {
-  const source = decodeDataUri(request.sourceImage ?? "");
   const form = new FormData();
   form.append("model", request.model);
   form.append("prompt", request.prompt);
   if (request.size) form.append("size", request.size);
   form.append("output_format", outputFormat(request.outputPath));
-  const extension = source.mimeType.split("/")[1] ?? "png";
-  // Copied into a fresh view: `Blob` wants an `ArrayBuffer`-backed one, and a
-  // decoded `Buffer` is typed as possibly `SharedArrayBuffer`-backed.
-  const part = new Blob([new Uint8Array(source.bytes)], { type: source.mimeType });
-  form.append("image[]", part, `source.${extension}`);
+  const sources = request.referenceImages ?? [request.sourceImage ?? ""];
+  for (const [index, uri] of sources.entries()) {
+    const source = decodeDataUri(uri);
+    const extension = source.mimeType.split("/")[1] ?? "png";
+    form.append(
+      "image[]",
+      new Blob([new Uint8Array(source.bytes)], { type: source.mimeType }),
+      `source-${index}.${extension}`,
+    );
+  }
   return form;
 }
 
@@ -229,7 +234,9 @@ export class GoogleImageAdapter extends FetchMediaAdapter {
             role: "user",
             parts: [
               { text: request.prompt },
-              ...(request.sourceImage === undefined ? [] : [inlineDataPart(request.sourceImage)]),
+              ...(
+                request.referenceImages ?? (request.sourceImage === undefined ? [] : [request.sourceImage])
+              ).map(inlineDataPart),
             ],
           },
         ],
@@ -255,7 +262,10 @@ export class GrokImageAdapter extends FetchMediaAdapter {
 
   protected async fetchImage(request: ImageGenerationRequest): Promise<GeneratedMedia> {
     requireModel(request.model, "grok-imagine-image-quality");
-    const editing = request.sourceImage !== undefined;
+    if ((request.referenceImages?.length ?? 0) > 1)
+      throw new Error("media_connector_multiple_references_unsupported:grok");
+    const source = request.referenceImages?.[0] ?? request.sourceImage;
+    const editing = source !== undefined;
     const base = this.endpoint ?? "https://api.x.ai/v1/images";
     const response = await this.send(`${base}/${editing ? "edits" : "generations"}`, {
       method: "POST",
@@ -266,7 +276,7 @@ export class GrokImageAdapter extends FetchMediaAdapter {
         ...(request.aspectRatio ? { aspect_ratio: request.aspectRatio } : {}),
         // The edit endpoint takes the source as a typed object rather than a
         // bare string, and rejects multipart entirely — it is JSON only.
-        ...(editing ? { image: { type: "image_url", url: request.sourceImage } } : {}),
+        ...(editing ? { image: { type: "image_url", url: source } } : {}),
         response_format: "b64_json",
       }),
     });

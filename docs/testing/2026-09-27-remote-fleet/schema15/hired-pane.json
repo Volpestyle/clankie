@@ -1,0 +1,24 @@
+{
+  "agent": "claude",
+  "agent_session": {
+    "agent": "claude",
+    "kind": "id",
+    "source": "herdr:claude",
+    "value": "06d91af9-e6c7-469b-a8bf-bd2b2062aeb2"
+  },
+  "agent_status": "done",
+  "cwd": "C:\\Users\\volpe\\.local\\share\\clankie-swarm\\vuh1381-schema15",
+  "focused": false,
+  "pane_id": "w2:p2W",
+  "revision": 4,
+  "scroll": {
+    "max_offset_from_bottom": 0,
+    "offset_from_bottom": 0,
+    "viewport_rows": 71
+  },
+  "tab_id": "w2:t29",
+  "terminal_id": "term_65c7aca90366f4a",
+  "terminal_title": "\u2733 VUH-1381 remote hire canary",
+  "terminal_title_stripped": "VUH-1381 remote hire canary",
+  "workspace_id": "w2"
+}

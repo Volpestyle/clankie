@@ -1,3 +1,4 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm, readdir, readFile, writeFile, mkdir, realpath } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -5,7 +6,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { CoordinationClient, enrollRuntime, localEndpoint, ownerState } from "swarm-mcp/runtime";
-import { SwarmHost } from "../src/index.ts";
+import { interactiveWorkersSupported, managedWorkersSupported, SwarmHost } from "../src/index.ts";
 import { Value } from "typebox/value";
 
 const roots: string[] = [];
@@ -40,7 +41,10 @@ afterEach(async () => {
       /* Already stopped. */
     }
   }
-  await Promise.all(completedRoots.map((root) => rm(root, { recursive: true, force: true })));
+  // Coordinators can finish a final write while SIGTERM is taking effect.
+  await Promise.all(
+    completedRoots.map((root) => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+  );
 });
 
 test("real MCP delivers isolated inboxes, explicit acknowledgment and stable identity after host restart", async () => {
@@ -187,6 +191,21 @@ test("real MCP delivers isolated inboxes, explicit acknowledgment and stable ide
     attemptId: claim.attemptId,
     fence: claim.fence,
   });
+  // Both conversations share one coordinator: the board reads it once, and
+  // names each of Clankie's own actors as him (ADR 0205).
+  expect(await host.tasks()).toEqual([
+    {
+      taskId,
+      scope: enrolled.scope,
+      title: "Review an existing result",
+      status: "running",
+      lead: { actor: a.actor, name: "Clankie", clankie: true },
+      owner: { actor: b.actor, name: "Clankie", clankie: true },
+      objective: "Review",
+      worktree: root,
+      updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u),
+    },
+  ]);
   await expect(host.assignment("bob", taskId, b.actor)).rejects.toThrow("owned by this conversation");
   await expect(host.assignment("alice", taskId, a.actor)).rejects.toThrow("active work");
   await expect(host.assignment("missing", taskId, b.actor)).rejects.toThrow("not connected");
@@ -286,213 +305,241 @@ test("real MCP delivers isolated inboxes, explicit acknowledgment and stable ide
   });
 }, 30000);
 
-test("named external coordinators retain independent work, doctrine and grants across restart", async () => {
-  const { SettingsStore } = await import("@clankie/settings");
-  const { FileCredentialStore } = await import("@clankie/credential-broker");
-  const root = await mkdtemp("/tmp/clankie-external-");
-  roots.push(join(root, "clankie"), root);
-  const settings = new SettingsStore(join(root, "settings.json"));
-  const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  const ownerPath = join(
-    dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json")),
-    "dist/coordination/owner-cli.js",
-  );
-  const enroll = (name: string, hostSessionId: string) =>
-    enrollRuntime({
-      stateDirectory: join(root, name),
-      nodePath: process.execPath,
-      ownerPath,
-      host: "pi",
-      hostSessionId,
-      incarnation: "first",
-      identity: { directory: root, fileRoot: root, projectRoot: root, profile: "external" },
-    });
-  const alpha = await enroll("alpha", "lead");
-  const beta = await enroll("beta", "lead");
-  expect(alpha.scope).toBe(beta.scope); // Same project/profile is not coordinator identity.
-  const worker = await enroll("alpha", "user-started-terminal");
-  const peer = await CoordinationClient.connect(
-    worker.environment.SWARM_COORDINATOR_ENDPOINT,
-    worker.environment.SWARM_SESSION_CAPABILITY,
-  );
-  const messages: string[] = [];
-  let ready = false;
-  const open = async () => {
-    const host = new SwarmHost({
-      stateDirectory: join(root, "clankie"),
-      connections: { settings, credentials },
-      canDispatch: () => false,
-      warn: () => {},
-    });
-    hosts.push(host);
-    await host.start({
-      ready: () => ready,
-      wake: async (_id, message) => {
-        messages.push(message);
-      },
-      instructions: async (binding) => `${binding.conversationId}: owner doctrine`,
-    });
-    return host;
-  };
-  const caller = async (host: SwarmHost, conversationId = "global-default") => {
-    const tools = await host.tools({ conversationId, cwd: root });
-    return async (name: string, args: Record<string, unknown>) => {
-      const tool = tools.find((tool) => tool.name === name)!;
-      expect(Value.Check(tool.parameters, args)).toBe(true);
-      return JSON.parse(
-        ((await tool.execute("test", args, undefined, undefined, {} as never)).content[0] as { text: string })
-          .text,
-      ).data;
-    };
-  };
-  const input = (id: string, enrolled: typeof alpha) => ({
-    id,
-    conversationId: "global-default",
-    endpoint: enrolled.environment.SWARM_COORDINATOR_ENDPOINT,
-    capability: enrolled.environment.SWARM_SESSION_CAPABILITY,
-  });
-  let host = await open();
-  try {
-    await host.connect(input("alpha", alpha), root);
-    await host.connect(input("beta", beta), root);
-    const contact = (await host.contacts()).find(
-      (entry) => entry.contact.connectionId === "alpha" && entry.contact.actor === worker.actor,
-    )!.contact;
-    await expect(
-      host.sendContact({ ...contact, connectionId: "beta" }, "wrong owner", "cross-contact", "thread"),
-    ).rejects.toThrow("coordinator changed");
-    await host.sendContact(contact, "Direct contact", "direct-contact", "contact-thread");
-    const direct = (await peer.request({
-      op: "command",
-      command: { id: "direct-fetch", type: "inbox.fetch", payload: { consumer: "test" } },
-    })) as { value: { deliveries: Array<{ message: { body: string; id: string }; leaseToken: string }> } };
-    expect(direct.value.deliveries[0]!.message.body).toBe("Direct contact");
-    await peer.request({
-      op: "command",
-      command: {
-        id: "direct-ack",
-        type: "inbox.ack",
-        payload: {
-          messageId: direct.value.deliveries[0]!.message.id,
-          leaseToken: direct.value.deliveries[0]!.leaseToken,
-        },
-      },
-    });
-    ready = true;
-    await peer.request({
-      op: "command",
-      command: {
-        id: "first-contact",
-        type: "message.send",
-        payload: {
-          recipient: alpha.actor,
-          threadId: "introduction",
-          kind: "question",
-          body: "Already listening?",
-        },
-      },
-    });
-    await expect.poll(() => messages.length).toBe(1);
-    expect(messages[0]).toContain("connection=alpha");
-    ready = false;
-    const firstEnvelope = JSON.parse(messages[0]!.split("\n").slice(1).join("\n"));
-    const call = await caller(host);
-    await call("swarm_inbox", {
-      connection: "alpha",
-      action: "ack",
-      commandId: "ack-first",
-      messageId: firstEnvelope.message.id,
-      leaseToken: firstEnvelope.leaseToken,
-    });
-    messages.length = 0;
-    expect((await call("swarm_sync", { connection: "alpha" })).actor).toBe(alpha.actor);
-    expect((await call("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
-    await expect(call("swarm_sync", { connection: "missing" })).rejects.toThrow("unavailable");
-    const other = await caller(host, "other-project");
-    await expect(other("swarm_sync", { connection: "alpha" })).rejects.toThrow("another conversation");
-    const work = {
-      commandId: "same-command",
-      title: "Review existing work",
-      contract: {
-        objective: "Review",
-        worktree: root,
-        acceptanceCriteria: ["Checked"],
-        expectedArtifacts: [],
-        constraints: [],
-      },
-    };
-    const a = await call("swarm_assign", { ...work, connection: "alpha" });
-    const b = await call("swarm_assign", { ...work, connection: "beta" });
-    expect(a.value.task.id).not.toBe(b.value.task.id);
-    const taskId = a.value.task.id;
-    const detail = await call("swarm_find", { connection: "alpha", kind: "task", taskId });
-    const instruction = await call("swarm_evidence", {
-      connection: "alpha",
-      action: "read",
-      commandId: "read",
-      artifactId: detail.contract.instructions[0].split("/").at(-1),
-    });
-    expect(instruction.text).toBe("global-default: owner doctrine");
-    await expect(call("swarm_find", { connection: "beta", kind: "task", taskId })).rejects.toThrow();
-    await peer.request({
-      op: "command",
-      command: { id: "claim", type: "task.claim", payload: { taskId, expectedVersion: 1 } },
-    });
-    expect(await host.assignment("global-default", taskId, worker.actor, "alpha")).toMatchObject({
-      connectionId: "alpha",
-      actor: worker.actor,
-    });
-    await expect(host.assignment("global-default", taskId, worker.actor, "beta")).rejects.toThrow();
-    expect(
-      await host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY, "alpha"),
-    ).toEqual({ actor: worker.actor, scope: worker.scope });
-    await expect(
-      host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY, "beta"),
-    ).rejects.toThrow();
-    await expect(
-      host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY),
-    ).rejects.toThrow();
-    await expect(host.connect(input("alpha", beta), root)).rejects.toThrow("pinned");
-    expect(await readFile(settings.path, "utf8")).not.toContain(alpha.environment.SWARM_SESSION_CAPABILITY);
-    await host.close();
-    hosts.splice(hosts.indexOf(host), 1);
-    host = await open();
-    const resumed = await caller(host);
-    expect((await resumed("swarm_assign", { ...work, connection: "alpha" })).value.task.id).toBe(taskId);
-    expect((await resumed("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
-    await peer.request({
-      op: "command",
-      command: {
-        id: "question",
-        type: "message.send",
-        payload: {
-          recipient: alpha.actor,
-          threadId: "existing-work",
-          kind: "question",
-          body: "Review complete?",
-        },
-      },
-    });
-    ready = true;
-    host.settled("global-default");
-    await expect.poll(() => messages.length).toBe(1);
-    expect(messages[0]).toContain("connection=alpha");
-    await host.disconnect("alpha");
-    expect((await host.contacts()).some((entry) => entry.contact.connectionId === "alpha")).toBe(false);
-    await expect(host.sendContact(contact, "disconnected", "disabled-contact", "thread")).rejects.toThrow(
-      "disabled",
+test.each([false, true])(
+  "external coordinator isolation and restart (SSH: %s)",
+  async (ssh) => {
+    const { SettingsStore } = await import("@clankie/settings");
+    const { FileCredentialStore } = await import("@clankie/credential-broker");
+    const root = await mkdtemp("/tmp/clankie-external-");
+    roots.push(join(root, "clankie"), root);
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const credentials = new FileCredentialStore(join(root, "credentials.json"));
+    const ownerPath = join(
+      dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json")),
+      "dist/coordination/owner-cli.js",
     );
-    await expect(resumed("swarm_sync", { connection: "alpha" })).rejects.toThrow("disabled");
-    await expect(host.assignment("global-default", taskId, worker.actor, "alpha")).rejects.toThrow(
-      "disabled",
+    const enroll = (name: string, hostSessionId: string) =>
+      enrollRuntime({
+        stateDirectory: join(root, name),
+        nodePath: process.execPath,
+        ownerPath,
+        host: "pi",
+        hostSessionId,
+        incarnation: "first",
+        identity: { directory: root, fileRoot: root, projectRoot: root, profile: "external" },
+      });
+    const alpha = await enroll("alpha", "lead");
+    const beta = await enroll("beta", "lead");
+    expect(alpha.scope).toBe(beta.scope); // Same project/profile is not coordinator identity.
+    const worker = await enroll("alpha", "user-started-terminal");
+    const peer = await CoordinationClient.connect(
+      worker.environment.SWARM_COORDINATOR_ENDPOINT,
+      worker.environment.SWARM_SESSION_CAPABILITY,
     );
-    expect((await resumed("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
-    await host.connect(input("alpha", alpha), root);
-    expect((await resumed("swarm_sync", { connection: "alpha" })).actor).toBe(alpha.actor);
-  } finally {
-    peer.close();
-  }
-}, 30_000);
+    const messages: string[] = [];
+    let ready = false;
+    const resolved: string[] = [];
+    const closed: Array<string | undefined> = [];
+    const open = async () => {
+      const host = new SwarmHost({
+        stateDirectory: join(root, "clankie"),
+        connections: {
+          settings,
+          credentials,
+          transport: {
+            endpoint: async (connection) => {
+              resolved.push(connection.id);
+              return connection.endpoint;
+            },
+            close: (id) => {
+              closed.push(id);
+            },
+          },
+        },
+        canDispatch: () => false,
+        warn: () => {},
+      });
+      hosts.push(host);
+      await host.start({
+        ready: () => ready,
+        wake: async (_id, message) => {
+          messages.push(message);
+        },
+        instructions: async (binding) => `${binding.conversationId}: owner doctrine`,
+      });
+      return host;
+    };
+    const caller = async (host: SwarmHost, conversationId = "global-default") => {
+      const tools = await host.tools({ conversationId, cwd: root });
+      return async (name: string, args: Record<string, unknown>) => {
+        const tool = tools.find((tool) => tool.name === name)!;
+        expect(Value.Check(tool.parameters, args)).toBe(true);
+        return JSON.parse(
+          (
+            (await tool.execute("test", args, undefined, undefined, {} as never)).content[0] as {
+              text: string;
+            }
+          ).text,
+        ).data;
+      };
+    };
+    const input = (id: string, enrolled: typeof alpha) => ({
+      id,
+      conversationId: "global-default",
+      endpoint: enrolled.environment.SWARM_COORDINATOR_ENDPOINT,
+      capability: enrolled.environment.SWARM_SESSION_CAPABILITY,
+      ...(ssh && id === "alpha" ? { ssh: "pc" } : {}),
+    });
+    let host = await open();
+    try {
+      await host.connect(input("alpha", alpha), root);
+      await host.connect(input("beta", beta), root);
+      const contact = (await host.contacts()).find(
+        (entry) => entry.contact.connectionId === "alpha" && entry.contact.actor === worker.actor,
+      )!.contact;
+      await expect(
+        host.sendContact({ ...contact, connectionId: "beta" }, "wrong owner", "cross-contact", "thread"),
+      ).rejects.toThrow("coordinator changed");
+      await host.sendContact(contact, "Direct contact", "direct-contact", "contact-thread");
+      const direct = (await peer.request({
+        op: "command",
+        command: { id: "direct-fetch", type: "inbox.fetch", payload: { consumer: "test" } },
+      })) as { value: { deliveries: Array<{ message: { body: string; id: string }; leaseToken: string }> } };
+      expect(direct.value.deliveries[0]!.message.body).toBe("Direct contact");
+      await peer.request({
+        op: "command",
+        command: {
+          id: "direct-ack",
+          type: "inbox.ack",
+          payload: {
+            messageId: direct.value.deliveries[0]!.message.id,
+            leaseToken: direct.value.deliveries[0]!.leaseToken,
+          },
+        },
+      });
+      ready = true;
+      await peer.request({
+        op: "command",
+        command: {
+          id: "first-contact",
+          type: "message.send",
+          payload: {
+            recipient: alpha.actor,
+            threadId: "introduction",
+            kind: "question",
+            body: "Already listening?",
+          },
+        },
+      });
+      await expect.poll(() => messages.length).toBe(1);
+      expect(messages[0]).toContain("connection=alpha");
+      ready = false;
+      const firstEnvelope = JSON.parse(messages[0]!.split("\n").slice(1).join("\n"));
+      const call = await caller(host);
+      await call("swarm_inbox", {
+        connection: "alpha",
+        action: "ack",
+        commandId: "ack-first",
+        messageId: firstEnvelope.message.id,
+        leaseToken: firstEnvelope.leaseToken,
+      });
+      messages.length = 0;
+      expect((await call("swarm_sync", { connection: "alpha" })).actor).toBe(alpha.actor);
+      expect((await call("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
+      await expect(call("swarm_sync", { connection: "missing" })).rejects.toThrow("unavailable");
+      const other = await caller(host, "other-project");
+      await expect(other("swarm_sync", { connection: "alpha" })).rejects.toThrow("another conversation");
+      const work = {
+        commandId: "same-command",
+        title: "Review existing work",
+        contract: {
+          objective: "Review",
+          worktree: root,
+          acceptanceCriteria: ["Checked"],
+          expectedArtifacts: [],
+          constraints: [],
+        },
+      };
+      const a = await call("swarm_assign", { ...work, connection: "alpha" });
+      const b = await call("swarm_assign", { ...work, connection: "beta" });
+      expect(a.value.task.id).not.toBe(b.value.task.id);
+      const taskId = a.value.task.id;
+      const detail = await call("swarm_find", { connection: "alpha", kind: "task", taskId });
+      const instruction = await call("swarm_evidence", {
+        connection: "alpha",
+        action: "read",
+        commandId: "read",
+        artifactId: detail.contract.instructions[0].split("/").at(-1),
+      });
+      expect(instruction.text).toBe("global-default: owner doctrine");
+      await expect(call("swarm_find", { connection: "beta", kind: "task", taskId })).rejects.toThrow();
+      await peer.request({
+        op: "command",
+        command: { id: "claim", type: "task.claim", payload: { taskId, expectedVersion: 1 } },
+      });
+      expect(await host.assignment("global-default", taskId, worker.actor, "alpha")).toMatchObject({
+        connectionId: "alpha",
+        actor: worker.actor,
+      });
+      await expect(host.assignment("global-default", taskId, worker.actor, "beta")).rejects.toThrow();
+      expect(
+        await host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY, "alpha"),
+      ).toEqual({ actor: worker.actor, scope: worker.scope });
+      await expect(
+        host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY, "beta"),
+      ).rejects.toThrow();
+      await expect(
+        host.workerInScope(worker.scope, worker.environment.SWARM_SESSION_CAPABILITY),
+      ).rejects.toThrow();
+      await expect(host.connect(input("alpha", beta), root)).rejects.toThrow("pinned");
+      expect(await readFile(settings.path, "utf8")).not.toContain(alpha.environment.SWARM_SESSION_CAPABILITY);
+      if (ssh) expect(resolved).toContain("alpha");
+      else expect(resolved).toEqual([]);
+      const resolutionCount = resolved.length;
+      await host.close();
+      expect(closed).toContain(undefined);
+      hosts.splice(hosts.indexOf(host), 1);
+      host = await open();
+      if (ssh) expect(resolved.length).toBeGreaterThan(resolutionCount);
+      const resumed = await caller(host);
+      expect((await resumed("swarm_assign", { ...work, connection: "alpha" })).value.task.id).toBe(taskId);
+      expect((await resumed("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
+      await peer.request({
+        op: "command",
+        command: {
+          id: "question",
+          type: "message.send",
+          payload: {
+            recipient: alpha.actor,
+            threadId: "existing-work",
+            kind: "question",
+            body: "Review complete?",
+          },
+        },
+      });
+      ready = true;
+      host.settled("global-default");
+      await expect.poll(() => messages.length).toBe(1);
+      expect(messages[0]).toContain("connection=alpha");
+      await host.disconnect("alpha");
+      expect(closed).toContain("alpha");
+      expect((await host.contacts()).some((entry) => entry.contact.connectionId === "alpha")).toBe(false);
+      await expect(host.sendContact(contact, "disconnected", "disabled-contact", "thread")).rejects.toThrow(
+        "disabled",
+      );
+      await expect(resumed("swarm_sync", { connection: "alpha" })).rejects.toThrow("disabled");
+      await expect(host.assignment("global-default", taskId, worker.actor, "alpha")).rejects.toThrow(
+        "disabled",
+      );
+      expect((await resumed("swarm_sync", { connection: "beta" })).actor).toBe(beta.actor);
+      await host.connect(input("alpha", alpha), root);
+      expect((await resumed("swarm_sync", { connection: "alpha" })).actor).toBe(alpha.actor);
+    } finally {
+      peer.close();
+    }
+  },
+  30_000,
+);
 
 test("updating Clankie's worker bridge preserves other configured execution routes", async () => {
   const root = await mkdtemp("/tmp/clankie-swarm-routes-");
@@ -547,205 +594,291 @@ test("updating Clankie's worker bridge preserves other configured execution rout
   ]);
 });
 
-test("routes explicit runtime selection and retains uncertain work across disconnect and endpoint changes", async () => {
-  const root = await realpath(await mkdtemp("/tmp/clankie-runtime-dispatch-"));
-  roots.push(root);
-  const bin = join(root, "bin"),
-    log = join(root, "launches.jsonl");
-  await mkdir(bin);
-  await writeFile(
-    join(bin, "herdr"),
-    `#!/usr/bin/env node
+test.skipIf(!(await interactiveWorkersSupported()))(
+  "routes explicit runtime selection and retains uncertain work across disconnect and endpoint changes",
+  async () => {
+    const root = await realpath(await mkdtemp("/tmp/clankie-runtime-dispatch-"));
+    roots.push(root);
+    const bin = join(root, "bin"),
+      log = join(root, "launches.jsonl");
+    await mkdir(bin);
+    await writeFile(
+      join(bin, "herdr"),
+      `#!/usr/bin/env node
 require('node:fs').appendFileSync(${JSON.stringify(log)}, JSON.stringify({socket:process.env.HERDR_SOCKET_PATH,args:process.argv.slice(2)})+'\\n');
 process.exit(1);
 `,
-    { mode: 0o700 },
-  );
-  await writeFile(join(bin, "claude"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
-  vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
-  let connections = ["one", "two"].map((id) => ({
-    id,
-    socketPath: join(root, `${id}.sock`),
-    enabled: true,
-    state: "healthy",
-    capacity: 1,
-    capabilities: ["code"],
-    workspaces: [{ kind: "directory" as const, path: root }],
-  }));
-  let budget: number | null = null;
-  const host = new SwarmHost({
-    stateDirectory: root,
-    dispatchBudget: async () => budget,
-    runtimeConnections: async () => connections,
-    warn: (message) => {
-      throw new Error(message);
-    },
-  });
-  hosts.push(host);
-  await host.start({ ready: () => true, wake: async () => undefined });
-  const tools = await host.tools({ conversationId: "lead", cwd: root });
-  const assign = tools.find((tool) => tool.name === "swarm_assign")!;
-  const input = {
-    commandId: "runtime-work",
-    title: "Work",
-    runtime: "two",
-    routing: { capabilities: ["code"], durable: true },
-    contract: {
-      objective: "Work",
-      worktree: root,
-      acceptanceCriteria: ["Done"],
-      expectedArtifacts: [],
-      constraints: [],
-    },
-  };
-  const refused = await assign.execute(
-    "test",
-    {
-      ...input,
-      commandId: "wrong-worktree",
-      contract: { ...input.contract, worktree: join(root, "outside") },
-    },
-    undefined,
-    undefined,
-    {} as never,
-  );
-  expect(JSON.stringify(refused)).toContain("allowedWorktrees");
-  expect(JSON.stringify(refused)).toContain(join(root, "outside"));
-  const first = await assign.execute("test", input, undefined, undefined, {} as never);
-  expect(JSON.stringify(first)).toContain("uncertain");
-  const launched = (await readFile(log, "utf8"))
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
-  expect(launched).toHaveLength(1);
-  expect(launched[0].socket).toBe(join(root, "two.sock"));
-  const policyOwner = await ownerState(join(root, createHash("sha256").update(root).digest("hex")));
-  expect(policyOwner.dispatch?.maximum).toBeNull();
-  budget = 25;
-  connections = connections.map((entry) => ({ ...entry, capacity: 25 }));
-  await host.syncRuntimeConnections();
-  const limitedOwner = await ownerState(dirname(policyOwner.configPath));
-  expect(limitedOwner.launcherSecret).toBe(policyOwner.launcherSecret);
-  expect(limitedOwner.dispatch?.maximum).toBe(25);
-  expect(limitedOwner.dispatch?.herdr).toEqual(
-    expect.arrayContaining([expect.objectContaining({ capacity: 25 })]),
-  );
-  budget = null;
-  await host.syncRuntimeConnections();
-  expect((await ownerState(dirname(policyOwner.configPath))).dispatch?.maximum).toBeNull();
-  // The old uncertain receipt is recovered, never launched again after policy updates.
-  await assign.execute("test", input, undefined, undefined, {} as never);
-  expect((await readFile(log, "utf8")).trim().split("\n")).toHaveLength(1);
-  const request = CoordinationClient.prototype.request;
-  const oldOwner = vi
-    .spyOn(CoordinationClient.prototype, "request")
-    .mockImplementation(async function (this: CoordinationClient, op) {
-      const result = await request.call(this, op);
-      return op.op === "bootstrap" ? { ...(result as object), dispatchConfigReload: false } : result;
-    });
-  await expect(host.syncRuntimeConnections()).rejects.toThrow(/upgraded/u);
-  await expect(assign.execute("test", input, undefined, undefined, {} as never)).rejects.toThrow(/upgraded/u);
-  oldOwner.mockRestore();
-  connections = connections.map((entry) => (entry.id === "two" ? { ...entry, enabled: false } : entry));
-  await host.syncRuntimeConnections();
-  await expect(assign.execute("test", input, undefined, undefined, {} as never)).rejects.toThrow(
-    /unavailable/u,
-  );
-  connections = connections.map((entry) =>
-    entry.id === "two" ? { ...entry, enabled: true, socketPath: join(root, "replacement.sock") } : entry,
-  );
-  await host.syncRuntimeConnections();
-  const retry = await assign.execute("test", input, undefined, undefined, {} as never);
-  expect(JSON.stringify(retry)).toContain("blocked");
-  expect((await readFile(log, "utf8")).trim().split("\n")).toHaveLength(1);
-  const owner = await ownerState(join(root, createHash("sha256").update(root).digest("hex")));
-  expect(
-    Array.isArray(owner.dispatch?.herdr) &&
-      owner.dispatch.herdr.some(
-        (route) => route.socketPath === join(root, "two.sock") && route.enabled === false,
-      ),
-  ).toBe(true);
-  // Existing enrolled peers remain usable with every Herdr connection disabled.
-  connections = connections.map((entry) => ({ ...entry, enabled: false }));
-  const worker = await enrollRuntime({
-    stateDirectory: dirname(owner.configPath),
-    nodePath: process.execPath,
-    ownerPath: join(
-      dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json")),
-      "dist/coordination/owner-cli.js",
-    ),
-    host: "pi",
-    hostSessionId: "independent-terminal",
-    incarnation: "first",
-    identity: { directory: root, fileRoot: root, projectRoot: root, profile: "clankie" },
-  });
-  const peer = await CoordinationClient.connect(
-    worker.environment.SWARM_COORDINATOR_ENDPOINT,
-    worker.environment.SWARM_SESSION_CAPABILITY,
-  );
-  try {
-    await peer.request({
-      op: "command",
-      command: { id: "available", type: "session.observe", payload: { runtime: "available" } },
-    });
-    const configured = JSON.parse(await readFile(owner.configPath, "utf8"));
-    configured.dispatch.peers = [
-      {
-        id: "independent-terminal",
-        worker: {
-          scope: worker.scope,
-          actor: worker.actor,
-          sessionId: worker.sessionId,
-          generation: worker.generation,
-        },
-        host: "terminal",
-        capabilities: ["code"],
-        durable: true,
-        capacity: 1,
-        overhead: 0,
+      { mode: 0o700 },
+    );
+    await writeFile(join(bin, "claude"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    let connections = ["one", "two"].map((id) => ({
+      id,
+      socketPath: join(root, `${id}.sock`),
+      enabled: true,
+      state: "healthy",
+      capacity: 1,
+      capabilities: ["code"],
+      workspaces: [{ kind: "directory" as const, path: root }],
+    }));
+    let budget: number | null = null;
+    const host = new SwarmHost({
+      stateDirectory: root,
+      dispatchBudget: async () => budget,
+      runtimeConnections: async () => connections,
+      warn: (message) => {
+        throw new Error(message);
       },
-    ];
-    await writeFile(owner.configPath, JSON.stringify(configured), { mode: 0o600 });
-    const routed = await assign.execute(
+    });
+    hosts.push(host);
+    await host.start({ ready: () => true, wake: async () => undefined });
+    const tools = await host.tools({ conversationId: "lead", cwd: root });
+    const assign = tools.find((tool) => tool.name === "swarm_assign")!;
+    const input = {
+      commandId: "runtime-work",
+      title: "Work",
+      runtime: "two",
+      routing: { capabilities: ["code"], durable: true },
+      contract: {
+        objective: "Work",
+        worktree: root,
+        acceptanceCriteria: ["Done"],
+        expectedArtifacts: [],
+        constraints: [],
+      },
+    };
+    const refused = await assign.execute(
       "test",
-      { ...input, commandId: "peer-work", runtime: undefined },
+      {
+        ...input,
+        commandId: "wrong-worktree",
+        contract: { ...input.contract, worktree: join(root, "outside") },
+      },
       undefined,
       undefined,
       {} as never,
     );
-    const block = routed.content.find((entry) => entry.type === "text");
-    if (!block || block.type !== "text") throw new Error("Missing dispatch result");
-    const { data } = JSON.parse(block.text);
-    expect(data.status).toBe("bound");
-    await expect(host.assignment("lead", data.taskId, worker.actor)).resolves.toBeDefined();
+    expect(JSON.stringify(refused)).toContain("allowedWorktrees");
+    expect(JSON.stringify(refused)).toContain(join(root, "outside"));
+    const first = await assign.execute("test", input, undefined, undefined, {} as never);
+    expect(JSON.stringify(first)).toContain("uncertain");
+    const launched = (await readFile(log, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(launched).toHaveLength(1);
+    expect(launched[0].socket).toBe(join(root, "two.sock"));
+    const policyOwner = await ownerState(join(root, createHash("sha256").update(root).digest("hex")));
+    expect(policyOwner.dispatch?.maximum).toBeNull();
+    budget = 25;
+    connections = connections.map((entry) => ({ ...entry, capacity: 25 }));
+    await host.syncRuntimeConnections();
+    const limitedOwner = await ownerState(dirname(policyOwner.configPath));
+    expect(limitedOwner.launcherSecret).toBe(policyOwner.launcherSecret);
+    expect(limitedOwner.dispatch?.maximum).toBe(25);
+    expect(limitedOwner.dispatch?.herdr).toEqual(
+      expect.arrayContaining([expect.objectContaining({ capacity: 25 })]),
+    );
+    budget = null;
+    await host.syncRuntimeConnections();
+    expect((await ownerState(dirname(policyOwner.configPath))).dispatch?.maximum).toBeNull();
+    // The old uncertain receipt is recovered, never launched again after policy updates.
+    await assign.execute("test", input, undefined, undefined, {} as never);
     expect((await readFile(log, "utf8")).trim().split("\n")).toHaveLength(1);
-  } finally {
-    peer.close();
-  }
-});
+    const request = CoordinationClient.prototype.request;
+    const oldOwner = vi
+      .spyOn(CoordinationClient.prototype, "request")
+      .mockImplementation(async function (this: CoordinationClient, op) {
+        const result = await request.call(this, op);
+        return op.op === "bootstrap" ? { ...(result as object), dispatchConfigReload: false } : result;
+      });
+    await expect(host.syncRuntimeConnections()).rejects.toThrow(/upgraded/u);
+    await expect(assign.execute("test", input, undefined, undefined, {} as never)).rejects.toThrow(
+      /upgraded/u,
+    );
+    oldOwner.mockRestore();
+    connections = connections.map((entry) => (entry.id === "two" ? { ...entry, enabled: false } : entry));
+    await host.syncRuntimeConnections();
+    await expect(assign.execute("test", input, undefined, undefined, {} as never)).rejects.toThrow(
+      /unavailable/u,
+    );
+    connections = connections.map((entry) =>
+      entry.id === "two" ? { ...entry, enabled: true, socketPath: join(root, "replacement.sock") } : entry,
+    );
+    await host.syncRuntimeConnections();
+    const retry = await assign.execute("test", input, undefined, undefined, {} as never);
+    expect(JSON.stringify(retry)).toContain("blocked");
+    expect((await readFile(log, "utf8")).trim().split("\n")).toHaveLength(1);
+    const owner = await ownerState(join(root, createHash("sha256").update(root).digest("hex")));
+    expect(
+      Array.isArray(owner.dispatch?.herdr) &&
+        owner.dispatch.herdr.some(
+          (route) => route.socketPath === join(root, "two.sock") && route.enabled === false,
+        ),
+    ).toBe(true);
+    // Existing enrolled peers remain usable with every Herdr connection disabled.
+    connections = connections.map((entry) => ({ ...entry, enabled: false }));
+    const worker = await enrollRuntime({
+      stateDirectory: dirname(owner.configPath),
+      nodePath: process.execPath,
+      ownerPath: join(
+        dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json")),
+        "dist/coordination/owner-cli.js",
+      ),
+      host: "pi",
+      hostSessionId: "independent-terminal",
+      incarnation: "first",
+      identity: { directory: root, fileRoot: root, projectRoot: root, profile: "clankie" },
+    });
+    const peer = await CoordinationClient.connect(
+      worker.environment.SWARM_COORDINATOR_ENDPOINT,
+      worker.environment.SWARM_SESSION_CAPABILITY,
+    );
+    try {
+      await peer.request({
+        op: "command",
+        command: { id: "available", type: "session.observe", payload: { runtime: "available" } },
+      });
+      const configured = JSON.parse(await readFile(owner.configPath, "utf8"));
+      configured.dispatch.peers = [
+        {
+          id: "independent-terminal",
+          worker: {
+            scope: worker.scope,
+            actor: worker.actor,
+            sessionId: worker.sessionId,
+            generation: worker.generation,
+          },
+          host: "terminal",
+          capabilities: ["code"],
+          durable: true,
+          capacity: 1,
+          overhead: 0,
+        },
+      ];
+      await writeFile(owner.configPath, JSON.stringify(configured), { mode: 0o600 });
+      const routed = await assign.execute(
+        "test",
+        { ...input, commandId: "peer-work", runtime: undefined },
+        undefined,
+        undefined,
+        {} as never,
+      );
+      const block = routed.content.find((entry) => entry.type === "text");
+      if (!block || block.type !== "text") throw new Error("Missing dispatch result");
+      const { data } = JSON.parse(block.text);
+      expect(data.status).toBe("bound");
+      await expect(host.assignment("lead", data.taskId, worker.actor)).resolves.toBeDefined();
+      expect((await readFile(log, "utf8")).trim().split("\n")).toHaveLength(1);
+    } finally {
+      peer.close();
+    }
+  },
+);
 
-test("default budget admits sixteen in-flight dispatches, owner limits reconcile, and clearing admits more", async () => {
-  const root = await realpath(await mkdtemp("/tmp/clankie-dispatch-limits-"));
+test.skipIf(!(await interactiveWorkersSupported()))(
+  "default budget admits sixteen in-flight dispatches, owner limits reconcile, and clearing admits more",
+  async () => {
+    const root = await realpath(await mkdtemp("/tmp/clankie-dispatch-limits-"));
+    roots.push(root);
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    for (const name of ["herdr", "claude"])
+      await writeFile(join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    let capacity: number | null = 16;
+    let budget: number | null = 16;
+    const host = new SwarmHost({
+      stateDirectory: root,
+      dispatchBudget: async () => budget,
+      runtimeConnections: async () => [
+        {
+          id: "default",
+          socketPath: join(root, "runtime.sock"),
+          enabled: true,
+          state: "healthy",
+          capacity,
+          capabilities: ["code"],
+        },
+      ],
+      warn: (message) => {
+        throw new Error(message);
+      },
+    });
+    hosts.push(host);
+    await host.start({ ready: () => true, wake: async () => undefined });
+    const tools = await host.tools({ conversationId: "lead", cwd: root });
+    const assign = tools.find((tool) => tool.name === "swarm_assign")!;
+    const run = async (id: string) =>
+      JSON.stringify(
+        await assign.execute(
+          id,
+          {
+            commandId: id,
+            title: id,
+            routing: { capabilities: ["code"], durable: true },
+            contract: {
+              objective: id,
+              worktree: root,
+              acceptanceCriteria: ["done"],
+              expectedArtifacts: [],
+              constraints: [],
+            },
+          },
+          undefined,
+          undefined,
+          {} as never,
+        ),
+      );
+    const first = await run("work-0");
+    expect(first).toContain("uncertain");
+    for (let i = 1; i < 16; i++) expect(await run(`work-${i}`)).toContain("uncertain");
+    expect(await run("default-exhausted")).toContain("concurrency_budget");
+    budget = 2;
+    capacity = 2;
+    await host.syncRuntimeConnections();
+    expect(await run("owner-exhausted")).toContain("route_capacity");
+    expect(await run("work-0")).toContain("uncertain");
+    budget = null;
+    capacity = null;
+    await host.syncRuntimeConnections();
+    expect(await run("unlimited-17")).toContain("uncertain");
+    const owner = await ownerState(join(root, createHash("sha256").update(root).digest("hex")));
+    expect(owner.dispatch?.maximum).toBeNull();
+    expect(owner.dispatch?.herdr).toEqual(
+      expect.arrayContaining([expect.objectContaining({ capacity: null })]),
+    );
+  },
+);
+
+test("native routes need installed support; explicit legacy stream never enables a headless launch", async () => {
+  const packageRoot = dirname(createRequire(import.meta.url).resolve("swarm-mcp/package.json"));
+  const ownerCli = await readFile(join(packageRoot, "dist/coordination/owner-cli.js"), "utf8");
+  const supported = await interactiveWorkersSupported();
+  // The probe asks the installed parser; the owner the host launches ships beside it.
+  expect(supported).toBe(ownerCli.includes("workerMode"));
+  const root = await realpath(await mkdtemp("/tmp/clankie-worker-mode-"));
   roots.push(root);
   const bin = join(root, "bin");
   await mkdir(bin);
   for (const name of ["herdr", "claude"])
     await writeFile(join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
   vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
-  let capacity: number | null = 16;
-  let budget: number | null = 16;
+  const runtime = (id: string, workerMode?: "stream" | "interactive") => ({
+    id,
+    socketPath: join(root, `${id}.sock`),
+    enabled: true,
+    state: "healthy",
+    capacity: 1,
+    capabilities: ["code"],
+    ...(workerMode ? { workerMode } : {}),
+  });
   const host = new SwarmHost({
     stateDirectory: root,
-    dispatchBudget: async () => budget,
     runtimeConnections: async () => [
-      {
-        id: "default",
-        socketPath: join(root, "runtime.sock"),
-        enabled: true,
-        state: "healthy",
-        capacity,
-        capabilities: ["code"],
-      },
+      runtime("unset"),
+      runtime("streamed", "stream"),
+      runtime("attended", "interactive"),
     ],
     warn: (message) => {
       throw new Error(message);
@@ -753,45 +886,130 @@ test("default budget admits sixteen in-flight dispatches, owner limits reconcile
   });
   hosts.push(host);
   await host.start({ ready: () => true, wake: async () => undefined });
+  await host.tools({ conversationId: "lead", cwd: root });
+  const configPath = join(root, createHash("sha256").update(root).digest("hex"), "owner.json");
+  const routes = JSON.parse(await readFile(configPath, "utf8")).dispatch.herdr as Record<string, unknown>[];
+  const route = (id: string) =>
+    routes.find((entry) => String(entry.id).startsWith(`clankie-runtime-${id}-`))!;
+  expect(route("streamed")).toMatchObject({ enabled: false });
+  expect(route("unset")).toMatchObject({ enabled: supported });
+  if (supported)
+    expect(route("unset")).toMatchObject({
+      workerMode: "interactive",
+      channelPlugin: "clankie-worker@clankie",
+    });
+  else expect(route("unset")).not.toHaveProperty("workerMode");
+  if (supported)
+    expect(route("attended")).toMatchObject({
+      enabled: true,
+      workerMode: "interactive",
+      channelPlugin: "clankie-worker@clankie",
+    });
+  else {
+    // Never silently stream: the runtime is unavailable until Swarm is upgraded.
+    expect(route("attended")).toMatchObject({ enabled: false });
+    expect(route("attended")).not.toHaveProperty("workerMode");
+  }
+  // Whatever was written, the installed owner still reads every route.
+  expect((await ownerState(dirname(configPath))).dispatch?.herdr).toHaveLength(3);
+});
+
+test("managed harness routes retain separate identities and never silently substitute Claude", async () => {
+  const supported = await managedWorkersSupported();
+  const root = await realpath(await mkdtemp("/tmp/clankie-worker-harness-"));
+  roots.push(root);
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  for (const name of ["herdr", "claude", "codex", "pi"])
+    await writeFile(join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+  let harness: "claude" | "codex" | "pi" = "claude";
+  const host = new SwarmHost({
+    stateDirectory: root,
+    warn: (message) => {
+      throw new Error(message);
+    },
+    runtimeConnections: async () => [
+      {
+        id: "default",
+        socketPath: join(root, "runtime.sock"),
+        enabled: true,
+        state: "healthy",
+        capacity: 1,
+        capabilities: ["code"],
+        workerHarness: harness,
+      },
+    ],
+  });
+  hosts.push(host);
+  await host.start({ ready: () => true, wake: async () => undefined });
   const tools = await host.tools({ conversationId: "lead", cwd: root });
-  const assign = tools.find((tool) => tool.name === "swarm_assign")!;
-  const run = async (id: string) =>
-    JSON.stringify(
-      await assign.execute(
-        id,
-        {
-          commandId: id,
-          title: id,
-          routing: { capabilities: ["code"], durable: true },
-          contract: {
-            objective: id,
-            worktree: root,
-            acceptanceCriteria: ["done"],
-            expectedArtifacts: [],
-            constraints: [],
-          },
+  const configPath = join(root, createHash("sha256").update(root).digest("hex"), "owner.json");
+  for (const selected of ["codex", "pi"] as const) {
+    harness = selected;
+    await host.syncRuntimeConnections();
+    const routes = JSON.parse(await readFile(configPath, "utf8")).dispatch.herdr as Record<string, unknown>[];
+    const route = routes.find((entry) => String(entry.id).endsWith(`-${selected}`))!;
+    const native = supported && (await interactiveWorkersSupported(selected));
+    expect(routes.filter((entry) => entry.enabled)).toHaveLength(native ? 1 : 0);
+    if (native) {
+      expect(route).toMatchObject({ harness: selected, harnessPath: join(bin, selected) });
+      expect(route).not.toHaveProperty("claudePath");
+      expect(route.model).toBe(selected === "codex" ? "gpt-6-astra" : "openrouter/moonshotai/kimi-k3");
+    } else expect(route.enabled).toBe(false);
+  }
+  // Selecting Claude explicitly cannot execute pi or revive the disabled old route.
+  const result = await tools
+    .find((tool) => tool.name === "swarm_assign")!
+    .execute(
+      "wrong-harness",
+      {
+        commandId: "wrong-harness",
+        title: "Must refuse",
+        runtime: "default",
+        harness: "claude",
+        routing: { intentId: "wrong-harness", capabilities: ["code"], durable: true },
+        contract: {
+          objective: "Must refuse",
+          worktree: root,
+          acceptanceCriteria: ["No launch"],
+          expectedArtifacts: [],
+          constraints: [],
         },
-        undefined,
-        undefined,
-        {} as never,
-      ),
+      },
+      undefined,
+      undefined,
+      {} as never,
     );
-  const first = await run("work-0");
-  expect(first).toContain("uncertain");
-  for (let i = 1; i < 16; i++) expect(await run(`work-${i}`)).toContain("uncertain");
-  expect(await run("default-exhausted")).toContain("concurrency_budget");
-  budget = 2;
-  capacity = 2;
-  await host.syncRuntimeConnections();
-  expect(await run("owner-exhausted")).toContain("route_capacity");
-  expect(await run("work-0")).toContain("uncertain");
-  budget = null;
-  capacity = null;
-  await host.syncRuntimeConnections();
-  expect(await run("unlimited-17")).toContain("uncertain");
-  const owner = await ownerState(join(root, createHash("sha256").update(root).digest("hex")));
-  expect(owner.dispatch?.maximum).toBeNull();
-  expect(owner.dispatch?.herdr).toEqual(
-    expect.arrayContaining([expect.objectContaining({ capacity: null })]),
+  const content = result.content[0]!;
+  if (content.type !== "text") throw new Error("Expected structured dispatch response");
+  expect(JSON.parse(content.text)).toMatchObject({ data: { status: "blocked" } });
+  expect((await readdir(dirname(configPath))).filter((name) => /^herdr-.*[.]json$/u.test(name))).toHaveLength(
+    0,
   );
+});
+
+test("reopens a disconnected lane MCP transport on the next tool-bank request", async () => {
+  const root = await mkdtemp("/tmp/clankie-swarm-reconnect-");
+  roots.push(root);
+  const host = new SwarmHost({ stateDirectory: root, canDispatch: () => false, warn: vi.fn() });
+  hosts.push(host);
+  const clients: Client[] = [];
+  const listTools = Client.prototype.listTools;
+  const listing = vi.spyOn(Client.prototype, "listTools").mockImplementation(function (
+    this: Client,
+    ...args
+  ) {
+    clients.push(this);
+    return listTools.apply(this, args);
+  });
+  const binding = { conversationId: "reconnect", cwd: root };
+  const first = await host.tools(binding);
+  const original = clients[0]!;
+  await original.close();
+  expect(original.transport).toBeUndefined();
+  const next = await host.tools(binding);
+  expect(clients.at(-1)).not.toBe(original);
+  expect(next.map((tool) => tool.name)).toEqual(first.map((tool) => tool.name));
+  listing.mockRestore();
 });

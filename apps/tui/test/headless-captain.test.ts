@@ -138,14 +138,15 @@ describe("headless clankie commands", () => {
     });
 
     expect(exitCode).toBe(0);
-    // The clankie service is probed exactly once through its health route. The
-    // bridge's presence detail legitimately rides the same port; what must not
-    // regress is a duplicate health round trip.
+    // The clankie service is probed once through its health route for its own
+    // state, and once more for the doorway `status` reports beside it (the
+    // `nextStep` line). The bridge's presence detail legitimately rides the same
+    // port; what must not regress is a third health round trip.
     const servicePaths = calls
       .map((url) => new URL(url))
       .filter((url) => url.port === "4310")
       .map((url) => url.pathname);
-    expect(servicePaths.filter((path) => path === "/health")).toEqual(["/health"]);
+    expect(servicePaths.filter((path) => path === "/health")).toEqual(["/health", "/health"]);
     expect(JSON.parse(stdout.text())).toMatchObject({
       ok: true,
       status: "ready",
@@ -166,6 +167,8 @@ describe("headless clankie commands", () => {
       // used to stop at the bridge, which is how a dead tunnel stayed invisible.
       ["activity", "healthy", false],
       ["tunnel", "healthy", false],
+      // Off unless the owner opted in (`clankie awake on`), and off is not a fault.
+      ["awake", "healthy", false],
     ]);
     // No tunnel configured in this fixture, and that is not a fault to report.
     expect(services.find((service) => service.id === "tunnel")).toMatchObject({
@@ -418,4 +421,26 @@ describe("headless clankie commands", () => {
       server.close();
     }
   });
+});
+
+it("returns typed JSON and exits nonzero when Linear following lacks its webhook", async () => {
+  const env = await stateEnv();
+  env.XDG_CONFIG_HOME = env.XDG_STATE_HOME;
+  const stdout = outputBuffer();
+  const stderr = outputBuffer();
+  const code = await runHeadlessCaptainCommand(["linear", "follow", "on"], {
+    env,
+    repoRoot: process.cwd(),
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+  });
+  expect(code).toBe(1);
+  expect(JSON.parse(stdout.text())).toMatchObject({
+    ok: false,
+    error: "linear_webhook_required",
+    following: false,
+    active: false,
+    missingWebhook: ["url", "secret"],
+  });
+  expect(stderr.text()).toBe("");
 });

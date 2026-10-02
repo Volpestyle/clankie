@@ -63,7 +63,7 @@ describe("seat outbox", () => {
     const delivery = outbox.deliver({
       kind: "escalation",
       conversationId: "global-default",
-      source: "clankie-menu-bar-voice",
+      source: "clankie-app",
       content: "can you check the build?",
       wantsReply: true,
     });
@@ -81,7 +81,7 @@ describe("seat outbox", () => {
     const delivery = outbox.deliver({
       kind: "escalation",
       conversationId: "global-default",
-      source: "clankie-menu-bar-voice",
+      source: "clankie-app",
       content: "hello?",
       wantsReply: true,
     });
@@ -92,7 +92,7 @@ describe("seat outbox", () => {
   });
 
   it("returns a turn to pi when the bridge dies before taking it, and honours the operator's cancel", async () => {
-    const outbox = new SeatOutbox({ boundTtlMs: 40 });
+    const outbox = new SeatOutbox({ boundGraceMs: 40 });
     expect(await outbox.poll(5)).toEqual([]);
     await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound" });
 

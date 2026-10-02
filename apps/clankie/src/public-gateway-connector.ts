@@ -184,7 +184,7 @@ export class PublicGatewayConnector {
     const wire = pairingOfferWire(offer);
     const fragment = new URLSearchParams(credential).toString();
     const deepLink = `${wire.deepLink}#${fragment}`;
-    return { ...wire, deepLink, code: deepLink };
+    return { ...wire, deepLink, code: deepLink, gateway: true };
   }
 
   public start(): void {
@@ -303,7 +303,13 @@ export class PublicGatewayConnector {
   }
 
   private connect(): void {
-    if (!this.started || this.socket !== undefined || this.connecting) return;
+    if (
+      !this.started ||
+      this.socket !== undefined ||
+      this.connecting ||
+      this.signInRequiredSince !== undefined
+    )
+      return;
     this.connecting = true;
     void this.openSocket().finally(() => {
       this.connecting = false;
@@ -316,6 +322,7 @@ export class PublicGatewayConnector {
       credential =
         this.resolveHostToken === undefined ? { token: this.hostToken ?? "" } : await this.resolveHostToken();
     } catch (error) {
+      if (!this.started) return;
       if (this.tokenErrorIsTerminal(error)) {
         // A rejected account credential outlives every retry, so the loop stops
         // here and says so once. `clankie gateway status` and `doctor` read it.
