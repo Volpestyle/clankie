@@ -1,6 +1,6 @@
 # ADR 0208: Agents carry a role; the world reads it
 
-Status: proposed (Claude, 2026-10-02). Applies
+Status: accepted (James, 2026-10-02). Applies
 [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md) and stays
 inside [ADR 0188](0188-native-agent-chats-read-their-own-history.md).
 
