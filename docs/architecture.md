@@ -311,8 +311,12 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   not duplicate their changing census.
 - **Browser catalog.** The service registers the complete paginated
   `agent-browser` catalog with pi, but only everyday navigation tools and
-  `browser_tool_search` start active. Browser calls are sequential across rooms;
-  the subprocess receives no Clankie credentials, but true filesystem/network
+  `browser_tool_search` start active. Browser calls are sequential across rooms.
+  Model-facing JSON previews retain up to 50 KiB or 2,000 serialized lines,
+  followed by a truncation notice when needed. A large page string keeps a
+  UTF-8-safe prefix instead of being dropped as an oversized line; full results
+  remain in the Pi tool details.
+  The subprocess receives no Clankie credentials, but true filesystem/network
   isolation requires a VM or remote broker ([ADR 0082](adr/0082-clankie-holds-the-browser.md)).
   The persistent profile holds his own accounts, signed up for by hand: the
   catalog's `headed` argument relaunches the browser visible on the operator's

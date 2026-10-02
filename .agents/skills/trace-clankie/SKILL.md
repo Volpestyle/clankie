@@ -78,6 +78,12 @@ Following controls waking, not collection.
 
 ## Gotchas that cost real time
 
+- **A truncated browser result is not necessarily a browser failure.** Compare
+  the model-facing text with the Pi tool's full `details`. JSON previews keep
+  up to 50 KiB or 2,000 serialized lines, with a cutoff notice; page strings
+  can end mid-line. Older serializers discarded oversized string lines entirely,
+  leaving only a few bytes of metadata even when the browser returned the page.
+
 - **A captain `said` line is not proof Discord received it.** Match the source
   delivery id to `discord.text.reply` and its `responseMessageId`. The official
   bot keeps unfinished deliveries in `discord-text-inbox.sqlite` beside its

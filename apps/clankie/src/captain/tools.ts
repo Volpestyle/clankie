@@ -87,9 +87,18 @@ export function toolJson(value: unknown): { content: [{ type: "text"; text: stri
     maxBytes: DEFAULT_MAX_BYTES,
     maxLines: DEFAULT_MAX_LINES,
   });
+  let preview = truncated.content;
+  if (truncated.truncatedBy === "bytes") {
+    // JSON escapes page newlines inside one string. Keeping only complete
+    // lines can discard the whole page; retain a UTF-8-safe partial line.
+    const bytes = Buffer.from(serialized);
+    let end = DEFAULT_MAX_BYTES;
+    while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end -= 1;
+    preview = bytes.subarray(0, end).toString("utf8");
+  }
   const text = truncated.truncated
-    ? `${truncated.content}\n\n[Output truncated to ${String(truncated.outputBytes)} of ${String(truncated.totalBytes)} bytes; request a narrower result.]`
-    : truncated.content;
+    ? `${preview}\n\n[Output truncated to ${String(Buffer.byteLength(preview))} of ${String(truncated.totalBytes)} bytes; request a narrower result.]`
+    : preview;
   return { content: [{ type: "text", text }], details: value };
 }
 
