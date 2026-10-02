@@ -309,6 +309,12 @@ or files. The [work-items package](https://github.com/Volpestyle/clankie/blob/ma
 explains discovery. Following Linear notifications is a separate opt-in from
 connecting the account; use the [setup reference](/cli/#linear-status-linear-follow-on-off).
 
+His work-tracking guidance prefers useful visual evidence: screenshots or short
+clips of tangible results, charts of measured data, and diagrams of systems and
+flows. Visuals belong on the relevant work item with captions explaining what
+they show; proposals and sample data are labeled, with tests and source links
+supporting claims about completed work.
+
 Workers do not automatically inherit every connected account. [Worker access](https://github.com/Volpestyle/clankie/blob/main/docs/worker-access.md)
 describes explicit, restricted grants and the current isolation limits.
 

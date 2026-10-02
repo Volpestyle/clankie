@@ -45,11 +45,17 @@ and `work_item_write` tools.
 2. **Follow what is recorded.** `.clankie/tracking.json` is the owner's answer.
    Do not create `.clankie/work/` files in a repo whose convention is Linear,
    GitHub or its own directory.
-3. **Every result carries evidence.** Before you report something finished,
-   attach inspectable artifacts: a screenshot or short video for anything
-   visible; the decisive test output, numbers, and commit links for anything
-   headless. Caption each with what it proves and what is sample data or a
-   stand-in. Large media belongs in an artifact store; attach the link.
+3. **Prefer real visuals; every result carries evidence.** When creating,
+   planning, updating or reporting tracked work, default to useful visuals:
+   screenshots or short clips of tangible results, charts of measured data,
+   and diagrams grounded in the actual system, dependencies or flow. This
+   applies to headless work too. Inspect visuals before attaching them; caption
+   what they show, their source or revision, and what they establish. Label
+   proposals, sample data and unverified states clearly. Before reporting work
+   finished, attach inspectable evidence, with decisive test output, numbers
+   and commit links supporting the result. Reuse meaningful artifacts; when
+   no visual adds information, use the decisive evidence without decorative
+   filler. Large media belongs in an artifact store; attach the link.
 4. **One owner per item.** Set `--owner` when you take an item; do not edit an
    item another agent owns without telling them.
 5. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
